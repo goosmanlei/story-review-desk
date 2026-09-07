@@ -1,0 +1,6 @@
+import {parseArgs} from 'node:util';
+import {readFile} from 'node:fs/promises';
+import {openInstanceRepository,resolveInstance} from '../host/instance-runtime/index.mjs';
+import {readMaterialDirectory,applyMaterialDirectory} from '../host/instance-runtime/material-directory.mjs';
+import {delegateInstanceMaintenance} from './instance-maintenance.mjs';
+if(!await delegateInstanceMaintenance('instance-material-directory.mjs',process.argv.slice(2))){const{values,positionals}=parseArgs({allowPositionals:true,options:{instance:{type:'string'},file:{type:'string'}}});if(!values.instance||!['inspect','apply'].includes(positionals[0]))throw new Error('Use inspect|apply --instance ROOT [--file INPUT]');const repo=await openInstanceRepository({...resolveInstance(values.instance),readOnly:positionals[0]==='inspect'});try{if(positionals[0]==='inspect'){const s=await repo.readTransaction(readMaterialDirectory);console.log(JSON.stringify({releaseId:s.releaseId,revisionId:s.revisionId,count:s.bindings.length,staleIds:s.staleIds}));}else{const input=JSON.parse(await readFile(values.file,'utf8'));console.log(JSON.stringify(await repo.writeTransaction(tx=>applyMaterialDirectory(tx,input))));}}finally{await repo.close();}}

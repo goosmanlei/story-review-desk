@@ -1,0 +1,11 @@
+import type {InstanceReadUnit,OpaqueLegacyJson} from './index.mjs';
+export type SourceBinding = {schemaVersion:'1.0';releaseId:string;documentId:string;revisionId:string;sha256:string;byteSize:number;byteStart:number;byteEnd:number};
+export const SOURCE_CHUNK_BYTES:number;
+export function sourceDocumentResourceId(id:string):string;
+export function sourceContextResources(documents:Array<{documentId:string;revisionId:string;sha256:string;byteSize:number;aliases:string[];metadata:Record<string,OpaqueLegacyJson>}>,releaseId:string):Array<{id:string;title:string;kind:string;text:string;sha256:string;href:string;role:'REFERENCE';versionId:string;relations:string[];sourceBinding?:SourceBinding}>;
+export function validateSourceBinding(binding:unknown):void;
+export function decodeSourceChunk(bytes:Uint8Array,binding:SourceBinding):{sourceText:string;sourceTextSha256:string;sourceSha256:string;revisionId:string;byteStart:number;byteEnd:number;byteSize:number};
+export function readFrozenSourceCatalog(tx:InstanceReadUnit,catalogHash:string):Promise<OpaqueLegacyJson>;
+export function readFrozenSourceChunk(tx:InstanceReadUnit,catalogHash:string,resourceId:string):Promise<OpaqueLegacyJson>;
+export function searchFrozenSourceChunks(tx:InstanceReadUnit,catalogHash:string,query:string):Promise<OpaqueLegacyJson>;
+export function sourceSearchScore(resource:{id:string;title:string},text:string,query:string):number;

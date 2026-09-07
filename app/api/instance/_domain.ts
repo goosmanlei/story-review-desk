@@ -1,0 +1,8 @@
+import {errorResponse,HttpError,jsonResponse,instanceRepository,validateMutationRequest} from '../v8/_store';
+export {jsonResponse,HttpError};
+export async function domainRepository(){const repo=await instanceRepository();if(!repo)throw new HttpError(503,'请选择故事实例');return repo;}
+export async function domainMutation(request:Request){return validateMutationRequest(request);}
+export function domainBody(value:unknown,keys:string[]):Record<string,unknown>{if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).some(k=>!keys.includes(k)))throw new HttpError(422,'请求含不支持的字段');return value as Record<string,unknown>;}
+export function requiredString(body:Record<string,unknown>,key:string){const value=body[key];if(typeof value!=='string'||!value.trim()||value.length>300)throw new HttpError(422,`${key}无效`);return value;}
+export function expectedRevision(body:Record<string,unknown>,key='expectedDraftRevisionId'){if(!Object.hasOwn(body,key)||(body[key]!==null&&typeof body[key]!=='string'))throw new HttpError(422,'必须绑定当前草稿版本');return body[key] as string|null;}
+export function domainError(e:unknown){if(e instanceof Error&&'code' in e){const code=String(e.code);if(code.startsWith('MEDIA_MAINTENANCE_'))return jsonResponse({error:'实例正在维护媒体，请稍后重新读取。未保存修改仍保留。'},{status:503});if(['DOMAIN_INVALID','SOURCE_EXTRACTION_FAILED','CONFIGURATION_INVALID'].includes(code))return jsonResponse({error:e.message},{status:422});if(['DOMAIN_CONFLICT','HEAD_CONFLICT','RELEASE_CONFLICT','CONFIGURATION_CONFLICT'].includes(code))return jsonResponse({error:e.message},{status:409});}return errorResponse(e,'故事资料操作失败');}

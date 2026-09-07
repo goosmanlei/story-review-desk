@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import {gzipSync} from 'node:zlib';
+import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
+import {packBackup,unpackBackup,BACKUP_STREAM_FORMAT} from '../host/instance-runtime/backup-stream.mjs';
+async function setup(t){const root=await mkdtemp(path.join(os.tmpdir(),'review-backup-stream-'));t.after(()=>rm(root,{recursive:true,force:true}));const source=path.join(root,'source');await mkdir(path.join(source,'data'),{recursive:true});const bytes=Buffer.from('完整中文与emoji😀\r\n'.repeat(12000));await writeFile(path.join(source,'data/repository.jsonl'),bytes);const body={kind:'REVIEW_INSTANCE_BACKUP',schemaVersion:'2.0',instanceId:'test-story',database:{path:'data/repository.jsonl',bytes:bytes.length,sha256:sha256(bytes)},files:[]};const manifest={...body,manifestSha256:sha256(canonicalJson(body))};await writeFile(path.join(source,'backup-manifest.json'),JSON.stringify(manifest));return{root,source,bytes,manifest};}
+test('portable backup streams exact bytes across chunks',async t=>{const{root,source,bytes}=await setup(t),archive=path.join(root,'backup.gz'),target=path.join(root,'restored');await packBackup(source,archive);await unpackBackup(archive,target);assert.deepEqual(await readFile(path.join(target,'data/repository.jsonl')),bytes);await assert.rejects(unpackBackup(archive,target),/EEXIST/);});
+test('corrupt or truncated backups cannot become registered backups',async t=>{const{root,source}=await setup(t),archive=path.join(root,'backup.gz');await packBackup(source,archive);const bytes=await readFile(archive);const broken=path.join(root,'broken.gz');await writeFile(broken,bytes.subarray(0,bytes.length-40));await assert.rejects(unpackBackup(broken,path.join(root,'broken')));await assert.rejects(readFile(path.join(root,'broken/backup-manifest.json')),/ENOENT/);});
+test('archive paths cannot escape the new restore directory',async t=>{const{root,manifest}=await setup(t);const {manifestSha256,...body}=manifest;body.database.path='../escape';const bad={...body,manifestSha256:sha256(canonicalJson(body))};const archive=path.join(root,'escape.gz');await writeFile(archive,gzipSync(JSON.stringify({format:BACKUP_STREAM_FORMAT,manifest:bad})+'\n'));await assert.rejects(unpackBackup(archive,path.join(root,'target')),/路径无效/);await assert.rejects(readFile(path.join(root,'escape')),/ENOENT/);});

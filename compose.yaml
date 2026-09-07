@@ -1,0 +1,111 @@
+name: review-${REVIEW_INSTANCE_ID:?Start with an explicit instance profile}
+services:
+  review-site:
+    build:
+      context: .
+      args:
+        REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+    user: "${REVIEW_UID:-1000}:${REVIEW_GID:-1000}"
+    ports:
+      - "127.0.0.1:${REVIEW_PORT:-3000}:3000"
+    environment:
+      REVIEW_INSTANCE_ROOT: /instance
+      REVIEW_SQLITE_OWNER: CONTAINER
+      REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+      REVIEW_PROJECT_ID: ${REVIEW_PROJECT_ID:?Instance project identity is required}
+      SITE_BASE_URL: http://localhost:${REVIEW_PORT:-3000}
+      REVIEW_ALLOWED_ORIGINS: http://localhost:${REVIEW_PORT:-3000},http://127.0.0.1:${REVIEW_PORT:-3000}
+      REVIEW_RUNTIME_ROOT: /instance/runtime
+      COMMENT_POLISH_WORKER_URL: ${REVIEW_COMMENT_WORKER_URL:-}
+      MATERIAL_REVIEW_WORKER_URL: ${REVIEW_MATERIAL_WORKER_URL:-}
+      REVIEW_TRIAL_WORKER_URL: ""
+    volumes:
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/instance.json:/instance/instance.json:ro
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/data:/instance/data:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/media:/instance/media:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/scratch:/instance/scratch:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/backups:/instance/backups:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/runtime/locks:/instance/runtime/locks:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/runtime/assistant/public:/instance/runtime/assistant/public:rw
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /instance/runtime:rw,noexec,nosuid,nodev,size=16m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v8/snapshot').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+  comment-polish-worker:
+    profiles: [assistant-ai]
+    build:
+      context: .
+      dockerfile: Dockerfile.comment-polish-worker
+      args:
+        REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+    user: "${REVIEW_UID:-1000}:${REVIEW_GID:-1000}"
+    environment:
+      COMMENT_POLISH_HOST: 0.0.0.0
+      COMMENT_POLISH_PORT: 8787
+      REVIEW_INSTANCE_ROOT: /instance
+      REVIEW_SQLITE_OWNER: CONTAINER
+      COMMENT_POLISH_SUCCESS_RETENTION_MS: 600000
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_COMMENT_POLISH_MODEL: ${REVIEW_COMMENT_MODEL:-gpt-5.6-terra}
+    secrets: [openai_api_key]
+    volumes:
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/instance.json:/instance/instance.json:ro
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/data:/instance/data:rw
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/health').then(async r=>{const x=await r.json();process.exit(r.ok&&x.configured&&x.ledgerReady?0:1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+  material-review-worker:
+    profiles: [assistant-ai]
+    build:
+      context: .
+      dockerfile: Dockerfile.material-review-worker
+      args:
+        REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+    user: "${REVIEW_UID:-1000}:${REVIEW_GID:-1000}"
+    environment:
+      MATERIAL_REVIEW_HOST: 0.0.0.0
+      MATERIAL_REVIEW_PORT: 8788
+      REVIEW_INSTANCE_ROOT: /instance
+      REVIEW_SQLITE_OWNER: CONTAINER
+      MATERIAL_REVIEW_SUCCESS_RETENTION_MS: 600000
+      OPENAI_API_KEY_FILE: /run/secrets/openai_api_key
+      OPENAI_MATERIAL_REVIEW_MODEL: ${REVIEW_MATERIAL_MODEL:-gpt-5.6-terra}
+    secrets: [openai_api_key]
+    volumes:
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/instance.json:/instance/instance.json:ro
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/data:/instance/data:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/media:/instance/media:ro
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/health').then(async r=>{const x=await r.json();process.exit(r.ok&&x.configured&&x.ledgerReady?0:1)}).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+secrets:
+  openai_api_key:
+    file: ${REVIEW_OPENAI_API_KEY_FILE:-/dev/null}
