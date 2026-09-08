@@ -10,7 +10,7 @@ import { dockerHostPath } from './docker-path.mjs';
 export class StorageOwnerError extends Error { constructor(code,message){super(message);this.code=code;} }
 const fail=(code,message)=>{throw new StorageOwnerError(code,message);};
 const cliPath=path.join(path.dirname(fileURLToPath(import.meta.url)),'cli.mjs');
-export const READ_ONLY_CLI_COMMANDS=new Set(['git-business-state','host-profile','host-context','aux-get','aux-list','document-get','assistant-source-read','assistant-source-search','media-resolve','integrity','read-model-cleanup-plan']);
+export const READ_ONLY_CLI_COMMANDS=new Set(['orchestration-read','git-business-state','host-profile','host-context','aux-get','aux-list','document-get','assistant-source-read','assistant-source-search','media-resolve','integrity','read-model-cleanup-plan']);
 export const isContainerStorageRuntime=()=>process.platform==='linux' && (process.env.REVIEW_SQLITE_OWNER==='CONTAINER'||process.env.REVIEW_DATABASE_BACKEND==='postgres') && existsSync('/.dockerenv');
 function environment(){
   const allowed=['PATH','HOME','LANG','LC_ALL','TMPDIR','DOCKER_HOST','DOCKER_CONTEXT','DOCKER_CONFIG','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH','REVIEW_INSTANCE_READ_ONLY'];

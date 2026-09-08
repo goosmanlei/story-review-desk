@@ -29,11 +29,11 @@ const bytes = (input) => {
 let repo;
 try {
   const instancePath=required('instance');
-  const write = ['aux-put', 'aux-delete', 'aux-move','read-model-cleanup','assistant-action'].includes(command);
+  const write = ['aux-put', 'aux-delete', 'aux-move','read-model-cleanup','assistant-action','orchestration-write'].includes(command);
   // Direct host CLI calls share exactly the same routing boundary as Python.
   if(!isContainerStorageRuntime() && (await resolveStorageOwner(instancePath)||JSON.parse(readFileSync(instancePath+'/instance.json','utf8')).schemaVersion==='2.0')){
     const forwarded=Object.entries(flags).filter(([key])=>key!=='instance').flatMap(([key,value])=>['--'+key,value]);
-    const result=await runInstanceCli(instancePath,[command,...forwarded],{input:['aux-put','read-model-cleanup','assistant-action'].includes(command)?stdinBytes():undefined});
+    const result=await runInstanceCli(instancePath,[command,...forwarded],{input:['aux-put','read-model-cleanup','assistant-action','orchestration-write','orchestration-read'].includes(command)?stdinBytes():undefined});
     process.stdout.write(JSON.stringify(result)+'\n');
   }else{
     const {openInstanceRepository,resolveInstance,sha256,RepositoryError}=await import('./index.mjs');
@@ -53,9 +53,10 @@ try {
     }
     let result;
     if(write){
-      const input=['aux-put','read-model-cleanup','assistant-action'].includes(command)?body():undefined;
+      const input=['aux-put','read-model-cleanup','assistant-action','orchestration-write'].includes(command)?body():undefined;
       result=await repo.writeTransaction(async tx=>{
         await state(tx); // Epoch check is inside the same write transaction as CAS.
+        if(command==='orchestration-write')return (await import('./orchestration-service.mjs')).writeOrchestration(tx,input);
         if(command==='assistant-action')return (await import('./assistant-action-service.mjs')).executeAssistantAction(tx,input);
         if(command==='read-model-cleanup')return (await import('./read-model-cleanup.mjs')).applyReadModelCleanup(tx,instance,input);
         if(command==='aux-put')return tx.putAux({namespace:required('namespace'),key:required('key'),bytes:bytes(input),expectedRevisionId:expected(),...(input.metadata?{metadata:input.metadata}:{}),...(input.mediaType?{mediaType:input.mediaType}:{})});
@@ -69,6 +70,7 @@ try {
       result=await repo.readTransaction(async tx=>{
         const current=await state(tx);
         switch(command){
+          case 'orchestration-read': return (await import('./orchestration-service.mjs')).readOrchestration(tx,stdinBytes().length?body():{});
           case 'git-business-state': return (await import('./git-business-archive.mjs')).gitBusinessState(tx);
           case 'read-model-cleanup-plan': return (await import('./read-model-cleanup.mjs')).planReadModelCleanup(tx,instance,required('backup-sha256'));
           case 'host-profile': {
