@@ -37,7 +37,7 @@ import {
   type MaterialMediaType,
 } from './material-taxonomy';
 import { latestMaterialVersion } from './material-version-history';
-import {dailyMaterialVersionRefs,exactMaterialVersion,isDeletedMaterialVersion} from './material-daily-versions';
+import {dailyMaterialVersionRefs,exactMaterialVersion,isDeletedMaterialVersion,pendingMaterialExpectedOutputs,resolveExactMaterialSelection} from './material-daily-versions';
 import { publicRef, visibleText } from './review-semantics';
 import { useRuntimeMode } from './runtime-mode';
 import { useAssistantFocus } from './assistant/context-provider';
@@ -453,9 +453,7 @@ function MaterialOutputViewer({
   const kind = mediaKind(version?.path || null);
   const deleted = Boolean(version && (version.outputState === 'DELETED' || version.historyRole === 'DELETED_AUDIT'));
   const dailyVersionRefs=dailyMaterialVersionRefs(model,family);
-  const expectedOutputs = family
-    ? (family.expectedOutputRefs || []).map((id) => (model.expectedOutputs || []).find((item) => item.id === id)).filter(Boolean)
-    : [];
+  const expectedOutputs = pendingMaterialExpectedOutputs(model,family);
   const selectedExpected = selectedRecordId
     ? expectedOutputs.find((item) => item?.id === selectedRecordId) || null
     : null;
@@ -934,7 +932,7 @@ export function MaterialProductionCenter({ model: summaryModel, snapshotId, cata
     const controller = new AbortController();
     void fetch(`/api/v8/ui/materials?requirementId=${encodeURIComponent(selectedDetailId)}`, {cache:'no-store',signal:controller.signal})
       .then(async response => {const body=await response.json() as PagedProductionPayload & {error?:string};if(!response.ok)throw new Error(body.error || '素材详情暂时无法读取');return body;})
-      .then(body=>{if(controller.signal.aborted)return;if(body.snapshotId!==snapshotId)throw new Error('素材详情与当前快照不一致，请刷新页面。');if(!body.page.materialRequirements?.some(r=>r.id===selectedDetailId))throw new Error('返回的详情没有精确绑定当前素材。');setDetail({id:selectedDetailId,snapshotId:body.snapshotId,page:body.page});})
+      .then(body=>{if(controller.signal.aborted)return;if(body.snapshotId!==snapshotId)throw new Error('素材详情与当前快照不一致，请刷新页面。');if(!body.page.materialRequirements?.some(r=>r.id===selectedDetailId))throw new Error('返回的详情没有精确绑定当前素材。');for(const rows of [body.page.assetFamilies,body.page.assetVersions,body.page.expectedOutputs])if(rows&&new Set(rows.map(row=>row.id)).size!==rows.length)throw new Error('素材详情包含重复身份，已拒绝合并或回退其他版本。');setDetail({id:selectedDetailId,snapshotId:body.snapshotId,page:body.page});})
       .catch(e=>{if(!controller.signal.aborted)setDetailFailure({id:selectedDetailId,snapshotId,attempt:detailAttempt,message:e instanceof Error?e.message:'素材详情暂时无法读取'});});
     return ()=>controller.abort();
   }, [selectedDetailId,snapshotId,detailAttempt]);
@@ -953,13 +951,12 @@ export function MaterialProductionCenter({ model: summaryModel, snapshotId, cata
     ? model.assetFamilies.find((family) => family.id === selectedFamilyId) || null
     : null;
   const latestVersion = latestMaterialVersion(model, selectedFamily);
-  const explicitSelectedVersion = selectedFamily && viewState.versionId
-    ? exactMaterialVersion(model,selectedFamily,viewState.versionId)
+  const explicitSelection = selectedFamily && viewState.versionId
+    ? resolveExactMaterialSelection(model,selectedFamily,viewState.versionId)
     : null;
+  const explicitSelectedVersion = explicitSelection?.version || null;
   const deletedVersionSelection=isDeletedMaterialVersion(explicitSelectedVersion);
-  const explicitSelectedExpected = selectedFamily && viewState.versionId
-    ? (model.expectedOutputs || []).find((expected) => expected.id === viewState.versionId && (selectedFamily.expectedOutputRefs || []).includes(expected.id)) || null
-    : null;
+  const explicitSelectedExpected = explicitSelection?.expected || null;
   const versionSelectionMismatch = Boolean(selectedFamily && viewState.versionId && !explicitSelectedVersion && !explicitSelectedExpected);
   const selectedVersion = selectedFamily && !versionSelectionMismatch && !deletedVersionSelection
     ? (viewState.versionId ? explicitSelectedVersion : latestVersion)
@@ -1053,7 +1050,7 @@ export function MaterialProductionCenter({ model: summaryModel, snapshotId, cata
       {!familySelectionMismatch && !versionSelectionMismatch && !deletedVersionSelection && <>
         <div className="material-review-focus">
           <div className="material-output-zone">
-            <MaterialOutputViewer outputPath={recipe?.output?.path} category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={viewState.versionId || selectedVersion?.id || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />
+            <MaterialOutputViewer outputPath={recipe?.output?.path} category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={selectedVersion?.id || explicitSelectedExpected?.id || viewState.versionId || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />
           </div>
           <section className="material-review-zone" data-material-section="review">
             <MaterialReviewPoints requirement={selectedRequirement} version={selectedVersion} historical={isHistoricalVersion}/>
