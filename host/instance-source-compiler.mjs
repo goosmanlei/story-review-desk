@@ -1,3 +1,5 @@
+import { nativeMaterialCandidateProof, assertNativeCandidatePreservation } from './instance-native-candidate-proof.mjs';
+import { registeredMaterialCandidateProof } from './instance-registered-material-candidates.mjs';
 import { assertSourceMediaReadScope, materializeSourceMedia } from './instance-source-media.mjs';
 import { preserveConfigurationProjection } from './instance-runtime/configuration-service.mjs';
 import { preserveDomainProjection } from './instance-runtime/domain-projection.mjs';
@@ -128,6 +130,8 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const semanticReportPath = '.instance-semantic-qa-report.json';
     requireSource(!occupied.has(mapPinsPath) && !occupied.has(mapReportPath) && !occupied.has(semanticReportPath), 'SOURCE_COLLISION', 'Reserved map adapter paths are occupied');
     const publishedSnapshot = JSON.parse(baseRelease.snapshotBytes);
+    const nativeCandidateProof = nativeMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
+    const registeredCandidateProof = registeredMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
     const modernEventProof = await validateModernEventsInChild({ events, baseRelease, eventDirectory: manifest.compiler.eventDirectory });
     const retiredAliases = new Set((retiredMedia || []).flatMap(row => row.registration.aliases));
     const retiredVersions = (publishedSnapshot.productionModel?.assetVersions || []).filter(row => retiredAliases.has(row.path));
@@ -143,7 +147,7 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
       return { ...binding, bindingHash: sha256(canonicalJson(binding)) };
     });
     const productionReferences = { releaseId: baseRelease.releaseId, snapshotSha256: sha256(baseRelease.snapshotBytes), families: (publishedSnapshot.productionModel?.assetFamilies || []).filter(row => row.assetRole === 'PRODUCTION_REFERENCE'), versions: (publishedSnapshot.productionModel?.assetVersions || []).filter(row => row.assetRole === 'PRODUCTION_REFERENCE') };
-    await put(mapPinsPath, canonicalJson({ ...pinnedMediaHashes, __modernEvents: modernEventProof, __documentHashes: pinnedDocumentHashes, __historicalEvidence: historicalEvidence, __productionReferences: productionReferences, __retiredProductionEvidence: retiredProductionEvidence, __retiredContactEvidence: { schemaVersion: '1.0', releaseId: baseRelease.releaseId, snapshotSha256: sha256(baseRelease.snapshotBytes), contactSheets: publishedSnapshot.p07?.contactSheets || {}, media: retiredContactMedia || [] } }));
+    await put(mapPinsPath, canonicalJson({ ...pinnedMediaHashes, __candidateSnapshotPath: manifest.compiler.snapshotPath, __nativeMaterialCandidates: nativeCandidateProof, __registeredMaterialCandidates: registeredCandidateProof, __modernEvents: modernEventProof, __documentHashes: pinnedDocumentHashes, __historicalEvidence: historicalEvidence, __productionReferences: productionReferences, __retiredProductionEvidence: retiredProductionEvidence, __retiredContactEvidence: { schemaVersion: '1.0', releaseId: baseRelease.releaseId, snapshotSha256: sha256(baseRelease.snapshotBytes), contactSheets: publishedSnapshot.p07?.contactSheets || {}, media: retiredContactMedia || [] } }));
     const commands = [];
     const workflowArgs = [manifest.compiler.workflowPath, manifestPath, 'prepare', canonicalJson(profile.sourceBindings.creativeRevisionPaths), manifest.compiler.snapshotPath];
     if (mode === 'SOURCE_SYNC') commands.push({ role: 'source-mutation-mask', ...(await python(scratch, invokeWorkflow, workflowArgs)) });
@@ -162,6 +166,8 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     };
     const mapProxyAdapter = JSON.parse(await output(mapReportPath));
     const semanticQaAdapter = JSON.parse(await output(semanticReportPath));
+    requireSource(nativeCandidateProof ? mapProxyAdapter?.nativeMaterialCandidates?.proofSha256 === nativeCandidateProof.proofSha256 && mapProxyAdapter.nativeMaterialCandidates.originalEventFilesPreserved === true && mapProxyAdapter.nativeMaterialCandidates.baseCandidateVersionsCreated === 0 : !mapProxyAdapter?.nativeMaterialCandidates, 'SOURCE_NATIVE_CANDIDATE_PROOF', 'Native candidate delegation proof was not preserved');
+    requireSource(registeredCandidateProof ? mapProxyAdapter?.registeredMaterialCandidates?.proofSha256 === registeredCandidateProof.proofSha256 && mapProxyAdapter.registeredMaterialCandidates.sourceBytesPreserved === true && mapProxyAdapter.registeredMaterialCandidates.baseCandidateVersionsCreated === 0 : !mapProxyAdapter?.registeredMaterialCandidates, 'SOURCE_REGISTERED_CANDIDATE_PROOF', 'Registered candidate compatibility proof was not preserved');
     if (modernEventProof) {
       requireSource(canonicalJson(semanticQaAdapter?.modernEvents?.modernRuntimeProof) === canonicalJson(modernEventProof.proof)
         && semanticQaAdapter.modernEvents.proofSha256 === modernEventProof.proofSha256
@@ -219,6 +225,7 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const domain=preserveDomainProjection({snapshot:materialProduction.snapshot,baseSnapshot:publishedSnapshot,events});
     const materialProvenance=preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot});
     snapshotBytes=Buffer.from(canonicalJson(await preserveProductionSpatialProjection({snapshot:materialProvenance,baseSnapshot:publishedSnapshot,documents})));recipesBytes=Buffer.from(canonicalJson(materialProduction.recipes));
-    return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };
+    const nativeCandidatePreservation = assertNativeCandidatePreservation({proof:nativeCandidateProof,snapshot:JSON.parse(snapshotBytes),recipes:JSON.parse(recipesBytes),events});
+    return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(nativeCandidatePreservation ? { nativeCandidatePreservation } : {}), ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }
