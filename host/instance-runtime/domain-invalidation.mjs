@@ -2,18 +2,21 @@
 export function applyDomainInvalidations(invalidations,versions,{reviewedDomainBindings=new Map(),currentDomainHashes=new Map()}={}){
   const stale=new Set(invalidations.flatMap(row=>row.versionIds.filter(id=>versions.get(id)?.familyId===row.familyId)));
   const recorded=new Set(stale);
+  const descendants=new Set();
   let expanded=true;
   while(expanded){expanded=false;for(const version of versions.values()){
-    if(stale.has(version.id))continue;
     if((version.inputVersionBindings||[]).some(binding=>{
       const id=binding.versionId||binding.assetVersionRef,parent=versions.get(id);
       return parent&&stale.has(id)&&binding.sha256===parent.sha256;
-    })){stale.add(version.id);expanded=true;}
+    })){descendants.add(version.id);if(!stale.has(version.id)){stale.add(version.id);expanded=true;}}
   }}
   // Preserve the complete historical descendant closure before resolving an
   // individually reviewed root. Reapproving identical parent bytes is not
   // evidence that an existing dependent output handled the changed domain.
   const pending=new Set([...recorded].filter(id=>{
+    // Having its own older direct invalidation does not prove that a child
+    // handled a later ancestor change. Root-only recovery excludes it too.
+    if(descendants.has(id))return false;
     const version=versions.get(id),binding=reviewedDomainBindings.get(id);
     const currentHash=currentDomainHashes.get(version.familyId);
     const latest=invalidations.filter(row=>row.familyId===version.familyId).at(-1);

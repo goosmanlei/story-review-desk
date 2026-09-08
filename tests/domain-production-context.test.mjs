@@ -116,3 +116,18 @@ test('review context changes only for the locally invalidated family, including 
  next.productionModel.domainInvalidations.push({familyId:'fa',previousHash:'e'.repeat(64),currentHash:old,versionIds:['v:fa']},{familyId:'fa',previousHash:old,currentHash:'e'.repeat(64),versionIds:['v:fa']});
  assert.notEqual(hash(next,'fa','v:fa','a'.repeat(64)),approved);
 });
+test('real domain projection appends both A-B-A cycles and no-op projection adds nothing',()=>{
+ const {assetReviewContextHash:hash}=bindingFunctions(),f=fixture(),initial=clone(f.graph),states=[];let snapshot=f.snapshot;
+ for(const label of ['B','A','B','A']){
+  const graph=clone(initial);if(label==='B')graph.entities[0].description='changed identity';
+  const before=clone(snapshot.productionModel.domainInvalidations||[]);snapshot=project(snapshot,graph);
+  const history=snapshot.productionModel.domainInvalidations;
+  assert.deepEqual(history.slice(0,-1),before);assert.equal(history.length,states.length+1);
+  assert.equal(history.at(-1).currentHash,snapshot.productionModel.assetFamilies[0].domainContext.hash);
+  states.push({hash:hash(snapshot,'fa','v:fa','a'.repeat(64)),domain:snapshot.productionModel.assetFamilies[0].domainContext.hash});
+  assert.deepEqual(project(snapshot,graph).productionModel.domainInvalidations,history);
+ }
+ assert.equal(states[0].domain,states[2].domain);assert.equal(states[1].domain,states[3].domain);
+ assert.notEqual(states[0].hash,states[2].hash);assert.notEqual(states[1].hash,states[3].hash);
+ assert.deepEqual(snapshot.productionModel.domainInvalidations[0],snapshot.productionModel.domainInvalidations[2],'same transition is a distinct occurrence, not a rewritten old record');
+});
