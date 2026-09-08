@@ -38,7 +38,11 @@ function operationalState(view,api){
 async function registeredInput(tx,model,state,binding){
  const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('参考版本尚未按精确 SHA 正式放行：'+reasons.join('、'));
  const media=await tx.getMedia(binding.familyId,binding.versionId),version=state.assetVersionsById[binding.versionId];
- if(!media||media.sha256!==binding.sha256||media.relativePath!==version.path||media.availability!=='PRESENT'||media.metadata?.sourceRole==='ORIGINAL_SOURCE'||!['FORMAL','IMPORTED_EVIDENCE'].includes(media.metadata?.authorityDomain)||!['PUBLIC',undefined].includes(media.metadata?.visibility)||(await mediaRetirementOverlay(tx,media)).state!=='ACTIVE')fail('参考输入缺少可用的正式受管媒体登记');
+ if(!media||media.sha256!==binding.sha256||media.availability!=='PRESENT'||media.metadata?.sourceRole==='ORIGINAL_SOURCE'||!['FORMAL','IMPORTED_EVIDENCE'].includes(media.metadata?.authorityDomain)||!['PUBLIC',undefined].includes(media.metadata?.visibility)||(await mediaRetirementOverlay(tx,media)).state!=='ACTIVE')fail('参考输入缺少可用的正式受管媒体登记');
+ // Published paths are logical aliases; migrated originals live in immutable
+ // blobs. Resolve the exact version and SHA, then require this same registry row.
+ const resolved=await tx.resolveMedia(version.path,{versionId:binding.versionId,sha256:binding.sha256});
+ if(!resolved||resolved.mediaId!==binding.familyId||resolved.versionId!==binding.versionId||resolved.sha256!==media.sha256||resolved.relativePath!==media.relativePath||resolved.byteSize!==media.byteSize)fail('参考逻辑路径未精确绑定同族版本和已登记 SHA');
  return {order:0,path:version.path,assetFamilyRef:binding.familyId,assetVersionRef:binding.versionId,sha256:binding.sha256};
 }
 async function context(tx,requirementId,api){

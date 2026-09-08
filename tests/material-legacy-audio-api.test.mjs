@@ -7,12 +7,13 @@ import {createInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {sharedStoryPostgres} from './fixtures/shared-story-postgres.mjs';
 import {sha256} from '../host/instance-runtime/bytes.mjs';
 import {legacyAudioFixture as materialProductionFixture,audioRequirementId as imageRequirementId,legacyFamily,legacyWork,params,wav} from './material-legacy-audio-fixture.mjs';
-import {legacyObjects} from './material-production-fixture.mjs';
+import {legacyObjects,changeDomain} from './material-production-fixture.mjs';
 import {preserveMaterialProductionProjection} from '../host/instance-runtime/material-production-preservation.mjs';
 import {applyMaterialProductionJob} from '../host/instance-runtime/material-production-service.mjs';
 import {productionBindingReasons} from '../host/instance-runtime/shot-production-model.mjs';
 
 const pngs=[wav(0),wav(1)];
+const downstreamRequirementId='demand:derived-voice';
 const keys=['REVIEW_INSTANCE_DB','REVIEW_INSTANCE_ID','REVIEW_INSTANCE_ROOT','REVIEW_INSTANCE_READ_ONLY','REVIEW_REMOTE_READ_ONLY','REVIEW_SITE_ROOT','REVIEW_EXPORT_DIR','REVIEW_ALLOWED_ORIGINS','REVIEW_POSTGRES_HOST','REVIEW_POSTGRES_PORT','REVIEW_POSTGRES_PASSWORD_FILE','REVIEW_POSTGRES_PASSWORD','REVIEW_POSTGRES_USER'];
 
 async function apiFixture(t){
@@ -36,7 +37,7 @@ async function apiFixture(t){
   return {status:response.status,body:await response.json()};
  };
  const materialPost=(body,options)=>post(material,'instance/material-production',{requirementId:imageRequirementId,...body},options);
- const workspace=async()=>{const r=await material.GET(new Request('http://localhost/api/instance/material-production?requirementId='+encodeURIComponent(imageRequirementId)));assert.equal(r.status,200,await r.clone().text());return r.json();};
+ const workspace=async(requirementId=imageRequirementId)=>{const r=await material.GET(new Request('http://localhost/api/instance/material-production?requirementId='+encodeURIComponent(requirementId)));assert.equal(r.status,200,await r.clone().text());return r.json();};
  const saveBody=(w,prompt)=>({action:'save',expectedReleaseId:w.releaseId,expectedBasisHash:w.basisHash,expectedDraftRevisionId:w.draftHeadRevisionId,content:{model:'seed-audio-1.0',prompt,negativePrompt:'No identity drift. Fixture protocol only.',parameters:structuredClone(params),inputBindings:[]}});
  const provision=async(w,prompt,{expectedMode='LEGACY_AUDIO_REVISION'}={})=>{
   assert.equal(w.mode,expectedMode);
@@ -101,5 +102,23 @@ async function apiFixture(t){
   await f.review(second,v2,'REQUEST_REVISION');const third=await f.provision(await f.workspace(),'Third exact fixture voice.');assert.equal(third.recipe.parentVersionId,v2.versionId);
   const v3=await f.register(third,await f.beginRun(third),pngs[0],{wrongParentVersionId:v1.versionId});assert.equal(v3.versionId,legacyFamily+'@V003');await f.review(third,v3,'APPROVE_AND_RELEASE');
   const final=await f.store.operationalSnapshot();assert.equal(final.stateProjection.assetFamiliesById[legacyFamily].currentVersionId,v3.versionId);assert.equal(final.stateProjection.assetVersionsById[v3.versionId].canFlowDownstream,true);
-  assert.equal(sha256(await readFile(path.join(f.root,'media/_review_pending/'+legacyFamily+'/FIXTURE_VOICE_MASTER_V001.wav'))),v1.sha256);assert.deepEqual(legacyObjects(await f.repo.readView()),old);assert.equal(f.externalCalls(),0);
+  assert.deepEqual(legacyObjects(await f.repo.readView()),old);
+  // An actual approved legacy candidate uses a logical path while its immutable
+  // registry points into media/_review_pending. Exercise the real API consumer,
+  // not projection flags, through draft, preview, queue and host publication.
+  const graph=(await f.repo.readView()).snapshot.productionModel.domainGraph,representation={...graph.representations.find(r=>r.assetFamilyIds.includes(legacyFamily)),id:'representation:derived-voice',assetFamilyIds:[],requirementIds:[downstreamRequirementId]};
+  const demand={...graph.requirements[0],id:downstreamRequirementId,representationId:representation.id,mediaType:'AUDIO',category:'voice-identity',acceptanceCriteria:['Synthetic same-identity voice input closure.']};
+  await changeDomain(f.repo,'MATERIAL',[{collection:'representations',id:representation.id,beforeHash:null,value:representation},{collection:'requirements',id:demand.id,beforeHash:null,value:demand}]);
+  const reference={familyId:legacyFamily,versionId:v3.versionId,sha256:v3.sha256},downstream=await f.workspace(downstreamRequirementId);
+  assert.ok(downstream.availableInputs.some(b=>b.familyId===reference.familyId&&b.versionId===reference.versionId&&b.sha256===reference.sha256));
+  const registered=await f.repo.getMedia(legacyFamily,v3.versionId);assert.notEqual(registered.relativePath,third.recipe.output.path);assert.equal(sha256(await readFile(path.join(f.root,registered.relativePath))),v3.sha256);
+  const sourceBefore=await f.repo.readView(),saved=await f.materialPost({requirementId:downstreamRequirementId,...f.saveBody(downstream,'Synthetic reference input protocol fixture.'),content:{model:'fixture:audio',prompt:'Synthetic same-identity voice input closure only.',negativePrompt:'',parameters:structuredClone(params),inputBindings:[reference]}});
+  assert.equal(saved.status,200,JSON.stringify(saved.body));
+  const preview=await f.materialPost({action:'preview',requirementId:downstreamRequirementId,draftRevisionId:saved.body.revisionId});assert.equal(preview.status,200,JSON.stringify(preview.body));
+  const queued=await f.materialPost({action:'publish',requirementId:downstreamRequirementId,draftRevisionId:saved.body.revisionId,previewHash:preview.body.previewHash});assert.equal(queued.status,200,JSON.stringify(queued.body));
+  const applied=await f.repo.writeTransaction(tx=>applyMaterialProductionJob(tx,{jobId:queued.body.jobId,api:f.adapter}));assert.equal(applied.modelCalls,0);
+  const downstreamDefinition=(await f.repo.readView()).recipes.executionDefinitions.find(d=>d.id===applied.definitionId);
+  assert.deepEqual(downstreamDefinition.upload.items,[{order:1,path:third.recipe.output.path,assetFamilyRef:legacyFamily,assetVersionRef:v3.versionId,sha256:v3.sha256}]);
+  const sourceAfter=await f.repo.readView();assert.deepEqual(sourceAfter.eventsByKind,sourceBefore.eventsByKind);assert.deepEqual(await f.repo.getMedia(legacyFamily,v3.versionId),registered);
+  assert.equal(sha256(await readFile(path.join(f.root,'media/_review_pending/'+legacyFamily+'/FIXTURE_VOICE_MASTER_V001.wav'))),v1.sha256);assert.deepEqual(legacyObjects(sourceAfter),legacyObjects(sourceBefore));assert.equal(f.externalCalls(),0);
  });
