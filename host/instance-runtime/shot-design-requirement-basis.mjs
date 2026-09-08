@@ -1,6 +1,7 @@
 import {canonicalJson,sha256} from './bytes.mjs';
 import {defaultDomainConfiguration} from './domain-model.mjs';
 import {refreshDirectoryProjection} from './directory-projection.mjs';
+import {validateRequirementComposition} from './material-requirement-composition.mjs';
 
 export const SHOT_DESIGN_REQUIREMENT_BASIS_VERSION='3.0';
 export const SHOT_DESIGN_REQUIREMENT_SEMANTIC_POLICY='SHOT_DESIGN_REQUIREMENT_SEMANTICS_V1';
@@ -22,7 +23,7 @@ function assertJson(value,seen=new Set()){
 // These fields describe realization, not the authored demand. The coverage and
 // current-shot fields are computed by _store.projectOperationalState and its
 // shot-plan gate; keep their exact names here, never strip unknown metadata.
-const implementationKeys=new Set(['assetFamilyRefs','materialWorkItemRef','plannedAssetFamilyId','formalAdoptionPerformed','currentVersionId','versionRefs','expectedOutputRefs','outputState','lifecycleState','canFlowDownstream','registrationState','availability','coverageSatisfied','bindingStale','coverageReasons','coveredByFamilyRefs','coveredByVersionRefs','materialWorkItemLifecycleState','currentShotIds','currentShotRelationState']);
+const implementationKeys=new Set(['assetFamilyRefs','materialWorkItemRef','plannedAssetFamilyId','formalAdoptionPerformed','currentVersionId','versionRefs','expectedOutputRefs','outputState','lifecycleState','canFlowDownstream','registrationState','availability','coverageSatisfied','bindingStale','coverageReasons','coveredByFamilyRefs','coveredByVersionRefs','materialWorkItemLifecycleState','currentShotIds','currentShotRelationState','compositionCoverage']);
 const derivedDomainKeys=new Set(['requirementHash','sourceRef','domainContext']);
 const domainContextKeys=new Set(['hashSchemaVersion','hash','representationIds','entityIds','relationIds']);
 function requirementValue(requirement,domainManaged){
@@ -43,6 +44,7 @@ function validateDomainRequirement(model,requirement,graph){
  if(requirement.requirementHash!==hash({demand,representation:rep}))fail('当前需求投影与域图原始哈希不一致',{requirementId:requirement.id});
  const fields={title:demand.title,representationRef:rep.id,entityRef:rep.entityId,stateRef:rep.stateId,mediaType:demand.mediaType,category:demand.category,assetFamilyRefs:rep.assetFamilyIds,scopeBindings:demand.scope,reuseScope:demand.reuseScope,acceptanceCriteria:demand.acceptanceCriteria,sourceBindings:demand.evidence};
  for(const [key,value] of Object.entries(fields))if(!same(requirement[key],value))fail('当前需求语义投影与正式域图不一致',{requirementId:requirement.id,field:key});
+ if(!same(requirement.composition,demand.composition))fail('当前需求组合投影与正式域图不一致',{requirementId:requirement.id});
  return {demand,rep};
 }
 function condition(graph,collection,id){
@@ -121,7 +123,11 @@ export function deriveShotDesignRequirementBasisV3(model,sceneId){
  const refs=[...new Set(coverage.content.beats.flatMap(beat=>{if(!Array.isArray(beat.materialRequirementRefs)||beat.materialRequirementRefs.some(id=>typeof id!=='string'||!id.trim()))fail('已采用镜头意图需求引用不完整');return beat.materialRequirementRefs;}))].sort();
  const rawGraph=model.domainGraph||{schemaVersion:'1.0',entities:[],states:[],representations:[],relations:[],requirements:[]};assertJson(rawGraph);graphShape(rawGraph);
  const directory=refreshDirectoryProjection(model),graph=directory?.graph||rawGraph;assertJson(graph);graphShape(graph);
- const bindings=refs.map(requirementId=>{
+ const active=new Set(),resolved=new Map();
+ function bindingFor(requirementId){
+  if(active.has(requirementId))fail('镜头设计需求组合存在循环',{requirementId});
+  if(resolved.has(requirementId))return resolved.get(requirementId);
+  active.add(requirementId);
   const requirement=exact(model.materialRequirements||[],requirementId,'素材需求');assertJson(requirement);
   if(requirement.requirementClass!=='REQUIRED'||!/^[a-f0-9]{64}$/.test(requirement.requirementHash||'')||directory?.staleIds.includes(requirementId))fail('需求缺失、失效或无精确哈希',{requirementId});
   const owners=(directory?.bindings||[]).filter(row=>row.requirementId===requirementId);if(owners.length>1)fail('需求目录归属不唯一',{requirementId});
@@ -137,8 +143,14 @@ export function deriveShotDesignRequirementBasisV3(model,sceneId){
   const semantic={requirement:requirementValue(requirement,domainManaged),demand:domain?structuredClone(domain.demand):null,conditions,
    directoryOwnership:owner?without(owner,new Set(['requirementHash','representationHash'])):null,
    graphClosure:semanticGraphClosure(model,graph,seeds,sceneId,coverage)};
-  return {requirementId,requirementSemanticHash:hash(semantic),acceptanceCriteria:structuredClone(requirement.acceptanceCriteria||[]),authority:requirement.authorityClass||requirement.authority||'UNKNOWN',...semantic};
- });
+  if(Object.hasOwn(requirement,'composition')){
+   let composition;try{composition=validateRequirementComposition(requirement.composition);}catch(error){fail(error.message,{requirementId});}
+   semantic.requiredComponents=composition.requiredComponents.map(component=>({...component,binding:bindingFor(component.requirementId)}));
+  }
+  const binding={requirementId,requirementSemanticHash:hash(semantic),acceptanceCriteria:structuredClone(requirement.acceptanceCriteria||[]),authority:requirement.authorityClass||requirement.authority||'UNKNOWN',...semantic};
+  active.delete(requirementId);resolved.set(requirementId,binding);return binding;
+ }
+ const bindings=refs.map(bindingFor);
  const value={schemaVersion:SHOT_DESIGN_REQUIREMENT_BASIS_VERSION,semanticPolicy:SHOT_DESIGN_REQUIREMENT_SEMANTIC_POLICY,sceneId,coverageRevisionId:coverage.id,coverageContentHash:coverage.contentHash,bindings};
  assertJson(value);return {id:'MATERIAL-REQUIREMENT-SET:'+sceneId,...value,contentHash:hash(value)};
 }

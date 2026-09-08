@@ -1,4 +1,5 @@
 import { canonicalJson, sha256 } from './bytes.mjs';
+import {validateRequirementCompositions} from './material-requirement-composition.mjs';
 
 const fail = message => { throw Object.assign(new Error(message), { code: 'DOMAIN_INVALID' }); };
 const object = (v, name) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(`${name}必须是对象`); return v; };
@@ -40,6 +41,7 @@ export function validateDomainGraph(input,options={}){
   if(t.acyclic&&!r.historicalOnly){const a=`${t.class}:${r.from.kind}:${r.from.id}`,b=`${t.class}:${r.to.kind}:${r.to.id}`;adjacent.set(a,[...(adjacent.get(a)||[]),b]);}}
  const done=new Set(),active=new Set();function visit(id){if(active.has(id))fail('生产参考或有向状态依赖存在循环');if(done.has(id))return;active.add(id);for(const n of adjacent.get(id)||[])visit(n);active.delete(id);done.add(id);}for(const id of adjacent.keys())visit(id);
  for(const r of g.requirements){text(r.title,'需求名称',300);if(!repById.has(r.representationId))fail('需求表现不存在');if(!['IMAGE','AUDIO','VIDEO','TEXT'].includes(r.mediaType))fail('需求媒介无效');text(r.category,'需求类型',300);text(r.reuseScope,'复用范围',1000);scopes(r.scope);evidence(r.evidence,options.sourceBindings);strings(r.acceptanceCriteria,'验收要求');if(!r.acceptanceCriteria.length)fail('素材需求必须有验收要求');}
+ validateRequirementCompositions(g.requirements,{knownRequirementIds:options.knownCompositionRequirementIds||options.knownRequirementIds||[]});
  return g;
 }
 export function validateInitializationContent(input){const v=object(input,'初始化草稿');keys(v,['schemaVersion','title','summary','configuration','graph','uncertainties','sourceBindings'],'初始化草稿');if(v.schemaVersion!=='1.0')fail('初始化草稿版本无效');text(v.title,'故事名称',300);if(typeof v.summary!=='string'||v.summary.length>100000)fail('故事说明无效');strings(v.uncertainties,'待确认问题');list(v.sourceBindings,'来源绑定',5000);for(const b of v.sourceBindings)evidence([b],null);object(v.configuration,'系统配置');validateDomainGraph(v.graph,{configuration:v.configuration.domain||defaultDomainConfiguration(),sourceBindings:v.sourceBindings});return structuredClone(v);}

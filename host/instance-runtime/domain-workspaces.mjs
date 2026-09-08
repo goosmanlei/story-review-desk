@@ -34,7 +34,7 @@ export async function getDomainWorkspace(tx,owner) {
 
 async function validate(tx,view,graph) {
   const bindings=evidenceBindings(graph);
-  validateDomainGraph(graph,{configuration:configOf(view),sourceBindings:bindings,knownFamilyIds:(view.snapshot.productionModel.assetFamilies||[]).map(r=>r.id),knownRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).map(r=>r.id)});
+  validateDomainGraph(graph,{configuration:configOf(view),sourceBindings:bindings,knownFamilyIds:(view.snapshot.productionModel.assetFamilies||[]).map(r=>r.id),knownRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).map(r=>r.id),knownCompositionRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).filter(r=>r.sourceKind!=='DOMAIN_GRAPH'&&r.requirementClass==='REQUIRED').map(r=>r.id)});
   const previous=await currentGraph(tx,view);
   await verifyDomainWorkspaceEvidence(tx,graph,previous.graph);await verifyQuotes(tx,graph);await validateIdentities(tx,graph,view);
   return bindings;

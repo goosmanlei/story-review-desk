@@ -81,7 +81,7 @@ else: w.validate_prospective_creative_revision_binding(json.loads((root/sys.argv
 /** Materialize only release-pinned records. Never consult a legacy project directory. */
 export async function compileInstanceSource(input) { return compilePinnedInstance(input, 'SOURCE_SYNC'); }
 export async function compileInstanceExtension(input) { return compilePinnedInstance(input, 'EXTENSION_COMPATIBILITY'); }
-async function compilePinnedInstance({ instanceRoot, documents, activeMedia, retiredMedia, retiredContactMedia, mediaReadScope, events, manifest, profile, baseRelease }, mode) {
+async function compilePinnedInstance({ instanceRoot, documents, activeMedia, retiredMedia, retiredContactMedia, mediaReadScope, events, historicalContexts, manifest, profile, baseRelease }, mode) {
   await assertSourceMediaReadScope(mediaReadScope);
   validateCompiler(manifest.compiler, documents);
   const scratchParent = path.join(await realpath(instanceRoot), 'scratch');
@@ -134,7 +134,7 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const nativeCandidateProof = nativeMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
     const legacyAudioProof = legacyAudioCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
     const registeredCandidateProof = registeredMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
-    const modernEventProof = await validateModernEventsInChild({ events, baseRelease, eventDirectory: manifest.compiler.eventDirectory });
+    const modernEventProof = await validateModernEventsInChild({ events, baseRelease, historicalContexts, eventDirectory: manifest.compiler.eventDirectory });
     const retiredAliases = new Set((retiredMedia || []).flatMap(row => row.registration.aliases));
     const retiredVersions = (publishedSnapshot.productionModel?.assetVersions || []).filter(row => retiredAliases.has(row.path));
     const retiredFamilyIds = new Set(retiredVersions.map(row => row.familyId));

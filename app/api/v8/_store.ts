@@ -1,4 +1,5 @@
 import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
+import {applyRequirementCompositionCoverage,type RequirementCoverageRow} from '../../../host/instance-runtime/material-requirement-composition.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
 import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
 import {shotProductionExecutionEntries} from '../../../host/instance-runtime/shot-production-gates.mjs';
@@ -4791,7 +4792,7 @@ export function projectOperationalState(
       && version.canFlowDownstream === true
     ));
     const coverageSatisfied = source.requirementClass === 'EVIDENCE_ONLY'
-      || (!bindingStale && coveredVersions.length === source.assetFamilyRefs.length);
+      || (source.assetFamilyRefs.length > 0 && !bindingStale && coveredVersions.length === source.assetFamilyRefs.length);
     const coverageReasons: string[] = [];
     if (source.requirementClass === 'EVIDENCE_ONLY') coverageReasons.push('EVIDENCE_ONLY_REQUIREMENT');
     if (source.isNewRequirement === true) coverageReasons.push('NEW_REQUIRED');
@@ -4811,6 +4812,12 @@ export function projectOperationalState(
         : 'NOT_APPLICABLE',
     });
   }
+
+  // Resolve explicit requirement aggregates after every leaf has its actual
+  // adopted-version projection. Definition order cannot decide readiness.
+  for (const row of applyRequirementCompositionCoverage(
+    [...materialRequirements.values()] as Array<RequirementCoverageRow & Record<string, unknown>>,
+  )) materialRequirements.set(row.id, row);
 
   const workPackages = new Map<string, WorkPackage & StatusProjection>();
   for (const source of data.productionModel.workPackages) {

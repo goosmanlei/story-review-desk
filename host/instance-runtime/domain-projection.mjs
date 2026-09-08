@@ -64,6 +64,8 @@ export function projectDomainGraph(snapshot,graph,reference,{initialization=null
  // rejects changed ownership. Missing historic links are resolved from their
  // immutable plan source by the material workspace, never invented here.
  for(const requirement of introduced){
+  const demand=graph.requirements.find(row=>row.id===requirement.id);
+  if(Object.hasOwn(demand,'composition'))requirement.composition=structuredClone(demand.composition);
   const prior=priorRequirements.find(row=>row.id===requirement.id&&row.sourceKind==='DOMAIN_GRAPH');
   if(prior?.requirementHash!==requirement.requirementHash)continue;
   for(const key of ['materialWorkItemRef','plannedAssetFamilyId'])if(Object.hasOwn(prior,key))requirement[key]=structuredClone(prior[key]);

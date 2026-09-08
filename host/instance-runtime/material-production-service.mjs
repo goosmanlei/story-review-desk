@@ -59,6 +59,7 @@ async function context(tx,requirementId,api){
  if(revision){requirement=revision.requirement;base.requirement=requirement;}
  if(!revision&&((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId)))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
  if(revision)blockers.push(...revision.blockers);
+ if(requirement.composition)blockers.push('组合需求须由全部必需子需求齐套，请为子需求分别建档制作');
  if(!['IMAGE','AUDIO'].includes(demand.mediaType))blockers.push('首次建档当前仅支持图片或声音基础素材');
  if(graph.requirements.filter(r=>r.representationId===representation.id).length!==1||(representation.requirementIds||[]).some(id=>id!==requirementId))blockers.push('此表现关联多个需求，须先明确独立的制作归属');
  if(!entity||representation.stateId&&!domainState)blockers.push('当前实体或状态归属不完整');

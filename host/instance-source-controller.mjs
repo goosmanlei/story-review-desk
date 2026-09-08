@@ -4,6 +4,7 @@ import { mkdir, lstat, realpath } from 'node:fs/promises';
 import { canonicalJson, sha256 } from './instance-runtime/index.mjs';
 import { compileInstanceSource, sourceRelative, validateCompiler } from './instance-source-compiler.mjs';
 import { HOST_NAMESPACE, requireSource, objectHash, verifyInstanceSourceProof } from './instance-source-proof.mjs';
+import { captureHistoricalEventContexts } from './instance-historical-event-context.mjs';
 
 const eventFingerprint = async (tx) => objectHash((await tx.listEvents()).filter((row) => row.eventKind !== 'source-operation'));
 const json = (value) => canonicalJson(value);
@@ -62,15 +63,19 @@ async function capture(tx, manifest) {
   requireSource(Array.isArray(derived) && derived.length === 9 && new Set(derived).size === 9 && derived.every((alias) => documents.some((row) => row.aliases.includes(alias))), 'SOURCE_DERIVED_SET', 'All nine derived registry records must be pinned in the same release');
   const compilerRevisions = validateCompiler(manifest.compiler, documents);
   const { media, activeMedia, retiredMedia, retiredContactMedia, mediaFingerprint, activeMediaFingerprint, retiredMediaFingerprint, retiredContactMediaFingerprint } = await captureSourceMedia(tx);
-  return { view, baseRelease, documents, changes, media, activeMedia, retiredMedia, retiredContactMedia, events: (await tx.listEvents()), context: {
+  const events = await tx.listEvents();
+  const historicalContexts = await captureHistoricalEventContexts(tx, { events, instanceId: view.instanceId });
+  return { view, baseRelease, documents, changes, media, activeMedia, retiredMedia, retiredContactMedia, events, historicalContexts, context: {
     instanceId: view.instanceId, runtimeEpoch: view.runtimeEpoch, baseReleaseId: baseRelease.releaseId, baseSnapshotId: baseRelease.snapshotId,
     profileRevisionId: baseRelease.profileRevisionId, profileHeadRevisionId: (await tx.getConfig('instance-profile')).revisionId,
-    sourceRevisionIds: baseRelease.sourceRevisionIds, eventFingerprint: (await eventFingerprint(tx)), mediaFingerprint, activeMediaFingerprint, retiredMediaFingerprint, retiredContactMediaFingerprint, compilerRevisions, compilerAdapterVersion: 'INSTANCE_SOURCE_COMPILER_1.1',
+    sourceRevisionIds: baseRelease.sourceRevisionIds, eventFingerprint: (await eventFingerprint(tx)), historicalContextsHash: historicalContexts.contextsHash, mediaFingerprint, activeMediaFingerprint, retiredMediaFingerprint, retiredContactMediaFingerprint, compilerRevisions, compilerAdapterVersion: 'INSTANCE_SOURCE_COMPILER_1.1',
   } };
 }
 async function assertContext(tx, context) {
   const view = (await tx.readView()); const release = (await tx.readRelease());
   const { mediaFingerprint, activeMediaFingerprint, retiredMediaFingerprint, retiredContactMediaFingerprint } = await captureSourceMedia(tx);
+  const historicalContexts = await captureHistoricalEventContexts(tx, { events: await tx.listEvents(), instanceId: view.instanceId });
+  requireSource(historicalContexts.contextsHash === context.historicalContextsHash, 'SOURCE_CAS_CONFLICT', 'Exact historical event release context changed during compilation');
   requireSource(retiredMediaFingerprint === context.retiredMediaFingerprint, 'SOURCE_CAS_CONFLICT', 'Exact historical media retirement bindings changed during compilation');
   requireSource(view.instanceId === context.instanceId && view.runtimeEpoch === context.runtimeEpoch && release?.releaseId === context.baseReleaseId && (await tx.getConfig('instance-profile')).revisionId === context.profileHeadRevisionId && (await eventFingerprint(tx)) === context.eventFingerprint && mediaFingerprint === context.mediaFingerprint && activeMediaFingerprint === context.activeMediaFingerprint && retiredContactMediaFingerprint === context.retiredContactMediaFingerprint, 'SOURCE_CAS_CONFLICT', 'Instance release, profile, media or review inputs changed during compilation; create a new plan');
   for (const id of context.sourceRevisionIds) { const document = (await tx.readDocumentRevision(id)); requireSource(document && (await tx.readDocument(document.documentId))?.revisionId === id, 'SOURCE_CAS_CONFLICT', 'A source document head changed during compilation'); }

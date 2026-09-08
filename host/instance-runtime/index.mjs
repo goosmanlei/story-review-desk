@@ -41,6 +41,19 @@ const text = (value, label) => { ensure(typeof value === 'string' && value.lengt
 const digest = (value) => { ensure(typeof value === 'string' && /^[a-f0-9]{64}$/.test(value), 'INVALID_SHA256', 'Expected SHA-256'); return value; };
 const payloadBytes = (value) => { ensure(typeof value === 'string' || value instanceof Uint8Array, 'INVALID_BYTES', 'Original UTF-8 string or byte buffer required'); return Buffer.from(value); };
 const now = () => new Date().toISOString();
+export function publishedReleaseCutoff(value) {
+  ensure(typeof value==='string'&&Number.isFinite(Date.parse(value)),'HISTORICAL_RELEASE_TIME','Historical event timestamp is required');
+  return new Date(value).toISOString();
+}
+export function selectPublishedReleaseAt(rows,{recordedBefore,snapshotId}) {
+  const cutoff=publishedReleaseCutoff(recordedBefore);text(snapshotId,'snapshotId');
+  ensure(rows.length>0&&rows.length<=200,'HISTORICAL_RELEASE_MISSING','Latest historical publication is missing or exceeds the bounded tie limit');
+  ensure(rows.every(r=>r.created_at<cutoff&&r.created_at===rows[0].created_at),'HISTORICAL_RELEASE_TIME','Historical publication timestamp differs');
+  const signatures=new Set(rows.map(r=>canonicalJson([r.snapshot_id,r.snapshot_sha256,r.recipes_sha256,r.profile_revision_id,JSON.parse(r.source_revision_ids_json)])));
+  ensure(signatures.size===1,'HISTORICAL_RELEASE_AMBIGUOUS','Simultaneous historical publications have different immutable bytes or source/profile bindings');
+  ensure(rows[0].snapshot_id===snapshotId,'HISTORICAL_RELEASE_STALE','Creation snapshot was not the latest publication before this event');
+  return rows[0].release_id;
+}
 const contexts = new AsyncLocalStorage();
 const writerTails = new Map();
 const exportTables = ['repository_meta', 'record_revisions', 'record_heads', 'document_aliases', 'releases', 'domain_events', 'media_versions', 'media_aliases'];
@@ -193,6 +206,14 @@ class ReadUnit {
     const row = this.db.prepare('SELECT * FROM releases WHERE release_id=?').get(text(releaseId, 'releaseId'));
     return row ? { releaseId: row.release_id, snapshotId: row.snapshot_id, snapshotBytes: Buffer.from(row.snapshot_bytes), snapshotSha256: row.snapshot_sha256,
       recipesBytes: Buffer.from(row.recipes_bytes), recipesSha256: row.recipes_sha256, sourceRevisionIds: JSON.parse(row.source_revision_ids_json), profileRevisionId: row.profile_revision_id, createdAt: row.created_at } : null;
+  }
+  readPublishedReleaseAt({recordedBefore,snapshotId}) {
+    const cutoff=publishedReleaseCutoff(recordedBefore);
+    // Do not filter by snapshotId: a newer publication with a different snapshot
+    // is evidence that the requested creation context was already stale.
+    const rows=this.db.prepare('SELECT release_id,snapshot_id,snapshot_sha256,recipes_sha256,source_revision_ids_json,profile_revision_id,created_at FROM releases WHERE created_at=(SELECT max(created_at) FROM releases WHERE created_at<=?) ORDER BY release_id LIMIT 201').all(cutoff);
+    const id=selectPublishedReleaseAt(rows,{recordedBefore:cutoff,snapshotId});
+    return this.readRelease(id);
   }
   getConfig(configId) { const item = this.getRecord('settings', configId); return item ? { ...item, configId, value: parse(item.bytes) } : null; }
   getProfile() { const config = this.getConfig('instance-profile'); ensure(config && !config.deleted, 'PROFILE_MISSING', 'Instance profile is required'); ensure(config.value.instanceId === meta(this.db).instance_id, 'INSTANCE_MISMATCH', 'Profile instance identity mismatch'); return config.value; }
@@ -383,6 +404,7 @@ export class InstanceRepository {
   readDocument(...args) { return this._read('readDocument', args); }
   readDocumentRevision(...args) { return this._read('readDocumentRevision', args); }
   readRelease(...args) { return this._read('readRelease', args); }
+  readPublishedReleaseAt(...args) { return this._read('readPublishedReleaseAt', args); }
   listDocuments(...args) { return this._read('listDocuments', args); }
   getConfig(...args) { return this._read('getConfig', args); }
   getProfile() { return this._read('getProfile', []); }

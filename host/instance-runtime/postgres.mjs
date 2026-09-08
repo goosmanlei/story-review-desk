@@ -4,7 +4,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { RepositoryError, canonicalJson, sha256, projectionFingerprintNamespaces, projectionFingerprintRows } from './index.mjs';
+import { RepositoryError, canonicalJson, sha256, projectionFingerprintNamespaces, projectionFingerprintRows, publishedReleaseCutoff, selectPublishedReleaseAt } from './index.mjs';
 import { APPLICATION_ID, SCHEMA_VERSION } from './schema.mjs';
 import { installQueryModel, rebuildQueryModel } from './query-model.mjs';
 import { BUSINESS_TABLES, POSTGRES_SCHEMA, POSTGRES_SCHEMA_VERSION } from './postgres-schema.mjs';
@@ -149,6 +149,11 @@ class PgUnit {
   cache.set(key,entry);while(cache.size>3)cache.delete(cache.keys().next().value);return entry;
  }
  async readRelease(id){const entry=await this.cachedRelease(id);if(!entry)return null;const r=entry.release;return {...r,snapshotBytes:Buffer.from(r.snapshotBytes),recipesBytes:Buffer.from(r.recipesBytes),sourceRevisionIds:[...r.sourceRevisionIds]};}
+ async readPublishedReleaseAt({recordedBefore,snapshotId}){
+  const cutoff=publishedReleaseCutoff(recordedBefore);
+  const rows=await this.all('SELECT release_id,snapshot_id,snapshot_sha256,recipes_sha256,source_revision_ids_json,profile_revision_id,created_at FROM releases WHERE created_at=(SELECT max(created_at) FROM releases WHERE created_at<=$1) ORDER BY release_id LIMIT 201',[cutoff]);
+  return this.readRelease(selectPublishedReleaseAt(rows,{recordedBefore:cutoff,snapshotId}));
+ }
  async getConfig(id){const r=await this.getRecord('settings',id);return r?{...r,configId:id,value:parse(r.bytes)}:null;}
  async getProfile(){const c=await this.getConfig('instance-profile');ensure(c&&!c.deleted,'PROFILE_MISSING','Instance profile required');ensure(c.value.instanceId===(await this.meta()).instance_id,'INSTANCE_MISMATCH','Profile identity mismatch');return c.value;}
  async getAux(namespace,key,options={}){return this.getRecord(`aux:${text(namespace,'namespace')}`,text(key,'key'),options.revisionId);}
@@ -303,7 +308,7 @@ export class PostgresRepository {
  async backupTo(target){ensure(!this.inTransaction,'ACTIVE_TRANSACTION','Backup must run outside transaction');const archive=await this.exportState();validateArchive(archive,this.instanceId);await mkdir(path.dirname(target),{recursive:true});const file=await writeArchiveFile(target,archive);return {path:target,...file,instanceId:this.instanceId,integrity:{ok:true,instanceId:this.instanceId,schemaVersion:SCHEMA_VERSION},mediaIncluded:false};}
  async close(){await this.pool.end();}
 }
-for(const method of ['getMetadata','getProjectionFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','readRelease','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
+for(const method of ['getMetadata','getProjectionFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','readRelease','readPublishedReleaseAt','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
 export async function openPostgresRepository(options){const repo=new PostgresRepository({...options,connection:await postgresConnection(options)});try{await repo.validateSchema();await repo.repositoryState();return repo;}catch(error){await repo.close();throw error;}}
 async function emptySchema(connection,callback){const pool=new pg.Pool({...connection,max:1});const c=await pool.connect();try{await c.query('BEGIN');ensure(!(await c.query("SELECT 1 FROM pg_tables WHERE schemaname='public' LIMIT 1")).rowCount,'RESTORE_TARGET_EXISTS','Target PostgreSQL database must be empty');await c.query(POSTGRES_SCHEMA);await c.query('INSERT INTO repository_schema VALUES(1,$1,$2,$3)',[POSTGRES_SCHEMA_VERSION,APPLICATION_ID,sha256(POSTGRES_SCHEMA)]);await installQueryModel(new PgUnit(c,null,true));await callback(c);await c.query('COMMIT');}catch(error){await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();await pool.end();}}
 export async function createPostgresRepository(options){ensure(!readOnlyProcess(),'READ_ONLY','Cannot create read-only repository');const connection=await postgresConnection(options);await emptySchema(connection,async c=>{await c.query('INSERT INTO repository_meta VALUES(1,$1,$2,0,NULL,$3)',[text(options.instanceId,'instanceId'),randomUUID(),now()]);const unit=new PgUnit(c,null,true);await unit.putConfig({configId:'instance-profile',value:options.profile,bytes:options.profileBytes,expectedRevisionId:null});});return openPostgresRepository({...options,connection});}

@@ -9,6 +9,7 @@ import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {deriveShotDesignRequirementBasisV3,assertShotDesignRequirementBasisV3Current,shotDesignRequirementBasisSchema} from '../host/instance-runtime/shot-design-requirement-basis.mjs';
+import {applyRequirementCompositionCoverage} from '../host/instance-runtime/material-requirement-composition.mjs';
 
 const clone=structuredClone,sceneId='scene:room',requirementId='demand:room';
 const evidence=[{sourceId:'source:script',revisionId:'source:revision1',sha256:'a'.repeat(64),locator:'scene:room/block:1',quote:'The visitor enters the dark room.'}];
@@ -28,6 +29,48 @@ function firstFamily(f,{directory=false}={}){
  r.sourceRef='story/material-production/plans/plan:room.json#requirement';r.materialWorkItemRef='work:room';r.plannedAssetFamilyId='family:room';return after;
 }
 const derive=snapshot=>deriveShotDesignRequirementBasisV3(snapshot.productionModel,sceneId);
+function composedFixture(){
+ const f=fixture(),childId='demand:component';
+ f.graph.representations.push({...clone(f.graph.representations[0]),id:'rep:component',requirementIds:[childId]});
+ f.graph.requirements.push({...clone(f.graph.requirements[0]),id:childId,representationId:'rep:component',title:'Required room view component'});
+ f.graph.requirements[0].composition={schemaVersion:'1.0',mode:'ALL',requiredComponents:[{id:'component:room-view',requirementId:childId}]};
+ f.snapshot=project(f.snapshot,f.graph);return {...f,childId};
+}
+test('explicit ALL composition freezes recursively resolved child semantics without silently expanding direct coverage refs',()=>{
+ const f=composedFixture(),basis=derive(f.snapshot);assert.equal(basis.bindings.length,1);
+ const components=basis.bindings[0].requiredComponents;assert.equal(components[0].requirementId,f.childId);assert.equal(components[0].binding.requirementId,f.childId);
+ assert.equal(components[0].binding.demand.acceptanceCriteria[0],f.graph.requirements[1].acceptanceCriteria[0]);
+ const changed=clone(f.graph);changed.requirements[1].acceptanceCriteria.push('The component must show its northern wall.');
+ assert.notEqual(derive(project(f.snapshot,changed)).contentHash,basis.contentHash);
+});
+test('child first-family allocation and real ALL coverage second-pass metadata preserve V3 semantics',()=>{
+ const f=composedFixture(),basis=derive(f.snapshot),graph=clone(f.graph);graph.representations[1].assetFamilyIds=['family:component'];
+ const produced=project(f.snapshot,graph);assert.notEqual(produced.productionModel.materialRequirements[1].requirementHash,f.snapshot.productionModel.materialRequirements[1].requirementHash);
+ produced.productionModel.materialRequirements=applyRequirementCompositionCoverage(produced.productionModel.materialRequirements);
+ assert.equal(produced.productionModel.materialRequirements[0].compositionCoverage.coveredCount,0);
+ assert.deepEqual(derive(produced),basis);
+ const child=produced.productionModel.materialRequirements.find(r=>r.id===f.childId);Object.assign(child,{coverageSatisfied:true,coveredByFamilyRefs:['family:component'],coveredByVersionRefs:['family:component@V1']});
+ produced.productionModel.materialRequirements=applyRequirementCompositionCoverage(produced.productionModel.materialRequirements);
+ assert.equal(produced.productionModel.materialRequirements[0].compositionCoverage.coveredCount,1);
+ assert.deepEqual(derive(produced),basis);
+});
+test('composition children include their own transitive child definitions',()=>{
+ const f=composedFixture(),g=clone(f.graph),grand='demand:grandchild';
+ g.representations.push({...clone(g.representations[1]),id:'rep:grandchild',requirementIds:[grand]});g.requirements.push({...clone(g.requirements[1]),id:grand,representationId:'rep:grandchild'});
+ g.requirements[1].composition={schemaVersion:'1.0',mode:'ALL',requiredComponents:[{id:'component:grandchild',requirementId:grand}]};
+ const before=derive(project(f.snapshot,g));assert.equal(before.bindings[0].requiredComponents[0].binding.requiredComponents[0].requirementId,grand);
+ g.requirements[2].scope[0].revisionId='script:updated';assert.notEqual(derive(project(f.snapshot,g)).contentHash,before.contentHash);
+});
+for(const [name,change] of [
+ ['missing child',g=>g.requirements[0].composition.requiredComponents[0].requirementId='demand:missing'],
+ ['self cycle',g=>g.requirements[0].composition.requiredComponents[0].requirementId=requirementId],
+ ['transitive cycle',g=>g.requirements[1].composition={schemaVersion:'1.0',mode:'ALL',requiredComponents:[{id:'component:back',requirementId}]}],
+ ['unknown composition semantics',g=>g.requirements[0].composition.mode='ANY'],
+ ['unknown component semantics',g=>g.requirements[0].composition.requiredComponents[0].optional=true],
+])test('V3 composition '+name+' fails closed',()=>{const f=composedFixture();change(f.graph);assert.throws(()=>derive(project(f.snapshot,f.graph)));});
+test('a projected composition cannot be dropped or changed independently of the exact domain source',()=>{
+ const f=composedFixture();delete f.snapshot.productionModel.materialRequirements[0].composition;assert.throws(()=>derive(f.snapshot),/组合投影/);
+});
 const {api}=loadModernEventRuntime(fileURLToPath(new URL('..',import.meta.url)));
 // Read the real private gate, without exporting it as an additional product API
 // or opening a repository. The test never replaces its implementation formula.
