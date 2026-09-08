@@ -1,3 +1,4 @@
+import { registeredCandidateSupport } from './instance-registered-material-candidates.mjs';
 import { retiredContactSupport } from './instance-retired-contact.mjs';
 import { historicalGuidanceSupport } from './instance-historical-guidance.mjs';
 import { retiredProductionSupport } from './instance-retired-production.mjs';
@@ -59,6 +60,7 @@ ${retiredContactSupport}
 ${historicalGuidanceSupport}
 ${retiredProductionSupport}
 ${referenceProjectionSupport}
+${registeredCandidateSupport}
 
 # No adaptation for compiler fixtures/extensions that have no map cache builder.
 if not functions:
@@ -90,11 +92,16 @@ else:
     published_references = pins.pop("__productionReferences", {})
     retired_contact_evidence = pins.pop("__retiredContactEvidence", {})
     retired_production_evidence = pins.pop("__retiredProductionEvidence", {})
+    registered_candidate_proof = pins.pop('__registeredMaterialCandidates', None)
+    native_candidate_proof = pins.pop('__nativeMaterialCandidates', None)
+    candidate_snapshot_path = pins.pop('__candidateSnapshotPath', None)
+    registered_transform, registered_install, registered_finish = prepare_registered_material_candidates(root, tree, registered_candidate_proof, document_pins, pins, native_candidate_proof, {'builder':p.relative_to(root).as_posix(),'snapshot':candidate_snapshot_path})
     retired_production_reports = []
     projection_function = [node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main']
     projection_guard_sha = hashlib.sha256(ast.dump(projection_function[0], include_attributes=False).encode()).hexdigest() if len(projection_function) == 1 else None
     transform_retired_production, install_retired_production = make_retired_production_support(root, retired_production_evidence, document_pins, retired_production_reports)
     tree = transform_retired_production(tree)
+    tree = registered_transform(tree)
     retired_contact_reports = []
     retired_contact_metadata = {}
     retired_contact_proof, build_retired_contact = make_retired_contact_support(root, retired_contact_evidence, retired_contact_reports)
@@ -282,6 +289,7 @@ else:
     sys.modules[module.__name__] = module
     exec(compile(tree, str(p), "exec"), module.__dict__)
     install_retired_production(module)
+    registered_install(module)
     original = module.build_map_proxies
     reports = []
 
@@ -494,6 +502,12 @@ else:
         raise ValueError("production reference preservation did not resolve every exact declared path")
     report = {"adapterVersion": "PINNED_REVIEW_EVIDENCE_REUSE_1.5", "materializationPolicy": "HASH_PINNED_EQUAL_MTIME_2000_01_01", "cacheFunctionsGuardAstSha256": cache_guard_sha, "guardAstSha256": ast_sha, "missingOriginals": reports[0], "contactGuardAstSha256": contact_guard_sha if (contact_reports or retired_contact_reports) else None, "historicalContacts": sorted(contact_reports, key=lambda row: row["key"]), "retiredContacts": sorted(retired_contact_reports, key=lambda row: row["key"]), "evidenceGuardAstSha256": evidence_guard_sha if historical_evidence_reports else None, "historicalEvidence": [historical_evidence_reports[ref] for ref in sorted(historical_evidence_reports)], "productionReferences": {"guardAstSha256": reference_guard_sha, "report": reference_reports[0], "resolvedPaths": sorted(reference_resolved_paths)} if reference_reports else None}
 
+    if registered_candidate_proof or native_candidate_proof:
+        candidate_report = registered_finish()
+        if native_candidate_proof:
+            report['nativeMaterialCandidates'] = candidate_report.pop('nativeCandidateDelegation')
+        if registered_candidate_proof:
+            report['registeredMaterialCandidates'] = candidate_report
     report['retiredProduction'] = sorted(retired_production_reports, key=lambda row:(row['kind'],row['id']))
 
 # Build and --check must report the same bindings; do not quietly overwrite drift.
