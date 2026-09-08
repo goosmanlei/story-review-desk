@@ -7,6 +7,40 @@ description: 明确开启故事审阅台多 Agent 工作模式，以当前会话
 
 本 Skill 是故事无关的软件能力。明确调用后，当前会话担任 MainAgent；后台 ScheduleAgent 管理同一项目实例的任务与四类 Worker。安装本 Skill 本身不启动进程、不发布任务、不授予创作或模型调用权限。
 
+## 工作模式架构
+
+```mermaid
+flowchart TB
+    U[用户]
+    M["MainAgent<br/>当前会话的唯一入口"]
+    S["ScheduleAgent<br/>实例后台的唯一调度器"]
+    L[("实例私有任务账本<br/>授权 · 队列 · 运行 · 证据 · 决策")]
+
+    subgraph W["按需启动的 Worker（默认并发 3 / 3 / 3 / 3）"]
+        CW[CreativeWorkerAgent]
+        CQ[CreativeQAWorkerAgent]
+        DW[DevelopWorkerAgent]
+        DQ[DevelopQAWorkerAgent]
+    end
+
+    U <-->|目标、澄清与决策| M
+    M -->|发布任务、查询状态、转交决策| S
+    S <-->|持久化任务与回执| L
+    S -->|创作任务| CW
+    CW -->|候选与证据| CQ
+    CQ -->|PASS| S
+    CQ -->|FAIL：最多三轮返修| CW
+    S -->|开发任务| DW
+    DW -->|候选提交与证据| DQ
+    DQ -->|PASS| S
+    DQ -->|FAIL：最多三轮返修| DW
+    CQ -.->|第三轮失败，请求用户决策| M
+    DQ -.->|第三轮失败，请求用户决策| M
+    S -->|进展、交付状态与未决请求| M
+```
+
+Main 不直接占用 Worker；Schedule 根据任务依赖派发工作，并为候选派生独立 QA 与必要的返修。任务、授权、运行、证据和决策保存在当前实例的私有账本中，能力凭据只保存在实例私有运行目录。图中流程只有在用户显式激活模式并发布具体任务后才开始；安装 Skill 本身不会启动后台或取得任何执行权限。
+
 ## 接入
 
 - 先读当前项目 README、AGENTS、STATE，确认显式项目根目录、实例位置及已发布指引。不得从父目录、邻近故事或 Skill 名称推断绑定。
