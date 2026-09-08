@@ -43,4 +43,8 @@ QA 对全部验收项给出结论和证据。总结果 `PASS` 需要所有必要
 
 `decision` 包含已有开放请求的 `decisionId`、`action` 和用户回答摘要 `comment`；可用动作包括 `resume`、`cancel`、`retry`、`scale`。加轮使用 `additionalRounds`，并发调整使用 `concurrency`。取消使用该决策路径，不存在独立的 task cancel/update 接口。`scale` 的四类键与任务类别一致，每类是非负整数。
 
+`decision` 的 `scale` 动作仅用于 `CONCURRENCY` 请求；其他阻塞可用独立 `scale` 命令调整并发，但不能因此消耗尚未解决的业务决策。调度器调用阻塞须响应它自身的 `SCHEDULER_BLOCKED` 请求，`resume` 或 `retry` 才恢复，普通模式重启不代表额度错误已解决。
+
+未知执行的 `retry` 或 `cancel` 必须提供 `reconciliation:{status:"CONFIRMED_NOT_RUNNING",runId,threadId,turnId,evidenceRef}`，匹配已保存的原运行、线程和回合及实际核查证据；原记录未创建线程或回合时只省略对应字段。它在核查前继续占用资源和并发资格。实例恢复后的旧任务先重新明确激活授权，再响应 `EPOCH_REAUTHORIZE`，提供 `reconciliation:{status:"INPUTS_REVALIDATED",evidenceRef}` 核验精确输入；这不替代对旧执行未知结果的单独核查。
+
 `RESULT_UNKNOWN` 记录原请求 ID 及未知范围，核对实际状态后再决定恢复。额度、限流和认证错误仅记录脱敏摘要。能力凭据、API 密钥和完整私有会话不能放入任务正文、Git、公开导出或 Skill。
