@@ -6,7 +6,7 @@ import {compileAuthoringRoots,validateAuthoringRoot,type AuthoringRoot,type Auth
 import {publishedInitializationProjection} from '../app/api/instance/_published-initialization';
 import type {InitializationContent} from '../host/instance-runtime/domain-model.mjs';
 
-async function fixture(page:Page,{sourceReadOnly=false}={}){
+async function fixture(page:Page,{sourceReadOnly=false,maintenanceOperations=[]}:{sourceReadOnly?:boolean;maintenanceOperations?:Array<Record<string,unknown>>}={}){
   const profile=blankProfile({title:'新剧初始化验收',instanceId:'system-management-ui',projectId:'system-management-story'});profile.capabilities.landingView='system';
   const snapshot=blankSnapshot(profile).snapshot;const configuration=defaultConfiguration(profile);const sources:Array<{id:string;title:string;role:string;format:string;sha256:string;revisionId:string;status:string;textAvailable?:boolean;documentId?:string;documentRevisionId?:string;documentSha256?:string;text?:string}>=[];
   const authoringRoots:AuthoringRoot[]=[];let candidates:Array<{creativeRevisionId:string;rootId:string;rootRevisionId:string;review:Record<string,unknown>|null}>=[];let adoptedCreativeRevisionId:string|null=null;let published:Record<string,unknown>|null=null;let publishedOnly=false;
@@ -39,7 +39,7 @@ async function fixture(page:Page,{sourceReadOnly=false}={}){
       const body=request.postDataJSON();mutations.push(body);if(body.action==='adoptionPreview')return json({previewHash:'adopt-sha',checks:['只采用方案，场正文仍需逐场审阅']});if(body.action==='adopt'){expect(body.previewHash).toBe('adopt-sha');adoptedCreativeRevisionId=body.creativeRevisionId;return json({releaseId:'fixture-release',creativeRevisionId:body.creativeRevisionId,state:'SOURCE_CURRENT'});}const previous=authoringRoots.find(r=>r.id===body.root?.id)||null;if(body.expectedRevisionId!==(previous?.revisionId||null))return route.fulfill({status:409,json:{error:'作者草稿已变化，本地修改未覆盖远端'}});const checked=validateAuthoringRoot(body.root,{previous,roots:authoringRoots});const root:AuthoringRoot={...checked,revisionId:`author-r${++sequence}`,status:'DRAFT',sourcePath:`story/authoring/${checked.id}.json`,sceneRevisionBindings:[],sha256:'b'.repeat(64),parentRevisionId:null,contentHash:'c'.repeat(64),createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),formalAdoptionPerformed:false};const index=authoringRoots.findIndex(r=>r.id===root.id);if(index>=0)authoringRoots.splice(index,1,root);else authoringRoots.push(root);return json({root,releaseId:'fixture-release'});
     }
     if(url.pathname==='/api/instance/configuration')return json({configuration,defaults:configuration,releaseId:'fixture-release',revisionId:'config-r1',sha256:'a'.repeat(64),history:[],bindings:[],boundStandards:[],reviewCatalog:{},initialized:true,draft:null});
-    if(url.pathname==='/api/instance/maintenance')return json({runtime:{instanceId:'system-management-ui',status:'READY'},storage:{provider:'postgresql'},backups:[],capabilities:{backup:true,verify:true,export:true},operations:[]});
+    if(url.pathname==='/api/instance/maintenance')return json({runtime:{instanceId:'system-management-ui',status:'READY'},storage:{provider:'postgresql'},backups:[],capabilities:{backup:true,verify:true,export:true},operations:maintenanceOperations});
     if(url.pathname==='/api/instance/domain-workspaces')return json({snapshotId:snapshot.snapshotId,releaseId:'fixture-release',revisionId:null,graph:emptyDomainGraph(),ownership:{},configuration:configuration.domain,requirements:[],spatial:null,draft:null,draftHeadRevisionId:null,legacyDrafts:[],readOnly:false});
     if(url.pathname==='/api/instance/relations')return json({releaseId:'fixture-release',revisionId:null,graph:emptyDomainGraph(),draft:null});
     unexpected.push(`${request.method()} ${url.pathname}`);return route.fulfill({status:418,json:{error:'Unexpected fixture request'}});
@@ -54,6 +54,19 @@ test('system tabs preserve links and five compact configuration groups fit narro
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
   await page.getByRole('tab',{name:'数据与运行',exact:true}).click();await expect(page.locator('.management-runtime-facts').first().getByText('postgresql',{exact:true})).toBeVisible();await page.reload();await expect(page.getByRole('tab',{name:'数据与运行',exact:true})).toHaveAttribute('aria-selected','true');
   expect(f.unexpected).toEqual([]);
+});
+
+test('maintenance results show compact verified outcomes and expandable whitelisted evidence',async({page})=>{
+ const digest='b'.repeat(64),f=await fixture(page,{maintenanceOperations:[
+  {operationId:'backup-proof',action:'import',status:'SUCCEEDED',result:{status:'BACKUP_VERIFIED',mediaFiles:435,manifestSha256:digest,output:'/project/'+('long-path-'.repeat(30)),secret:'must-not-render'}},
+  {operationId:'restore-proof',action:'restore',status:'SUCCEEDED',result:{status:'RESTORED_VERIFIED',runtimeEpoch:'restore_v1_fixture'}},
+  {operationId:'failed-proof',action:'verify',status:'FAILED',error:'来源清单不一致，未更改实例'},
+ ]});
+ await page.goto('/?view=system&systemTab=runtime');const records=page.getByLabel('维护任务记录',{exact:true});
+ await expect(records.getByText('导入备份',{exact:true})).toBeVisible();await expect(records.getByText('业务历史与435 份受管媒体已核验，可下载或恢复。',{exact:true})).toBeVisible();
+ await expect(records.getByText('独立副本已恢复并核验；当前实例未切换。',{exact:true})).toBeVisible();await expect(records.getByText('来源清单不一致，未更改实例',{exact:true})).toBeVisible();
+ await expect(records.getByText(digest,{exact:true})).not.toBeVisible();await records.locator('summary').first().click();await expect(records.getByText(digest,{exact:true})).toBeVisible();
+ await expect(records).not.toContainText('must-not-render');await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);expect(f.mutations).toEqual([]);expect(f.unexpected).toEqual([]);
 });
 
 test('new story authors an outline then a screenplay using exact confirmed sources and a parent draft',async({page})=>{

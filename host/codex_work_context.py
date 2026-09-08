@@ -231,7 +231,7 @@ class WorkContext:
         fields = {"schemaVersion", "projectId", "scopeKey", "snapshotId", "focus", "focusKey", "dependencyHash", "catalogHash", "initialResourceIds", "draftTargets", "missing"}
         if not isinstance(body, dict) or set(body) != fields or digest(body) != self.reference["packetHash"]:
             raise ContextError("CONTEXT_HASH_MISMATCH", "上下文包内容或哈希无效")
-        if body.get("schemaVersion") not in {"1.0","1.1"} or body.get("projectId") != project_id or body.get("scopeKey") != scope_key or body.get("snapshotId") != turn.get("snapshotId"):
+        if body.get("schemaVersion") not in {"1.0","1.1","1.2"} or body.get("projectId") != project_id or body.get("scopeKey") != scope_key or body.get("snapshotId") != turn.get("snapshotId"):
             raise ContextError("CONTEXT_SCOPE_INVALID", "上下文包项目、权限或快照不一致")
         self.body = body
         bounded_text(body["focusKey"], "focusKey", 1000)
@@ -254,8 +254,10 @@ class WorkContext:
                 raise ContextError("CONTEXT_INVALID", "资料目录包含重复资源")
             self.resources[resource["id"]] = resource
         initial = body["initialResourceIds"]
-        if not isinstance(initial, list) or len(initial) > 48 or any(not isinstance(key, str) or key not in self.resources for key in initial):
+        if not isinstance(initial, list) or len(initial) > 48 or any(not isinstance(key, str) for key in initial):
             raise ContextError("CONTEXT_INVALID", "当前工作资料引用无效")
+        for key in initial:
+            self._resource(key)
         self.targets: dict[str, dict[str, Any]] = {}
         if not isinstance(body["draftTargets"], list) or len(body["draftTargets"]) > 30:
             raise ContextError("CONTEXT_INVALID", "草稿目标无效")
@@ -286,7 +288,7 @@ class WorkContext:
 
     def _validate_resource(self, resource: Any) -> None:
         required = {"id", "title", "kind", "sha256", "text", "href", "role", "relations"}
-        if not isinstance(resource, dict) or not required.issubset(resource) or set(resource) - required - {"versionId", "media", "sourceBinding"}:
+        if not isinstance(resource, dict) or not required.issubset(resource) or set(resource) - required - {"versionId", "media", "sourceBinding", "bodyBinding", "relationBinding"}:
             raise ContextError("CONTEXT_INVALID", "资源字段无效")
         for key in ("id", "title", "kind"):
             bounded_text(resource[key], key, 1000)
@@ -299,12 +301,12 @@ class WorkContext:
             raise ContextError("CONTEXT_INVALID", "资源链接必须是审阅台内部链接")
         if resource["role"] not in {"CURRENT", "HISTORICAL", "REFERENCE"}:
             raise ContextError("CONTEXT_INVALID", "资源角色无效")
-        if not isinstance(resource["relations"], list) or len(resource["relations"]) > 500 or any(not isinstance(x, str) for x in resource["relations"]):
+        if not isinstance(resource["relations"], list) or len(resource["relations"]) > (10000 if self.body["schemaVersion"] == "1.2" else 500) or any(not isinstance(x, str) for x in resource["relations"]):
             raise ContextError("CONTEXT_INVALID", "资源关系无效")
         binding = resource.get("sourceBinding")
         if binding is not None:
             expected = {"schemaVersion","releaseId","documentId","revisionId","sha256","byteSize","byteStart","byteEnd"}
-            if self.body["schemaVersion"] != "1.1" or not isinstance(binding,dict) or set(binding) != expected:
+            if self.body["schemaVersion"] not in {"1.1","1.2"} or not isinstance(binding,dict) or set(binding) != expected:
                 raise ContextError("CONTEXT_INVALID","来源分块绑定无效")
             if binding["schemaVersion"] != "1.0" or resource.get("versionId") != binding["revisionId"]:
                 raise ContextError("CONTEXT_INVALID","来源修订不一致")
@@ -319,6 +321,19 @@ class WorkContext:
                 same = False
             if not same:
                 raise ContextError("CONTEXT_INVALID","来源目录与精确绑定不一致")
+        for key in ("bodyBinding","relationBinding"):
+            binding=resource.get(key)
+            if binding is None:
+                continue
+            if self.body["schemaVersion"]!="1.2" or resource.get("sourceBinding") or (key=="relationBinding" and (not resource.get("bodyBinding") or resource["relations"])):
+                raise ContextError("CONTEXT_INVALID","业务正文索引不一致")
+            self._validate_body_binding(binding)
+            try:
+                same=json.loads(text).get(key)==binding
+            except (ValueError,AttributeError):
+                same=False
+            if not same:
+                raise ContextError("CONTEXT_INVALID","业务正文目录与绑定不一致")
         media = resource.get("media")
         if media is not None:
             if not isinstance(media, dict) or set(media) != {"kind", "path", "sha256", "mimeType"} or media["kind"] not in {"image", "audio", "video"}:
@@ -327,14 +342,76 @@ class WorkContext:
                 bounded_text(media[key], key, 2000)
             sha(media["sha256"], "媒体sha256")
 
+    @staticmethod
+    def _validate_body_binding(binding: Any) -> None:
+        keys={"schemaVersion","sha256","byteSize","characterCount","chunkCount"}
+        if not isinstance(binding,dict) or set(binding)!=keys or binding["schemaVersion"]!="1.0":
+            raise ContextError("CONTEXT_INVALID","业务正文绑定无效")
+        sha(binding["sha256"],"body SHA")
+        if any(isinstance(binding[k],bool) or not isinstance(binding[k],int) or binding[k]<0 for k in ("byteSize","characterCount","chunkCount")) or binding["byteSize"]>32*1024*1024 or binding["characterCount"]>binding["byteSize"] or binding["chunkCount"]!=max(1,(binding["byteSize"]+11999)//12000):
+            raise ContextError("CONTEXT_INVALID","业务正文大小无效")
+
     def _resource(self, resource_id: Any) -> dict[str, Any]:
-        key = bounded_text(resource_id, "resourceId", 1000)
-        resource = self.resources.get(key)
-        if resource is None:
-            raise ContextError("RESOURCE_UNAVAILABLE", "资料不在本轮可读取的项目目录内")
-        return resource
+        key=bounded_text(resource_id,"resourceId",1000)
+        if key in self.resources:
+            return self.resources[key]
+        try:
+            base_id,suffix=key.rsplit(":body:",1)
+            body_sha,ordinal=suffix.split(":")
+            base=self.resources[base_id]
+            if self.body["schemaVersion"]!="1.2" or not re.fullmatch(r"\d{6}",ordinal):
+                raise ValueError()
+            section="TEXT" if base.get("bodyBinding",{}).get("sha256")==body_sha else "RELATIONS"
+            binding=base.get("bodyBinding" if section=="TEXT" else "relationBinding")
+            self._validate_body_binding(binding)
+            index=int(ordinal)
+            if binding["sha256"]!=body_sha or index>=binding["chunkCount"]:
+                raise ValueError()
+            chunk_id=lambda i:base_id+":body:"+body_sha+":"+str(i).zfill(6)
+            byte_range={"byteStart":index*12000,"byteEnd":min((index+1)*12000,binding["byteSize"])}
+            metadata={"resourceId":base_id,"bodySha256":body_sha,**byte_range,"byteSize":binding["byteSize"],"part":index+1,"parts":binding["chunkCount"],"previousResourceId":chunk_id(index-1) if index else None,"nextResourceId":chunk_id(index+1) if index+1<binding["chunkCount"] else None,"boundary":"本条元数据未包含正文；实际读取返回sourceText、sourceTextSha256和精确字节范围，不代表其他块已读。"}
+            text=json.dumps(metadata,ensure_ascii=False,separators=(",",":"))
+            return {**{k:v for k,v in base.items() if k not in {"media","relationBinding"}},"relations":[],"id":key,"title":base["title"]+" · 正文第"+str(index+1)+"/"+str(binding["chunkCount"])+"部分","text":text,"sha256":hashlib.sha256(text.encode()).hexdigest(),"bodyBinding":binding,"bodyRange":byte_range,"bodyOf":base_id,"bodySection":section}
+        except (KeyError,ValueError,TypeError,ContextError) as error:
+            raise ContextError("RESOURCE_UNAVAILABLE","资料不在本轮冻结目录的精确范围内") from error
+
+    def _body_read(self,resource:dict[str,Any]) -> dict[str,Any]:
+        if not resource.get("bodyRange"):
+            return {}
+        if resource["id"] in self.source_reads:
+            return self.source_reads[resource["id"]]
+        binding=resource["bodyBinding"]
+        try:
+            if self.instance:
+                result=self.instance.source_chunk(self.body["catalogHash"],resource["id"])
+            else:
+                folder=self.store_root/"resource-bodies"
+                check_directory(folder)
+                content=read_regular(folder/(binding["sha256"]+".txt"),32*1024*1024)
+                if len(content)!=binding["byteSize"] or hashlib.sha256(content).hexdigest()!=binding["sha256"] or len(content.decode("utf-8"))!=binding["characterCount"]:
+                    raise ValueError("body bytes")
+                start,end=resource["bodyRange"]["byteStart"],resource["bodyRange"]["byteEnd"]
+                while start<len(content) and content[start]&0xc0==0x80:
+                    start+=1
+                while end<len(content) and content[end]&0xc0==0x80:
+                    end+=1
+                part=content[start:end]
+                result={"resourceId":resource["id"],"bodyOf":resource["bodyOf"],"bodySection":resource["bodySection"],"bodySha256":binding["sha256"],"sourceText":part.decode("utf-8"),"sourceTextSha256":hashlib.sha256(part).hexdigest(),"sourceSha256":binding["sha256"],"revisionId":resource.get("versionId") or binding["sha256"],"byteStart":start,"byteEnd":end,"byteSize":len(content),"wholeBodyRead":start==0 and end==len(content)}
+        except (InstanceStorageError,OSError,ValueError) as error:
+            raise ContextError("RESOURCE_SCOPE_INVALID","业务正文未通过冻结目录和SHA核验") from error
+        text=bounded_text(result.get("sourceText"),"业务正文分块",16000,empty=True)
+        start,end=result.get("byteStart"),result.get("byteEnd")
+        nominal=resource["bodyRange"]
+        if any(isinstance(n,bool) or not isinstance(n,int) for n in (start,end)) or not nominal["byteStart"]<=start<=min(binding["byteSize"],nominal["byteStart"]+3) or not nominal["byteEnd"]<=end<=min(binding["byteSize"],nominal["byteEnd"]+3) or result.get("resourceId")!=resource["id"] or result.get("bodyOf")!=resource["bodyOf"] or result.get("bodySection")!=resource["bodySection"] or result.get("bodySha256")!=binding["sha256"] or result.get("sourceSha256")!=binding["sha256"] or result.get("revisionId")!=(resource.get("versionId") or binding["sha256"]) or result.get("byteSize")!=binding["byteSize"] or hashlib.sha256(text.encode()).hexdigest()!=result.get("sourceTextSha256") or len(text.encode())!=end-start or result.get("wholeBodyRead")!=(start==0 and end==binding["byteSize"]):
+            raise ContextError("RESOURCE_HASH_MISMATCH","业务正文分块范围、角色来源或SHA不一致")
+        if len(canonical_json({**resource,**result}))>80000:
+            raise ContextError("CONTEXT_BUDGET_EXCEEDED","业务正文分块超出读取预算")
+        self.source_reads[resource["id"]]=result
+        return result
 
     def _source_read(self,resource:dict[str,Any]) -> dict[str,Any]:
+        if resource.get("bodyRange"):
+            return self._body_read(resource)
         if not resource.get("sourceBinding"):
             return {}
         if resource["id"] in self.source_reads:
@@ -362,18 +439,22 @@ class WorkContext:
         if len(self.read_ids | resources_by_id.keys()) > MAX_READ_RESOURCES:
             raise ContextError("RESOURCE_BUDGET_EXCEEDED", "本轮实际读取资料已达100项上限；请缩小问题范围")
         source_contents = {item["id"]:self._source_read(item) for item in resources}
-        new_chars = sum(len(item["text"])+len(source_contents[item["id"]].get("sourceText","")) for item in resources if item["id"] not in self.read_ids)
+        new_chars = sum((len(canonical_json(item))+len(canonical_json(source_contents[item["id"]]))+256) if self.body["schemaVersion"]=="1.2" else len(item["text"])+len(source_contents[item["id"]].get("sourceText","")) for item in resources if item["id"] not in self.read_ids)
         if self.text_chars + new_chars > MAX_TEXT_CHARS:
             raise ContextError("CONTEXT_BUDGET_EXCEEDED", "本轮全文读取已达上限；请缩小问题范围")
         self.text_chars += new_chars
         self.read_ids.update(item["id"] for item in resources)
         return {"resources": [{key: value for key, value in item.items() if key != "media"} | source_contents[item["id"]] | {
+            **({"bodyState": "INDEX_ONLY_BODY_NOT_READ" if not item.get("bodyRange") else "BODY_CHUNK_READ",
+                "wholeBodyRead": source_contents[item["id"]].get("wholeBodyRead",False)} if item.get("bodyBinding") else {}),
             "observation": "IMAGE_AVAILABLE_NOT_OBSERVED" if item.get("media", {}).get("kind") == "image" else "SOURCE_CHUNK_READ" if item.get("sourceBinding") else "TEXT_OR_METADATA_ONLY"
         } for item in resources],"remainingCharacters":MAX_TEXT_CHARS-self.text_chars,"readResourceCount":len(self.read_ids)}
 
     def initial_prompt(self, history: list[dict[str, str]]) -> str:
         self.progress("READING_CONTEXT", "正在读取当前工作资料")
         initial = self.read_resources(self.body["initialResourceIds"]) if self.body["initialResourceIds"] else {"resources": []}
+        if self.body["schemaVersion"]=="1.2" and len(canonical_json(initial["resources"]))>72000:
+            raise ContextError("CONTEXT_BUDGET_EXCEEDED","初始精确资料超过72000字符；索引不代表正文，需减少附加块后按需读取")
         return canonical_json({
             "protocol": PROTOCOL, "projectId": self.body["projectId"], "focus": self.body["focus"],
             "focusKey": self.body["focusKey"], "snapshotId": self.body["snapshotId"],
@@ -391,7 +472,7 @@ class WorkContext:
         terms = terms[:20] or [query]
         ranked = []
         for resource in self.resources.values():
-            if resource["role"] == "HISTORICAL" or resource.get("sourceBinding"):
+            if resource["role"] == "HISTORICAL" or resource.get("sourceBinding") or resource.get("bodyBinding"):
                 continue
             title = resource["title"].lower()
             text = resource["text"].lower()
@@ -401,7 +482,7 @@ class WorkContext:
                 score = sum(2 * (term in title) + (term in text) for term in pairs[:30]) / 100
             if score:
                 ranked.append((score, resource))
-        if any(resource.get("sourceBinding") for resource in self.resources.values()):
+        if any(resource.get("sourceBinding") or resource.get("bodyBinding") for resource in self.resources.values()):
             if not self.instance:
                 raise ContextError("SOURCE_STORAGE_UNAVAILABLE","来源检索需要已绑定的实例存储")
             try:
@@ -410,7 +491,7 @@ class WorkContext:
                 raise ContextError("RESOURCE_SCOPE_INVALID","来源检索未能验证冻结目录") from error
             for match in source_matches:
                 resource=self._resource(match.get("id"))
-                if not resource.get("sourceBinding") or resource["role"]=="HISTORICAL" or not isinstance(match.get("score"),(int,float)) or match["score"]<=0:
+                if not (resource.get("sourceBinding") or resource.get("bodyRange")) or resource["role"]=="HISTORICAL" or not isinstance(match.get("score"),(int,float)) or match["score"]<=0:
                     raise ContextError("RESOURCE_SCOPE_INVALID","来源检索结果不属于冻结目录")
                 ranked.append((match["score"],resource))
         ranked.sort(key=lambda item: (-item[0], item[1]["id"]))
@@ -424,7 +505,7 @@ class WorkContext:
             if offset>len(ranked):
                 raise ContextError("INVALID_ARGUMENTS","检索游标越界")
         next_offset=offset+limit
-        return {"matches": [{"id": r["id"], "title": r["title"], "kind": r["kind"], "role": r["role"], "sha256": r["sha256"], "characterCount": len(r["text"]), **({"bodyDeferred":True} if r.get("sourceBinding") else {})} for _, r in ranked[offset:next_offset]], "totalMatches": len(ranked), "fullTextRead": False, "nextCursor":prefix+str(next_offset) if next_offset<len(ranked) else None}
+        return {"matches": [{"id": r["id"], "title": r["title"], "kind": r["kind"], "role": r["role"], "sha256": r["sha256"], "characterCount": len(r["text"]), **({"bodyDeferred":True} if r.get("sourceBinding") or r.get("bodyBinding") else {})} for _, r in ranked[offset:next_offset]], "totalMatches": len(ranked), "fullTextRead": False, "nextCursor":prefix+str(next_offset) if next_offset<len(ranked) else None}
 
     def view_image(self, resource_id: Any) -> dict[str, Any]:
         resource = self._resource(resource_id)

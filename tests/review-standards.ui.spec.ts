@@ -33,7 +33,7 @@ test('390px directory and editor are usable without horizontal overflow',async({
  // Use a visible root group regardless of its prior browser toggle state.
  await page.getByRole('button',{name:'故事审阅',exact:true}).click();
  await expect(page.getByRole('heading',{name:'分集剧情设计',exact:true})).toBeVisible();
- await page.screenshot({path:'../../output/qa/review-standards-20260906/configuration-mobile.png',fullPage:true});
+ await page.screenshot({path:test.info().outputPath('configuration-mobile.png'),fullPage:true});
 });
 test('leaving unsaved configuration can be cancelled, while saved-draft preview never targets an unseen draft',async({page})=>{
  await open(page);const panel=page.getByRole('region',{name:'当前审阅标准'});

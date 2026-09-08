@@ -24,11 +24,16 @@ export type AssistantResource = {
   role: 'CURRENT' | 'HISTORICAL' | 'REFERENCE';
   relations: string[];
   media?: { kind: 'image' | 'audio' | 'video'; path: string; sha256: string; mimeType: string };
+  bodyBinding?: import('../../host/instance-runtime/assistant-source.mjs').BodyBinding;
+  relationBinding?: import('../../host/instance-runtime/assistant-source.mjs').BodyBinding;
+  bodySection?: 'TEXT'|'RELATIONS';
+  bodyRange?: {byteStart:number;byteEnd:number};
+  bodyOf?: string;
   sourceBinding?: import('../../host/instance-runtime/assistant-source.mjs').SourceBinding;
 };
 
 export type ResourceCatalog = {
-  schemaVersion: '1.0' | '1.1'; projectId: string; scopeKey: string;
+  schemaVersion: '1.0' | '1.1' | '1.2'; projectId: string; scopeKey: string;
   snapshotId: string; resources: AssistantResource[];
 };
 
@@ -36,7 +41,7 @@ export type ContextPacket = {
   packetId: string;
   packetHash: string;
   body: {
-    schemaVersion: '1.0' | '1.1'; projectId: string; scopeKey: string;
+    schemaVersion: '1.0' | '1.1' | '1.2'; projectId: string; scopeKey: string;
     snapshotId: string; focus: WorkFocus; focusKey: string;
     dependencyHash: string; catalogHash: string;
     initialResourceIds: string[]; draftTargets: ClientDraft[]; missing: string[];

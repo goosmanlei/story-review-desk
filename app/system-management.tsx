@@ -87,6 +87,17 @@ function SystemInitialization({openConfiguration}:{openConfiguration:()=>void}) 
 }
 
 type RuntimeState = { runtime?: Record<string, unknown>; storage?: Record<string, unknown>; backups?: Array<Record<string, unknown>>; capabilities?: Record<string, unknown>; operations?: Array<Record<string, unknown>>; readOnly?: boolean };
+function MaintenanceOperation({operation}:{operation:Record<string,unknown>}) {
+  const action=String(operation.action),status=String(operation.status);
+  const result=operation.result&&typeof operation.result==='object'&&!Array.isArray(operation.result)?operation.result as Record<string,unknown>:{};
+  const titles:Record<string,string>={backup:'完整备份',import:'导入备份',restore:'独立恢复',verify:'实例核验',export:'只读导出'};
+  const statuses:Record<string,string>={QUEUED:'等待执行',RUNNING:'正在执行',SUCCEEDED:'已完成',FAILED:'未完成'};
+  const count=Number.isSafeInteger(result.mediaFiles)&&Number(result.mediaFiles)>=0?`${result.mediaFiles} 份受管媒体`:'受管媒体';
+  const verified=status==='SUCCEEDED';
+  const summary=operation.error?String(operation.error):status==='QUEUED'?'等待本地维护工作器执行。':status==='RUNNING'?'工作器正在处理，完成后会核验结果。':verified&&result.status==='BACKUP_VERIFIED'?`业务历史与${count}已核验，可下载或恢复。`:verified&&result.status==='RESTORED_VERIFIED'?'独立副本已恢复并核验；当前实例未切换。':verified&&result.status==='HOSTED_EXPORT_VERIFIED'?'只读导出已核验，不含原始音频与私有助手记录。':verified&&result.passed===true?'当前实例完整性核验通过。':verified?'任务已完成，具体结果见核验依据。':'执行结果仍需核查，未自动重试。';
+  const fields:Record<string,unknown>={'任务身份':operation.operationId,'开始时间':operation.startedAt||operation.createdAt,'完成时间':operation.completedAt,'结果代码':result.status,'清单 SHA-256':result.manifestSha256,'输出目录':result.output,'当前发布':result.releaseId,'恢复运行期':result.runtimeEpoch};
+  return <article><b>{titles[action]||'维护任务'}</b><span>{statuses[status]||'状态待核查'}</span><p>{summary}</p><details><summary>核验依据</summary><dl>{Object.entries(fields).filter(([,value])=>typeof value==='string'&&value).map(([label,value])=><div key={label}><dt>{label}</dt><dd>{String(value)}</dd></div>)}</dl></details></article>;
+}
 function DataAndRuntime({ technicalAppendix }: { technicalAppendix?: ReactNode }) {
   const { hostedReadOnly } = useRuntimeMode();
   const state = useManagementLoad<RuntimeState>('/api/instance/maintenance', !hostedReadOnly);
@@ -110,7 +121,7 @@ function DataAndRuntime({ technicalAppendix }: { technicalAppendix?: ReactNode }
       <div className="management-actions">{[['verify','核验当前实例'],['backup','创建完整备份'],['export','准备只读导出']].map(([action,label]) => <button key={action} disabled={busy || !state.value || state.value.capabilities?.[action] === false} onClick={() => void run(action)}>{label}</button>)}<button disabled={state.loading} onClick={() => void state.reload()}>刷新状态</button></div>
       <MaintenanceTransfer onQueued={()=>void state.reload()}/>
       {!!state.value?.backups?.length && <section className="management-restore"><h3>下载或恢复已核验备份</h3><div className="management-form-grid"><label>已有备份<select value={backup} onChange={e => setBackup(e.target.value)}><option value="">选择一份完整备份</option>{state.value.backups.map((b,index) => <option key={String(b.id || index)} value={String(b.id || b.backupId || '')}>{String(b.title || b.createdAt || b.id || `备份 ${index+1}`)}</option>)}</select></label><label>新实例目录名<input value={target} onChange={e => setTarget(e.target.value)} placeholder="例如：my-story-copy（与当前实例同目录）" /></label></div><div className="management-actions"><button disabled={busy || !backup || !target.trim() || state.value.capabilities?.restore === false} onClick={() => void run('restore')}>恢复到新目录</button>{state.value.backups.filter(b=>b.id===backup&&b.downloadUrl).map(b=><a key={String(b.id)} href={String(b.downloadUrl)} download>下载完整备份</a>)}</div><p>恢复不替换当前实例。核验独立副本后，再由本地 Codex 显式切换运行绑定；原实例保留用于回滚。</p></section>}
-      <div className="management-operation-list">{state.value?.operations?.map((operation,index) => <article key={String(operation.operationId || index)}><b>{managementLabel(operation.action)}</b><span>{managementLabel(operation.status)}</span><p>{managementLabel(operation.message || operation.error || operation.result || '')}</p></article>)}</div>
+      <div className="management-operation-list" aria-label="维护任务记录">{state.value?.operations?.map((operation,index) => <MaintenanceOperation key={String(operation.operationId || index)} operation={operation}/>)}</div>
     </>}
   </section>{technicalAppendix && <details className="management-card management-appendix"><summary>技术附录与审计依据</summary>{technicalAppendix}</details>}</div>;
 }

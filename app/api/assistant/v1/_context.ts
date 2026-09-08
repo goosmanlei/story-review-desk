@@ -1,7 +1,7 @@
 import {withInstanceMediaRead} from '../../v8/_media-read';
 import {projectGuidanceResources, initialGuidanceIds} from '../../../assistant/project-guidance';
 import {GUIDANCE_ALIASES} from '../../../../host/instance-runtime/guidance-aliases.mjs';
-import {sourceContextResources} from '../../../../host/instance-runtime/assistant-source.mjs';
+import {sourceContextResources,compactResourceCatalog,resolveCatalogResource,prepareInitialSourceReadCosts} from '../../../../host/instance-runtime/assistant-source.mjs';
 import {relationProjection} from '../../../../host/instance-runtime/domain-projection.mjs';
 import type {DomainGraph} from '../../../../host/instance-runtime/domain-model.mjs';
 import {NARRATIVE_OVERVIEW_SECTIONS,runtimeTotal,type NarrativeScene} from '../../../narrative-revision';
@@ -13,7 +13,7 @@ import { instanceProfile } from '../../../instance-profile';
 import type { AssistantResource, ClientDraft, ContextPacket, ResourceCatalog, WorkFocus } from '../../../assistant/types';
 import {
   ASSISTANT_CONTEXT_LIMITS, canonicalContextJson, contextDependencyHash, contextObjectHash,
-  contextResource, contextTextHash, sealContextPacket, selectInitialResources, validateResourceCatalog,
+  contextTextHash, sealContextPacket, selectInitialResources, validateResourceCatalog,
 } from '../../../assistant/context-catalog';
 import { visibleText } from '../../../review-semantics';
 import { CREATOR_PRODUCTION_STAGES } from '../../../creator-production-workflow';
@@ -51,7 +51,8 @@ function assertId(value: unknown, name: string): string {
   return id;
 }
 function resource(id: string, title: string, kind: string, value: unknown, href: string, relations: string[] = [], role: AssistantResource['role'] = 'CURRENT', versionId?: string): AssistantResource {
-  return contextResource({ id, title: visibleText(title), kind, text: typeof value === 'string' ? value : jsonText(value), href, relations: unique(relations), role, ...(versionId ? { versionId } : {}) });
+  const text=typeof value === 'string' ? value : jsonText(value);
+  return { id, title: visibleText(title), kind, text,sha256:contextTextHash(text), href, relations: unique(relations), role, ...(versionId ? { versionId } : {}) };
 }
 function mapProjection(operations: Operations, key: string): Row {
   return row(row(operations.stateProjection)[key]);
@@ -179,7 +180,7 @@ async function assembleCatalog(data: ReviewData, operations: Operations, recipes
       criteriaVersion: plan.content.criteriaVersion,reviewSpec:plan.content.reviewSpec, contentHash: plan.content.contentHash, contextHash: plan.content.contextHash,
       actualBoundaryExcerpts: row(plan.content.presentation)[uid] || null,
       characterNames: plan.content.subjectNames,
-      boundary: '本集只是完整分集方案中的审阅输入，独立意见不形成分集制作放行。相邻集只用于衔接核对。',
+      boundary: '六项输入、正式放行和受控同步分别成立，以本集精确记录为准；相邻集仅用于衔接核对。',
     }, href, [...sceneIds.map((id) => `scene:${id}`), ...strings(dossier.causalChainIds).map((id) => `cause:${id}`)], plan.status === 'CURRENT' ? 'CURRENT' : 'REFERENCE', plan.id));
   }
   for (const scene of scenes) {
@@ -359,7 +360,7 @@ async function assembleCatalog(data: ReviewData, operations: Operations, recipes
     counts: currentWorkCountsFor(filteredUnits), recommendations: queue.recommendations, programs: queue.programs,
     workUnits: filteredUnits.map((unit) => ({ resourceId: `action:${str(unit.workUnitKey)}`, title: unit.title, workState: unit.workState })),
   }, link({ view: 'overview' }), filteredUnits.map((unit) => `action:${str(unit.workUnitKey)}`)));
-  return { catalog: validateResourceCatalog({ schemaVersion: resources.some(resource => resource.sourceBinding) ? '1.1' : '1.0', projectId: PROJECT_ID, scopeKey: SCOPE_KEY, snapshotId: data.snapshotId, resources }), families, versions, requirements, plan };
+  return { catalog: { schemaVersion: resources.some(resource => resource.sourceBinding) ? '1.1' : '1.0', projectId: PROJECT_ID, scopeKey: SCOPE_KEY, snapshotId: data.snapshotId, resources } as ResourceCatalog, families, versions, requirements, plan };
 }
 
 function parseFocus(value: WorkFocus, PROJECT_ID: string): WorkFocus {
@@ -435,7 +436,8 @@ async function buildCurrentContext(rawFocus: WorkFocus, draftTargets: ClientDraf
   if (!allowNewSnapshot && focus.snapshotId !== data.snapshotId) throw new HttpError(409, '当前页面快照已变化，请刷新后重新发送');
   focus.snapshotId = data.snapshotId;
   const assembly = await assembleCatalog(data, operations, recipes, focus);
-  const { catalog, families, versions, requirements } = assembly;
+  const { families, versions, requirements } = assembly;
+  let catalog=assembly.catalog;
   const missing: string[] = [];
   const primaryId = focusResourceId(focus);
   let primary = catalog.resources.find((entry) => entry.id === primaryId);
@@ -558,10 +560,23 @@ async function buildCurrentContext(rawFocus: WorkFocus, draftTargets: ClientDraf
       if (focus.subjectType !== 'WORK_ITEM' || reference !== row(row(JSON.parse(primary.text)).reviewContext).id) throw new HttpError(409, '正式审阅范围不属于当前制作工作项');
       continue;
     }
-    if (!catalog.resources.some((entry) => entry.id === reference)) throw new HttpError(404, '附加依据不属于当前可读取的项目目录');
+    if (!resolveCatalogResource(reference.includes(':body:')?compactResourceCatalog(catalog):catalog,reference)) throw new HttpError(404, '附加依据不属于当前可读取的项目目录');
     requiredIds.push(reference);
   }
+  // Focus and draft validation uses complete original bodies, never index placeholders.
+  const drafts = resolvedDrafts(draftTargets, focus, selectedRequirement, row(JSON.parse(primary.text)));
+  catalog=compactResourceCatalog(catalog);
+  validateResourceCatalog(catalog);
+  // Only exact initial source candidates need body bytes for escaped JSON sizing.
+  // This server validation does not mark any source as read by the assistant.
+  const initialCandidates=unique([...requiredIds,...optionalIds]).slice(0,ASSISTANT_CONTEXT_LIMITS.initialResources);
+  if(initialCandidates.some(id=>resolveCatalogResource(catalog,id)?.sourceBinding)){
+    const repository=await instanceRepository();
+    if(!repository)throw new HttpError(503,'来源分块需要已绑定的实例存储');
+    await repository.readTransaction(tx=>prepareInitialSourceReadCosts(tx,catalog,initialCandidates));
+  }
   const selection = selectInitialResources(catalog, requiredIds, optionalIds);
+  if(selection.selected.some(id=>resolveCatalogResource(catalog,id)?.bodyBinding&&!resolveCatalogResource(catalog,id)?.bodyRange))missing.push('本轮初始资料含正文索引：索引不是完整主对象，正文与延迟关系列表尚未读取；须按分块ID读取并注明实际范围。');
   if (selection.deferred.length) missing.push(`以下关联资料尚未读取，可继续按资源ID查阅：${selection.deferred.join('、')}。`);
   for (const entry of catalog.resources.filter((resource) => selection.selected.includes(resource.id) && resource.media)) {
     if (!entry.media) continue;
@@ -578,7 +593,6 @@ async function buildCurrentContext(rawFocus: WorkFocus, draftTargets: ClientDraf
   if (finalOperations.mutationEtag !== operations.mutationEtag) throw new HttpError(409, '上下文装配期间项目状态发生变化，请重新读取');
   validateResourceCatalog(catalog);
   // Never expose a caller-supplied title, adoption flag or unvalidated field target.
-  const drafts = resolvedDrafts(draftTargets, focus, selectedRequirement, row(JSON.parse(primary.text)));
   primary = catalog.resources.find((entry) => entry.id === primaryId)!;
   const focusKey = contextObjectHash({ projectId: PROJECT_ID, subjectType: focus.subjectType, subjectId: focus.subjectId, versionId: focus.versionId || null, criterionId: focus.criterionId || null, itemId: focus.itemId || null, selection: focus.selection || null, filters: focus.filters || null });
   const packet = sealContextPacket({
@@ -604,7 +618,7 @@ export function contextPreview(packet: ContextPacket, catalog: ResourceCatalog) 
   return {
     packetId: packet.packetId, packetHash: packet.packetHash,
     focusKey: packet.body.focusKey, focus: packet.body.focus,
-    resources: packet.body.initialResourceIds.map((id) => catalog.resources.find((entry) => entry.id === id)!).filter(Boolean).map((entry) => ({
+    resources: packet.body.initialResourceIds.map((id) => resolveCatalogResource(catalog,id)!).filter(Boolean).map((entry) => ({
       id: entry.id, title: entry.title, kind: entry.kind, versionId: entry.versionId,
       sha256: entry.sha256, href: entry.href, role: entry.role, characterCount: entry.text.length,
       ...(entry.media ? { media: { kind: entry.media.kind, sha256: entry.media.sha256, mimeType: entry.media.mimeType } } : {}),
@@ -626,7 +640,7 @@ export async function isAssistantContextCurrent(packet: ContextPacket, evidenceI
   }
   if (frozen && (contextObjectHash(frozen) !== packet.body.catalogHash || frozen.projectId !== PROJECT_ID || frozen.scopeKey !== SCOPE_KEY || frozen.snapshotId !== packet.body.snapshotId)) return false;
   const allIds = unique([...packet.body.initialResourceIds, ...evidenceIds]);
-  if (evidenceIds.some((id) => !frozen?.resources.some((resource) => resource.id === id))) return false;
+  if (evidenceIds.some((id) => !frozen||!resolveCatalogResource(frozen,id))) return false;
   const operations = await operationalSnapshot();
   const key = `${operations.mutationEtag}:${packet.body.focusKey}:${packet.body.dependencyHash}:${contextObjectHash(evidenceIds)}:${packet.body.catalogHash}`;
   const canCache = !['MATERIAL', 'WORK_ITEM'].includes(packet.body.focus.subjectType)
@@ -639,7 +653,7 @@ export async function isAssistantContextCurrent(packet: ContextPacket, evidenceI
       if (current.packet.body.focusKey !== packet.body.focusKey || current.packet.body.dependencyHash !== packet.body.dependencyHash) return false;
       if (frozen && contextDependencyHash(current.catalog, allIds) !== contextDependencyHash(frozen, allIds)) return false;
       for (const id of evidenceIds) {
-        const resource = current.catalog.resources.find((entry) => entry.id === id);
+        const resource = resolveCatalogResource(current.catalog,id);
         const media = resource?.media;
         if (media) {
           const file = await withInstanceMediaRead(()=>hashStableFileAfterResolve(media.path, {versionId: resource?.versionId, sha256: media.sha256}));

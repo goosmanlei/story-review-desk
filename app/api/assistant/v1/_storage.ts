@@ -1,3 +1,6 @@
+import {catalogBodyRecords} from '../../../../host/instance-runtime/assistant-source.mjs';
+import {validateResourceCatalog} from '../../../assistant/context-catalog';
+import { constants } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import path from 'node:path';
@@ -22,6 +25,17 @@ async function readRecord<T>(file: string, limit = MAX_CATALOG_BYTES): Promise<T
   return JSON.parse(value) as T;
 }
 
+async function readBodyFile(file:string) {
+  const handle=await open(file,constants.O_RDONLY|constants.O_NOFOLLOW);
+  try {
+    const info=await handle.stat();
+    if(!info.isFile()||info.size>MAX_CATALOG_BYTES)throw new HttpError(409,'assistant body file is invalid');
+    const bytes=await handle.readFile();
+    if(bytes.byteLength>MAX_CATALOG_BYTES)throw new HttpError(409,'assistant body file exceeds budget');
+    return Buffer.from(bytes);
+  } finally {await handle.close();}
+}
+
 async function immutableWrite(directory: string, filename: string, value: unknown) {
   if (instanceMode()) {
     const bytes = Buffer.from(canonicalJson(value));
@@ -40,7 +54,7 @@ async function immutableWrite(directory: string, filename: string, value: unknow
   await mkdir(directory, { recursive: true, mode: 0o700 });
   if (!(await lstat(directory)).isDirectory() || (await lstat(directory)).isSymbolicLink()) throw new HttpError(409, 'assistant storage directory is invalid');
   const target = path.join(directory, filename);
-  const bytes = canonicalJson(value);
+  const bytes = Buffer.isBuffer(value)?value:Buffer.from(canonicalJson(value));
   if (Buffer.byteLength(bytes) > MAX_CATALOG_BYTES) throw new HttpError(413, 'assistant context exceeds the storage budget');
   const temporary = path.join(directory, `.pending-${randomUUID()}`);
   const handle = await open(temporary, 'wx', 0o600);
@@ -49,7 +63,7 @@ async function immutableWrite(directory: string, filename: string, value: unknow
     try { await link(temporary, target); }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      if (digest(await readRecord(target)) !== digest(value)) throw new HttpError(409, 'immutable assistant evidence conflicts');
+      if (Buffer.isBuffer(value)?!(await readBodyFile(target)).equals(value):digest(await readRecord(target)) !== digest(value)) throw new HttpError(409, 'immutable assistant evidence conflicts');
     }
     const directoryHandle = await open(directory, 'r');
     try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
@@ -60,7 +74,28 @@ export async function persistAssistantContext(packet: ContextPacket, catalog: Re
   const profile = instanceProfile(await reviewData());
   if (packet.packetHash !== digest(packet.body) || packet.packetId !== `ctx_${packet.packetHash}` || packet.body.catalogHash !== digest(catalog)) throw new HttpError(409, 'assistant context hash is invalid');
   if (packet.body.projectId !== profile.projectId || catalog.projectId !== profile.projectId || packet.body.scopeKey !== profile.assistant.scopeKey || catalog.scopeKey !== packet.body.scopeKey) throw new HttpError(403, 'assistant project scope is not allowed');
-  const root = conversationStoreRoot();
+  validateResourceCatalog(catalog);
+  const bodies=catalogBodyRecords(catalog),root=conversationStoreRoot();
+  if(instanceMode()){
+    const repo=(await instanceRepository())!;
+    await repo.writeTransaction(async tx=>{
+      const write=async(key:string,bytes:Uint8Array,mediaType='application/json')=>{
+        const previous=await tx.getAux('assistant-public',key);
+        if(previous){if(previous.deleted||!Buffer.from(previous.bytes).equals(bytes))throw new HttpError(409,'immutable assistant evidence conflicts');return;}
+        await tx.putAux({namespace:'assistant-public',key,bytes,expectedRevisionId:null,mediaType});
+      };
+      const bySha=new Map(bodies.map(item=>[item.sha256,item.bytes]));
+      for(const resource of catalog.resources)for(const binding of [resource.bodyBinding,resource.relationBinding].filter((item):item is NonNullable<typeof item>=>Boolean(item))){
+        const key='resource-bodies/'+binding.sha256+'.txt',bytes=bySha.get(binding.sha256)||(await tx.getAux('assistant-public',key))?.bytes;
+        if(!bytes||bytes.byteLength!==binding.byteSize||createHash('sha256').update(bytes).digest('hex')!==binding.sha256)throw new HttpError(409,'frozen resource body unavailable');
+        await write(key,bytes,'text/plain; charset=utf-8');
+      }
+      await write('catalogs/'+packet.body.catalogHash+'.json',Buffer.from(canonicalJson(catalog)));
+      await write('contexts/'+packet.packetId+'.json',Buffer.from(canonicalJson(packet)));
+    });
+    return;
+  }
+  for(const body of bodies)await immutableWrite(path.join(root,'resource-bodies'),body.sha256+'.txt',Buffer.from(body.bytes));
   await immutableWrite(path.join(root, 'catalogs'), `${packet.body.catalogHash}.json`, catalog);
   await immutableWrite(path.join(root, 'contexts'), `${packet.packetId}.json`, packet);
 }

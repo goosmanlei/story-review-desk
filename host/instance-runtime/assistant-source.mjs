@@ -61,7 +61,7 @@ export async function readFrozenSourceCatalog(tx,catalogHash) {
   const saved=await tx.getAux('assistant-public','catalogs/'+catalogHash+'.json');
   ensure(saved && !saved.deleted && hash(saved.bytes)===saved.sha256,'CONTEXT_CATALOG_UNAVAILABLE');
   const catalog=JSON.parse(Buffer.from(saved.bytes).toString('utf8'));
-  ensure(catalog.schemaVersion==='1.1' && hash(canonical(catalog))===catalogHash,'CONTEXT_CATALOG_HASH_INVALID');
+  ensure(['1.1','1.2'].includes(catalog.schemaVersion) && hash(canonical(catalog))===catalogHash,'CONTEXT_CATALOG_HASH_INVALID');
   const state=await tx.getMetadata();
   const profileRecord=await tx.getRecord('settings','instance-profile',state.profileRevisionId);
   ensure(profileRecord && hash(profileRecord.bytes)===profileRecord.sha256,'CONTEXT_SCOPE_INVALID');
@@ -87,9 +87,11 @@ async function exactSourceBytes(tx,binding,cache) {
 
 export async function readFrozenSourceChunk(tx,catalogHash,resourceId) {
   const catalog=await readFrozenSourceCatalog(tx,catalogHash);
-  const matches=catalog.resources.filter(resource=>resource.id===resourceId);
-  ensure(matches.length===1 && matches[0].sourceBinding,'CONTEXT_SOURCE_RESOURCE_UNAVAILABLE');
-  const resource=matches[0], bytes=await exactSourceBytes(tx,resource.sourceBinding,new Map());
+  const resource=resolveCatalogResource(catalog,resourceId);
+  ensure(resource,'CONTEXT_SOURCE_RESOURCE_UNAVAILABLE');
+  if(resource.bodyBinding){ensure(resource.bodyRange,'CONTEXT_BODY_CHUNK_REQUIRED');return derivedChunk(await exactDerivedBytes(tx,resource),resource);}
+  ensure(resource.sourceBinding,'CONTEXT_SOURCE_RESOURCE_UNAVAILABLE');
+  const bytes=await exactSourceBytes(tx,resource.sourceBinding,new Map());
   return {resourceId,...sliceVerifiedSourceChunk(bytes,resource.sourceBinding)};
 }
 
@@ -106,7 +108,21 @@ export async function searchFrozenSourceChunks(tx,catalogHash,query) {
   ensure(typeof query==='string' && query.trim() && query.length<=240,'CONTEXT_SOURCE_QUERY_INVALID');
   const catalog=await readFrozenSourceCatalog(tx,catalogHash), cache=new Map(), matches=[];
   for(const resource of catalog.resources) {
-    if(!resource.sourceBinding || resource.role==='HISTORICAL')continue;
+    if(resource.role==='HISTORICAL')continue;
+    if(resource.bodyBinding){
+      for(const binding of [resource.bodyBinding,resource.relationBinding].filter(Boolean)){
+      const indexed={...resource,bodyBinding:binding};
+      const bytes=await exactDerivedBytes(tx,indexed);
+      for(let i=0;i<binding.chunkCount;i++){
+        const part=resolveCatalogResource(catalog,bodyChunkId(indexed,i)),chunk=derivedChunk(bytes,part);
+        let end=Math.min(bytes.length,chunk.byteEnd+1024);while(end<bytes.length&&(bytes[end]&0xc0)===0x80)end++;
+        const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes.subarray(chunk.byteStart,end));
+        const score=sourceSearchScore(part,text,query.trim().toLocaleLowerCase());if(score)matches.push({id:part.id,score});
+      }
+      }
+      continue;
+    }
+    if(!resource.sourceBinding)continue;
     const bytes=await exactSourceBytes(tx,resource.sourceBinding,cache);
     const chunk=sliceVerifiedSourceChunk(bytes,resource.sourceBinding);
     // Search includes bounded neighbouring text, so a phrase crossing a page boundary is discoverable.
@@ -117,4 +133,115 @@ export async function searchFrozenSourceChunks(tx,catalogHash,query) {
     if(score)matches.push({id:resource.id,score});
   }
   return {matches,fullTextRead:false};
+}
+
+/** Derived business bodies are frozen separately; catalog cardinality never grows with chunks. */
+const derivedBodies = new WeakMap();
+const initialSourceCosts = new WeakMap();
+export const DERIVED_BODY_MAX_BYTES = 32 * 1024 * 1024;
+export function bodyChunkId(resource,index) {
+  return resource.id+':body:'+resource.bodyBinding.sha256+':'+String(index).padStart(6,'0');
+}
+export function validateBodyBinding(binding) {
+  const keys=['schemaVersion','sha256','byteSize','characterCount','chunkCount'];
+  ensure(binding&&typeof binding==='object'&&Object.keys(binding).sort().join(',')===keys.sort().join(','),'CONTEXT_BODY_BINDING_INVALID');
+  ensure(binding.schemaVersion==='1.0'&&/^[a-f0-9]{64}$/.test(binding.sha256),'CONTEXT_BODY_BINDING_INVALID');
+  ensure(['byteSize','characterCount','chunkCount'].every(k=>Number.isSafeInteger(binding[k])&&binding[k]>=0)
+    &&binding.byteSize<=DERIVED_BODY_MAX_BYTES&&binding.characterCount<=binding.byteSize
+    &&binding.chunkCount===Math.max(1,Math.ceil(binding.byteSize/SOURCE_CHUNK_BYTES)),'CONTEXT_BODY_BINDING_INVALID');
+}
+export function compactResourceCatalog(catalog) {
+  const bodies=new Map(),resources=catalog.resources.map(resource=>{
+    if(resource.bodyBinding){validateBodyBinding(resource.bodyBinding);return resource;}
+    if(resource.sourceBinding||resource.kind==='PROJECT_GUIDANCE'||resource.text.length<=2048&&resource.relations.length<=128)return resource;
+    const bytes=Buffer.from(resource.text,'utf8'),sha256=hash(bytes);
+    ensure(bytes.length<=DERIVED_BODY_MAX_BYTES,'CONTEXT_BODY_STORAGE_CAPACITY');
+    ensure(new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes)===resource.text,'CONTEXT_BODY_UTF8_INVALID');
+    const bodyBinding={schemaVersion:'1.0',sha256,byteSize:bytes.length,characterCount:[...resource.text].length,chunkCount:Math.max(1,Math.ceil(bytes.length/SOURCE_CHUNK_BYTES))};
+    let relationBinding;
+    if(resource.relations.length>128){
+      ensure(resource.relations.length<=10000&&new Set(resource.relations).size===resource.relations.length,'CONTEXT_RELATION_CAPACITY');
+      const relationText=JSON.stringify(resource.relations),relationBytes=Buffer.from(relationText),relationSha=hash(relationBytes);
+      relationBinding={schemaVersion:'1.0',sha256:relationSha,byteSize:relationBytes.length,characterCount:[...relationText].length,chunkCount:Math.max(1,Math.ceil(relationBytes.length/SOURCE_CHUNK_BYTES))};
+      bodies.set(relationSha,relationBytes);
+    }
+    const value={...resource,bodyBinding,...(relationBinding?{relations:[],relationBinding}:{})};
+    const text=JSON.stringify({resourceId:resource.id,bodyBinding,...(relationBinding?{relationBinding,relationCount:resource.relations.length,firstRelationChunkId:bodyChunkId({...value,bodyBinding:relationBinding},0)}:{}),firstChunkId:bodyChunkId(value,0),lastChunkId:bodyChunkId(value,bodyBinding.chunkCount-1),
+      boundary:'仅正文索引，尚未读取正文。read_resources按分块ID读取精确UTF-8范围；search_project检索全部正文。索引不证明已读任何正文块。'});
+    bodies.set(sha256,bytes);return {...value,text,sha256:hash(text)};
+  });
+  const result={...catalog,schemaVersion:'1.2',resources};
+  derivedBodies.set(result,bodies);return result;
+}
+export function catalogBodyRecords(catalog) {
+  return [...(derivedBodies.get(catalog)||new Map())].map(([sha256,bytes])=>({sha256,bytes}));
+}
+export function resolveCatalogResource(catalog,resourceId) {
+  const direct=catalog.resources.filter(r=>r.id===resourceId);
+  if(direct.length)return direct.length===1?direct[0]:null;
+  if(catalog.schemaVersion!=='1.2'||typeof resourceId!=='string')return null;
+  const marker=resourceId.lastIndexOf(':body:');if(marker<0)return null;
+  const baseId=resourceId.slice(0,marker),parts=resourceId.slice(marker+6).split(':');
+  const bases=catalog.resources.filter(r=>r.id===baseId&&(r.bodyBinding?.sha256===parts[0]||r.relationBinding?.sha256===parts[0]));if(bases.length!==1||parts.length!==2||!/^\d{6}$/.test(parts[1]))return null;
+  const original=bases[0],section=original.bodyBinding?.sha256===parts[0]?'TEXT':'RELATIONS';
+  const base={...original,bodyBinding:section==='TEXT'?original.bodyBinding:original.relationBinding};validateBodyBinding(base.bodyBinding);const index=Number(parts[1]);
+  if(index>=base.bodyBinding.chunkCount||bodyChunkId(base,index)!==resourceId)return null;
+  const bodyRange={byteStart:index*SOURCE_CHUNK_BYTES,byteEnd:Math.min((index+1)*SOURCE_CHUNK_BYTES,base.bodyBinding.byteSize)};
+  const text=JSON.stringify({resourceId:base.id,bodySha256:base.bodyBinding.sha256,...bodyRange,byteSize:base.bodyBinding.byteSize,part:index+1,parts:base.bodyBinding.chunkCount,
+    previousResourceId:index?bodyChunkId(base,index-1):null,nextResourceId:index+1<base.bodyBinding.chunkCount?bodyChunkId(base,index+1):null,
+    boundary:'本条元数据未包含正文；实际读取返回sourceText、sourceTextSha256和精确字节范围，不代表其他块已读。'});
+  const {media,relationBinding,...metadata}=base;
+  return {...metadata,relations:[],id:resourceId,title:base.title+' · 正文第'+(index+1)+'/'+base.bodyBinding.chunkCount+'部分',text,sha256:hash(text),bodyRange,bodyOf:base.id,bodySection:section};
+}
+async function exactDerivedBytes(tx,resource) {
+  validateBodyBinding(resource.bodyBinding);
+  const record=await tx.getAux('assistant-public','resource-bodies/'+resource.bodyBinding.sha256+'.txt');
+  ensure(record&&!record.deleted&&record.sha256===resource.bodyBinding.sha256,'CONTEXT_BODY_UNAVAILABLE');
+  const bytes=Buffer.from(record.bytes);
+  ensure(bytes.length===resource.bodyBinding.byteSize&&hash(bytes)===resource.bodyBinding.sha256,'CONTEXT_BODY_BYTES_INVALID');
+  const text=new TextDecoder('utf-8',{fatal:true,ignoreBOM:true}).decode(bytes);
+  ensure([...text].length===resource.bodyBinding.characterCount,'CONTEXT_BODY_BYTES_INVALID');return bytes;
+}
+function derivedChunk(bytes,resource) {
+  const chunk=sliceVerifiedSourceChunk(bytes,{...resource.bodyRange,sha256:resource.bodyBinding.sha256,revisionId:resource.versionId||resource.bodyBinding.sha256});
+  return {resourceId:resource.id,bodyOf:resource.bodyOf,bodySection:resource.bodySection,bodySha256:resource.bodyBinding.sha256,...chunk,wholeBodyRead:chunk.byteStart===0&&chunk.byteEnd===bytes.length};
+}
+
+/** Server-side sizing is not a model read receipt. Only initial source candidates are verified here. */
+export async function prepareInitialSourceReadCosts(tx,catalog,resourceIds) {
+  const costs=new Map(),cache=new Map();
+  for(const id of [...new Set(resourceIds)].slice(0,48)){
+    const resource=resolveCatalogResource(catalog,id);if(!resource?.sourceBinding)continue;
+    const bytes=await exactSourceBytes(tx,resource.sourceBinding,cache);
+    const result={resourceId:id,...sliceVerifiedSourceChunk(bytes,resource.sourceBinding)};
+    costs.set(id,{bindingHash:hash(canonical(resource.sourceBinding)),characters:canonical(result).length});
+  }
+  initialSourceCosts.set(catalog,costs);
+}
+
+/** Same envelope as host read_resources: canonical resource + source result + 256.
+ * JS UTF-16 length is >= Python Unicode length. The 256 allowance covers observation,
+ * index/read state and array punctuation; it never claims that the body was read.
+ */
+export function catalogResourceReadCharacters(catalog,resource) {
+  let sourceCharacters=2; // The host returns {} when there is no deferred text read.
+  if(resource.bodyRange){
+    const bytes=derivedBodies.get(catalog)?.get(resource.bodyBinding.sha256);
+    if(bytes)sourceCharacters=canonical(derivedChunk(bytes,resource)).length;
+    else sourceCharacters=unknownSourceReadCharacters(resource);
+  } else if(resource.sourceBinding){
+    const cost=initialSourceCosts.get(catalog)?.get(resource.id);
+    sourceCharacters=cost?.bindingHash===hash(canonical(resource.sourceBinding))?cost.characters:unknownSourceReadCharacters(resource);
+  }
+  return canonical(resource).length+sourceCharacters+256;
+}
+function unknownSourceReadCharacters(resource) {
+  const binding=resource.sourceBinding||resource.bodyBinding,range=resource.sourceBinding||resource.bodyRange;
+  const byteEnd=Math.min(binding.byteSize,range.byteEnd+3),byteStart=Math.min(binding.byteSize,range.byteStart+3);
+  const envelope={resourceId:resource.id,sourceText:'',sourceTextSha256:'0'.repeat(64),sourceSha256:binding.sha256,
+    revisionId:resource.sourceBinding?binding.revisionId:resource.versionId||binding.sha256,byteStart,byteEnd,byteSize:binding.byteSize,
+    ...(resource.bodyRange?{bodyOf:resource.bodyOf,bodySection:resource.bodySection,bodySha256:binding.sha256,wholeBodyRead:false}:{})};
+  // Only deserialized/unprepared catalogs use this safe bound. Live initial candidates
+  // use exact JSON escaped costs, so ordinary 12k chunks remain attachable.
+  return canonical(envelope).length+6*(byteEnd-range.byteStart);
 }

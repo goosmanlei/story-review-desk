@@ -24,7 +24,7 @@ export function workflowOverview(model,preparation,context={}){
  });
  const nodes=[
  {id:'SOURCES',label:'来源资料',group:'故事创作',href:'?view=story&storyMode=source',detail:'登记来源、阅读原文和核对资料'},
- {id:'STORY',label:'故事与剧本审阅',group:'故事创作',href:'?view=story&storyMode=logic',detail:currentPlan?'已发布分集可阅读；正式采用与逐场制作状态见当前工作投影':preparation?.candidate?'完整分集候选待审阅与受控采用':'先建立完整故事与分集候选'},
+ {id:'STORY',label:'故事与剧本审阅',group:'故事创作',href:'?view=story&storyMode=logic',detail:context.queue?.storyProgress?.headline||(currentPlan?'已发布分集可阅读；正式采用与逐场制作状态见当前工作投影':preparation?.candidate?'完整分集候选待审阅与受控采用':'先建立完整故事与分集候选')},
  {id:'SETTINGS',label:'主体与空间设定',group:'故事设定',href:'?view=settings',detail:'分类查看主体与空间；关系和永久身份共用'},
  {id:'MATERIALS',label:'实体状态与素材',group:'素材管理',href:'?view=materials',detail:'已定义 → 待生成 → 待审阅 → 已通过；精确版本用于下游'},
  ...productionNodes];

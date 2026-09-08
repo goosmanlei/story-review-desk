@@ -20,12 +20,56 @@ export const WORKSPACE_BOUNDARIES = Object.freeze([
  'Web 只提交受控请求；模型调用、媒体操作与正式源同步由所属主机工作器执行。结果未知先核查，不自动重试。',
  '只读镜像仅展示已发布状态，不接受正式审阅、候选登记、生产执行或源同步写入。',
 ]);
+
+/** Inputs are the canonical narrative resolver result and the operationally
+ * validated episode release projection. Raw candidate/review events are not
+ * sufficient evidence of either currentness or a completed source sync.
+ * @param {any} resolvedPlan
+ * @param {any} releasesByUid
+ * @param {string|null} [resolutionError]
+ */
+export function projectStoryProgress(resolvedPlan,releasesByUid,resolutionError=null){
+ const unknown={schemaVersion:'1.0',state:resolutionError?'UNAVAILABLE':'UNKNOWN',sourceRole:null,revisionId:null,contentHash:null,
+  episodeCount:null,sceneCount:null,releasedEpisodeCount:null,releasedSceneCount:null,releaseIds:[],formalDenominatorState:'UNKNOWN',
+  headline:resolutionError?'当前分集候选不可读取；不回退历史库存':null,nextAction:null};
+ if(!resolvedPlan||!['CANDIDATE','CURRENT','PROPOSAL'].includes(resolvedPlan.sourceRole))return unknown;
+ const episodes=rows(resolvedPlan.content?.episodes),uids=episodes.map(episode=>episode.episodeUid),sceneIds=episodes.flatMap(episode=>rows(episode.sceneIds));
+ const validId=value=>typeof value==='string'&&value.length>0;
+ if(!validId(resolvedPlan.revisionId)||!episodes.length||!uids.every(validId)||new Set(uids).size!==uids.length
+  ||!sceneIds.length||!sceneIds.every(validId)||new Set(sceneIds).size!==sceneIds.length
+  ||episodes.some(episode=>!Array.isArray(episode.sceneIds)||!episode.sceneIds.length))return {...unknown,state:'UNAVAILABLE'};
+ const byUid=new Map(episodes.map(episode=>[episode.episodeUid,episode]));
+ const releaseProjectionAvailable=releasesByUid&&typeof releasesByUid==='object'&&!Array.isArray(releasesByUid);
+ const released=Object.entries(releaseProjectionAvailable?releasesByUid:{}).filter(([uid,release])=>{
+  const episode=byUid.get(uid),actual=rows(release?.reviewInput?.scenes).map(scene=>scene.id);
+  return episode&&release?.episodeUid===uid&&release.state==='READY'&&release.canFlowDownstream===true
+   &&release.scopeRole==='CURRENT'&&release.sourceSyncState==='SOURCE_CURRENT'
+   &&validId(release.id)&&validId(release.reviewEventId)&&validId(release.sourceOperationId)
+   &&actual.length===episode.sceneIds.length&&actual.every((id,index)=>id===episode.sceneIds[index]);
+ }).map(([,release])=>release);
+ const releasedEpisodeCount=releaseProjectionAvailable?released.length:null;
+ const releasedSceneCount=releaseProjectionAvailable?new Set(released.flatMap(release=>release.reviewInput.scenes.map(scene=>scene.id))).size:null;
+ const sourceLabel=resolvedPlan.sourceRole==='CANDIDATE'?'当前候选':resolvedPlan.sourceRole==='PROPOSAL'?'当前方案提案':'当前已发布方案';
+ const releaseLabel=releasedEpisodeCount===null?'逐集发布状态待核':`${releasedEpisodeCount} 集已独立正式通过并完成源同步`;
+ return {...unknown,state:'AVAILABLE',sourceRole:resolvedPlan.sourceRole,revisionId:resolvedPlan.revisionId,contentHash:resolvedPlan.contentHash||null,
+  episodeCount:episodes.length,sceneCount:sceneIds.length,releasedEpisodeCount,releasedSceneCount,releaseIds:released.map(release=>release.id),
+  headline:`${sourceLabel} ${episodes.length} 集 / ${sceneIds.length} 场；${releaseLabel}。候选规模不等于全剧采用或正式制作分母。`,
+  nextAction:releasedEpisodeCount===null?'先核对逐集发布证据，再继续正文审阅。':releasedEpisodeCount<episodes.length
+   ?'继续未放行集的正文阅读、六项判断与本集确认；已同步集可独立准备镜头拆解，无需等待全剧。'
+   :'逐集放行不代替全剧方案采用或 PROJECT 出口核验；按本集精确输入继续制作准备。'};
+}
+
 export function projectWorkspaceModules({model={},queue=null,operations=null,metadata=null,readOnly=false,preparation=null,snapshotId=null}={}){
- const domains=rows(queue?.workspaceSummary?.domains),graph=model.domainGraph||{};
+ const domains=rows(queue?.workspaceSummary?.domains),graph=model.domainGraph||{},story=queue?.storyProgress;
+ const storyLabel=story?.sourceRole==='CURRENT'?'当前已发布方案':story?.sourceRole==='PROPOSAL'?'当前方案提案':'当前候选';
  const facts={
   STORY_CREATION:[
-   count('registered-episodes','已登记集',unique(model.episodes),'登记对象数，不等于正式通过集数。'),
-   count('registered-scenes','已登记场',unique(model.scenes),'登记对象数，不以旧场号重映射当前候选。'),
+   count('current-episodes',storyLabel+'集数',story?.episodeCount,'来自正文页同一精确方案解析；候选规模不是正式采用分母。'),
+   count('current-scenes',storyLabel+'场数',story?.sceneCount,'按当前方案永久集／场身份读取，不由旧快照库存推断。'),
+   count('released-episodes','独立正式通过且已同步集',story?.releasedEpisodeCount,'来自本集正式 Review 与受控源同步的有效投影；不是六项输入数或全剧采用。'),
+   count('released-episode-scenes','已同步集覆盖场数',story?.releasedSceneCount,'本集正式确认覆盖的正文场数，不制造独立场 ReviewEvent 或正式镜头分母。'),
+   count('registered-episodes','历史／基线库存集',unique(model.episodes),'旧快照对象库存，仅供历史审计，不代表当前候选或正式通过范围。'),
+   count('registered-scenes','历史／基线库存场',unique(model.scenes),'旧快照对象库存；不以显示场号映射当前候选。'),
    count('episode-inputs','分集审阅输入事件',operations?.counts?.episodePlanSubmissions,'含历史输入；不是当前已采用集数。'),
   ],
   STORY_SETTINGS:[
@@ -48,7 +92,7 @@ export function projectWorkspaceModules({model={},queue=null,operations=null,met
   return {...module,facts:facts[module.id],status:domain?.status||(module.id==='STORY_SETTINGS'?(model.domainGraphRef?'REGISTERED':'WAITING'):'UNKNOWN'),
    headline:domain?.headline||(module.id==='STORY_SETTINGS'?'主体与空间的查阅、补全在本模块独立进行。':'尚无可判定的当前工作投影。'),
    nextAction:domain?.nextUnlockText||null,work:domain?.counts||null,
-   stages:rows(domain?.stages),revisionId:module.id==='STORY_SETTINGS'?model.domainGraphRef?.revisionId||null:null};
+   stages:rows(domain?.stages),revisionId:module.id==='STORY_SETTINGS'?model.domainGraphRef?.revisionId||null:module.id==='STORY_CREATION'?story?.revisionId||null:null};
  });
  const actualSnapshot=snapshotId||queue?.snapshotId||metadata?.snapshotId||null;
  const freshness={schemaVersion:'1.0',projectionVersion:'WORKSPACE_PROJECTION_1',

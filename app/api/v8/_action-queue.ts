@@ -1,3 +1,4 @@
+import {projectStoryProgress} from '../../../host/instance-runtime/workspace-projection.mjs';
 import { executionRuntimeReason, executionRequestsForRuntimeQueue } from '../../../host/instance-runtime/execution-epoch.mjs';
 import { executionEligibilityReasons, configuredProductionProgress } from '../../gate-evaluation';
 import { CREATOR_PRODUCTION_STAGES, creatorProductionGateDefinition, creatorProductionStageForGate } from '../../creator-production-workflow';
@@ -885,6 +886,7 @@ export async function buildActionQueue() {
       episodePlanResolutionError = error instanceof Error ? error.message : '当前分集方案不可读取';
     }
   }
+  const storyProgress=projectStoryProgress(resolvedEpisodePlan,operations.stateProjection.episodeNarrativeReleasesByUid,episodePlanResolutionError);
   const narrativeCandidate = resolvedEpisodePlan?.sourceRole === 'CANDIDATE' ? resolvedEpisodePlan.content.narrativeRevision : undefined;
   const pendingSceneCount = narrativeCandidate?.scenes.length || canonicalSceneOrder.length;
   if (narrativeCandidate) storyTargets = []; // Old scene tasks cannot masquerade as new candidate scenes.
@@ -2191,7 +2193,7 @@ export async function buildActionQueue() {
         : !episodePlanReady && !episodePlanBasisAvailable
         ? hasCurrentStoryScenes ? '等待补齐当前场正文与分集方案的可核验依据' : '尚未建立分集方案，先整理来源资料与当前场正文'
         : episodePlanProgramItems.length
-        ? '整体审阅当前全剧分集方案；通过后等待受控源同步'
+        ? storyProgress.headline || '按集阅读和提交判断；本集明确确认并受控同步后可独立下传'
         : '当前全剧分集方案已采用且权威源同步成功',
     },
     {
@@ -2335,13 +2337,17 @@ export async function buildActionQueue() {
         label: '故事 → 剧本',
         status: activeStoryProgram ? activeStoryProgram.status === 'BLOCKED' ? 'BLOCKED' : 'ACTIVE' : !episodePlanReady || !hasCurrentStoryScenes ? 'WAITING' : 'COMPLETE',
         currentGate: activeStoryProgram?.label || (!hasCurrentStoryScenes ? '尚未建立当前场正文' : !episodePlanReady ? '等待分集方案依据' : '故事与剧本主线已完成'),
-        headline: activeStoryProgram?.summary || (!episodePlanReady || !hasCurrentStoryScenes ? '先整理来源资料与当前场正文，再形成可核验的分集方案' : '当前故事与剧本主线均已形成正式采用事实'),
-        nextUnlockText: activeStoryProgram
+        headline: storyProgress.headline || activeStoryProgram?.summary || (!episodePlanReady || !hasCurrentStoryScenes ? '先整理来源资料与当前场正文，再形成可核验的分集方案' : '当前故事与剧本主线均已形成正式采用事实'),
+        nextUnlockText: storyProgress.nextAction || (activeStoryProgram
           ? '完成当前程序后，按场逐步解锁镜头意图与正式镜头计划'
-          : !episodePlanReady || !hasCurrentStoryScenes ? '资料和当前正文齐备后，再建立正式创作与审阅工作' : '等待后续剧本变更或新的创作范围',
+          : !episodePlanReady || !hasCurrentStoryScenes ? '资料和当前正文齐备后，再建立正式创作与审阅工作' : '等待后续剧本变更或新的创作范围'),
         navigationIntent: { href: href('/', { view: 'story', storyMode: !hasCurrentStoryScenes ? 'source' : 'logic' }), label: '进入故事创作' },
         counts: storyCounts,
         metrics: [
+          ...(storyProgress.state==='AVAILABLE'?[
+            {id:'CURRENT_EPISODES',label:storyProgress.sourceRole==='CANDIDATE'?'当前候选集数':'当前方案集数',value:storyProgress.episodeCount,denominator:null,denominatorState:'UNKNOWN' as const,unit:'集'},
+            {id:'EPISODES_SOURCE_CURRENT',label:'独立正式通过且已同步',value:storyProgress.releasedEpisodeCount,denominator:null,denominatorState:'UNKNOWN' as const,unit:'集'},
+          ]:[]),
           { id: 'EPISODE_PLAN', label: '正式分集方案', value: episodePlanReady ? 1 : 0, denominator: episodePlanReady || episodePlanBasisAvailable || episodePlanResolutionError ? 1 : null, denominatorState: episodePlanReady || episodePlanBasisAvailable || episodePlanResolutionError ? 'KNOWN' : 'UNKNOWN', unit: '套' },
           { id: 'SCRIPT_SCENES', label: narrativeCandidate ? '待审稿已拆场次' : '已确认场正文', value: narrativeCandidate ? pendingSceneCount : storyTargets.length - openStorySceneIds.length, denominator: narrativeCandidate ? null : storyTargets.length || null, denominatorState: narrativeCandidate ? 'UNKNOWN' : storyTargets.length ? 'KNOWN' : 'UNKNOWN', unit: '场' },
         ],
@@ -2475,6 +2481,7 @@ export async function buildActionQueue() {
         nextActionKey: program.nextActionKey,
       })),
     } : null,
+    storyProgress,
     workspaceSummary,
     count: workUnits.length,
     rowCount: result.length,
