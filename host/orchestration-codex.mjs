@@ -127,7 +127,7 @@ export class OrchestrationCodex extends EventEmitter {
   async handleServerRequest(message) {
     const { id, method, params = {} } = message;
     const active = this.active;
-    const bound = active && params.threadId === active.threadId && nonempty(params.turnId)
+    const bound = active && !active.settled && params.threadId === active.threadId && nonempty(params.turnId)
       && (!active.turnId || params.turnId === active.turnId);
     const reply = payload => { try { this.send({ id, result: payload }); } catch {} };
     if (method === 'item/tool/call') {

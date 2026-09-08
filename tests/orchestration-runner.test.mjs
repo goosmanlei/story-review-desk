@@ -79,7 +79,7 @@ function mockCodex({ gate, failure, closeResult = true } = {}) {
 }
 async function runnerFor(f, t, mock = mockCodex()) {
   const runner = new OrchestrationRunner({ ...f, codexFactory: mock.factory,
-    workspaceFactory: async () => ({ cwd: f.projectRoot, worktree: null }), instructions: async () => 'Fixture role instructions' });
+    workspaceFactory: async () => ({ cwd: f.projectRoot, worktree: null }), instructions: async () => 'Fixture role instructions', gitToolsFactory: () => ({ specs: [], handlers: {} }) });
   await runner.initialize();
   t.after(async () => { runner.shutdown(); await runner.schedulePromise; await runner.scheduleAdapter?.close(); await runner.lock.release(); });
   return { runner, mock };

@@ -71,6 +71,21 @@ test('unregistered tool or a request from another thread cannot invoke a role ca
   await mock.adapter.close();
 });
 
+test('a settled turn cannot issue another host mutation while its result is draining', async () => {
+  const mock = server((message, { send }) => {
+    if (message.method !== 'turn/start') return;
+    send({ id: message.id, result: { turn: { id: 'turn-one' } } });
+    complete(send, '{}');
+    send({ id: 'late', method: 'item/tool/call', params: { threadId: 'thread-one', turnId: 'turn-one', callId: 'late-write', tool: 'write_candidate', arguments: {} } });
+    return true;
+  });
+  await mock.adapter.start(); await mock.adapter.threadStart({ tools: [{ type: 'function', name: 'write_candidate', description: 'Write', inputSchema: {} }] });
+  let invoked = 0;
+  await mock.adapter.runTurn('thread-one', 'Test', { handlers: { write_candidate: () => invoked++ } });
+  assert.equal(invoked, 0); assert.equal(mock.results.find(row => row.id === 'late').result.success, false);
+  await mock.adapter.close();
+});
+
 test('quota notification blocks immediately and interrupts server retry without starting another call', async () => {
   const mock = server((message, { send }) => {
     if (message.method !== 'turn/start') return;
