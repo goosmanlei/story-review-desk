@@ -17,6 +17,8 @@
 
 本地 Codex 使用既有登录与项目绑定，讨论和受控执行分开；其他 AI API 在系统配置中填写 API_KEY 的环境变量名，密钥值只放宿主环境。未配置密钥不妨碍非模型功能。
 
+可选的 [多 Agent 协作 Skill](.agents/skills/story-review-orchestrator/SKILL.md) 随软件包维护并安装到故事项目；明确启用后，由当前会话桥接后台调度、四类并行 Worker 与独立质检。安装不会自动启动任务。开发验证使用 `npm run test:orchestration`；真实隔离 PostgreSQL 验证增加 `REVIEW_TEST_POSTGRES=1`。
+
 ## 数据与交付
 
 数据库是业务权威。复制项目目录不等于数据库备份；完整备份、便携导入与独立恢复见 [系统管理](docs/system-management.md)。恢复不覆盖原实例，不恢复凭证或活跃执行资格。
