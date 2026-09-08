@@ -10,7 +10,7 @@ import {readFileSync} from 'node:fs';
 import {defaultConfiguration} from '../host/instance-runtime/configuration-model.mjs';
 import {workspaceProjection} from '../host/instance-runtime/domain-workspaces.mjs';
 import type {DomainGraph} from '../host/instance-runtime/domain-model.mjs';
-import type {MaterialRequirement} from '../app/production-workbench';
+import type {ExpectedOutput,MaterialRequirement} from '../app/production-workbench';
 
 const base=JSON.parse(readFileSync(new URL('./fixtures/generic-adopted-scene.json',import.meta.url),'utf8'));
 const ids={a:'material-person-a',b:'material-person-b',place:'material-place',day:'material-state-day',night:'material-state-night',bday:'material-state-b',empty:'material-state-empty',ep1:'material-episode-uid-1',ep2:'material-episode-uid-2',s1:'material-scene-uid-1',s2:'material-scene-uid-2'};
@@ -49,7 +49,7 @@ function requirement(id:string,title:string,mediaKind:string,category:string,ind
  // Every fixture need carries a stable permanent identity.
  return {id,title,category,mediaKind,requirementClass:'REQUIRED',reuseScope:'PROJECT',productionLane:'MATERIAL_PREP',workflowStepId:null,assetFamilyRefs:[],plannedAssetFamilyId:null,materialWorkItemRef:'work-'+id,consumerWorkItemRefs:[],episodeIds:[],episodeUids:[],sceneIds:[],shotIds:[],currentShotIds:[],structureCardRefs:[],storyBasis:{sourceRef:'fixture-exact-source',factBoundary:'合成测试资料，不是故事事实或媒体观察',whyNeeded:'辨认主体并保持连续性',onScreenRequirement:title},storyApplicability:{kind:'PROJECT_LEVEL',reason:'跨场复用；用途另行精确绑定'},acceptanceProfile:'FIXTURE',acceptanceCriteria:['身份与状态不混淆','未知不得冒充事实'],requirementHash:hash(index),coverageContextHash:hash(index),coverageSatisfied:index===4,bindingStale:false,coverageReasons:index===4?[]:['NO_CURRENT_OUTPUT'],coveredByFamilyRefs:[],coveredByVersionRefs:[],materialWorkItemLifecycleState:'WAITING_UPSTREAM'};
 }
-async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=false,wideScopes=false,flatProof=false,stateAuditProjection='both',trialMediaMismatch=false,compactReview=false}={}){
+async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=false,wideScopes=false,flatProof=false,stateAuditProjection='both',trialMediaMismatch=false,compactReview=false,realizedExpected=false}={}){
  const capture=structuredClone(base),snapshot=capture.responses.bootstrap.data,profile=snapshot.instance;
  profile.capabilities.landingView='materials';const configuration=defaultConfiguration(profile);
  const requirements=[requirement('MATREQ-FIXTURE-A','人物甲白天形象','IMAGE','人物身份',1),requirement('MATREQ-FIXTURE-A-VOICE','人物甲夜间声音','AUDIO','声音身份',2),requirement('MATREQ-FIXTURE-B','人物乙来访形象','IMAGE','人物身份',3),requirement('MATREQ-FIXTURE-PLACE','小店空态画面','IMAGE','地点空态',4),requirement('MATREQ-FIXTURE-TEXT','小店对白说明','TEXT','对白文本',5)];
@@ -64,11 +64,13 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
  const imageUrl='data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="16" height="9"%3E%3Crect width="16" height="9" fill="%23796"/%3E%3C/svg%3E';
  const assetFamilies=flatProof?[{id:'fixture-family-a',label:'人物甲图像族',kind:'IMAGE',subtype:'IDENTITY',episodeIds:[],sceneIds:[],segmentIds:[],shotIds:[],currentVersionId:'fixture-family-a@V001',versionRefs:['fixture-family-a@V001','fixture-family-a@V002'],sourceRef:'fixture',outputState:'PRESENT',lifecycleState:'RELEASED'}]:[];
  const assetVersions=flatProof?[1,2].map(version=>({id:'fixture-family-a@V00'+version,familyId:'fixture-family-a',label:'人物甲版本 '+version,path:'fixture-person-a-v'+version+'.png',sha256:hash(900+version),preview:imageUrl,mediaUrl:imageUrl,audioProxy:null,promptRef:null,model:null,historyId:null,resourceId:null,sourceRef:'fixture',outputState:'PRESENT',lifecycleState:'RELEASED',historyRole:'CURRENT'})):[];
+ const expectedOutputs:ExpectedOutput[]=realizedExpected?[{id:'EXPECTED_OUTPUT:fixture-family-a@V001',familyId:'fixture-family-a',label:'旧精确计划',targetPath:'fixture-person-a-v1.png',plannedVersionLabel:'V001',legacyVersionId:'fixture-family-a@PLANNED-V001',expectationState:'REALIZED',realizedVersionId:'fixture-family-a@V001',realizedVersionSha256:hash(901)}]:[];
+ if(realizedExpected)Object.assign(assetFamilies[0],{expectedOutputRefs:expectedOutputs.map(item=>item.id),currentExpectedOutputId:null});
  if(flatProof){requirements[0].assetFamilyRefs=['fixture-family-a'];graph.representations[0].assetFamilyIds=['fixture-family-a'];}
  if(compactReview){Object.assign(requirements[0],{acceptanceCriteria:['身份清晰','UNKNOWN',' '],storyBasis:{sourceRef:'fixture-exact-source',whyNeeded:'UNKNOWN',onScreenRequirement:'独立补充：服装连续',factBoundary:'UNKNOWN'},reviewSpec:{profileId:'compact-review',configurationHash:hash(750),hash:hash(751),criteria:['身份清晰','服装连续','构图可用','无多余文字'].map((label,index)=>({id:'compact-criterion-'+index,label,question:label,required:true,allowNA:false,noteRequiredOnFail:false}))}});assetVersions[1].lifecycleState='REVIEW_PENDING';}
  const workItems=requirements.map((item,index)=>({id:item.materialWorkItemRef,label:item.title,lane:'MATERIAL_PREP',workflowStepId:null,requirementRef:item.id,requirementHash:item.requirementHash,scopeType:'PROJECT',scopeId:profile.projectId,episodeIds:[],sceneIds:[],shotIds:[],inputAssetRefs:[],outputAssetRef:'',additionalOutputAssetRefs:[],consumerWorkItemRefs:[],sourceRef:'fixture-exact-source',executionDefinitionRef:null,applicabilityState:'REQUIRED',lifecycleState:['WAITING_UPSTREAM','READY_TO_START','REVIEW_PENDING','RELEASED'][index]||'WAITING_UPSTREAM',flowBlockReasons:[],executionBlockReasons:[]}));
  if(compactReview)Object.assign(workItems[0],{executionDefinitionRef:'fixture-compact-recipe',outputAssetRef:'fixture-family-a'});
- Object.assign(snapshot.productionModel,{domainGraph:graph,systemConfiguration:{config:configuration},materialRequirements:requirements,materialWorkItems:workItems,assetFamilies,assetVersions,expectedOutputs:[]});
+ Object.assign(snapshot.productionModel,{domainGraph:graph,systemConfiguration:{config:configuration},materialRequirements:requirements,materialWorkItems:workItems,assetFamilies,assetVersions,expectedOutputs});
  // Existing published episodes deliberately differ. Candidate permanent IDs and
  // exact hashes, not historical E01/S01 aliases, must drive the material axes.
  const episodes=[{episodeUid:ids.ep1,displayId:'E01',title:'白天到店',sceneIds:[ids.s1]},{episodeUid:ids.ep2,displayId:'E02',title:'夜间来访',sceneIds:[ids.s2]}];
@@ -93,6 +95,7 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
   if(compactReview&&url.pathname==='/api/v8/material-review-drafts'&&request.method()==='POST'){aiRequests.push(request.postDataJSON());return json({draft:{qualityRecommendation:'QUALITY_PASS_ON_OBSERVED_EVIDENCE',summary:'仅合成测试 AI 草稿，不是媒体观察',observations:[],unobserved:['权利尚未核验'],criterionFindings:requirements[0].reviewSpec!.criteria.map(c=>({criterionId:c.id,verdict:'PASS',note:'fixture草稿 '+c.id})),overallNote:'AI合成意见',revisionInstructions:{preserve:[],change:[],mustNotRegress:[]}}});}
   if(!['GET','HEAD'].includes(request.method())){writes.push(request.method()+' '+url.pathname);return route.fulfill({status:418,json:{error:'FIXTURE_MUTATION_BLOCKED'}});}
   if(compactReview&&url.pathname==='/api/v8/asset-versions'){const versionId=url.searchParams.get('versionId');return json({events:versionId==='fixture-family-a@V002'?[{eventId:'fixture-generation',familyId:'fixture-family-a',versionId,sha256:hash(902),actualPromptHash:hash(761),actualPrompt:{main:'本次实际旧Prompt'},recipePromptHash:hash(762),promptChangedFromCallPackage:true,promptSyncRequired:true,runId:'fixture-run',callPackageHash:hash(763),inputBindings:[{order:1,path:'fixture-actual-input.png',assetFamilyRef:'fixture-input-family',assetVersionRef:'fixture-input@V001',sha256:hash(764)}],inputBindingsHash:hash(765)}]:[]});}
+  if(realizedExpected&&url.pathname==='/api/v8/asset-versions')return json({events:[]});
   if(compactReview&&url.pathname==='/api/v8/recipes/fixture-compact-recipe')return json({recipe:{id:'fixture-compact-recipe',title:'合成制作定义',pipelineStageCode:'P03',executorKind:'MODEL_API',definitionHash:hash(763),currentRevisionId:'fixture-recipe-r1',upload:{items:[{order:1,path:'fixture-current-input.png'}],rawText:'当前附件定义'},model:{branch:'fixture-model',rawRule:'fixture',resolution:'1920x1080'},parametersRaw:'seed=42',prompt:{main:'当前权威Prompt不等于历史实际Prompt',negative:'无多余文字',negativeApplication:'APPEND'},output:{path:'fixture-output.png',mediaType:'IMAGE'},declaredGate:'INTERNAL_MACHINE_ONLY',rawSourceBlock:'fixture-only'}});
   if(url.pathname==='/api/trial/scopes')return json({scopes:[{id:'trial-fixture',countsTowardFormalProject:false}],defaultScopeId:'trial-fixture'});
   if(url.pathname==='/api/trial/snapshot')return json({mode:'LOCAL_TRIAL',scope:{id:'trial-fixture',countsTowardFormalProject:false},recipes:[],assets:trialAssets,mutationEtag:'trial-fixture'});
@@ -102,7 +105,7 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
   if(url.pathname==='/api/v8/operations/snapshot')return json(operations);
   if(url.pathname==='/api/v8/ui/materials'){
    materialRequests.push(url.search);const id=url.searchParams.get('requirementId'),items=id?requirements.filter(item=>item.id===id):requirements;
-   return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-fixture',appliedMode:'requirements',detailState:'COMPLETE',page:{materialRequirements:items,materialWorkItems:workItems.filter(item=>!id||item.requirementRef===id),assetFamilies,assetVersions,expectedOutputs:[]},count:items.length,total:items.length,nextCursor:null,hasMore:false,appliedFilters:{}});
+   return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-fixture',appliedMode:'requirements',detailState:'COMPLETE',page:{materialRequirements:items,materialWorkItems:workItems.filter(item=>!id||item.requirementRef===id),assetFamilies,assetVersions,expectedOutputs},count:items.length,total:items.length,nextCursor:null,hasMore:false,appliedFilters:{}});
   }
   if(url.pathname==='/api/instance/domain-workspaces')return json({...workspaceProjection(snapshot,workspaceGraph,'MATERIAL'),requirements,readOnly:!definitionOnly,releaseId:'release-fixture',revisionId:'graph-fixture',draft:null,draftHeadRevisionId:null,legacyDrafts:[]});
   if(url.pathname==='/api/instance/material-directory')return json(directory);
@@ -114,7 +117,7 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
   if(url.pathname==='/api/instance/documents')return json({documents:[]});
   for(const[key,value]of Object.entries(capture.routes))if(url.pathname===String(value).split('?')[0])return json(capture.responses[key]);
   unexpected.push(request.method()+' '+url.pathname);return route.fulfill({status:418,json:{error:'UNEXPECTED_FIXTURE_API'}});
- });return {requirements,graph,assetFamilies,assetVersions,unexpected,writes,errors,materialRequests,aiRequests};
+ });return {requirements,graph,assetFamilies,assetVersions,expectedOutputs,unexpected,writes,errors,materialRequests,aiRequests};
 }
 type Fixture=Awaited<ReturnType<typeof materialFixture>>;
 function clean(f:Fixture){expect(f.unexpected,'No business API may escape interception').toEqual([]);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);}
@@ -381,6 +384,20 @@ test('日常素材版本选择排除精确删除审计但保留原模型及当�
  await expect(chips.getByRole('button')).toHaveCount(2);await expect(chips).not.toContainText('原删除审计版本');
  await expect(chips.getByRole('button',{name:/人物甲版本 1/})).toBeVisible();await expect(chips.getByRole('button',{name:/人物甲版本 2/})).toBeVisible();
  expect(f.assetFamilies[0].currentVersionId).toBe('fixture-family-a@V001');expect(f.assetFamilies[0].versionRefs).toContain(deleted.id);expect(JSON.stringify({families:f.assetFamilies,versions:f.assetVersions})).toBe(before);clean(f);
+});
+test('已实现EO不重复显示尚未产出，旧精确EO深链绑定原实际版本与SHA而非最新版本',async({page})=>{
+ const f=await materialFixture(page,{flatProof:true,realizedExpected:true}),id=f.expectedOutputs[0].id,before=JSON.stringify({families:f.assetFamilies,versions:f.assetVersions,expected:f.expectedOutputs});
+ await page.goto('/?view=materials&materialPanel=material&material=MATREQ-FIXTURE-A&family=fixture-family-a&version='+encodeURIComponent(id));
+ const card=drawer(page).locator('[data-material-info-id="MATREQ-FIXTURE-A"]'),output=card.locator('.material-output-viewer'),chips=card.locator('.material-version-chips');
+ await expect(output).toHaveAttribute('data-version-id','fixture-family-a@V001');await expect(output).toHaveAttribute('data-version-sha256',hash(901));await expect(chips.getByRole('button')).toHaveCount(2);await expect(chips).not.toContainText('尚未产出');await expect(chips.getByRole('button',{name:/人物甲版本 1/})).toHaveAttribute('aria-pressed','true');
+ expect(new URL(page.url()).searchParams.get('version')).toBe(id);await page.reload();await expect(output).toHaveAttribute('data-version-id','fixture-family-a@V001');expect(JSON.stringify({families:f.assetFamilies,versions:f.assetVersions,expected:f.expectedOutputs})).toBe(before);clean(f);
+});
+for(const defect of ['unknown','wrong-family','sha-mismatch','ambiguous'])test('无效EO深链不回退真实最新版本：'+defect,async({page})=>{
+ const f=await materialFixture(page,{flatProof:true,realizedExpected:true}),expected=f.expectedOutputs[0];
+ if(defect==='wrong-family')expected.familyId='other-family';if(defect==='sha-mismatch')expected.realizedVersionSha256=hash(999);if(defect==='ambiguous')f.expectedOutputs.push({...expected});
+ const id=defect==='unknown'?'EXPECTED_OUTPUT:unknown':expected.id;
+ await page.goto('/?view=materials&materialPanel=material&material=MATREQ-FIXTURE-A&family=fixture-family-a&version='+encodeURIComponent(id));
+ const card=drawer(page).locator('[data-material-info-id="MATREQ-FIXTURE-A"]');if(defect==='ambiguous')await expect(drawer(page).getByRole('alert')).toContainText('重复身份');else await expect(card.locator('.material-selection-error')).toBeVisible();await expect(drawer(page).locator('.material-output-viewer,[data-material-section="review"]')).toHaveCount(0);expect(new URL(page.url()).searchParams.get('version')).toBe(id);clean(f);
 });
 for(const width of [1440,390])test('已删版本深链只读说明且不换绑或提供裁决 '+width,async({page})=>{
  await page.setViewportSize({width,height:900});const f=await materialFixture(page,{flatProof:true}),deleted=addDeletedVersionFixture(f),before=JSON.stringify({families:f.assetFamilies,versions:f.assetVersions}),url='/?view=materials&materialPanel=material&material=MATREQ-FIXTURE-A&family=fixture-family-a&version='+encodeURIComponent(deleted.id);
