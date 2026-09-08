@@ -2202,7 +2202,7 @@ class BridgeWorker:
         self.active_claim_path = claim_path
         progress_sequence = 0
         progress_lock = threading.Lock()
-        last_progress: Tuple[str, float] = ("", 0)
+        last_progress: Optional[Tuple[str, str]] = None
         provider_started = False
         segment_path = self.private_paths["root"] / "work-segments" / f"{turn['turnId']}.json"
         segment: Optional[Dict[str, Any]] = None
@@ -2212,12 +2212,14 @@ class BridgeWorker:
         def progress(phase: str, message: str) -> None:
             nonlocal progress_sequence, last_progress
             with progress_lock:
-                self.verify_active_claim(claim_path, turn)
-                now = time.monotonic()
-                if last_progress[0] == phase and now - last_progress[1] < 0.5:
+                # UI phase text is not a heartbeat or an audit record. Repeated
+                # answer deltas must not each perform synchronous repository I/O.
+                # Actual tool/action/terminal paths keep their own claim fences.
+                if last_progress == (phase, message):
                     return
+                self.verify_active_claim(claim_path, turn)
                 progress_sequence += 1
-                last_progress = (phase, now)
+                last_progress = (phase, message)
                 atomic_write_json(self.paths["root"] / "progress" / f"{turn['turnId']}.json", {"turnId": turn["turnId"], "conversationId": turn["conversationId"], "sequence": progress_sequence, "phase": phase, "message": message, "updatedAt": utc_now()})
 
         try:

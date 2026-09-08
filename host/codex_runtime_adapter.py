@@ -129,6 +129,9 @@ class CodexRuntimeAdapter:
                             waiter.set_result(message["result"])
                         else:
                             waiter.set_exception(RuntimeErrorResponse("PROTOCOL_INVALID", "Codex控制响应无效"))
+                # Buffered readline() need not suspend. Keep heartbeat, tool and
+                # cancellation tasks runnable while draining a burst of deltas.
+                await asyncio.sleep(0)
         except asyncio.CancelledError:
             return
         except BaseException as error:
