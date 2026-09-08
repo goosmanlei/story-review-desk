@@ -11,6 +11,7 @@ import {
 } from './_store';
 
 export { projectedExecutionRequests };
+import {shotProductionInputConsumptionReasons} from '../../../host/instance-runtime/shot-production-stage-policy.mjs';
 
 export const executionRequestStatuses = new Set(['AUTHORIZED', 'CLAIMED', 'FULFILLED', 'CANCELLED', 'EXPIRED']);
 export const executionRequestExecutors = new Set(['CODEX', 'USER_EXTERNAL']);
@@ -160,6 +161,10 @@ export function canonicalInputBindings(
     const actualPath = String(actual.path || '');
     const actualFamily = String(actual.assetFamilyRef || actual.familyId || '');
     const actualVersion = String(actual.assetVersionRef || actual.versionId || '');
+    const consumerWork = [...data.productionModel.workItems, ...(data.productionModel.materialWorkItems || [])]
+      .find((work) => work.id === definition.workItemRef);
+    const consumptionReasons = shotProductionInputConsumptionReasons(data.productionModel, consumerWork, {familyId: expectedFamily});
+    if (consumptionReasons.length) throw new HttpError(422, 'input is not approved for this production use', {eligibilityReasons: consumptionReasons});
     if (
       !Number.isInteger(order) || order < 1 || actualOrder !== order
       || actualPath !== expectedPath

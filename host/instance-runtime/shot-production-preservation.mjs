@@ -1,6 +1,7 @@
 import {canonicalJson,sha256} from './bytes.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
 import {compileShotProductionPlan,productionHash} from './shot-production-model.mjs';
+import {shotProductionPolicy,resolveShotProductionProducer} from './shot-production-stage-policy.mjs';
 const fail=message=>{throw Object.assign(new Error(message),{code:'SCOPED_SOURCE_CONFLICT'});};
 const one=(rows,predicate,label)=>{const found=(rows||[]).filter(predicate);if(found.length!==1)fail(label+'必须精确且唯一');return found[0];};
 const outputKey=work=>canonicalJson([work.scopeType,work.scopeId,work.deliverableKey,work.outputSlot]);
@@ -15,6 +16,10 @@ function assertPlanClosure(prior,plan){
  for(const work of works){
   const target=one(expected,w=>outputKey(w)===outputKey(work),'制作计划输出槽');
   if(work.sceneId!==plan.sceneId||work.shotPlanSetRevisionId!==design.id||work.shotPlanSetRevisionHash!==design.contentHash||work.outputBasisHash!==target.outputBasisHash)fail('制作工作项与固定局部输入不一致');
+  if(shotProductionPolicy(plan)==='PREVIS_FIRST_V1'){
+   for(const key of ['productionSchemaVersion','stagePolicy','productionPurpose','allowedUse'])if(work[key]!==target[key])fail('制作工作项用途与固定阶段合同不一致');
+   if(resolveShotProductionProducer(prior,{familyId:work.outputAssetRef}).blockers.length)fail('制作产物的预演使用范围闭包不一致');
+  }
   familyMap.set(target.outputAssetRef,work.outputAssetRef);
  }
  for(const work of works){

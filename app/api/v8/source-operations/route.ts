@@ -1,3 +1,4 @@
+import {shotDesignRequirementBasisSchema} from '../../../../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../../host/instance-runtime/shot-design-contract.mjs';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
@@ -317,6 +318,7 @@ function assertCurrentSourceReviewBinding(
       snapshot.stateProjection,
       sceneId,
       revision.basisBindings,
+      isRequirementDrivenPlanningVersion(revision.planningContractVersion) ? shotDesignRequirementBasisSchema(revision.materialRequirementSet) : '2.0',
     );
     if (stableObjectHash(isRequirementDrivenPlanningVersion(revision.planningContractVersion) ? revision.materialRequirementSet : revision.adoptedMaterialSet) !== stableObjectHash(adoptedMaterialSet)) {
       throw new HttpError(409, 'the approved ShotPlanSet no longer binds the current adopted material versions');

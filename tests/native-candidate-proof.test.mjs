@@ -25,7 +25,7 @@ async function mpFixture(t){
 }
 function spFixture(){
  const sceneId='scene:fixture',episodeUid='episode:fixture',spec={shotId:'shot:fixture',sceneId,order:1,title:'Fixture',narrativeBeat:'A fixed beat',audienceTakeaway:'A fixed outcome',materialRequirementRefs:[],inputBindings:[]},designContent={sceneId,identityChangeReason:'NO_IDENTITY_CHANGE',shots:[spec]},design={id:'design:fixture',scopeId:sceneId,episodeUid,content:designContent,contentHash:productionHash(designContent)};
- const scope={sceneId,episodeUid,plan:design,shots:[{...spec,id:spec.shotId}]},settings=defaultShotProductionPlan(scope),documents=[];
+ const scope={sceneId,episodeUid,plan:design,shots:[{...spec,id:spec.shotId}]},settings=defaultShotProductionPlan(scope,{schemaVersion:'1.0'}),documents=[];
  const document=(sourcePath,revisionId,body,sourceRole)=>{const bytes=canonicalJson(body),d={revisionId,aliases:[sourcePath],bytes,sha256:sha256(bytes),metadata:{sourceRole}};documents.push(d);return d;};
  const plan={id:'plan:fixture',sceneId,episodeUid,content:settings,contentHash:productionHash(settings),sourcePath:'story/shot-production/fixture.json',sourceRevisionId:'source:plan',scopeRole:'EVIDENCE_ONLY'};
  const doc=document(plan.sourcePath,plan.sourceRevisionId,{schemaVersion:'1.0',productionPlanId:plan.id,content:settings,contentHash:plan.contentHash,shotPlanRevisionId:design.id},'SHOT_PRODUCTION_PLAN');plan.sourceSha256=doc.sha256;

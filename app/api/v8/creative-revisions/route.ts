@@ -174,6 +174,7 @@ async function validateSemanticBasis(
   subjectKind: string,
   subjectId: string,
   bindings: BasisBinding[],
+  requirementSchemaVersion: '2.0' | '3.0' = '2.0',
 ) {
   if (!['SCENE_COVERAGE', 'SHOT_PLAN_SET'].includes(subjectKind)) return;
   const operations = await operationalSnapshot();
@@ -278,7 +279,7 @@ async function validateSemanticBasis(
       sceneId,
     });
   }
-  assertShotPlanMaterialBasisCurrent(data, state, sceneId, bindings);
+  assertShotPlanMaterialBasisCurrent(data, state, sceneId, bindings, requirementSchemaVersion);
 }
 
 async function basisBindings(
@@ -286,6 +287,7 @@ async function basisBindings(
   subjectKind: string,
   subjectId: string,
   value: unknown,
+  requirementSchemaVersion: '2.0' | '3.0' = '2.0',
 ) {
   const required = (requiredBasisTypes[subjectKind] || []).map(type => {
     if (type === 'EPISODE_PLAN_REVISION' && Array.isArray(value) && value.some(b => b?.bindingType === 'EPISODE_NARRATIVE_RELEASE')) return 'EPISODE_NARRATIVE_RELEASE';
@@ -351,7 +353,7 @@ async function basisBindings(
       });
     }
   }
-  await validateSemanticBasis(data, subjectKind, subjectId, bindings);
+  await validateSemanticBasis(data, subjectKind, subjectId, bindings, requirementSchemaVersion);
   return bindings.sort((left, right) => (
     left.bindingType.localeCompare(right.bindingType) || left.bindingId.localeCompare(right.bindingId)
   ));
@@ -1083,7 +1085,10 @@ export async function POST(request: Request) {
       : null;
     const requestedPlanningVersion = body.planningContractVersion;
     if (requestedPlanningVersion != null && (subjectKind !== 'SHOT_PLAN_SET' || !['1.0','2.0','3.0'].includes(String(requestedPlanningVersion)))) throw new HttpError(422, 'planningContractVersion 仅用于显式支持的镜头设计契约');
-    const canonicalBasisBindings = await basisBindings(data, subjectKind, subjectId, body.basisBindings);
+    const requestedRequirementSchema = body.materialRequirementSetSchemaVersion;
+    if (requestedRequirementSchema != null && (subjectKind !== 'SHOT_PLAN_SET' || !['2.0','3.0'].includes(String(requestedRequirementSchema)) || requestedRequirementSchema === '3.0' && requestedPlanningVersion !== '3.0')) throw new HttpError(422, '需求语义基线必须由V3镜头设计显式选择支持的版本');
+    const requirementSchemaVersion: '2.0' | '3.0' = requestedRequirementSchema === '3.0' ? '3.0' : '2.0';
+    const canonicalBasisBindings = await basisBindings(data, subjectKind, subjectId, body.basisBindings, requirementSchemaVersion);
     const content = subjectKind === 'EPISODE_PLAN'
       ? canonicalEpisodePlanContent(data, subjectId, rawContent, episodePlanLedger!)
       : canonicalSceneScopedContent(
@@ -1101,7 +1106,8 @@ export async function POST(request: Request) {
     if (requirementBased && !data.productionModel.shotPlanSetRevisions?.some(row => row.planId === subjectId && row.episodeNarrativeReleaseId)) {
       throw new HttpError(422, '镜头设计 V2 必须从独立已发布的分集场正文进入；旧全剧 V1 同步契约保持不变');
     }
-    const materialRequirementSet = requirementBased ? deriveCurrentMaterialRequirementSet(data, String((content as {sceneId:string}).sceneId)) : null;
+    if (requestedRequirementSchema != null && !requirementBased) throw new HttpError(422, '实际采用素材基线不可声明需求语义版本');
+    const materialRequirementSet = requirementBased ? deriveCurrentMaterialRequirementSet(data, String((content as {sceneId:string}).sceneId), requirementSchemaVersion) : null;
     const adoptedMaterialSet = subjectKind === 'SHOT_PLAN_SET' && !requirementBased
       ? deriveCurrentAdoptedMaterialSet(
         data,

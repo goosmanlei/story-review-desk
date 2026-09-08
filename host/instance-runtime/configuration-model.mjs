@@ -3,6 +3,7 @@ import { deliveryAliases, productionGroups } from "./review-standard-catalog.mjs
 import { standardDefaults } from "./review-standard-defaults.mjs";
 import { normalizeReviewSnapshot, phaseSpecs } from "./snapshot-contract.mjs";
 import { criteriaForReviewScope } from "./review-criteria.mjs";
+import { shotPrevisReviewProfile } from "./shot-previs-review-profiles.mjs";
 import { canonicalJson, sha256 } from "./bytes.mjs";
 
 export const CONFIG_ID = "system-configuration";
@@ -706,7 +707,9 @@ export function validateConfiguration(config, previous) {
     fail("缺少必要审阅模板");
   if (config.template.version === "1.1") {
     const required = new Set(productionGroups.flatMap(([, , gates])=>gates.flatMap(([, , keys])=>keys.map(k=>deliveryAliases[k] || k))));
-    for (const key of required) if(!profiles.has(`production-${key.toLowerCase()}`)) fail("缺少必要的制作审阅标准",key);
+    // DIALOGUE_TEMP is an explicit V2 work contract; old published configuration
+    // documents do not acquire a new mandatory profile merely by being read.
+    for (const key of required) if(key!=='DIALOGUE_TEMP'&&!profiles.has(`production-${key.toLowerCase()}`)) fail("缺少必要的制作审阅标准",key);
   }
   for (const profile of config.reviewProfiles) {
     string(profile.label, "reviewProfiles.label");
@@ -990,6 +993,7 @@ export function categoryFor(config, primary, secondary) {
   return { category: cat, type: t };
 }
 export function profileFor(config, kind, object) {
+  if(kind==='WORK_PRODUCT'&&shotPrevisReviewProfile(object))return shotPrevisReviewProfile(object).id;
   if (kind === "ASSET") {
     const { type } = categoryFor(
       config,
@@ -1015,7 +1019,7 @@ export function reviewSpec(
   { legacy = false, shotContext, scopeContext } = {},
 ) {
   const profileId = profileFor(config, kind, object);
-  const profile = config.reviewProfiles.find((p) => p.id === profileId);
+  const profile = config.reviewProfiles.find((p) => p.id === profileId) || (!legacy && kind==='WORK_PRODUCT' ? shotPrevisReviewProfile(object) : null);
   if (profile && profile.subjectKind !== kind)
     fail("审阅模板与对象类型不一致", profileId);
   let criteria = profile?.criteria;

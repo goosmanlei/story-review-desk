@@ -6,7 +6,7 @@ import './shot-production-recipe-editor.css';
 
 type AuthorContent={model:string;prompt:string;negativePrompt:string;parameters:Record<string,unknown>};
 type BoundInput={order:number;path:string;familyId?:string;versionId?:string;assetFamilyRef?:string;assetVersionRef?:string;sha256:string};
-type Workspace={releaseId:string;draftHeadRevisionId:string|null;draft:{revisionId:string;content:AuthorContent}|null;current:Record<string,unknown>|null;defaults:AuthorContent|null;inputs:BoundInput[];output:Record<string,unknown>|null;readOnly:boolean;blockers:string[];jobs?:Array<{jobId:string;status:string;error?:string}>};
+type Workspace={deliverableKey?:string;productionPurpose?:string|null;allowedUse?:string|null;releaseId:string;draftHeadRevisionId:string|null;draft:{revisionId:string;content:AuthorContent}|null;current:Record<string,unknown>|null;defaults:AuthorContent|null;inputs:BoundInput[];output:Record<string,unknown>|null;readOnly:boolean;blockers:string[];jobs?:Array<{jobId:string;status:string;error?:string}>};
 type Preview={previewHash:string;definition?:unknown;bodydiff?:unknown};
 const empty:AuthorContent={model:'',prompt:'',negativePrompt:'',parameters:{}};
 function sourceContent(state:Workspace):AuthorContent{
@@ -43,6 +43,7 @@ export function ShotProductionRecipeEditor({workItemId,definitionRef,readOnly=fa
    <header><h4>本工作项调用包</h4><button type="button" disabled={busy||(dirty&&!uncertain)} onClick={()=>{if(uncertain)void inspectUnconfirmed();else{setState(null);setRefresh(value=>value+1);}}}>重读调用包与任务</button></header>
    <p>保存作者草稿，核对当前附件与预期输出，再由工作器登记执行定义。模型调用使用独立的生成授权。</p>
    {state?<>
+    {state.allowedUse==='PREVIS_TIMING'&&<p>本产物仅用于粗分镜与预演锁时。临时对白不要求正式声音母版；进入最终对白制作时另建独立产物。</p>}
     {state.blockers.map(reason=><p key={reason} role="status">{reason}</p>)}
     <fieldset disabled={state.readOnly||busy||uncertain}><label>模型ID<input value={draft.model} onChange={e=>edit('model',e.target.value)} autoComplete="off"/></label><label>完整主提示词<textarea value={draft.prompt} onChange={e=>edit('prompt',e.target.value)}/></label><label>完整负面提示词<textarea value={draft.negativePrompt} onChange={e=>edit('negativePrompt',e.target.value)}/></label><label>模型参数（JSON对象）<textarea value={parameters} onChange={e=>edit('parameters',e.target.value)} spellCheck={false}/></label></fieldset>
     <details open><summary>当前精确附件与预期输出</summary>{state.inputs.length?<ol>{state.inputs.map(input=><li key={input.order+':'+input.path}><b>{input.order}. {input.assetVersionRef||input.versionId}</b><span>{input.path}</span><code>SHA {input.sha256}</code></li>)}</ol>:<p>当前派生附件清单为空。</p>}<pre>{JSON.stringify(state.output,null,2)}</pre></details>

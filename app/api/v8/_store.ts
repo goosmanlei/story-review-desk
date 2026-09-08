@@ -1,3 +1,4 @@
+import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
 import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
 import {shotProductionExecutionEntries} from '../../../host/instance-runtime/shot-production-gates.mjs';
@@ -1001,7 +1002,17 @@ export function deriveCurrentAdoptedMaterialSet(
 
 /** V2 authoring freezes demand and setting facts, never pretends missing media
  * are adopted inputs. Operational material status is deliberately not hashed. */
-export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: string) {
+export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: string, schemaVersion: '2.0' | '3.0' = '2.0') {
+  if (schemaVersion === '3.0') {
+    try { return deriveShotDesignRequirementBasisV3(data.productionModel as unknown as Record<string,unknown>, sceneId); }
+    catch (error) {
+      if (error && typeof error === 'object' && 'reasonCode' in error && error.reasonCode === 'SHOT_DESIGN_REQUIREMENT_BASIS_INVALID') {
+        throw new HttpError(409, error instanceof Error ? error.message : '镜头设计需求基线已失效', {reasonCode:error.reasonCode,sceneId});
+      }
+      throw error;
+    }
+  }
+  if (schemaVersion !== '2.0') throw new HttpError(422, '不支持的镜头需求基线版本');
   const coverageRows = (data.productionModel.sceneCoveragePlanRevisions || []).filter(row =>
     row.scopeId === sceneId && row.scopeRole === 'CURRENT' && row.revisionState === 'CURRENT' && row.isCurrent === true);
   if (coverageRows.length !== 1) throw new HttpError(409, '本场必须有唯一当前已采用镜头意图');
@@ -1069,6 +1080,7 @@ export function assertShotPlanMaterialBasisCurrent(
   state: AdoptedMaterialStateProjection,
   sceneId: string,
   rawBasisBindings: unknown,
+  requirementSchemaVersion: '2.0' | '3.0' = '2.0',
 ) {
   const basisBindings = Array.isArray(rawBasisBindings)
     ? rawBasisBindings.filter((binding): binding is Record<string, unknown> => (
@@ -1081,7 +1093,7 @@ export function assertShotPlanMaterialBasisCurrent(
     throw new HttpError(409, '镜头设计需求依据与 V1 实际采用素材依据不能混合');
   }
   const adopted = basisBindings.filter((binding) => binding.bindingType === bindingType);
-  const current = requirementBasis ? deriveCurrentMaterialRequirementSet(data, sceneId) : deriveCurrentAdoptedMaterialSet(data, state, sceneId);
+  const current = requirementBasis ? deriveCurrentMaterialRequirementSet(data, sceneId, requirementSchemaVersion) : deriveCurrentAdoptedMaterialSet(data, state, sceneId);
   const binding = adopted[0];
   if (
     adopted.length !== 1
@@ -1279,8 +1291,10 @@ export function assertCreativeRevisionBasisCurrent(
     basisBindings: coverage.row.basisBindings,
     basisBindingsHash: coverage.row.basisBindingsHash,
   }, { requireCurrentPredecessor: false });
-  const materialSet = assertShotPlanMaterialBasisCurrent(data, state, sceneId, basisBindings);
   const v2 = bindingByType.has('MATERIAL_REQUIREMENT_SET');
+  const requirementSchemaVersion = v2 ? shotDesignRequirementBasisSchema(revision.materialRequirementSet) : '2.0';
+  if (requirementSchemaVersion === '3.0' && revision.planningContractVersion !== '3.0') throw new HttpError(409, '需求语义基线 V3 只能用于镜头设计 V3', {reasonCode:'SHOT_DESIGN_REQUIREMENT_SCHEMA_MISMATCH',sceneId});
+  const materialSet = assertShotPlanMaterialBasisCurrent(data, state, sceneId, basisBindings, requirementSchemaVersion);
   const frozenSet = v2 ? revision.materialRequirementSet : revision.adoptedMaterialSet;
   if (v2 !== (isRequirementDrivenPlanningVersion(revision.planningContractVersion)) || v2 && revision.adoptedMaterialSet != null || !v2 && revision.materialRequirementSet != null) {
     throw new HttpError(409, '镜头设计 V2 必须声明独立契约，不可冒充已采用实际素材');
@@ -2329,6 +2343,12 @@ type ReviewRollup = {
   targetWorkItemIds: string[];
 };
 
+function shotProductionUsageSlice(value: unknown) {
+  const row = value as Record<string, unknown>;
+  if (!['productionSchemaVersion','stagePolicy','allowedUse'].some(key => row[key] !== undefined)) return {};
+  return Object.fromEntries(['id','ownerRef','outputAssetRef','shotProductionPlanId','deliverableKey','productionSchemaVersion','stagePolicy','productionPurpose','allowedUse'].map(key => [key,row[key] ?? null]));
+}
+
 function statusSlice(record: StatusProjection) {
   return {
     outputState: record.outputState || null,
@@ -2599,6 +2619,7 @@ export function sourceSyncSucceeded(
             mediaStateProjection,
             String(review.scopeId || ''),
             review.basisBindings,
+            isRequirementDrivenPlanningVersion(deployedRevision.planningContractVersion) ? shotDesignRequirementBasisSchema(deployedRevision.materialRequirementSet) : '2.0',
           );
           assertDeployedShotPlanMaterialSet(
             data,
@@ -4877,6 +4898,7 @@ export function projectOperationalState(
     }])),
     assetFamiliesById: Object.fromEntries([...families].map(([id, family]) => [id, {
       id,
+      ...shotProductionUsageSlice(family),
       domainContextHash: (family as unknown as Record<string,{hash?:string}>).domainContext?.hash || null,
       currentVersionId: family.currentVersionId || null,
       adoptedVersionId: family.currentVersionId || null,
@@ -4896,6 +4918,7 @@ export function projectOperationalState(
     }])),
     expectedOutputsById: Object.fromEntries(expectedOutputRealizations),
     workItemsById: Object.fromEntries([...workItems].map(([id, item]) => [id, {
+      ...shotProductionUsageSlice(item),
       ...statusSlice(item),
       additionalOutputAssetRefs: item.additionalOutputAssetRefs || [],
     }])),

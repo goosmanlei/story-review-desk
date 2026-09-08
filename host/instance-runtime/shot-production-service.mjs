@@ -1,6 +1,6 @@
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
-import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,productionBindingReasons} from './shot-production-model.mjs';
+import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,shotProductionEntryGates,productionBindingReasons} from './shot-production-model.mjs';
 import {bindConfiguration} from './configuration-model.mjs';
 import {applyAnimaticProjection,reconcileAnimaticLocks} from './animatic-service.mjs';
 import {applyShotProductionLocksProjection} from './shot-production-locks.mjs';
@@ -55,7 +55,8 @@ export async function getShotProductionWorkspace(tx,{sceneId,api}) {
   const manifestTargets=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)&&['SHOT_INPUT_LOCK','LOCKED_SHOT'].includes(w.deliverableKey)).map(w=>({workItemId:w.id,shotId:w.shotId,gateId:w.gateId,label:w.label}));
   const sceneWorkIds=new Set((model.workItems||[]).filter(w=>w.sceneId===sceneId).map(w=>w.id));
   const manifestJobs=(model.shotProductionManifestJobs||[]).filter(j=>sceneWorkIds.has(j.workItemId)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(({jobId,workItemId,status,error})=>({jobId,workItemId,status,error}));
-  return {sceneId,releaseId:view.releaseId,basis,blockers,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),availableInputs,availableSpace,manifestTargets,manifestJobs,jobs};
+  const entryGates=shotProductionEntryGates(model,state),stageEntries=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)).map(w=>({id:w.id,shotId:w.shotId,deliverableKey:w.deliverableKey,gateId:w.gateId,label:w.label,blockers:entryGates[w.id]||['PRODUCTION_WORK_CLOSURE_CHANGED']}));
+  return {sceneId,releaseId:view.releaseId,basis,blockers,stageEntries,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),availableInputs,availableSpace,manifestTargets,manifestJobs,jobs};
 }
 export async function saveShotProductionDraft(tx,input,{api}){
   const {view,model,state}=await readCurrentShotProductionModel(tx,{api});if(view.releaseId!==input.expectedReleaseId)fail('发布版本已变化，请重新核对');
@@ -69,13 +70,13 @@ export async function previewShotProduction(tx,input,{api}) {
   if(!draft||record.revisionId!==input.draftRevisionId||view.releaseId!==draft.baseReleaseId)fail('草稿或发布基线已变化，请重新保存核对');
   const scope=currentScope(model,state,input.sceneId),content=validateShotProductionPlan(draft.content,scope);
   // Bindings can be incomplete in a production plan; they cannot claim a lock.
-  for(const shot of content.shots)for(const binding of shot.inputs){const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('输入绑定不能采用：'+reasons.join('、'));}
+  for(const shot of content.shots){for(const binding of shot.inputs){const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('输入绑定不能采用：'+reasons.join('、'));}for(const binding of shot.previsInputs||[]){const reasons=productionBindingReasons(model,state,binding,{consumerRole:'PREVIS_TIMING'});if(reasons.length)fail('预演参考不能采用：'+reasons.join('、'));}}
   const id='SP-PLAN-'+productionHash({sceneId:input.sceneId,draftRevisionId:record.revisionId}).slice(0,24);
   const compiled=compileShotProductionPlan(scope,content,{id,revisionId:record.revisionId,sourceRef:'PREVIEW_ONLY'});
   const old=(model.shotProductionPlans||[]).find(p=>p.sceneId===input.sceneId&&p.scopeRole==='CURRENT');
   const reuse=reuseShotProductionObjects(model,old,compiled);
   const body={schemaVersion:'1.0',sceneId:input.sceneId,expectedReleaseId:view.releaseId,draftRevisionId:record.revisionId,contentHash:productionHash(content),productionPlanId:id,shotPlanRevisionId:scope.plan.id,shotCount:scope.shots.length,workItemCount:reuse.additions.workItems.length,outputCount:reuse.additions.expectedOutputs.length,replacedProductionPlanId:old?.id||null,previousWorkItemIds:reuse.retiredWorkItemIds,reusedWorkItemIds:reuse.reusedWorkItemIds};
-  return {...body,previewHash:productionHash(body),checks:['仅建立本场过程素材的制作需求，不伪造实际版本','保留旧计划与素材历史','输入、声音、锁时和关键帧仍须分别验收','未就绪镜头保持阻断，尚不调用视频模型']};
+  return {...body,previewHash:productionHash(body),checks:['仅建立本场过程素材的制作需求，不伪造实际版本','保留旧计划与素材历史','输入、声音、锁时和关键帧仍须分别验收',...(content.schemaVersion==='2.0'?['粗分镜和临时对白按本镜本句条件并行；正式视觉输入逐镜锁定']:['未就绪镜头保持阻断，尚不调用视频模型'])]};
 }
 export async function enqueueShotProduction(tx,input,{api}){
   productionId(input.requestId);const previous=read(await tx.getAux(SHOT_PRODUCTION_NS.requests,input.requestId));if(previous){if(previous.requestHash!==productionHash(input))fail('请求编号已用于其他操作');return previous.result;}

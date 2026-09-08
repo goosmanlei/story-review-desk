@@ -20,7 +20,7 @@ export const materialStandards = [
 export const productionGroups = [
   ['PREVIS','镜头方案与预演',[
     ['SHOT_PLAN_INPUT_LOCK','镜头设计与输入锁定',['SHOT_PLAN_SET']],
-    ['STORYBOARD_DIALOGUE','粗分镜与对白并行',['STORYBOARD','DIALOGUE_DRY','STORYBOARD_DIALOGUE_PACKAGE']],
+    ['STORYBOARD_DIALOGUE','粗分镜与对白并行',['STORYBOARD','DIALOGUE_TEMP','DIALOGUE_DRY','STORYBOARD_DIALOGUE_PACKAGE']],
     ['ANIMATIC_LOCK','场级预演与锁时',['ANIMATIC_TIMING_LOCK','ANIMATIC']],
   ]],
   ['SHOT_FINISH','镜头成品',[
@@ -50,7 +50,7 @@ export const deliveryAliases = {
 };
 export const deliveryLabels = Object.fromEntries([
   ...productionGroups.flatMap(([, , gates])=>gates.map(([, label, keys])=>[keys[0],label])),
-  ['STORYBOARD','粗分镜'],['DIALOGUE_DRY','对白干声'],['STORYBOARD_DIALOGUE_PACKAGE','分镜与对白齐套'],
+  ['STORYBOARD','粗分镜'],['DIALOGUE_TEMP','临时对白'],['DIALOGUE_DRY','对白干声'],['STORYBOARD_DIALOGUE_PACKAGE','分镜与对白齐套'],
   ['START_FRAME','首帧'],['END_FRAME','尾帧'],['SHOT_KEYFRAME_SET','首尾帧齐套'],['LOCKED_SHOT','单镜锁定'],['POST_LIP_VIDEO','口型修正'],
   ['SCENE_SOUND_MIX_SUBTITLES','场声音与混音'],['SUBTITLE_FILE','字幕'],['AUDIO_STEMS','声音分轨'],
   ['TECHNICAL_REPORT','附加技术报告'],['CONTINUITY_REPORT','附加连续性报告'],['LOC_STATE','地点状态（旧制作标准）'],

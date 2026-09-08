@@ -6,7 +6,7 @@ import path from 'node:path';
 import {createInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {blankProfile,blankSnapshot} from '../host/instance-runtime/blank.mjs';
 import {initializeConfiguration} from '../host/instance-runtime/configuration-service.mjs';
-import {productionHash,defaultShotProductionPlan,resolveShotProductionScope} from '../host/instance-runtime/shot-production-model.mjs';
+import {productionHash} from '../host/instance-runtime/shot-production-model.mjs';
 import {getShotProductionWorkspace,saveShotProductionDraft,previewShotProduction,enqueueShotProduction,applyShotProductionJob} from '../host/instance-runtime/shot-production-service.mjs';
 import {runShotProductionWorkerIteration} from '../scripts/instance-shot-production-worker.mjs';
 
@@ -56,4 +56,15 @@ test('unchanged settings reuse exact work and family identities while changing o
  ({preview}=await stage(repo,api,c=>{c.shots[0].handles.tailFrames=12;return c;}));assert(preview.reusedWorkItemIds.includes(board.id));assert(!preview.previousWorkItemIds.includes(board.id));
  job=await enqueue(repo,api,preview,'queue-reuse-change');await repo.writeTransaction(tx=>applyShotProductionJob(tx,{jobId:job.jobId,api}));
  const after=(await repo.readView()).snapshot.productionModel;assert.deepEqual(after.workItems.find(w=>w.id===board.id),board);assert(after.shotProductionPlans[0].workItemIds.includes(board.id));assert.equal(after.assetFamilies.filter(f=>f.id===board.outputAssetRef).length,1);
+}));
+
+test('V2 real repository publishes temporary audio before masters and later FINAL retains the exact TEMP work and source',()=>fixture(async(repo,{api})=>{
+ await repo.writeTransaction(async tx=>{const view=await tx.readView(),snapshot=structuredClone(view.snapshot);snapshot.productionModel.domainGraph={entities:[{id:'ENTITY-actor',type:'CHARACTER',authority:'A'}],representations:[]};snapshot.snapshotId='snapshot:temporary-dialogue-fixture';await tx.publishRelease({snapshot,recipes:{...view.recipes,snapshotId:snapshot.snapshotId},sourceRevisionIds:view.sourceRevisionIds,expectedReleaseId:view.releaseId});});
+ const first=await stage(repo,api,c=>{c.shots[0].dialogueLines=[{id:'LINE-timing',text:'这是给我的？',speakerEntityId:'ENTITY-actor',purpose:'TEMPORARY',performance:'留出停顿，测试对白节奏'}];return c;}),job=await enqueue(repo,api,first.preview,'publish-temporary');await repo.writeTransaction(tx=>applyShotProductionJob(tx,{jobId:job.jobId,api}));
+ const initial=await repo.readView(),m=initial.snapshot.productionModel,plan=m.shotProductionPlans[0],temporary=m.workItems.find(w=>w.deliverableKey==='DIALOGUE_TEMP'),board=m.workItems.find(w=>w.deliverableKey==='STORYBOARD');
+ assert.equal(plan.content.schemaVersion,'2.0');assert.equal(plan.content.stagePolicy,'PREVIS_FIRST_V1');assert.equal(temporary.allowedUse,'PREVIS_TIMING');assert(m.workItems.filter(w=>w.deliverableKey==='SHOT_INPUT_LOCK').every(w=>w.scopeType==='SHOT'));
+ const workspace=await repo.readTransaction(tx=>getShotProductionWorkspace(tx,{sceneId,api}));assert.deepEqual(workspace.stageEntries.find(w=>w.id===temporary.id).blockers,[]);assert.deepEqual(workspace.stageEntries.find(w=>w.id===board.id).blockers,[]);assert(workspace.stageEntries.find(w=>w.deliverableKey==='START_FRAME').blockers.includes('INPUT_LOCK_REQUIRED'));
+ const sourceBefore=await repo.readTransaction(tx=>tx.getPublishedDocument(plan.sourcePath)),tempBefore=structuredClone(temporary);
+ const next=await stage(repo,api,c=>{c.shots[0].dialogueLines[0].purpose='FINAL';return c;}),nextJob=await enqueue(repo,api,next.preview,'publish-final-plan');assert(next.preview.reusedWorkItemIds.includes(temporary.id));await repo.writeTransaction(tx=>applyShotProductionJob(tx,{jobId:nextJob.jobId,api}));
+ const after=await repo.readView();assert.deepEqual(after.snapshot.productionModel.workItems.find(w=>w.id===temporary.id),tempBefore);assert(after.snapshot.productionModel.workItems.some(w=>w.deliverableKey==='DIALOGUE_DRY'&&w.id!==temporary.id));const sourceAfter=await repo.readTransaction(tx=>tx.getPublishedDocument(plan.sourcePath));assert(sourceAfter.bytes.equals(sourceBefore.bytes));assert.equal((await repo.listMedia()).length,0);assert.equal(after.snapshot.productionModel.assetVersions.length,0);
 }));

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": "V1_COMPILER_BASELINE_GOLDEN",
+  "baseCommit": "4e87616f44135b730b8dc3a6643a7dc92a7119c5",
+  "fixture": "shot-previs-stage-v2.fixture.mjs:fixture",
+  "identity": {
+    "id": "V1-GOLDEN",
+    "revisionId": "V1-SOURCE",
+    "sourceRef": "story/v1-golden.json"
+  },
+  "contentHash": "dfccc4a0599067067d8724bac46e2cdca45d36b6caca042732546c50cc5f1dc8",
+  "compiledHash": "0d09b8d4258babc7a1f4797fd9699cc3fe8ddec86ec4807d1c9eb147e700b04c",
+  "defaultHash": "b9dff5aa8356af37b3d116399dcbb637e9adf72e9c043da147d950db516de5e0"
+}

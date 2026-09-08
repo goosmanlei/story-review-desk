@@ -3,6 +3,7 @@ import {canonicalJson,sha256} from './instance-runtime/bytes.mjs';
 import {inspectExecutionDefinitionHash} from './instance-runtime/execution-definition-hash.mjs';
 import {preserveMaterialProductionProjection} from './instance-runtime/material-production-preservation.mjs';
 import {preserveShotProductionProjection,preserveShotRecipeProjection} from './instance-runtime/shot-production-preservation.mjs';
+import {shotProductionInputConsumptionReasons} from './instance-runtime/shot-production-stage-policy.mjs';
 
 const hash=value=>sha256(canonicalJson(value));
 const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
@@ -29,6 +30,8 @@ function inputProof(input,definition,{events,model,activeMedia,pinnedMediaHashes
  const expected=(definition.upload?.items||[]).map((b,i)=>({order:b.order??i+1,path:b.path,assetFamilyRef:b.assetFamilyRef,assetVersionRef:b.assetVersionRef,sha256:b.sha256}));
  check(Array.isArray(input)&&same(input,expected),'Candidate inputs differ from the frozen ordered upload list');
  for(const b of input){
+  const consumerWork=[...(model.workItems||[]),...(model.materialWorkItems||[])].find(w=>w.id===definition.workItemRef);
+  check(!shotProductionInputConsumptionReasons(model,consumerWork,b).length,'Native input is not approved for this production use');
   check(Number.isSafeInteger(b.order)&&b.order>0&&safe(b.path)&&b.assetFamilyRef&&b.assetVersionRef&&hex(b.sha256),'Native input binding is incomplete');
   const v=versionEvidence(model,events,b.assetVersionRef,'Native input version');check(v.familyId===b.assetFamilyRef&&v.path===b.path&&v.sha256===b.sha256,'Native input identity/path/SHA differs');
   const media=one(activeMedia,m=>m.mediaId===b.assetFamilyRef&&m.versionId===b.assetVersionRef,'Native input media');check(formal(media)&&media.sha256===b.sha256&&pinnedMediaHashes[b.path]===b.sha256,'Native input has no exact active formal byte pin');

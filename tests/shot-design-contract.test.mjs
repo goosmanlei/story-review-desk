@@ -45,3 +45,10 @@ test('single-start and multiple-keyframe strategies have explicit output expecta
  const unknown=design();unknown.estimatedDurationSeconds=null;unknown.keyframeStrategy={mode:'UNDECIDED',reason:'待预演校准',intermediateFrameCount:0};assert.equal(canonicalShotDesign(unknown).estimatedDurationSeconds,null);
  assert.equal(isRequirementDrivenPlanningVersion('1.0'),false);assert.equal(isRequirementDrivenPlanningVersion('2.0'),true);assert.equal(isRequirementDrivenPlanningVersion('3.0'),true);assert.equal(isRequirementDrivenPlanningVersion('4.0'),false);
 });
+
+test('V3 semantic demand conflicts are definite 409 responses, not unknown server errors',async()=>{
+ let conflict;try{api.deriveCurrentMaterialRequirementSet({productionModel:{sceneCoveragePlanRevisions:[]}},'scene:missing','3.0');}catch(error){conflict=error;}
+ assert.ok(conflict);const response=api.errorResponse(conflict,'fallback');assert.equal(response.status,409);
+ const body=await response.json();assert.equal(body.reasonCode,'SHOT_DESIGN_REQUIREMENT_BASIS_INVALID');assert.equal(body.sceneId,'scene:missing');
+ assert.equal(api.errorResponse(new Error('unexpected-program-error'),'fallback').status,500);
+});
