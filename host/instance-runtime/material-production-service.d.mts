@@ -2,7 +2,7 @@ import type {InstanceReadUnit, InstanceUnit, InstanceRepository} from './index.m
 import type {projectOperationalState} from '../../app/api/v8/_store';
 
 export const MATERIAL_PRODUCTION_NS:{drafts:string;jobs:string;requests:string};
-export type MaterialProductionApi = {projectOperationalState:typeof projectOperationalState;safeGeneratedPath?:(path:string,binding:{versionId?:string;sha256?:string})=>Promise<string>};
+export type MaterialProductionApi = {projectOperationalState:typeof projectOperationalState;safeReviewPendingPath?:(path:string,familyId?:string)=>Promise<string>;safeGeneratedPath?:(path:string,binding:{versionId?:string;sha256?:string})=>Promise<string>};
 export type MaterialProductionInputBinding = {familyId:string;versionId:string;sha256:string};
 export type MaterialProductionContent = {model:string;prompt:string;negativePrompt:string;parameters:Record<string,unknown>;inputBindings:MaterialProductionInputBinding[]};
 export type MaterialProductionDraft = {requirementId:string;baseReleaseId:string;basisHash:string;content:MaterialProductionContent;revisionId:string};

@@ -1,3 +1,4 @@
+import {assertFailedMaterialAttempt,FAILED_OUTPUT_REMAKE_SCHEMA} from './material-production-failed-attempt.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
@@ -26,12 +27,17 @@ export async function materialProductionRevisionContext(tx,c){
  if(!source||source.deleted||source.sha256!==sourceRow.sourceSha256||sha256(source.bytes)!==source.sha256||!source.aliases?.includes(sourceRow.sourcePath)||source.metadata?.sourceRole!==(definition.id===plan.definitionId?'MATERIAL_PRODUCTION_PLAN':'MATERIAL_PRODUCTION_RECIPE'))fail('当前素材调用定义的固定源不可验证');
  const sourceBody=JSON.parse(Buffer.from(source.bytes).toString('utf8'));
  if(!same(definition,{...sourceBody.executionDefinition,sourceRef:sourceRow.sourcePath,sourceRevisionId:source.revisionId,sourceSha256:source.sha256}))fail('当前素材调用定义与固定源内容不同');
- const events=c.view.eventsByKind||{},candidates=(events['asset-version']||[]).filter(e=>e.familyId===family.id),parentCandidates=candidates.filter(e=>e.expectedOutputId===output.id),parent=latest(parentCandidates),blockers=[];
- if(!parent||new Set(parentCandidates.map(e=>e.versionId)).size!==1)blockers.push('当前素材预期产物尚未形成唯一实际候选，不能新建后继版本');
- let media=null;
+ const events=c.view.eventsByKind||{},candidates=(events['asset-version']||[]).filter(e=>e.familyId===family.id),parentCandidates=candidates.filter(e=>e.expectedOutputId===output.id),blockers=[];
+ let parent=latest(parentCandidates),parentDefinition=definition,parentOutput=output,parentSource=sourceRow,failedAttempt=null,media=null;
+ const failedRemake=parentCandidates.length===0&&Boolean(definition.parentVersionId&&definition.parentVersionSha256);
+ if(failedRemake){
+  const actual=candidates.filter(e=>e.versionId===definition.parentVersionId&&e.sha256===definition.parentVersionSha256);
+  if(actual.length===1){parent=actual[0];parentDefinition=owned(c.view.recipes.executionDefinitions,parent.executionDefinitionId,'失败重制的实际父调用定义');parentOutput=owned(c.model.expectedOutputs,parent.expectedOutputId,'失败重制的实际父预期产物');parentSource=parentDefinition.id===plan.definitionId?plan:(c.model.materialProductionRecipeRevisions||[]).find(r=>r.definitionId===parentDefinition.id&&r.materialProductionPlanId===plan.id);}
+ }
+ if(!parent||!failedRemake&&new Set(parentCandidates.map(e=>e.versionId)).size!==1)blockers.push('当前素材预期产物尚未形成唯一实际候选，不能新建后继版本');
  if(parent){
   media=await tx.getMedia(family.id,parent.versionId);const projected=c.state.assetVersionsById?.[parent.versionId];
-  if(parent.executionDefinitionId!==definition.id||parent.callPackageHash!==definition.definitionHash||!projected||projected.familyId!==family.id||projected.sha256!==parent.sha256||projected.path!==output.targetPath||!media||media.sha256!==parent.sha256||media.relativePath!==output.targetPath||media.availability!=='PRESENT'||!['FORMAL','IMPORTED_EVIDENCE'].includes(media.metadata?.authorityDomain)||!['PUBLIC',undefined].includes(media.metadata?.visibility)||media.metadata?.sourceRole==='ORIGINAL_SOURCE'||(await mediaRetirementOverlay(tx,media)).state!=='ACTIVE')blockers.push('父版本必须是本调用包的精确实际候选及可用正式媒体');
+  if(parent.executionDefinitionId!==parentDefinition.id||parent.callPackageHash!==parentDefinition.definitionHash||!projected||projected.familyId!==family.id||projected.sha256!==parent.sha256||projected.path!==parentOutput.targetPath||!media||media.sha256!==parent.sha256||media.relativePath!==parentOutput.targetPath||media.availability!=='PRESENT'||!['FORMAL','IMPORTED_EVIDENCE'].includes(media.metadata?.authorityDomain)||!['PUBLIC',undefined].includes(media.metadata?.visibility)||media.metadata?.sourceRole==='ORIGINAL_SOURCE'||(await mediaRetirementOverlay(tx,media)).state!=='ACTIVE')blockers.push('父版本必须是本调用包的精确实际候选及可用正式媒体');
  }
  const definitions=new Set((c.view.recipes.executionDefinitions||[]).filter(d=>d.workItemRef===work.id).map(d=>d.id));
  const requests=latestPer((events['execution-request']||[]).filter(e=>e.workItemId===work.id||e.familyId===family.id),'executionRequestId');
@@ -44,15 +50,30 @@ export async function materialProductionRevisionContext(tx,c){
  for(const request of requests){
   const state=String(request.requestState||request.status||'UNKNOWN'),requestRuns=runs.filter(r=>r.executionRequestId===request.executionRequestId),count=new Set(candidates.filter(e=>e.executionRequestId===request.executionRequestId).map(e=>e.versionId)).size;
   if(count>=Math.max(1,Number(request.maxOutputs)||1))continue;
-  if(['AUTHORIZED','CLAIMED','RESULT_UNKNOWN','UNKNOWN'].includes(state)&&!requestRuns.length||['AUTHORIZED','CLAIMED'].includes(state)&&requestRuns.some(r=>!['FAILED','CANCELLED'].includes(runState(r))))blockers.push('素材仍有未完成的生成授权：'+request.executionRequestId);
+  if(['RESULT_UNKNOWN','UNKNOWN'].includes(state)||['AUTHORIZED','CLAIMED'].includes(state)&&!requestRuns.length||['AUTHORIZED','CLAIMED'].includes(state)&&requestRuns.some(r=>!['FAILED','CANCELLED'].includes(runState(r))))blockers.push('素材仍有未完成的生成授权：'+request.executionRequestId);
  }
- if(parent){const run=runs.find(r=>r.runId===parent.runId);if(!run||runState(run)!=='SUCCEEDED'||run.executionDefinitionId!==definition.id||run.callPackageHash!==definition.definitionHash||run.executionRequestId!==parent.executionRequestId)blockers.push('父候选的实际成功 Run 闭包不完整');}
+ if(parent){const run=runs.find(r=>r.runId===parent.runId);if(!run||runState(run)!=='SUCCEEDED'||run.executionDefinitionId!==parentDefinition.id||run.callPackageHash!==parentDefinition.definitionHash||run.executionRequestId!==parent.executionRequestId)blockers.push('父候选的实际成功 Run 闭包不完整');}
+ if(failedRemake&&parent){
+  try{
+   if(!parentSource||parentDefinition.materialProductionPlanId!==plan.id||parentDefinition.workItemRef!==work.id||parentOutput.familyId!==family.id||parentOutput.executionDefinitionRef!==parentDefinition.id||!family.expectedOutputRefs.includes(parentOutput.id)||!inspectExecutionDefinitionHash(parentDefinition).valid)fail('失败重制缺少真实父版本的固定定义');
+   const doc=await tx.readDocumentRevision(parentSource.sourceRevisionId);
+   if(!doc||doc.deleted||doc.sha256!==parentSource.sourceSha256||sha256(doc.bytes)!==doc.sha256||!doc.aliases?.includes(parentSource.sourcePath)||doc.metadata?.sourceRole!==(parentDefinition.id===plan.definitionId?'MATERIAL_PRODUCTION_PLAN':'MATERIAL_PRODUCTION_RECIPE')||!same(parentDefinition,{...JSON.parse(Buffer.from(doc.bytes).toString('utf8')).executionDefinition,sourceRef:parentSource.sourcePath,sourceRevisionId:doc.revisionId,sourceSha256:doc.sha256}))fail('失败重制的实际父版本来源不可验证');
+   if(!c.api?.safeGeneratedPath||!c.api?.safeReviewPendingPath)fail('失败重制缺少实例原件和未登记输出的实际文件核查器');
+   await c.api.safeGeneratedPath(parentOutput.targetPath,{versionId:parent.versionId,sha256:parent.sha256});
+   const versionId=family.id+'@'+output.plannedVersionLabel;
+   if((events['asset-version']||[]).some(e=>e.executionDefinitionId===definition.id||e.expectedOutputId===output.id||e.versionId===versionId||e.path===output.targetPath)||(c.model.assetVersions||[]).some(v=>v.id===versionId||v.path===output.targetPath)||(await tx.listMedia()).some(m=>m.metadata?.executionDefinitionId===definition.id||m.metadata?.expectedOutputId===output.id||m.versionId===versionId||m.relativePath===output.targetPath||(m.aliases||[]).includes(output.targetPath)))fail('失败预期产物仍有候选或受管媒体登记，必须先核清实际结果');
+   let absent=false;try{await c.api.safeReviewPendingPath(output.targetPath,family.id);}catch(e){if(e.code==='ENOENT')absent=true;else throw e;}if(!absent)fail('失败预期产物路径仍有实际文件，不能跳过未登记产物');
+   const attemptRequests=(events['execution-request']||[]).filter(e=>e.executionDefinitionId===definition.id),ids=new Set(attemptRequests.map(e=>e.executionRequestId)),attemptRuns=(events.run||[]).filter(e=>e.executionDefinitionId===definition.id||ids.has(e.executionRequestId));
+   failedAttempt={schemaVersion:FAILED_OUTPUT_REMAKE_SCHEMA,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),source:{path:sourceRow.sourcePath,revisionId:sourceRow.sourceRevisionId,sha256:sourceRow.sourceSha256},parentDefinitionId:parentDefinition.id,parentDefinitionHash:parentDefinition.definitionHash,parentExpectedOutputId:parentOutput.id,parentExpectedOutputHash:domainHash(parentOutput),parentSource:{path:parentSource.sourcePath,revisionId:parentSource.sourceRevisionId,sha256:parentSource.sourceSha256},parentRun:runs.find(r=>r.runId===parent.runId),parentMedia:{mediaId:media?.mediaId,versionId:media?.versionId,sha256:media?.sha256,relativePath:media?.relativePath,byteSize:media?.byteSize,registrationEventId:media?.metadata?.registrationEventId||null},absence:{path:output.targetPath,versionId,candidates:0,registeredMedia:0,fileState:'ABSENT'},requests:attemptRequests,runs:attemptRuns,requestHeads:latestPer(attemptRequests,'executionRequestId').map(eventBinding),runHeads:latestPer(attemptRuns,'runId').map(eventBinding)};
+   assertFailedMaterialAttempt(failedAttempt,{definition,output,parentCandidate:parent,parentDefinition,parentOutput,fail});
+  }catch(e){failedAttempt=null;blockers.push('当前素材预期产物尚未形成候选；失败重制核查未通过：'+String(e.message||e));}
+ }
  const labels=(c.model.expectedOutputs||[]).filter(o=>o.familyId===family.id).map(o=>o.plannedVersionLabel);
  if(labels.some(label=>!/^V\d{3,}$/.test(label||''))||new Set(labels).size!==labels.length)fail('素材族历史版本标签不唯一或无效');
  const plannedVersionLabel='V'+String(Math.max(...labels.map(label=>Number(label.slice(1))))+1).padStart(3,'0');
  const reviews=(events.review||[]).filter(e=>e.applicationStatus==='APPLIED'&&e.effect==='APPLIED'&&e.subjectType==='ASSET'&&e.familyId===family.id);
  const adoptedId=c.state.assetFamiliesById?.[family.id]?.currentVersionId||null,adopted=adoptedId?c.state.assetVersionsById[adoptedId]:null,meta=await tx.getMetadata();
- const revisionBasis={materialProductionPlanId:plan.id,familyId:family.id,workItemId:work.id,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),parentVersionId:parent?.versionId||null,parentVersionSha256:parent?.sha256||null,parentCandidate:eventBinding(parent),parentReview:eventBinding(latest(reviews.filter(e=>e.versionId===parent?.versionId&&e.versionSha256===parent?.sha256))),familyReviewHead:eventBinding(latest(reviews)),adoptedVersion:adopted?{versionId:adopted.id,sha256:adopted.sha256}:null,requestHeads:requests.map(eventBinding),runHeads:runs.map(eventBinding),plannedVersionLabel,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch};
+ const revisionBasis={materialProductionPlanId:plan.id,familyId:family.id,workItemId:work.id,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),parentVersionId:parent?.versionId||null,parentVersionSha256:parent?.sha256||null,parentCandidate:eventBinding(parent),parentReview:eventBinding(latest(reviews.filter(e=>e.versionId===parent?.versionId&&e.versionSha256===parent?.sha256))),familyReviewHead:eventBinding(latest(reviews)),adoptedVersion:adopted?{versionId:adopted.id,sha256:adopted.sha256}:null,requestHeads:requests.map(eventBinding),runHeads:runs.map(eventBinding),plannedVersionLabel,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch,...(failedAttempt?{failedAttempt}: {})};
  return {plan,family,work,definition,output,parent,media,revisionBasis,plannedVersionLabel,blockers:[...new Set(blockers)]};
 }
 
