@@ -31,8 +31,10 @@ export async function apiFixture(t){
  globalThis.fetch=async()=>{externalCalls++;throw Error('External model/provider calls are forbidden in this isolated protocol test');};
  t.after(async()=>{globalThis.fetch=originalFetch;process.env.REVIEW_INSTANCE_READ_ONLY='';process.env.REVIEW_REMOTE_READ_ONLY='';await storeRepository.close();await server.close();for(const k of keys){if(env[k]===undefined)delete process.env[k];else process.env[k]=env[k];}});
  const post=async(route,url,body,{key,headers={}}={})=>{
-  const op=await store.operationalSnapshot();
-  const response=await route.POST(new Request('http://localhost/api/'+url,{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost','If-Match':op.mutationEtag,'Idempotency-Key':key||'material-native:'+String(++sequence),...headers},body:JSON.stringify({...(url.startsWith('v8/')?{snapshotId:(await store.reviewData()).snapshotId}:{}),...body})}));
+  // Hosted/read-only writes must fail before any private repository or CAS read.
+  const readOnly=process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1';
+  const op=readOnly?null:await store.operationalSnapshot();
+  const response=await route.POST(new Request('http://localhost/api/'+url,{method:'POST',headers:{'Content-Type':'application/json',Origin:'http://localhost','If-Match':op?.mutationEtag||'"readonly-boundary-fixture"','Idempotency-Key':key||'material-native:'+String(++sequence),...headers},body:JSON.stringify({...(url.startsWith('v8/')&&!readOnly?{snapshotId:(await store.reviewData()).snapshotId}:{}),...body})}));
   return {status:response.status,body:await response.json()};
  };
  const materialPost=(body,options)=>post(material,'instance/material-production',{requirementId:imageRequirementId,...body},options);
