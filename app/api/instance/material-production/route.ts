@@ -1,7 +1,7 @@
 import * as store from '../../v8/_store';
 import {domainRepository,domainMutation,domainError,domainBody,requiredString,expectedRevision,jsonResponse,HttpError} from '../_domain';
 import {getMaterialProductionWorkspace,saveMaterialProductionDraft,previewMaterialProduction,enqueueMaterialProduction} from '../../../../host/instance-runtime/material-production-service.mjs';
-const api={projectOperationalState:store.projectOperationalState};
+const api={projectOperationalState:store.projectOperationalState,safeGeneratedPath:store.safeGeneratedPath};
 export async function GET(request:Request){try{
  const requirementId=new URL(request.url).searchParams.get('requirementId');if(!requirementId)throw new HttpError(422,'请选择素材需求');
  if(store.hostedReadOnlyMode()){

@@ -4112,6 +4112,25 @@ export function projectOperationalState(
       materialItemByDefinition.set(String(previous.definitionId), work);
     }
   }
+  // Explicit legacy AUDIO revision rows preserve adopted predecessor consumers
+  // without declaring the legacy family to be a native first-setup plan.
+  const legacyAudioRevisions = (Array.isArray(nativeModel.legacyMaterialRecipeRevisions) ? nativeModel.legacyMaterialRecipeRevisions : []) as Array<Record<string, unknown>>;
+  for (const revision of legacyAudioRevisions) {
+    const work = (data.productionModel.materialWorkItems || []).find(w => w.id === revision.workItemId);
+    const family = data.productionModel.assetFamilies.find(f => f.id === revision.familyId);
+    const output = (data.productionModel.expectedOutputs || []).find(o => o.id === revision.expectedOutputId);
+    if (!work || !family || !output || (family as unknown as Record<string, unknown>).kind !== 'AUDIO' || family.ownerRef !== work.id || work.outputAssetRef !== family.id
+      || work.executionDefinitionRef !== revision.definitionId || family.currentExpectedOutputId !== output.id
+      || output.executionDefinitionRef !== revision.definitionId || output.familyId !== family.id
+      || output.legacyMaterialRecipeRevisionId !== revision.id || output.legacyVersionId !== family.id + '@' + output.plannedVersionLabel
+      || revision.requirementId !== work.requirementRef || revision.requirementHash !== work.requirementHash
+      || !/^LA-RECIPE-[a-f0-9]{24}$/.test(String(revision.id || '')) || !(family.expectedOutputRefs || []).includes(output.id)) continue;
+    nativeRevisionFamilyIds.add(family.id);
+    for (const previous of legacyAudioRevisions.filter(r => r.familyId === family.id && r.workItemId === work.id && r.requirementHash === work.requirementHash)) {
+      materialItemByDefinition.set(String(previous.previousDefinitionId), work);
+      materialItemByDefinition.set(String(previous.definitionId), work);
+    }
+  }
   const versions = new Map<string, ProjectedVersion>();
   for (const source of data.productionModel.assetVersions) {
     const version: ProjectedVersion = { ...source, source: 'BASE_SNAPSHOT' };
