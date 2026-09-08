@@ -256,6 +256,43 @@ test("Codex Bridge settings project into the host profile without rebinding revi
   );
   assert.equal(configHash(semanticConfiguration(validated)), beforeSemantic);
 });
+test("a collaboration-only publish does not misclassify a pre-existing uncatalogued requirement as deletion", async () =>
+  fixture(async (repo) => {
+    await repo.writeTransaction((tx) => initializeConfiguration(tx));
+    await repo.writeTransaction(async (tx) => {
+      const view = await tx.readView();
+      const snapshot = structuredClone(view.snapshot);
+      const requirement = snapshot.productionModel.materialRequirements[0];
+      delete requirement.businessCategoryPrimaryId;
+      delete requirement.businessCategorySecondaryId;
+      requirement.businessCategoryPrimary = "历史未登记分类";
+      requirement.businessCategorySecondary = "历史未登记类型";
+      const projected = preserveConfigurationProjection({
+        snapshot,
+        recipes: view.recipes,
+        baseSnapshot: view.snapshot,
+        profile: view.profile,
+      });
+      await tx.publishRelease({
+        ...projected,
+        expectedReleaseId: view.releaseId,
+        sourceRevisionIds: view.sourceRevisionIds,
+      });
+    });
+    await repo.readTransaction(async (tx) => {
+      const current = await getConfiguration(tx);
+      const configuration = structuredClone(current.configuration);
+      configuration.collaboration.codexBridge.autoStart = true;
+      const preview = await previewConfiguration(tx, {
+        configuration,
+        expectedReleaseId: current.releaseId,
+        expectedConfigurationRevisionId: current.revisionId,
+        upgradeKeys: [],
+      });
+      assert.equal(preview.semanticChange, false);
+      assert.deepEqual(preview.changedGroups, ["collaboration"]);
+    });
+  }));
 test("production standards render actual scoped evidence instead of borrowing navigation-shot identity", () => {
   const c = defaultConfiguration();
   const spec = reviewSpec(

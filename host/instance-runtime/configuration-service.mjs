@@ -280,6 +280,11 @@ export async function previewConfiguration(
         c.id === requirement.businessCategoryPrimaryId ||
         c.label === requirement.businessCategoryPrimary,
     );
+    // A legacy requirement may already be outside the configuration catalog.
+    // That pre-existing mismatch is not a deletion by this configuration
+    // change; only identities that the previous configuration actually owned
+    // can be protected by the removal checks below.
+    if (!old) continue;
     const next = config.taxonomy.categories.find((c) => c.id === old?.id);
     assert(next, "使用中的一级分类不能删除");
     const priorType = old.types.find(
