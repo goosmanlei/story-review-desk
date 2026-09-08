@@ -224,3 +224,10 @@ test('scheduler credit failure stays blocked across restart until its own explic
   await f.call('decision', {decisionId: decision.id, action: 'resume', comment: 'User confirmed credit recovery'}, f.main);
   assert.ok(await f.claim('CREATIVE'));
 });
+
+test('formal delivery has an implicit project-wide lock across author pools', async () => {
+  const f = await fixture().start();
+  for (const kind of ['CREATIVE', 'DEVELOP']) {await f.submit({kind}); await f.submitWork(await f.claim(kind)); await f.qa(await f.claim(kind + '_QA'));}
+  const creative = await f.claim('CREATIVE'); assert.ok(creative.run.resources.includes('project:formal-delivery'));
+  assert.equal(await f.claim('DEVELOP'), null); await f.finalize(creative); assert.ok(await f.claim('DEVELOP'));
+});

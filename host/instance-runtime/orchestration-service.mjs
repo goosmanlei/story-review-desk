@@ -7,6 +7,7 @@ export const WORKER_KINDS = Object.freeze(['CREATIVE', 'CREATIVE_QA', 'DEVELOP',
 const terminal = new Set(['DONE', 'CANCELLED', 'SUPERSEDED']);
 const running = new Set(['RUNNING', 'FINALIZING_RUNNING']);
 const heldRuns = new Set(['RUNNING', 'RESULT_UNKNOWN', 'CANCEL_REQUESTED']);
+const claimResources = task => [...new Set([...task.resources, ...(task.status === 'FINALIZING' ? ['project:formal-delivery'] : [])])];
 const fail = (code, message) => {throw Object.assign(new Error(message), {code});};
 const requireValue = (ok, message, code = 'ORCHESTRATION_INVALID') => {if (!ok) fail(code, message);};
 const text = (value, name, maximum = 16000) => {requireValue(typeof value === 'string' && value.trim() && value.length <= maximum && !value.includes('\0'), name + ' is required'); return value;};
@@ -204,7 +205,7 @@ export async function writeOrchestration(tx, input) {
       if (used < config.concurrency[args.kind] && !activeRuns.some(run => run.workerId === workerId)) for (const task of tasks) {
         if (task.kind !== args.kind || !['READY', 'WAITING_DEPENDENCIES', 'FINALIZING'].includes(task.status) || args.taskId && args.taskId !== task.id || task.runtimeEpoch !== metadata.runtimeEpoch) continue;
         if (task.dependencies.some(dependency => tasks.find(item => item.id === dependency)?.status !== 'DONE')) continue;
-        if (task.resources.some(resource => occupied.has(resource))) continue;
+        if (claimResources(task).some(resource => occupied.has(resource))) continue;
         if (task.kind.endsWith('_QA') && allRuns.some(run => run.rootId === task.rootId && run.phase === 'WORK' && run.workerId === workerId)) continue;
         eligible.push(task);
       }
@@ -214,7 +215,7 @@ export async function writeOrchestration(tx, input) {
       else {
         await store.clearDependencyDecisions(config, task.id);
         const phase = task.status === 'FINALIZING' ? 'FINALIZE' : task.kind.endsWith('_QA') ? 'QA' : 'WORK';
-        const run = {id: id('run'), taskId: task.id, rootId: task.rootId, workerId, tokenHash: sha256(token), generation: config.scheduler.generation, runtimeEpoch: metadata.runtimeEpoch, kind: task.kind, phase, status: 'RUNNING', resources: task.resources, createdAt: stamp()};
+        const run = {id: id('run'), taskId: task.id, rootId: task.rootId, workerId, tokenHash: sha256(token), generation: config.scheduler.generation, runtimeEpoch: metadata.runtimeEpoch, kind: task.kind, phase, status: 'RUNNING', resources: claimResources(task), createdAt: stamp()};
         task.status = phase === 'FINALIZE' ? 'FINALIZING_RUNNING' : 'RUNNING'; task.currentRunId = run.id;
         await store.save(task); await store.put('runs/' + run.id, run); await store.event(config, 'TASK_CLAIMED', {taskId: task.id, runId: run.id, workerId, phase});
         output = {task: clean(task), run: {...clean(run), token}};
