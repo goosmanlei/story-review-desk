@@ -9,6 +9,7 @@ import './trial/trial.css';
 type Criterion = { id: string; label: string; description: string };
 export type TrialAsset = {
   id: string; mediaId: string; versionId: string; sha256: string;
+  scopeId?: string; sourceRequirementId?: string;
   mediaKind: 'IMAGE' | 'AUDIO' | 'VIDEO'; mediaUrl: string; version: number;
   lifecycle: string; title?: string; label?: string; recipeId?: string; metadata: Record<string, unknown>;
   prompt: string | { main?: string; negative?: string; full?: string; model?: string; parameters?: Record<string, unknown>; inputs?: unknown[] };
@@ -23,7 +24,7 @@ export type TrialSnapshot = {
   mode: 'LOCAL_TRIAL'; mutationEtag: string;
   scope: { id: string; title: string; projectTitle: string; countsTowardFormalProject: false };
   checkpoint: Record<string, unknown>;
-  recipes: Array<{ id: string; subjectId: string; label: string; model: string; outputPath?: string; fullPrompt?: string; blockedBy?: string[] }>;
+  recipes: Array<{ id: string; subjectId: string; originalSubjectId?: string; sourceRequirementId?: string; sourceRequirementHash?: string; sourceTrialThemeId?: string; label: string; model: string; mediaKind?: string; outputPath?: string; fullPrompt?: string; blockedBy?: string[] }>;
   story?: {
     episodes: Array<{ episodeUid: string; displayLabel: string; title: string; goal: string; audienceKnowsAtEnd: string; endingHook: string; sourceSceneId: string }>;
     sourceScenes: Array<{ sceneId: string; exactSourceText: string }>;
@@ -41,13 +42,27 @@ function readablePrompt(value: TrialAsset['prompt']) {
   return typeof value === 'string' ? value : value.full || [value.main, value.negative].filter(Boolean).join('\n\n');
 }
 
-export async function loadTrialSnapshot(signal: AbortSignal): Promise<TrialSnapshot | null> {
-  const response = await fetch('/api/trial/snapshot', { cache: 'no-store', signal });
+export type TrialScopeIndex = { scopes: TrialSnapshot['scope'][]; defaultScopeId: string | null };
+export async function loadTrialScopes(signal: AbortSignal): Promise<TrialScopeIndex> {
+  const response = await fetch('/api/trial/scopes', { cache: 'no-store', signal });
+  const data = await response.json() as TrialScopeIndex & { message?: string };
+  if (!response.ok) throw new Error(data.message || '试制范围暂时无法读取。');
+  if (!Array.isArray(data.scopes)) throw new Error('试制范围格式不匹配。');
+  return data;
+}
+export async function loadTrialSnapshots(signal: AbortSignal): Promise<TrialSnapshot[]> {
+  const index = await loadTrialScopes(signal);
+  const snapshots = await Promise.all(index.scopes.map((scope) => loadTrialSnapshot(signal, scope.id)));
+  return snapshots.filter((snapshot): snapshot is TrialSnapshot => snapshot !== null);
+}
+export async function loadTrialSnapshot(signal: AbortSignal, scopeId?: string): Promise<TrialSnapshot | null> {
+  const response = await fetch('/api/trial/snapshot' + (scopeId ? `?scopeId=${encodeURIComponent(scopeId)}` : ''), { cache: 'no-store', signal });
   const data = await response.json() as TrialSnapshot & { error?: string; message?: string };
   if (response.status === 503 && data.error === 'TRIAL_NOT_IMPORTED') return null;
   if (!response.ok) throw new Error(data.message || '试制资料暂时无法读取，请稍后重试。');
   if (data.mode !== 'LOCAL_TRIAL' || !data.scope || !Array.isArray(data.assets) || !Array.isArray(data.recipes)) throw new Error('试制资料格式不匹配。');
-  return { ...data, mutationEtag: response.headers.get('etag') || data.mutationEtag };
+  if (scopeId && data.scope.id !== scopeId) throw new Error('试制返回范围与所选范围不一致。');
+  return { ...data, assets: data.assets.map(asset => ({ ...asset, scopeId: data.scope.id })), mutationEtag: response.headers.get('etag') || data.mutationEtag };
 }
 
 export function AssetReview({ asset, etag, refresh, currentVersion, readOnly=false }: { asset: TrialAsset; etag: string; refresh: () => Promise<void>; currentVersion: boolean; readOnly?:boolean }) {
@@ -70,10 +85,11 @@ export function AssetReview({ asset, etag, refresh, currentVersion, readOnly=fal
     if (!canEdit || busy) return;
     setBusy(true); setMessage('');
     try {
-      const response = await fetch('/api/trial/reviews', {
+      const response = await fetch('/api/trial/reviews' + (asset.scopeId ? `?scopeId=${encodeURIComponent(asset.scopeId)}` : ''), {
         method: 'POST', headers: { 'Content-Type': 'application/json', 'If-Match': etag, 'Idempotency-Key': `trial-review-${crypto.randomUUID()}` },
         body: JSON.stringify({
           mediaId: asset.mediaId, versionId: asset.versionId, sha256: asset.sha256, decision, comment,
+          ...(asset.scopeId ? { scopeId: asset.scopeId } : {}),
           criteria: asset.reviewCriteria.map(({ id }) => ({ id, result: answers[id]?.result || '', comment: answers[id]?.comment || '' })),
           ...(internalOnly ? { rightsAttestation: 'PROJECT_INTERNAL_ONLY' } : {}),
           ...(asset.reviewHeadId ? { supersedesReviewEventId: asset.reviewHeadId } : {}),

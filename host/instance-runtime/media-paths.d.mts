@@ -1,1 +1,1 @@
-export function instanceCandidateRelativePath(logicalPath: string): string;
+export function instanceCandidateRelativePath(logicalPath: string, familyId?: string): string;

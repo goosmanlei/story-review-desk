@@ -5240,7 +5240,7 @@ export async function appendEvent(
         (await tx.registerMedia({
           mediaId: assertString(payload.familyId, 'familyId'),
           versionId: assertString(payload.versionId, 'versionId'),
-          relativePath: instanceCandidateRelativePath(assertString(payload.path, 'path')),
+          relativePath: instanceCandidateRelativePath(assertString(payload.path, 'path'), assertString(payload.familyId, 'familyId')),
           sha256: assertSha256(payload.sha256, 'sha256'),
           byteSize: Number(payload.byteSize),
           aliases: [String(payload.versionId), String(payload.path)],
@@ -5379,10 +5379,10 @@ export async function safeGeneratedPath(projectPath: string, binding: { versionI
   return resolved;
 }
 
-export async function safeReviewPendingPath(projectPath: string) {
+export async function safeReviewPendingPath(projectPath: string, familyId?: string) {
   if (instanceRepositoryMode() && !hostedReadOnlyMode()) {
     let relativePath: string;
-    try { relativePath = instanceCandidateRelativePath(projectPath); }
+    try { relativePath = instanceCandidateRelativePath(projectPath, familyId); }
     catch { throw new HttpError(422, 'Candidate media requires a normalized instance or legacy _review_pending target'); }
     return safeInstanceMediaPath(relativePath);
   }
