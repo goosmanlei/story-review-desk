@@ -94,6 +94,7 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
   if(!['GET','HEAD'].includes(request.method())){writes.push(request.method()+' '+url.pathname);return route.fulfill({status:418,json:{error:'FIXTURE_MUTATION_BLOCKED'}});}
   if(compactReview&&url.pathname==='/api/v8/asset-versions'){const versionId=url.searchParams.get('versionId');return json({events:versionId==='fixture-family-a@V002'?[{eventId:'fixture-generation',familyId:'fixture-family-a',versionId,sha256:hash(902),actualPromptHash:hash(761),actualPrompt:{main:'本次实际旧Prompt'},recipePromptHash:hash(762),promptChangedFromCallPackage:true,promptSyncRequired:true,runId:'fixture-run',callPackageHash:hash(763),inputBindings:[{order:1,path:'fixture-actual-input.png',assetFamilyRef:'fixture-input-family',assetVersionRef:'fixture-input@V001',sha256:hash(764)}],inputBindingsHash:hash(765)}]:[]});}
   if(compactReview&&url.pathname==='/api/v8/recipes/fixture-compact-recipe')return json({recipe:{id:'fixture-compact-recipe',title:'合成制作定义',pipelineStageCode:'P03',executorKind:'MODEL_API',definitionHash:hash(763),currentRevisionId:'fixture-recipe-r1',upload:{items:[{order:1,path:'fixture-current-input.png'}],rawText:'当前附件定义'},model:{branch:'fixture-model',rawRule:'fixture',resolution:'1920x1080'},parametersRaw:'seed=42',prompt:{main:'当前权威Prompt不等于历史实际Prompt',negative:'无多余文字',negativeApplication:'APPEND'},output:{path:'fixture-output.png',mediaType:'IMAGE'},declaredGate:'INTERNAL_MACHINE_ONLY',rawSourceBlock:'fixture-only'}});
+  if(url.pathname==='/api/trial/scopes')return json({scopes:[{id:'trial-fixture',countsTowardFormalProject:false}],defaultScopeId:'trial-fixture'});
   if(url.pathname==='/api/trial/snapshot')return json({mode:'LOCAL_TRIAL',scope:{id:'trial-fixture',countsTowardFormalProject:false},recipes:[],assets:trialAssets,mutationEtag:'trial-fixture'});
   if(url.pathname==='/api/instance/profile')return json(profile);
   if(url.pathname==='/api/v8/ui/bootstrap')return json({data:snapshot,snapshotId:snapshot.snapshotId});
@@ -275,6 +276,20 @@ test('独立试制版本选择保存专用永久身份，刷新保留原意见�
  const f=await materialFixture(page);await page.goto('/?view=materials&materialPanel=material&entity='+ids.a+'&materialTrial=trial-fixture-0');
  await expect(drawer(page).locator('.trial-version')).toContainText('原项目内放行意见');await drawer(page).getByRole('button',{name:'版本 1',exact:true}).click();await expect(drawer(page).locator('.trial-version')).toContainText('原返修意见');await expect(page).toHaveURL(/materialTrialVersion=trial-version-1/);expect(new URL(page.url()).searchParams.has('version')).toBe(false);
  await page.reload();await expect(drawer(page).locator('.trial-version')).toContainText('原返修意见');await expect(drawer(page).getByRole('button',{name:'版本 1',exact:true})).toHaveAttribute('aria-pressed','true');await expect(page).toHaveURL(/materialTrial=trial-fixture-0/);await count(page,'媒介','全部媒介',5);await expect(drawer(page).getByText(/UNKNOWN/, {exact:false})).toHaveCount(1);clean(f);
+});
+
+test('新试制范围按需求永久身份进入素材卡，候选不增加正式需求分母',async({page})=>{
+ const f=await materialFixture(page),scopeId='new-trial-scope',subjectId='new-trial-material';
+ await page.route('**/api/trial/scopes',route=>route.fulfill({json:{scopes:[{id:scopeId,title:'新独立范围',countsTowardFormalProject:false}],defaultScopeId:scopeId}}));
+ const asset={id:'new-trial-asset',mediaId:subjectId,versionId:'new-trial-version',sha256:hash(999),mediaKind:'IMAGE',mediaUrl:'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="16" height="9"/%3E',version:1,lifecycle:'REVIEW_PENDING',title:'新人物候选',metadata:{RIGHTS_STATUS:'UNKNOWN'},prompt:'新范围实际Prompt',qa:{},reviewCriteria:[]};
+ await page.route('**/api/trial/snapshot*',route=>route.fulfill({json:{mode:'LOCAL_TRIAL',scope:{id:scopeId,title:'新独立范围',countsTowardFormalProject:false},recipes:[{id:'new-trial-recipe',subjectId,sourceRequirementId:'MATREQ-FIXTURE-A',sourceRequirementHash:f.requirements[0].requirementHash,label:'新人物候选',model:'FIXTURE',mediaKind:'IMAGE'}],assets:[asset],mutationEtag:'"new-trial-head"'}}));
+ const themeId=`TRIAL:${scopeId}:${subjectId}`;
+ await page.goto('/?view=materials&materialPanel=material&entity='+ids.a+'&materialTrial='+encodeURIComponent(themeId));
+ await expect(drawer(page).locator('.trial-version')).toContainText('新人物候选');
+ await expect(drawer(page).locator('.trial-status')).toHaveText('待你审阅');
+ await expect(drawer(page).locator('.material-trial-production')).toContainText('新范围实际Prompt');
+ await count(page,'媒介','全部媒介',5);
+ await page.reload();await expect(drawer(page).locator('.trial-version')).toContainText('新人物候选');clean(f);
 });
 
 

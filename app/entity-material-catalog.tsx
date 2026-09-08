@@ -8,7 +8,7 @@ import {RelationshipCanvas,type CanvasNode,type CanvasEdge} from './relationship
 import {StorySettingsWorkspace} from './story-settings-workspace';
 import {readManagementResponse} from './system-management-client';
 import {publicRef,visibleText} from './review-semantics';
-import {AssetReview,loadTrialSnapshot,type TrialSnapshot,type TrialAsset} from './trial-asset-review';
+import {AssetReview,loadTrialSnapshots,type TrialSnapshot,type TrialAsset} from './trial-asset-review';
 import {useRuntimeMode} from './runtime-mode';
 import {classifiedMaterial,materialMediaTypeOptions,materialCreatorStageOptions,type MaterialCreatorStageProjection,type MaterialMediaType,type MaterialCreatorStage} from './material-taxonomy';
 import {allMaterialCatalogFilters,filterMaterialCatalogRows,isAllCatalogValue,materialCatalogEntityGroups,materialCatalogFacetCounts,materialCatalogUsage,uniqueMaterialCatalogRows,type MaterialCatalogFacet,type MaterialCatalogFilters,type MaterialCatalogPreparation,type MaterialCatalogRow} from './material-catalog-facets';
@@ -27,7 +27,7 @@ export function MaterialReviewPoints({requirement,historical=false}:{requirement
  return <section className="entity-review-points" aria-label="审阅要点">{historical?<p>历史版本按实际生产资料和原冻结标准核对；当前要求不补作历史生成依据。</p>:<><h3>补充审阅要点</h3><ul>{points.map((p,i)=><li key={i}>{visibleText(p)}</li>)}</ul></>}</section>;
 }
 
-type TrialBinding={trialThemeId:string;entityId:string;stateId:string;title:string;mediaType:string;displayState:string;reason:string;versions:Array<{mediaId:string;versionId:string;sha256:string;lifecycle:string}>};
+type TrialBinding={trialThemeId:string;entityId:string;stateId:string;title:string;mediaType:string;displayState:string;reason:string;versions:Array<{scopeId?:string;mediaId:string;versionId:string;sha256:string;lifecycle:string}>};
 type Directory={revisionId?:string;releaseId?:string;graph:DomainGraph;bindings:Array<{requirementId:string;entityId:string;stateId:string;representationId?:string;reviewFocus?:{points:Array<{label:string}>}}>;trials:TrialBinding[];staleIds:string[]};
 export type MaterialCatalogControlPatch={search?:string;mediaType?:'全部'|MaterialMediaType;creatorStage?:'全部'|MaterialCreatorStage;episodeScope?:string;sceneScope?:string};
 type Props={model?:ProductionModel;requirements:MaterialRequirement[];selectedRequirement:MaterialRequirement|null|undefined;mode?:'classification'|'episodes';onSelect:(r:MaterialRequirement)=>void;stageFor:(r:MaterialRequirement)=>MaterialCreatorStageProjection;inspector:ReactNode;inspectorReady?:boolean;episodeScope:string;sceneScope:string;mediaFilter:string;stageFilter:string;search:string;catalogLoading?:boolean;onFiltersChange?:(patch:MaterialCatalogControlPatch)=>void};
@@ -63,7 +63,7 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
  const [workspace,setWorkspace]=useState<WorkspaceState|null>(null),[directory,setDirectory]=useState<Directory|null>(null),[preparation,setPreparation]=useState<MaterialCatalogPreparation|null>(null);
  const [canvasHighlight,setCanvasHighlight]=useState<{entityId:string;nodeId?:string}>({entityId:''});
  const [error,setError]=useState(''),[refresh,setRefresh]=useState(0),[selectedEntity,setSelectedEntity]=useState(''),[directoryQuery,setDirectoryQuery]=useState('');
- const [panel,setPanel]=useState<MaterialPanelIntent|null>(null),[panelError,setPanelError]=useState(''),[trialSnapshot,setTrialSnapshot]=useState<TrialSnapshot|null>(null),[trialVersion,setTrialVersion]=useState('');
+ const [panel,setPanel]=useState<MaterialPanelIntent|null>(null),[panelError,setPanelError]=useState(''),[trialSnapshots,setTrialSnapshots]=useState<TrialSnapshot[]>([]),[trialVersion,setTrialVersion]=useState('');
  const [definitionOwner,setDefinitionOwner]=useState<'MATERIAL'|'SETTINGS'>('MATERIAL'),[edit,setEdit]=useState<{collection:'states'|'representations'|'requirements'|'relations';id:string}|null>(null);
  const [filters,setFilters]=useState<MaterialCatalogFilters>(()=>({...allMaterialCatalogFilters(),mediaType:normalize(mediaFilter),creatorStage:normalize(stageFilter),episodeUid:normalize(episodeScope),sceneId:normalize(sceneScope),search}));
  const [initialLocation]=useState(()=>typeof window==='undefined'?null:window.location.href);
@@ -76,14 +76,32 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
  useEffect(()=>{const restore=(event:Event)=>{const incoming=materialPanelIntent(new URL(location.href).searchParams),previous=lastPanelLocation?new URL(lastPanelLocation):null;const sameDefinition=Boolean(new URL(location.href).searchParams.get('view')==='materials'&&previous?.searchParams.get('view')==='materials'&&edit&&incoming.definition?.collection===edit.collection&&incoming.definition.id===edit.id&&incoming.entityId===(previous?.searchParams.get('entity')||''));if(edit&&!sameDefinition&&!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true}))){event.stopImmediatePropagation();if(lastPanelLocation)history.pushState(history.state,'',lastPanelLocation);return;}readLocation(location.href);};window.addEventListener('popstate',restore,true);window.addEventListener('review:material-panel-location',restore);return()=>{window.removeEventListener('popstate',restore,true);window.removeEventListener('review:material-panel-location',restore);};},[edit,lastPanelLocation,readLocation]);
  // eslint-disable-next-line react-hooks/set-state-in-effect -- The parent owns these public filter axes, not drawer open intent.
  useEffect(()=>{setFilters(current=>({...current,mediaType:normalize(mediaFilter),creatorStage:normalize(stageFilter),episodeUid:normalize(episodeScope),sceneId:normalize(sceneScope),search}));},[mediaFilter,stageFilter,episodeScope,sceneScope,search]);
- const hasRegisteredTrialMedia=Boolean(directory?.trials.some(trial=>trial.versions.length>0));
- useEffect(()=>{if(hostedReadOnly||!hasRegisteredTrialMedia)return;const c=new AbortController();void loadTrialSnapshot(c.signal).then(setTrialSnapshot).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[hostedReadOnly,hasRegisteredTrialMedia,refresh]);
+ useEffect(()=>{if(hostedReadOnly)return;const c=new AbortController();void loadTrialSnapshots(c.signal).then(setTrialSnapshots).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[hostedReadOnly,refresh]);
  const readOnly=hostedReadOnly||workspace?.readOnly===true;
  const graph=useMemo(()=>directory?.graph||workspace?.graph||{schemaVersion:'1.0',entities:[],states:[],representations:[],relations:[],requirements:[]} as DomainGraph,[directory,workspace]);
  const entityById=useMemo(()=>new Map(graph.entities.map(entity=>[entity.id,entity])),[graph]),stateById=useMemo(()=>new Map(graph.states.map(state=>[state.id,state])),[graph]);
  const entityLabel=(id:string)=>visibleText(entityById.get(id)?.name||'归属待核');
  const entityTypeLabel=(type:string)=>workspace?.configuration.entityTypes.find(row=>row.id===type)?.label||entityLabels[type]||'制作主题';
  const stateLabel=(id:string)=>visibleText(stateById.get(id)?.label||'状态归属未登记');
+ const allTrialAssets=useMemo(()=>trialSnapshots.flatMap(snapshot=>snapshot.assets),[trialSnapshots]);
+ const trialBindings=useMemo(()=>{
+  const result:TrialBinding[]=(directory?.trials||[]).map(trial=>({...trial,versions:[...trial.versions]}));
+  for(const snapshot of trialSnapshots)for(const recipe of snapshot.recipes){
+   const subjectId=recipe.originalSubjectId||recipe.subjectId;
+   const assets=snapshot.assets.filter(asset=>asset.mediaId===subjectId||asset.mediaId===recipe.subjectId);
+   let binding=result.find(trial=>recipe.sourceTrialThemeId===trial.trialThemeId||trial.versions.some(version=>version.mediaId===subjectId));
+   if(!binding){
+    const requirement=requirements.find(row=>row.id===recipe.sourceRequirementId&&row.requirementClass==='REQUIRED');
+    const ownership=directory?.bindings.find(row=>row.requirementId===requirement?.id);
+    if(!requirement||!ownership)continue;
+    binding={trialThemeId:`TRIAL:${snapshot.scope.id}:${subjectId}`,entityId:ownership.entityId,stateId:ownership.stateId,title:recipe.label,mediaType:recipe.mediaKind||assets[0]?.mediaKind||String(requirement.mediaType||requirement.mediaKind),displayState:'待生成',reason:`${requirement.title}的独立候选；本次产出尚未绑定为正式采用输入。`,versions:[]};
+    result.push(binding);
+   }
+   for(const asset of assets){const prior=binding.versions.findIndex(version=>version.versionId===asset.versionId&&version.sha256===asset.sha256&&(!version.scopeId||version.scopeId===snapshot.scope.id));const next={scopeId:snapshot.scope.id,mediaId:asset.mediaId,versionId:asset.versionId,sha256:asset.sha256,lifecycle:asset.lifecycle};if(prior>=0)binding.versions[prior]=next;else binding.versions.push(next);}
+   const latest=binding.versions.at(-1);if(latest)binding.displayState=latest.lifecycle==='RELEASED'?'已通过':latest.lifecycle==='REVIEW_PENDING'?'待审阅':'已定义';
+  }
+  return result;
+ },[directory,requirements,trialSnapshots]);
  const entries:Entry[]=useMemo(()=>uniqueMaterialCatalogRows([
   ...requirements.filter(requirement=>requirement.requirementClass==='REQUIRED').map(requirement=>{
    const binding=directory?.bindings.find(row=>row.requirementId===requirement.id),representation=exactMaterialRepresentation(graph,requirement.id,binding?.representationId);
@@ -94,8 +112,8 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
    const usageLabels=[...(preparation?.candidate?.episodes||[]).filter(episode=>usage.episodeUids.includes(episode.episodeUid)).flatMap(episode=>[episode.displayId,episode.title]),...(preparation?.candidate?.scenes||[]).filter(scene=>usage.sceneIds.includes(scene.id)).flatMap(scene=>[scene.displayId,scene.title])];
    return {id:requirement.id,required:true,title:requirement.title,representationId:representation?.id,entityId,entityType:entity?.type||'UNRESOLVED',stateId,mediaType:taxonomy.mediaType,creatorStage:stage.creatorStage,stage,requirement,...usage,usagePairs,searchText:[requirement.id,requirement.title,entity?.name,state?.label,...Object.values(state?.dimensions||{}),requirement.storyBasis?.sourceRef,...requirement.assetFamilyRefs,...versionIds,...usageLabels,requirement.cardSpec?JSON.stringify(requirement.cardSpec):''].filter(Boolean).join(' ')};
   }),
-  ...(directory?.trials||[]).map(trial=>({id:trial.trialThemeId,required:false,title:trial.title,entityId:trial.entityId,entityType:entityById.get(trial.entityId)?.type||'UNRESOLVED',stateId:trial.stateId,mediaType:trial.mediaType,creatorStage:({已定义:'INITIAL',待生成:'PRODUCTION_READY',待审阅:'PENDING_REVIEW',已通过:'APPROVED'} as Record<string,string>)[trial.displayState]||'INITIAL',sceneIds:[],episodeUids:[],searchText:[trial.title,entityById.get(trial.entityId)?.name,stateById.get(trial.stateId)?.label].join(' '),trial})),
- ]),[requirements,directory,graph,entityById,stateById,stageFor,preparation,model?.assetFamilies]);
+  ...trialBindings.map(trial=>({id:trial.trialThemeId,required:false,title:trial.title,entityId:trial.entityId,entityType:entityById.get(trial.entityId)?.type||'UNRESOLVED',stateId:trial.stateId,mediaType:trial.mediaType,creatorStage:({已定义:'INITIAL',待生成:'PRODUCTION_READY',待审阅:'PENDING_REVIEW',已通过:'APPROVED'} as Record<string,string>)[trial.displayState]||'INITIAL',sceneIds:[],episodeUids:[],searchText:[trial.title,entityById.get(trial.entityId)?.name,stateById.get(trial.stateId)?.label].join(' '),trial})),
+ ]),[requirements,directory,graph,entityById,stateById,stageFor,preparation,model?.assetFamilies,trialBindings]);
 
  const filtered=filterMaterialCatalogRows(entries,filters);
  const entryFor=(intent:MaterialPanelIntent|null)=>{if(!intent||intent.kind!=='material')return undefined;if(intent.id)return exactMaterialPanelMatch(entries.filter(row=>Boolean(row.trial)===intent.trial),intent.id,row=>row.id,publicRef);const familyIds=[...new Set(entries.flatMap(row=>row.requirement?.assetFamilyRefs||[]))],familyId=exactMaterialPanelMatch(familyIds,intent.familyId,id=>id,publicRef);const matches=familyId?entries.filter(row=>row.requirement?.assetFamilyRefs.includes(familyId)):[];return matches.length===1?matches[0]:undefined;};
@@ -160,13 +178,14 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
  if(definition&&directory&&workspace&&(!definitionRow||panel?.entityId&&definitionEntityId&&definitionEntityId!==panel.entityId))targetError='素材定义永久身份未登记，或不属于链接指定实体。已保留原值，未打开其他定义。';
  const panelEntity=panel?.kind==='entity'?entityById.get(panel.id):undefined;
  const relatedEntries=panel?.kind==='entity'?entries.filter(entry=>entry.entityId===panel.id):panel?.kind==='state'?entries.filter(entry=>entry.stateId===panel.id&&entry.entityId===panelState?.entityId):relationshipEntry?[relationshipEntry]:relationshipState?entries.filter(entry=>entry.stateId===relationshipState.id&&entry.entityId===relationshipState.entityId):panelReference?entries.filter(entry=>[panelReference.from,panelReference.to].includes('material:'+entry.id)):[];
- const trial=panelEntry?.trial,trialAssets=trialSnapshot?.assets.filter(asset=>trial?.versions.some(version=>version.mediaId===asset.mediaId&&version.versionId===asset.versionId&&version.sha256===asset.sha256))||[],asset=trialVersion?trialAssets.find(row=>row.versionId===trialVersion):trialAssets.at(-1);
- if(panel?.trial&&trialVersion&&trialSnapshot&&!asset)targetError='试制版本未在该主题的精确版本与 SHA 绑定中登记，未换用最新版本。';
+ const trial=panelEntry?.trial,trialAssets=allTrialAssets.filter(asset=>trial?.versions.some(version=>(!version.scopeId||version.scopeId===asset.scopeId)&&version.mediaId===asset.mediaId&&version.versionId===asset.versionId&&version.sha256===asset.sha256)),asset=trialVersion?trialAssets.find(row=>row.versionId===trialVersion):trialAssets.at(-1);
+ const trialSnapshot=asset?trialSnapshots.find(snapshot=>snapshot.scope.id===asset.scopeId):undefined;
+ if(panel?.trial&&trialVersion&&trialSnapshots.length&&!asset)targetError='试制版本未在该主题的精确版本与 SHA 绑定中登记，未换用最新版本。';
 
  const panelTitle=targetError?'无法定位原对象':definitionRow?('label'in definitionRow?visibleText(definitionRow.label):'title'in definitionRow?visibleText(definitionRow.title):'素材定义'):panel?.kind==='entity'?entityLabel(panel.id):panel?.kind==='state'?stateLabel(panel.id):panel?.kind==='material'?visibleText(panelEntry?.title||'正在核对素材'):visibleText(panelRelation?.label||structuralRelation?.label||'正在核对关系');
  const renderRelated=()=> <section className="material-panel-related"><h3>精确关联的素材需求</h3>{relatedEntries.length?<div>{relatedEntries.map(entry=><button type="button" key={entry.id} data-related-material-id={entry.id} onClick={()=>choose(entry)}><strong>{visibleText(entry.title)}</strong><small>{entry.trial?'独立试制 · 不计正式需求':entry.stage?.creatorStageLabel} · {stateLabel(entry.stateId)}</small></button>)}</div>:<p>没有已登记的精确关联需求；不会根据名称推测或新建需求。</p>}</section>;
 
- const thumbnailFor=(entityId:string)=>{const entityEntries=entries.filter(entry=>entry.entityId===entityId),familyIds=[...new Set(entityEntries.flatMap(entry=>entry.requirement?.assetFamilyRefs||[]))],version=materialRepresentativeImage(model,familyIds);const trialCandidates=entityEntries.flatMap(entry=>entry.trial?(trialSnapshot?.assets||[]).filter(asset=>asset.mediaKind==='IMAGE'&&asset.lifecycle!=='DO_NOT_USE'&&entry.trial!.versions.some(binding=>binding.mediaId===asset.mediaId&&binding.versionId===asset.versionId&&binding.sha256===asset.sha256)):[]).sort((a,b)=>Number(b.lifecycle==='RELEASED')-Number(a.lifecycle==='RELEASED')||b.version-a.version);return {version,trial:version?undefined:trialCandidates[0],mediaType:version||trialCandidates.length?'IMAGE':entityEntries[0]?.mediaType||'UNKNOWN'};};
+ const thumbnailFor=(entityId:string)=>{const entityEntries=entries.filter(entry=>entry.entityId===entityId),familyIds=[...new Set(entityEntries.flatMap(entry=>entry.requirement?.assetFamilyRefs||[]))],version=materialRepresentativeImage(model,familyIds);const trialCandidates=entityEntries.flatMap(entry=>entry.trial?allTrialAssets.filter(asset=>asset.mediaKind==='IMAGE'&&asset.lifecycle!=='DO_NOT_USE'&&entry.trial!.versions.some(binding=>(!binding.scopeId||binding.scopeId===asset.scopeId)&&binding.mediaId===asset.mediaId&&binding.versionId===asset.versionId&&binding.sha256===asset.sha256)):[]).sort((a,b)=>Number(b.lifecycle==='RELEASED')-Number(a.lifecycle==='RELEASED')||b.version-a.version);return {version,trial:version?undefined:trialCandidates[0],mediaType:version||trialCandidates.length?'IMAGE':entityEntries[0]?.mediaType||'UNKNOWN'};};
  const renderEvidence=(row:{authority?:string;evidence?:unknown[]})=><section className="material-panel-evidence"><h3>依据与维护边界</h3><p>依据级别：{row.authority||'UNKNOWN'}。定义及其关联不证明已生成、正式采用或实际观察。</p>{row.evidence?.length?<pre>{JSON.stringify(row.evidence,null,2)}</pre>:<p>未登记进一步来源证据。</p>}</section>;
  const activeFilterCount=Object.entries(filters).filter(([key,value])=>key==='search'?Boolean(value.trim()):!isAllCatalogValue(value)).length;
  const renderFacet=(facet:MaterialCatalogFacet,label:string,defaultExpanded=false)=><CatalogChips key={facet} label={label} value={filters[facet]} options={facetOptions[facet]||[]} defaultExpanded={defaultExpanded} onChange={value=>changeFilter(facet,value)}/>;

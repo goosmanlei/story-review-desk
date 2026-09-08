@@ -497,7 +497,7 @@ export async function POST(request: Request) {
     }
 
     const {filePath,file}=await withInstanceMediaRead(async()=>{
-    const filePath = await safeReviewPendingPath(projectPath);
+    const filePath = await safeReviewPendingPath(projectPath, familyId);
     const file = await hashStableFile(filePath);
     if (textCandidateExtensions.has(candidateExtension)) {
       if (file.size > 5 * 1024 * 1024) throw new HttpError(413, 'text candidate exceeds the 5 MiB review limit');

@@ -11,6 +11,27 @@ const originalBody = (row) => JSON.parse(row.body);
 const kinds = ['IMAGE', 'AUDIO', 'VIDEO'];
 const blockedObservation = (qa) => qa?.technicalStatus === 'NEEDS_CORRECTION' || qa?.visualPass === false;
 
+async function scopeIds(tx) {
+  const index = await tx.getAux('local-trial-index', 'scopes');
+  if (!index || index.deleted) return [];
+  const ids = parse(index.bytes);
+  ensure(Array.isArray(ids) && ids.every((id) => typeof id === 'string' && id.length > 0) && new Set(ids).size === ids.length, 'TRIAL_IMPORT_INVALID', '试制范围索引无效。');
+  return ids;
+}
+export async function instanceTrialScopes(repository) {
+  return repository.readTransaction(async (tx) => {
+    const scopes = [];
+    for (const id of await scopeIds(tx)) {
+      const record = await tx.getAux(`local-trial:${id}`, 'meta/config');
+      ensure(record && !record.deleted, 'TRIAL_IMPORT_INVALID', '试制配置缺失。');
+      const config = JSON.parse(parse(record.bytes).value);
+      ensure(config.scope?.id === id && config.scope.countsTowardFormalProject === false, 'TRIAL_SCOPE_INVALID', '试制权限范围不匹配。');
+      scopes.push(config.scope);
+    }
+    return { scopes, defaultScopeId: scopes[0]?.id ?? null, sourceAuthority: 'POSTGRES', formalProjectChanged: false };
+  });
+}
+
 /** Imported table rows keep their original TEXT columns; the aux revision owns the mutable head. */
 async function tableRows(tx, namespace, table) {
   return (await tx.listAux(namespace, { prefix: `${table}/` })).map((record) => ({ record, row: parse(record.bytes) }))
@@ -65,7 +86,7 @@ function projectAsset(state, entry) {
   const reviewLock = { locked: Boolean(newer || used), reason: newer ? '该版本已有后继版本，请切换到最新版本审阅。' : used ? '该版本已被下游执行精确绑定，当前结论已锁定。' : '' };
   return { ...item, lifecycle: row.lifecycle, reviewHeadId: row.review_head, latestReview, technicalRejection, qaObservations, qualityBlocked,
     qualityBlockReason: failed?.observations.summary || (qualityBlocked ? '这版已确认不符合固定制作要求，请修正后登记新候选。' : ''),
-    nonWaivableBlocked: blockingFacts(item), reviewLock, mediaUrl: `/api/trial/media/${encodeURIComponent(item.id)}` };
+    scopeId: state.scopeId, nonWaivableBlocked: blockingFacts(item), reviewLock, mediaUrl: `/api/trial/media/${encodeURIComponent(item.id)}?scopeId=${encodeURIComponent(state.scopeId)}` };
 }
 async function snapshotFrom(tx, state) {
   const allRecipes = (await tableRows(tx, state.namespace, 'recipes')).map(({ row }) => originalBody(row));
@@ -82,15 +103,21 @@ async function snapshotFrom(tx, state) {
   return { schemaVersion: 'trial-control/1.0', mode: 'LOCAL_TRIAL', instanceId: state.config.instanceId, scope: state.config.scope, checkpoint: state.config.checkpoint, story: state.config.story,
     recipes, recipeHistory: allRecipes.filter((recipe) => !recipes.includes(recipe)), assets: state.assets.map((entry) => projectAsset(state, entry)),
     executions: state.executions.map(({ row }) => { const result = { ...originalBody(row) }; delete result.leaseToken; return result; }),
-    budgets, eventHead: state.eventHead, mutationEtag: state.etag, sourceAuthority: 'INSTANCE_SQLITE_LOCAL_TRIAL', formalProjectChanged: false };
+    budgets, eventHead: state.eventHead, mutationEtag: state.etag, sourceAuthority: 'POSTGRES', formalProjectChanged: false };
 }
 export async function instanceTrialSnapshot(repository, { scopeId } = {}) {
   return repository.readTransaction(async (tx) => (await snapshotFrom(tx, (await scopeState(tx, scopeId)))));
 }
 export async function instanceTrialAsset(repository, id, { scopeId } = {}) {
   return repository.readTransaction(async (tx) => {
-    const state = (await scopeState(tx, scopeId)); const entry = state.assets.find(({ row }) => row.id === id || row.version_id === id);
-    ensure(entry, 'ASSET_NOT_FOUND', '此试制版本不存在。'); return projectAsset(state, entry);
+    const matches = [];
+    for (const candidateScopeId of scopeId ? [scopeId] : await scopeIds(tx)) {
+      const state = await scopeState(tx, candidateScopeId);
+      for (const entry of state.assets.filter(({ row }) => row.id === id || row.version_id === id)) matches.push({ state, entry });
+    }
+    ensure(matches.length > 0, 'ASSET_NOT_FOUND', '此试制版本不存在。');
+    ensure(matches.length === 1, 'TRIAL_SCOPE_REQUIRED', '版本身份匹配多个试制范围，请明确选择。');
+    return projectAsset(matches[0].state, matches[0].entry);
   });
 }
 function optionalComment(value, label) {
@@ -100,9 +127,10 @@ function optionalComment(value, label) {
 /** One repository transaction commits the original trial event, asset head and idempotency receipt. */
 export async function instanceTrialReview(repository, body, { ifMatch, idempotencyKey, scopeId, verifyMedia } = {}) {
   ensure(body && typeof body === 'object' && !Array.isArray(body), 'REVIEW_BINDING', '审阅内容无效。');
+  ensure(!body.scopeId || !scopeId || body.scopeId === scopeId, 'REVIEW_BINDING', '审阅范围与请求地址不一致。');
   ensure(typeof idempotencyKey === 'string' && /^[A-Za-z0-9._:-]{8,160}$/.test(idempotencyKey), 'IDEMPOTENCY_REQUIRED', '缺少有效审阅请求编号。');
   return repository.writeTransaction(async (tx) => {
-    const state = (await scopeState(tx, scopeId)); const bindingHash = hashJson({ action: 'review', body });
+    const state = (await scopeState(tx, scopeId || body.scopeId)); const bindingHash = hashJson({ action: 'review', body });
     const prior = (await tx.getAux(state.namespace, `idempotency/${idempotencyKey}`));
     if (prior && !prior.deleted) {
       const row = parse(prior.bytes); ensure(row.binding_hash === bindingHash, 'IDEMPOTENCY_CONFLICT', '同一请求编号已用于不同意见。');

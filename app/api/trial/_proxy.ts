@@ -3,7 +3,7 @@ import { assertAssistantLocal } from '../assistant/v1/_http';
 import { errorResponse, HttpError, instanceRepository, instanceRepositoryMode, instanceReadOnlyMode, safeGeneratedPath } from '../v8/_store';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
-import { instanceTrialAsset, instanceTrialReview, instanceTrialSnapshot, TrialRepositoryError } from './_instance.mjs';
+import { instanceTrialAsset, instanceTrialReview, instanceTrialSnapshot, instanceTrialScopes, TrialRepositoryError } from './_instance.mjs';
 
 const mime: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp', wav: 'audio/wav', mp3: 'audio/mpeg', flac: 'audio/flac', ogg: 'audio/ogg', m4a: 'audio/mp4', mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm' };
 async function registeredBytesWithoutLease(asset: { versionId: string; sha256: string }) {
@@ -29,9 +29,13 @@ export async function trialProxy(request: Request, endpoint: string) {
     }
     if (instanceRepositoryMode()) {
       const repository = (await instanceRepository())!;
-      const options = { scopeId: process.env.REVIEW_TRIAL_SCOPE_ID };
+      const scopeId = new URL(request.url).searchParams.get('scopeId') || undefined;
+      const options = { scopeId };
+      if (request.method === 'GET' && endpoint === '/api/trial/scopes') {
+        return Response.json(await instanceTrialScopes(repository), { headers: { 'Cache-Control': 'no-store' } });
+      }
       if (request.method === 'GET' && endpoint === '/api/trial/snapshot') {
-        const snapshot = await instanceTrialSnapshot(repository, options);
+        const snapshot = await instanceTrialSnapshot(repository, { scopeId: scopeId || process.env.REVIEW_TRIAL_SCOPE_ID });
         return Response.json(snapshot, { headers: { 'Cache-Control': 'no-store', ETag: snapshot.mutationEtag } });
       }
       if (request.method === 'POST' && endpoint === '/api/trial/reviews') {
@@ -74,7 +78,10 @@ export async function trialProxy(request: Request, endpoint: string) {
       const value = request.headers.get(name);
       if (value) headers.set(name, value);
     }
-    const response = await fetch(new URL(endpoint, base), {
+    const target = new URL(endpoint, base);
+    const requestedScopeId = new URL(request.url).searchParams.get('scopeId');
+    if (requestedScopeId) target.searchParams.set('scopeId', requestedScopeId);
+    const response = await fetch(target, {
       method: request.method, headers, body, redirect: 'error', cache: 'no-store', signal: AbortSignal.timeout(15_000),
     });
     const outputHeaders = new Headers({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
@@ -85,7 +92,7 @@ export async function trialProxy(request: Request, endpoint: string) {
     return new Response(response.body, { status: response.status, headers: outputHeaders });
   } catch (error) {
     if (error instanceof TrialRepositoryError) {
-      const status = ['CAS_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'REVIEW_HEAD', 'REVIEW_LOCKED'].includes(error.code) ? 409 : ['TRIAL_NOT_IMPORTED', 'TRIAL_SCOPE_REQUIRED', 'TRIAL_IMPORT_INVALID'].includes(error.code) ? 503 : 400;
+      const status = ['CAS_CONFLICT', 'IDEMPOTENCY_CONFLICT', 'REVIEW_HEAD', 'REVIEW_LOCKED'].includes(error.code) ? 409 : ['TRIAL_NOT_IMPORTED', 'TRIAL_IMPORT_INVALID'].includes(error.code) ? 503 : error.code === 'ASSET_NOT_FOUND' ? 404 : 400;
       return Response.json({ error: error.code, message: error.message }, { status, headers: { 'Cache-Control': 'no-store' } });
     }
     if (error instanceof HttpError) return errorResponse(error);

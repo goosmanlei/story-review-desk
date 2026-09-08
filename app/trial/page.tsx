@@ -1,4 +1,3 @@
-/* eslint-disable @next/next/no-img-element -- Review displays the exact registered media bytes. */
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -6,7 +5,7 @@ import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { useRuntimeMode } from '../runtime-mode';
 import './trial.css';
-import {AssetReview,loadTrialSnapshot} from '../trial-asset-review';
+import {AssetReview,loadTrialSnapshot,loadTrialScopes,type TrialScopeIndex} from '../trial-asset-review';
 
 type Criterion = { id: string; label: string; description: string };
 type TrialAsset = {
@@ -55,22 +54,28 @@ export default function TrialPage() {
   const [loading, setLoading] = useState(true);
   const requestController = useRef<AbortController | null>(null);
   const [selected, setSelected] = useState('');
+  const [scopeIndex, setScopeIndex] = useState<TrialScopeIndex | null>(null);
   const params = useSearchParams();
+  const requestedScopeId = params.get('scopeId') || '';
   const requestedView = params.get('view') || 'materials';
   const view = ['story', 'materials', 'pipeline'].includes(requestedView) ? requestedView : 'materials';
   const readSnapshot = useCallback(async (controller: AbortController) => {
     try {
-      const next = await loadTrialSnapshot(controller.signal);
+      const index = await loadTrialScopes(controller.signal);
+      const scopeId = requestedScopeId || index.defaultScopeId || undefined;
+      const next = scopeId ? await loadTrialSnapshot(controller.signal, scopeId) : null;
+      if (!controller.signal.aborted) setScopeIndex(index);
       if (!controller.signal.aborted) setSnapshot(next);
     } catch (reason) {
       if (!controller.signal.aborted) {
+        setSnapshot(null);
         setError(reason instanceof Error ? reason.message : '试制资料读取失败');
         throw reason;
       }
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [requestedScopeId]);
   async function refresh() {
     requestController.current?.abort();
     const controller = new AbortController();
@@ -82,25 +87,24 @@ export default function TrialPage() {
     if (hostedReadOnly) return;
     const controller = new AbortController();
     requestController.current = controller;
-    void loadTrialSnapshot(controller.signal)
-      .then(next => { if (!controller.signal.aborted) setSnapshot(next); })
-      .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : '试制资料读取失败'); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    void Promise.resolve().then(() => readSnapshot(controller)).catch(() => {});
     return () => requestController.current?.abort();
-  }, [hostedReadOnly]);
-  const recipeId = selected || snapshot?.recipes[0]?.id || '';
+  }, [hostedReadOnly, readSnapshot]);
+  const scopeQuery = snapshot ? `&scopeId=${encodeURIComponent(snapshot.scope.id)}` : '';
+  const recipeId = (snapshot?.recipes.some(item => item.id === selected) ? selected : '') || snapshot?.recipes[0]?.id || '';
   const recipe = snapshot?.recipes.find((item) => item.id === recipeId);
   const versions = snapshot?.assets.filter((item) => item.mediaId === recipe?.subjectId) || [];
   const [versionId, setVersionId] = useState('');
   const asset = versions.find((item) => item.versionId === versionId) || versions.at(-1);
   return <main className="review-shell trial-shell">
-    <aside className="workspace-sidebar" aria-label="审阅台主导航"><Link className="sidebar-brand" href="/"><span className="brand-mark">阅</span><span><b>{snapshot?.scope.projectTitle || '制作审阅台'}</b><small>本剧试制范围</small></span></Link><nav className="workspace-nav">{[['overview', '当前工作'], ['story', '故事创作'], ['materials', '素材管理'], ['pipeline', '全剧制作'], ['system', '系统管理']].map(([id, label], index) => <a key={id} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined} href={['overview', 'system'].includes(id) ? `/?view=${id}` : `/trial?view=${id}`}><span>0{index + 1}</span><b>{label}</b></a>)}</nav><Link className="trial-return" href="/">← 返回全剧当前工作</Link></aside>
+    <aside className="workspace-sidebar" aria-label="审阅台主导航"><Link className="sidebar-brand" href="/"><span className="brand-mark">阅</span><span><b>{snapshot?.scope.projectTitle || '制作审阅台'}</b><small>本剧试制范围</small></span></Link><nav className="workspace-nav">{[['overview', '当前工作'], ['story', '故事创作'], ['materials', '素材管理'], ['pipeline', '全剧制作'], ['system', '系统管理']].map(([id, label], index) => <a key={id} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined} href={['overview', 'system'].includes(id) ? `/?view=${id}` : `/trial?view=${id}${scopeQuery}`}><span>0{index + 1}</span><b>{label}</b></a>)}</nav><Link className="trial-return" href="/">← 返回全剧当前工作</Link></aside>
     <div className="workspace-main"><header className="workspace-topbar"><div><small>独立试制范围</small><h1>{snapshot?.scope.title || '试制审阅'}</h1></div><button onClick={() => void refresh().catch(() => {})} disabled={hostedReadOnly || loading}>刷新状态</button></header><div className="workspace-content">
       {hostedReadOnly ? <section className="trial-empty"><h2>试制素材保存在本机</h2><p>请在本地审阅图片、试听声音并保存正式判断。</p><a href="http://localhost:3000/trial?view=materials">打开本地试制</a></section> : <>
         {error && <div className="trial-feedback"><p role="alert">{error}</p><button onClick={() => void refresh().catch(() => {})} disabled={loading}>重新读取试制资料</button></div>}
         {loading && <p role="status">正在读取试制内容…</p>}
         {!snapshot && !loading && !error && <section className="trial-empty"><h2>尚未设置试制范围</h2><p>这个实例还没有试制内容、素材或审阅记录。</p><Link href="/">返回审阅台</Link></section>}
         {snapshot && <>
+          {scopeIndex && scopeIndex.scopes.length > 1 && <label>试制范围 <select aria-label="试制范围" value={snapshot.scope.id} onChange={event => { const url = new URL(location.href); url.searchParams.set('scopeId', event.target.value); location.assign(url.href); }}>{scopeIndex.scopes.map(scope => <option key={scope.id} value={scope.id}>{scope.title}</option>)}</select></label>}
           <p className="trial-scope-note">已登记 {snapshot.story?.episodes?.length ?? 0} 个分集选段 · {snapshot.story?.shotProposals?.length ?? 0} 项镜头提案 · {snapshot.recipes.length} 项素材配方 · 本试制进度单独统计</p>
           {view === 'materials' && <div className="trial-material-workspace"><nav className="trial-catalog" aria-label="试制素材目录">{snapshot.recipes.map((item) => {
             const produced = snapshot.assets.filter((candidate) => candidate.mediaId === item.subjectId);

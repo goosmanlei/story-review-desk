@@ -37,6 +37,7 @@ async function mockDesk(page: Page, landingView = 'story') {
       const { focus } = request.postDataJSON();
       return route.fulfill({ json: { context: { focus, resources: [], missing: [], draftTargets: [] } } });
     }
+    if (url.pathname === '/api/trial/scopes') return route.fulfill({ json: { scopes: [], defaultScopeId: null } });
     if (url.pathname === '/api/trial/snapshot') return route.fulfill({ status: 503, json: { error: 'TRIAL_NOT_IMPORTED', message: '本实例尚未导入试制范围。' } });
     if (url.pathname.startsWith('/api/trial/media/')) return route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF1sAAAAASUVORK5CYII=', 'base64') });
     unexpected.push(`${request.method()} ${url.pathname}`);
@@ -274,7 +275,7 @@ test('trial not imported is a normal empty state across all trial views while co
     await expect(page.getByText(/TRIAL_NOT_IMPORTED|两集选段|第一检查点已确认/)).toHaveCount(0);
   }
   let failed = true;
-  await page.route('**/api/trial/snapshot', route => route.fulfill(failed ? { status: 503, json: { error: 'FIXTURE_UNAVAILABLE' } } : { status: 503, json: { error: 'TRIAL_NOT_IMPORTED' } }));
+  await page.route('**/api/trial/scopes', route => route.fulfill(failed ? { status: 503, json: { message: '试制资料暂时无法读取' } } : { json: { scopes: [], defaultScopeId: null } }));
   await page.getByRole('button', { name: '刷新状态' }).click();
   await expect(page.getByRole('alert')).toContainText('试制资料暂时无法读取');
   await expect(page.getByRole('heading', { name: '尚未设置试制范围' })).toHaveCount(0);
@@ -294,7 +295,8 @@ const trialFixture = () => ({
 
 test('trial counts and review state come from the selected instance and missing usage stays explicit', async ({ page }) => {
   await mockDesk(page);
-  await page.route('**/api/trial/snapshot', route => route.fulfill({ json: trialFixture() }));
+  await page.route('**/api/trial/scopes', route => route.fulfill({ json: { scopes: [trialFixture().scope], defaultScopeId: trialFixture().scope.id } }));
+  await page.route('**/api/trial/snapshot*', route => route.fulfill({ json: trialFixture() }));
   await page.goto('/trial?view=story');
   await expect(page.locator('.trial-scope-note')).toContainText('已登记 1 个分集选段 · 3 项镜头提案 · 1 项素材配方');
   await expect(page.locator('.trial-shot')).toHaveCount(3);

@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 const allowed = new Set(['instance-entity-migration.mjs','instance-material-directory.mjs','instance-production-preparation.mjs','instance-media-retirement.mjs','instance-guidance.mjs','instance-sources.mjs','instance-initialize.mjs','instance-relations.mjs','instance-authoring.mjs','instance-source.mjs', 'instance-extension.mjs', 'instance-configuration.mjs', 'instance-document.mjs', 'instance-backup.mjs', 'instance-copy.mjs', 'instance-restore.mjs', 'instance-export-hosted.mjs', 'instance-verify.mjs', 'instance-stage-media.mjs']);
 const sha = value => createHash('sha256').update(value).digest('hex');
 allowed.add('instance-episode-source.mjs');
+allowed.add('instance-trial-worker.mjs');
 const inContainer = () => process.platform === 'linux' && (process.env.REVIEW_SQLITE_OWNER === 'CONTAINER'||process.env.REVIEW_DATABASE_BACKEND==='postgres') && existsSync('/.dockerenv');
 const json = value => JSON.stringify(value);
 export function flagValue(argv, name) {
