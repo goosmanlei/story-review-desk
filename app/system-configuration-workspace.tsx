@@ -683,6 +683,55 @@ export function SystemConfigurationWorkspace() {
               <p>画面基线发布不会改写已生成文件的实际参数。</p>
             </>
           )}
+          {group === "interface" && (
+            <>
+              <p>统一管理当前项目在审阅台中的品牌呈现和默认落点；这里只改变界面，不改变项目、实例或业务对象身份。</p>
+              <div className="configuration-form-grid">
+                {text("项目标记", config.presentation.mark, (value) =>
+                  edit((c) => {
+                    c.presentation.mark = value;
+                  }),
+                  false,
+                  "显示在审阅台品牌位置的简短项目标记。",
+                )}
+                {text("项目说明", config.presentation.description, (value) =>
+                  edit((c) => {
+                    c.presentation.description = value;
+                  }),
+                  false,
+                  "显示在项目入口与辅助说明区域。",
+                )}
+                <label className="configuration-field">
+                  默认入口
+                  <select
+                    aria-label="默认入口"
+                    aria-describedby="configuration-interface-landing-help"
+                    disabled={readonly}
+                    value={config.presentation.landingView}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.presentation.landingView = e.target.value;
+                      })
+                    }
+                  >
+                    {[
+                      ["overview", "当前工作"],
+                      ["story", "故事创作"],
+                      ["settings", "故事设定"],
+                      ["materials", "素材管理"],
+                      ["pipeline", "全剧制作"],
+                      ["system", "系统管理"],
+                    ].map(([id, label]) => (
+                      <option value={id} key={id}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <small id="configuration-interface-landing-help" className="configuration-field-help">打开当前项目时默认进入的顶级工作区。</small>
+                </label>
+              </div>
+            </>
+          )}
           {group === "sources" && (
             <>
               <h3>来源核对顺序</h3>
@@ -782,47 +831,12 @@ export function SystemConfigurationWorkspace() {
               <p>来源原文、具体空间事实和使用权利由相应业务资料维护。</p>
             </>
           )}
-          {group === "general" && (
+          {group === "assistant" && (
             <>
+              <p>供评论的 AI 生成／润色和审阅意见的 AI 辅助使用；输出始终是可编辑建议，不代替正式评论、审阅裁决或素材采用。</p>
               {text('AI API Key 环境变量名',config.collaboration.apiKeyEnvName||'OPENAI_API_KEY',value=>edit(c=>{c.collaboration.apiKeyEnvName=value.trim();}))}
-              <p>仅填写变量名，不填密钥。适用于已接入的 AI API 工作器，保存并发布后重启本地实例生效；Codex 继续使用本机 CLI 认证。</p>
+              <p>仅填写变量名，不填密钥。适用于评论润色与辅助审阅工作器，保存并发布后重启本地实例生效。</p>
               <div className="configuration-form-grid">
-                {(["mark", "description"] as const).map(
-                  (k, i) =>
-                    text(
-                      ["标记", "说明"][i],
-                      config.presentation[k],
-                      (v) =>
-                        edit((c) => {
-                          c.presentation[k] = v;
-                        }),
-                    ),
-                )}
-                <label className="configuration-field">
-                  默认入口
-                  <select
-                    disabled={readonly}
-                    value={config.presentation.landingView}
-                    onChange={(e) =>
-                      edit((c) => {
-                        c.presentation.landingView = e.target.value;
-                      })
-                    }
-                  >
-                    {[
-                      ["overview", "当前工作"],
-                      ["story", "故事创作"],
-                      ["settings", "故事设定"],
-                      ["materials", "素材管理"],
-                      ["pipeline", "全剧制作"],
-                      ["system", "系统管理"],
-                    ].map(([id, label]) => (
-                      <option value={id} key={id}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
                 <label className="configuration-field">
                   协作偏好
                   <select
@@ -861,6 +875,12 @@ export function SystemConfigurationWorkspace() {
                   </select>
                 </label>
               </div>
+              <p>协作偏好和默认执行方式只影响界面推荐；每次 AI 执行仍需绑定具体对象与当次授权。</p>
+            </>
+          )}
+          {group === "codex" && (
+            <>
+              <p>项目 Codex 读取当前项目已发布上下文并提供只读建议；Bridge 使用宿主机 Codex CLI 登录态。</p>
               <div className="configuration-options">
                 <label>
                   <input
@@ -873,28 +893,9 @@ export function SystemConfigurationWorkspace() {
                       })
                     }
                   />
-                  启用本地助手
-                </label>
-                <label>
-                  <input
-                    disabled={readonly}
-                    type="checkbox"
-                    checked={config.presentation.trialEnabled}
-                    onChange={(e) =>
-                      edit((c) => {
-                        c.presentation.trialEnabled = e.target.checked;
-                      })
-                    }
-                  />
-                  显示已登记的试制范围入口
+                  启用项目 Codex 助手
                 </label>
               </div>
-              {text("试制入口名称", config.presentation.trialLabel, (v) =>
-                edit((c) => {
-                  c.presentation.trialLabel = v;
-                }),
-              )}
-              <h3>Codex Bridge 服务</h3>
               <div className="configuration-options">
                 <label>
                   <input
@@ -959,7 +960,31 @@ export function SystemConfigurationWorkspace() {
                 </label>
               </div>
               <p>配置发布后，在下次启动本地实例时生效。Bridge 启动失败只会让助手显示未连接，不阻断审阅台；服务启动本身不会发起模型请求。</p>
-              <p>执行方式只是默认选择，每次执行仍需绑定具体对象与授权。</p>
+            </>
+          )}
+          {group === "trial" && (
+            <>
+              <p>试制入口暂作为独立模块保留，只管理已登记试制范围的显示；不改变正式需求、审阅或采用状态。</p>
+              <div className="configuration-options">
+                <label>
+                  <input
+                    disabled={readonly}
+                    type="checkbox"
+                    checked={config.presentation.trialEnabled}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.presentation.trialEnabled = e.target.checked;
+                      })
+                    }
+                  />
+                  显示已登记的试制范围入口
+                </label>
+              </div>
+              {text("试制入口名称", config.presentation.trialLabel, (v) =>
+                edit((c) => {
+                  c.presentation.trialLabel = v;
+                }),
+              )}
             </>
           )}
         </section>

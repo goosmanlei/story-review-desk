@@ -49,7 +49,7 @@ async function fixture(page:Page,{sourceReadOnly=false,maintenanceOperations=[]}
 
 test('system tabs preserve links and five compact configuration groups fit narrow screens',async({page})=>{
   const f=await fixture(page);await page.goto('/?view=system#system-configuration');await expect(page.getByRole('tab',{name:'系统配置',exact:true})).toHaveAttribute('aria-selected','true');
-  for(const name of ['项目与画面','资料与设定','素材与制作','审阅标准','AI与界面'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
+  for(const name of ['项目设定','资料与设定','素材与制作','审阅标准','AI 配置'])await expect(page.getByRole('button',{name,exact:true})).toBeVisible();
   await page.getByRole('button',{name:'资料与设定',exact:true}).click();await page.getByRole('button',{name:'实体体系',exact:true}).click();const structure=page.getByRole('navigation',{name:'配置结构目录',exact:true});await expect(structure).toBeVisible();await structure.getByRole('button',{name:'关系类型',exact:true}).click();await expect(structure.getByRole('button',{name:'关系类型',exact:true})).toHaveAttribute('aria-pressed','true');await expect(page.getByRole('combobox',{name:'关系用途',exact:true})).toBeVisible();await expect(page.getByRole('combobox',{name:'关系用途',exact:true}).getByRole('option')).toHaveCount(4);
   await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
   await page.getByRole('tab',{name:'数据与运行',exact:true}).click();await expect(page.locator('.management-runtime-facts').first().getByText('postgresql',{exact:true})).toBeVisible();await page.reload();await expect(page.getByRole('tab',{name:'数据与运行',exact:true})).toHaveAttribute('aria-selected','true');

@@ -23,14 +23,16 @@ import {
   applicationRoot,
   loadInstanceRuntime,
 } from "./instance-profile.mjs";
-import { resolveStorageOwner } from "../host/instance-runtime/transport.mjs";
+import {
+  resolveStorageOwner,
+  runInstanceCli,
+} from "../host/instance-runtime/transport.mjs";
 import { runMaintenanceProcess } from "./instance-maintenance.mjs";
 
 const filename = fileURLToPath(import.meta.url);
 const pause = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 const managerLockName = "runtime/locks/codex-bridge-host.json";
-const healthName = "runtime/assistant/public/health.json";
 const managerStartTimeoutMilliseconds = 90_000;
 
 const alive = (pid) => {
@@ -197,14 +199,60 @@ async function managerRecord(lock) {
   }
 }
 
-async function matchingHealth(root, managerPid, settings, startedAt) {
-  let health;
-  try {
-    health = await readJsonFile(path.join(root, healthName));
-  } catch (error) {
-    if (error.code === "ENOENT") return null;
-    throw error;
-  }
+export function decodeBridgeHealthRecord(record) {
+  if (!record) return null;
+  if (
+    typeof record.bytesBase64 !== "string" ||
+    !/^[a-f0-9]{64}$/.test(record.sha256 || "")
+  )
+    throw new Error("Bridge 健康记录无效");
+  const bytes = Buffer.from(record.bytesBase64, "base64");
+  if (
+    bytes.toString("base64") !== record.bytesBase64 ||
+    sha256(bytes) !== record.sha256
+  )
+    throw new Error("Bridge 健康记录校验失败");
+  return JSON.parse(bytes.toString("utf8"));
+}
+
+async function bridgeHealth(root) {
+  const record = await runInstanceCli(root, [
+    "aux-get",
+    "--namespace",
+    "assistant-public",
+    "--key",
+    "health.json",
+  ]);
+  return decodeBridgeHealthRecord(record);
+}
+
+export function bridgeProcessOwnedByManager(
+  managerPid,
+  launcherPid,
+  launcher,
+  bridge,
+) {
+  if (
+    !launcher ||
+    launcher.pid !== launcherPid ||
+    launcher.parentPid !== managerPid ||
+    !launcher.command.includes("codex_conversation_bridge.py") ||
+    !bridge ||
+    !bridge.command.includes("codex_conversation_bridge.py")
+  )
+    return false;
+  return bridge.pid === launcherPid || bridge.parentPid === launcherPid;
+}
+
+async function matchingHealth(
+  root,
+  managerPid,
+  launcherPid,
+  settings,
+  startedAt,
+) {
+  const health = await bridgeHealth(root);
+  if (!health) return null;
   if (
     !["READY", "PROCESSING"].includes(health.status) ||
     health.mode !== "REAL" ||
@@ -217,11 +265,17 @@ async function matchingHealth(root, managerPid, settings, startedAt) {
     Date.parse(health.checkedAt) < startedAt
   )
     return null;
-  const processInfo = await processDetails(health.pid);
+  const [launcher, processInfo] = await Promise.all([
+    processDetails(launcherPid),
+    processDetails(health.pid),
+  ]);
   if (
-    !processInfo ||
-    processInfo.parentPid !== managerPid ||
-    !processInfo.command.includes("codex_conversation_bridge.py")
+    !bridgeProcessOwnedByManager(
+      managerPid,
+      launcherPid,
+      launcher,
+      processInfo,
+    )
   )
     return null;
   return health;
@@ -260,6 +314,7 @@ export async function startManagedBridge(runtime) {
       const health = await matchingHealth(
         root,
         current.pid,
+        current.childPid,
         settings,
         Date.now() - 10_000,
       );
@@ -303,17 +358,20 @@ export async function startManagedBridge(runtime) {
   child.unref();
   closeSync(descriptor);
   const startedAt = Date.now();
-  for (
-    let elapsed = 0;
-    elapsed < managerStartTimeoutMilliseconds;
-    elapsed += 250
-  ) {
-    await pause(250);
+  const deadline = Date.now() + managerStartTimeoutMilliseconds;
+  while (Date.now() < deadline) {
+    await pause(500);
     if (!alive(child.pid)) break;
     const record = await managerRecord(lock);
     if (record?.pid !== child.pid || record.settingsHash !== settingsHash)
       continue;
-    const health = await matchingHealth(root, child.pid, settings, startedAt);
+    const health = await matchingHealth(
+      root,
+      child.pid,
+      record.childPid,
+      settings,
+      startedAt,
+    );
     if (health)
       return {
         status: "STARTED",
