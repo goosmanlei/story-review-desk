@@ -1673,12 +1673,20 @@ export function assetReviewContextHash(
     .filter((requirement) => requirement.assetFamilyRefs.includes(familyId))
     .map((requirement) => ({ id: requirement.id, requirementHash: requirement.requirementHash }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  // Only versions with an actual recorded production-domain change enter this
+  // context protocol. Unaffected historical review hashes remain unchanged.
+  const domainInvalidations = (data.productionModel.domainInvalidations || []).filter(row => row.familyId === familyId && row.versionIds.includes(versionId));
+  const family = data.productionModel.assetFamilies.find(row => row.id === familyId);
+  const domainContextHash = (family as unknown as {domainContext?:{hash?:string}})?.domainContext?.hash || null;
   return stableObjectHash({
     subjectType: 'ASSET',
     familyId,
     versionId,
     versionSha256: versionSha256.toLowerCase(),
     materialRequirements,
+    // Bind the local history too: a later A → B → A change must not resurrect
+    // an approval from the previous occurrence of A without a fresh review.
+    ...(domainInvalidations.length ? {domainContextHash,domainInvalidationHash:stableObjectHash(domainInvalidations)} : {}),
   });
 }
 
@@ -4335,8 +4343,22 @@ export function projectOperationalState(
 
   // Relationship changes invalidate only the recorded versions and their exact descendants.
   // Review events remain immutable; the current usability projection carries the reason.
-  const domainInvalidations=((data.productionModel as unknown as Record<string,unknown>).domainInvalidations||[]) as Array<{familyId:string;versionIds:string[]}>;
-  applyDomainInvalidations(domainInvalidations,versions);
+  const domainInvalidations=data.productionModel.domainInvalidations||[];
+  const currentDomainHashes = new Map(data.productionModel.assetFamilies.map(family => [family.id,
+    (family as unknown as {domainContext?:{hash?:string}}).domainContext?.hash || '',
+  ]));
+  const reviewedDomainBindings = new Map<string,{familyId:string;sha256:string;domainContextHash:string}>();
+  for (const review of effectiveMediaReviews) {
+    if (review.subjectType !== 'ASSET' || review.action !== 'APPROVE_AND_RELEASE'
+      || (assetChainIssuesByTarget.get(mediaReviewTargetKey(review)) || []).length) continue;
+    const versionId=String(review.versionId||''),familyId=String(review.familyId||''),version=versions.get(versionId);
+    const sha256=String(review.versionSha256||'').toLowerCase(),domainContextHash=currentDomainHashes.get(familyId)||'';
+    if (!version || version.familyId !== familyId || version.sha256 !== sha256
+      || version.canFlowDownstream !== true || version.lifecycleState !== 'RELEASED' || version.historyRole !== 'CURRENT'
+      || review.contextHash !== assetReviewContextHash(data,familyId,versionId,sha256)) continue;
+    reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash});
+  }
+  applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes});
 
   for (const family of families.values()) {
     const familyVersions = [...versions.values()].filter((version) => version.familyId === family.id);

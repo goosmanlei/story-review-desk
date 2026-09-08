@@ -104,3 +104,15 @@ test('V1/V2 material-set hashes and modern asset-review validation survive story
  assert.equal(functions.reviewBindsCurrentGraph(before,event),true);assert.equal(functions.reviewBindsCurrentGraph(after,event),true);assert.equal(JSON.stringify(event),bytes);
  assert.equal(after.productionModel.assetFamilies[0].domainContext.hash,before.productionModel.assetFamilies[0].domainContext.hash);
 });
+test('review context changes only for the locally invalidated family, including a later return to the same domain hash',()=>{
+ const {assetReviewContextHash:hash}=bindingFunctions(),f=fixture(),before=f.snapshot,next=clone(before);
+ const old=before.productionModel.assetFamilies[0].domainContext.hash;
+ next.productionModel.assetFamilies[0].domainContext.hash='e'.repeat(64);
+ next.productionModel.domainInvalidations=[{familyId:'fa',previousHash:old,currentHash:'e'.repeat(64),versionIds:['v:fa']}];
+ assert.notEqual(hash(before,'fa','v:fa','a'.repeat(64)),hash(next,'fa','v:fa','a'.repeat(64)));
+ assert.equal(hash(before,'fb','v:fb','b'.repeat(64)),hash(next,'fb','v:fb','b'.repeat(64)),'unrelated reviews retain exact hashes');
+ assert.equal(hash(before,'fa','v:fa-later','a'.repeat(64)),hash(next,'fa','v:fa-later','a'.repeat(64)),'an unrecorded successor in the same family retains its review hash');
+ const approved=hash(next,'fa','v:fa','a'.repeat(64));
+ next.productionModel.domainInvalidations.push({familyId:'fa',previousHash:'e'.repeat(64),currentHash:old,versionIds:['v:fa']},{familyId:'fa',previousHash:old,currentHash:'e'.repeat(64),versionIds:['v:fa']});
+ assert.notEqual(hash(next,'fa','v:fa','a'.repeat(64)),approved);
+});
