@@ -16,6 +16,9 @@ import {animaticMediaBindings} from '../host/instance-runtime/animatic-model.mjs
 import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mjs';
 import {episodeSourceCompiler} from '../host/instance-runtime/episode-source-sync.mjs';
 import {fileURLToPath} from 'node:url';
+import {loadMaterialUsageEvidence} from '../host/instance-runtime/material-usage-preservation.mjs';
+import {MATERIAL_USAGE_SOURCE} from '../host/instance-runtime/material-usage-model.mjs';
+import {encodeMaterialUsageDocuments,validateHostedMaterialUsages} from '../host/instance-material-usage-proof.mjs';
 
 const JSON_FILES = ['review-data-core.generated.json', 'review-data-production-a.generated.json', 'review-data-production-b.generated.json', 'review-recipes.generated.json', 'hosted-material-events.generated.json'];
 const PRODUCTION_A_KEYS = new Set(['schemaVersion','policy','reviewContextCatalog','workflowSteps','continuityGroups','stageDefinitions','episodes','scenes','segments','beats','shots','reviewContexts','structureCards','executionRecipeSummary']);
@@ -137,6 +140,10 @@ export async function exportHostedInstance(instancePath, output) {
       const release=(await tx.readRelease(view.releaseId));
       if(!release || !view.snapshot || !view.recipes)throw new Error('A published instance release is required');
       view.snapshot=structuredClone(view.snapshot);
+      view.snapshot.productionModel=await loadMaterialUsageEvidence(tx,view.snapshot.productionModel,{view});
+      const usageDocuments=[];
+      for(const doc of await tx.listPublishedDocumentMetadata())if(doc.metadata?.sourceRole===MATERIAL_USAGE_SOURCE||doc.aliases.some(a=>a.startsWith('story/material-usages/')))usageDocuments.push(await tx.readDocumentRevision(doc.revisionId));
+      if(usageDocuments.length)view.snapshot.productionModel.materialUsageSources=encodeMaterialUsageDocuments(usageDocuments);
       let animaticModel=await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}}));
       animaticModel=await applyProductionSpatialProjection(tx,animaticModel,{view});
       if(animaticModel.animaticTimelines.length||animaticModel.animaticRenderJobs.length||animaticModel.shotProductionManifestJobs.length||(animaticModel.shotProductionPlans||[]).length){
@@ -149,6 +156,7 @@ export async function exportHostedInstance(instancePath, output) {
       view.snapshot.productionModel.materialDirectory=publicMaterialDirectory(await readMaterialDirectory(tx));
       view.snapshot.creativeLineage={...view.snapshot.creativeLineage,spatialSettings:await readSpatialSettings(tx,view)};
       const media=[...selectHostedMedia(activeMedia),...animatic.media];view.snapshot.productionModel.publicExportMediaBindings=media.map(m=>({familyId:m.mediaId,versionId:m.versionId,sha256:m.sha256}));
+      for(const row of view.snapshot.productionModel.materialUsageEvidence||[]){const source=row.body.basis.source;row.mediaCurrentInSourceProjection=row.mediaCurrent===true;row.mediaAvailabilityScope='HOSTED_EXPORT';row.mediaCurrent=row.mediaCurrentInSourceProjection&&media.some(m=>m.mediaId===source.familyId&&m.versionId===source.versionId&&m.sha256===source.sha256);}
       return {view,release,events:await hostedEventProjection(view),media};
     });
   const pending=await mkdtemp(path.join(parent,'.hosted-export-pending-'));
@@ -215,6 +223,7 @@ export async function verifyHostedExport(directory) {
   if(core.snapshotId!==productionA.snapshotId || core.snapshotId!==productionB.snapshotId)throw new Error('Hosted snapshot shard identity mismatch');
   const snapshot={...core,productionModel:{...productionA.productionModel,...productionB.productionModel}};
   if(snapshot.snapshotId!==body.snapshotId || snapshot.instance?.instanceId!==body.instanceId || recipes.snapshotId!==body.snapshotId || events.snapshotId!==body.snapshotId || events.mode!=='HOSTED_READ_ONLY_EVENT_PROJECTION')throw new Error('Hosted export snapshot identity mismatch');
+  validateHostedMaterialUsages(snapshot,events,{mediaBindings:body.media.map(m=>({familyId:m.mediaId,versionId:m.versionId,sha256:m.sha256}))});
   return {root,manifest,snapshot,recipes,events};
 }
 

@@ -23,7 +23,7 @@ function assertJson(value,seen=new Set()){
 // These fields describe realization, not the authored demand. The coverage and
 // current-shot fields are computed by _store.projectOperationalState and its
 // shot-plan gate; keep their exact names here, never strip unknown metadata.
-const implementationKeys=new Set(['assetFamilyRefs','materialWorkItemRef','plannedAssetFamilyId','formalAdoptionPerformed','currentVersionId','versionRefs','expectedOutputRefs','outputState','lifecycleState','canFlowDownstream','registrationState','availability','coverageSatisfied','bindingStale','coverageReasons','coveredByFamilyRefs','coveredByVersionRefs','materialWorkItemLifecycleState','currentShotIds','currentShotRelationState','compositionCoverage']);
+const implementationKeys=new Set(['assetFamilyRefs','materialWorkItemRef','plannedAssetFamilyId','formalAdoptionPerformed','currentVersionId','versionRefs','expectedOutputRefs','outputState','lifecycleState','canFlowDownstream','registrationState','availability','coverageSatisfied','bindingStale','coverageReasons','coveredByFamilyRefs','coveredByVersionRefs','materialWorkItemLifecycleState','currentShotIds','currentShotRelationState','compositionCoverage','materialUsageBindings']);
 const derivedDomainKeys=new Set(['requirementHash','sourceRef','domainContext']);
 const domainContextKeys=new Set(['hashSchemaVersion','hash','representationIds','entityIds','relationIds']);
 function requirementValue(requirement,domainManaged){

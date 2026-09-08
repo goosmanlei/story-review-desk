@@ -1,3 +1,5 @@
+import {requirementInputFamilyIds} from './material-requirement-composition.mjs';
+import {exactRequirementUsageBinding} from './material-usage-model.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {productionSpaceReasons} from './shot-production-space.mjs';
 import {selectAnimaticLockForShot} from './animatic-model.mjs';
@@ -241,7 +243,7 @@ export function productionBindingReasons(model,state,binding,{requireAdopted=tru
   if(!family||!version||version.familyId!==binding.familyId||version.sha256!==binding.sha256||!hashPattern.test(binding.sha256||'')||typeof version.path!=='string'||!version.path.trim())return ['INPUT_FILE_OR_SHA_MISSING'];
   const reasons=[];
   if(requireAdopted&&(family.currentVersionId!==version.id||version.canFlowDownstream!==true||family.canFlowDownstream!==true))reasons.push('INPUT_VERSION_NOT_CURRENT_RELEASED');
-  if(binding.requirementId){const requirement=list(model.materialRequirements).find(r=>r.id===binding.requirementId&&r.requirementClass==='REQUIRED');if(!requirement||!list(requirement.assetFamilyRefs).includes(binding.familyId))reasons.push('INPUT_REQUIREMENT_BINDING_CHANGED');}
+  if(binding.requirementId){const requirement=list(model.materialRequirements).find(r=>r.id===binding.requirementId&&r.requirementClass==='REQUIRED');if(!requirement||!(requirement.composition?requirementInputFamilyIds(model,state,requirement).includes(binding.familyId)&&family.currentVersionId===binding.versionId:list(requirement.assetFamilyRefs).includes(binding.familyId)||exactRequirementUsageBinding(state,requirement,binding)))reasons.push('INPUT_REQUIREMENT_BINDING_CHANGED');}
   const producer=resolveShotProductionProducer(model,binding);reasons.push(...producer.blockers,...shotProductionConsumptionReasons({...producer,consumerRole}));
   return unique(reasons);
 }
@@ -273,7 +275,7 @@ export function shotProductionReadiness(model,state,sceneId) {
     const missing=list(spec.materialRequirementRefs).filter(id=>!inputs.some(b=>b.requirementId===id));
     if(missing.length)blockers.push(...missing.map(id=>'MATERIAL_INPUT_MISSING:'+id));
     for(const b of inputs)blockers.push(...productionBindingReasons(model,state,b).map(reason=>reason+':'+b.familyId));
-    blockers.push(...productionSpaceReasons(model,settings));
+    blockers.push(...productionSpaceReasons(model,settings,state));
     const localInputHash=productionHash({shotId:spec.id,inputs:settings.inputs,space:settings.space});
     if(!inputLocks.some(lock=>lock.inputHash===allInputsHash||list(lock.perShotHashes).some(row=>row.shotId===spec.id&&row.inputHash===localInputHash)))blockers.push('INPUT_LOCK_REQUIRED');
     if(settings.keyframeStrategy.mode==='UNDECIDED')blockers.push('KEYFRAME_STRATEGY_REQUIRED');
@@ -311,7 +313,7 @@ function previsReadiness(model,state,{scope,plan,content,works,expectedWorks}){
  const refs=(bindings,consumerRole)=>bindings.flatMap(b=>productionBindingReasons(model,state,b,{consumerRole}).map(reason=>reason+':'+b.familyId));
  const report=scope.shots.map(spec=>{
   const settings=content.shots.find(s=>s.shotId===spec.id),local=works.filter(w=>w.shotId===spec.id),visual=shotProductionVisualInputs(model,settings);
-  const visualReasons=[...settings.visualRequirementIds.filter(id=>!visual.some(i=>i.requirementId===id)).map(id=>'MATERIAL_INPUT_MISSING:'+id),...refs(visual,'VISUAL_PRODUCTION'),...productionSpaceReasons(model,settings)];
+  const visualReasons=[...settings.visualRequirementIds.filter(id=>!visual.some(i=>i.requirementId===id)).map(id=>'MATERIAL_INPUT_MISSING:'+id),...refs(visual,'VISUAL_PRODUCTION'),...productionSpaceReasons(model,settings,state)];
   const inputHash=shotProductionVisualInputHash(model,settings);
   const locked=list(model.shotInputLocks).some(l=>l.scopeRole==='CURRENT'&&l.sceneId===scope.sceneId&&(l.shotId===spec.id||list(l.perShotHashes).some(r=>r.shotId===spec.id))&&(l.inputHash===inputHash||list(l.perShotHashes).some(r=>r.shotId===spec.id&&r.inputHash===inputHash)));
   const visualLockReasons=locked?[]:['INPUT_LOCK_REQUIRED'];

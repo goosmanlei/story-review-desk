@@ -1,4 +1,5 @@
 import {restoredRuntimeEpoch} from './execution-epoch.mjs';
+import {createMaterialUsageArchiveValidator,validateMaterialUsageArchive} from './material-usage-archive.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
@@ -517,7 +518,19 @@ export async function restoreInstanceRepository({ backupPath, dbPath, instanceId
   ensure(!processReadOnly(), 'READ_ONLY', 'Read-only runtime cannot restore a database');
   const source = safePath(backupPath); const target = safePath(dbPath); assertSqliteOwner(source); assertSqliteOwner(target); digest(expectedSha256);
   ensure(sha256(readFileSync(source)) === expectedSha256, 'BACKUP_HASH_MISMATCH', 'Backup hash mismatch');
-  openInstanceRepository({ dbPath: source, instanceId, readOnly: true }).integrityCheck();
+  const sourceRepository=openInstanceRepository({ dbPath: source, instanceId, readOnly: true });
+  try{
+    sourceRepository.integrityCheck();
+    await sourceRepository.readTransaction(tx=>{
+      const validation=createMaterialUsageArchiveValidator();
+      // Validate raw SQLite backups with the same semantic closure as object
+      // and streamed archives, without materializing a complete export.
+      for(const table of ['repository_meta','document_aliases','record_revisions','domain_events','releases']){
+        for(const row of tx.db.prepare(`SELECT * FROM ${table}`).iterate())validation.accept(table,row);
+      }
+      validation.finish();
+    });
+  }finally{sourceRepository.close();}
   ensure(!existsSync(target) && !existsSync(`${target}-wal`) && !existsSync(`${target}-shm`), 'RESTORE_TARGET_EXISTS', 'Restore requires a new target');
   mkdirSync(path.dirname(target), { recursive: true }); copyFileSync(source, target, constants.COPYFILE_EXCL); chmodSync(target, 0o600);
   ensure(sha256(readFileSync(target)) === expectedSha256, 'BACKUP_CHANGED', 'Backup changed during copy');
@@ -536,6 +549,7 @@ export function importRepositoryState(options) {
   ensure(digest(exportSha256) === sha256(canonicalJson(body)), 'EXPORT_HASH_MISMATCH', 'Business archive was modified');
   ensure(body.schemaVersion === SCHEMA_VERSION && body.applicationId === APPLICATION_ID && body.instanceId === instanceId, 'INSTANCE_MISMATCH', 'Archive schema or instance identity mismatch');
   ensure(Object.keys(body.tables).sort().join(',') === [...exportTables].sort().join(','), 'EXPORT_TABLES_MISMATCH', 'Archive must contain the exact business table set');
+  validateMaterialUsageArchive(archive);
   const target = safePath(dbPath); assertSqliteOwner(target); ensure(!existsSync(target) && !existsSync(`${target}-wal`) && !existsSync(`${target}-shm`), 'RESTORE_TARGET_EXISTS', 'Archive import requires a new target');
   mkdirSync(path.dirname(target), { recursive: true }); const fd = openSync(target, 'wx', 0o600); closeSync(fd); const db = openDb(target, false);
   try {

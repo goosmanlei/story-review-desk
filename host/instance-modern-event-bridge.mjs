@@ -6,6 +6,7 @@ import os from 'node:os';
 import {readFile,mkdtemp,realpath,chmod,writeFile,rm} from 'node:fs/promises';
 import {digest,frozenEventManifest} from './instance-modern-event-validator.mjs';
 import {historicalEventContextsHash} from './instance-historical-event-context.mjs';
+import {encodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
 
 // Historical excerpt hashes use JSON.stringify(scriptBlocks), whose object field
 // order is part of the evidence. Canonical hashes still guard the independent
@@ -40,12 +41,15 @@ export async function withHistoricalEventTransport(bundle,callback){
   }finally{await rm(scratch,{recursive:true,force:true});}
 }
 
-export async function validateModernEventsInChild({events,baseRelease,eventDirectory,historicalContexts}){
-  const required=events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
+export async function validateModernEventsInChild({events,baseRelease,eventDirectory,historicalContexts,documents=[]}){
+  const materialUsageSources=encodeMaterialUsageDocuments(documents);
+  const snapshot=JSON.parse(baseRelease.snapshotBytes),materialUsageLedger=snapshot.productionModel?.materialUsageLedger;
+  const hasUsage=materialUsageSources.length||events.some(e=>e.eventKind==='material-usage-review'||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))||materialUsageLedger!==undefined&&(!Array.isArray(materialUsageLedger)||materialUsageLedger.length);
+  const required=hasUsage||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
   if(!required)return null;
-  const snapshot=JSON.parse(baseRelease.snapshotBytes),validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
+  const validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
   return withHistoricalEventTransport(historicalContexts,async({historicalContexts:transported,directory})=>{
-  const input={events,snapshot,...(transported?{historicalContexts:transported}:{}),binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),...(historicalContexts?{historicalContextsHash:historicalContexts.contextsHash}:{}),eventDirectory,eventManifest:frozenEventManifest(events)}};
+  const input={events,snapshot,...(hasUsage?{materialUsageSources}:{}),...(transported?{historicalContexts:transported}:{}),binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),...(hasUsage?{materialUsageSourcesHash:materialUsageDocumentsHash(materialUsageSources)}:{}),...(historicalContexts?{historicalContextsHash:historicalContexts.contextsHash}:{}),eventDirectory,eventManifest:frozenEventManifest(events)}};
   const softwareRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
   const code=`import {loadModernEventRuntime,validateModernEventClosure,readFrozenModernEventInput} from ${JSON.stringify(validator.href)};const input=await readFrozenModernEventInput(process.stdin);const runtime=loadModernEventRuntime(${JSON.stringify(softwareRoot)});runtime.historicalContextDirectory=${JSON.stringify(directory)};const result=validateModernEventClosure(input,runtime);process.stdout.write(JSON.stringify(result));`;
   const proof=await new Promise((resolve,reject)=>{

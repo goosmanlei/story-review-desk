@@ -3,4 +3,6 @@ export type RequirementCoverageRow={id:string;requirementHash?:string;requiremen
 export type CompositionCoverage={schemaVersion:'1.0';mode:'ALL';compositionHash:string;requiredCount:number;coveredCount:number;components:Array<{id:string;requirementId:string;requirementHash:string|null;coverageSatisfied:boolean;reasons:string[];coveredByFamilyRefs:string[];coveredByVersionRefs:string[]}>};
 export function validateRequirementComposition(value:unknown):RequirementComposition;
 export function validateRequirementCompositions(rows:Array<{id:string;composition?:unknown}>,options?:{knownRequirementIds?:string[]}):void;
-export function applyRequirementCompositionCoverage<T extends RequirementCoverageRow>(rows:T[]):Array<T&{compositionCoverage?:CompositionCoverage}>;
+export function applyRequirementCompositionCoverage<T extends RequirementCoverageRow>(rows:T[],options?:{usageBindings?:Array<{eligible:boolean;requirementId:string;requirementHash:string;familyId:string;versionId:string;sha256:string}>}):Array<T&{compositionCoverage?:CompositionCoverage}>;
+
+export function requirementInputFamilyIds(model:unknown,state:unknown,requirement:unknown):string[];

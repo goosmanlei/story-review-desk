@@ -135,6 +135,9 @@ export type CharacterCardSpec =
     };
 
 export type MaterialRequirement = {
+  composition?: import('../host/instance-runtime/material-requirement-composition.mjs').RequirementComposition;
+  compositionCoverage?: import('../host/instance-runtime/material-requirement-composition.mjs').CompositionCoverage;
+  materialUsageBindings?: import('../host/instance-runtime/material-usage-model.mjs').MaterialUsageBinding[];
   sourceKind?: string;
   reviewSpec?: ReviewSpec; configurationBinding?: ConfigurationBinding; businessCategoryPrimaryId?:string;businessCategorySecondaryId?:string;
   id: string;

@@ -1,4 +1,6 @@
 import {historicalEventContextReader} from './instance-historical-event-context.mjs';
+import {decodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
+import {validateMaterialUsageLedger} from './instance-runtime/material-usage-model.mjs';
 import {planningReviewVersion} from './instance-runtime/shot-design-contract.mjs';
 // Pure validation of a frozen event set. No repository, network or mutation API is invoked.
 // Invoke in an isolated Node process: TypeScript loading must not alter a web process.
@@ -68,18 +70,22 @@ export function frozenEventManifest(events) {
   return {count:rows.length,eventSequenceHighWater:Math.max(0,...rows.map(row=>Number(row.eventSequence)||0)),events:rows,eventsHash:digest(rows)};
 }
 
-export function validateModernEventClosure({events,snapshot,binding,historicalContexts},runtime) {
+export function validateModernEventClosure({events,snapshot,binding,historicalContexts,materialUsageSources=[]},runtime) {
   const {api}=runtime, before=canonical(events), manifest=frozenEventManifest(events);
   requireThat(binding && text(binding.releaseId) && sha(binding.snapshotSha256) && text(binding.snapshotId),'exact base release binding required');
   requireThat(snapshot?.snapshotId===binding.snapshotId && digest(snapshot)===binding.snapshotCanonicalSha256,'frozen snapshot bytes/canonical binding mismatch');
   requireThat(equal(manifest,binding.eventManifest),'complete frozen event set differs from capture');
+  const usageDocuments=decodeMaterialUsageDocuments(materialUsageSources);
+  const usageRows=validateMaterialUsageLedger({snapshot,documents:usageDocuments,events});
+  if(usageRows.length||materialUsageSources.length||binding.materialUsageSourcesHash!==undefined)requireThat(materialUsageDocumentsHash(materialUsageSources)===binding.materialUsageSourcesHash,'material usage fixed source capture differs');
+  const usageIds=new Set(usageRows.map(row=>row.event.eventId));
   assertScopedShotProjections(snapshot.productionModel||{});
   // Imported pre-sequence evidence keeps its original absence; never backfill it.
   // This is the runtime projection order, with original date/id as the legacy tie breaker.
   const ordered=[...events].sort((a,b)=>(Number(a.eventSequence)||0)-(Number(b.eventSequence)||0)||String(a.recordedAt).localeCompare(String(b.recordedAt))||a.eventId.localeCompare(b.eventId));
   const sequences=new Set();
   for(const e of ordered){
-    requireThat(text(e.eventId)&&text(e.eventKind)&&text(e.snapshotId)&&text(e.schemaVersion),'event envelope identity is incomplete');
+    requireThat(text(e.eventId)&&text(e.eventKind)&&(usageIds.has(e.eventId)||text(e.snapshotId))&&text(e.schemaVersion),'event envelope identity is incomplete');
     requireThat(sha(e.requestHash)&&sha(e.idempotencyKeyHash)&&(!('rawRequestHash'in e)||sha(e.rawRequestHash)),'event request digest is invalid: '+e.eventId);
     requireThat(text(e.recordedAt)&&Number.isFinite(Date.parse(e.recordedAt)),'event recordedAt invalid');
     if(e.eventSequence!=null){requireThat(Number.isSafeInteger(e.eventSequence)&&e.eventSequence>0&&!sequences.has(e.eventSequence),'duplicate/invalid event sequence: '+e.eventId+' / '+e.eventSequence);sequences.add(e.eventSequence);}
@@ -92,6 +98,7 @@ export function validateModernEventClosure({events,snapshot,binding,historicalCo
   const modernIds=new Set(modernCandidates.map(e=>e.creativeRevisionId));
   const modernCommentIds=new Set(ordered.filter(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2').map(e=>e.commentId));
   const recordIds=new Set(),relationIds=new Set(), candidateReports=[],commentReports=[],submissionReports=[],resolutionReports=[];
+  for(const id of usageIds){recordIds.add(id);relationIds.add(id);}
   const latestCandidate=(event,subjectId)=>candidates.filter(c=>c.eventSequence<event.eventSequence&&(!subjectId||c.subjectId===subjectId)).at(-1);
   const historicalSnapshot=historicalEventContextReader(historicalContexts,{events,expectedHash:binding.historicalContextsHash,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,directory:runtime.historicalContextDirectory});
   function scopedViewBefore(event){

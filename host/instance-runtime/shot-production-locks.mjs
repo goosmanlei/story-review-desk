@@ -1,3 +1,4 @@
+import {loadMaterialUsageEvidence} from './material-usage-preservation.mjs';
 import {canonicalJson} from './bytes.mjs';
 import {createHash} from 'node:crypto';
 import {productionHash,productionBindingReasons,resolveShotProductionScope,compileShotProductionPlan,shotProductionVisualInputs,shotProductionVisualInputHash} from './shot-production-model.mjs';
@@ -98,6 +99,7 @@ async function readContext(tx,options={}){
  const view=await tx.readView();let model=options.model||await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}});
  if(!options.model){const{applyShotProductionManifestProjection}=await import('./shot-production-manifest.mjs');model=await applyShotProductionManifestProjection(tx,model);}
  model=await applyProductionSpatialProjection(tx,model,{view});
+ if(Object.hasOwn(model,'materialUsageLedger')||Object.hasOwn(model,'materialUsageEvidence'))model=await loadMaterialUsageEvidence(tx,model,{view});
  const state=options.state||(options.api?.projectEpisodeNarrativeReleases?episodeSourceCompiler(options.api).stateFor({...view,snapshot:{...view.snapshot,productionModel:model}}):options.api?.projectOperationalState({...view.snapshot,productionModel:model},events(view),view.eventsByKind?.['asset-version']||[],view.eventsByKind?.run||[],view.eventsByKind?.['source-operation']||[],view.eventsByKind?.['execution-request']||[]));
  if(!state)fail('缺少正式媒体运行态校验器');if(!options.model)model={...model,...(state.episodeNarrativeReleasesByUid?{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById}}:{}),animaticLocks:reconcileAnimaticLocks(model,state)};return{view,model,state};
 }
@@ -112,7 +114,7 @@ async function validateInputLock(tx,c,state,evidence){
  if(visualLock(c.plan)){
   assertFields(evidence,inputLockEvidence(c));const settings=c.settings,binding=localInputBinding(c.model,settings);
   if(settings.visualRequirementIds.some(id=>!binding.inputs.some(b=>b.requirementId===id)))fail('本镜视觉输入锁尚缺实际素材');
-  const reasons=productionSpaceReasons(c.model,{...settings,inputs:binding.inputs});if(reasons.length)fail(reasons.join('、'));
+  const reasons=productionSpaceReasons(c.model,{...settings,inputs:binding.inputs},state);if(reasons.length)fail(reasons.join('、'));
   const doc=await tx.getPublishedDocument(c.model.spatialEvidence.sourceRef);if(!doc||doc.sha256!==c.model.spatialEvidence.sourceSha256)fail('空间冻结源字节尚未核验');
   for(const input of binding.inputs){if(productionBindingReasons(c.model,state,input,{consumerRole:'VISUAL_PRODUCTION'}).length)fail('输入绑定必须实际采用已放行的精确版本 SHA');await assertRegistered(tx,input);}
   const hash=localInputHash(c.model,c.plan,settings);return{inputHash:hash,perShotHashes:[{shotId:settings.shotId,inputHash:hash}],inputBindings:[binding]};
@@ -120,7 +122,7 @@ async function validateInputLock(tx,c,state,evidence){
  assertFields(evidence,{...baseEvidence(c,'INPUT_LOCK'),inputHash:inputHash(c.plan)});
  for(const settings of c.plan.content.shots){const shot=c.scope.shots.find(s=>(s.shotId||s.id)===settings.shotId);
   if((shot.materialRequirementRefs||[]).some(id=>!settings.inputs.some(b=>b.requirementId===id))||Object.values(settings.space||{}).some(v=>!v||v==='UNKNOWN'))fail('输入锁定尚缺需求、空间或机位绑定');
-  const spaceReasons=productionSpaceReasons(c.model,settings);if(spaceReasons.length)fail(spaceReasons.join('、'));
+  const spaceReasons=productionSpaceReasons(c.model,settings,state);if(spaceReasons.length)fail(spaceReasons.join('、'));
   const doc=await tx.getPublishedDocument(c.model.spatialEvidence.sourceRef);if(!doc||doc.sha256!==c.model.spatialEvidence.sourceSha256)fail('空间冻结源字节尚未核验');
   for(const binding of settings.inputs){if(productionBindingReasons(c.model,state,binding).length)fail('输入绑定必须实际采用已放行的精确版本 SHA');await assertRegistered(tx,binding);}
  }
@@ -190,7 +192,7 @@ export async function applyShotProductionLocksProjection(tx,model,{state,view}={
     const v2=visualLock(c.plan);if(v2!==visualLock(currentPlan))fail('INPUT_LOCK_POLICY_CHANGED');
     if(v2&&(!same(record.inputBindings,[localInputBinding(model,c.settings)])||!same(record.perShotHashes,[{shotId:c.settings.shotId,inputHash:localInputHash(model,c.plan,c.settings)}])||record.inputHash!==localInputHash(model,c.plan,c.settings)||record.shotId!==c.settings.shotId))fail('VISUAL_INPUT_LOCK_CLOSURE_CHANGED');
     for(const original of record.inputBindings||[]){const next=currentPlan.content.shots.find(s=>s.shotId===original.shotId);if(!next||!same(original,v2?localInputBinding(model,next):{shotId:next.shotId,inputs:next.inputs,space:next.space}))continue;
-     let valid=productionSpaceReasons(model,v2?{...next,inputs:original.inputs}:next).length===0;for(const binding of original.inputs){if(productionBindingReasons(model,state,binding,v2?{consumerRole:'VISUAL_PRODUCTION'}:{}).length){valid=false;break;}try{await assertRegistered(tx,binding);}catch{valid=false;break;}}
+     let valid=productionSpaceReasons(model,v2?{...next,inputs:original.inputs}:next,state).length===0;for(const binding of original.inputs){if(productionBindingReasons(model,state,binding,v2?{consumerRole:'VISUAL_PRODUCTION'}:{}).length){valid=false;break;}try{await assertRegistered(tx,binding);}catch{valid=false;break;}}
      if(valid)applicableShotIds.push(original.shotId);
     }
     if(!applicableShotIds.length)fail('ALL_SHOT_INPUTS_CHANGED');

@@ -380,6 +380,9 @@ export async function POST(request: Request) {
   try {
     const { data, idempotencyKey, ifMatch } = await validateMutationRequest(request);
     const body = await request.json() as Record<string, unknown>;
+    if (['reviewPurpose', 'usageBindingId', 'usageId'].some((key) => Object.hasOwn(body, key))) {
+      throw new HttpError(422, '新用途审阅须使用支持 MATERIAL_USAGE_V1 的专用接口，不能作为原资产采用提交。');
+    }
     const rawRequestHash = mutationRequestHash('review', body);
     const replay = await replayIdempotentEvent('review', idempotencyKey, rawRequestHash);
     if (replay) {

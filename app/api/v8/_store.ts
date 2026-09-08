@@ -1,5 +1,7 @@
+import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
 import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {applyRequirementCompositionCoverage,type RequirementCoverageRow} from '../../../host/instance-runtime/material-requirement-composition.mjs';
+import {projectMaterialUsages,effectiveRequirementFamilyIds,materialUsageBindingsFor} from '../../../host/instance-runtime/material-usage-model.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
 import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
 import {shotProductionExecutionEntries} from '../../../host/instance-runtime/shot-production-gates.mjs';
@@ -570,6 +572,10 @@ function hasProductionAux(data:ReviewData){
   return Boolean((production.shotProductionPlans||[]).length||(production.spatialShotViews||[]).length||data.sourceHashes?.productionMapSha256);
 }
 async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+  if(Object.hasOwn(data.productionModel,'materialUsageLedger')||Object.hasOwn(data.productionModel,'materialUsageEvidence')){
+    const {loadMaterialUsageEvidence}=await import('../../../host/instance-runtime/material-usage-preservation.mjs');
+    data={...data,productionModel:await loadMaterialUsageEvidence(repository,data.productionModel)};
+  }
   const production=data.productionModel as unknown as {shotProductionPlans?:unknown[]};
   if(!hasProductionAux(data))return data;
   const {applyProductionSpatialProjection}=await import('../../../host/instance-runtime/spatial-production.mjs');
@@ -961,6 +967,8 @@ export function currentCreativeSubjectBaseHash(
 export type AdoptedMaterialStateProjection = {
   assetFamiliesById?: Record<string, Record<string, unknown> | undefined>;
   assetVersionsById?: Record<string, Record<string, unknown> | undefined>;
+  materialRequirementsById?: Record<string, Record<string, unknown> | undefined>;
+  materialUsageBindings?: unknown[];
 };
 
 export function deriveCurrentAdoptedMaterialSet(
@@ -973,8 +981,10 @@ export function deriveCurrentAdoptedMaterialSet(
   const coverageRefs = scopedCoverage ? [...new Set(((scopedCoverage.content as {beats?:Array<{materialRequirementRefs:string[]}>})?.beats || []).flatMap(beat => beat.materialRequirementRefs))] : [];
   const scopedFamilies = coverageRefs.flatMap(ref => {
     const requirement = data.productionModel.materialRequirements?.find(r => r.id === ref && r.requirementClass === 'REQUIRED');
-    if (!requirement || !Array.isArray(requirement.assetFamilyRefs) || !requirement.assetFamilyRefs.length) throw new HttpError(409, '本场已采用镜头意图仍有未绑定素材需求，不能把缺项当作空输入集');
-    return requirement.assetFamilyRefs.map(String);
+    const familyIds=requirement && (requirement.composition || !requirement.assetFamilyRefs?.length)
+      ? requirementInputFamilyIds(data.productionModel,state,requirement) : requirement?.assetFamilyRefs || [];
+    if (!familyIds.length) throw new HttpError(409, '本场已采用镜头意图仍有未齐套或未绑定素材需求，不能把缺项当作空输入集');
+    return familyIds.map(String);
   });
   const familyRefs = [...new Set([
     ...scopedFamilies,
@@ -4775,14 +4785,20 @@ export function projectOperationalState(
     materialWorkItems.set(item.id, item);
   }
 
+  const materialUsageBindings=projectMaterialUsages(data.productionModel,{
+    assetFamiliesById:Object.fromEntries(families),assetVersionsById:Object.fromEntries(versions),
+    materialUsageSourceReviewHeads:Object.fromEntries(effectiveMediaReviews.filter(r=>r.subjectType==='ASSET').map(r=>[String(r.versionId),String(r.eventId)])),
+  });
+  const usageState={materialUsageBindings};
   const materialRequirements = new Map<string, Record<string, unknown>>();
   for (const source of data.productionModel.materialRequirements || []) {
-    const currentVersions = source.assetFamilyRefs
+    const familyIds=effectiveRequirementFamilyIds(usageState,source),usageBindings=materialUsageBindingsFor(usageState,source),usageRecords=materialUsageBindings.filter(b=>b.requirementId===source.id);
+    const currentVersions = familyIds
       .map((familyId) => families.get(familyId))
       .map((family) => family?.currentVersionId ? versions.get(family.currentVersionId) : null)
       .filter(Boolean) as ProjectedVersion[];
-    const matchingBindings = currentVersions.flatMap((version) => version.materialRequirementBindings || [])
-      .filter((binding) => binding.requirementRef === source.id);
+    const matchingBindings = [...currentVersions.flatMap((version) => version.materialRequirementBindings || [])
+      .filter((binding) => binding.requirementRef === source.id),...usageBindings.map(b=>({requirementRef:b.requirementId,requirementHash:b.requirementHash}))];
     const bindingStale = currentVersions.length > 0 && !matchingBindings.some(
       (binding) => binding.requirementHash === source.requirementHash,
     );
@@ -4792,16 +4808,17 @@ export function projectOperationalState(
       && version.canFlowDownstream === true
     ));
     const coverageSatisfied = source.requirementClass === 'EVIDENCE_ONLY'
-      || (source.assetFamilyRefs.length > 0 && !bindingStale && coveredVersions.length === source.assetFamilyRefs.length);
+      || (familyIds.length > 0 && !bindingStale && coveredVersions.length === familyIds.length);
     const coverageReasons: string[] = [];
     if (source.requirementClass === 'EVIDENCE_ONLY') coverageReasons.push('EVIDENCE_ONLY_REQUIREMENT');
     if (source.isNewRequirement === true) coverageReasons.push('NEW_REQUIRED');
     if (!currentVersions.length && source.isNewRequirement !== true) coverageReasons.push('CURRENT_ASSET_VERSION_UNRESOLVED');
     if (bindingStale) coverageReasons.push('REQUIREMENT_HASH_VERSION_BINDING_STALE');
     const coveredFamilyIds = new Set(coveredVersions.map((version) => version.familyId));
-    coverageReasons.push(...source.assetFamilyRefs.filter((familyId) => !coveredFamilyIds.has(familyId)).map((familyId) => `UNCOVERED_ASSET_FAMILY:${familyId}`));
+    coverageReasons.push(...familyIds.filter((familyId) => !coveredFamilyIds.has(familyId)).map((familyId) => `UNCOVERED_ASSET_FAMILY:${familyId}`));
     materialRequirements.set(source.id, {
       ...source,
+      ...(usageRecords.length||Object.hasOwn(source,'materialUsageBindings')?{materialUsageBindings:usageRecords}:{}),
       coverageSatisfied,
       bindingStale,
       coverageReasons: [...new Set(coverageReasons)],
@@ -4817,6 +4834,7 @@ export function projectOperationalState(
   // adopted-version projection. Definition order cannot decide readiness.
   for (const row of applyRequirementCompositionCoverage(
     [...materialRequirements.values()] as Array<RequirementCoverageRow & Record<string, unknown>>,
+    {usageBindings:materialUsageBindings},
   )) materialRequirements.set(row.id, row);
 
   const workPackages = new Map<string, WorkPackage & StatusProjection>();
@@ -4931,6 +4949,7 @@ export function projectOperationalState(
     }])),
     materialWorkItemsById: Object.fromEntries([...materialWorkItems].map(([id, item]) => [id, statusSlice(item)])),
     materialRequirementsById: Object.fromEntries(materialRequirements),
+    ...(materialUsageBindings.length?{materialUsageBindings}:{}),
     materialStoryRelations: data.productionModel.materialStoryRelations
       ? { ...data.productionModel.materialStoryRelations }
       : undefined,

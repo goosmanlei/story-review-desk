@@ -1,4 +1,5 @@
 import {canonicalJson,sha256} from './bytes.mjs';
+import {effectiveRequirementFamilyIds} from './material-usage-model.mjs';
 
 const fail=message=>{throw Object.assign(new Error(message),{code:'DOMAIN_INVALID'});};
 const identifier=value=>typeof value==='string'&&/^[A-Za-z0-9][A-Za-z0-9:_.@-]{0,299}$/.test(value);
@@ -36,7 +37,7 @@ export function validateRequirementCompositions(rows,{knownRequirementIds=[]}={}
 }
 
 /** Second pass over actual operational coverage, never free-text inference or adoption. */
-export function applyRequirementCompositionCoverage(rows){
+export function applyRequirementCompositionCoverage(rows,{usageBindings=[]}={}){
  const byId=new Map(),duplicateIds=new Set();
  for(const row of rows){if(byId.has(row.id))duplicateIds.add(row.id);byId.set(row.id,row);}
  const resolved=new Map(),active=new Set();
@@ -50,7 +51,8 @@ export function applyRequirementCompositionCoverage(rows){
   if(!Object.hasOwn(row,'composition')){
    // Legacy evidence-only rows retain their historical projection; they cannot
    // satisfy a required component. An empty REQUIRED leaf is never delivered.
-   const result=row.requirementClass!=='EVIDENCE_ONLY'&&!(row.assetFamilyRefs||[]).length
+   const hasExactUsage=usageBindings.some(b=>b.eligible===true&&b.requirementId===row.id&&b.requirementHash===row.requirementHash&&b.versionId&&b.familyId&&/^[a-f0-9]{64}$/.test(b.sha256||''));
+   const result=row.requirementClass!=='EVIDENCE_ONLY'&&!(row.assetFamilyRefs||[]).length&&!hasExactUsage
     ?blocked(row,'CURRENT_ASSET_VERSION_UNRESOLVED'):row;
    resolved.set(id,result);return result;
   }
@@ -76,4 +78,25 @@ export function applyRequirementCompositionCoverage(rows){
   resolved.set(id,result);return result;
  };
  return rows.map(row=>visit(row.id));
+}
+
+/** Adopted input expansion for explicit ALL aggregates. The parent's own file
+ * never substitutes for its children; every child needs current exact coverage. */
+export function requirementInputFamilyIds(model,state,requirement){
+ const active=new Set();
+ const visit=row=>{
+  if(!row||!current(row)||active.has(row.id))return [];
+  if(!Object.hasOwn(row,'composition'))return effectiveRequirementFamilyIds(state,row);
+  let composition;try{composition=validateRequirementComposition(row.composition);}catch{return [];}
+  const projected=state.materialRequirementsById?.[row.id];
+  if(!projected||projected.requirementHash!==row.requirementHash||projected.coverageSatisfied!==true||projected.bindingStale===true||projected.compositionCoverage?.compositionHash!==sha256(canonicalJson(composition)))return [];
+  active.add(row.id);const families=[];
+  for(const component of composition.requiredComponents){
+   const matches=(model.materialRequirements||[]).filter(child=>child.id===component.requirementId),child=matches[0],coverage=state.materialRequirementsById?.[child?.id];
+   if(matches.length!==1||!current(child)||coverage?.requirementHash!==child.requirementHash||coverage?.coverageSatisfied!==true||coverage?.bindingStale===true){active.delete(row.id);return [];}
+   const ids=visit(child);if(!ids.length){active.delete(row.id);return [];}families.push(...ids);
+  }
+  active.delete(row.id);return unique(families);
+ };
+ return visit(requirement);
 }

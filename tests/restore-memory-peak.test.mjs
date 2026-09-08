@@ -10,6 +10,7 @@ const {canonicalSha256,archiveRowHashes,assertArchiveRowHashes}=await import(pat
 const {BUSINESS_TABLES}=await import(pathToFileURL(path.join(softwareRoot,'host/instance-runtime/postgres-schema.mjs')).href);
 const {APPLICATION_ID,SCHEMA_VERSION}=await import(pathToFileURL(path.join(softwareRoot,'host/instance-runtime/schema.mjs')).href);
 const {restoredRuntimeEpoch}=await import(pathToFileURL(path.join(softwareRoot,'host/instance-runtime/execution-epoch.mjs')).href);
+const {validateMaterialUsageArchive}=await import(pathToFileURL(path.join(softwareRoot,'host/instance-runtime/material-usage-archive.mjs')).href);
 const restoreUuid='11111111-2222-4333-8444-555555555555';
 const expectedRestoreEpoch=restoredRuntimeEpoch(restoreUuid);
 const sha256=x=>createHash('sha256').update(x).digest('hex');
@@ -93,7 +94,7 @@ async function runScenario(mode){
  async readTransaction(callback){return callback(tx);},async writeTransaction(callback){counts.writes++;return callback(tx);},
  async exportState(){throw Error('duplicate export forbidden');},async integrityCheck(){throw Error('duplicate integrity pass forbidden');},
  async close(){counts.closed++;}};
- const bindings={ensure,readOnlyProcess:()=>false,number,parse,digest:x=>x,sha256,canonicalJson,canonicalSha256,archiveRowHashes,assertArchiveRowHashes,restoredRuntimeEpoch,BUSINESS_TABLES,APPLICATION_ID,SCHEMA_VERSION,
+ const bindings={validateMaterialUsageArchive,ensure,readOnlyProcess:()=>false,number,parse,digest:x=>x,sha256,canonicalJson,canonicalSha256,archiveRowHashes,assertArchiveRowHashes,restoredRuntimeEpoch,BUSINESS_TABLES,APPLICATION_ID,SCHEMA_VERSION,
  postgresConnection:async options=>{assert(!Object.hasOwn(options,'archive'));return{};},
  emptySchema:async(_connection,callback)=>{await callback(client);counts.commits++;},
  openPostgresRepository:async options=>{assert(!Object.hasOwn(options,'archive'));return repo;},

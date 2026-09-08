@@ -1,4 +1,4 @@
-import { postgresMaterialPage, summarizeMaterialPage } from '../_material-query';
+import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings } from '../_material-query';
 import { projectIdFor } from '../../../../instance-profile';
 import { normalizeEmptyProductionFilters } from '../../../../../host/instance-runtime/snapshot-contract.mjs';
 import { assertStableId, errorResponse, HttpError, jsonResponse, operationalSnapshot, reviewData } from '../../_store';
@@ -202,7 +202,9 @@ export async function GET(request: Request) {
           .sort((left, right) => String(left.id || '').localeCompare(String(right.id || ''))),
         state.materialWorkItemsById,
       ).filter((item) => materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan));
+      const usageBindings=materialUsagePageBindings(materialRequirements),usageFamilyIds=new Set(usageBindings.map(b=>b.familyId)),usageVersionIds=new Set(usageBindings.map(b=>b.versionId));
       const candidateFamilyIds = new Set([
+        ...usageFamilyIds,
         ...materialRequirements.flatMap((item) => [
           ...(Array.isArray(item.assetFamilyRefs) ? item.assetFamilyRefs.map(String) : []),
           ...(Array.isArray(item.coveredByFamilyRefs) ? item.coveredByFamilyRefs.map(String) : []),
@@ -219,13 +221,13 @@ export async function GET(request: Request) {
           .filter((item) => candidateFamilyIds.has(item.id))
           .sort((left, right) => String(left.id || '').localeCompare(String(right.id || ''))),
         state.assetFamiliesById,
-      ).filter((item) => materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan));
+      ).filter((item) => usageFamilyIds.has(item.id)||materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan));
       const familyIds = new Set(assetFamilies.map((item) => item.id));
       const baseVersions = overlay(
         (data.productionModel.assetVersions as unknown as Row[])
           .filter((item) => familyIds.has(String(item.familyId || ''))),
         state.assetVersionsById,
-      ).filter((item) => materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan));
+      ).filter((item) => usageVersionIds.has(item.id)||materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan));
       const baseVersionIds = new Set(baseVersions.map((item) => item.id));
       const projectedVersions = Object.entries(state.assetVersionsById)
         .map(([id, item]) => item ? { ...item, id: String(item.id || id) } as Row : null)
@@ -233,7 +235,7 @@ export async function GET(request: Request) {
           item
           && !baseVersionIds.has(item.id)
           && familyIds.has(String(item.familyId || ''))
-          && materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan),
+          && (usageVersionIds.has(item.id)||materialSecondaryScopeMatches(item, parsed.filters, episodeAliases, currentEpisodePlan)),
         ));
       const assetVersions = [...baseVersions, ...projectedVersions].sort((left, right) => String(left.id || '').localeCompare(String(right.id || '')));
       const expectedOutputs = overlay(

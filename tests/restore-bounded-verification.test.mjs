@@ -5,11 +5,12 @@ const {canonicalSha256,archiveRowHashes}=await import(pathToFileURL(path.join(ro
 const {BUSINESS_TABLES}=await import(pathToFileURL(path.join(root,'host/instance-runtime/postgres-schema.mjs')));
 const {SCHEMA_VERSION,APPLICATION_ID}=await import(pathToFileURL(path.join(root,'host/instance-runtime/schema.mjs')));
 const {canonicalJson}=await import(pathToFileURL(path.join(root,'host/instance-runtime/bytes.mjs')));
+const {validateMaterialUsageArchive}=await import(pathToFileURL(path.join(root,'host/instance-runtime/material-usage-archive.mjs')));
 const sha256=value=>createHash('sha256').update(value).digest('hex'),parse=value=>JSON.parse(Buffer.from(value).toString('utf8'));
 const ensure=(ok,code,message)=>{if(!ok)throw Object.assign(Error(message),{code});};
 const number=value=>{const result=Number(value);ensure(Number.isSafeInteger(result),'INTEGER_RANGE','Database integer exceeds safe range');return result;};
 const encode=row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,Buffer.isBuffer(v)?{encoding:'base64',bytes:v.toString('base64')}:['repository_revision','storage_sequence','original_sequence','byte_size'].includes(k)&&v!==null?number(v):v]));
-const bindings={ensure,sha256,parse,number,canonicalJson,canonicalSha256,digest:value=>value,SCHEMA_VERSION,APPLICATION_ID,BUSINESS_TABLES};
+const bindings={ensure,sha256,parse,number,canonicalJson,canonicalSha256,validateMaterialUsageArchive,digest:value=>value,SCHEMA_VERSION,APPLICATION_ID,BUSINESS_TABLES};
 const impl=Function(...Object.keys(bindings),implementation+';return{validateArchive,verifyRestoredRows,verifyImportedRepository};')(...Object.values(bindings));
 function fixture(){
  const record=Buffer.from('{"title":"original"}'),snapshot=Buffer.from('{"snapshotId":"snap"}'),event=Buffer.from('{"eventId":"event","eventKind":"TEST","idempotencyKeyHash":"key"}');

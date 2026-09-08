@@ -1,0 +1,12 @@
+import type {MaterialUsageTarget,MaterialUsageContent} from '../host/instance-runtime/material-usage-model.mjs';
+import type {MaterialUsageWorkspace,MaterialUsageSelection,MaterialUsageDraft} from '../host/instance-runtime/material-usage-service.mjs';
+export type UsagePending={action:'save'|'publish';target:MaterialUsageTarget;requestId:string;basisHash:string;releaseId:string;oldDraftRevisionId:string|null;content:MaterialUsageContent};
+export type UsageEditableDraft=Omit<MaterialUsageContent,'observation'|'decision'>&{observation:Omit<MaterialUsageContent['observation'],'originalViewed'>&{originalViewed:boolean};decision:Omit<MaterialUsageContent['decision'],'action'|'criterionFindings'>&{action:MaterialUsageContent['decision']['action']|'';criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA'|'';note:string}>}};
+export type UsageLocalDraft={target:MaterialUsageTarget;basisHash:string;releaseId:string;content:UsageEditableDraft};
+export function sameUsageTarget(a:unknown,b:unknown):boolean;
+export function validUsageSelection(value:unknown,requirementId:string):MaterialUsageSelection;
+export function validUsageWorkspace(value:unknown,expected:MaterialUsageTarget):MaterialUsageWorkspace;
+export function validUsageReceipt(value:unknown,action:'save'|'preview'|'publish',workspace:MaterialUsageWorkspace):Record<string,unknown>;
+export function validUsagePending(value:unknown,requirementId:string):UsagePending;
+export function validUsageLocalDraft(value:unknown,requirementId:string):UsageLocalDraft;
+export function reconcileUsagePending(pending:UsagePending,workspace:MaterialUsageWorkspace):{confirmed:boolean;job?:MaterialUsageWorkspace['jobs'][number];draft?:MaterialUsageDraft;stale?:boolean};

@@ -14,6 +14,8 @@ import {domainReferenceEligibility} from './domain-reference.mjs';
 import {validateShotRecipeContent} from './shot-production-recipes.mjs';
 import {executionDefinitionHash,SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA} from './execution-definition-hash.mjs';
 import {productionBindingReasons,productionId} from './shot-production-model.mjs';
+import {loadMaterialUsageEvidence} from './material-usage-preservation.mjs';
+import {materialUsageBindingsFor} from './material-usage-model.mjs';
 
 export const MATERIAL_PRODUCTION_NS={drafts:'material-production-drafts',jobs:'material-production-jobs',requests:'material-production-requests'};
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
@@ -47,7 +49,7 @@ async function registeredInput(tx,model,state,binding){
 }
 async function context(tx,requirementId,api){
  productionId(requirementId);const view=await tx.readView();if(!view.snapshot)fail('当前实例没有已发布资料');
- const model=view.snapshot.productionModel,current=await currentGraph(tx,view),graph=current.graph,state=operationalState(view,api);
+ const model=await loadMaterialUsageEvidence(tx,view.snapshot.productionModel,{view}),current=await currentGraph(tx,view),graph=current.graph,state=operationalState({...view,snapshot:{...view.snapshot,productionModel:model}},api);
  const legacy=await legacyAudioRevisionContext(tx,{view,model,graph,current,state,requirementId,api});if(legacy)return legacy;
  const rows=(model.materialRequirements||[]).filter(r=>r.id===requirementId);let requirement=rows[0];const demand=graph.requirements.find(r=>r.id===requirementId),representation=graph.representations.find(r=>r.id===demand?.representationId);
  if(rows.length!==1||requirement?.requirementClass!=='REQUIRED'||requirement.sourceKind!=='DOMAIN_GRAPH'||!demand||!representation||requirement.scopeRole==='EVIDENCE_ONLY'||requirement.activeInCurrentProduction===false)fail('仅支持当前领域图谱中的正式必需素材需求');
@@ -60,6 +62,7 @@ async function context(tx,requirementId,api){
  if(!revision&&((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId)))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
  if(revision)blockers.push(...revision.blockers);
  if(requirement.composition)blockers.push('组合需求须由全部必需子需求齐套，请为子需求分别建档制作');
+ if(materialUsageBindingsFor(state,requirement).length)blockers.push('该需求已有精确通过的图片用途绑定，不重复创建生产族');
  if(!['IMAGE','AUDIO'].includes(demand.mediaType))blockers.push('首次建档当前仅支持图片或声音基础素材');
  if(graph.requirements.filter(r=>r.representationId===representation.id).length!==1||(representation.requirementIds||[]).some(id=>id!==requirementId))blockers.push('此表现关联多个需求，须先明确独立的制作归属');
  if(!entity||representation.stateId&&!domainState)blockers.push('当前实体或状态归属不完整');

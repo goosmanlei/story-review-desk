@@ -6,6 +6,12 @@ type Row=Record<string,unknown> & {id?:string};
 const strings=(v:unknown):string[]=>Array.isArray(v)?v.filter((x):x is string=>typeof x==='string'):[];
 const refs=(rows:Row[],key:string)=>[...new Set(rows.flatMap(r=>strings(r[key])))];
 const oneRefs=(rows:Row[],key:string)=>[...new Set(rows.flatMap(r=>typeof r[key]==='string'?[r[key] as string]:[]))];
+/** Display references only: stale/rejected purposes remain inspectable without
+ * making their source family owned by or eligible for the new requirement. */
+export function materialUsagePageBindings(rows:Row[]) {
+  return rows.flatMap(row=>Array.isArray(row.materialUsageBindings)?row.materialUsageBindings:[])
+    .filter((value):value is {familyId:string;versionId:string;sha256:string}=>Boolean(value&&typeof value==='object'&&typeof value.familyId==='string'&&typeof value.versionId==='string'&&/^[a-f0-9]{64}$/.test(value.sha256)));
+}
 export async function postgresMaterialPage(request:Request,data:Awaited<ReturnType<typeof reviewData>>,operations:Awaited<ReturnType<typeof operationalSnapshot>>,validateFilters:(data:Awaited<ReturnType<typeof reviewData>>,filters:ReturnType<typeof parseUiPageRequest>['filters'])=>void) {
   const repo=await instanceRepository();if(repo?.backend!=='postgres')return null;
   const url=new URL(request.url),summary=url.searchParams.get('detail')==='summary',requirementId=url.searchParams.get('requirementId');
@@ -46,11 +52,13 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
     }
     const result=await queryObjects(tx,{releaseId,collection:'materialRequirements',ids,required:true,scopeType:parsed.filters.scopeType,scopeId:parsed.filters.scopeId,after,limit:requirementId?1:parsed.limit,summary});
     if(requirementId&&!result.items.length)throw new HttpError(404,'当前素材需求不存在');
-    const requirements=result.items,requirementIds=oneRefs(requirements,'id');
+    const projected=(operations.stateProjection as unknown as {materialRequirementsById?:Record<string,Row>}).materialRequirementsById||{};
+    const requirements=result.items.map(row=>{const usage=projected[String(row.id)]?.materialUsageBindings;return usage?{...row,materialUsageBindings:usage}:row;}),requirementIds=oneRefs(requirements,'id');
+    const usageBindings=materialUsagePageBindings(requirements);
     const work=await queryObjects(tx,{releaseId,collection:'materialWorkItems',requirementIds,limit:1000,summary});
-    const familyIds=[...new Set([...refs(requirements,'assetFamilyRefs'),...refs(requirements,'coveredByFamilyRefs'),...oneRefs(requirements,'plannedAssetFamilyId'),...oneRefs(work.items,'outputAssetRef'),...refs(work.items,'additionalOutputAssetRefs'),...(!summary?refs(work.items,'inputAssetRefs'):[])])];
+    const familyIds=[...new Set([...usageBindings.map(b=>b.familyId),...refs(requirements,'assetFamilyRefs'),...refs(requirements,'coveredByFamilyRefs'),...oneRefs(requirements,'plannedAssetFamilyId'),...oneRefs(work.items,'outputAssetRef'),...refs(work.items,'additionalOutputAssetRefs'),...(!summary?refs(work.items,'inputAssetRefs'):[])])];
     const families=await queryObjects(tx,{releaseId,collection:'assetFamilies',ids:familyIds,limit:1000,summary});
-    const versionIds=oneRefs(families.items,'currentVersionId');
+    const versionIds=[...new Set([...oneRefs(families.items,'currentVersionId'),...usageBindings.map(b=>b.versionId)])];
     const versions=await queryObjects(tx,{releaseId,collection:'assetVersions',...(summary?{ids:versionIds}:{familyIds}),limit:1000,summary});
     const expected=summary?{items:[]}:await queryObjects(tx,{releaseId,collection:'expectedOutputs',familyIds,limit:1000});
     const more=!requirementId&&requirements.length===parsed.limit&&Boolean(result.lastId)&&Boolean((await queryObjects(tx,{releaseId,collection:'materialRequirements',ids,required:true,scopeType:parsed.filters.scopeType,scopeId:parsed.filters.scopeId,after:result.lastId!,limit:1,summary:true})).items.length);
@@ -61,5 +69,5 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
   });
 }
 export function summarizeMaterialPage<T extends {page:Record<string,unknown>}>(payload:T):T {
-  return {...payload,page:Object.fromEntries(Object.entries(payload.page).map(([key,value])=>[key,Array.isArray(value)?value.map(r=>objectSummary(r)):value]))};
+  return {...payload,page:Object.fromEntries(Object.entries(payload.page).map(([key,value])=>[key,Array.isArray(value)?value.map(r=>({...objectSummary(r),...(Array.isArray(r.materialUsageBindings)?{materialUsageBindings:r.materialUsageBindings}:{})})):value]))};
 }

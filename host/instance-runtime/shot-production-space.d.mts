@@ -1,1 +1,1 @@
-export function productionSpaceReasons(model:unknown,settings:unknown):string[];
+export function productionSpaceReasons(model:unknown,settings:unknown,operationalState?:unknown):string[];

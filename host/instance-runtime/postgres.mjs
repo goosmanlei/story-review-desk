@@ -2,7 +2,7 @@ import {restoredRuntimeEpoch} from './execution-epoch.mjs';
 import pg from 'pg';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, lstat } from 'node:fs/promises';
+import { readFile, mkdir, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { RepositoryError, canonicalJson, sha256, projectionFingerprintNamespaces, projectionFingerprintRows, publishedReleaseCutoff, selectPublishedReleaseAt } from './index.mjs';
 import { APPLICATION_ID, SCHEMA_VERSION } from './schema.mjs';
@@ -13,6 +13,7 @@ import {canonicalSha256,archiveRowHashes} from './archive-integrity.mjs';
 import {writeArchiveFile,hashArchiveRows,ARCHIVE_FILE_FORMAT} from './archive-file.mjs';
 import {validateArchiveRows,assertArchiveRowsUnchanged,decodeArchiveRow,MAX_DECLARED_ARCHIVE_BYTES} from './archive-stream-validation.mjs';
 import {DEFAULT_ARCHIVE_MAX_ROW_BYTES} from './archive-file-reader.mjs';
+import {createMaterialUsageArchiveValidator,validateMaterialUsageArchive} from './material-usage-archive.mjs';
 const contexts = new AsyncLocalStorage();
 const mediaLeaseContexts = new AsyncLocalStorage();
 const MEDIA_GATE_NAMESPACE = 'media-maintenance-gates';
@@ -50,11 +51,13 @@ export function createArchiveStreamValidator(header,tableNames,instanceId,{expec
  ensure(header?.schemaVersion===SCHEMA_VERSION&&header.applicationId===APPLICATION_ID&&header.instanceId===instanceId,'INSTANCE_MISMATCH','Archive identity/schema mismatch');
  ensure(Array.isArray(tableNames)&&[...tableNames].sort().join(',')===[...BUSINESS_TABLES].sort().join(','),'EXPORT_TABLES_MISMATCH','Archive business table set differs');
  const allowed=new Set(tableNames),finished=new Set(),chains=new Map(),heads=new Map(),revisionIds=new Set(),references=new Set();let metaCount=0,done=false;
+ const materialUsage=createMaterialUsageArchiveValidator();
  return{
   accept(table,row){
    ensure(!done&&allowed.has(table)&&!finished.has(table),'EXPORT_TABLES_MISMATCH','Archive table was repeated or already closed');
    ensure(row&&typeof row==='object'&&!Array.isArray(row),'EXPORT_ROW_MISMATCH','Archive row must be an object');
    const r=Object.fromEntries(Object.entries(row).map(([key,value])=>{if(value===null||typeof value!=='object')return[key,value];ensure(value.encoding==='base64'&&typeof value.bytes==='string','EXPORT_BYTES_MISMATCH','Invalid base64');const decoded=Buffer.from(value.bytes,'base64');ensure(decoded.toString('base64')===value.bytes,'EXPORT_BYTES_MISMATCH','Invalid base64');return[key,decoded];}));
+   if(table!=='releases')materialUsage.accept(table,r);
    if(table==='record_revisions'){
     ensure(sha256(r.content_bytes)===r.content_sha256,'INTEGRITY_FAILED','Record bytes mismatch');
     const key=canonicalJson([r.namespace,r.record_key]),chain=chains.get(key)||[];
@@ -67,7 +70,9 @@ export function createArchiveStreamValidator(header,tableNames,instanceId,{expec
     const event=parse(r.event_bytes);ensure(sha256(r.event_bytes)===r.event_sha256&&event.eventId===r.event_id&&(event.eventKind||event.eventType)===r.event_kind&&(event.idempotencyKeyHash||null)===r.idempotency_key_hash,'INTEGRITY_FAILED','Event bytes mismatch');
    }
    if(table==='releases'){
-    ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&parse(r.snapshot_bytes).snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');
+    const snapshot=parse(r.snapshot_bytes);
+    ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&snapshot.snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');
+    materialUsage.accept(table,r,snapshot);
     const sources=JSON.parse(r.source_revision_ids_json);ensure(Array.isArray(sources),'INTEGRITY_FAILED','Release source binding missing');references.add(r.profile_revision_id);for(const id of sources)references.add(id);
    }
    if(table==='repository_meta'){
@@ -79,7 +84,7 @@ export function createArchiveStreamValidator(header,tableNames,instanceId,{expec
   finish(){
    ensure(!done&&finished.size===allowed.size,'EXPORT_TABLES_MISMATCH','Archive table set is incomplete');
    for(const [key,chain]of chains){chain.sort((a,b)=>a.number-b.number);let previous=null;for(let i=0;i<chain.length;i++){const revision=chain[i];ensure(revision.number===i+1&&revision.previous===previous,'INTEGRITY_FAILED','Revision chain mismatch');previous=revision.id;}ensure(heads.has(key),'INTEGRITY_FAILED','Missing head');ensure(heads.get(key)===previous,'INTEGRITY_FAILED','Head mismatch');heads.delete(key);}
-   ensure(heads.size===0,'INTEGRITY_FAILED','Head mismatch');ensure([...references].every(id=>revisionIds.has(id)),'INTEGRITY_FAILED','Release source binding missing');ensure(metaCount===1,'INSTANCE_MISMATCH','Metadata identity mismatch');done=true;
+   ensure(heads.size===0,'INTEGRITY_FAILED','Head mismatch');ensure([...references].every(id=>revisionIds.has(id)),'INTEGRITY_FAILED','Release source binding missing');ensure(metaCount===1,'INSTANCE_MISMATCH','Metadata identity mismatch');materialUsage.finish();done=true;
   },
  };
 }
@@ -319,7 +324,7 @@ export function validateArchive(archive,instanceId){
  for(const h of decoded.record_heads){const key=canonicalJson([h.namespace,h.record_key]);ensure(heads.get(key)?.revision_id===h.revision_id,'INTEGRITY_FAILED','Head mismatch');heads.delete(key);}ensure(heads.size===0,'INTEGRITY_FAILED','Missing head');
  for(const e of decoded.domain_events){const p=parse(e.event_bytes);ensure(sha256(e.event_bytes)===e.event_sha256&&p.eventId===e.event_id&&(p.eventKind||p.eventType)===e.event_kind&&(p.idempotencyKeyHash||null)===e.idempotency_key_hash,'INTEGRITY_FAILED','Event bytes mismatch');}
  for(const r of decoded.releases){ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&parse(r.snapshot_bytes).snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');ensure(revisions.has(r.profile_revision_id)&&JSON.parse(r.source_revision_ids_json).every(id=>revisions.has(id)),'INTEGRITY_FAILED','Release source binding missing');}
- ensure(decoded.repository_meta.length===1&&decoded.repository_meta[0].instance_id===instanceId,'INSTANCE_MISMATCH','Metadata identity mismatch');return decoded;
+ ensure(decoded.repository_meta.length===1&&decoded.repository_meta[0].instance_id===instanceId,'INSTANCE_MISMATCH','Metadata identity mismatch');validateMaterialUsageArchive({tables:decoded},{encoded:false});return decoded;
 }
 async function verifyRestoredRows(tx,instanceId,expectedRowHashes,expectedMeta){
  const tables=[...BUSINESS_TABLES].filter(table=>table!=='repository_meta').sort();

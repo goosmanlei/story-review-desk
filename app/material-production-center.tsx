@@ -9,6 +9,7 @@ import {EntityMaterialCatalog,MaterialReviewPoints} from './entity-material-cata
 import {ProductionMaterialCatalog} from './production-material-catalog';
 import {MaterialProgressBadge} from './material-appearance';
 import {MaterialProductionSetupEditor} from './material-production-setup-editor';
+import {MaterialUsageEditor} from './material-usage-editor';
 import {
   episodePlanIsCurrent,
   mediaKind,
@@ -170,7 +171,8 @@ function creatorStageFor(
 ) {
   const projected = item ? projection?.materialWorkItemsById?.[item.id] : null;
   const derived = projectMaterialCreatorStage({
-    lifecycleState: String(projected?.lifecycleState || item?.lifecycleState || 'UNKNOWN'),
+    lifecycleState: !item && requirement.requirementClass === 'REQUIRED' && requirement.coverageSatisfied && !requirement.bindingStale
+      ? 'SATISFIED_BY_EXISTING' : String(projected?.lifecycleState || item?.lifecycleState || 'UNKNOWN'),
     executionRequestState: typeof projected?.executionRequestState === 'string' ? projected.executionRequestState : null,
     requirementClass: requirement.requirementClass,
     coverageSatisfied:requirement.coverageSatisfied,bindingStale:requirement.bindingStale,
@@ -1046,6 +1048,10 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
   const selectedMediaLabel = materialMediaTypeOptions.find((item) => item.id === selectedClassification?.mediaType)?.label || 'UNKNOWN';
   const storyBasis = selectedRequirement?.storyBasis;
   const storyEvidenceRefs = storyBasis?.evidenceRefs || [storyBasis?.sourceRef];
+  const composition = selectedRequirement?.composition;
+  const usageOnlyLeaf = selectedRequirement?.sourceKind === 'DOMAIN_GRAPH' && selectedRequirement.requirementClass === 'REQUIRED' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && !composition && selectedClassification?.mediaType === 'IMAGE';
+  const hasUsageBindings = !!selectedRequirement?.materialUsageBindings?.length;
+  const hasEligibleUsage = selectedRequirement?.materialUsageBindings?.some(binding=>binding.eligible) === true;
   const materialInfoCard = selectedDetailId && !detailReady
     ? <section className="material-info-card material-detail-loading" aria-busy={!detailError}><p role={detailError?'alert':'status'}>{detailError || '正在读取这项素材的产物、版本、审阅与完整生产资料…'}</p>{detailError&&<button onClick={()=>setDetailAttempt(v=>v+1)}>重新读取素材详情</button>}</section>
     : !selectedRequirement ? <section className="material-info-card is-empty"><p className="v6-empty-note">选择一项素材，查看固定产物区、Review、生产资料、用途与版本血缘。</p></section>
@@ -1067,7 +1073,9 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           : `版本 ${publicRef(viewState.versionId)} 不属于资产族 ${publicRef(selectedFamily.id)}，已拒绝静默显示最新版本。`}</p></section>}
       {deletedVersionSelection&&<section className="material-selection-error" role="alert" data-deleted-material-version={explicitSelectedVersion?.id}><b>该版本已登记为删除审计</b><p>不在日常素材工作区展示。原历史记录未改写，未切换到其他版本；这次界面整理没有执行物理删除。</p></section>}
       {!familySelectionMismatch && !versionSelectionMismatch && !deletedVersionSelection && <>
-        <div className="material-review-focus">
+        {composition&&<section className="material-production-materials" aria-label="素材组成与就绪情况"><header><h3>需要全部就绪的素材</h3><span>{selectedRequirement.compositionCoverage?.coveredCount||0} / {composition.requiredComponents.length} 项已就绪</span></header>{composition.requiredComponents.map(component=>{const requirement=model.materialRequirements?.find(r=>r.id===component.requirementId),coverage=selectedRequirement.compositionCoverage?.components.find(c=>c.id===component.id);return <section key={component.id}><p><b>{requirement?.title||component.id}</b> · {coverage?.coverageSatisfied?'已就绪':'待完成'}</p>{requirement&&<button type="button" onClick={()=>select(requirement)}>查看这项素材</button>}{coverage?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}</section>}
+        {hasUsageBindings&&<section className="material-production-materials" aria-label="已登记的图片用途"><header><h3>已登记的图片用途</h3><span>{selectedRequirement.coverageSatisfied?'本需求已覆盖':'本需求待完成'}</span></header>{selectedRequirement.materialUsageBindings!.map(binding=>{const version=model.assetVersions.find(v=>v.id===binding.versionId&&v.sha256===binding.sha256),url=version?.mediaToken?'/api/v8/media/'+version.mediaToken:null;return <section key={binding.usageId}><p>{binding.eligible?'当前用途可用':'当前用途不可用'} · {binding.versionId}</p>{url&&<a href={url} target="_blank" rel="noreferrer">查看绑定原图</a>}{!binding.eligible&&binding.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}{usageOnlyLeaf&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>}</section>}
+        {!composition&&!usageOnlyLeaf&&<div className="material-review-focus">
           <div className="material-output-zone">
             <MaterialOutputViewer outputPath={recipe?.output?.path} category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={selectedVersion?.id || explicitSelectedExpected?.id || viewState.versionId || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />
           </div>
@@ -1077,13 +1085,13 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
               ? <AssetReviewForm key={`${selectedRequirement.requirementHash}:${selectedRequirement.reviewSpec?.hash || 'LEGACY'}:${selectedVersion?.id || viewState.versionId || 'NO_VERSION'}`} requirement={selectedRequirement} family={selectedFamily} version={selectedVersion} operations={operations} />
               : <div className="v6-empty-note"><b>Review 区已保留</b><p>当前还没有资产族或候选文件；登记文件与 SHA-256 后在这里进行 AI 辅助与正式人工 Review。</p></div>}
           </section>
-        </div>
+        </div>}
         <section className="material-production-materials" data-material-section="production" data-production-version-id={selectedVersion?.id || explicitSelectedExpected?.id || 'NO_VERSION'}>
-          <header><h3>全部生产资料</h3><span>{isHistoricalVersion ? `${visibleText(selectedVersion?.label || '历史版本')} · 版本绑定资料` : selectedVersion ? `${visibleText(selectedVersion.label)} · 最新生产资料` : '尚未产出 · 最新生产资料'}</span></header>
+          <header><h3>全部生产资料</h3><span>{isHistoricalVersion ? `${visibleText(selectedVersion?.label || '历史版本')} · 版本绑定资料` : selectedVersion ? `${visibleText(selectedVersion.label)} · 最新生产资料` : composition ? '由各项素材共同满足' : hasUsageBindings ? '已有图片用途审阅记录' : '尚未产出 · 最新生产资料'}</span></header>
           <CharacterCardRequirementPreview requirement={selectedRequirement} />
           {selectedFamily
             ? <>{!isHistoricalVersion && <RecipePanel expanded compact definitionRef={selectedItem?.executionDefinitionRef} recipe={recipe} error={recipeError} title="" defaultOpen reviewerView />}<MaterialCandidateProductionFacts key={`${selectedFamily.id}:${selectedVersion?.id || 'NO_VERSION'}:${selectedVersion?.sha256 || 'NO_SHA'}:${selectedVersion?.outputState || 'NO_OUTPUT'}`} family={selectedFamily} version={selectedVersion} historical={isHistoricalVersion} /></>
-            : <><p className="v6-empty-note">尚未建立可绑定的资产族；生产资料仍为待补齐。</p>{selectedRequirement.sourceKind === 'DOMAIN_GRAPH' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} />}</>}
+            : composition ? <p>逐项完成上方素材后，这项组合需求才会就绪。</p> : <>{!hasUsageBindings&&<p className="v6-empty-note">{usageOnlyLeaf?'这项需求尚未绑定产物，可制作新图或审阅已有图片的新用途。':'这项需求尚未绑定产物，可建立制作资料并生成候选。'}</p>}{usageOnlyLeaf&&!hasUsageBindings&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>} {!hasEligibleUsage&&selectedRequirement.sourceKind === 'DOMAIN_GRAPH' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} />}</>}
           {selectedFamily && !isHistoricalVersion && (selectedItem?.materialProductionPlanId || selectedFamily.materialProductionPlanId || selectedFamily.kind === 'AUDIO' && selectedVersion?.sha256 && recipe?.model?.branch === 'seed-audio-1.0' && selectedItem?.executionDefinitionRef) && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} revision />}
         </section>
         <section className="material-purpose-usage" data-material-section="purpose-usage">

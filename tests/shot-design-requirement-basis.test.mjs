@@ -71,6 +71,13 @@ for(const [name,change] of [
 test('a projected composition cannot be dropped or changed independently of the exact domain source',()=>{
  const f=composedFixture();delete f.snapshot.productionModel.materialRequirements[0].composition;assert.throws(()=>derive(f.snapshot),/组合投影/);
 });
+test('adopting or invalidating an exact existing-image usage does not change the authored demand semantics',()=>{
+ const f=composedFixture(),before=derive(f.snapshot),child=f.snapshot.productionModel.materialRequirements.find(r=>r.id===f.childId);
+ child.materialUsageBindings=[{usageId:'usage:fixture',familyId:'family:source',versionId:'family:source@V1',sha256:'e'.repeat(64),effective:true}];
+ assert.deepEqual(derive(f.snapshot),before);
+ child.materialUsageBindings[0].effective=false;assert.deepEqual(derive(f.snapshot),before);
+ const changed=clone(f.graph);changed.requirements[1].acceptanceCriteria.push('New actual state boundary');assert.notEqual(derive(project(f.snapshot,changed)).contentHash,before.contentHash);
+});
 const {api}=loadModernEventRuntime(fileURLToPath(new URL('..',import.meta.url)));
 // Read the real private gate, without exporting it as an additional product API
 // or opening a repository. The test never replaces its implementation formula.
