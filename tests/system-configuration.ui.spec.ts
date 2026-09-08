@@ -21,7 +21,7 @@ test("five configuration sections publish a preview while preserving existing ob
     page.getByRole("region", { name: "系统配置编辑器", exact: true }),
   ).toBeVisible();
   for (const name of [
-    "项目与交付",
+    "项目与画面",
     "资料与设定",
     "素材与制作",
     "审阅标准",
@@ -31,7 +31,7 @@ test("five configuration sections publish a preview while preserving existing ob
     await expect(page.locator(".configuration-editor")).toBeVisible();
   }
   await expect(page.getByText('版本与维护',{exact:true})).toHaveCount(0);
-  await page.getByRole('button',{name:'项目与交付',exact:true}).click();
+  await page.getByRole('button',{name:'项目与画面',exact:true}).click();
   await page.getByLabel("审阅台名称", { exact: true }).fill(title);
   await page.getByRole("button", { name: "保存草稿", exact: true }).click();
   await expect(
@@ -58,7 +58,7 @@ test("five configuration sections publish a preview while preserving existing ob
       .formalEventCounts,
   ).toEqual(runtime.formalEventCounts);
   await page.reload();
-  await page.getByRole("button", { name: "项目与交付", exact: true }).click();
+  await page.getByRole("button", { name: "项目与画面", exact: true }).click();
   await expect(page.getByLabel("审阅台名称", { exact: true })).toHaveValue(
     title,
   );
@@ -75,6 +75,6 @@ test("configuration remains readable without horizontal overflow on a narrow scr
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
     390,
   );
-  await page.getByRole("button", { name: "项目与交付", exact: true }).click();
+  await page.getByRole("button", { name: "项目与画面", exact: true }).click();
   await expect(page.getByLabel("画幅", { exact: true })).toBeVisible();
 });

@@ -680,61 +680,7 @@ export function SystemConfigurationWorkspace() {
                   <small id="configuration-technical-picture-confirmation-help" className="configuration-field-help">表示整组画面参数的可信度；选择“已确认”前，画幅、宽度、高度和帧率必须完整。</small>
                 </label>
               </div>
-              <h3>目标交付规格</h3>
-              <div className="configuration-form-grid configuration-delivery-grid">
-                {(
-                  [
-                    "platform",
-                    "audience",
-                    "codec",
-                    "color",
-                    "loudness",
-                  ] as const
-                ).map((k, i) =>
-                  text(
-                    ["目标平台", "目标受众", "编码", "色彩", "响度"][i],
-                    config.technical.delivery[k],
-                    (v) =>
-                      edit((c) => {
-                        c.technical.delivery[k] = v;
-                      }),
-                    false,
-                    [
-                      "决定按哪个发布渠道的要求准备和审阅交付内容。",
-                      "作为内容尺度、表达方式与适龄判断的目标人群依据。",
-                      "规定目标文件的编码格式，供交付准备与技术审阅核对。",
-                      "规定目标色彩空间或制式，供调色与技术审阅核对。",
-                      "规定目标音频响度标准，供混音与技术审阅核对。",
-                    ][i],
-                  ),
-                )}
-                <label className="configuration-field">
-                  确认状态
-                  <select
-                    aria-label="目标交付规格确认状态"
-                    aria-describedby="configuration-technical-delivery-confirmation-help"
-                    disabled={readonly}
-                    value={config.technical.delivery.confirmation}
-                    onChange={(e) =>
-                      edit((c) => {
-                        c.technical.delivery.confirmation = e.target.value;
-                      })
-                    }
-                  >
-                    {[
-                      ["UNKNOWN", "未确认"],
-                      ["SUGGESTED", "建议值"],
-                      ["CONFIRMED", "已确认"],
-                    ].map(([id, label]) => (
-                      <option value={id} key={id}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <small id="configuration-technical-delivery-confirmation-help" className="configuration-field-help">表示整组交付要求的可信度；选择“已确认”前，平台、受众、编码、色彩和响度必须完整。</small>
-                </label>
-              </div>
-              <p>未知项保留 UNKNOWN。规格发布不会改写已生成文件的实际参数。</p>
+              <p>画面基线发布不会改写已生成文件的实际参数。</p>
             </>
           )}
           {group === "sources" && (

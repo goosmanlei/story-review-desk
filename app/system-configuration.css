@@ -17,7 +17,7 @@
 .configuration-field input,.configuration-field select,.configuration-field textarea{width:100%;padding:7px 9px;font-size:16px;box-sizing:border-box;min-width:0}
 .configuration-field-help{color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .configuration-field textarea{min-height:90px;resize:vertical}.configuration-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
-.configuration-picture-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.configuration-delivery-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
+.configuration-picture-grid{grid-template-columns:repeat(5,minmax(0,1fr))}
 .configuration-card{border:1px solid var(--line);background:var(--paper-bright);padding:14px;border-radius:3px;margin:12px 0}
 .configuration-card-heading{display:flex;justify-content:space-between;gap:12px;align-items:baseline}.configuration-card-heading>span{color:var(--muted);font-size:12px;overflow-wrap:anywhere}
 .configuration-options,.configuration-row-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.configuration-type{border-top:1px solid var(--line);margin-top:10px;padding-top:8px}

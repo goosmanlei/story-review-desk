@@ -24,13 +24,13 @@ for(const width of [390,1440])for(const reverse of [false,true])test(`${width}px
  const tabs=page.getByRole('navigation',{name:'系统配置分组'});await expect(tabs.getByRole('button')).toHaveCount(5);
  let boxes=await unobstructed(page);expect(boxes.badgeNavOverlap).toBe(0);expect(boxes.overflow).toBe(false);
  if(width===390){const initial=await page.evaluate(()=>{const footer=document.querySelector('.configuration-footer')!,editor=document.querySelector('.configuration-editor')!;return{position:getComputedStyle(footer).position,footerTop:footer.getBoundingClientRect().top,editorBottom:editor.getBoundingClientRect().bottom}});expect(initial.position).toBe('static');expect(initial.footerTop).toBeGreaterThanOrEqual(initial.editorBottom);await page.screenshot({path:info.outputPath('configuration-390-initial.png')});}
- for(const name of ['资料与设定','素材与制作','审阅标准','AI与界面','项目与交付']){await tabs.getByRole('button',{name,exact:true}).click();await expect(tabs.getByRole('button',{name,exact:true})).toHaveAttribute('aria-pressed','true');}
- await expect(page.locator('.configuration-field-help')).toHaveCount(13);
- for(const name of ['故事名称','审阅台名称','画幅','宽度（像素）','高度（像素）','帧率','目标平台','目标受众','编码','色彩','响度'])await expect(page.getByLabel(name,{exact:true})).toHaveAttribute('aria-describedby',/configuration-technical-.+-help/);
+ for(const name of ['资料与设定','素材与制作','审阅标准','AI与界面','项目与画面']){await tabs.getByRole('button',{name,exact:true}).click();await expect(tabs.getByRole('button',{name,exact:true})).toHaveAttribute('aria-pressed','true');}
+ await expect(page.locator('.configuration-field-help')).toHaveCount(7);
+ for(const name of ['故事名称','审阅台名称','画幅','宽度（像素）','高度（像素）','帧率'])await expect(page.getByLabel(name,{exact:true})).toHaveAttribute('aria-describedby',/configuration-technical-.+-help/);
  await expect(page.getByLabel('内部画面基线确认状态',{exact:true})).toHaveAttribute('aria-describedby','configuration-technical-picture-confirmation-help');
- await expect(page.getByLabel('目标交付规格确认状态',{exact:true})).toHaveAttribute('aria-describedby','configuration-technical-delivery-confirmation-help');
- await expect(page.getByText('规格发布不会改写已生成文件的实际参数。',{exact:false})).toBeVisible();
- await page.getByLabel('故事名称',{exact:true}).fill('仅本地未保存布局稿');await expect(page.getByText('未保存草稿',{exact:true})).toBeVisible();await tabs.getByRole('button',{name:'资料与设定',exact:true}).click();await tabs.getByRole('button',{name:'项目与交付',exact:true}).click();await expect(page.getByLabel('故事名称',{exact:true})).toHaveValue('仅本地未保存布局稿');
+ for(const name of ['目标平台','目标受众','编码','色彩','响度','目标交付规格确认状态'])await expect(page.getByLabel(name,{exact:true})).toHaveCount(0);
+ await expect(page.getByText('画面基线发布不会改写已生成文件的实际参数。',{exact:true})).toBeVisible();
+ await page.getByLabel('故事名称',{exact:true}).fill('仅本地未保存布局稿');await expect(page.getByText('未保存草稿',{exact:true})).toBeVisible();await tabs.getByRole('button',{name:'资料与设定',exact:true}).click();await tabs.getByRole('button',{name:'项目与画面',exact:true}).click();await expect(page.getByLabel('故事名称',{exact:true})).toHaveValue('仅本地未保存布局稿');
  await page.evaluate(()=>window.scrollTo(0,document.documentElement.scrollHeight));boxes=await unobstructed(page);expect(boxes.footerToolsOverlap).toBe(0);expect(boxes.actionHitTests.every(Boolean)).toBe(true);expect(boxes.overflow).toBe(false);if(width===1440){expect(boxes.footer.height).toBeLessThan(96);await expect(page.locator('.configuration-footer')).toHaveCSS('position','sticky');}
  const publishColors=await page.locator('.configuration-publish').evaluate(e=>{const s=getComputedStyle(e);return{foreground:s.color,background:s.backgroundColor}});expect(publishColors.foreground).not.toBe(publishColors.background);expect(publishColors.background).not.toBe('rgba(0, 0, 0, 0)');
  await page.screenshot({path:info.outputPath('configuration-'+width+'.png'),fullPage:false});expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);console.log(JSON.stringify({width,reverse,boxes,publishColors}));

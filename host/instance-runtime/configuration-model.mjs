@@ -1083,13 +1083,8 @@ export function reviewSpec(
     criteria = criteria.map((c,i)=>i===0 ? {...c,question:`${c.question} ${basis}`} : c);
   }
   if (!legacy && criteria?.length && kind !== "EPISODE_PLAN") {
-    const picture = config.technical.picture,
-      delivery = config.technical.delivery;
-    const specs = `本对象制作基线：${picture.aspectRatio}，${picture.width}×${picture.height}，${picture.fps} fps（${picture.confirmation}）；交付：${Object.entries(
-      delivery,
-    )
-      .map(([k, v]) => `${({platform:"平台",audience:"受众",codec:"编码",color:"色彩",loudness:"响度",confirmation:"确认状态"})[k]}=${v}`)
-      .join("；")}。未确认值仍为 UNKNOWN，须以实际文件核验。`;
+    const picture = config.technical.picture;
+    const specs = `本对象制作基线：${picture.aspectRatio}，${picture.width}×${picture.height}，${picture.fps} fps（${picture.confirmation}）。未确认值仍为 UNKNOWN，须以实际文件核验。`;
     const continuity = `连续性依据：${config.sources.continuity.specAlias || "UNKNOWN"}；检查主题：${config.sources.continuity.themes.map((t) => t.label).join("、")}；必需坐标：${config.sources.continuity.requiredCoordinates.join("、")}。缺失依据须明确说明。`;
     criteria = criteria.map((c) => ({
       ...c,

@@ -52,6 +52,15 @@ test('a customized alias is not silently co-edited with another video standard',
  assert(nodes.some(n=>n.profileIds?.includes('production-audio_driven_video')));
 });
 
+test('legacy delivery metadata is not injected into new review questions',()=>{
+ const c=defaultConfiguration();
+ c.technical.delivery={platform:'抖音',audience:'测试受众',codec:'H.264',color:'Rec.709',loudness:'-14 LUFS',confirmation:'SUGGESTED'};
+ const spec=reviewSpec(c,'WORK_PRODUCT',{deliverableKey:'EPISODE_TECH_QC_REPORT'});
+ const text=spec.criteria.map(row=>row.question).join('\n');
+ assert.match(text,/本对象制作基线/);
+ assert(!text.includes('抖音'));assert(!text.includes('测试受众'));assert(!text.includes('-14 LUFS'));
+});
+
 test('necessary canonical standards cannot be deleted from a current template',()=>{
  const c=defaultConfiguration();c.reviewProfiles=c.reviewProfiles.filter(p=>p.id!=='production-shot_video');assert.throws(()=>validateConfiguration(c),/缺少必要/);
 });
