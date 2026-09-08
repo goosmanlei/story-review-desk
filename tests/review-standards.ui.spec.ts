@@ -1,5 +1,5 @@
 import {test,expect} from '@playwright/test';
-const open=async(page:import('@playwright/test').Page)=>{await page.goto('/?view=system#system-configuration');await expect(page.getByRole('navigation',{name:'审阅模块与标准目录'})).toBeVisible();};
+const open=async(page:import('@playwright/test').Page)=>{await page.goto('/?view=system#system-configuration');await page.getByRole('button',{name:'审阅标准',exact:true}).click();await expect(page.getByRole('navigation',{name:'审阅模块与标准目录'})).toBeVisible();};
 test('hierarchy, shared aliases, inline editing, saved drafts and immutable bound standards',async({page,request,baseURL})=>{
  if(new URL(baseURL!).port!=='4197')throw Error('Mutation test requires isolated instance');
  const original=await request.get('/api/instance/configuration').then(r=>r.json());
@@ -22,7 +22,7 @@ test('hierarchy, shared aliases, inline editing, saved drafts and immutable boun
  await page.getByRole('button',{name:'预览影响',exact:true}).click();await expect(page.getByText('影响预览已完成')).toBeVisible();
  await page.getByRole('button',{name:'发布配置',exact:true}).click();await expect(page.getByText('配置已发布，当前实例已生效')).toBeVisible();
  const after=await request.get('/api/instance/configuration').then(r=>r.json());expect(after.boundStandards).toEqual(original.boundStandards);expect(after.bindings).toEqual(original.bindings);
- await page.reload();await expect(page.getByRole('navigation',{name:'审阅模块与标准目录'})).toBeVisible();
+ await page.reload();await page.getByRole('button',{name:'审阅标准',exact:true}).click();await expect(page.getByRole('navigation',{name:'审阅模块与标准目录'})).toBeVisible();
  await page.getByRole('button',{name:'素材审阅',exact:true}).click();await page.getByRole('button',{name:'人物身份',exact:true}).click();await expect(panel.getByText(title,{exact:true})).toBeVisible();
 });
 test('390px directory and editor are usable without horizontal overflow',async({page})=>{

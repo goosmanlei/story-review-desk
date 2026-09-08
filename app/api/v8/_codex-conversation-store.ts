@@ -1609,7 +1609,7 @@ export async function codexBridgeProjection(): Promise<CodexBridgeProjection> {
     online,
     executionProtocol: isFresh && health?.executionProtocol === 'REVIEW_CONTROLLED_ACTIONS_V1' ? 'REVIEW_CONTROLLED_ACTIONS_V1' : null,
     workContextProtocol: health?.workContextProtocol === 'REVIEW_WORK_CONTEXT_V1' ? 'REVIEW_WORK_CONTEXT_V1' : null,
-    workContextCatalogVersions: Array.isArray(health?.workContextCatalogVersions) ? health.workContextCatalogVersions.filter((value): value is string => value === '1.0' || value === '1.1') : ['1.0'],
+    workContextCatalogVersions: Array.isArray(health?.workContextCatalogVersions) ? health.workContextCatalogVersions.filter((value): value is string => value === '1.0' || value === '1.1' || value === '1.2') : ['1.0'],
     workContextPreflightVerified: isFresh && health?.workContextPreflightVerified === true,
     status: isFresh ? acceptedStatus as CodexBridgeProjection['status'] : 'OFFLINE',
     checkedAt,
