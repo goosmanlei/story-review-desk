@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 import {legacyAudioRevisionContext,compileLegacyAudioRevision,LEGACY_AUDIO_MODE,LEGACY_AUDIO_SOURCE,LEGACY_AUDIO_SCHEMA} from './material-legacy-audio.mjs';
 import {materialProductionRevisionContext,compileMaterialProductionRevision} from './material-production-revision.mjs';
 import {preserveMaterialProductionProjection} from './material-production-preservation.mjs';
@@ -51,6 +52,7 @@ async function context(tx,requirementId,api){
  productionId(requirementId);const view=await tx.readView();if(!view.snapshot)fail('当前实例没有已发布资料');
  const model=await loadMaterialUsageEvidence(tx,view.snapshot.productionModel,{view}),current=await currentGraph(tx,view),graph=current.graph,state=operationalState({...view,snapshot:{...view.snapshot,productionModel:model}},api);
  const legacy=await legacyAudioRevisionContext(tx,{view,model,graph,current,state,requirementId,api});if(legacy)return legacy;
+ if(materialRequirementSelectionReasons(model,requirementId,{use:'CURRENT_TARGET'}).length)fail('这项需求已拆分或替代关系异常，请选择当前具体用途制作');
  const rows=(model.materialRequirements||[]).filter(r=>r.id===requirementId);let requirement=rows[0];const demand=graph.requirements.find(r=>r.id===requirementId),representation=graph.representations.find(r=>r.id===demand?.representationId);
  if(rows.length!==1||requirement?.requirementClass!=='REQUIRED'||requirement.sourceKind!=='DOMAIN_GRAPH'||!demand||!representation||requirement.scopeRole==='EVIDENCE_ONLY'||requirement.activeInCurrentProduction===false)fail('仅支持当前领域图谱中的正式必需素材需求');
  if(requirement.representationRef!==representation.id||requirement.requirementHash!==domainHash({demand,representation})||!same(requirement.assetFamilyRefs||[],representation.assetFamilyIds))fail('需求与表现的精确基线不一致');

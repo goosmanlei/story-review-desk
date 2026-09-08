@@ -1,4 +1,4 @@
-import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings } from '../_material-query';
+import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings, materialDirectoryProjection } from '../_material-query';
 import { projectIdFor } from '../../../../instance-profile';
 import { normalizeEmptyProductionFilters } from '../../../../../host/instance-runtime/snapshot-contract.mjs';
 import { assertStableId, errorResponse, HttpError, jsonResponse, operationalSnapshot, reviewData } from '../../_store';
@@ -180,11 +180,11 @@ export async function GET(request: Request) {
         );
       });
     };
-    const projectedRequirements = overlay(
-      (data.productionModel.materialRequirements || []) as unknown as Row[],
-      state.materialRequirementsById,
-    );
-    const primary = projectedRequirements
+    const directory = materialDirectoryProjection(data.productionModel,state);
+    const currentIds = new Set(directory.currentRows.map(row=>row.id));
+    const atomicIds = new Set(directory.atomicRows.map(row=>row.id));
+    const primary = (directory.rows as Row[])
+      .filter(item=>requestedRequirementId || currentIds.has(item.id))
       .filter((item) => item.requirementClass === 'REQUIRED')
       .filter((item) => !requestedRequirementId || item.id === requestedRequirementId)
       .filter((item) => consumerMatchesProductionFilter(item))
@@ -253,6 +253,8 @@ export async function GET(request: Request) {
         page: { materialRequirements, materialWorkItems, assetFamilies, assetVersions, expectedOutputs },
         count,
         total: primary.length,
+        atomicTotal: primary.filter(row=>atomicIds.has(row.id)).length,
+        aggregateTotal: primary.filter(row=>currentIds.has(row.id)&&(row.currentDisposition==='CURRENT_AGGREGATE' || row.composition)).length,
         nextCursor: hasMore ? encodeUiCursor('materials:requirements', data.snapshotId, parsed.filterHash, parsed.offset + count) : null,
         hasMore,
         appliedFilters: parsed.filters,

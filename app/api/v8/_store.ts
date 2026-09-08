@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from '../../../host/instance-runtime/material-requirement-disposition.mjs';
 import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
 import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {applyRequirementCompositionCoverage,type RequirementCoverageRow} from '../../../host/instance-runtime/material-requirement-composition.mjs';
@@ -980,6 +981,7 @@ export function deriveCurrentAdoptedMaterialSet(
   const scopedCoverage = data.productionModel.sceneCoveragePlanRevisions?.find(row => row.scopeId === sceneId && row.scopeRole === 'CURRENT' && row.episodeNarrativeReleaseId);
   const coverageRefs = scopedCoverage ? [...new Set(((scopedCoverage.content as {beats?:Array<{materialRequirementRefs:string[]}>})?.beats || []).flatMap(beat => beat.materialRequirementRefs))] : [];
   const scopedFamilies = coverageRefs.flatMap(ref => {
+    if(materialRequirementSelectionReasons(data.productionModel,ref,{use:'CURRENT_INPUT'}).length)throw new HttpError(409,'本场意图引用已拆分或异常需求，须显式采用新用途');
     const requirement = data.productionModel.materialRequirements?.find(r => r.id === ref && r.requirementClass === 'REQUIRED');
     const familyIds=requirement && (requirement.composition || !requirement.assetFamilyRefs?.length)
       ? requirementInputFamilyIds(data.productionModel,state,requirement) : requirement?.assetFamilyRefs || [];
@@ -1045,6 +1047,7 @@ export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: s
   };
   const graph = directory.graph || (model.domainGraph || {}) as NonNullable<typeof directory.graph>;
   const bindings = refs.map(requirementId => {
+    if(materialRequirementSelectionReasons(data.productionModel,requirementId,{use:'CURRENT_INPUT'}).length)throw new HttpError(409,'本场意图引用已拆分或异常需求，须显式采用新用途',{requirementId});
     const rows = (data.productionModel.materialRequirements || []).filter(row => row.id === requirementId);
     const requirement = rows[0] as Record<string, unknown> | undefined;
     if (rows.length !== 1 || requirement?.requirementClass !== 'REQUIRED'

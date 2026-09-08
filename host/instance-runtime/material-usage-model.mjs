@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 
 export const MATERIAL_USAGE_PROTOCOL='MATERIAL_USAGE_V1';
@@ -29,6 +30,7 @@ export function assertMaterialUsageSource(body){
  validateMaterialUsageContent(body.content,b);return body;
 }
 export function materialUsageRequirementBasis(model,requirementId){
+ check(!materialRequirementSelectionReasons(model,requirementId,{use:'CURRENT_TARGET'}).length,'用途目标已拆分或替代关系异常');
  const requirements=list(model.materialRequirements).filter(r=>r.id===requirementId),requirement=requirements[0],graph=model.domainGraph;
  check(requirements.length===1&&requirement.requirementClass==='REQUIRED'&&requirement.sourceKind==='DOMAIN_GRAPH'&&!requirement.composition&&requirement.scopeRole!=='EVIDENCE_ONLY'&&requirement.activeInCurrentProduction!==false,'用途绑定仅支持当前DOMAIN_REQUIRED叶需求');
  const demand=list(graph?.requirements).filter(r=>r.id===requirementId),representations=list(graph?.representations).filter(r=>r.id===demand[0]?.representationId),representation=representations[0];

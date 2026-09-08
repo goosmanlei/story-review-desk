@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {objectSummary} from '../host/instance-runtime/query-model.mjs';
+import {currentMaterialRequirementRows,projectMaterialRequirementDispositions} from '../host/instance-runtime/material-requirement-disposition.mjs';
 
 function emitted(filename,names){const text=readFileSync(new URL(filename,import.meta.url),'utf8'),ast=ts.createSourceFile(filename,text,ts.ScriptTarget.ESNext,true);return ts.transpileModule(ast.statements.filter(node=>!ts.isImportDeclaration(node)&&(!names||ts.isFunctionDeclaration(node)&&names.includes(node.name?.text))).map(node=>node.getText(ast)).join('\n'),{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;}
 async function moduleFor(source,values){globalThis.__usageQueryFixture=values;try{return await import('data:text/javascript;base64,'+Buffer.from('const {'+Object.keys(values).join(',')+'}=globalThis.__usageQueryFixture;\n'+source).toString('base64'));}finally{delete globalThis.__usageQueryFixture;}}
-const query=await moduleFor(emitted('../app/api/v8/ui/_material-query.ts',['materialUsagePageBindings','summarizeMaterialPage']),{objectSummary});
+const query=await moduleFor(emitted('../app/api/v8/ui/_material-query.ts',['materialUsagePageBindings','summarizeMaterialPage','materialDirectoryProjection']),{objectSummary,currentMaterialRequirementRows,projectMaterialRequirementDispositions});
 const digest='a'.repeat(64),sourceFamily={id:'SOURCE',episodeUid:'EP-SOURCE',ownerRef:'WORK-ORIGINAL',currentVersionId:'SOURCE@V002',versionRefs:['SOURCE@V001','SOURCE@V002']};
 const usage={usageId:'MUSE-test',eventId:'usage:test',requirementId:'REQ-TARGET',requirementHash:digest,familyId:'SOURCE',versionId:'SOURCE@V001',sha256:digest,eligible:false,reasons:['USAGE_DO_NOT_USE']};
 const requirement={id:'REQ-TARGET',requirementClass:'REQUIRED',assetFamilyRefs:[],episodeUid:'EP-TARGET',materialUsageBindings:[usage],coverageSatisfied:false};

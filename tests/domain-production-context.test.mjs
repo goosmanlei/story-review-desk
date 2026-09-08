@@ -5,6 +5,7 @@ import ts from 'typescript';
 import {projectDomainGraph,relationProjection,preserveDomainProjection} from '../host/instance-runtime/domain-projection.mjs';
 import {domainHash,defaultDomainConfiguration} from '../host/instance-runtime/domain-model.mjs';
 import {applyDomainInvalidations} from '../host/instance-runtime/domain-invalidation.mjs';
+import {materialRequirementSelectionReasons} from '../host/instance-runtime/material-requirement-disposition.mjs';
 
 const clone=structuredClone;
 const entity=id=>({id,type:'CHARACTER',name:id,aliases:[],description:'stable identity',authority:'A',evidence:[]});
@@ -90,8 +91,8 @@ function bindingFunctions(){
  assert.equal(declarations.length,names.length);
  const js=ts.transpileModule(declarations.join('\n'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
  const module={exports:{}};
- const binding=new Function('module','exports','stableObjectHash','HttpError','resolveFormalReviewSpec','assetReviewOwnership',js+'\nreturn {'+names.join(',')+'};');
- return binding(module,module.exports,domainHash,Error,()=>({hash:'frozen-review-standard',legacy:false}),()=>({reviewable:true}));
+ const binding=new Function('module','exports','stableObjectHash','HttpError','resolveFormalReviewSpec','assetReviewOwnership','materialRequirementSelectionReasons',js+'\nreturn {'+names.join(',')+'};');
+ return binding(module,module.exports,domainHash,Error,()=>({hash:'frozen-review-standard',legacy:false}),()=>({reviewable:true}),materialRequirementSelectionReasons);
 }
 test('V1/V2 material-set hashes and modern asset-review validation survive story-only/schema migration',()=>{
  const functions=bindingFunctions(),f=fixture(),before=withFrozenHash(f.snapshot,'2.0'),graph=clone(f.graph);graph.relations.push(story());

@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 import {requirementInputFamilyIds} from './material-requirement-composition.mjs';
 import {exactRequirementUsageBinding} from './material-usage-model.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
@@ -38,6 +39,7 @@ export function resolveShotProductionScope(model,sceneId) {
   const shotIds=specs.map((s,i)=>{productionId(s?.shotId,'永久镜头');if(s.sceneId!==sceneId||s.order!==i+1)fail('正式镜头归属或顺序无效','DOMAIN_CONFLICT');return s.shotId;});
   if(unique(shotIds).length!==shotIds.length||locks.length!==1||scopeLock.lockState!=='LOCKED'||scopeLock.denominatorState!=='KNOWN'||scopeLock.shotPlanSetRevisionId!==plan.id||scopeLock.shotPlanSetRevisionHash!==plan.contentHash||productionHash(scopeLock.shotIds)!==productionHash(shotIds))fail('本场正式镜头范围未精确锁定','DOMAIN_CONFLICT');
   const shots=specs.map(spec=>{
+    for(const requirementId of list(spec.materialRequirementRefs))if(materialRequirementSelectionReasons(model,requirementId,{use:'CURRENT_INPUT'}).length)fail('本场镜头设计仍引用已拆分或异常需求，请显式采用新用途','DOMAIN_CONFLICT');
     const matches=list(model.shots).filter(s=>s.id===spec.shotId&&current(s)),shot=matches[0];
     if(matches.length!==1||shot.sceneId!==sceneId||shot.shotPlanSetRevisionId!==plan.id||shot.shotPlanSetRevisionHash!==plan.contentHash)fail('镜头不属于当前正式计划','DOMAIN_CONFLICT');
     return {...spec,id:spec.shotId};
@@ -243,6 +245,7 @@ export function productionBindingReasons(model,state,binding,{requireAdopted=tru
   if(!family||!version||version.familyId!==binding.familyId||version.sha256!==binding.sha256||!hashPattern.test(binding.sha256||'')||typeof version.path!=='string'||!version.path.trim())return ['INPUT_FILE_OR_SHA_MISSING'];
   const reasons=[];
   if(requireAdopted&&(family.currentVersionId!==version.id||version.canFlowDownstream!==true||family.canFlowDownstream!==true))reasons.push('INPUT_VERSION_NOT_CURRENT_RELEASED');
+  if(binding.requirementId)reasons.push(...materialRequirementSelectionReasons(model,binding.requirementId,{use:'CURRENT_INPUT'}));
   if(binding.requirementId){const requirement=list(model.materialRequirements).find(r=>r.id===binding.requirementId&&r.requirementClass==='REQUIRED');if(!requirement||!(requirement.composition?requirementInputFamilyIds(model,state,requirement).includes(binding.familyId)&&family.currentVersionId===binding.versionId:list(requirement.assetFamilyRefs).includes(binding.familyId)||exactRequirementUsageBinding(state,requirement,binding)))reasons.push('INPUT_REQUIREMENT_BINDING_CHANGED');}
   const producer=resolveShotProductionProducer(model,binding);reasons.push(...producer.blockers,...shotProductionConsumptionReasons({...producer,consumerRole}));
   return unique(reasons);

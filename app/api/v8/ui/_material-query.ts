@@ -1,3 +1,4 @@
+import {currentMaterialRequirementRows,projectMaterialRequirementDispositions} from '../../../../host/instance-runtime/material-requirement-disposition.mjs';
 import {queryObjects,updateOperationalProjection,objectSummary} from '../../../../host/instance-runtime/query-model.mjs';
 import {instanceRepository,operationalSnapshot,reviewData,HttpError,stableObjectHash,jsonResponse} from '../_store';
 import {parseUiPageRequest} from './_pagination';
@@ -6,6 +7,15 @@ type Row=Record<string,unknown> & {id?:string};
 const strings=(v:unknown):string[]=>Array.isArray(v)?v.filter((x):x is string=>typeof x==='string'):[];
 const refs=(rows:Row[],key:string)=>[...new Set(rows.flatMap(r=>strings(r[key])))];
 const oneRefs=(rows:Row[],key:string)=>[...new Set(rows.flatMap(r=>typeof r[key]==='string'?[r[key] as string]:[]))];
+/** The complete operational graph decides selection before SQL pagination. */
+export function materialDirectoryProjection(model:Record<string,unknown>,state?:{materialRequirementsById?:Record<string,Row|undefined>}) {
+  const original=Array.isArray(model.materialRequirements)?model.materialRequirements as Row[]:[];
+  const full={...model,materialRequirements:original.map(row=>({...row,...state?.materialRequirementsById?.[String(row.id)]}))};
+  const rows=projectMaterialRequirementDispositions(full) as Row[];
+  const currentRows=currentMaterialRequirementRows(full) as Row[];
+  const atomicRows=currentMaterialRequirementRows(full,{atomicOnly:true}) as Row[];
+  return {rows,currentRows,atomicRows};
+}
 /** Display references only: stale/rejected purposes remain inspectable without
  * making their source family owned by or eligible for the new requirement. */
 export function materialUsagePageBindings(rows:Row[]) {
@@ -45,7 +55,9 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
   }
   return repo.readTransaction(async tx=>{
     const current=await tx.getMetadata();if(current.releaseId!==releaseId||current.eventSequence!==metadata.eventSequence)throw new HttpError(409,'素材状态已更新，请重新读取');
-    let ids=requirementId?[requirementId]:undefined;
+    const directory=materialDirectoryProjection(data.productionModel,operations.stateProjection as unknown as {materialRequirementsById?:Record<string,Row|undefined>});
+    const dispositionById=new Map(directory.rows.map(row=>[String(row.id),row]));
+    let ids=requirementId?[requirementId]:directory.currentRows.map(row=>String(row.id));
     if(parsed.filters.phaseId||parsed.filters.gateId){
       const valid=new Set(data.productionModel.workItems.filter(w=>w.activeInCurrentProduction===true&&(!parsed.filters.phaseId||w.phaseId===parsed.filters.phaseId)&&(!parsed.filters.gateId||w.gateId===parsed.filters.gateId)).map(w=>w.id));
       ids=(data.productionModel.materialRequirements||[]).filter(r=>(!ids||ids.includes(r.id))&&strings(r.consumerWorkItemRefs).some(id=>valid.has(id))).map(r=>r.id);
@@ -53,7 +65,9 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
     const result=await queryObjects(tx,{releaseId,collection:'materialRequirements',ids,required:true,scopeType:parsed.filters.scopeType,scopeId:parsed.filters.scopeId,after,limit:requirementId?1:parsed.limit,summary});
     if(requirementId&&!result.items.length)throw new HttpError(404,'当前素材需求不存在');
     const projected=(operations.stateProjection as unknown as {materialRequirementsById?:Record<string,Row>}).materialRequirementsById||{};
-    const requirements=result.items.map(row=>{const usage=projected[String(row.id)]?.materialUsageBindings;return usage?{...row,materialUsageBindings:usage}:row;}),requirementIds=oneRefs(requirements,'id');
+    const requirements:Row[]=result.items.map(row=>{const usage=projected[String(row.id)]?.materialUsageBindings,disposition=dispositionById.get(String(row.id));return {...row,...(usage?{materialUsageBindings:usage}:{}),...(disposition?.currentDisposition?{currentDisposition:disposition.currentDisposition,requirementReplacement:disposition.requirementReplacement}:{})};}),requirementIds=oneRefs(requirements,'id');
+    const atomicIds=new Set(directory.atomicRows.map(row=>String(row.id)));
+    const atomicResult=await queryObjects(tx,{releaseId,collection:'materialRequirements',ids:ids.filter(id=>atomicIds.has(id)),required:true,scopeType:parsed.filters.scopeType,scopeId:parsed.filters.scopeId,limit:1,summary:true});
     const usageBindings=materialUsagePageBindings(requirements);
     const work=await queryObjects(tx,{releaseId,collection:'materialWorkItems',requirementIds,limit:1000,summary});
     const familyIds=[...new Set([...usageBindings.map(b=>b.familyId),...refs(requirements,'assetFamilyRefs'),...refs(requirements,'coveredByFamilyRefs'),...oneRefs(requirements,'plannedAssetFamilyId'),...oneRefs(work.items,'outputAssetRef'),...refs(work.items,'additionalOutputAssetRefs'),...(!summary?refs(work.items,'inputAssetRefs'):[])])];
@@ -62,7 +76,7 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
     const versions=await queryObjects(tx,{releaseId,collection:'assetVersions',...(summary?{ids:versionIds}:{familyIds}),limit:1000,summary});
     const expected=summary?{items:[]}:await queryObjects(tx,{releaseId,collection:'expectedOutputs',familyIds,limit:1000});
     const more=!requirementId&&requirements.length===parsed.limit&&Boolean(result.lastId)&&Boolean((await queryObjects(tx,{releaseId,collection:'materialRequirements',ids,required:true,scopeType:parsed.filters.scopeType,scopeId:parsed.filters.scopeId,after:result.lastId!,limit:1,summary:true})).items.length);
-    const payload={schemaVersion:'1.0',snapshotId:data.snapshotId,operationRevision:operations.operationRevision,appliedMode:'requirements',detailState:summary?'SUMMARY':'COMPLETE',page:{materialRequirements:requirements,materialWorkItems:work.items,assetFamilies:families.items,assetVersions:versions.items,expectedOutputs:expected.items},count:requirements.length,total:result.total,nextCursor:more?Buffer.from(JSON.stringify({v:2,resource:'materials',version,filterHash:parsed.filterHash,after:result.lastId})).toString('base64url'):null,hasMore:more,appliedFilters:parsed.filters};
+    const payload={schemaVersion:'1.0',snapshotId:data.snapshotId,operationRevision:operations.operationRevision,appliedMode:'requirements',detailState:summary?'SUMMARY':'COMPLETE',page:{materialRequirements:requirements,materialWorkItems:work.items,assetFamilies:families.items,assetVersions:versions.items,expectedOutputs:expected.items},count:requirements.length,total:result.total,atomicTotal:atomicResult.total,aggregateTotal:requirementId?requirements.filter(r=>directory.currentRows.some(current=>current.id===r.id)&&(r.currentDisposition==='CURRENT_AGGREGATE'||r.composition)).length:result.total-atomicResult.total,nextCursor:more?Buffer.from(JSON.stringify({v:2,resource:'materials',version,filterHash:parsed.filterHash,after:result.lastId})).toString('base64url'):null,hasMore:more,appliedFilters:parsed.filters};
     const etag='"materials:'+stableObjectHash([version,parsed.filters,after,requirementId,summary])+'"';
     if(request.headers.get('If-None-Match')===etag)return new Response(null,{status:304,headers:{ETag:etag,'Cache-Control':'private, no-cache'}});
     return jsonResponse(payload,{headers:{ETag:etag,'Cache-Control':'private, no-cache'}});

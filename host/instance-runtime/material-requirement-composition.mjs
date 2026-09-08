@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {effectiveRequirementFamilyIds} from './material-usage-model.mjs';
 
@@ -38,6 +39,7 @@ export function validateRequirementCompositions(rows,{knownRequirementIds=[]}={}
 
 /** Second pass over actual operational coverage, never free-text inference or adoption. */
 export function applyRequirementCompositionCoverage(rows,{usageBindings=[]}={}){
+ const selectable=row=>current(row)&&!materialRequirementSelectionReasons({materialRequirements:rows},row.id,{use:'CURRENT_INPUT'}).length;
  const byId=new Map(),duplicateIds=new Set();
  for(const row of rows){if(byId.has(row.id))duplicateIds.add(row.id);byId.set(row.id,row);}
  const resolved=new Map(),active=new Set();
@@ -62,17 +64,17 @@ export function applyRequirementCompositionCoverage(rows,{usageBindings=[]}={}){
   }
   active.add(id);
   const components=composition.requiredComponents.map(component=>{
-   const child=visit(component.requirementId),eligible=current(child),covered=eligible&&child.coverageSatisfied===true&&child.bindingStale!==true;
+   const child=visit(component.requirementId),eligible=selectable(child),covered=eligible&&child.coverageSatisfied===true&&child.bindingStale!==true;
    return {...component,requirementHash:child?.requirementHash||null,coverageSatisfied:covered,
     reasons:!child?['COMPONENT_REQUIREMENT_MISSING']:!eligible?['COMPONENT_REQUIREMENT_NOT_CURRENT_REQUIRED']:covered?[]:unique([...(child.coverageReasons||[]),...(child.bindingStale?['REQUIREMENT_HASH_VERSION_BINDING_STALE']:[]),'COMPONENT_NOT_COVERED']),
     coveredByFamilyRefs:child?.coveredByFamilyRefs||[],coveredByVersionRefs:child?.coveredByVersionRefs||[]};
   });
   active.delete(id);
-  const covered=current(row)&&row.bindingStale!==true&&components.every(component=>component.coverageSatisfied);
+  const covered=selectable(row)&&row.bindingStale!==true&&components.every(component=>component.coverageSatisfied);
   // The parent's own media is not an implicit component. Only the explicit
   // child contract covers the aggregate; a separate file is not mandatory.
   const result={...row,coverageSatisfied:covered,
-   coverageReasons:unique([...(row.bindingStale?['REQUIREMENT_HASH_VERSION_BINDING_STALE']:[]),...(!current(row)?['COMPOSITION_REQUIREMENT_NOT_CURRENT_REQUIRED']:[]),...components.filter(c=>!c.coverageSatisfied).map(c=>'UNCOVERED_COMPONENT:'+c.id)]),
+   coverageReasons:unique([...(row.bindingStale?['REQUIREMENT_HASH_VERSION_BINDING_STALE']:[]),...(!selectable(row)?['COMPOSITION_REQUIREMENT_NOT_CURRENT_REQUIRED']:[]),...components.filter(c=>!c.coverageSatisfied).map(c=>'UNCOVERED_COMPONENT:'+c.id)]),
    coveredByFamilyRefs:unique(components.flatMap(c=>c.coveredByFamilyRefs)),coveredByVersionRefs:unique(components.flatMap(c=>c.coveredByVersionRefs)),
    compositionCoverage:{schemaVersion:'1.0',mode:'ALL',compositionHash:sha256(canonicalJson(composition)),requiredCount:components.length,coveredCount:components.filter(c=>c.coverageSatisfied).length,components}};
   resolved.set(id,result);return result;
@@ -85,7 +87,7 @@ export function applyRequirementCompositionCoverage(rows,{usageBindings=[]}={}){
 export function requirementInputFamilyIds(model,state,requirement){
  const active=new Set();
  const visit=row=>{
-  if(!row||!current(row)||active.has(row.id))return [];
+  if(!row||!current(row)||materialRequirementSelectionReasons(model,row.id,{use:'CURRENT_INPUT'}).length||active.has(row.id))return [];
   if(!Object.hasOwn(row,'composition'))return effectiveRequirementFamilyIds(state,row);
   let composition;try{composition=validateRequirementComposition(row.composition);}catch{return [];}
   const projected=state.materialRequirementsById?.[row.id];
@@ -93,7 +95,7 @@ export function requirementInputFamilyIds(model,state,requirement){
   active.add(row.id);const families=[];
   for(const component of composition.requiredComponents){
    const matches=(model.materialRequirements||[]).filter(child=>child.id===component.requirementId),child=matches[0],coverage=state.materialRequirementsById?.[child?.id];
-   if(matches.length!==1||!current(child)||coverage?.requirementHash!==child.requirementHash||coverage?.coverageSatisfied!==true||coverage?.bindingStale===true){active.delete(row.id);return [];}
+   if(matches.length!==1||!current(child)||materialRequirementSelectionReasons(model,child.id,{use:'CURRENT_INPUT'}).length||coverage?.requirementHash!==child.requirementHash||coverage?.coverageSatisfied!==true||coverage?.bindingStale===true){active.delete(row.id);return [];}
    const ids=visit(child);if(!ids.length){active.delete(row.id);return [];}families.push(...ids);
   }
   active.delete(row.id);return unique(families);

@@ -135,6 +135,9 @@ export type CharacterCardSpec =
     };
 
 export type MaterialRequirement = {
+  replaces?: {requirementId:string;requirementHash:string};
+  currentDisposition?: import('../host/instance-runtime/material-requirement-disposition.mjs').RequirementDisposition['kind'];
+  requirementReplacement?: {protocol:'MATERIAL_REQUIREMENT_REPLACEMENT_V1';status:'VALID'|'INVALID';replaces:{requirementId:string;requirementHash:string}|null;replacedByRequirementId:string|null;reasons:string[]};
   composition?: import('../host/instance-runtime/material-requirement-composition.mjs').RequirementComposition;
   compositionCoverage?: import('../host/instance-runtime/material-requirement-composition.mjs').CompositionCoverage;
   materialUsageBindings?: import('../host/instance-runtime/material-usage-model.mjs').MaterialUsageBinding[];

@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from '../host/instance-runtime/material-requirement-disposition.mjs';
 import {executionRuntimeReason,type ExecutionRuntime} from '../host/instance-runtime/execution-epoch.mjs';
 import {domainReferenceEligibility} from '../host/instance-runtime/domain-reference.mjs';
 import {shotProductionInputConsumptionReasons,shotProductionProjectedConsumptionReasons} from '../host/instance-runtime/shot-production-stage-policy.mjs';
@@ -63,6 +64,7 @@ export function configuredGates(
       missingOutputTypes,
     };
     const requirement = requirements.find((r) => r.id === w.requirementRef);
+    if(requirement)entryReasons.push(...materialRequirementSelectionReasons(model,String(requirement.id),{use:'CURRENT_TARGET'}));
     if (requirement && flow) {
       const requiredScenes = (flow.materialPrerequisites || [])
         .filter((rule) => rule.requirementIds.includes(String(requirement.id)))

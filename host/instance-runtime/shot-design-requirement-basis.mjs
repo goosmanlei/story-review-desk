@@ -2,6 +2,7 @@ import {canonicalJson,sha256} from './bytes.mjs';
 import {defaultDomainConfiguration} from './domain-model.mjs';
 import {refreshDirectoryProjection} from './directory-projection.mjs';
 import {validateRequirementComposition} from './material-requirement-composition.mjs';
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 
 export const SHOT_DESIGN_REQUIREMENT_BASIS_VERSION='3.0';
 export const SHOT_DESIGN_REQUIREMENT_SEMANTIC_POLICY='SHOT_DESIGN_REQUIREMENT_SEMANTICS_V1';
@@ -24,7 +25,7 @@ function assertJson(value,seen=new Set()){
 // current-shot fields are computed by _store.projectOperationalState and its
 // shot-plan gate; keep their exact names here, never strip unknown metadata.
 const implementationKeys=new Set(['assetFamilyRefs','materialWorkItemRef','plannedAssetFamilyId','formalAdoptionPerformed','currentVersionId','versionRefs','expectedOutputRefs','outputState','lifecycleState','canFlowDownstream','registrationState','availability','coverageSatisfied','bindingStale','coverageReasons','coveredByFamilyRefs','coveredByVersionRefs','materialWorkItemLifecycleState','currentShotIds','currentShotRelationState','compositionCoverage','materialUsageBindings']);
-const derivedDomainKeys=new Set(['requirementHash','sourceRef','domainContext']);
+const derivedDomainKeys=new Set(['requirementHash','sourceRef','domainContext','currentDisposition','requirementReplacement']);
 const domainContextKeys=new Set(['hashSchemaVersion','hash','representationIds','entityIds','relationIds']);
 function requirementValue(requirement,domainManaged){
  if(requirement.domainContext&&Object.keys(requirement.domainContext).some(key=>!domainContextKeys.has(key)))fail('未识别的域上下文字段不能从语义基线排除',{requirementId:requirement.id});
@@ -129,6 +130,7 @@ export function deriveShotDesignRequirementBasisV3(model,sceneId){
   if(resolved.has(requirementId))return resolved.get(requirementId);
   active.add(requirementId);
   const requirement=exact(model.materialRequirements||[],requirementId,'素材需求');assertJson(requirement);
+  if(materialRequirementSelectionReasons(model,requirementId,{use:'CURRENT_INPUT'}).length)fail('本镜意图引用了已拆分或异常的素材需求，须显式采用新的具体用途',{requirementId});
   if(requirement.requirementClass!=='REQUIRED'||!/^[a-f0-9]{64}$/.test(requirement.requirementHash||'')||directory?.staleIds.includes(requirementId))fail('需求缺失、失效或无精确哈希',{requirementId});
   const owners=(directory?.bindings||[]).filter(row=>row.requirementId===requirementId);if(owners.length>1)fail('需求目录归属不唯一',{requirementId});
   const owner=owners[0];if(owner)assertJson(owner);

@@ -5,6 +5,8 @@ export type MaterialCatalogFilters = Record<MaterialCatalogFacet, string> & {sea
 export type MaterialCatalogRow = {
   id: string;
   required: boolean;
+  currentSelectable?: boolean;
+  countsAsAtomic?: boolean;
   mediaType: string;
   entityType: string;
   entityId: string;
@@ -26,6 +28,7 @@ export function uniqueMaterialCatalogRows<T extends MaterialCatalogRow>(rows: T[
   return [...unique.values()];
 }
 export function matchesMaterialCatalogRow(row: MaterialCatalogRow, filters: MaterialCatalogFilters): boolean {
+  if (row.currentSelectable === false) return false;
   for (const facet of ['mediaType','entityType','entityId','stateId','creatorStage'] as const) {
     if (!isAllCatalogValue(filters[facet]) && row[facet] !== filters[facet]) return false;
   }
@@ -42,7 +45,7 @@ export function filterMaterialCatalogRows<T extends MaterialCatalogRow>(rows:T[]
   return uniqueMaterialCatalogRows(rows.filter(row=>matchesMaterialCatalogRow(row,filters)));
 }
 export function countMaterialCatalogRequirements(rows: MaterialCatalogRow[], filters: MaterialCatalogFilters): number {
-  return new Set(rows.filter(row=>row.required&&matchesMaterialCatalogRow(row,filters)).map(row=>row.id)).size;
+  return new Set(rows.filter(row=>row.required&&row.countsAsAtomic!==false&&matchesMaterialCatalogRow(row,filters)).map(row=>row.id)).size;
 }
 export function materialCatalogFacetCounts<T extends {value:string;label:string}>(rows:MaterialCatalogRow[],filters:MaterialCatalogFilters,facet:MaterialCatalogFacet,options:readonly T[]):Array<T&{count:number}> {
   return options.map(option=>({...option,count:countMaterialCatalogRequirements(rows,{...filters,[facet]:option.value})}));
@@ -50,7 +53,7 @@ export function materialCatalogFacetCounts<T extends {value:string;label:string}
 export function materialCatalogEntityGroups<T extends MaterialCatalogRow>(rows:T[]):Array<{entityId:string;rows:T[];requirementCount:number;trialCount:number}> {
   const groups=new Map<string,T[]>();
   for(const row of uniqueMaterialCatalogRows(rows))groups.set(row.entityId,[...(groups.get(row.entityId)||[]),row]);
-  return [...groups].map(([entityId,items])=>({entityId,rows:items,requirementCount:new Set(items.filter(r=>r.required).map(r=>r.id)).size,trialCount:items.filter(r=>!r.required).length}));
+  return [...groups].map(([entityId,items])=>({entityId,rows:items,requirementCount:new Set(items.filter(r=>r.required&&r.currentSelectable!==false&&r.countsAsAtomic!==false).map(r=>r.id)).size,trialCount:items.filter(r=>!r.required).length}));
 }
 export function materialCatalogStateGroups<T extends MaterialCatalogRow>(rows:T[]):Array<{stateId:string;rows:T[]}> {
   const groups=new Map<string,T[]>();
