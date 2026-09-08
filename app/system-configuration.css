@@ -1,4 +1,5 @@
-.configuration-page{position:relative;display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px 20px;max-width:1280px;margin:0;padding:0;color:var(--ink);font-size:16px;line-height:1.6}
+/* Reserve the fixed tool band: 22px bottom + 48px controls + 12px separation. */
+.configuration-page{--configuration-bottom-clearance:82px;position:relative;display:grid;grid-template-columns:200px minmax(0,1fr);gap:16px 20px;max-width:1280px;margin:0;padding:0 0 var(--configuration-bottom-clearance);color:var(--ink);font-size:16px;line-height:1.6}
 .configuration-page button,.configuration-page input,.configuration-page select,.configuration-page textarea{font:inherit;color:inherit;border:1px solid var(--line);border-radius:3px;background:var(--paper-bright)}
 .configuration-page button{padding:7px 12px;min-height:36px;cursor:pointer}.configuration-page button:disabled{opacity:.45;cursor:default}
 .configuration-page :focus-visible{outline:2px solid var(--accent);outline-offset:3px}
@@ -21,9 +22,9 @@
 .configuration-options,.configuration-row-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px}.configuration-type{border-top:1px solid var(--line);margin-top:10px;padding-top:8px}
 .configuration-page fieldset{border:1px solid var(--line);border-radius:3px;margin:14px 0;padding:12px}.configuration-page fieldset>label{display:block;margin:6px 0}
 .configuration-page input[type=checkbox]{margin-right:8px;accent-color:var(--accent)}
-.configuration-footer{grid-column:1/-1;position:sticky;bottom:0;z-index:8;border-top:1px solid var(--line);padding:12px;background:var(--paper-bright)}
+.configuration-footer{grid-column:1/-1;position:sticky;bottom:var(--configuration-bottom-clearance);z-index:8;border-top:1px solid var(--line);padding:12px;background:var(--paper-bright)}
 .configuration-footer [role=alert]{color:var(--accent)}.configuration-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end}
-.configuration-actions .configuration-publish{background:var(--accent);border-color:var(--accent);color:var(--paper-bright)}
+.configuration-actions .configuration-publish{background:var(--accent,var(--red));border-color:var(--accent,var(--red));color:var(--paper-bright)}
 .configuration-preview{background:var(--paper-soft);border:1px solid var(--line);padding:12px;border-radius:3px;margin-bottom:12px}.configuration-preview ul{display:flex;flex-wrap:wrap;gap:6px 24px}
 .configuration-binding{display:flex;align-items:start;margin:10px 0;overflow-wrap:anywhere}.configuration-binding small{display:block;color:var(--muted)}
 .configuration-domain-workspace{display:grid;grid-template-columns:170px minmax(0,1fr);border:1px solid var(--line);background:var(--paper-bright);min-height:360px}
@@ -64,6 +65,8 @@
 .standard-detail > button {margin-top:16px;}
 @media(max-width:800px){.review-standards-layout{grid-template-columns:minmax(0,1fr);gap:20px;}.standards-directory{position:static;max-height:330px;}.standard-criterion-editor{padding-left:0;}.standard-detail>header h3{font-size:22px;}.standard-question{font-size:14px;}}
 
-@media(max-width:950px){.configuration-page{grid-template-columns:1fr}.configuration-tabs{position:static;flex-direction:row;flex-wrap:wrap}.configuration-tabs button{border:0;flex:1 1 auto}.configuration-domain-workspace{grid-template-columns:150px minmax(0,1fr)}}
+@media(max-width:950px){.configuration-page{grid-template-columns:1fr}.configuration-page>.configuration-heading{position:static;grid-column:1/-1}.configuration-page .configuration-editor>header{padding-right:0}.configuration-tabs{position:static;flex-direction:row;flex-wrap:wrap}.configuration-tabs button{border:0;flex:1 1 auto}.configuration-domain-workspace{grid-template-columns:150px minmax(0,1fr)}}
+/* Mobile actions follow the form; padding clears the 70 + 48 + 12px tool band. */
+@media(max-width:700px){.configuration-page{--configuration-bottom-clearance:calc(130px + env(safe-area-inset-bottom, 0px))}.configuration-footer{position:static}}
 @media(max-width:1200px){.configuration-picture-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}
 @media(max-width:600px){.configuration-form-grid,.configuration-picture-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.configuration-domain-workspace{display:block}.configuration-domain-workspace>nav{max-height:220px;border-right:0;border-bottom:1px solid var(--line)}.configuration-subtabs{gap:10px;flex-wrap:wrap}.configuration-subtabs button{font-size:14px}}

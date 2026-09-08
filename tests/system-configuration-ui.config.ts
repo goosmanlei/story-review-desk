@@ -1,7 +1,7 @@
 import { defineConfig } from "@playwright/test";
 export default defineConfig({
   testDir: ".",
-  testMatch: "system-configuration.ui.spec.ts",
+  testMatch: ["system-configuration.ui.spec.ts", "configuration-layout.ui.spec.ts"],
   workers: 1,
   timeout: 45000,
   expect: { timeout: 12000 },
