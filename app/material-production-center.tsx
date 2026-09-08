@@ -937,16 +937,18 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
     ? requestedRequirementPool.find((item) => item.id === viewState.requirementId) || null
     : familyRequirements.length === 1 ? familyRequirements[0] : null;
   const selectedRequirement = requestedRequirement
-    || requirements[0]
+    || (!viewState.requirementId ? requirements[0] : null)
     || null;
-  const selectedDetailId = selectedRequirement?.id || null;
+  // A deep link may precede its summary page. Fetch that exact requirement,
+  // rather than displaying or requesting the first catalog row while it loads.
+  const selectedDetailId = viewState.requirementId || selectedRequirement?.id || null;
   const detailError=detailFailure?.id===selectedDetailId&&detailFailure?.snapshotId===snapshotId&&detailFailure?.attempt===detailAttempt?detailFailure.message:'';
-  const detailReady = Boolean(selectedDetailId && detail?.id === selectedDetailId && detail.snapshotId === snapshotId);
+  const detailReady = Boolean(selectedDetailId && selectedRequirement?.id === selectedDetailId && detail?.id === selectedDetailId && detail.snapshotId === snapshotId);
   useEffect(() => {
     if (!selectedDetailId) return;
     const controller = new AbortController();
     void fetch(`/api/v8/ui/materials?requirementId=${encodeURIComponent(selectedDetailId)}`, {cache:'no-store',signal:controller.signal})
-      .then(async response => {const body=await response.json() as PagedProductionPayload & {error?:string};if(!response.ok)throw new Error(body.error || '素材详情暂时无法读取');return body;})
+      .then(async response => {const body=await response.json() as PagedProductionPayload & {error?:string;detailState?:string};if(!response.ok)throw new Error(body.error || '素材详情暂时无法读取');if(body.detailState && body.detailState!=='COMPLETE')throw new Error('当前返回的是素材摘要，完整详情暂不可用。');return body;})
       .then(body=>{if(controller.signal.aborted)return;if(body.snapshotId!==snapshotId)throw new Error('素材详情与当前快照不一致，请刷新页面。');if(!body.page.materialRequirements?.some(r=>r.id===selectedDetailId))throw new Error('返回的详情没有精确绑定当前素材。');for(const rows of [body.page.assetFamilies,body.page.assetVersions,body.page.expectedOutputs])if(rows&&new Set(rows.map(row=>row.id)).size!==rows.length)throw new Error('素材详情包含重复身份，已拒绝合并或回退其他版本。');setDetail({id:selectedDetailId,snapshotId:body.snapshotId,page:body.page});})
       .catch(e=>{if(!controller.signal.aborted)setDetailFailure({id:selectedDetailId,snapshotId,attempt:detailAttempt,message:e instanceof Error?e.message:'素材详情暂时无法读取'});});
     return ()=>controller.abort();
@@ -1042,9 +1044,11 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
   }
   const selectedClassification = selectedRequirement ? classificationById.get(selectedRequirement.id) || null : null;
   const selectedMediaLabel = materialMediaTypeOptions.find((item) => item.id === selectedClassification?.mediaType)?.label || 'UNKNOWN';
-  const materialInfoCard = !selectedRequirement
-    ? <section className="material-info-card is-empty"><p className="v6-empty-note">选择一项素材，查看固定产物区、Review、生产资料、用途与版本血缘。</p></section>
-    : !detailReady ? <section className="material-info-card material-detail-loading" aria-busy={!detailError}><p role={detailError?'alert':'status'}>{detailError || '正在读取这项素材的产物、版本、审阅与完整生产资料…'}</p>{detailError&&<button onClick={()=>setDetailAttempt(v=>v+1)}>重新读取素材详情</button>}</section>
+  const storyBasis = selectedRequirement?.storyBasis;
+  const storyEvidenceRefs = storyBasis?.evidenceRefs || [storyBasis?.sourceRef];
+  const materialInfoCard = selectedDetailId && !detailReady
+    ? <section className="material-info-card material-detail-loading" aria-busy={!detailError}><p role={detailError?'alert':'status'}>{detailError || '正在读取这项素材的产物、版本、审阅与完整生产资料…'}</p>{detailError&&<button onClick={()=>setDetailAttempt(v=>v+1)}>重新读取素材详情</button>}</section>
+    : !selectedRequirement ? <section className="material-info-card is-empty"><p className="v6-empty-note">选择一项素材，查看固定产物区、Review、生产资料、用途与版本血缘。</p></section>
     : <article className="material-info-card" data-material-info-id={publicRef(selectedRequirement.id)} data-family-id={selectedFamily?.id || ''}>
       <header className="material-info-header"><span>{selectedMediaLabel} · {selectedClassification?.businessCategoryPrimary} / {selectedClassification?.businessCategorySecondary}</span><MaterialProgressBadge stage={selectedCreatorStage?.creatorStage||'INITIAL'}/></header>
       {!!selectedCreatorStage?.creatorStageReasons.length && <section className="material-blocking-explanation" aria-label="当前素材阻断说明">
@@ -1086,11 +1090,11 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           <header><h3>用途与使用位置</h3></header>
           <div className="material-purpose-grid">
             <section><h4>为什么需要</h4>{[
-              ['故事需要',selectedRequirement.storyBasis.whyNeeded],
-              ['观众必须看见／听见',selectedRequirement.storyBasis.onScreenRequirement],
-              ['依据说明',selectedRequirement.storyBasis.evidenceSpecificity],
+              ['故事需要',storyBasis?.whyNeeded],
+              ['观众必须看见／听见',storyBasis?.onScreenRequirement],
+              ['依据说明',storyBasis?.evidenceSpecificity],
               ['全剧适用依据',selectedRequirement.storyApplicability?.kind==='PROJECT_LEVEL' ? selectedRequirement.projectScopeReason||selectedRequirement.storyApplicability.reason : ''],
-            ].filter(([,text])=>materialDisplayText(text)).map(([label,text])=><p key={label}><b>{label}：</b>{visibleText(text!)}</p>)}{materialDisplayText(selectedRequirement.storyBasis.whyNeeded)||materialDisplayText(selectedRequirement.storyBasis.onScreenRequirement)?null:<p>用途说明尚未登记。</p>}{(selectedRequirement.storyBasis.evidenceRefs||[selectedRequirement.storyBasis.sourceRef]).some(ref=>materialDisplayText(ref))&&<code>{(selectedRequirement.storyBasis.evidenceRefs||[selectedRequirement.storyBasis.sourceRef]).map(materialDisplayText).filter(Boolean).join('；')}</code>}</section>
+            ].filter(([,text])=>materialDisplayText(text)).map(([label,text])=><p key={label}><b>{label}：</b>{visibleText(text!)}</p>)}{!storyBasis ? <p role="status">当前详情未提供用途上下文，暂不可用。</p> : materialDisplayText(storyBasis.whyNeeded)||materialDisplayText(storyBasis.onScreenRequirement)?null:<p>当前详情没有可用的用途说明。</p>}{storyEvidenceRefs.some(ref=>materialDisplayText(ref))&&<code>{storyEvidenceRefs.map(materialDisplayText).filter(Boolean).join('；')}</code>}</section>
             <section><h4>会在哪里使用</h4><div className="material-use-links">{currentEpisodePlan ? selectedRequirement.sceneIds.filter(id=>model.scenes.some(s=>s.id===id&&s.scopeRole==='CURRENT')).map((sceneId) => <button key={sceneId} onClick={() => onOpenStoryScene(sceneId)}>阅读对应场剧本 →</button>) : <p>候选集场关联见目录集、场筛选，尚未绑定为正式输入；旧用途只作历史证据。</p>}{(selectedClassification?.currentShotIds || []).map((shotId) => <button key={shotId} onClick={() => onOpenConsumer(shotId)}>{shotId} →</button>)}</div>{!(selectedClassification?.currentShotIds || []).length && <p>尚无正式镜头绑定。</p>}</section>
           </div>
         </section>

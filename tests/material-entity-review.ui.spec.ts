@@ -117,7 +117,7 @@ async function materialFixture(page:Page,{fullDenominator=false,definitionOnly=f
   if(url.pathname==='/api/instance/documents')return json({documents:[]});
   for(const[key,value]of Object.entries(capture.routes))if(url.pathname===String(value).split('?')[0])return json(capture.responses[key]);
   unexpected.push(request.method()+' '+url.pathname);return route.fulfill({status:418,json:{error:'UNEXPECTED_FIXTURE_API'}});
- });return {requirements,graph,assetFamilies,assetVersions,expectedOutputs,unexpected,writes,errors,materialRequests,aiRequests};
+ });return {requirements,graph,assetFamilies,assetVersions,expectedOutputs,unexpected,writes,errors,materialRequests,aiRequests,bootstrapData:snapshot};
 }
 type Fixture=Awaited<ReturnType<typeof materialFixture>>;
 function clean(f:Fixture){expect(f.unexpected,'No business API may escape interception').toEqual([]);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);}
@@ -133,6 +133,53 @@ const drawer=(page:Page)=>root(page).locator('dialog.material-review-drawer');
 const node=(page:Page,id:string)=>root(page).locator('[data-canvas-node-id="'+id+'"]');
 async function fit(page:Page){await root(page).locator('.material-entity-workspace').getByRole('button',{name:'适配全图',exact:true}).click();}
 async function closeDrawer(page:Page){await drawer(page).getByRole('button',{name:'关闭详情',exact:true}).click();await expect(drawer(page)).not.toBeVisible();}
+
+test('原生素材缺少用途上下文时先等精确详情，再保留原版本并显示不可用',async({page})=>{
+ const f=await materialFixture(page,{flatProof:true,realizedExpected:true});
+ // Native DOMAIN_GRAPH detail legitimately omits this legacy presentation field.
+ const nativeRequirement:Partial<MaterialRequirement>=f.requirements[0];delete nativeRequirement.storyBasis;
+ let releaseDetail!:()=>void;const detailGate=new Promise<void>(resolve=>{releaseDetail=resolve;});let requested=false;
+ await page.route('**/api/v8/ui/materials?**',async route=>{
+  if(new URL(route.request().url()).searchParams.get('requirementId')==='MATREQ-FIXTURE-A'){requested=true;await detailGate;}
+  await route.fallback();
+ });
+ await page.goto('/?view=materials&material=MATREQ-FIXTURE-A&family=fixture-family-a&version=fixture-family-a%40V001');
+ await expect.poll(()=>requested).toBe(true);await expect(drawer(page).getByText('正在读取这项素材的产物、版本、审阅与完整生产资料…',{exact:true})).toBeVisible();
+ await expect(drawer(page).locator('[data-material-info-id]')).toHaveCount(0);releaseDetail();
+ const card=drawer(page).locator('[data-material-info-id="MATREQ-FIXTURE-A"]');await expect(card).toHaveAttribute('data-family-id','fixture-family-a');
+ await expect(card.getByText('当前详情未提供用途上下文，暂不可用。',{exact:true})).toBeVisible();
+ await expect(card.locator('[data-material-section="production"]')).toHaveAttribute('data-production-version-id','fixture-family-a@V001');
+ await expect(card.locator('[data-material-section="purpose-usage"]')).not.toContainText('辨认主体并保持连续性');
+ expect(new URL(page.url()).searchParams.get('version')).toBe('fixture-family-a@V001');clean(f);
+});
+
+test('素材深链不在bootstrap摘要时直接读取所选需求，不请求默认条目',async({page})=>{
+ const f=await materialFixture(page),requestedId='MATREQ-FIXTURE-B';
+ const summary=structuredClone(f.bootstrapData);summary.productionModel.materialRequirements=f.requirements.filter(r=>r.id!==requestedId);
+ await page.route('**/api/v8/ui/bootstrap',route=>route.fulfill({json:{data:summary,snapshotId:summary.snapshotId}}));
+ await page.route('**/api/v8/ui/materials?**',route=>{
+  if(new URL(route.request().url()).searchParams.has('requirementId'))return route.fallback();
+  return route.fulfill({json:{schemaVersion:'1.0',snapshotId:summary.snapshotId,detailState:'SUMMARY',page:{materialRequirements:summary.productionModel.materialRequirements},count:4,total:4,nextCursor:null,hasMore:false,appliedFilters:{}}});
+ });
+ await page.goto('/?view=materials&material='+requestedId);
+ await expect(drawer(page).locator('[data-material-info-id="'+requestedId+'"]').getByText('人物乙来访形象',{exact:true}).first()).toBeVisible();
+ const exactRequests=f.materialRequests.map(query=>new URLSearchParams(query).get('requirementId')).filter(Boolean);
+ expect(exactRequests.length).toBeGreaterThan(0);expect(new Set(exactRequests)).toEqual(new Set([requestedId]));
+ expect(new URL(page.url()).searchParams.get('material')).toBe(requestedId);clean(f);
+});
+
+test('素材精确详情误返摘要时显示不可用且重读，不渲染摘要为完整卡',async({page})=>{
+ const f=await materialFixture(page);let detailAttempts=0;
+ await page.route('**/api/v8/ui/materials?**',route=>{
+  if(new URL(route.request().url()).searchParams.get('requirementId')!=='MATREQ-FIXTURE-A')return route.fallback();
+  detailAttempts++;if(detailAttempts>1)return route.fallback();
+  return route.fulfill({json:{schemaVersion:'1.0',snapshotId:f.bootstrapData.snapshotId,detailState:'SUMMARY',page:{materialRequirements:[f.requirements[0]]},count:1,total:1,nextCursor:null,hasMore:false,appliedFilters:{}}});
+ });
+ await page.goto('/?view=materials&material=MATREQ-FIXTURE-A');
+ await expect(drawer(page).getByRole('alert')).toHaveText('当前返回的是素材摘要，完整详情暂不可用。');await expect(drawer(page).locator('[data-material-info-id]')).toHaveCount(0);
+ await drawer(page).getByRole('button',{name:'重新读取素材详情',exact:true}).click();await expect(drawer(page).locator('[data-material-info-id="MATREQ-FIXTURE-A"]')).toBeVisible();
+ expect(detailAttempts).toBe(2);clean(f);
+});
 
 for(const width of [1440,390])test(width+'px素材单击只高亮精确直接关联，全图曲线与阅读相机保持原位',async({page})=>{
  const f=await materialFixture(page,{flatProof:true});await page.setViewportSize({width,height:1000});await open(page,'classification');await root(page).locator('[data-entity-id="'+ids.a+'"]').click();await fit(page);
