@@ -143,9 +143,29 @@ function media(row, db) {
     aliases: db.prepare('SELECT alias FROM media_aliases WHERE media_id=? AND version_id=? ORDER BY alias').all(row.media_id, row.version_id).map((x) => x.alias) } : null;
 }
 
+// Lightweight read watermark: immutable AUX head identities (including deletions),
+// and registered-media metadata, never record bodies or media bytes.
+export function projectionFingerprintNamespaces(namespaces) {
+  ensure(Array.isArray(namespaces)&&namespaces.length<=64,'INVALID_INPUT','At most 64 projection namespaces required');
+  return [...new Set(namespaces.map(value=>text(value,'namespace')))].sort();
+}
+export function projectionFingerprintRows(namespaces,heads,mediaRows,aliases) {
+  const sorted=rows=>rows.map(row=>canonicalJson(row)).sort();
+  return sha256(canonicalJson({namespaces,heads:sorted(heads.map(r=>[r.namespace,r.record_key,r.revision_id])),
+    media:sorted(mediaRows.map(r=>[r.media_id,r.version_id,r.relative_path,r.sha256,Number(r.byte_size),r.availability,JSON.parse(r.metadata_json)])),
+    aliases:sorted(aliases.map(r=>[r.alias,r.media_id,r.version_id]))}));
+}
+
 class ReadUnit {
   constructor(db) { this.db = db; this.backend = 'sqlite'; }
   getMetadata() { const m=meta(this.db),r=m.current_release_id?this.db.prepare('SELECT profile_revision_id,snapshot_id FROM releases WHERE release_id=?').get(m.current_release_id):null; return {instanceId:m.instance_id,runtimeEpoch:m.runtime_epoch,repositoryRevision:m.repository_revision,releaseId:m.current_release_id,profileRevisionId:r?.profile_revision_id||null,snapshotId:r?.snapshot_id||null,eventSequence:this.db.prepare('SELECT COALESCE(max(storage_sequence),0) AS n FROM domain_events').get().n}; }
+  getProjectionFingerprint(namespaces) {
+    const selected=projectionFingerprintNamespaces(namespaces),parameters=selected.map(value=>'aux:'+value);
+    const heads=parameters.length?this.db.prepare('SELECT namespace,record_key,revision_id FROM record_heads WHERE namespace IN ('+parameters.map(()=>'?').join(',')+')').all(...parameters):[];
+    const mediaRows=this.db.prepare('SELECT media_id,version_id,relative_path,sha256,byte_size,availability,metadata_json FROM media_versions').all();
+    const aliases=this.db.prepare('SELECT alias,media_id,version_id FROM media_aliases').all();
+    return projectionFingerprintRows(selected,heads,mediaRows,aliases);
+  }
   listRecordRevisions(namespace,key) { return this.db.prepare('SELECT * FROM record_revisions WHERE namespace=? AND record_key=? ORDER BY revision_number').all(namespace,key).map(record); }
   listPublishedDocumentMetadata() {
     const release=this.db.prepare('SELECT source_revision_ids_json FROM releases WHERE release_id=(SELECT current_release_id FROM repository_meta WHERE singleton=1)').get();
@@ -355,6 +375,7 @@ export class InstanceRepository {
   }
   getRecord(...args) { return this._read('getRecord',args); }
   getMetadata() { return this._read('getMetadata', []); }
+  getProjectionFingerprint(...args) { return this._read('getProjectionFingerprint', args); }
   listRecordRevisions(...args) { return this._read('listRecordRevisions', args); }
   listPublishedDocumentMetadata() { return this._read('listPublishedDocumentMetadata', []); }
   getPublishedDocument(...args) { return this._read('getPublishedDocument', args); }

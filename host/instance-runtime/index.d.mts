@@ -16,6 +16,8 @@ export interface InstanceReadUnit {
   backend?: 'sqlite'|'postgres';
   getRecord(namespace:string,key:string,revisionId?:string):Promise<RepositoryRecord|null>;
   getMetadata():Promise<{instanceId:string;runtimeEpoch:string;repositoryRevision:number;releaseId:string|null;profileRevisionId:string|null;snapshotId:string|null;eventSequence:number}>;
+  /** Exact selected AUX heads + registered media metadata, within the caller's read transaction. */
+  getProjectionFingerprint(namespaces: readonly string[]):Promise<string>;
   listRecordRevisions(namespace:string,key:string):Promise<RepositoryRecord[]>;
   listPublishedDocumentMetadata():Promise<Array<{documentId:string;revisionId:string;sha256:string;byteSize:number;aliases:string[];metadata:Record<string,OpaqueLegacyJson>;mediaType:string}>>;
   getPublishedDocument(alias:string):Promise<RepositoryDocument|null>;
@@ -58,6 +60,7 @@ export class InstanceRepository implements InstanceReadUnit {
   readDocumentRevision: InstanceReadUnit['readDocumentRevision']; readRelease: InstanceReadUnit['readRelease']; listMedia: InstanceReadUnit['listMedia'];
   getConfig: InstanceReadUnit['getConfig']; getProfile: InstanceReadUnit['getProfile']; getAux: InstanceReadUnit['getAux']; listAux: InstanceReadUnit['listAux'];
   listEvents: InstanceReadUnit['listEvents']; findIdempotentEvent: InstanceReadUnit['findIdempotentEvent']; getMedia: InstanceReadUnit['getMedia']; resolveMedia: InstanceReadUnit['resolveMedia'];
+  getProjectionFingerprint: InstanceReadUnit['getProjectionFingerprint'];
   exportState: InstanceReadUnit['exportState'];
   readTransaction<T>(callback: (tx: InstanceReadUnit) => T | Promise<T>): Promise<T>;
   writeTransaction<T>(callback: (tx: InstanceUnit) => T | Promise<T>): Promise<T>;

@@ -558,9 +558,17 @@ async function publishedView(repository: NonNullable<Awaited<ReturnType<typeof i
   return pending;
 }
 
-async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+const OPERATIONAL_PRODUCTION_AUX_NAMESPACES = [
+  'animatic-heads','animatic-revisions','animatic-render-jobs','animatic-locks','animatic-output-slots',
+  'shot-production-manifest-jobs','shot-production-lock-heads','shot-production-lock-records','media-retirement-tombstones',
+] as const;
+function hasProductionAux(data:ReviewData){
   const production=data.productionModel as unknown as {shotProductionPlans?:unknown[];spatialShotViews?:unknown[]};
-  if(!(production.shotProductionPlans||[]).length&&!(production.spatialShotViews||[]).length&&!data.sourceHashes?.productionMapSha256)return data;
+  return Boolean((production.shotProductionPlans||[]).length||(production.spatialShotViews||[]).length||data.sourceHashes?.productionMapSha256);
+}
+async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+  const production=data.productionModel as unknown as {shotProductionPlans?:unknown[]};
+  if(!hasProductionAux(data))return data;
   const {applyProductionSpatialProjection}=await import('../../../host/instance-runtime/spatial-production.mjs');
   const view=await repository.readView();
   const spatialModel=await applyProductionSpatialProjection(repository,{...data.productionModel,spatialEvidence:(data as unknown as {creativeLineage?:{spatialEvidence?:unknown}}).creativeLineage?.spatialEvidence||null,sourceHashes:data.sourceHashes||{}},{view});
@@ -4866,10 +4874,17 @@ export async function currentExecutionRuntime():Promise<ExecutionRuntime|null>{
  const repository=(await instanceRepository())!;const metadata=await repository.getMetadata();return {instanceId:metadata.instanceId,runtimeEpoch:metadata.runtimeEpoch};
 }
 
-async function buildOperationalSnapshot() {
-  const base = !hostedReadOnlyMode() && instanceRepositoryMode() ? await publishedView((await instanceRepository())!) : null;
-  const data = base ? (dataCache&&dataCacheFingerprint===base.dataFingerprint?dataCache:normalizeReviewSnapshot(base.snapshot as ReviewData)) : await reviewData();
+async function buildOperationalSnapshot(productionAuxRevision?:string|null) {
+  const repository = !hostedReadOnlyMode() && instanceRepositoryMode() ? (await instanceRepository())! : null;
+  const base = repository ? await publishedView(repository) : null;
+  let data = base ? (dataCache&&dataCacheFingerprint===base.dataFingerprint?dataCache:normalizeReviewSnapshot(base.snapshot as ReviewData)) : await reviewData();
   if(base){bindInstanceSourceRoles(instanceProfile(data));dataCache=data;dataCacheFingerprint=base.dataFingerprint;}
+  if(repository){
+    productionAuxRevision ??= hasProductionAux(data)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
+    // The caller owns the same repository transaction for the watermark, AUX, media and events.
+    // Keep the immutable release cache raw; only this returned projection gains current AUX.
+    data=await currentProductionAux(repository,data);
+  }
   const executionRuntime=base?{instanceId:base.instanceId,runtimeEpoch:base.runtimeEpoch}:null;
   const verifiedDataFingerprint = base?.dataFingerprint || dataCacheFingerprint;
   const gateCatalog = base ? base.recipes as RecipeCatalog : await recipeCatalog();
@@ -4907,6 +4922,7 @@ async function buildOperationalSnapshot() {
     baseSnapshotId: data.snapshotId,
     dataFingerprint: verifiedDataFingerprint,
     recipeFingerprint: verifiedRecipeFingerprint,
+    ...(productionAuxRevision?{productionAuxRevision}:{}),
     events: orderedForHash,
   })).digest('hex');
   const operationRevision = `OP-${orderedForHash.length}-${digest.slice(0, 24)}`;
@@ -5178,9 +5194,11 @@ export async function operationalSnapshot(): Promise<Awaited<ReturnType<typeof b
     if (repository.transactionMode==='WRITE') return buildOperationalSnapshot();
     return repository.readTransaction(async () => {
       const meta = await repository.getMetadata();
-      const key = `${meta.instanceId}:${meta.runtimeEpoch}:${meta.releaseId}:${meta.eventSequence}`;
+      const base=await publishedView(repository);
+      const productionAuxRevision=hasProductionAux(base.snapshot as ReviewData)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
+      const key = `${meta.instanceId}:${meta.runtimeEpoch}:${meta.releaseId}:${meta.eventSequence}:${productionAuxRevision||''}`;
       let pending = operationsCache.get(key);
-      if(!pending){pending=buildOperationalSnapshot();operationsCache.set(key,pending);pending.catch(()=>operationsCache.delete(key));if(operationsCache.size>3)operationsCache.delete(operationsCache.keys().next().value!);}
+      if(!pending){pending=buildOperationalSnapshot(productionAuxRevision);operationsCache.set(key,pending);pending.catch(()=>operationsCache.delete(key));if(operationsCache.size>3)operationsCache.delete(operationsCache.keys().next().value!);}
       return pending;
     });
   }
