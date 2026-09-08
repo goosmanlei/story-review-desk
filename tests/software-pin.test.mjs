@@ -24,6 +24,15 @@ test('explicit unversioned development software packages reproducibly in differe
  assert.equal(manifest.copiedBusinessData,false);
  assert.deepEqual(manifest.productionStorySpecificHits,[]);
  assert.ok(manifest.files.length>100);
+ assert.equal(manifest.skills.length,1);
+ const skill=manifest.skills[0];assert.equal(skill.name,'story-review-orchestrator');
+ assert(skill.files.includes(skill.path+'/SKILL.md'));assert(skill.files.includes(skill.path+'/agents/openai.yaml'));
+ for(const name of skill.files){
+  const file=manifest.files.find(item=>item.path===name);assert(file);
+  const source=await readFile(new URL('../'+name,import.meta.url));
+  assert.equal(file.sha256,hash(source));assert.equal(file.bytes,source.length);
+  assert.deepEqual(await readFile(path.join(root,'first',name)),source);
+ }
 });
 async function fixture(t){
  const project=await realpath(await mkdtemp(path.join(tmpdir(),'review-core-pin-'))),software=path.join(project,'review-software');

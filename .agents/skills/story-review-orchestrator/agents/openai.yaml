@@ -1,0 +1,6 @@
+interface:
+  display_name: "故事审阅台多 Agent 协作"
+  short_description: "以当前会话管理项目创作与开发队列、独立质检、并行执行及用户决策"
+  default_prompt: "使用 $story-review-orchestrator 开启当前故事项目的多 Agent 协作模式。"
+policy:
+  allow_implicit_invocation: false

@@ -17,3 +17,7 @@ public/runtime/
 __pycache__/
 *.pyc
 .openai/
+# This Skill is versioned software even when user-global excludes hide Skills.
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/story-review-orchestrator/

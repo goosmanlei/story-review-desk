@@ -63,7 +63,7 @@ async function tree(relative, allowed) {
 await tree('app', (filename) => /\.(tsx?|css|mjs|mts)$/.test(filename));
 await tree('host/instance-runtime', (filename) => /\.(mjs|mts)$/.test(filename));
 for (const filename of ['codex_conversation_bridge.py', 'codex_work_context.py', 'codex_work_preflight.py', 'codex_runtime_adapter.py', 'codex_project_actions.py', 'instance_aux.py']) await copy('host/' + filename);
-for (const name of await readdir(path.join(applicationRoot, 'host'))) if (/^instance-.*\.(mjs|mts)$/.test(name)) await copy('host/' + name);
+for (const name of await readdir(path.join(applicationRoot, 'host'))) if (/^(?:instance-|orchestration-).*\.(mjs|mts)$/.test(name)) await copy('host/' + name);
 await tree('workers', (filename) => filename.endsWith('.mjs'));
 await copy('docs/instance-isolation.md');
 await copy('docs/system-configuration.md');
@@ -84,6 +84,7 @@ packageJson.scripts = { dev: 'REVIEW_NODE_DEV=1 vinext dev', build: 'node script
   'instance:migrate': 'node scripts/instance-migrate.mjs', 'instance:sources': 'node scripts/instance-sources.mjs', 'instance:initialize': 'node scripts/instance-initialize.mjs', 'instance:relations': 'node scripts/instance-relations.mjs', 'instance:authoring': 'node scripts/instance-authoring.mjs',
   'instance:backup': 'node scripts/instance-backup.mjs', 'instance:restore': 'node scripts/instance-restore.mjs', 'instance:copy': 'node scripts/instance-copy.mjs',
   'instance:trial': 'node scripts/instance-trial-worker.mjs',
+  'instance:skills': 'node scripts/instance-skills.mjs', 'orchestrate': 'node scripts/instance-orchestration.mjs',
   'codex:bridge': 'node scripts/instance-bridge.mjs', 'codex:doctor': 'node scripts/instance-bridge.mjs --command doctor', 'deploy:local': 'node scripts/deploy-local.mjs' };
 await put('package.json', JSON.stringify(packageJson, null, 2) + '\n', 'SOFTWARE_PACKAGE');
 const lock = JSON.parse(await readPackageSource(sourceIdentity,'package-lock.json'));
@@ -93,6 +94,9 @@ await put('package-lock.json', JSON.stringify(lock, null, 2) + '\n', 'DEPENDENCY
 await copy('vite.config.ts');
 await put('public/favicon.svg', '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="12" fill="#18352c"/><path d="M17 17h30v30H17z" fill="none" stroke="#eadfc8" stroke-width="3"/><path d="M24 26h16M24 33h16M24 40h10" stroke="#eadfc8" stroke-width="3"/></svg>\n', 'GENERIC_SOFTWARE_ICON');
 await tree('docs/software-guidance', filename => filename.endsWith('.md'));
+// Explicit hidden-root input: the discoverable Skill ships as exact core bytes.
+const skillPath='.agents/skills/story-review-orchestrator';
+await tree(skillPath, () => true);
 for (const name of ['README.md','AGENTS.md','STATE.md']) await put(name, await readPackageSource(sourceIdentity,'docs/software-guidance/'+name), name==='STATE.md'?'SOFTWARE_STATE':'SOFTWARE_GUIDANCE');
 // Scan actual packaged production text, never the source checkout's historical data.
 const issues = [];
@@ -105,6 +109,7 @@ for (const item of files) {
 // A core commit must produce byte-identical manifests across machines and runs.
 const report = { schemaVersion:'1.0', kind:'STORY_NEUTRAL_SOFTWARE',
   softwareCommit, sourceCheckoutRequiredAtRuntime:false, gitRequired:false, copiedBusinessData:false, copiedPublicStoryMedia:false, copiedCredentials:false,
+  skills: [{name:'story-review-orchestrator',path:skillPath,files:files.filter(item=>item.path.startsWith(skillPath+'/')).map(item=>item.path).sort()}],
   excluded: ['data/**','app/*.generated.json','public/** historical inputs','.openai/**','.git/**','.env*','runtime/**','tests and test fixtures','optional legacy trial adapter'],
   productionStorySpecificHits: issues, files: files.sort((a,b)=>a.path.localeCompare(b.path)) };
 await assertPackageSourceUnchanged(sourceIdentity);
