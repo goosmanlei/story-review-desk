@@ -14,7 +14,7 @@ if (!await delegateInstanceMaintenance('instance-trial-worker.mjs', process.argv
   try {
     const body = values.file ? JSON.parse(await readFile(values.file, 'utf8')) : null;
     const invoke = () => command === 'inspect' ? commands[command](repository, options) : commands[command](repository, body, options);
-    const result = await repository.withMediaLease({ mode: 'SHARED' }, invoke);
+    const result = await repository.withMediaReadLease(invoke);
     console.log(JSON.stringify(result, null, 2));
   } finally { await repository.close(); }
 }
