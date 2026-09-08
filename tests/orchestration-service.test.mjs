@@ -155,8 +155,8 @@ test('paused work can finish; new claims stop; cancellation fences descendants a
 });
 
 test('unknown execution continues holding resources and pool slots until exact reconciliation', async () => {
-  const f = await fixture().start(); await f.submit({resources: ['object:shared']}); const next = await f.submit({resources: ['object:shared']});
-  const author = await f.claim('CREATIVE');
+  const f = await fixture().start(); const first = await f.submit({resources: ['object:shared']}); const next = await f.submit({resources: ['object:shared']});
+  const author = await f.claim('CREATIVE', first.id);
   const opened = await f.call('scheduler-open', {schedulerId: 'replacement', capabilityToken: capability()}, f.main); f.scheduler = {kind: 'SCHEDULER', ...opened.scheduler};
   assert.equal(await f.claim('CREATIVE', next.id), null);
   const status = await f.read(); assert.equal(status.counts.CREATIVE.running, 1); assert.equal(status.runs[0].status, 'RESULT_UNKNOWN');
@@ -173,6 +173,12 @@ test('scheduler cannot create new roots disguised as repair children or QA the a
   assert.equal(await f.call('claim', {kind: 'CREATIVE_QA', workerId: author.run.workerId, capabilityToken: capability()}, f.scheduler), null);
   const qa = await f.claim('CREATIVE_QA');
   await assert.rejects(f.call('run-context', {runId: qa.run.id, threadId: 'author-thread'}, qa.actor), {code: 'ORCHESTRATION_QA_IDENTITY'});
+});
+
+test('worker-reported RESULT_UNKNOWN holds its resource until observed reconciliation', async () => {
+  const f = await fixture().start(), first = await f.submit({resources: ['object:shared']}), next = await f.submit({resources: ['object:shared']});
+  await f.report(await f.claim('CREATIVE', first.id), {status: 'BLOCKED', code: 'RESULT_UNKNOWN', summary: 'Provider response was lost'});
+  assert.equal((await f.read()).runs[0].status, 'RESULT_UNKNOWN'); assert.equal(await f.claim('CREATIVE', next.id), null);
 });
 
 test('stop drains running work and idle tick does not append heartbeat history', async () => {

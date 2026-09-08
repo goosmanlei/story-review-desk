@@ -183,7 +183,7 @@ export async function writeOrchestration(tx, input) {
     const value = inputTask(args);
     const authorization = config.authorization;
     for (const dependency of value.dependencies) await store.task(dependency);
-    const taskId = id('task'), task = {id: taskId, rootId: taskId, parentId: args.parentId || null, kind: value.kind, title: value.title, goal: value.goal, scope: value.scope, acceptance: value.acceptance, dependencies: value.dependencies, inputs: value.inputs, resources: value.resources, execution: value.execution || {}, priority: value.priority || 0, status: 'READY', qaFailures: 0, qaLimit: 3, artifacts: [], artifactHash: null, authorization, createdAt: stamp(), runtimeEpoch: metadata.runtimeEpoch};
+    const taskId = id('task'), task = {id: taskId, rootId: taskId, parentId: null, kind: value.kind, title: value.title, goal: value.goal, scope: value.scope, acceptance: value.acceptance, dependencies: value.dependencies, inputs: value.inputs, resources: value.resources, execution: value.execution || {}, priority: value.priority || 0, status: 'READY', qaFailures: 0, qaLimit: 3, artifacts: [], artifactHash: null, authorization, createdAt: stamp(), queuedSeq: config.lastEventSeq + 1, runtimeEpoch: metadata.runtimeEpoch};
     for (const dependency of task.dependencies) if ((await store.task(dependency)).status !== 'DONE') task.status = 'WAITING_DEPENDENCIES';
     await store.save(task); await store.event(config, 'TASK_SUBMITTED', {taskId, kind: task.kind}); output = {task: clean(task)};
   } else if (input.command === 'claim') {
@@ -202,7 +202,7 @@ export async function writeOrchestration(tx, input) {
         if (task.kind.endsWith('_QA') && allRuns.some(run => run.rootId === task.rootId && run.phase === 'WORK' && run.workerId === workerId)) continue;
         eligible.push(task);
       }
-      eligible.sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+      eligible.sort((a, b) => b.priority - a.priority || a.createdAt.localeCompare(b.createdAt) || (a.queuedSeq || 0) - (b.queuedSeq || 0) || a.id.localeCompare(b.id));
       const task = eligible[0];
       if (!task) output = null;
       else {
@@ -236,7 +236,7 @@ export async function writeOrchestration(tx, input) {
         const produced = artifacts(result.artifacts);
         root.artifacts = produced; root.artifactHash = sha256(canonicalJson(produced)); root.status = 'QA_PENDING';
         task.artifacts = produced; task.artifactHash = root.artifactHash; task.status = 'QA_PENDING';
-        const qa = {...structuredClone(root), id: id('task'), parentId: task.id, rootId: root.id, kind: root.kind + '_QA', title: 'QA: ' + root.title, status: 'READY', dependencies: [], resources: root.resources, currentRunId: null, createdAt: stamp(), reviewedTaskId: task.id};
+        const qa = {...structuredClone(root), id: id('task'), parentId: task.id, rootId: root.id, kind: root.kind + '_QA', title: 'QA: ' + root.title, status: 'READY', dependencies: [], resources: root.resources, currentRunId: null, createdAt: stamp(), queuedSeq: config.lastEventSeq + 1, reviewedTaskId: task.id};
         await store.save(qa); if (root.id !== task.id) await store.save(root);
         await store.event(config, 'QA_QUEUED', {taskId: root.id, qaTaskId: qa.id, artifactHash: root.artifactHash});
       } else if (run.phase === 'QA') {
@@ -259,7 +259,7 @@ export async function writeOrchestration(tx, input) {
           if (root.qaFailures >= root.qaLimit) {root.status = 'AWAITING_DECISION'; await store.decision(config, 'QA_LIMIT', root, 'Three failed quality rounds require a user decision', {qaFailures: root.qaFailures});}
           else {
             root.status = 'REWORK_PENDING';
-            const rework = {...structuredClone(root), id: id('task'), parentId: root.id, rootId: root.id, title: 'Rework: ' + root.title, status: 'READY', dependencies: [], currentRunId: null, createdAt: stamp(), repairInstructions: result};
+            const rework = {...structuredClone(root), id: id('task'), parentId: root.id, rootId: root.id, title: 'Rework: ' + root.title, status: 'READY', dependencies: [], currentRunId: null, createdAt: stamp(), queuedSeq: config.lastEventSeq + 1, repairInstructions: result};
             await store.save(rework); await store.event(config, 'REWORK_QUEUED', {taskId: root.id, reworkTaskId: rework.id, qaFailures: root.qaFailures});
           }
         }
@@ -272,7 +272,7 @@ export async function writeOrchestration(tx, input) {
         requireValue(sha256(canonicalJson(artifacts(result.artifacts))) === root.artifactHash, 'Finalization changed the reviewed artifacts', 'ORCHESTRATION_ARTIFACT_CHANGED');
         task.status = 'DONE'; task.result = result;
       }
-      task.progress = result.summary; run.status = result.status === 'BLOCKED' ? 'BLOCKED' : 'COMPLETED'; run.result = result; run.finishedAt = stamp();
+      task.progress = result.summary; run.status = result.status === 'BLOCKED' ? result.code === 'RESULT_UNKNOWN' ? 'RESULT_UNKNOWN' : 'BLOCKED' : 'COMPLETED'; run.result = result; run.finishedAt = stamp();
       await store.save(task); await store.put('runs/' + run.id, run); await store.event(config, 'RUN_REPORTED', {taskId: task.id, runId: run.id, result: result.status, taskStatus: task.status}); output = {task: clean(task), root: clean(await store.task(root.id))};
     }
   } else if (input.command === 'tick') {
@@ -325,7 +325,7 @@ export async function writeOrchestration(tx, input) {
           }
         } else if (decision.type === 'QA_LIMIT') {
           requireValue(Number.isSafeInteger(args.additionalRounds) && args.additionalRounds > 0, 'Explicit additional QA rounds required'); root.qaLimit += args.additionalRounds; root.status = 'REWORK_PENDING'; await store.save(root);
-          const rework = {...structuredClone(root), id: id('task'), rootId: root.id, parentId: root.id, status: 'READY', currentRunId: null, dependencies: [], createdAt: stamp(), repairInstructions: root.lastQA}; await store.save(rework);
+          const rework = {...structuredClone(root), id: id('task'), rootId: root.id, parentId: root.id, status: 'READY', currentRunId: null, dependencies: [], createdAt: stamp(), queuedSeq: config.lastEventSeq + 1, repairInstructions: root.lastQA}; await store.save(rework);
         } else {
           requireValue(task.runtimeEpoch === metadata.runtimeEpoch, 'Reauthorize restored task inputs first', 'ORCHESTRATION_EPOCH');
           if (decision.type === 'RESULT_UNKNOWN') requireValue(args.action === 'retry', 'Unknown output requires explicit retry after reconciliation');
