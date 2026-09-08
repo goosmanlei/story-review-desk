@@ -9,7 +9,7 @@ import { APPLICATION_ID, SCHEMA_VERSION } from './schema.mjs';
 import { installQueryModel, rebuildQueryModel } from './query-model.mjs';
 import { BUSINESS_TABLES, POSTGRES_SCHEMA, POSTGRES_SCHEMA_VERSION } from './postgres-schema.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
-import {canonicalSha256,archiveRowHashes,assertArchiveRowHashes} from './archive-integrity.mjs';
+import {canonicalSha256,archiveRowHashes} from './archive-integrity.mjs';
 import {writeArchiveFile} from './archive-file.mjs';
 const contexts = new AsyncLocalStorage();
 const mediaLeaseContexts = new AsyncLocalStorage();
@@ -105,7 +105,7 @@ class PgUnit {
  async getConfig(id){const r=await this.getRecord('settings',id);return r?{...r,configId:id,value:parse(r.bytes)}:null;}
  async getProfile(){const c=await this.getConfig('instance-profile');ensure(c&&!c.deleted,'PROFILE_MISSING','Instance profile required');ensure(c.value.instanceId===(await this.meta()).instance_id,'INSTANCE_MISMATCH','Profile identity mismatch');return c.value;}
  async getAux(namespace,key,options={}){return this.getRecord(`aux:${text(namespace,'namespace')}`,text(key,'key'),options.revisionId);}
- async listAux(namespace,{prefix='',includeDeleted=false}={}){return (await this.all('SELECT r.* FROM record_heads h JOIN record_revisions r ON r.revision_id=h.revision_id WHERE h.namespace=$1 ORDER BY r.record_key',[`aux:${text(namespace,'namespace')}`])).filter(r=>r.record_key.startsWith(prefix)&&(includeDeleted||!r.deleted)).map(rowRecord);}
+ async listAux(namespace,{prefix='',includeDeleted=false}={}){return (await this.all('SELECT r.* FROM record_heads h JOIN record_revisions r ON r.revision_id=h.revision_id WHERE h.namespace=$1 AND starts_with(h.record_key,$2) ORDER BY r.record_key',[`aux:${text(namespace,'namespace')}`,prefix])).filter(r=>includeDeleted||!r.deleted).map(rowRecord);}
  async listEvents(kind,{authorityDomain='FORMAL'}={}){return orderedEvents(await this.all(`SELECT event_bytes FROM domain_events WHERE authority_domain=$1${kind?' AND event_kind=$2':''}`,kind?[authorityDomain,kind]:[authorityDomain]));}
  async findIdempotentEvent(kind,key,{authorityDomain='FORMAL'}={}){const r=await this.one('SELECT event_bytes FROM domain_events WHERE authority_domain=$1 AND event_kind=$2 AND idempotency_key_hash=$3',[authorityDomain,kind,sha256(`${kind}:${key}`)]);return r?parse(r.event_bytes):null;}
  async media(r){return r?{mediaId:r.media_id,versionId:r.version_id,relativePath:r.relative_path,sha256:r.sha256,byteSize:number(r.byte_size),availability:r.availability,metadata:JSON.parse(r.metadata_json),aliases:(await this.all('SELECT alias FROM media_aliases WHERE media_id=$1 AND version_id=$2 ORDER BY alias',[r.media_id,r.version_id])).map(x=>x.alias)}:null;}
@@ -244,14 +244,63 @@ export function validateArchive(archive,instanceId){
  for(const r of decoded.releases){ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&parse(r.snapshot_bytes).snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');ensure(revisions.has(r.profile_revision_id)&&JSON.parse(r.source_revision_ids_json).every(id=>revisions.has(id)),'INTEGRITY_FAILED','Release source binding missing');}
  ensure(decoded.repository_meta.length===1&&decoded.repository_meta[0].instance_id===instanceId,'INSTANCE_MISMATCH','Metadata identity mismatch');return decoded;
 }
-async function verifyImportedRepository(repo,expectedRowHashes){
+async function verifyRestoredRows(tx,instanceId,expectedRowHashes,expectedMeta){
+ const tables=[...BUSINESS_TABLES].filter(table=>table!=='repository_meta').sort();
+ ensure(tables.join(',')===Object.keys(expectedRowHashes).sort().join(','),'EXPORT_TABLES_MISMATCH','Migration changed business table set');
+ const order={repository_meta:'singleton',record_revisions:'namespace,record_key,revision_number',record_heads:'namespace,record_key',document_aliases:'alias',releases:'release_id',domain_events:'storage_sequence',media_versions:'media_id,version_id',media_aliases:'alias,media_id,version_id'};
+ // Only identity/chain metadata and the already frozen SHA multiset survive a
+ // FETCH. BYTEA, base64 and parsed release bodies are bounded to one row.
+ const revisions=new Set(),heads=new Map();
+ for(const table of BUSINESS_TABLES){
+  const remaining=new Map();let rows=0,failure;
+  for(const hash of expectedRowHashes[table]||[])remaining.set(hash,(remaining.get(hash)||0)+1);
+  await tx.query(`DECLARE review_restore_verify_rows NO SCROLL CURSOR FOR SELECT * FROM ${table} ORDER BY ${order[table]}`);
+  try{
+   for(;;){
+    const result=await tx.query('FETCH FORWARD 1 FROM review_restore_verify_rows');
+    if(!result.rows.length)break;
+    ensure(result.rows.length===1,'INTEGRITY_FAILED','Restore cursor exceeded one row');
+    const r=result.rows[0];rows++;
+    if(table==='repository_meta')ensure(r.instance_id===instanceId,'INSTANCE_MISMATCH','Metadata identity mismatch');
+    if(table==='record_revisions'){
+     ensure(sha256(r.content_bytes)===r.content_sha256,'INTEGRITY_FAILED','Record bytes mismatch');
+     const key=canonicalJson([r.namespace,r.record_key]),previous=heads.get(key);
+     ensure(r.revision_number===(previous?.revision_number??0)+1&&r.previous_revision_id===(previous?.revision_id??null),'INTEGRITY_FAILED','Revision chain mismatch');
+     heads.set(key,{revision_number:r.revision_number,revision_id:r.revision_id});revisions.add(r.revision_id);
+    }
+    if(table==='record_heads'){
+     const key=canonicalJson([r.namespace,r.record_key]);
+     ensure(heads.get(key)?.revision_id===r.revision_id,'INTEGRITY_FAILED','Head mismatch');heads.delete(key);
+    }
+    if(table==='domain_events'){
+     const event=parse(r.event_bytes);
+     ensure(sha256(r.event_bytes)===r.event_sha256&&event.eventId===r.event_id&&(event.eventKind||event.eventType)===r.event_kind&&(event.idempotencyKeyHash||null)===r.idempotency_key_hash,'INTEGRITY_FAILED','Event bytes mismatch');
+    }
+    if(table==='releases'){
+     ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&parse(r.snapshot_bytes).snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');
+     ensure(revisions.has(r.profile_revision_id)&&JSON.parse(r.source_revision_ids_json).every(id=>revisions.has(id)),'INTEGRITY_FAILED','Release source binding missing');
+    }
+    const encoded=Object.fromEntries(Object.entries(r).map(([key,value])=>[key,Buffer.isBuffer(value)?{encoding:'base64',bytes:value.toString('base64')}:['repository_revision','storage_sequence','original_sequence','byte_size'].includes(key)&&value!==null?number(value):value]));
+    if(table==='repository_meta')ensure(canonicalJson(encoded)===canonicalJson(expectedMeta),'INTEGRITY_FAILED','Restored metadata differs from the exact import binding');
+    else{
+     const hash=canonicalSha256(encoded),count=remaining.get(hash)||0;
+     ensure(count>0,'INTEGRITY_FAILED','Migration changed original business rows: '+table);
+     if(count===1)remaining.delete(hash);else remaining.set(hash,count-1);
+    }
+   }
+  }catch(error){failure=error;throw error;}
+  finally{try{await tx.query('CLOSE review_restore_verify_rows');}catch(error){if(!failure)throw error;}}
+  if(table==='repository_meta')ensure(rows===1,'INSTANCE_MISMATCH','Metadata identity mismatch');
+  if(table==='record_heads')ensure(heads.size===0,'INTEGRITY_FAILED','Missing head');
+  ensure(remaining.size===0,'INTEGRITY_FAILED','Migration changed original business rows: '+table);
+ }
+}
+async function verifyImportedRepository(repo,expectedRowHashes,expectedMeta){
  await repo.validateSchema();
  return repo.readTransaction(async tx=>{
-  let restored=await tx.exportState();
-  // All former final checks share ONE restored database snapshot and ONE export.
-  validateArchive(restored,repo.instanceId);
-  assertArchiveRowHashes(restored,expectedRowHashes);
-  restored=null;
+  // Schema, all original rows/references and the current read view share ONE
+  // read snapshot. Never rebuild a second complete archive after import.
+  await verifyRestoredRows(tx,repo.instanceId,expectedRowHashes,expectedMeta);
   await tx.readView();
   return Object.freeze({
    status:'POSTGRES_IMPORT_VERIFIED',metadata:Object.freeze(await tx.getMetadata()),
@@ -265,6 +314,7 @@ export async function importPostgresState({archive,...options}){
  ensure(!readOnlyProcess(),'READ_ONLY','Cannot import read-only repository');
  let tables=validateArchive(archive,options.instanceId);
  const expectedRowHashes=archiveRowHashes(archive),connection=await postgresConnection(options);
+ const expectedMeta=Object.freeze({...tables.repository_meta[0],runtime_epoch:restoredRuntimeEpoch(randomUUID()),repository_revision:number(number(tables.repository_meta[0].repository_revision)+1)});
  const high=Math.max(...(archive.sequence||[]).map(r=>number(r.seq)),...tables.domain_events.map(r=>number(r.storage_sequence)),0);
  // Neither the repository options nor an await-spanning closure retain the archive.
  archive=null;
@@ -277,13 +327,13 @@ export async function importPostgresState({archive,...options}){
    }
   }
   await c.query("SELECT setval(pg_get_serial_sequence('domain_events','storage_sequence'),$1,$2)",[Math.max(high,1),high>0]);
-  await c.query('UPDATE repository_meta SET runtime_epoch=$1,repository_revision=repository_revision+1 WHERE singleton=1',[restoredRuntimeEpoch(randomUUID())]);
+  await c.query('UPDATE repository_meta SET runtime_epoch=$1,repository_revision=repository_revision+1 WHERE singleton=1',[expectedMeta.runtime_epoch]);
  });
  tables=null;
  const repo=await openPostgresRepository({...options,connection});
  try{
   await repo.writeTransaction(async tx=>{const release=await tx.readRelease();if(release)await rebuildQueryModel(tx,{releaseId:release.releaseId,snapshot:parse(release.snapshotBytes),recipes:parse(release.recipesBytes)});});
-  const proof=await verifyImportedRepository(repo,expectedRowHashes);
+  const proof=await verifyImportedRepository(repo,expectedRowHashes,expectedMeta);
   Object.defineProperty(repo,'importVerification',{value:proof,enumerable:false,writable:false,configurable:false});
   return repo;
  }catch(error){await repo.close().catch(()=>{});throw error;}

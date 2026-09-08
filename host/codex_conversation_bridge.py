@@ -1475,6 +1475,7 @@ class BridgeWorker:
         self.current_lease_id: Optional[str] = None
         self.active_claim_path: Optional[Path] = None
         self._lock_handle: Optional[Any] = None
+        self._validated_terminal_heads: Dict[str, Tuple[str, str]] = {}
 
     def acquire_singleton_lock(self) -> None:
         self._lock_handle = self.paths["lock"].open("a+", encoding="utf-8")
@@ -1567,13 +1568,61 @@ class BridgeWorker:
         row = INSTANCE.get(turn_path)
         return bool(row and not row["deleted"] and json.loads(row["metadata_json"]).get("runtimeEpoch") == INSTANCE.runtime_epoch)
 
+    def uncompleted_turn_paths(self) -> List[Path]:
+        """Skip only validated terminal results at unchanged immutable heads.
+
+        Directory heads are read afresh on every scan. Claim reads, provider
+        dispatch and result CAS retain their existing live validation paths.
+        """
+        if not INSTANCE or self.project_root != INSTANCE.root:
+            # Local fixtures retain their filesystem validation behaviour.
+            return sorted(path_glob(self.paths["turns"], "turn_*.json"), key=lambda item:item.name)
+        try:
+            turns=INSTANCE.heads(self.paths["turns"], "turn_*.json")
+            results=INSTANCE.heads(self.paths["results"], "turn_*.json")
+        except InstanceStorageError as error:
+            raise BridgeError("INVALID_STORE_JSON", "队列目录无法读取") from error
+        unresolved=[]
+        retained={}
+        for turn_path, turn_revision in sorted(turns.items(), key=lambda item:item[0].name):
+            result_path=self.paths["results"]/turn_path.name
+            result_revision=results.get(result_path)
+            heads=(turn_revision,result_revision)
+            if result_revision:
+                if self._validated_terminal_heads.get(turn_path.name)==heads:
+                    retained[turn_path.name]=heads
+                    continue
+                try:
+                    turn=validate_turn(read_json_file(turn_path),allow_legacy_protocol=True)
+                    result=read_json_file(result_path)
+                    if turn["turnId"]!=turn_path.stem or result is None:
+                        raise BridgeError("RESULT_BINDING_INVALID", "终态结果与目录身份不一致")
+                    validate_public_result(result,turn)
+                    if result["turnInputHash"] != compute_turn_input_hash(turn,result["contextManifestHash"],result["policyHash"]):
+                        raise BridgeError("RESULT_BINDING_INVALID", "终态结果与当前请求正文不一致")
+                    # A directory capture is advisory. Confirm the exact heads
+                    # whose payloads were validated before memoizing anything.
+                    current_turn=INSTANCE.get(turn_path)
+                    current_result=INSTANCE.get(result_path)
+                    if (current_turn and current_result and not current_turn["deleted"] and not current_result["deleted"]
+                            and (current_turn["revision_id"],current_result["revision_id"])==heads):
+                        retained[turn_path.name]=heads
+                        continue
+                except (BridgeError,InstanceStorageError,TypeError,ValueError):
+                    # Invalid/unbound results must remain in the fail-closed
+                    # orphan/epoch paths, never act as a completed-name shortcut.
+                    pass
+            unresolved.append(turn_path)
+        self._validated_terminal_heads=retained
+        return unresolved
+
     def reconcile_runtime_epoch_turns(self) -> int:
         """Imported/restored unresolved requests are historical, never executable."""
         if not INSTANCE or self.project_root != INSTANCE.root:
             return 0
         count = 0
-        for turn_path in path_glob(self.paths["turns"], "turn_*.json"):
-            if self.turn_epoch_current(turn_path) or path_exists(self.paths["results"] / turn_path.name):
+        for turn_path in self.uncompleted_turn_paths():
+            if self.turn_epoch_current(turn_path) or ((not INSTANCE or self.project_root != INSTANCE.root) and path_exists(self.paths["results"] / turn_path.name)):
                 continue
             try:
                 turn = validate_turn(read_json_file(turn_path), allow_legacy_protocol=True)
@@ -1587,7 +1636,7 @@ class BridgeWorker:
         return count
 
     def pending_turn_paths(self) -> Iterable[Path]:
-        candidates = sorted(path_glob(self.paths["turns"], "turn_*.json"), key=lambda item: item.name)
+        candidates = self.uncompleted_turn_paths()
         for turn_path in candidates:
             turn_id = turn_path.stem
             if not self.turn_epoch_current(turn_path):
@@ -2947,6 +2996,8 @@ class CodexBridgeScheduler:
         return retry is None or time.monotonic() >= retry["retryAtMonotonic"]
 
     def prune_bind_backoff(self) -> None:
+        if not self.bind_backoff:
+            return
         pending_conversation_ids: set[str] = set()
         for turn_path in self.template.pending_turn_paths():
             try:
@@ -3322,6 +3373,7 @@ class CodexBridgeScheduler:
         runnable_count = sum(slot.status != "POISONED" for slot in self.slots)
         cached_count = sum(slot.status == "IDLE" and slot.worker is not None for slot in self.slots)
         blocked_count = self.blocked_conversation_count()
+        queued_count = self.queued_turn_count()
         backoff_count = len(self.bind_backoff)
         nearest_retry_seconds = (
             round(max(
@@ -3374,7 +3426,7 @@ class CodexBridgeScheduler:
             "hardConcurrencyLimit": HARD_MAX_CONCURRENT,
             "pendingTurnLimit": PENDING_TURN_LIMIT,
             "idleTtlSeconds": self.idle_ttl_seconds,
-            "queuedTurnCount": self.queued_turn_count(),
+            "queuedTurnCount": queued_count,
             "activeSlotCount": active_count,
             "readySlotCount": ready_count,
             "runnableSlotCount": runnable_count,

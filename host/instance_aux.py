@@ -156,8 +156,9 @@ class InstanceStorage:
         row=self.get(path)
         return bool(row and not row["deleted"])
 
-    def glob(self,directory:Path,pattern:str):
-        result=[]
+    def heads(self,directory:Path,pattern:str):
+        """Exact directory head identities only; never cache claim or mutation reads."""
+        result={}
         for root,namespace in ((self.public_root,"assistant-public"),(self.private_root,"assistant-private")):
             if directory.is_relative_to(root):
                 prefix=directory.relative_to(root).as_posix().strip(".")
@@ -167,9 +168,15 @@ class InstanceStorage:
                     key=row["key"]
                     suffix=key[len(prefix):] if key.startswith(prefix) else None
                     if suffix and "/" not in suffix and fnmatch.fnmatchcase(suffix,pattern):
-                        result.append(root/key)
+                        revision=row.get("revisionId")
+                        if not isinstance(revision,str) or not revision:
+                            raise InstanceStorageError("Auxiliary directory lacks a head revision")
+                        result[root/key]=revision
                 return result
-        return list(directory.glob(pattern))
+        return {path:None for path in directory.glob(pattern)}
+
+    def glob(self,directory:Path,pattern:str):
+        return list(self.heads(directory,pattern))
 
     def put(self,path:Path,content:bytes,exclusive=False):
         namespace,key=self.binding(path)

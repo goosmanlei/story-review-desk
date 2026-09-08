@@ -62,7 +62,23 @@ async function runScenario(mode){
   if(sql.startsWith('SELECT setval'))return{rows:[]};throw Error('unexpected SQL');
  }};
  const metadata=()=>({instanceId:ids.instance,releaseId:ids.release,runtimeEpoch:expectedRestoreEpoch,repositoryRevision:2,eventSequence:1});
- const tx={async exportState(){
+ let cursorRows=[];
+ const tx={async query(sql){
+  if(sql.startsWith('DECLARE review_restore_verify_rows')){
+   const table=sql.match(/FROM ([a-z_]+)/)[1];cursorRows=stored[table].map(row=>({...row}));
+   if(table==='media_versions'){
+    if(mode==='row-mutation')cursorRows[0].byte_size++;
+    if(mode==='row-addition')cursorRows.push({...cursorRows[0],media_id:'m3'});
+    if(mode==='reorder')cursorRows.reverse();
+   }
+   if(mode==='missing-head'&&table==='record_heads')cursorRows=[];
+   if(mode==='bytes-tamper'&&table==='record_revisions')cursorRows[0].content_bytes=Buffer.from('changed');
+   return{rows:[]};
+  }
+  if(sql==='FETCH FORWARD 1 FROM review_restore_verify_rows')return{rows:cursorRows.length?[cursorRows.shift()]:[]};
+  if(sql==='CLOSE review_restore_verify_rows'){cursorRows=[];return{rows:[]};}
+  throw Error('unexpected verification SQL: '+sql);
+ },async exportState(){
   counts.exports++;
   const tables=Object.fromEntries(Object.entries(stored).map(([name,rows])=>[name,rows.map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,Buffer.isBuffer(v)?encode(v):v])))]));
   if(mode==='row-mutation')tables.media_versions[0].byte_size++;
@@ -92,7 +108,7 @@ async function runScenario(mode){
   assert.equal(repo.importVerification.integrity.ok,true);assert(Object.isFrozen(repo.importVerification));assert(Object.isFrozen(repo.importVerification.metadata));
   assert.equal(stored.repository_meta[0].runtime_epoch,expectedRestoreEpoch,'restore uses the actual prefixed fresh epoch helper');
   assert.equal(repo.importVerification.metadata.runtimeEpoch,expectedRestoreEpoch);
-  assert.equal(counts.exports,1);assert.equal(counts.schema,1);assert.equal(counts.views,1);assert.equal(counts.metadata,1);assert.equal(counts.writes,1);
+  assert.equal(counts.exports,0);assert.equal(counts.schema,1);assert.equal(counts.views,1);assert.equal(counts.metadata,1);assert.equal(counts.writes,1);
   assert.throws(()=>{repo.importVerification={status:'fake'};});
   assert.equal(original.tables.repository_meta[0].runtime_epoch,'old_epoch','caller archive is not mutated');
  }catch(error){

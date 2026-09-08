@@ -198,8 +198,8 @@ class ReadUnit {
   getProfile() { const config = this.getConfig('instance-profile'); ensure(config && !config.deleted, 'PROFILE_MISSING', 'Instance profile is required'); ensure(config.value.instanceId === meta(this.db).instance_id, 'INSTANCE_MISMATCH', 'Profile instance identity mismatch'); return config.value; }
   getAux(namespace, key, options = {}) { return this.getRecord(`aux:${text(namespace, 'namespace')}`, text(key, 'key'), options.revisionId); }
   listAux(namespace, { prefix = '', includeDeleted = false } = {}) {
-    return this.db.prepare('SELECT r.* FROM record_heads h JOIN record_revisions r ON r.revision_id=h.revision_id WHERE h.namespace=? ORDER BY h.record_key').all(`aux:${text(namespace, 'namespace')}`)
-      .filter((row) => row.record_key.startsWith(prefix) && (includeDeleted || !row.deleted)).map(record);
+    return this.db.prepare('SELECT r.* FROM record_heads h JOIN record_revisions r ON r.revision_id=h.revision_id WHERE h.namespace=? AND substr(h.record_key,1,length(?))=? ORDER BY h.record_key').all(`aux:${text(namespace, 'namespace')}`,prefix,prefix)
+      .filter((row) => includeDeleted || !row.deleted).map(record);
   }
   listEvents(kind, { authorityDomain = 'FORMAL' } = {}) {
     const rows = kind ? this.db.prepare('SELECT * FROM domain_events WHERE authority_domain=? AND event_kind=?').all(authorityDomain, kind)
