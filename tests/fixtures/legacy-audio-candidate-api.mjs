@@ -10,9 +10,9 @@ import {applyMaterialProductionJob} from '../../host/instance-runtime/material-p
 
 const keys=['REVIEW_INSTANCE_DB','REVIEW_INSTANCE_ID','REVIEW_INSTANCE_ROOT','REVIEW_INSTANCE_READ_ONLY','REVIEW_REMOTE_READ_ONLY','REVIEW_SITE_ROOT','REVIEW_EXPORT_DIR','REVIEW_ALLOWED_ORIGINS','REVIEW_POSTGRES_HOST','REVIEW_POSTGRES_PORT','REVIEW_POSTGRES_PASSWORD_FILE','REVIEW_POSTGRES_PASSWORD','REVIEW_POSTGRES_USER'];
 
-async function apiFixture(t){
+async function apiFixture(t,options={}){
  const env=Object.fromEntries(keys.map(k=>[k,process.env[k]]));let pg;
- const f=await materialProductionFixture(t,{repositoryFactory:async({root,profile})=>{pg=await sharedStoryPostgres(root);return createInstanceRepository({root,instanceId:profile.instanceId,backend:'postgres',database:pg.database,profile});}});
+ const f=await materialProductionFixture(t,{...options,repositoryFactory:async({root,profile})=>{pg=await sharedStoryPostgres(root);return createInstanceRepository({root,instanceId:profile.instanceId,backend:'postgres',database:pg.database,profile});}});
  t.after(()=>pg.cleanup());
  await f.repo.writeTransaction(async tx=>{const view=await tx.readView(),snapshot=structuredClone(view.snapshot);snapshot.productionModel.systemModel={...snapshot.productionModel.systemModel,stateModel:{...snapshot.productionModel.systemModel?.stateModel,reviewContract:{schemaVersion:'2.2',actions:['APPROVE_AND_RELEASE','REQUEST_REVISION','DO_NOT_USE']}}};await tx.publishRelease({snapshot,recipes:view.recipes,expectedReleaseId:view.releaseId,sourceRevisionIds:view.sourceRevisionIds});});
  await writeFile(path.join(f.root,'instance.json'),JSON.stringify({schemaVersion:'2.0',instanceId:f.profile.instanceId,database:pg.database}));

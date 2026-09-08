@@ -1,3 +1,4 @@
+import {assertLegacyAudioMasterMetadata} from './material-legacy-audio-metadata.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
@@ -30,6 +31,7 @@ export function preserveLegacyAudioProjection({snapshot,recipes,baseSnapshot,bas
   if(!same(omit(b.assetFamily,familyPointers),omit(b.previousFamily,familyPointers))||!same(omit(b.materialWorkItem,workPointers),omit(b.previousWork,workPointers))||b.assetFamily.id!==row.familyId||b.materialWorkItem.id!==row.workItemId||b.previousWork.requirementRef!==row.requirementId||b.previousWork.requirementHash!==row.requirementHash||b.assetFamily.currentExpectedOutputId!==output.id||b.materialWorkItem.executionDefinitionRef!==def.id||b.materialWorkItem.promptRef!==def.currentRevisionId||!same(b.assetFamily.expectedOutputRefs,[...b.previousFamily.expectedOutputRefs,output.id]))fail('旧声音修订不得改变素材族、工作或历史归属');
   if(!same(b.previousDefinition,one(baseRecipes.executionDefinitions,row.previousDefinitionId,'旧声音旧定义'))||!inspectExecutionDefinitionHash(b.previousDefinition).valid||rb.definitionHash!==b.previousDefinition.definitionHash||!same(omit(b.previousOutput,realization),omit(one(prior.expectedOutputs,row.previousExpectedOutputId,'旧声音旧 EO'),realization))||domainHash(b.previousOutput)!==rb.expectedOutputHash||b.previousDefinition.output.expectedOutputRef!==row.previousExpectedOutputId||row.parentVersionId!==row.familyId+'@'+b.previousOutput.plannedVersionLabel||Number(output.plannedVersionLabel.slice(1))!==Number(b.previousOutput.plannedVersionLabel.slice(1))+1)fail('旧声音修订前代定义或版本顺序不一致');
   if(b.inputBindings?.length||def.upload?.items?.length||b.seedAsset?.references?.length||b.seedAsset?.asset_id!==row.familyId||b.seedAsset.output_path!==output.targetPath||b.seedAsset.text_prompt!==def.prompt.main||b.seedAsset.negative_prompt!==def.prompt.negative||b.seedAsset.model!==def.model.branch||!same(b.seedAsset.audio_config,def.parameters.audio_config)||!same(b.seedAsset.delivery,def.parameters.delivery)||b.seedAsset.metadata?.SUBJECT_ID!==b.basis.representation.entityId||!same(b.seedAsset.metadata.PARENT_ASSETS,[row.parentVersionId])||b.seedAsset.metadata.PARENT_VERSION_SHA256!==row.parentVersionSha256)fail('旧声音完整 Seed 规格与调用定义不一致');
+  try{assertLegacyAudioMasterMetadata(b);}catch(e){fail(e.message);}
   return {row,b};
  });
  const next=structuredClone(snapshot),catalog=structuredClone(recipes),model=next.productionModel;
