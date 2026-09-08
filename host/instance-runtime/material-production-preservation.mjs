@@ -55,6 +55,14 @@ function assertGraphBinding(plan,body){
  }
 }
 
+/** Read-only reuse of the immutable native source/graph/directory contract.
+ * This validates history; it does not restore media eligibility or adoption. */
+export function materialProductionPlanGraphClosure({plan,document}){
+ const result=sourceBody(plan,document?[document]:[]);
+ assertGraphBinding(plan,result.body);
+ return result;
+}
+
 const familyMutable=['versionRefs','currentVersionId','latestVersionId','expectedOutputRefs','currentExpectedOutputId','domainContext','lifecycleState','reviewDecision','publishState','referenceEligible','generationAllowed'];
 const workMutable=['executionDefinitionRef','promptRef','inputAssetRefs','lifecycleState','reviewDecision','publishState','generationAllowed'];
 function assertFrozen(actual,declared,mutable,label){

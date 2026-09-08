@@ -1,6 +1,7 @@
 import {canonicalJson,sha256} from './bytes.mjs';
 import {currentGraph} from './domain-service.mjs';
 import {directoryProjection} from './material-directory.mjs';
+import {historicalDirectoryGraph} from './historical-directory-graph.mjs';
 
 const hash=value=>sha256(canonicalJson(value));
 const decode=row=>row?JSON.parse(Buffer.from(row.bytes).toString('utf8')):null;
@@ -50,10 +51,10 @@ async function historical(tx,namespace,current,binding){
 }
 async function directoryContext(tx,view,record,current=false){
  if(!record)return null;
- const content=decode(record),ref=content.graphRef;
+ const content=decode(record);
  let graph;
  if(current)graph=(await currentGraph(tx,view)).graph;
- else {const row=ref?.revisionId?await tx.getAux('domain-graph','current',{revisionId:ref.revisionId}):null;if(!row||row.sha256!==ref.sha256||sha256(row.bytes)!==row.sha256)return null;graph=decode(row);}
+ else {graph=await historicalDirectoryGraph(tx,view,record);if(!graph)return null;}
  // Old requirement hashes are checked separately; keep this historical directory
  // projection independent of current requirements so one changed need stays local.
  const result=structuredClone(graph);
