@@ -9,6 +9,7 @@ import { canonicalJson, openInstanceRepository, resolveInstance, sha256 } from '
 import { hostedEventProjection } from './export-hosted-material-events.mjs';
 import { readSpatialSettings } from '../host/instance-runtime/domain-spatial.mjs';
 import {applyAnimaticProjection,reconcileAnimaticLocks} from '../host/instance-runtime/animatic-service.mjs';
+import {applyProductionSpatialProjection} from '../host/instance-runtime/spatial-production.mjs';
 import {applyShotProductionManifestProjection} from '../host/instance-runtime/shot-production-manifest.mjs';
 import {applyShotProductionLocksProjection} from '../host/instance-runtime/shot-production-locks.mjs';
 import {animaticMediaBindings} from '../host/instance-runtime/animatic-model.mjs';
@@ -137,6 +138,7 @@ export async function exportHostedInstance(instancePath, output) {
       if(!release || !view.snapshot || !view.recipes)throw new Error('A published instance release is required');
       view.snapshot=structuredClone(view.snapshot);
       let animaticModel=await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}}));
+      animaticModel=await applyProductionSpatialProjection(tx,animaticModel,{view});
       if(animaticModel.animaticTimelines.length||animaticModel.animaticRenderJobs.length||animaticModel.shotProductionManifestJobs.length||(animaticModel.shotProductionPlans||[]).length){
         const {api}=loadModernEventRuntime(fileURLToPath(new URL('..',import.meta.url))),state=episodeSourceCompiler(api).stateFor({...view,snapshot:{...view.snapshot,productionModel:animaticModel}});
         animaticModel={...animaticModel,assetFamilies:animaticModel.assetFamilies.map(f=>({...f,...state.assetFamiliesById[f.id]})),assetVersions:Object.values(state.assetVersionsById),operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById},animaticLocks:reconcileAnimaticLocks(animaticModel,state)};

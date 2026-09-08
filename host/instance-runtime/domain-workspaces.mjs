@@ -2,7 +2,7 @@ import {canonicalJson} from './bytes.mjs';
 import {readingProjection} from './domain-reading.mjs';
 import {domainHash,validateDomainGraph,graphImpact,defaultDomainConfiguration} from './domain-model.mjs';
 import {currentGraph,evidenceBindings,verifyQuotes,validateIdentities} from './domain-service.mjs';
-import {verifySourceBindings} from './domain-sources.mjs';
+import {verifyDomainWorkspaceEvidence} from './domain-workspace-evidence.mjs';
 import {projectDomainGraph} from './domain-projection.mjs';
 import {materialDirectorySource} from './material-directory.mjs';
 import {refreshDirectoryProjection} from './directory-projection.mjs';
@@ -35,7 +35,8 @@ export async function getDomainWorkspace(tx,owner) {
 async function validate(tx,view,graph) {
   const bindings=evidenceBindings(graph);
   validateDomainGraph(graph,{configuration:configOf(view),sourceBindings:bindings,knownFamilyIds:(view.snapshot.productionModel.assetFamilies||[]).map(r=>r.id),knownRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).map(r=>r.id)});
-  await verifySourceBindings(tx,bindings,{allowLegacy:true});await verifyQuotes(tx,graph);await validateIdentities(tx,graph,view);
+  const previous=await currentGraph(tx,view);
+  await verifyDomainWorkspaceEvidence(tx,graph,previous.graph);await verifyQuotes(tx,graph);await validateIdentities(tx,graph,view);
   return bindings;
 }
 

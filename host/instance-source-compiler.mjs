@@ -4,6 +4,7 @@ import { preserveDomainProjection } from './instance-runtime/domain-projection.m
 import {preserveScopedProductionProjection} from './instance-runtime/scoped-production-projection.mjs';
 import {preserveShotProductionProjection,preserveShotRecipeProjection} from './instance-runtime/shot-production-preservation.mjs';
 import {preserveMaterialProductionProjection,preserveMaterialProductionRequirementProvenance} from './instance-runtime/material-production-preservation.mjs';
+import {preserveProductionSpatialProjection} from './instance-runtime/spatial-production.mjs';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import { mkdir, mkdtemp, realpath, lstat, readFile, writeFile, rm, open, utimes } from 'node:fs/promises';
@@ -216,7 +217,8 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const productionRecipes=preserveShotRecipeProjection({snapshot:production,recipes:projected.recipes,baseSnapshot:publishedSnapshot,baseRecipes:JSON.parse(baseRelease.recipesBytes),documents});
     const materialProduction=preserveMaterialProductionProjection({snapshot:productionRecipes.snapshot,recipes:productionRecipes.recipes,baseSnapshot:publishedSnapshot,baseRecipes:JSON.parse(baseRelease.recipesBytes),documents});
     const domain=preserveDomainProjection({snapshot:materialProduction.snapshot,baseSnapshot:publishedSnapshot,events});
-    snapshotBytes=Buffer.from(canonicalJson(preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot})));recipesBytes=Buffer.from(canonicalJson(materialProduction.recipes));
+    const materialProvenance=preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot});
+    snapshotBytes=Buffer.from(canonicalJson(await preserveProductionSpatialProjection({snapshot:materialProvenance,baseSnapshot:publishedSnapshot,documents})));recipesBytes=Buffer.from(canonicalJson(materialProduction.recipes));
     return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }

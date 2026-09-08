@@ -1,1 +1,1 @@
-export function shotProductionExecutionEntries(model:any,state:any,recipes:any):Record<string,string[]>;
+export function shotProductionExecutionEntries(model:unknown,state:unknown,recipes:unknown):Record<string,string[]>;

@@ -4,6 +4,7 @@ import {productionHash,productionBindingReasons,resolveShotProductionScope,compi
 import {applyAnimaticProjection,lockAnimaticTimeline,assertAnimaticInputs,reconcileAnimaticLocks} from './animatic-service.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
 import {productionSpaceReasons} from './shot-production-space.mjs';
+import {applyProductionSpatialProjection} from './spatial-production.mjs';
 import {episodeSourceCompiler} from './episode-source-sync.mjs';
 import {selectAnimaticLockForShot} from './animatic-model.mjs';
 
@@ -78,6 +79,7 @@ export function validateShotProductionEvidence(value){
 async function readContext(tx,options={}){
  const view=await tx.readView();let model=options.model||await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}});
  if(!options.model){const{applyShotProductionManifestProjection}=await import('./shot-production-manifest.mjs');model=await applyShotProductionManifestProjection(tx,model);}
+ model=await applyProductionSpatialProjection(tx,model,{view});
  const state=options.state||(options.api?.projectEpisodeNarrativeReleases?episodeSourceCompiler(options.api).stateFor({...view,snapshot:{...view.snapshot,productionModel:model}}):options.api?.projectOperationalState({...view.snapshot,productionModel:model},events(view),view.eventsByKind?.['asset-version']||[],view.eventsByKind?.run||[],view.eventsByKind?.['source-operation']||[],view.eventsByKind?.['execution-request']||[]));
  if(!state)fail('缺少正式媒体运行态校验器');if(!options.model)model={...model,...(state.episodeNarrativeReleasesByUid?{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById}}:{}),animaticLocks:reconcileAnimaticLocks(model,state)};return{view,model,state};
 }

@@ -224,6 +224,8 @@ export function projectProductionEvidence(
   let parentVersion: ProductionEvidenceField;
   if (!hasParentField) {
     parentVersion = evidenceField('MISSING', '未登记父版本或显式根版本关系。');
+  } else if (typeof definition?.materialProductionPlanId === 'string' && definition.parentVersionId != null && definition.parentVersionId !== parentVersionId) {
+    parentVersion = evidenceField('CONFLICT', '父版本与本次固定素材修订配方不一致。');
   } else if (!parentVersionId) {
     parentVersion = parentBindingState === 'EXPLICIT_ROOT'
       ? evidenceField('VERIFIED', '已核验为显式根版本。', { parentVersionId: null, parentVersionSha256: null, parentBindingState })
@@ -377,6 +379,30 @@ function realizedExpectedOutput(
     || (expectedOutput.legacyVersionId?.startsWith(`${expectedOutput.familyId}@`)
       && candidate.plannedVersionId === expectedOutput.legacyVersionId)
   ));
+}
+
+function assertMaterialRevisionParent(
+  data: Awaited<ReturnType<typeof validateMutationRequest>>['data'],
+  definition: Record<string, unknown>,
+  parentVersionId: string | null,
+  parentVersionSha256: string | null,
+) {
+  if (typeof definition.materialProductionPlanId !== 'string') return;
+  const model = data.productionModel as unknown as Record<string, unknown>;
+  const plans = Array.isArray(model.materialProductionPlans) ? model.materialProductionPlans as Record<string, unknown>[] : [];
+  const plan = plans.find(row => row.id === definition.materialProductionPlanId);
+  if (plan?.definitionId === definition.id) return;
+  const revisions = Array.isArray(model.materialProductionRecipeRevisions) ? model.materialProductionRecipeRevisions as Record<string, unknown>[] : [];
+  const rows = revisions.filter(row => row.definitionId === definition.id);
+  const revision = rows.length === 1 ? rows[0] : null;
+  const output = definition.output as Record<string, unknown> | undefined;
+  if (!plan || !revision || revision.materialProductionPlanId !== plan.id
+    || revision.familyId !== output?.assetFamilyRef || revision.workItemId !== definition.workItemRef
+    || revision.expectedOutputId !== output?.expectedOutputRef || revision.definitionHash !== definition.definitionHash
+    || revision.parentVersionId !== definition.parentVersionId || revision.parentVersionId !== parentVersionId
+    || revision.parentVersionSha256 !== parentVersionSha256) {
+    throw new HttpError(422, 'candidate parent must exactly match the native material revision source and SHA');
+  }
 }
 
 export async function GET(request: Request) {
@@ -639,6 +665,7 @@ export async function POST(request: Request) {
     if (existingMaterializedFamilyVersions.length && !parentVersionId && parentBindingState !== 'BOUND') {
       throw new HttpError(422, 'a new family version must bind an existing materialized parentVersionId');
     }
+    assertMaterialRevisionParent(data, definition, parentVersionId, parentVersionSha256);
     const token = mediaToken(versionId);
     const semanticRequest = {
       snapshotId,
@@ -716,7 +743,7 @@ export async function POST(request: Request) {
         if(referenceReasons.length)throw new HttpError(422,'实际参考未通过当前关系规则',{eligibilityReasons:referenceReasons});
         const lockedFamily = locked.stateProjection.assetFamiliesById[familyId];
         if(lockedRequest.domainReferenceHash&&lockedFamily?.domainContextHash!==lockedRequest.domainReferenceHash)throw new HttpError(409,'素材关系已变化，请重新冻结制作输入');
-        if (!lockedFamily || lockedFamily.currentExpectedOutputId !== expectedOutputId) {
+        if (!lockedFamily || (lockedFamily.nextExpectedOutputId || lockedFamily.currentExpectedOutputId) !== expectedOutputId) {
           throw new HttpError(409, 'ExpectedOutput was realized or replaced while registration was in flight');
         }
         const lockedRun = latestAggregateEvent(locked.runs.events, 'runId', runId);

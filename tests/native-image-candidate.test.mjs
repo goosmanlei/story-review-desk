@@ -8,9 +8,9 @@ import {compileShotRecipePreview} from '../host/instance-runtime/shot-production
 // Exercise the actual route consumer rather than a second implementation.
 const source=readFileSync(new URL('../app/api/v8/asset-versions/route.ts',import.meta.url),'utf8');
 const ast=ts.createSourceFile('route.ts',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
-const functions=ast.statements.filter(s=>ts.isFunctionDeclaration(s)&&['knownVersion','isMaterializedVersion','defaultVersionId','realizedExpectedOutput'].includes(s.name?.text)).map(s=>s.getText(ast)).join('\n');
+const functions=ast.statements.filter(s=>ts.isFunctionDeclaration(s)&&['knownVersion','isMaterializedVersion','defaultVersionId','realizedExpectedOutput','assertMaterialRevisionParent'].includes(s.name?.text)).map(s=>s.getText(ast)).join('\n');
 class HttpError extends Error{constructor(status,message){super(message);this.status=status;}}
-const {defaultVersionId,realizedExpectedOutput}=new Function('HttpError','stableObjectHash',ts.transpile(functions+'\nreturn {defaultVersionId,realizedExpectedOutput};', {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}))(HttpError,productionHash);
+const {defaultVersionId,realizedExpectedOutput,assertMaterialRevisionParent}=new Function('HttpError','stableObjectHash',ts.transpile(functions+'\nreturn {defaultVersionId,realizedExpectedOutput,assertMaterialRevisionParent};', {target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.None}))(HttpError,productionHash);
 function fixture(prefix='SP'){
  const key='a'.repeat(24),planId=prefix+'-PLAN-'+key,familyId=prefix+'-AF-'+key,workId=prefix+'-WI-'+key,id=prefix+'-EO-'+key,marker=prefix==='SP'?'shotProductionPlanId':'materialProductionPlanId';
  const expectedOutput={id,familyId,legacyVersionId:id,plannedVersionLabel:'V001',targetPath:'media/_review_pending/'+familyId+'/V001.png',expectationState:'PLANNED',[marker]:planId};
@@ -54,4 +54,13 @@ test('native current EO realizes once without treating a predecessor alias as a 
 test('legacy realization evidence without an ExpectedOutput field is still recognized',()=>{
  const output={id:'OLD-EO',familyId:'OLD',legacyVersionId:'OLD@V001'},candidate={familyId:'OLD',plannedVersionId:'OLD@V001',versionId:'OLD@V001'};
  assert.equal(realizedExpectedOutput(output,[candidate]),candidate);
+});
+
+test('native material successor candidate binds the frozen parent identity and SHA instead of any same-family history',()=>{
+ const f=fixture('MP'),plan=f.data.productionModel.materialProductionPlans[0],parent=f.family.id+'@V002',parentSha=productionHash('real parent'),definition={id:'MP-CALL-'+'b'.repeat(24),materialProductionPlanId:plan.id,workItemRef:f.work.id,definitionHash:productionHash('new frozen recipe'),parentVersionId:parent,output:{assetFamilyRef:f.family.id,expectedOutputRef:'MP-EO-'+'b'.repeat(24)}};
+ plan.definitionId='MP-CALL-'+'a'.repeat(24);f.data.productionModel.materialProductionRecipeRevisions=[{materialProductionPlanId:plan.id,familyId:f.family.id,workItemId:f.work.id,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:definition.output.expectedOutputRef,parentVersionId:parent,parentVersionSha256:parentSha}];
+ assert.doesNotThrow(()=>assertMaterialRevisionParent(f.data,definition,parent,parentSha));
+ assert.throws(()=>assertMaterialRevisionParent(f.data,definition,f.family.id+'@V001',parentSha),{status:422});assert.throws(()=>assertMaterialRevisionParent(f.data,definition,parent,productionHash('different bytes')),{status:422});
+ const noProof=structuredClone(f.data);noProof.productionModel.materialProductionRecipeRevisions=[];assert.throws(()=>assertMaterialRevisionParent(noProof,definition,parent,parentSha),{status:422});
+ assert.doesNotThrow(()=>assertMaterialRevisionParent(f.data,{...definition,id:plan.definitionId,parentVersionId:null},null,null));assert.doesNotThrow(()=>assertMaterialRevisionParent(f.data,{id:'LEGACY',parentVersionId:'old'},null,null));
 });

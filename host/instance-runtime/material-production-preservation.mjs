@@ -1,6 +1,7 @@
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
+import {materialProductionRevisionClosures} from './material-production-revision-preservation.mjs';
 
 const fail=message=>{throw Object.assign(new Error(message),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});};
 const same=(left,right)=>canonicalJson(left)===canonicalJson(right);
@@ -55,7 +56,7 @@ function assertGraphBinding(plan,body){
 }
 
 const familyMutable=['versionRefs','currentVersionId','latestVersionId','expectedOutputRefs','currentExpectedOutputId','domainContext','lifecycleState','reviewDecision','publishState','referenceEligible','generationAllowed'];
-const workMutable=['executionDefinitionRef','promptRef','lifecycleState','reviewDecision','publishState','generationAllowed'];
+const workMutable=['executionDefinitionRef','promptRef','inputAssetRefs','lifecycleState','reviewDecision','publishState','generationAllowed'];
 function assertFrozen(actual,declared,mutable,label){
  if(!declared||!actual||!same(without(actual,mutable),without(declared,mutable)))fail(label+'与初次建档的固定源不一致');
 }
@@ -97,7 +98,7 @@ function assertMaterialClosure(prior,catalog,{plan,body,doc}){
  const current=one(catalog.executionDefinitions,row=>row.id===work.executionDefinitionRef&&row.workItemRef===work.id,'基础素材当前调用定义');
  one(catalog.promptRevisions,row=>row.id===work.promptRef&&row.executionDefinitionId===current.id,'基础素材当前提示词修订');
 }
-function preserveMembers(model,catalog,prior,baseRecipes,closures){
+function preserveMembers(model,catalog,prior,baseRecipes,closures,revisions){
  const familyIds=new Set(closures.map(({plan})=>plan.familyId)),workIds=new Set(closures.map(({plan})=>plan.workItemId));
  const workRows=(prior.materialWorkItems||[]).filter(row=>workIds.has(row.id)),contextIds=new Set(workRows.map(row=>row.reviewContextRef));
  if((model.workItems||[]).some(row=>workIds.has(row.id)))fail('源编译不能把基础素材工作项复制为全剧制作工作项');
@@ -109,7 +110,7 @@ function preserveMembers(model,catalog,prior,baseRecipes,closures){
   ['reviewContexts',(prior.reviewContexts||[]).filter(row=>contextIds.has(row.id))],
  ])mergeFrozen(model,key,rows);
  const definitions=(baseRecipes.executionDefinitions||[]).filter(row=>workIds.has(row.workItemRef));
- const declaredIds=new Set(closures.map(({plan})=>plan.definitionId));
+ const declaredIds=new Set([...closures.map(({plan})=>plan.definitionId),...revisions.map(({row})=>row.definitionId)]);
  for(const definition of definitions)if(!declaredIds.has(definition.id))fail('基础素材后续调用定义缺少受控固定源保留适配：'+definition.id);
  const definitionIds=new Set(definitions.map(row=>row.id));
  mergeFrozen(catalog,'executionDefinitions',definitions);
@@ -137,8 +138,10 @@ export function preserveMaterialProductionProjection({snapshot,recipes,baseSnaps
  // graph: subsequent explicit domain changes invalidate current eligibility,
  // while the original production source and history remain immutable.
  for(const closure of closures)assertMaterialClosure(prior,baseRecipes,closure);
+ const revisions=materialProductionRevisionClosures({model:prior,recipes:baseRecipes,documents,initialClosures:closures});
  mergeFrozen(model,'materialProductionPlans',plans);
- preserveMembers(model,catalog,prior,baseRecipes,closures);
+ if(revisions.length)mergeFrozen(model,'materialProductionRecipeRevisions',revisions.map(({row})=>row));
+ preserveMembers(model,catalog,prior,baseRecipes,closures,revisions);
  return {snapshot:next,recipes:catalog};
 }
 

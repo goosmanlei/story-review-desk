@@ -9,6 +9,7 @@ import {runAnimaticWorkerIteration} from './instance-animatic-worker.mjs';
 import {runShotProductionManifestIteration} from '../host/instance-runtime/shot-production-manifest.mjs';
 import {runShotRecipeIteration} from '../host/instance-runtime/shot-production-recipes.mjs';
 import {runMaterialProductionIteration} from '../host/instance-runtime/material-production-service.mjs';
+import {runSpatialShotViewIteration} from '../host/instance-runtime/spatial-shot-view-service.mjs';
 import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mjs';
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
 export async function runShotProductionWorkerIteration({repository,api}){
@@ -27,6 +28,7 @@ export async function shotProductionWorker(instanceRoot,{once=false}={}){
  const stop=()=>{stopping=true;};process.once('SIGTERM',stop);process.once('SIGINT',stop);
  try{do{
   const material=await runMaterialProductionIteration({repository,api});if(material.processed)process.stdout.write(JSON.stringify(material)+'\n');
+  const spatial=await runSpatialShotViewIteration({repository});if(spatial.processed)process.stdout.write(JSON.stringify(spatial)+'\n');
   const result=await runShotProductionWorkerIteration({repository,api});if(result.processed)process.stdout.write(JSON.stringify(result)+'\n');
   const recipe=await runShotRecipeIteration({repository,api});if(recipe.processed)process.stdout.write(JSON.stringify(recipe)+'\n');
   const manifest=await runShotProductionManifestIteration({repository,instanceRoot:instance.root,workerId,api});if(manifest.processed)process.stdout.write(JSON.stringify(manifest)+'\n');

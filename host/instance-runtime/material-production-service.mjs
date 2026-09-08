@@ -1,8 +1,10 @@
+import {materialProductionRevisionContext,compileMaterialProductionRevision} from './material-production-revision.mjs';
+import {preserveMaterialProductionProjection} from './material-production-preservation.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
 import {domainHash,validateDomainGraph,defaultDomainConfiguration} from './domain-model.mjs';
 import {currentGraph,evidenceBindings,verifyQuotes,validateIdentities} from './domain-service.mjs';
-import {verifySourceBindings} from './domain-sources.mjs';
+import {verifyDomainWorkspaceEvidence} from './domain-workspace-evidence.mjs';
 import {projectDomainGraph} from './domain-projection.mjs';
 import {materialDirectorySource} from './material-directory.mjs';
 import {refreshDirectoryProjection} from './directory-projection.mjs';
@@ -46,30 +48,36 @@ async function context(tx,requirementId,api){
  if(requirement.representationRef!==representation.id||requirement.requirementHash!==domainHash({demand,representation})||!same(requirement.assetFamilyRefs||[],representation.assetFamilyIds))fail('需求与表现的精确基线不一致');
  const head=await tx.getAux('domain-graph','current');if(head?.revisionId!==current.revisionId||head.sha256!==model.domainGraphRef?.sha256||head.sha256!==domainHash(graph))fail('领域图谱发布基线或当前头已变化');
  const entity=graph.entities.find(e=>e.id===representation.entityId),domainState=representation.stateId?graph.states.find(s=>s.id===representation.stateId&&s.entityId===entity?.id):null;
- const blockers=[];if((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
+ const blockers=[],base={view,model,state,graph,requirement,demand,representation};
+ const revision=await materialProductionRevisionContext(tx,base);
+ if(!revision&&((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId)))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
+ if(revision)blockers.push(...revision.blockers);
  if(!['IMAGE','AUDIO'].includes(demand.mediaType))blockers.push('首次建档当前仅支持图片或声音基础素材');
  if(graph.requirements.filter(r=>r.representationId===representation.id).length!==1||(representation.requirementIds||[]).some(id=>id!==requirementId))blockers.push('此表现关联多个需求，须先明确独立的制作归属');
  if(!entity||representation.stateId&&!domainState)blockers.push('当前实体或状态归属不完整');
  if(!requirement.configurationBinding?.reviewSpec?.hash||!requirement.reviewSpec?.hash)blockers.push('当前需求缺少冻结审阅标准和配置');
  const basis={requirementId,requirementHash:requirement.requirementHash,demand,representation,entity:entity||null,state:domainState,graphRef:{revisionId:current.revisionId,sha256:head.sha256},configurationBinding:requirement.configurationBinding||null,domainContext:requirement.domainContext||null};
- return {view,model,state,graph,requirement,demand,representation,basis,basisHash:domainHash(basis),blockers};
+ if(revision)basis.revision=revision.revisionBasis;
+ return {...base,basis,basisHash:domainHash(basis),blockers,revision,mode:revision?'REVISION':'FIRST_SETUP'};
 }
 export async function getMaterialProductionWorkspace(tx,{requirementId,api}){
  const c=await context(tx,requirementId,api),record=await tx.getAux(MATERIAL_PRODUCTION_NS.drafts,requirementId),draft=read(record),availableInputs=[];
  for(const [familyId,f] of Object.entries(c.state.assetFamiliesById||{})){const v=c.state.assetVersionsById?.[f.currentVersionId];if(!v?.sha256)continue;const binding={familyId,versionId:v.id,sha256:v.sha256};try{await registeredInput(tx,c.model,c.state,binding);const source=(c.model.assetFamilies||[]).find(x=>x.id===familyId);availableInputs.push({...binding,label:source?.label||familyId,kind:source?.kind||'UNKNOWN'});}catch{}}
- return {requirementId,releaseId:c.view.releaseId,requirement:c.requirement,representation:c.representation,basis:c.basis,basisHash:c.basisHash,draftHeadRevisionId:record?.revisionId||null,draft:draft?{...draft,revisionId:record.revisionId}:null,defaults:{model:'',prompt:[c.requirement.title,...(c.requirement.acceptanceCriteria||[])].join('\n'),negativePrompt:'',parameters:{},inputBindings:[]},availableInputs,blockers:c.blockers,currentRegistration:(c.model.materialProductionPlans||[]).find(p=>p.requirementId===requirementId)||null,jobs:(await tx.listAux(MATERIAL_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.requirementId===requirementId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(({jobId,status,error,result})=>({jobId,status,error,result})),readOnly:false};
+ const draftCurrent=draft&&draft.basisHash===c.basisHash&&draft.baseReleaseId===c.view.releaseId;
+ const defaults=c.revision?{...c.revision.definition.authoringContent,inputBindings:(c.revision.definition.upload?.items||[]).map(b=>({familyId:b.assetFamilyRef,versionId:b.assetVersionRef,sha256:b.sha256}))}:{model:'',prompt:[c.requirement.title,...(c.requirement.acceptanceCriteria||[])].join('\n'),negativePrompt:'',parameters:{},inputBindings:[]};
+ return {requirementId,mode:c.mode,parentVersionId:c.revision?.parent?.versionId||null,parentVersionSha256:c.revision?.parent?.sha256||null,plannedVersionLabel:c.revision?.plannedVersionLabel||'V001',currentDefinitionId:c.revision?.definition.id||null,releaseId:c.view.releaseId,requirement:c.requirement,representation:c.representation,basis:c.basis,basisHash:c.basisHash,draftHeadRevisionId:record?.revisionId||null,draft:draftCurrent?{...draft,revisionId:record.revisionId}:null,staleDraft:draft&&!draftCurrent?{...draft,revisionId:record.revisionId,reason:'制作基线已变化；旧稿保留，须核对当前父版本和参考后重新保存。'}:null,defaults,availableInputs,blockers:c.blockers,currentRegistration:(c.model.materialProductionPlans||[]).find(p=>p.requirementId===requirementId)||null,jobs:(await tx.listAux(MATERIAL_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.requirementId===requirementId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(({jobId,status,error,result})=>({jobId,status,error,result})),readOnly:false};
 }
 export async function saveMaterialProductionDraft(tx,input,{api}){
- const c=await context(tx,input.requirementId,api);if(c.view.releaseId!==input.expectedReleaseId)fail('发布版本已变化');if(c.blockers.length)fail(c.blockers.join('、'));
+ const c=await context(tx,input.requirementId,api);if(c.view.releaseId!==input.expectedReleaseId)fail('发布版本已变化');if(c.mode==='REVISION'&&input.expectedBasisHash!==c.basisHash)fail('素材父版本、审阅或运行基线已变化，请重新核对当前素材建档状态');if(c.blockers.length)fail(c.blockers.join('、'));
  const content=validateMaterialProductionContent(input.content);for(const b of content.inputBindings)await registeredInput(tx,c.model,c.state,b);
  const record=await put(tx,MATERIAL_PRODUCTION_NS.drafts,input.requirementId,{requirementId:input.requirementId,baseReleaseId:c.view.releaseId,basisHash:c.basisHash,content},input.expectedDraftRevisionId);
  return {revisionId:record.revisionId,formalAdoptionPerformed:false,modelCalls:0};
 }
 async function compile(tx,c,content,draftRevisionId){
- content=validateMaterialProductionContent(content);const id='MP-PLAN-'+domainHash({requirementId:c.requirement.id,draftRevisionId}).slice(0,24),key=domainHash({requirementId:c.requirement.id}).slice(0,24),familyId='MP-AF-'+key,workId='MP-WI-'+key,outputId='MP-EO-'+key,definitionId='MP-CALL-'+key,contextId='MP-CTX-'+key,sourcePath='story/material-production/plans/'+id+'.json';
+ content=validateMaterialProductionContent(content);if(c.revision)return compileMaterialProductionRevision(tx,c,content,draftRevisionId,registeredInput);const id='MP-PLAN-'+domainHash({requirementId:c.requirement.id,draftRevisionId}).slice(0,24),key=domainHash({requirementId:c.requirement.id}).slice(0,24),familyId='MP-AF-'+key,workId='MP-WI-'+key,outputId='MP-EO-'+key,definitionId='MP-CALL-'+key,contextId='MP-CTX-'+key,sourcePath='story/material-production/plans/'+id+'.json';
  for(const [rows,objectId] of [[c.model.assetFamilies,familyId],[c.model.materialWorkItems,workId],[c.model.workItems,workId],[c.model.expectedOutputs,outputId],[c.view.recipes.executionDefinitions,definitionId],[c.model.reviewContexts,contextId]])if((rows||[]).some(r=>r.id===objectId))fail('首次素材制作身份已经存在');
  const graph=structuredClone(c.graph),afterRepresentation=graph.representations.find(r=>r.id===c.representation.id);afterRepresentation.assetFamilyIds=[familyId];
- const configuration=c.model.systemConfiguration?.config?.domain||defaultDomainConfiguration();validateDomainGraph(graph,{configuration,sourceBindings:evidenceBindings(graph),knownFamilyIds:[...c.model.assetFamilies.map(r=>r.id),familyId],knownRequirementIds:c.model.materialRequirements.map(r=>r.id)});await verifySourceBindings(tx,evidenceBindings(graph),{allowLegacy:true});await verifyQuotes(tx,graph);await validateIdentities(tx,graph,c.view);
+ const configuration=c.model.systemConfiguration?.config?.domain||defaultDomainConfiguration();validateDomainGraph(graph,{configuration,sourceBindings:evidenceBindings(graph),knownFamilyIds:[...c.model.assetFamilies.map(r=>r.id),familyId],knownRequirementIds:c.model.materialRequirements.map(r=>r.id)});await verifyDomainWorkspaceEvidence(tx,graph,c.graph);await verifyQuotes(tx,graph);await validateIdentities(tx,graph,c.view);
  const graphHash=domainHash(graph),configurationBinding=structuredClone(c.requirement.configurationBinding),reviewSpec=configurationBinding.reviewSpec;
  const lifecycle={lifecycleState:'READY_TO_START',outputState:'NOT_PRODUCED',reviewDecision:null,projectRightsGate:'UNKNOWN',canFlowDownstream:false,flowBlockReasons:['OUTPUT_NOT_PRESENT']};
  const targetPath='media/_review_pending/material-production/'+familyId+'/V001'+(c.demand.mediaType==='IMAGE'?'.png':'.wav');
@@ -112,6 +120,7 @@ export async function applyMaterialProductionJob(tx,{jobId,api}){
  const meta=await tx.getMetadata();if(meta.instanceId!==job.instanceId||meta.runtimeEpoch!==job.runtimeEpoch)fail('建档任务的实例或运行代次已变化');
  const preview=await previewMaterialProduction(tx,job.input,{api});if(preview.previewHash!==job.preview.previewHash)fail('工作器执行前建档预览已变化');
  const c=await context(tx,job.requirementId,api),draft=read(await tx.getAux(MATERIAL_PRODUCTION_NS.drafts,job.requirementId)),compiled=await compile(tx,c,draft.content,job.input.draftRevisionId),plan=compiled.plan;
+ if(c.revision)return publishRevision(tx,c,plan,job,record);
  const graphRecord=await put(tx,'domain-graph','current',compiled.graph,plan.graphBinding.before.revisionId);if(graphRecord.sha256!==plan.graphBinding.after.sha256)fail('领域图谱写入 SHA 不一致');
  const sourcePath='story/material-production/plans/'+plan.id+'.json',source=await tx.putDocument({documentId:'material-production:'+plan.id,aliases:[sourcePath],expectedRevisionId:null,bytes:canonicalJson(plan),mediaType:'application/json',metadata:{sourceRole:'MATERIAL_PRODUCTION_PLAN'}});
  const snapshot=compiled.projected,model=snapshot.productionModel;model.domainGraphRef={revisionId:graphRecord.revisionId,sha256:graphRecord.sha256};snapshot.creativeLineage={...snapshot.creativeLineage,domainGraphRef:model.domainGraphRef};
@@ -131,4 +140,21 @@ export async function runMaterialProductionIteration({repository,api}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能发布素材建档');
  const job=await repository.readTransaction(async tx=>(await tx.listAux(MATERIAL_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
  try{return {processed:true,status:'SUCCEEDED',...await repository.writeTransaction(tx=>applyMaterialProductionJob(tx,{jobId:job.jobId,api}))};}catch(e){await repository.writeTransaction(async tx=>{const record=await tx.getAux(MATERIAL_PRODUCTION_NS.jobs,job.jobId),current=read(record);if(current?.status==='QUEUED')await put(tx,MATERIAL_PRODUCTION_NS.jobs,job.jobId,{...current,status:'FAILED',error:String(e.message||e).slice(0,1500)},record.revisionId);});return {processed:true,jobId:job.jobId,status:'FAILED'};}
+}
+
+async function publishRevision(tx,c,plan,job,record){
+ const source=await tx.putDocument({documentId:'material-production-recipe:'+plan.id,aliases:[plan.sourcePath],expectedRevisionId:null,bytes:canonicalJson(plan),mediaType:'application/json',metadata:{sourceRole:'MATERIAL_PRODUCTION_RECIPE'}});
+ const snapshot=structuredClone(c.view.snapshot),model=snapshot.productionModel,recipes=structuredClone(c.view.recipes),sourceEnvelope={sourceRef:plan.sourcePath,sourceRevisionId:source.revisionId,sourceSha256:source.sha256};
+ model.assetFamilies=model.assetFamilies.map(f=>f.id===plan.assetFamily.id?plan.assetFamily:f);
+ model.materialWorkItems=model.materialWorkItems.map(w=>w.id===plan.materialWorkItem.id?plan.materialWorkItem:w);
+ model.expectedOutputs.push(plan.expectedOutput);
+ recipes.executionDefinitions.push({...plan.executionDefinition,...sourceEnvelope});recipes.promptRevisions.push({...plan.promptRevision,...sourceEnvelope});
+ model.materialProductionRecipeRevisions=[...(model.materialProductionRecipeRevisions||[]),{id:plan.id,materialProductionPlanId:plan.materialProductionPlanId,requirementId:plan.requirementId,representationId:plan.representationId,familyId:plan.assetFamily.id,workItemId:plan.materialWorkItem.id,expectedOutputId:plan.expectedOutput.id,definitionId:plan.executionDefinition.id,definitionHash:plan.executionDefinition.definitionHash,previousDefinitionId:plan.previousDefinitionId,previousExpectedOutputId:plan.previousExpectedOutputId,parentVersionId:plan.parentVersionId,parentVersionSha256:plan.parentVersionSha256,requirementHash:plan.requirementAfter.requirementHash,basisHash:plan.basisHash,sourcePath:plan.sourcePath,sourceRevisionId:source.revisionId,sourceSha256:source.sha256}];
+ const documents=[...await Promise.all(c.view.sourceRevisionIds.map(id=>tx.readDocumentRevision(id))),source];
+ // Publication must itself prove that the entire old/new immutable closure can
+ // survive source synchronization; do not defer that validation to the next sync.
+ preserveMaterialProductionProjection({snapshot,recipes,baseSnapshot:snapshot,baseRecipes:recipes,documents});
+ snapshot.snapshotId='snapshot_'+domainHash({previous:c.view.snapshot.snapshotId,revision:plan.id,sourceSha256:source.sha256}).slice(0,32);recipes.snapshotId=snapshot.snapshotId;
+ const release=await tx.publishRelease({snapshot,recipes,expectedReleaseId:c.view.releaseId,sourceRevisionIds:[...c.view.sourceRevisionIds,source.revisionId]}),result={releaseId:release.releaseId,mode:'REVISION',planId:plan.materialProductionPlanId,recipeRevisionId:plan.id,familyId:plan.assetFamily.id,workItemId:plan.materialWorkItem.id,expectedOutputId:plan.expectedOutput.id,definitionId:plan.executionDefinition.id,sourceRevisionId:source.revisionId,requirementHash:plan.requirementAfter.requirementHash,parentVersionId:plan.parentVersionId,plannedVersionLabel:plan.expectedOutput.plannedVersionLabel,modelCalls:0,actualMediaCreated:false,formalAdoptionPerformed:false};
+ await put(tx,MATERIAL_PRODUCTION_NS.jobs,job.jobId,{...job,status:'SUCCEEDED',completedAt:new Date().toISOString(),result},record.revisionId);return result;
 }

@@ -195,6 +195,7 @@ type AssetFamily = {
   materialRequirementRefs?: string[];
   expectedOutputRefs?: string[];
   currentExpectedOutputId?: string | null;
+  nextExpectedOutputId?: string | null;
   versionDeepLinkAliases?: Array<{ legacyVersionId?: string | null; expectedOutputId?: string | null }>;
   legacyState?: { materializationState?: string | null; rightsStatus?: string | null; [key: string]: unknown } | null;
 };
@@ -558,12 +559,17 @@ async function publishedView(repository: NonNullable<Awaited<ReturnType<typeof i
 }
 
 async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
-  if(!((data.productionModel as unknown as {shotProductionPlans?:unknown[]}).shotProductionPlans||[]).length)return data;
+  const production=data.productionModel as unknown as {shotProductionPlans?:unknown[];spatialShotViews?:unknown[]};
+  if(!(production.shotProductionPlans||[]).length&&!(production.spatialShotViews||[]).length&&!data.sourceHashes?.productionMapSha256)return data;
+  const {applyProductionSpatialProjection}=await import('../../../host/instance-runtime/spatial-production.mjs');
+  const view=await repository.readView();
+  const spatialModel=await applyProductionSpatialProjection(repository,{...data.productionModel,spatialEvidence:(data as unknown as {creativeLineage?:{spatialEvidence?:unknown}}).creativeLineage?.spatialEvidence||null,sourceHashes:data.sourceHashes||{}},{view});
+  if(!(production.shotProductionPlans||[]).length)return {...data,productionModel:spatialModel} as ReviewData;
   const {applyAnimaticProjection,reconcileAnimaticLocks}=await import('../../../host/instance-runtime/animatic-service.mjs');
   const {applyShotProductionLocksProjection}=await import('../../../host/instance-runtime/shot-production-locks.mjs');
   const {applyShotProductionManifestProjection}=await import('../../../host/instance-runtime/shot-production-manifest.mjs');
   const {episodeSourceCompiler}=await import('../../../host/instance-runtime/episode-source-sync.mjs');
-  const model=await applyShotProductionManifestProjection(repository,await applyAnimaticProjection(repository,{...data.productionModel,spatialEvidence:(data as unknown as {creativeLineage?:{spatialEvidence?:unknown}}).creativeLineage?.spatialEvidence||null,sourceHashes:data.sourceHashes||{}})),view=await repository.readView();
+  const model=await applyShotProductionManifestProjection(repository,await applyAnimaticProjection(repository,spatialModel));
   const state=episodeSourceCompiler({projectOperationalState,projectEpisodeNarrativeReleases,projectedReviewIndexes,projectedStructureReviewIndexes,projectedScopeLocks}).stateFor({...view,snapshot:{...data,productionModel:model}});
   Object.assign(model,{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById},animaticLocks:reconcileAnimaticLocks(model,state)});
   return {...data,productionModel:await applyShotProductionLocksProjection(repository,model,{state,view})} as ReviewData;
@@ -4080,6 +4086,32 @@ export function projectOperationalState(
       .filter((item) => item.executionDefinitionRef)
       .map((item) => [item.executionDefinitionRef as string, item]),
   );
+  // Native material revisions preserve one family and one review owner while
+  // appending exact output slots. An adopted predecessor remains usable until
+  // the successor is formally adopted; legacy slot replacement is unchanged.
+  const nativeModel = data.productionModel as unknown as Record<string, unknown>;
+  const nativePlans = (Array.isArray(nativeModel.materialProductionPlans) ? nativeModel.materialProductionPlans : []) as Array<Record<string, unknown>>;
+  const nativeRevisions = (Array.isArray(nativeModel.materialProductionRecipeRevisions) ? nativeModel.materialProductionRecipeRevisions : []) as Array<Record<string, unknown>>;
+  const nativeRevisionFamilyIds = new Set<string>();
+  for (const revision of nativeRevisions) {
+    const plan = nativePlans.find(p => p.id === revision.materialProductionPlanId);
+    const work = (data.productionModel.materialWorkItems || []).find(w => w.id === revision.workItemId);
+    const family = data.productionModel.assetFamilies.find(f => f.id === revision.familyId);
+    const output = (data.productionModel.expectedOutputs || []).find(o => o.id === revision.expectedOutputId);
+    if (!plan || !work || !family || !output || plan.familyId !== family.id || plan.workItemId !== work.id
+      || family.ownerRef !== work.id || work.outputAssetRef !== family.id || work.executionDefinitionRef !== revision.definitionId
+      || family.currentExpectedOutputId !== output.id || output.familyId !== family.id || output.executionDefinitionRef !== revision.definitionId
+      || revision.requirementHash !== work.requirementHash || revision.requirementId !== work.requirementRef
+      || !/^MP-PLAN-[a-f0-9]{24}$/.test(String(plan.id || ''))
+      || (family as unknown as Record<string, unknown>).materialProductionPlanId !== plan.id
+      || (work as unknown as Record<string, unknown>).materialProductionPlanId !== plan.id || output.materialProductionPlanId !== plan.id
+      || output.legacyVersionId !== plan.expectedOutputId || !(family.expectedOutputRefs || []).includes(output.id)) continue;
+    nativeRevisionFamilyIds.add(family.id);
+    materialItemByDefinition.set(String(plan.definitionId), work);
+    for (const previous of nativeRevisions.filter(r => r.materialProductionPlanId === plan.id && r.familyId === family.id && r.workItemId === work.id && r.requirementHash === work.requirementHash)) {
+      materialItemByDefinition.set(String(previous.definitionId), work);
+    }
+  }
   const versions = new Map<string, ProjectedVersion>();
   for (const source of data.productionModel.assetVersions) {
     const version: ProjectedVersion = { ...source, source: 'BASE_SNAPSHOT' };
@@ -4199,7 +4231,7 @@ export function projectOperationalState(
     const version = versions.get(versionId);
     const family = families.get(familyId);
     if (!version || !family || version.familyId !== familyId || version.sha256?.toLowerCase() !== versionSha256) continue;
-    const reviewTargetsCurrentSlot = !family.currentExpectedOutputId
+    const reviewTargetsCurrentSlot = nativeRevisionFamilyIds.has(familyId) || !family.currentExpectedOutputId
       || (currentSlotCandidateVersionIdsByFamily.get(familyId) || new Set<string>()).has(versionId);
     if (!reviewTargetsCurrentSlot) {
       // Keep the immutable review visible on the historical version without
@@ -4283,7 +4315,7 @@ export function projectOperationalState(
     const familyVersions = [...versions.values()].filter((version) => version.familyId === family.id);
     const currentSlotCandidateVersionIds = currentSlotCandidateVersionIdsByFamily.get(family.id) || new Set<string>();
     const rawCurrent = family.currentVersionId ? versions.get(family.currentVersionId) : null;
-    const current = rawCurrent && (!family.currentExpectedOutputId || currentSlotCandidateVersionIds.has(rawCurrent.id))
+    const current = rawCurrent && (nativeRevisionFamilyIds.has(family.id) || !family.currentExpectedOutputId || currentSlotCandidateVersionIds.has(rawCurrent.id))
       ? rawCurrent
       : null;
     if (rawCurrent && !current) family.currentVersionId = null;
@@ -4309,7 +4341,7 @@ export function projectOperationalState(
           ? explicitTerminalDecision
           : materializedFallback;
     family.decisionVersionId = projection?.id || null;
-    if (projection) Object.assign(family, statusSlice(projection));
+    if (projection) Object.assign(family, statusSlice(nativeRevisionFamilyIds.has(family.id) && current ? current : projection));
     if (!current && projection?.reviewDecision === 'DO_NOT_USE') {
       family.lifecycleState = 'DO_NOT_USE';
       family.canFlowDownstream = false;
@@ -4327,7 +4359,7 @@ export function projectOperationalState(
     for(const version of versions.values())if(!available.has(`${version.familyId}\u0000${version.id}\u0000${version.sha256}`)){
       unavailable.add(version.id);version.canFlowDownstream=false;version.flowBlockReasons=[...new Set([...(version.flowBlockReasons||[]),'PUBLIC_MEDIA_NOT_EXPORTED'])];Object.assign(version,{publicMediaAvailability:'NOT_EXPORTED'});
     }
-    for(const family of families.values())if(unavailable.has(family.currentVersionId||'')||unavailable.has(family.decisionVersionId||'')){
+    for(const family of families.values())if(unavailable.has(family.currentVersionId||'')||(!(nativeRevisionFamilyIds.has(family.id)&&family.currentVersionId)&&unavailable.has(family.decisionVersionId||''))){
       family.canFlowDownstream=false;family.flowBlockReasons=[...new Set([...(family.flowBlockReasons||[]),'PUBLIC_MEDIA_NOT_EXPORTED'])];Object.assign(family,{publicMediaAvailability:'NOT_EXPORTED'});
     }
   }
@@ -4623,13 +4655,16 @@ export function projectOperationalState(
     const item: WorkItem = { ...source, flowBlockReasons: [...(source.flowBlockReasons || [])] };
     item.executionGate = source.declaredExecutionGate || null;
     const outputFamily = item.outputAssetRef ? families.get(item.outputAssetRef) : null;
-    const projectedOutputVersionId = outputFamily?.decisionVersionId || outputFamily?.currentVersionId || '';
+    const nativeRevisionTarget = Boolean(outputFamily && nativeRevisionFamilyIds.has(outputFamily.id));
+    const projectedOutputVersionId = nativeRevisionTarget
+      ? String(currentCandidates.find(event => event.familyId === outputFamily!.id && candidateRealizesCurrentExpectedOutput(data, event))?.versionId || '')
+      : outputFamily?.decisionVersionId || outputFamily?.currentVersionId || '';
     const projectedOutputVersion = projectedOutputVersionId ? versions.get(projectedOutputVersionId) : null;
     const hasMaterializedOutput = Boolean(
       item.outputAssetRef && projectedOutputVersion && versionIsMaterialized(projectedOutputVersion)
     );
     if (outputFamily && hasMaterializedOutput) {
-      Object.assign(item, statusSlice(outputFamily));
+      Object.assign(item, statusSlice(nativeRevisionTarget ? projectedOutputVersion! : outputFamily));
     } else {
       const latestRun = latestRunsByWorkItem.get(item.id) || null;
       if (latestRun) {
@@ -4800,9 +4835,10 @@ export function projectOperationalState(
         && versions.get(family.decisionVersionId)?.historyRole === 'CANDIDATE'
         ? family.decisionVersionId
         : null,
-      currentExpectedOutputId: family.currentExpectedOutputId && !expectedOutputRealizations.has(family.currentExpectedOutputId)
+      currentExpectedOutputId: !(nativeRevisionFamilyIds.has(id) && family.currentVersionId) && family.currentExpectedOutputId && !expectedOutputRealizations.has(family.currentExpectedOutputId)
         ? family.currentExpectedOutputId
         : null,
+      ...(nativeRevisionFamilyIds.has(id) ? { nextExpectedOutputId: family.currentVersionId && family.currentExpectedOutputId && !expectedOutputRealizations.has(family.currentExpectedOutputId) ? family.currentExpectedOutputId : null } : {}),
       realizedExpectedOutputIds: (family.expectedOutputRefs || []).filter((expectedId) => expectedOutputRealizations.has(expectedId)),
       versionRefs: family.versionRefs || [],
       ...statusSlice(family),
