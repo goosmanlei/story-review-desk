@@ -728,7 +728,7 @@ function EpisodePlanWorkbenchStateful({ resolvedPlan, model, snapshotId, baseRev
       const response=await fetch('/api/v8/episode-plan-reviews/release',{method:'POST',headers:{'Content-Type':'application/json','If-Match':binding.mutationEtag,'Idempotency-Key':await requestKey('episode-release',body)},body:JSON.stringify(body)});
       const payload=await response.json() as {error?:string};if(!response.ok)throw new Error(payload.error||`HTTP ${response.status}`);
       await refreshCandidate(candidate);window.dispatchEvent(new CustomEvent('review:operations-updated'));
-      setMessage(selectedSubmission.recommendation==='APPROVE_AND_RELEASE'?`${selectedEpisode.displayId}本集正式结论已登记。请由本地主机完成本集受控源同步；随后本集各场可独立推进镜头拆解，无需等待其他集。`:'本集正式修改／禁用结论已登记，原记录保留。');
+      setMessage(selectedSubmission.recommendation==='APPROVE_AND_RELEASE'?`${selectedEpisode.displayId}本集正式结论已登记。请由本地主机完成本集受控源同步；随后本集各场可独立推进镜头制作，无需等待其他集。`:'本集正式修改／禁用结论已登记，原记录保留。');
     } catch(error){setMessage(`本集正式确认未完成：${error instanceof Error?error.message:'UNKNOWN'}。已提交的六项判断仍保留。`);}finally{setBusy(false);}
   }
 
@@ -876,7 +876,7 @@ function EpisodePlanWorkbenchStateful({ resolvedPlan, model, snapshotId, baseRev
       <p>{selectedEpisodeRelease?.canFlowDownstream?'本集各场使用同一已发布正文与精确依据，其他集未完成不会阻断本集。镜头意图、正式镜头计划和后续产物仍分别审阅、同步与锁定。':selectedEpisodeReview?'正式结论与源同步是独立步骤。未同步前不标为当前制作输入，不会将全剧标成已通过。':'此确认覆盖本集全部场正文及六项设计判断，不为其他集作出结论。确认后原提交只读保留；修改需形成新候选。'}</p>
       {selectedEpisodeRelease?.state==='STALE'&&<p role="alert">{selectedEpisodeRelease.reason}</p>}
       {!selectedEpisodeReview&&!selectedEpisodeRelease?.canFlowDownstream&&<button type="button" disabled={hostedReadOnly||busy||loadingState||Boolean(contractError)} onClick={()=>void finalizeEpisode()}>{hostedReadOnly?'请回本地确认':selectedSubmission.recommendation==='APPROVE_AND_RELEASE'?'确认本集正文并通过放行':'登记本集正式结论'}</button>}
-      {selectedEpisodeRelease?.canFlowDownstream&&<a href={`?view=pipeline&creatorStage=shot-breakdown&preparationEpisode=${encodeURIComponent(selectedEpisode.episodeUid)}&preparationScene=${encodeURIComponent(selectedEpisode.sceneIds[0])}`}>进入本集镜头拆解 →</a>}
+      {selectedEpisodeRelease?.canFlowDownstream&&<a href={`?view=pipeline&creatorStage=shot-production&preparationEpisode=${encodeURIComponent(selectedEpisode.episodeUid)}&preparationScene=${encodeURIComponent(selectedEpisode.sceneIds[0])}`}>进入本集镜头制作 →</a>}
     </section>}
 
     {!review && !editingEpisodeUid && seed.sourceRole !== 'CURRENT' && episodeSubmissions.length === seed.episodes.length && <section className="episode-plan-finalize-retry" role="status" aria-label="整套分集方案汇总">

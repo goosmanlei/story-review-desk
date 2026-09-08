@@ -138,10 +138,9 @@ test('工作流拓扑不由CURRENT镜头或未经有效投影的裸ScopeLock推�
   ]) assert.equal(workflowOverview(model, null).denominatorState, 'UNKNOWN');
 });
 
-test('工作流四阶段深链同时绑定creatorStage与精确默认门禁，不保留旧phase节点', () => {
+test('工作流三模块深链绑定精确默认门禁；镜头制作统一六步骤且保留五个canonical phase', () => {
   const expected = [
-    ['SHOT_BREAKDOWN', 'PREVIS', 'SHOT_PLAN_INPUT_LOCK'],
-    ['SHOT_GENERATION', 'PREVIS', 'STORYBOARD_DIALOGUE'],
+    ['SHOT_PRODUCTION', 'PREVIS', 'SHOT_PLAN_INPUT_LOCK'],
     ['SCENE_EDIT', 'SCENE_FINISH', 'PICTURE_LOCK'],
     ['EPISODE_EDIT', 'EPISODE_FINISH', 'EPISODE_ASSEMBLY'],
   ];
@@ -157,6 +156,7 @@ test('工作流四阶段深链同时绑定creatorStage与精确默认门禁，�
     assert.equal(url.searchParams.get('productionGate'), gateId.toLowerCase().replaceAll('_', '-'));
     assert.equal(url.searchParams.has('phase'), false);
   }
+  assert.deepEqual(result.nodes.find(node=>node.id==='SHOT_PRODUCTION').gateIds,['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE','ANIMATIC_LOCK','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK']);
   assert.ok(canonicalIds.every(id => !result.nodes.some(node => node.id === id)));
   assert.equal(result.nodes.some(node => node.id === 'PREPARATION'), false);
   assert.equal(JSON.stringify(model), before);

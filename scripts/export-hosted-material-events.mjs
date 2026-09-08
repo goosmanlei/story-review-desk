@@ -153,14 +153,19 @@ const selectedFamilyIds = new Set(
     .filter((item) => selectedRequirementIds.has(String(item.requirementRef || '')))
     .map((item) => String(item.outputAssetRef || '')),
 );
+const materialFamilyIds=new Set(selectedFamilyIds),animaticVersionIds=new Set((reviewData.productionModel.publicProductionMedia||reviewData.productionModel.publicAnimaticMedia||[]).map(m=>m.versionId));
+const publicBindings=reviewData.productionModel.publicExportMediaBindings,publicVersionIds=Array.isArray(publicBindings)?new Set(publicBindings.map(b=>b.versionId)):null;
+for(const item of reviewData.productionModel.publicAnimaticMedia||[])selectedFamilyIds.add(item.familyId);
+for(const item of reviewData.productionModel.workItems||[])if(item.scopeRole==='CURRENT'&&selectedFamilyIds.has(item.outputAssetRef))selectedWorkItemIds.add(item.id);
 const assetVersions = (await events('asset-version')).filter((event) => (
-  selectedFamilyIds.has(String(event.familyId || ''))
+  publicVersionIds?publicVersionIds.has(event.versionId):(materialFamilyIds.has(String(event.familyId || '')) || animaticVersionIds.has(event.versionId))
 ));
-const candidateRequestIds = new Set(assetVersions.map((event) => String(event.executionRequestId || '')));
+const candidateRequestIds = new Set(assetVersions.filter(event=>!['DETERMINISTIC_RENDER','DETERMINISTIC_MANIFEST'].includes(event.executorKind)).map((event) => String(event.executionRequestId || '')));
+const materialReviews=(await events('review')).filter(event=>['ASSET','WORK_PRODUCT'].includes(event.subjectType)&&(publicVersionIds?publicVersionIds.has(event.versionId):(materialFamilyIds.has(event.familyId)||animaticVersionIds.has(event.versionId))));
 const candidateExecutionRequests = allExecutionRequests.filter((event) => (
   candidateRequestIds.has(String(event.executionRequestId || ''))
 ));
-const executionRequests = [...currentExecutionRequests, ...candidateExecutionRequests]
+const executionRequests = [...(publicVersionIds?[]:currentExecutionRequests), ...candidateExecutionRequests]
   .filter((event, index, rows) => rows.findIndex((candidate) => candidate.eventId === event.eventId) === index);
 const requestIds = new Set(executionRequests.map((event) => String(event.executionRequestId || '')));
 const runs = (await events('run')).filter((event) => (
@@ -296,7 +301,7 @@ const bundle = {
     'asset-version': assetVersions,
     'creative-revision': [...episodePlanRevisions,...scopedCandidates].sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
     'episode-plan-submission': episodePlanSubmissions,
-    review: [...episodePlanReviews,...scopedReviews].sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
+    review: [...episodePlanReviews,...scopedReviews,...materialReviews].filter((event,index,rows)=>rows.findIndex(row=>row.eventId===event.eventId)===index).sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
     'source-operation': [...episodePlanSourceOperations,...scopedOperations].sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
     'script-comment': storyComments,
   },
@@ -311,6 +316,7 @@ const bundle = {
     storyCommentEvents: storyComments.length,
     scopedCreativeRevisionEvents:scopedCandidates.length,
     scopedReviewEvents:scopedReviews.length,
+    materialReviewEvents:materialReviews.length,
     scopedSourceOperationEvents:scopedOperations.length,
   },
 };

@@ -8,6 +8,13 @@ import path from 'node:path';
 import { canonicalJson, openInstanceRepository, resolveInstance, sha256 } from '../host/instance-runtime/index.mjs';
 import { hostedEventProjection } from './export-hosted-material-events.mjs';
 import { readSpatialSettings } from '../host/instance-runtime/domain-spatial.mjs';
+import {applyAnimaticProjection,reconcileAnimaticLocks} from '../host/instance-runtime/animatic-service.mjs';
+import {applyShotProductionManifestProjection} from '../host/instance-runtime/shot-production-manifest.mjs';
+import {applyShotProductionLocksProjection} from '../host/instance-runtime/shot-production-locks.mjs';
+import {animaticMediaBindings} from '../host/instance-runtime/animatic-model.mjs';
+import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mjs';
+import {episodeSourceCompiler} from '../host/instance-runtime/episode-source-sync.mjs';
+import {fileURLToPath} from 'node:url';
 
 const JSON_FILES = ['review-data-core.generated.json', 'review-data-production-a.generated.json', 'review-data-production-b.generated.json', 'review-recipes.generated.json', 'hosted-material-events.generated.json'];
 const PRODUCTION_A_KEYS = new Set(['schemaVersion','policy','reviewContextCatalog','workflowSteps','continuityGroups','stageDefinitions','episodes','scenes','segments','beats','shots','reviewContexts','structureCards','executionRecipeSummary']);
@@ -18,6 +25,7 @@ function snapshotShards(snapshot) {
   return [core,{snapshotId:snapshot.snapshotId,productionModel:a},{snapshotId:snapshot.snapshotId,productionModel:b}];
 }
 const MEDIA_EXTENSIONS = new Set(['.png','.jpg','.jpeg','.webp','.gif','.avif','.mp3','.wav','.ogg','.m4a','.aac','.mp4','.webm','.mov','.flac']);
+const PROCESS_EXTENSIONS=new Set([...MEDIA_EXTENSIONS,'.json','.txt','.md','.srt','.vtt']);
 const MANIFEST = 'hosted-export-manifest.json';
 const LIMIT = 16 * 1024 * 1024;
 export function publicMaterialDirectory(directory) {
@@ -38,10 +46,10 @@ function relative(value) {
   if (typeof value !== 'string' || path.isAbsolute(value) || /[\\%?#\u0000-\u001f]/.test(value) || value.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('Unsafe hosted export path');
   return value;
 }
-function publicAlias(alias) {
+function publicAlias(alias,{processMedia=false}={}) {
   if (typeof alias !== 'string' || !alias.startsWith('/media/')) throw new Error('Hosted media must use an explicit /media/ alias');
   relative(alias.slice(1));
-  if (alias.split('/').some(part => ['private','trial','review-audio'].includes(part.toLowerCase())) || !MEDIA_EXTENSIONS.has(path.extname(alias).toLowerCase())) throw new Error('Unsupported or private hosted media alias');
+  if (alias.split('/').some(part => ['private','trial','review-audio'].includes(part.toLowerCase())) || !(processMedia?PROCESS_EXTENSIONS:MEDIA_EXTENSIONS).has(path.extname(alias).toLowerCase())) throw new Error('Unsupported or private hosted media alias');
   return alias;
 }
 async function safeFile(root, name) {
@@ -74,6 +82,35 @@ export function selectHostedMedia(rows) {
   return [...outputs.values()].sort((a,b)=>a.url.localeCompare(b.url));
 }
 
+/** Public additions are bound to exact current timeline and registered versions. */
+export function publicAnimaticExport(model,rows){
+ const forbiddenHashes=new Set(rows.filter(forbiddenMedia).map(m=>m.sha256)),selected=new Map(),omitted=[];
+ const resolve=b=>rows.find(m=>m.mediaId===b.familyId&&m.versionId===b.versionId&&m.sha256===b.sha256&&m.availability==='PRESENT'&&!forbiddenMedia(m)&&!forbiddenHashes.has(m.sha256));
+ const timelines=(model.animaticTimelines||[]).filter(t=>{const valid=animaticMediaBindings(t.content).every(resolve);if(!valid)omitted.push({sceneId:t.sceneId,reason:'PRIVATE_OR_UNAVAILABLE_INPUT'});return valid;});
+ const timelineIds=new Set([...timelines.map(t=>t.timelineRevisionId),...(model.animaticLocks||[]).filter(l=>l.scopeRole==='CURRENT'&&l.applicableShotIds?.length).map(l=>l.timelineRevisionId)]);
+ function include(media){const extension=path.extname(media.relativePath).toLowerCase();if(!PROCESS_EXTENSIONS.has(extension))return null;if(media.byteSize>LIMIT)throw Error('过程媒体超过只读导出的16MiB限制；须另建已登记审阅代理');const token=createHash('sha256').update(media.versionId).digest('base64url').slice(0,28),url='/media/animatic/'+token+extension;
+  const item={registrationKind:'ANIMATIC_PROCESS_MEDIA',url,path:'public'+url,sourceRelativePath:media.relativePath,mediaId:media.mediaId,versionId:media.versionId,sha256:media.sha256,bytes:media.byteSize};selected.set(media.versionId,item);return url;}
+ for(const timeline of timelines)for(const binding of animaticMediaBindings(timeline.content))include(resolve(binding));
+ const jobs=(model.animaticRenderJobs||[]).filter(j=>timelineIds.has(j.timelineRevisionId)&&(j.inputBindings||[]).every(resolve)).map(j=>{
+  for(const binding of j.inputBindings||[])include(resolve(binding));
+  const value={jobId:j.jobId,sceneId:j.sceneId,timelineRevisionId:j.timelineRevisionId,timelineHash:j.timelineHash,status:j.status,createdAt:j.createdAt,workItemId:j.workItemId,expectedOutput:j.expectedOutput,inputBindings:j.inputBindings,registrationVerified:false,result:null};
+  if(j.status==='SUCCEEDED'&&j.registrationVerified===true&&j.result){const media=resolve({familyId:j.result.familyId,versionId:j.result.versionId,sha256:j.result.sha256});if(media){const url=include(media);if(url){value.registrationVerified=true;value.result={familyId:j.result.familyId,versionId:j.result.versionId,sha256:j.result.sha256,byteSize:j.result.byteSize,relativePath:j.result.relativePath,registrationEventId:j.result.registrationEventId,mediaUrl:url,frameCount:j.result.frameCount,fps:j.result.fps,width:j.result.width,height:j.result.height};}}}
+  return value;
+ });
+ const manifestJobs=(model.shotProductionManifestJobs||[]).filter(j=>j.status==='SUCCEEDED'&&j.registrationVerified===true&&j.result&&(j.inputBindings||[]).every(resolve)&&resolve({familyId:j.result.familyId,versionId:j.result.versionId,sha256:j.result.sha256})).map(j=>{
+  const media=resolve({familyId:j.result.familyId,versionId:j.result.versionId,sha256:j.result.sha256}),mediaUrl=include(media);for(const binding of j.inputBindings||[])include(resolve(binding));
+  return{jobId:j.jobId,status:j.status,workItemId:j.workItemId,createdAt:j.createdAt,expectedOutput:j.expectedOutput,content:j.content,manifestHash:j.manifestHash,inputBindings:j.inputBindings,registrationVerified:Boolean(mediaUrl),result:{familyId:j.result.familyId,versionId:j.result.versionId,sha256:j.result.sha256,byteSize:j.result.byteSize,relativePath:j.result.relativePath,registrationEventId:j.result.registrationEventId,mediaUrl}};
+ });
+ const currentFamilies=new Set((model.workItems||[]).filter(w=>w.scopeRole==='CURRENT'&&w.activeInCurrentProduction!==false&&w.shotProductionPlanId&&!['SHOT_INPUT_LOCK','LOCKED_SHOT','ANIMATIC'].includes(w.deliverableKey)).map(w=>w.outputAssetRef));
+ for(const version of model.assetVersions||[])if(currentFamilies.has(version.familyId)){const media=resolve({familyId:version.familyId,versionId:version.id,sha256:version.sha256});if(media)include(media);}
+ const validJobs=new Set(jobs.filter(j=>j.registrationVerified).map(j=>j.jobId)),locks=(model.animaticLocks||[]).filter(l=>validJobs.has(l.renderJobId));
+ const publicProof=record=>record.output&&selected.has(record.output.versionId)&&(record.members||[]).every(b=>resolve(b))&&(record.inputBindings||[]).every(row=>(row.inputs||[]).every(resolve));
+ const productionLocks=Object.fromEntries(['shotInputLocks','shotKeyframeSets','shotLocks'].map(key=>[key,(model[key]||[]).filter(publicProof)]));
+ const publicAnimaticMedia=[...selected.values()].map(m=>{const version=(model.assetVersions||[]).find(v=>v.id===m.versionId),family=(model.assetFamilies||[]).find(f=>f.id===m.mediaId);return{familyId:m.mediaId,versionId:m.versionId,sha256:m.sha256,label:family?.label||version?.label||m.versionId,kind:family?.kind||'',path:m.sourceRelativePath,mediaUrl:m.url};});
+ const assetVersions=(model.assetVersions||[]).map(v=>{const media=publicAnimaticMedia.find(m=>m.familyId===v.familyId&&m.versionId===v.id&&m.sha256===v.sha256);return media?{...v,mediaUrl:media.mediaUrl}:v;});
+ return{model:{...model,assetVersions,...productionLocks,shotProductionManifestJobs:manifestJobs,animaticTimelines:timelines,animaticRenderJobs:jobs,animaticLocks:locks,publicAnimaticMedia,publicProductionMedia:publicAnimaticMedia,animaticExportOmissions:omitted},media:[...selected.values()]};
+}
+
 export async function exportHostedInstance(instancePath, output) {
   if (!instancePath || !output) throw new Error('Explicit instance and new output directory are required');
   const location=resolveInstance(instancePath);
@@ -91,10 +128,18 @@ export async function exportHostedInstance(instancePath, output) {
       const release=(await tx.readRelease(view.releaseId));
       if(!release || !view.snapshot || !view.recipes)throw new Error('A published instance release is required');
       view.snapshot=structuredClone(view.snapshot);
+      let animaticModel=await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}}));
+      if(animaticModel.animaticTimelines.length||animaticModel.animaticRenderJobs.length||animaticModel.shotProductionManifestJobs.length||(animaticModel.shotProductionPlans||[]).length){
+        const {api}=loadModernEventRuntime(fileURLToPath(new URL('..',import.meta.url))),state=episodeSourceCompiler(api).stateFor({...view,snapshot:{...view.snapshot,productionModel:animaticModel}});
+        animaticModel={...animaticModel,assetFamilies:animaticModel.assetFamilies.map(f=>({...f,...state.assetFamiliesById[f.id]})),assetVersions:Object.values(state.assetVersionsById),operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById},animaticLocks:reconcileAnimaticLocks(animaticModel,state)};
+        animaticModel=await applyShotProductionLocksProjection(tx,animaticModel,{state,view});
+      }
+      const activeMedia=await activeMediaForExport(tx,await tx.listMedia()),animatic=publicAnimaticExport(animaticModel,activeMedia);view.snapshot.productionModel=animatic.model;
       view.snapshot.productionModel.productionPreparation=await readProductionPreparation(tx);
       view.snapshot.productionModel.materialDirectory=publicMaterialDirectory(await readMaterialDirectory(tx));
       view.snapshot.creativeLineage={...view.snapshot.creativeLineage,spatialSettings:await readSpatialSettings(tx,view)};
-      return {view,release,events:await hostedEventProjection(view),media:selectHostedMedia(await activeMediaForExport(tx,await tx.listMedia()))};
+      const media=[...selectHostedMedia(activeMedia),...animatic.media];view.snapshot.productionModel.publicExportMediaBindings=media.map(m=>({familyId:m.mediaId,versionId:m.versionId,sha256:m.sha256}));
+      return {view,release,events:await hostedEventProjection(view),media};
     });
   const pending=await mkdtemp(path.join(parent,'.hosted-export-pending-'));
   try {
@@ -119,7 +164,7 @@ export async function exportHostedInstance(instancePath, output) {
       runtimeEpoch:frozen.view.runtimeEpoch,repositoryRevision:frozen.view.repositoryRevision,
       releaseSnapshotSha256:frozen.release.snapshotSha256,releaseRecipesSha256:frozen.release.recipesSha256,
       sourceRevisionIds:frozen.view.sourceRevisionIds,profileRevisionId:frozen.release.profileRevisionId,
-      captureMode:location.backend==='postgres'?'SINGLE_POSTGRES_REPEATABLE_READ_TRANSACTION':'SINGLE_SQLITE_READ_TRANSACTION',mediaPolicy:'REGISTERED_IMPORTED_PUBLIC_MEDIA_ONLY',
+      captureMode:location.backend==='postgres'?'SINGLE_POSTGRES_REPEATABLE_READ_TRANSACTION':'SINGLE_SQLITE_READ_TRANSACTION',mediaPolicy:'REGISTERED_PUBLIC_AND_ANIMATIC_MEDIA_ONLY',
       privateAssistantIncluded:false,trialIncluded:false,originalAudioIncluded:false,files,media:frozen.media};
     const manifest={...body,manifestSha256:sha256(canonicalJson(body))};
     await writeFile(path.join(pending,MANIFEST),JSON.stringify(manifest,null,2)+'\n',{flag:'wx',mode:0o600});
@@ -138,13 +183,13 @@ export async function verifyHostedExport(directory) {
   if ((await lstat(directory)).isSymbolicLink()) throw new Error('Hosted export root cannot be a symlink');
   const manifest=JSON.parse(await readFile(await safeFile(root,MANIFEST),'utf8'));
   const {manifestSha256,...body}=manifest;
-  if(body.schemaVersion!=='1.0' || body.kind!=='REVIEW_HOSTED_EXPORT' || !['SINGLE_SQLITE_READ_TRANSACTION','SINGLE_POSTGRES_REPEATABLE_READ_TRANSACTION'].includes(body.captureMode) || body.mediaPolicy!=='REGISTERED_IMPORTED_PUBLIC_MEDIA_ONLY' || body.privateAssistantIncluded!==false || body.trialIncluded!==false || body.originalAudioIncluded!==false || sha256(canonicalJson(body))!==manifestSha256) throw new Error('Invalid hosted export manifest');
+  if(body.schemaVersion!=='1.0' || body.kind!=='REVIEW_HOSTED_EXPORT' || !['SINGLE_SQLITE_READ_TRANSACTION','SINGLE_POSTGRES_REPEATABLE_READ_TRANSACTION'].includes(body.captureMode) || !['REGISTERED_IMPORTED_PUBLIC_MEDIA_ONLY','REGISTERED_PUBLIC_AND_ANIMATIC_MEDIA_ONLY'].includes(body.mediaPolicy) || body.privateAssistantIncluded!==false || body.trialIncluded!==false || body.originalAudioIncluded!==false || sha256(canonicalJson(body))!==manifestSha256) throw new Error('Invalid hosted export manifest');
   if (!Array.isArray(body.files) || JSON.stringify(body.files.map(item=>item.path).sort())!==JSON.stringify([...JSON_FILES].sort()) || !Array.isArray(body.media)) throw new Error('Unexpected hosted export file inventory');
   const expected=new Set([MANIFEST,...body.files.map(item=>item.path)]);
   for(const file of body.files)await verifiedFile(root,file);
   for(const item of body.media) {
-    publicAlias(item.url);
-    if(item.path!=='public'+item.url || item.legacySourcePath!=='review-site/public'+item.url || !relative(item.sourceRelativePath).startsWith('media/') || !item.mediaId || !item.versionId || item.bytes>LIMIT || expected.has(item.path)) throw new Error('Invalid hosted media index');
+    publicAlias(item.url,{processMedia:item.registrationKind==='ANIMATIC_PROCESS_MEDIA'});
+    if(item.path!=='public'+item.url || (item.registrationKind==='ANIMATIC_PROCESS_MEDIA'?!item.url.startsWith('/media/animatic/'):item.legacySourcePath!=='review-site/public'+item.url) || !relative(item.sourceRelativePath).startsWith('media/') || !item.mediaId || !item.versionId || item.bytes>LIMIT || expected.has(item.path)) throw new Error('Invalid hosted media index');
     expected.add(item.path);await verifiedFile(root,item);
   }
   async function walk(relativeRoot='') {

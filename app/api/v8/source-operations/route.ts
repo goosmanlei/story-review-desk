@@ -1,3 +1,4 @@
+import {isRequirementDrivenPlanningVersion} from '../../../../host/instance-runtime/shot-design-contract.mjs';
 import { createHash } from 'node:crypto';
 import { constants, existsSync } from 'node:fs';
 import { lstat, open, readFile, readlink, realpath } from 'node:fs/promises';
@@ -317,7 +318,7 @@ function assertCurrentSourceReviewBinding(
       sceneId,
       revision.basisBindings,
     );
-    if (stableObjectHash(revision.planningContractVersion === '2.0' ? revision.materialRequirementSet : revision.adoptedMaterialSet) !== stableObjectHash(adoptedMaterialSet)) {
+    if (stableObjectHash(isRequirementDrivenPlanningVersion(revision.planningContractVersion) ? revision.materialRequirementSet : revision.adoptedMaterialSet) !== stableObjectHash(adoptedMaterialSet)) {
       throw new HttpError(409, 'the approved ShotPlanSet no longer binds the current adopted material versions');
     }
     if (['DEPLOYED', 'SUCCEEDED'].includes(state)) {

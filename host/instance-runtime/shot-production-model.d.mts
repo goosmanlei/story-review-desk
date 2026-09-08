@@ -1,0 +1,12 @@
+export const SHOT_PRODUCTION_VERSION: string;
+export function productionHash(value: unknown): string;
+export function productionId(value: unknown,label?:string): string;
+export function exactProductionMedia(value: unknown): {familyId:string;versionId:string;sha256:string};
+export function resolveShotProductionScope(model:any,sceneId:string): {sceneId:string;episodeUid:string;plan:any;shots:any[];episodeRelease:any;scopeLock:any};
+export function defaultShotProductionPlan(scope:any): any;
+export function validateShotProductionPlan(content:any,scope:any): any;
+export function productionOutputIdentity(planId:string,scopeId:string,deliverableKey:string,slot?:string): {workItemId:string;familyId:string;expectedOutputId:string;slot:string};
+export function compileShotProductionPlan(scope:any,content:any,identity:{id:string;revisionId:string;sourceRef:string}): any;
+export function productionBindingReasons(model:any,state:any,binding:any,options?:{requireAdopted?:boolean}): string[];
+export function shotProductionReadiness(model:any,state:any,sceneId:string): any;
+export function shotProductionEntryGates(model:any,state:any): Record<string,string[]>;

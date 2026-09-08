@@ -25,7 +25,7 @@ export function useWorkflowProjection(){
 }
 
 export function workflowItemStage(item:ActionItem):string|null{
- // Only an exact gate determines creator stage; PREVIS spans two stages.
+ // Only an exact gate determines creator stage; canonical phases remain audit identities.
  if(item.ownerModule==='FULL_PRODUCTION')return creatorProductionStageForGate(item.productionGateId);
  if(item.ownerModule==='STORY_CREATION')return ({EPISODE_PLANNING:'EPISODE_PLAN',STORY_CONFIRMATION:'STORY_CONFIRMATION',SCENE_COVERAGE:'SCENE_COVERAGE'} as Record<string,string>)[item.workstream]||null;
  // Action type is not a material lifecycle. Unbound actions stay explicitly at chain level.
@@ -36,7 +36,7 @@ export function buildWorkflowStages(domain:WorkspaceDomainSummary,workflow:Workf
   const node=workflow.nodes.find(n=>n.id===stage.id);
   const storyHref=stage.id==='EPISODE_PLAN'?'?view=story&storyMode=logic':stage.id==='STORY_CONFIRMATION'?'?view=story&storyMode=logic':stage.id==='SCENE_COVERAGE'?'?view=story&storyMode=audit':null;
   const materialHref = domain.id === 'WORLD_AND_MATERIALS' ? '?view=materials&materialMode=classification&materialCreatorStage='+encodeURIComponent(stage.id) : null;
-  return {...stage,href:node?.href||storyHref||materialHref||domain.navigationIntent.href,detail:node?.detail||domain.nextUnlockText,items:items.filter(item=>item.ownerModule===domain.id&&workflowItemStage(item)===stage.id),preparation:domain.id==='FULL_PRODUCTION'&&stage.id==='SHOT_BREAKDOWN'?workflow.preparationWork:null};
+  return {...stage,href:node?.href||storyHref||materialHref||domain.navigationIntent.href,detail:node?.detail||domain.nextUnlockText,items:items.filter(item=>item.ownerModule===domain.id&&workflowItemStage(item)===stage.id),preparation:domain.id==='FULL_PRODUCTION'&&stage.id==='SHOT_PRODUCTION'?workflow.preparationWork:null};
  });
 }
 export function workflowCount(stage:WorkspaceStageSummary){return stage.denominatorState==='KNOWN'&&stage.denominator!=null?`${stage.count??'未知'} / ${stage.denominator}`:stage.count==null?'正式范围未锁定':`${stage.count} · 正式分母未锁定`;}

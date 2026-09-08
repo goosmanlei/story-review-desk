@@ -5,6 +5,7 @@ export {
   creatorProductionStageForGate,
   creatorProductionStageDefinition,
   creatorProductionScopeForGate,
+  resolveCreatorProductionStage,
 } from '../host/instance-runtime/creator-production-workflow.mjs';
 export type {
   CreatorProductionStageId,

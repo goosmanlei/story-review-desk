@@ -432,7 +432,7 @@ export function SystemConfigurationWorkspace() {
           {group === "workflow" && (
             <>
               <p>按制作对象设置检查要求。输入锁定、独立审阅与权利限制持续有效；分组不改变已冻结对象的标准。</p>
-              <nav className="configuration-tabs" aria-label="流程配置四阶段">
+              <nav className="configuration-tabs" aria-label="流程配置制作模块">
                 {CREATOR_PRODUCTION_STAGES.map(stage => (
                   <button type="button" key={stage.id}
                     aria-pressed={creatorStage?.id === stage.id}

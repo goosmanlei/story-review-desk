@@ -324,7 +324,7 @@ async function assembleCatalog(data: ReviewData, operations: Operations, recipes
     creatorStages: CREATOR_PRODUCTION_STAGES,
     phases: (model.productionPhases || []).map((entry) => pick(entry, ['id', 'label', 'purpose', 'denominatorState', 'denominator', 'discoveredCount', 'currentObjectCount', 'releasedObjectCount', 'flowBlockReasons'])),
     gates: (model.productionGates || []).map((entry) => pick(entry, ['id', 'phaseId', 'label', 'purpose', 'scopeType', 'denominatorState', 'denominator', 'discoveredCount'])),
-    boundary: '四阶段是创作导航，phases/gates 是独立的冻结检查契约。全剧导出检查保留 PROJECT 范围。仅对应 ScopeLock 成立时分母为 KNOWN；镜、场、集、项目数量不得相加。',
+    boundary: '三个制作模块和镜头制作六步骤是创作导航，phases/gates 是独立的冻结检查契约。全剧导出检查保留 PROJECT 范围。仅对应 ScopeLock 成立时分母为 KNOWN；镜、场、集、项目数量不得相加。',
   }, link({ view: 'pipeline' }), currentWorkItems.map((entry) => `work:${str(entry.id)}`)));
   const queue = await buildActionQueue();
   if (queue.snapshotId !== data.snapshotId || queue.operationRevision !== operations.operationRevision) throw new HttpError(409, '当前工作状态正在变化，请重新读取上下文');

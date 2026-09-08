@@ -1,16 +1,17 @@
-import {SCOPED_PLANNING_CRITERIA,SHOT_DESIGN_CRITERIA_V2,type ScopedPlanningKind} from '../../../scoped-planning-review';
+import {planningReviewVersion} from '../../../../host/instance-runtime/shot-design-contract.mjs';
+import {SCOPED_PLANNING_CRITERIA,SHOT_DESIGN_CRITERIA_V2,SHOT_DESIGN_CRITERIA_V3,type ScopedPlanningKind} from '../../../scoped-planning-review';
 import {HttpError,stableObjectHash,type EventRecord} from '../_store';
 
 export function scopedPlanningReviewSpec(kind:ScopedPlanningKind, version = '1.0') {
-  if (!['1.0','2.0'].includes(version) || version === '2.0' && kind !== 'SHOT_PLAN_SET') throw new HttpError(422,'不支持的场级规划审阅标准版本');
-  const criteria = version === '2.0' ? SHOT_DESIGN_CRITERIA_V2 : SCOPED_PLANNING_CRITERIA[kind];
+  if (!['1.0','2.0','3.0'].includes(version) || version !== '1.0' && kind !== 'SHOT_PLAN_SET') throw new HttpError(422,'不支持的场级规划审阅标准版本');
+  const criteria = version === '3.0' ? SHOT_DESIGN_CRITERIA_V3 : version === '2.0' ? SHOT_DESIGN_CRITERIA_V2 : SCOPED_PLANNING_CRITERIA[kind];
   const value={schemaVersion:version,subjectKind:kind,criteria:criteria.map(([id,label,question])=>({id:`${kind.toLowerCase()}:${id}`,label,question}))};
   return {...value,hash:stableObjectHash(value)};
 }
 export function assertScopedPlanningFindings(candidate:EventRecord,findings:unknown,reviewSpecHash:unknown) {
   if(!candidate.scopedReviewSpec)return;
   const spec=candidate.scopedReviewSpec as ReturnType<typeof scopedPlanningReviewSpec>;
-  const expectedVersion = candidate.planningContractVersion === '2.0' ? '2.0' : '1.0';
+  const expectedVersion = planningReviewVersion(candidate.planningContractVersion);
   if (stableObjectHash(spec) !== stableObjectHash(scopedPlanningReviewSpec(candidate.subjectKind as ScopedPlanningKind,expectedVersion))) throw new HttpError(409,'审阅标准必须匹配此候选冻结的设计契约');
   if(stableObjectHash({...spec,hash:undefined})!==spec.hash||reviewSpecHash!==spec.hash||!Array.isArray(findings)||findings.length!==spec.criteria.length)throw new HttpError(409,'本场审阅标准或判断项不完整');
   const ids=new Set<string>();for(const finding of findings){

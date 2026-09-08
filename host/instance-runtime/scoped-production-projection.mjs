@@ -1,3 +1,4 @@
+import {isRequirementDrivenPlanningVersion} from './shot-design-contract.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 const fail=message=>{throw Object.assign(new Error(message),{code:'SCOPED_SOURCE_CONFLICT'});};
@@ -24,7 +25,7 @@ export function assertScopedShotProjections(model){
     if(plan.scopeRole==='CURRENT'&&domainHash(actual.map(s=>s.id).sort())!==domainHash(plan.content.shots.map(s=>s.shotId).sort()))fail('当前镜头计划与运行镜头集合不一致');
     for(const shot of actual){
       const spec=plan.content.shots.find(s=>s.shotId===shot.id);if(!spec)fail('运行镜头不属于其精确计划');
-      if(plan.planningContractVersion==='2.0'&&(shot.planningContractVersion!=='2.0'||shot.adoptionScope!=='SHOT_DESIGN_ONLY'||shot.canGenerate!==false||shot.canFlowDownstream!==false||shot.inputBindings?.length!==0))fail('镜头设计采用不可冒充实际输入锁或生成就绪');
+      if(isRequirementDrivenPlanningVersion(plan.planningContractVersion)&&(shot.planningContractVersion!==plan.planningContractVersion||shot.adoptionScope!=='SHOT_DESIGN_ONLY'||shot.canGenerate!==false||shot.canFlowDownstream!==false||shot.inputBindings?.length!==0))fail('镜头设计采用不可冒充实际输入锁或生成就绪');
       const fields=Object.keys(spec).filter(k=>k!=='inputBindings'),pick=x=>Object.fromEntries(fields.map(k=>[k,x[k]]));
       if(domainHash(pick(shot))!==domainHash(pick(spec))||domainHash(shot.planningBasisBindings)!==domainHash(spec.inputBindings)||shot.shotPlanSetRevisionHash!==plan.contentHash||shot.episodeUid!==plan.episodeUid)fail('运行镜头表达与已审精确 ShotSpec 不一致');
     }

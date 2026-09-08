@@ -41,6 +41,32 @@ services:
       retries: 5
       start_period: 20s
     restart: unless-stopped
+  shot-production-worker:
+    build:
+      context: .
+      args:
+        REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+    command: ["node", "scripts/instance-shot-production-worker.mjs", "--instance", "/instance"]
+    user: "${REVIEW_UID:-1000}:${REVIEW_GID:-1000}"
+    environment:
+      REVIEW_INSTANCE_ROOT: /instance
+      REVIEW_SQLITE_OWNER: CONTAINER
+      REVIEW_SOFTWARE_COMMIT: ${REVIEW_SOFTWARE_COMMIT:-UNVERSIONED}
+      REVIEW_PROJECT_ID: ${REVIEW_PROJECT_ID:?Instance project identity is required}
+    volumes:
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/instance.json:/instance/instance.json:ro
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/data:/instance/data:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/media:/instance/media:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/scratch:/instance/scratch:rw
+      - ${REVIEW_INSTANCE_ROOT:?Instance root is required}/runtime/locks:/instance/runtime/locks:rw
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=128m
+      - /instance/runtime:rw,noexec,nosuid,nodev,size=16m
+    restart: unless-stopped
   comment-polish-worker:
     profiles: [assistant-ai]
     build:

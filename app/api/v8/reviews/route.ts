@@ -845,6 +845,11 @@ export async function POST(request: Request) {
       };
     }
 
+    if(subjectType==='WORK_PRODUCT'&&body.shotProductionEvidence!=null){
+      const {validateShotProductionEvidence}=await import('../../../../host/instance-runtime/shot-production-locks.mjs');
+      try{const evidence=validateShotProductionEvidence(body.shotProductionEvidence);semanticRequest.shotProductionEvidence=evidence;eventPayload.shotProductionEvidence=evidence;}
+      catch(reason){throw new HttpError(422,reason instanceof Error?reason.message:'制作审阅证据无效');}
+    }
     const appendPayload: Record<string, unknown> = { ...eventPayload, rawRequestHash };
     const { event, replayed, operations } = await appendEvent(
       'review',

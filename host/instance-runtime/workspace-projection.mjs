@@ -6,7 +6,7 @@ export const WORKSPACE_MODULES = Object.freeze([
  {id:'STORY_CREATION',label:'故事创作',href:'?view=story&storyMode=source',responsibility:'来源资料、故事结构、分集候选与正文评论；审阅输入、正式裁决和受控源同步分别留痕。'},
  {id:'STORY_SETTINGS',label:'故事设定',href:'?view=settings',responsibility:'主体档案、空间与关系共用永久身份。Codex按明确选择的当前资料抽取建议，经保存、预览和确认维护设定。'},
  {id:'WORLD_AND_MATERIALS',label:'素材管理',href:'?view=materials&materialMode=classification',responsibility:'按实体、集和场组织素材需求、生产资料、实际版本与正式审阅；关联不代表放行。'},
- {id:'FULL_PRODUCTION',label:'全剧制作',href:'?view=pipeline',responsibility:'镜头拆解、镜头生成、场景剪辑、分集成片；设计采用、精确输入锁定和实际生成分别判断。'},
+ {id:'FULL_PRODUCTION',label:'全剧制作',href:'?view=pipeline',responsibility:'镜头制作、场景剪辑、分集成片；设计采用、精确输入锁定和实际生成分别判断。'},
 ].map(Object.freeze));
 const rows=value=>Array.isArray(value)?value:[];
 const unique=(value,key='id')=>Array.isArray(value)?new Set(value.map(row=>row?.[key]).filter(value=>typeof value==='string'&&value)).size:null;
@@ -55,7 +55,7 @@ export function projectStoryProgress(resolvedPlan,releasesByUid,resolutionError=
   episodeCount:episodes.length,sceneCount:sceneIds.length,releasedEpisodeCount,releasedSceneCount,releaseIds:released.map(release=>release.id),
   headline:`${sourceLabel} ${episodes.length} 集 / ${sceneIds.length} 场；${releaseLabel}。候选规模不等于全剧采用或正式制作分母。`,
   nextAction:releasedEpisodeCount===null?'先核对逐集发布证据，再继续正文审阅。':releasedEpisodeCount<episodes.length
-   ?'继续未放行集的正文阅读、六项判断与本集确认；已同步集可独立准备镜头拆解，无需等待全剧。'
+   ?'继续未放行集的正文阅读、六项判断与本集确认；已同步集可独立准备镜头制作，无需等待全剧。'
    :'逐集放行不代替全剧方案采用或 PROJECT 出口核验；按本集精确输入继续制作准备。'};
 }
 

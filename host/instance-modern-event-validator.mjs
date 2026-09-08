@@ -1,3 +1,4 @@
+import {planningReviewVersion} from './instance-runtime/shot-design-contract.mjs';
 // Pure validation of a frozen event set. No repository, network or mutation API is invoked.
 // Invoke in an isolated Node process: TypeScript loading must not alter a web process.
 import fs from 'node:fs';
@@ -51,6 +52,8 @@ export function loadModernEventRuntime(softwareRoot) {
       ...require(path.join(root,'app/story-comment-model.ts')),
       ...require(path.join(root,'app/instance-profile.ts')),
       ...require(path.join(root,'app/api/v8/_store.ts')),
+      ...require(path.join(root,'app/api/v8/_workflow.ts')),
+      configuredGates:require(path.join(root,'app/gate-evaluation.ts')).configuredGates,
     };
     requireThat(loaded.size > 0,'a fresh isolated process is required; runtime module cache was already populated');
     return {api,codeBindings:[...loaded].sort(([a],[b])=>a.localeCompare(b)).map(([alias,sha256])=>({alias,sha256})),typescriptVersion:ts.version};
@@ -137,10 +140,10 @@ export function validateModernEventClosure({events,snapshot,binding},runtime) {
     if(event.eventKind==='creative-revision'&&event.scopedReviewSpec){
       requireThat(['SCENE_COVERAGE','SHOT_PLAN_SET'].includes(event.subjectKind)&&event.scopeType==='SCENE'&&event.scopeId===event.content?.sceneId,'scoped candidate scope differs');
       requireThat(event.schemaVersion==='2.0'&&event.revisionState==='CANDIDATE'&&event.adoptionPerformed===false&&digest(event.content)===event.contentHash&&digest(event.basisBindings)===event.basisBindingsHash,'scoped candidate content/basis differs');
-      requireThat(equal(event.scopedReviewSpec,api.scopedPlanningReviewSpec(event.subjectKind,event.planningContractVersion==='2.0'?'2.0':'1.0')),'scoped planning standard differs');
-      requireThat(event.creativeRevisionId===event.revisionId&&event.contextHash===api.stableObjectHash({subjectKind:event.subjectKind,subjectId:event.subjectId,baseRevisionHash:event.baseRevisionHash,basisBindingsHash:event.basisBindingsHash}),'scoped candidate identity/context differs');
+      requireThat(equal(event.scopedReviewSpec,api.scopedPlanningReviewSpec(event.subjectKind,planningReviewVersion(event.planningContractVersion))),'scoped planning standard differs');
+      requireThat(event.creativeRevisionId===event.revisionId&&event.contextHash===api.stableObjectHash({subjectKind:event.subjectKind,subjectId:event.subjectId,baseRevisionHash:event.baseRevisionHash,basisBindingsHash:event.basisBindingsHash,...(event.planningContractVersion==='3.0'?{planningContractVersion:'3.0'}:{})}),'scoped candidate identity/context differs');
       const view=scopedViewBefore(event);
-      const canonicalContent=api.canonicalSceneScopedContent(view.snapshot,event.subjectKind,event.subjectId,event.content,event.basisBindings);
+      const canonicalContent=api.canonicalSceneScopedContent(view.snapshot,event.subjectKind,event.subjectId,event.content,event.basisBindings,event.planningContractVersion);
       requireThat(equal(canonicalContent,event.content),'scoped candidate content is not canonical');
       api.assertCreativeRevisionBasisCurrent(view.snapshot,episodeSourceCompiler(api).stateFor(view),event,{requireCurrentPredecessor:true});
       recordIds.add(event.eventId);relationIds.add(event.eventId);continue;

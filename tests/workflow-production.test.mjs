@@ -23,8 +23,8 @@ const wf=load('workflow-overview.tsx').exports;
 test('preparation capability filters do not promote AI assistance into independent advancement',()=>{const check=load('current-work-center.tsx').exports.preparationMatchesFilters;const prep={status:'READY',capabilities:['人可推进','AI可辅助']};const filter={actor:'HUMAN',state:'NOW',type:'ALL'};assert.equal(check(prep,filter),true);assert.equal(check(prep,{...filter,actor:'AI'}),false);assert.equal(check(prep,{...filter,actor:'BOTH'}),false);assert.equal(check({...prep,status:'BLOCKED'},filter),false);});
 test('stage identity follows canonical workflow fields; names never infer material lifecycle',()=>{
  assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'SCENE_FINISH'}),null);
- assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'PREVIS',productionGateId:'SHOT_PLAN_INPUT_LOCK'}),'SHOT_BREAKDOWN');
- assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'PREVIS',productionGateId:'STORYBOARD_DIALOGUE'}),'SHOT_GENERATION');
+ assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'PREVIS',productionGateId:'SHOT_PLAN_INPUT_LOCK'}),'SHOT_PRODUCTION');
+ assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'PREVIS',productionGateId:'STORYBOARD_DIALOGUE'}),'SHOT_PRODUCTION');
  assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'SCENE_FINISH',productionGateId:'SCENE_QA'}),'SCENE_EDIT');
  assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionPhaseId:'SERIES_DELIVERY',productionGateId:'DELIVERY_ARCHIVE'}),'EPISODE_EDIT');
  assert.equal(wf.workflowItemStage({ownerModule:'FULL_PRODUCTION',productionGateId:'UNKNOWN',title:'镜头生成'}),null);
@@ -33,7 +33,7 @@ test('stage identity follows canonical workflow fields; names never infer materi
  assert.equal(wf.workflowItemStage({ownerModule:'WORLD_AND_MATERIALS',materialCreatorStage:'PENDING_REVIEW'}),'PENDING_REVIEW');
 });
 test('candidate preparation never supplies a formal denominator or formal task',()=>{
- const result=wf.buildWorkflowStages({id:'FULL_PRODUCTION',stages:[{id:'SHOT_BREAKDOWN',label:'配置标签',count:0,denominator:null,denominatorState:'UNKNOWN'}],navigationIntent:{href:'formal'},nextUnlockText:'next'},{nodes:[],preparationWork:{sceneCount:142,status:'READY'}},[]);
+ const result=wf.buildWorkflowStages({id:'FULL_PRODUCTION',stages:[{id:'SHOT_PRODUCTION',label:'配置标签',count:0,denominator:null,denominatorState:'UNKNOWN'}],navigationIntent:{href:'formal'},nextUnlockText:'next'},{nodes:[],preparationWork:{sceneCount:142,status:'READY'}},[]);
  assert.equal(result[0].preparation.sceneCount,142);assert.equal(result[0].denominator,null);assert.equal(result[0].items.length,0);assert.equal(result[0].label,'配置标签');assert.match(wf.workflowCount(result[0]),/正式分母未锁定/);
 });
 test('material stage selection filters exact demand stages and retains the same directory filter in its link',()=>{
@@ -51,8 +51,8 @@ test('creator task filtering preserves canonical gate scope while phase-only tas
  ];
  const stages=creatorWorkflow.CREATOR_PRODUCTION_STAGES.map(s=>({id:s.id,label:s.label,count:0,denominator:null,denominatorState:'UNKNOWN'}));
  const result=wf.buildWorkflowStages({id:'FULL_PRODUCTION',stages,navigationIntent:{href:'formal'},nextUnlockText:'next'},{nodes:[],preparationWork:{sceneCount:142,status:'READY'}},items);
- assert.deepEqual(Array.from(result,s=>Array.from(s.items,i=>i.subjectId)),[['plan'],['shot'],[],['whole-project']]);
- assert.equal(result.filter(s=>s.preparation).length,1);assert.equal(result[0].id,'SHOT_BREAKDOWN');
+ assert.deepEqual(Array.from(result,s=>Array.from(s.items,i=>i.subjectId)),[['plan','shot'],[],['whole-project']]);
+ assert.equal(result.filter(s=>s.preparation).length,1);assert.equal(result[0].id,'SHOT_PRODUCTION');
  assert.equal(wf.workflowItemStage(items[3]),null);
 });
 const workspacePacket=marker=>({queue:{marker,snapshotId:'snapshot',operationRevision:'ops'},workflow:{marker,freshness:{snapshotId:'snapshot',operationRevision:'ops'}}});
@@ -84,17 +84,17 @@ const workflow={phases:[...new Set(contractGates.map(g=>g.phaseId))].map(id=>({i
 test('creator checks preserve shared dependency order despite interleaved phase-local input orders',async()=>{
  const interleaved=['KEYFRAMES','STORYBOARD_DIALOGUE','SHOT_VIDEO','ANIMATIC_LOCK','SHOT_LOCK'];
  const reordered={...workflow,gates:[...interleaved.map(id=>workflow.gates.find(g=>g.id===id)),...workflow.gates.filter(g=>!interleaved.includes(g.id))]};
- const frozen=JSON.stringify(reordered),h=load('production-preparation-workspace.tsx'),seen=[],props={workflow:reordered,initialCreatorStageId:'SHOT_GENERATION',renderStage:ctx=>{seen.push(ctx);return null;}};
+ const frozen=JSON.stringify(reordered),h=load('production-preparation-workspace.tsx'),seen=[],props={workflow:reordered,initialCreatorStageId:'shot-generation',renderStage:ctx=>{seen.push(ctx);return null;}};
  h.render('ProductionPreparationWorkspace',props);h.requests[0].resolve(new Response(JSON.stringify(prep())));await settle();
  const tree=h.render('ProductionPreparationWorkspace',props),buttons=all(tree).filter(n=>n.props?.['data-production-check']);
- assert.deepEqual(buttons.map(n=>n.props['data-production-check']),['STORYBOARD_DIALOGUE','ANIMATIC_LOCK','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK']);
+ assert.deepEqual(buttons.map(n=>n.props['data-production-check']),['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE','ANIMATIC_LOCK','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK']);
  for(const button of buttons){button.props.onClick();h.render('ProductionPreparationWorkspace',props);const expected=creatorWorkflow.creatorProductionGateDefinition(button.props['data-production-check']);assert.equal(seen.at(-1).gateId,expected.gateId);assert.equal(seen.at(-1).phaseId,expected.phaseId);assert.equal(seen.at(-1).scopeType,expected.scopeType);assert.equal(seen.at(-1).sceneId,'permanent-1');}
  assert.equal(JSON.stringify(reordered),frozen);assert.equal(h.writes.length,0);h.cleanup();
 });
 test('one permanent scene context survives stage change and no mutation is created',async()=>{
  const h=load('production-preparation-workspace.tsx'),seen=[],props={workflow,renderStage:ctx=>{seen.push(ctx);return null;}};h.render('ProductionPreparationWorkspace',props);h.requests[0].resolve(new Response(JSON.stringify(prep())));await settle();let tree=h.render('ProductionPreparationWorkspace',props);
  all(tree).find(n=>n.type==='button'&&n.props['data-preparation-episode']==='episode-2').props.onClick();tree=h.render('ProductionPreparationWorkspace',props);
- all(tree).find(n=>n.type==='button'&&n.props['data-creator-stage']==='SHOT_GENERATION').props.onClick();h.render('ProductionPreparationWorkspace',props);
+ all(tree).find(n=>n.type==='button'&&n.props['data-production-check']==='STORYBOARD_DIALOGUE').props.onClick();h.render('ProductionPreparationWorkspace',props);
  assert.equal(seen.at(-1).sceneId,'permanent-2');assert.equal(seen.at(-1).episodeUid,'episode-2');assert.equal(seen.at(-1).phaseId,'PREVIS');assert.equal(seen.at(-1).gateId,'STORYBOARD_DIALOGUE');assert.equal(seen.at(-1).scopeType,'SHOT');assert.equal(seen.at(-1).navigationScopeType,'SCENE');assert.equal(h.writes.length,0);h.cleanup();
 });
 test('dirty preparation preserves the old exact revision when background candidate changes',async()=>{
@@ -133,7 +133,7 @@ for(const [gateId,scopeType,navigationScopeType] of [['EPISODE_ASSEMBLY','EPISOD
  assert.equal(seen.at(-1).episodeUid,'episode-2');assert.equal(seen.at(-1).scopeType,scopeType);assert.equal(seen.at(-1).navigationScopeType,navigationScopeType);assert.equal(Object.hasOwn(seen.at(-1),'sceneId'),false);assert.equal(all(tree).filter(n=>n.props?.['aria-label']==='制作上下文场次').length,0);assert.equal(h.context.window.location.searchParams.has('preparationScene'),false);assert.equal(h.context.window.location.searchParams.has('scene'),false);assert.equal(h.writes.length,0);h.cleanup();
 });
 test('canonical gate and creator stage mismatch does not render or allow preparation saves',async()=>{
- const h=load('production-preparation-workspace.tsx'),seen=[],props={workflow,initialCreatorStageId:'SHOT_BREAKDOWN',initialGateId:'KEYFRAMES',renderStage:c=>{seen.push(c);return null;}};
+ const h=load('production-preparation-workspace.tsx'),seen=[],props={workflow,initialCreatorStageId:'SCENE_EDIT',initialGateId:'KEYFRAMES',renderStage:c=>{seen.push(c);return null;}};
  h.render('ProductionPreparationWorkspace',props);h.requests[0].resolve(new Response(JSON.stringify(prep())));await settle();const tree=h.render('ProductionPreparationWorkspace',props);
  assert.equal(seen.length,0);assert.ok(all(tree).some(n=>n.props?.role==='alert'&&text(n).includes('制作阶段与检查不匹配')));assert.equal(all(tree).filter(n=>n.type==='button'&&text(n)==='编辑本场准备内容').length,0);assert.equal(h.writes.length,0);h.cleanup();
 });

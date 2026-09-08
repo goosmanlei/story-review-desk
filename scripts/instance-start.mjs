@@ -60,7 +60,7 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
   }
   const aiEnabled = Boolean(key);
   const env = { ...process.env, ...instanceEnvironment(runtime, { port: values.port, aiEnabled }), OPENAI_API_KEY: '', [keyEnvironment]:'', REVIEW_OPENAI_API_KEY_FILE: '/dev/null' };
-  const services = aiEnabled ? ['review-site', 'comment-polish-worker', 'material-review-worker'] : ['review-site'];
+  const services = aiEnabled ? ['review-site', 'shot-production-worker', 'comment-polish-worker', 'material-review-worker'] : ['review-site', 'shot-production-worker'];
   const baseArgs = ['compose', '--project-name', runtime.composeProject, '--file', path.join(applicationRoot, 'compose.yaml')];
   if (aiEnabled) baseArgs.push('--profile', 'assistant-ai');
   if (values.check) {
@@ -76,7 +76,7 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
   const secretDirectory = await mkdtemp(path.join(runtime.root, 'runtime', '.compose-secret-'));
   await chmod(secretDirectory, 0o700);
   try {
-    if(isPostgres){const pg=await ensurePostgres(runtime.root);const envPatch={REVIEW_DATABASE_BACKEND:'postgres',REVIEW_POSTGRES_HOST:'postgres',REVIEW_POSTGRES_PASSWORD_FILE:'/run/secrets/postgres-password'};const service={environment:envPatch,networks:['default','story-database'],volumes:[{type:'bind',source:path.join(runtime.root,'runtime/private/postgres-password'),target:'/run/secrets/postgres-password',read_only:true}]};const override=path.join(secretDirectory,'postgres.override.json');await writeFile(override,JSON.stringify({services:{'review-site':service,'comment-polish-worker':service,'material-review-worker':service},networks:{'story-database':{external:true,name:pg.network}}}),{flag:'wx',mode:0o600});baseArgs.push('--file',override);}
+    if(isPostgres){const pg=await ensurePostgres(runtime.root);const envPatch={REVIEW_DATABASE_BACKEND:'postgres',REVIEW_POSTGRES_HOST:'postgres',REVIEW_POSTGRES_PASSWORD_FILE:'/run/secrets/postgres-password'};const service={environment:envPatch,networks:['default','story-database'],volumes:[{type:'bind',source:path.join(runtime.root,'runtime/private/postgres-password'),target:'/run/secrets/postgres-password',read_only:true}]};const override=path.join(secretDirectory,'postgres.override.json');await writeFile(override,JSON.stringify({services:{'review-site':service,'shot-production-worker':service,'comment-polish-worker':service,'material-review-worker':service},networks:{'story-database':{external:true,name:pg.network}}}),{flag:'wx',mode:0o600});baseArgs.push('--file',override);}
     if (key) {
       // Local credentials are outside the business repository and excluded from backups.
       // A stable private mount also allows Docker's restart policy to work.

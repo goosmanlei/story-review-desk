@@ -34,7 +34,7 @@ export async function GET(request:Request) {
         try {const actual=deriveCurrentAdoptedMaterialSet(data,ops.stateProjection,sceneId);materialReadiness={adoptedMaterialSet:actual,materialsReady:true,canGenerate:false,reasons:['SHOT_EXACT_INPUT_LOCK_REQUIRED']};}
         catch(error){materialReadiness={materialsReady:false,canGenerate:false,reasons:[error instanceof Error?error.message:'MATERIAL_INPUT_UNKNOWN','SHOT_EXACT_INPUT_LOCK_REQUIRED']};}
       }
-      return {kind,template,candidate,review,state,canAuthor:!blockedReason,blockedReason,basisBindings:basis,...(kind==='SHOT_PLAN_SET'?{planningContractVersion:'2.0',adoptionScope:'SHOT_DESIGN_ONLY',canGenerate:false,materialReadiness}: {})};
+      return {kind,template,candidate,review,state,canAuthor:!blockedReason,blockedReason,basisBindings:basis,...(kind==='SHOT_PLAN_SET'?{planningContractVersion:'3.0',adoptionScope:'SHOT_DESIGN_ONLY',canGenerate:false,materialReadiness}: {})};
     });
     return jsonResponse({snapshotId:data.snapshotId,episode:{episodeUid,displayId:episode.displayId,title:episode.title},sceneId,release:release?{id:release.id,state:release.state,canFlowDownstream:release.canFlowDownstream,reason:release.reason,reviewEventId:release.reviewEventId,episodeScriptReleaseSnapshot:release.episodeScriptReleaseSnapshot}:null,plans,wholePlanAdopted:false,formalShotCount:plans[1].state?.canFlowDownstream?(data.productionModel.shotPlanSetRevisions?.find(r=>r.scopeId===sceneId&&r.scopeRole==='CURRENT')?.denominator??null):null});
   }catch(error){return errorResponse(error,'本集制作入口不可用');}

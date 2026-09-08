@@ -80,7 +80,7 @@ test('legacy SQLite fixture new-story CLI creates a blank identity, imports read
   assert.equal(imported.formalAdoptionPerformed, false);
   assert.equal(run('instance-document.mjs', ['read', '--instance', root, '--alias', 'story/source-notes.md']), '# 来源\n\n独立的新故事资料。\n');
   const startup = JSON.parse(run('instance-start.mjs', ['--instance', root, '--offline', '--port', '4199', '--check']));
-  assert.equal(startup.mode, 'PLAN_ONLY'); assert.equal(startup.instanceId, created.instanceId); assert.equal(startup.parentProjectRequired, false); assert.deepEqual(startup.services, ['review-site']);
+  assert.equal(startup.mode, 'PLAN_ONLY'); assert.equal(startup.instanceId, created.instanceId); assert.equal(startup.parentProjectRequired, false); assert.deepEqual(startup.services, ['review-site','shot-production-worker']);
   const repo = (await openInstanceRepository({ ...resolveInstance(root), readOnly: true })); const view = (await repo.readView());
   assert.equal(view.profile.storyTitle, '独立测试故事'); assert.equal(view.sourceRevisionIds.length, 4); assert.deepEqual(view.profile.sourceBindings.derivedRegistryPaths, []); assert.deepEqual(view.snapshot.productionModel.episodes, []); assert.equal((await repo.listEvents()).length, 0);
 });

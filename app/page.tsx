@@ -29,7 +29,7 @@ import { isMaterialCreatorStage } from './material-taxonomy';
 import type { AdaptationAudit, AudioVerificationTarget, SceneReviewDossier, StoryConfirmationTarget } from './adaptation-audit';
 import { DocumentBlocks, type DocumentBlock } from './document-blocks';
 import { EpisodePlanWorkbench, type EpisodeCriterionId } from './episode-plan-workbench';
-import { CREATOR_PRODUCTION_STAGES, creatorProductionGateDefinition, creatorProductionStageForGate } from './creator-production-workflow';
+import { CREATOR_PRODUCTION_STAGES, creatorProductionGateDefinition, creatorProductionStageForGate, resolveCreatorProductionStage } from './creator-production-workflow';
 import {exactMaterialPanelMatch} from './material-catalog-panel';
 import { EpisodeLogicReview, EpisodeLogicSummary, firstLogicItem, normalizeLogicSelection } from './episode-logic-review';
 import { StoryStructureWorkbench, STORY_OVERVIEW_SECTIONS } from './story-structure-workbench';
@@ -607,7 +607,7 @@ const workspaceViews: Array<{ id: WorkspaceView; index: string; title: string; s
   { id: 'story', index: '故事', title: '故事创作', short: '故事', desc: '来源资料、故事结构与叙事拆解' },
   { id: 'settings', index: '设定', title: '故事设定', short: '设定', desc: '主体分类、空间设定与实体关系' },
   { id: 'materials', index: '素材', title: '素材管理', short: '素材', desc: '实体素材目录、集场筛选与统一素材信息卡' },
-  { id: 'pipeline', index: '制作', title: '全剧制作', short: '制作', desc: '镜头拆解与生成、场景剪辑、分集成片' },
+  { id: 'pipeline', index: '制作', title: '全剧制作', short: '制作', desc: '镜头制作、场景剪辑、分集成片' },
   { id: 'system', index: '管理', title: '系统管理', short: '管理', desc: '使用与初始化、系统配置、数据与运行' },
 ];
 
@@ -1311,8 +1311,8 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       ? params.get('phase') || inferLegacyProductionStage(params.get('work'), params.get('item'), params.get('family'), params.get('version'))
       : null);
     const legacySelection = legacyProductionGate(legacyStage);
-    const creatorStage = CREATOR_PRODUCTION_STAGES.find(stage=>stage.id===params.get('creatorStage')||productionSlug(stage.id)===params.get('creatorStage'));
-    const creatorEntry = creatorProductionGateDefinition(creatorStage?.defaultGateId);
+    const creatorSelection = resolveCreatorProductionStage(params.get('creatorStage'));
+    const creatorEntry = creatorProductionGateDefinition(creatorSelection?.defaultGateId);
     const pending: PendingProductionLocation = {
       shotId: params.get('shot'),
       sceneId: nextScene,
@@ -1322,7 +1322,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       versionId: params.get('version'),
       materialRequirementId: params.get('material'),
       phaseId: phaseIdFromLocation(params.get('productionPhase')) || legacySelection?.phaseId || creatorEntry?.phaseId || null,
-      gateId: gateIdFromLocation(params.get('productionGate')) || legacySelection?.gateId || creatorStage?.defaultGateId as ProductionGateId || null,
+      gateId: gateIdFromLocation(params.get('productionGate')) || legacySelection?.gateId || creatorSelection?.defaultGateId as ProductionGateId || null,
       scopeType: params.get('productionScope'),
       objectId: params.get('productionObject'),
       legacyStage,
@@ -1578,6 +1578,12 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       if (nextView === 'materials') {
         setNavigationError('');
         pendingProductionIntentRef.current = null;
+        // Production outputs use the same asset/work-product card, with their
+        // own exact catalogue endpoint; never resolve them as entity demands.
+        if (params.get('materialCatalog') === 'production') {
+          setMaterialCenterState(current=>({...current,requirementId:null,familyId:null,versionId:null}));
+          return true;
+        }
         // Trial identity and versions belong to their independent drawer, not
         // the REQUIRED material/family/version resolver.
         if (params.get('materialTrial') && !pending.materialRequirementId && !pending.familyId) {
@@ -1963,7 +1969,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       else url.searchParams.delete('productionGate');
       const creatorStageId = creatorProductionStageForGate(selectedProductionGateId);
       // Preserve explicit invalid/mismatched links for the workspace to reject.
-      if (creatorStageId && !url.searchParams.has('creatorStage')) url.searchParams.set('creatorStage',productionSlug(creatorStageId));
+      if (creatorStageId && (!url.searchParams.has('creatorStage') || resolveCreatorProductionStage(url.searchParams.get('creatorStage')))) url.searchParams.set('creatorStage',productionSlug(creatorStageId));
       url.searchParams.set('productionScope', currentPackage?.scopeType || selectedGate?.scopeType || 'UNKNOWN');
       url.searchParams.set('productionObject', currentPackage ? publicRef(currentPackage.scopeId) : 'UNKNOWN');
       ['scene', 'shot', 'work'].forEach((key) => url.searchParams.delete(key));
@@ -2035,7 +2041,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       else url.searchParams.delete('materialQ');
       url.searchParams.delete('map');
     } else {
-      ['material', 'materialPanel', 'materialRelation', 'materialTrial', 'materialTrialVersion', 'materialMedia', 'materialPrimary', 'materialCategory', 'materialEpisode', 'materialEpisodeDisplay', 'materialScene', 'materialShot', 'materialCreatorStage', 'materialCoverage', 'materialState', 'materialPage', 'materialMode', 'structureScene', 'materialQ', 'assetOwner', 'assetBusinessState', 'assetFact', 'assetKind', 'assetEpisode', 'assetEpisodeDisplay', 'assetPage', 'assetQ'].forEach((key) => url.searchParams.delete(key));
+      ['materialCatalog','productionMaterial','productionMaterialVersion','processQ','processKind','processMedia','processState','processGate','processEpisode','processScene','processShot','material', 'materialPanel', 'materialRelation', 'materialTrial', 'materialTrialVersion', 'materialMedia', 'materialPrimary', 'materialCategory', 'materialEpisode', 'materialEpisodeDisplay', 'materialScene', 'materialShot', 'materialCreatorStage', 'materialCoverage', 'materialState', 'materialPage', 'materialMode', 'structureScene', 'materialQ', 'assetOwner', 'assetBusinessState', 'assetFact', 'assetKind', 'assetEpisode', 'assetEpisodeDisplay', 'assetPage', 'assetQ'].forEach((key) => url.searchParams.delete(key));
     }
     if(activeView==='materials')saveMaterialBrowseLocation(url);
     ['targetEpisode', 'targetScene', 'targetSubset', 'targetPage'].forEach((key) => url.searchParams.delete(key));
@@ -2907,7 +2913,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       </section>}
 
       {activeProductionReady && activeView === 'materials' && <section className="content-section material-section v6-page" id="materials">
-        <div className="section-heading"><div><p>SCREENPLAY → REUSABLE MATERIALS</p><h2>按实体分类管理可复用素材</h2></div><p className="section-intro">素材的产物、Review、全部生产资料、用途和版本血缘统一收进一张信息卡；镜头、场、集与全剧产物继续只在“全剧制作”管理。</p></div>
+        <div className="section-heading"><div><p>MATERIALS</p><h2>基础素材与制作过程素材</h2></div><p className="section-intro">人物、场景与道具按实体管理；粗分镜、对白、预演和关键帧按制作步骤查找。两个视图使用同一素材版本、审阅记录和制作信息卡。</p></div>
         {materialWindow.error&&<p role="alert">后续素材摘要读取未完成：{materialWindow.error}<button onClick={()=>void onNeedProduction({resource:materialResource,filters:materialFilters,mode:'all'})}>继续读取素材目录</button></p>}
         <MaterialProductionCenter
           catalogLoading={materialWindow.loading||materialWindow.hasMore}

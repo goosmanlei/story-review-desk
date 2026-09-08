@@ -1,3 +1,4 @@
+import {canonicalShotDesign} from '../../../../host/instance-runtime/shot-design-contract.mjs';
 import { narrativeExcerpt, validateNarrativeRevision } from '../_narrative-revision';
 import {assertScopedEpisodeSceneBasis} from '../episode-plan-reviews/_release';
 import {scopedPlanningReviewSpec} from '../episode-plan-reviews/_planning';
@@ -708,7 +709,11 @@ export function canonicalSceneScopedContent(
   subjectId: string,
   value: Record<string, unknown>,
   planBasisBindings: BasisBinding[],
+  planningContractVersion?: string,
 ) {
+  const structuredDesign = planningContractVersion === '3.0';
+  if (planningContractVersion != null && !['1.0','2.0','3.0'].includes(planningContractVersion)) throw new HttpError(422, '不支持的镜头设计契约版本');
+  if (structuredDesign && (subjectKind !== 'SHOT_PLAN_SET' || !planBasisBindings.some(binding => binding.bindingType === 'MATERIAL_REQUIREMENT_SET'))) throw new HttpError(422, '镜头设计 V3 只接受已发布场级意图与需求基线');
   const requirementClasses = materialRequirementClasses(data);
   const rows = (subjectKind === 'SCENE_COVERAGE'
     ? data.productionModel.sceneCoveragePlanRevisions
@@ -858,10 +863,15 @@ export function canonicalSceneScopedContent(
     const shotFields = [
       'shotId', 'sceneId', 'order', 'title', 'coverageBeatRefs', 'visualIntent', 'actionIntent',
       'soundIntent', 'dialogueContext', 'narrativeBeat', 'audienceTakeaway',
-      'materialRequirementRefs', 'inputBindings',
+      'materialRequirementRefs', 'inputBindings', ...(structuredDesign ? ['design'] : []),
     ];
     if (Object.keys(shot).some((key) => !shotFields.includes(key))) {
       throw new HttpError(422, `content.shots[${shotIndex}] does not match the ShotSpec contract`);
+    }
+    let design: ReturnType<typeof canonicalShotDesign> | undefined;
+    if (structuredDesign) {
+      try { design = canonicalShotDesign(shot.design, `content.shots[${shotIndex}].design`); }
+      catch (error) { throw new HttpError(422, error instanceof Error ? error.message : '镜头设计字段无效'); }
     }
     const shotId = assertStableId(shot.shotId, `content.shots[${shotIndex}].shotId`);
     if (!shotId.startsWith(`${sceneId}-SH`) || !/^\d{2,3}$/.test(shotId.slice(sceneId.length + 3))) {
@@ -962,8 +972,15 @@ export function canonicalSceneScopedContent(
       dialogueContext,
       materialRequirementRefs,
       inputBindings,
+      ...(design ? {design} : {}),
     };
   });
+  if (structuredDesign) {
+    shots.forEach((shot,index) => {
+      const continuity=shot.design!.continuity;
+      if (continuity.previousShotId !== (shots[index-1]?.shotId || null) || continuity.nextShotId !== (shots[index+1]?.shotId || null)) throw new HttpError(422, `content.shots[${index}].design.continuity 必须指向本场精确相邻镜头；场首尾使用 null，跨场承接写在转换说明中`);
+    });
+  }
   if (planBasisBindings.some(binding => binding.bindingType === 'MATERIAL_REQUIREMENT_SET')) {
     for (const [beatId, refs] of coverageMaterialRefsByBeat) {
       const beatShots = shots.filter(shot => shot.coverageBeatRefs.includes(beatId));
@@ -1064,6 +1081,8 @@ export async function POST(request: Request) {
     const episodePlanLedger = subjectKind === 'EPISODE_PLAN'
       ? await episodePlanIdentityLedger(data)
       : null;
+    const requestedPlanningVersion = body.planningContractVersion;
+    if (requestedPlanningVersion != null && (subjectKind !== 'SHOT_PLAN_SET' || !['1.0','2.0','3.0'].includes(String(requestedPlanningVersion)))) throw new HttpError(422, 'planningContractVersion 仅用于显式支持的镜头设计契约');
     const canonicalBasisBindings = await basisBindings(data, subjectKind, subjectId, body.basisBindings);
     const content = subjectKind === 'EPISODE_PLAN'
       ? canonicalEpisodePlanContent(data, subjectId, rawContent, episodePlanLedger!)
@@ -1073,9 +1092,12 @@ export async function POST(request: Request) {
         subjectId,
         rawContent,
         canonicalBasisBindings,
+        requestedPlanningVersion == null ? undefined : String(requestedPlanningVersion),
       );
     const basisBindingsHash = stableObjectHash(canonicalBasisBindings);
     const requirementBased = subjectKind === 'SHOT_PLAN_SET' && canonicalBasisBindings.some(binding => binding.bindingType === 'MATERIAL_REQUIREMENT_SET');
+    const planningContractVersion = requirementBased ? requestedPlanningVersion === '3.0' ? '3.0' : '2.0' : '1.0';
+    if (requestedPlanningVersion != null && requestedPlanningVersion !== planningContractVersion) throw new HttpError(422, '镜头设计契约与需求／实际素材基线不匹配');
     if (requirementBased && !data.productionModel.shotPlanSetRevisions?.some(row => row.planId === subjectId && row.episodeNarrativeReleaseId)) {
       throw new HttpError(422, '镜头设计 V2 必须从独立已发布的分集场正文进入；旧全剧 V1 同步契约保持不变');
     }
@@ -1111,10 +1133,10 @@ export async function POST(request: Request) {
       evidenceRefs: refs,
       basisBindingsHash,
       adoptedMaterialSet,
-      ...(requirementBased ? {planningContractVersion:'2.0',materialRequirementSet} : {}),
+      ...(requirementBased ? {planningContractVersion,materialRequirementSet} : {}),
     }).slice(0, 32)}`;
     const criteriaVersion = subjectKind === 'EPISODE_PLAN' && (content as { episodes?: Array<{ reviewDossier: { schemaVersion: string } }> }).episodes?.every((episode) => episode.reviewDossier.schemaVersion === '1.1') ? '2.0' : undefined;
-    const contextHash = stableObjectHash({ subjectKind, subjectId, baseRevisionHash, basisBindingsHash, ...(criteriaVersion ? { criteriaVersion } : {}) });
+    const contextHash = stableObjectHash({ subjectKind, subjectId, baseRevisionHash, basisBindingsHash, ...(criteriaVersion ? { criteriaVersion } : {}), ...(planningContractVersion === '3.0' ? {planningContractVersion} : {}) });
     const semanticRequest = {
       snapshotId,
       creationSnapshotId: snapshotId,
@@ -1131,10 +1153,10 @@ export async function POST(request: Request) {
       ...(criteriaVersion ? { criteriaVersion } : {}),
       ...(subjectKind==='EPISODE_PLAN'&&data.productionModel.systemConfiguration?(()=>{const c=data.productionModel.systemConfiguration.config;const spec=reviewSpec(c,'EPISODE_PLAN',{});return {reviewSpec:spec,configurationBinding:{key:`candidate:${creativeRevisionId}`,kind:'EPISODE_PLAN',reviewSpec:spec,technical:c.technical,workflow:c.workflow,sources:c.sources,configurationHash:configHash(c),createdBy:'CANDIDATE_REGISTRATION'}};})():{}),
       basisBindings: canonicalBasisBindings,
-      ...(['SCENE_COVERAGE','SHOT_PLAN_SET'].includes(subjectKind) && (subjectKind==='SCENE_COVERAGE'?data.productionModel.sceneCoveragePlanRevisions:data.productionModel.shotPlanSetRevisions)?.some(row=>row.planId===subjectId&&row.episodeNarrativeReleaseId) ? {scopeType:'SCENE',scopeId:(content as {sceneId:string}).sceneId,scopedReviewSpec:scopedPlanningReviewSpec(subjectKind as 'SCENE_COVERAGE'|'SHOT_PLAN_SET', requirementBased ? '2.0' : '1.0')} : {}),
+      ...(['SCENE_COVERAGE','SHOT_PLAN_SET'].includes(subjectKind) && (subjectKind==='SCENE_COVERAGE'?data.productionModel.sceneCoveragePlanRevisions:data.productionModel.shotPlanSetRevisions)?.some(row=>row.planId===subjectId&&row.episodeNarrativeReleaseId) ? {scopeType:'SCENE',scopeId:(content as {sceneId:string}).sceneId,scopedReviewSpec:scopedPlanningReviewSpec(subjectKind as 'SCENE_COVERAGE'|'SHOT_PLAN_SET', requirementBased ? planningContractVersion : '1.0')} : {}),
       basisBindingsHash,
       adoptedMaterialSet,
-      ...(requirementBased ? {planningContractVersion:'2.0',materialRequirementSet} : {}),
+      ...(requirementBased ? {planningContractVersion,materialRequirementSet} : {}),
       authorityClass,
       evidenceRefs: refs,
       note,

@@ -1,3 +1,5 @@
+import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
+import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
 import type {ExecutionRuntime} from '../../../host/instance-runtime/execution-epoch.mjs';
 import { projectEpisodeNarrativeReleases, assertScopedEpisodeSceneBasis, assertScopedSceneSyncBinding, SCENE_SYNC_PROTOCOL } from './episode-plan-reviews/_release';
 import {applyDomainInvalidations} from '../../../host/instance-runtime/domain-invalidation.mjs';
@@ -91,6 +93,7 @@ export function derivedArtifactHashMap(value: unknown, name = 'derivedArtifactHa
 
 type WorkItem = {
   id: string;
+  shotProductionPlanId?: string;
   lane?: string | null;
   requirementRef?: string | null;
   requirementHash?: string | null;
@@ -151,6 +154,7 @@ type WorkItem = {
 
 type WorkPackage = {
   id: string;
+  shotProductionPlanId?: string;
   stepId?: string | null;
   phaseId?: string | null;
   gateId?: string | null;
@@ -552,17 +556,31 @@ async function publishedView(repository: NonNullable<Awaited<ReturnType<typeof i
   return pending;
 }
 
+async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+  if(!((data.productionModel as unknown as {shotProductionPlans?:unknown[]}).shotProductionPlans||[]).length)return data;
+  const {applyAnimaticProjection,reconcileAnimaticLocks}=await import('../../../host/instance-runtime/animatic-service.mjs');
+  const {applyShotProductionLocksProjection}=await import('../../../host/instance-runtime/shot-production-locks.mjs');
+  const {applyShotProductionManifestProjection}=await import('../../../host/instance-runtime/shot-production-manifest.mjs');
+  const {episodeSourceCompiler}=await import('../../../host/instance-runtime/episode-source-sync.mjs');
+  const model=await applyShotProductionManifestProjection(repository,await applyAnimaticProjection(repository,{...data.productionModel,spatialEvidence:(data as unknown as {creativeLineage?:{spatialEvidence?:unknown}}).creativeLineage?.spatialEvidence||null,sourceHashes:data.sourceHashes||{}})),view=await repository.readView();
+  const state=episodeSourceCompiler({projectOperationalState,projectEpisodeNarrativeReleases,projectedReviewIndexes,projectedStructureReviewIndexes,projectedScopeLocks}).stateFor({...view,snapshot:{...data,productionModel:model}});
+  Object.assign(model,{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById},animaticLocks:reconcileAnimaticLocks(model,state)});
+  return {...data,productionModel:await applyShotProductionLocksProjection(repository,model,{state,view})} as ReviewData;
+}
+
 export async function reviewData() {
   if (!hostedReadOnlyMode() && instanceRepositoryMode()) {
     const repository = (await instanceRepository())!;
     const view = await publishedView(repository);
-    if (dataCache && dataCacheFingerprint === view.dataFingerprint) return dataCache;
+    if (dataCache && dataCacheFingerprint === view.dataFingerprint) {
+      return currentProductionAux(repository,dataCache);
+    }
     if (!view.snapshot?.snapshotId || !view.snapshot.productionModel || !view.recipes || view.snapshot.snapshotId !== view.recipes.snapshotId) throw new HttpError(503, 'Instance has no coherent active business release');
     const parsed = normalizeReviewSnapshot(view.snapshot as ReviewData);
     if (!parsed.instance || parsed.instance.instanceId !== view.instanceId) throw new HttpError(503, 'Instance release profile is missing or mismatched');
     bindInstanceSourceRoles(instanceProfile(parsed));
     dataCache = parsed; dataCacheFingerprint = view.dataFingerprint;
-    return parsed;
+    return currentProductionAux(repository,parsed);
   }
   if (hostedReadOnlyMode()) {
     if (dataCache && dataCacheFingerprint.startsWith('hosted:')) return dataCache;
@@ -1248,7 +1266,7 @@ export function assertCreativeRevisionBasisCurrent(
   const materialSet = assertShotPlanMaterialBasisCurrent(data, state, sceneId, basisBindings);
   const v2 = bindingByType.has('MATERIAL_REQUIREMENT_SET');
   const frozenSet = v2 ? revision.materialRequirementSet : revision.adoptedMaterialSet;
-  if (v2 !== (revision.planningContractVersion === '2.0') || v2 && revision.adoptedMaterialSet != null || !v2 && revision.materialRequirementSet != null) {
+  if (v2 !== (isRequirementDrivenPlanningVersion(revision.planningContractVersion)) || v2 && revision.adoptedMaterialSet != null || !v2 && revision.materialRequirementSet != null) {
     throw new HttpError(409, '镜头设计 V2 必须声明独立契约，不可冒充已采用实际素材');
   }
   if (
@@ -3672,11 +3690,13 @@ function gateShotPlanDerivedOperationalProjection(
 
   for (const work of data.productionModel.workItems) {
     if (
-      work.deliverableKey !== 'SHOT_INPUT_LOCK'
+      (work.deliverableKey !== 'SHOT_INPUT_LOCK' && !work.shotProductionPlanId)
       || !work.shotPlanSetRevisionId
       || !work.shotPlanSetRevisionHash
     ) continue;
-    const current = exactCurrentPlan(
+    const activeProductionPlans=((data.productionModel as unknown as {shotProductionPlans?:Array<{id:string;scopeRole:string;workItemIds?:string[]}>}).shotProductionPlans||[]).filter(p=>p.scopeRole==='CURRENT');
+    const productionCurrent=!work.shotProductionPlanId||activeProductionPlans.some(p=>p.workItemIds?p.workItemIds.includes(work.id):p.id===work.shotProductionPlanId);
+    const current = productionCurrent && exactCurrentPlan(
       String(work.sceneId || ''),
       work.shotPlanSetRevisionId,
       work.shotPlanSetRevisionHash,
@@ -3686,7 +3706,9 @@ function gateShotPlanDerivedOperationalProjection(
   }
   for (const workPackage of data.productionModel.workPackages) {
     if (!workPackage.shotPlanSetRevisionId || !workPackage.shotPlanSetRevisionHash) continue;
-    const current = exactCurrentPlan(
+    const activeProductionPlans=((data.productionModel as unknown as {shotProductionPlans?:Array<{id:string;scopeRole:string;workItemIds?:string[]}>}).shotProductionPlans||[]).filter(p=>p.scopeRole==='CURRENT');
+    const productionCurrent=!workPackage.shotProductionPlanId||activeProductionPlans.some(p=>p.workItemIds?Boolean(workPackage.workItemRefs?.length)&&workPackage.workItemRefs!.every(id=>p.workItemIds!.includes(id)):p.id===workPackage.shotProductionPlanId);
+    const current = productionCurrent && exactCurrentPlan(
       String(workPackage.sceneId || ''),
       workPackage.shotPlanSetRevisionId,
       workPackage.shotPlanSetRevisionHash,
@@ -3959,6 +3981,12 @@ function makeReviewRollup(stage: string, items: WorkItem[]): ReviewRollup {
 }
 
 function candidateBindsCurrentGraph(data: ReviewData, event: EventRecord) {
+  if(event.executorKind==='DETERMINISTIC_MANIFEST'&&!shotManifestCandidateMatchesJob(event,((data.productionModel as unknown as Record<string,unknown>).shotProductionManifestJobs||[]) as unknown[]))return false;
+  if(event.executorKind==='DETERMINISTIC_RENDER'){
+    const jobs=((data.productionModel as unknown as Record<string,unknown>).animaticRenderJobs||[]) as Array<Record<string,unknown>>;
+    const job=jobs.find(j=>j.jobId===event.renderJobId),result=job?.result as Record<string,unknown>|undefined,expected=job?.expectedOutput as Record<string,unknown>|undefined;
+    if(!job||job.status!=='SUCCEEDED'||job.registrationVerified!==true||result?.registrationEventId!==event.eventId||result?.versionId!==event.versionId||result?.familyId!==event.familyId||result?.sha256!==event.sha256||result?.relativePath!==event.path||result?.byteSize!==event.byteSize||expected?.id!==event.expectedOutputId||job.workItemId!==event.workItemId||job.timelineRevisionId!==event.timelineRevisionId||job.timelineHash!==event.timelineHash||stableObjectHash(job.inputBindings)!==event.inputBindingsHash||stableObjectHash(event.inputBindings)!==event.inputBindingsHash)return false;
+  }
   const familyId = String(event.familyId || '');
   const versionId = String(event.versionId || '');
   const sha256 = String(event.sha256 || '').toLowerCase();
@@ -5188,6 +5216,11 @@ export async function appendEvent(
       });
       if (validateLocked) await validateLocked(before);
       const result = (await tx.appendEvent({ kind, idempotencyKey, requestHash, payload, eventSchemaVersion }));
+      if(kind==='review'&&payload.subjectType==='WORK_PRODUCT'&&payload.action==='APPROVE_AND_RELEASE'){
+        const {recordShotProductionReview}=await import('../../../host/instance-runtime/shot-production-locks.mjs');
+        try{await recordShotProductionReview(tx,{reviewEventId:String(result.event.eventId),api:{projectOperationalState,projectEpisodeNarrativeReleases,projectedReviewIndexes,projectedStructureReviewIndexes,projectedScopeLocks}});}
+        catch(reason){throw new HttpError(409,reason instanceof Error?reason.message:'制作锁定验证失败');}
+      }
       if (kind === 'creative-revision' && payload.subjectKind === 'EPISODE_PLAN') {
         const candidate = result.event as EventRecord;
         const data = await reviewData();

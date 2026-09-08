@@ -30,7 +30,7 @@ test('live module projection preserves exact metadata and never promotes prepara
  assert.equal(production.facts.find(fact=>fact.id==='registered-shots').value,1);
  assert.ok(production.stages.every(stage=>stage.denominator===null&&stage.denominatorState==='UNKNOWN'));
  assert.equal(result.modules[1].work,null,'settings must not impersonate all material work');
- assert.equal(result.audit.configuration.phaseCount,5);assert.equal(result.audit.creatorStages.length,4);
+ assert.equal(result.audit.configuration.phaseCount,5);assert.deepEqual(result.audit.creatorStages.map(stage=>stage.id),['SHOT_PRODUCTION','SCENE_EDIT','EPISODE_EDIT']);assert.deepEqual(result.audit.creatorStages[0].gateIds,['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE','ANIMATIC_LOCK','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK']);assert.equal(result.audit.configuration.gateCount,15);
  const overview=workflowOverview(f.model,f.preparation,f);
  assert.equal(overview.denominatorState,'UNKNOWN');assert.equal(overview.definition.phases,f.model.systemConfiguration.config.workflow.phases);
  assert.ok(overview.nodes.filter(node=>node.group==='全剧制作').every(node=>node.definitionState==='DEFINED'));

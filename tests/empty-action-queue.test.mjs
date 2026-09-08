@@ -105,22 +105,23 @@ function productionStageFixture() {
 }
 const productionDomain=queue=>queue.workspaceSummary.domains.find(d=>d.id==='FULL_PRODUCTION');
 
-test('creator queue has four exact exit denominators and never sums project export objects into episodes',async()=>{
+test('creator queue has three module exits; design/input counts never inflate locked-shot or episode denominators',async()=>{
   const f=productionStageFixture();
   f.exits.forEach((id,index)=>f.add(id,'permanent-object-'+index));
   const project=f.snapshot.productionModel.productionGates.find(g=>g.id==='DELIVERY_ARCHIVE');project.denominatorState='KNOWN';project.denominator=99;
   for(let i=0;i<3;i++)f.add('DELIVERY_ARCHIVE','project-'+i);
   f.operations.stateProjection.scopeLocksById.fake={scopeType:'PROJECT',scopeId:f.snapshot.productionModel.projectId,lockState:'LOCKED',denominatorState:'KNOWN',denominator:999};
   const before=JSON.stringify([f.snapshot,f.operations]),domain=productionDomain(await f.buildActionQueue());
-  assert.deepEqual(domain.stages.map(s=>s.id),['SHOT_BREAKDOWN','SHOT_GENERATION','SCENE_EDIT','EPISODE_EDIT']);
-  assert.deepEqual(domain.stages.map(s=>[s.count,s.denominator,s.denominatorState]),[[1,2,'KNOWN'],[1,3,'KNOWN'],[1,4,'KNOWN'],[1,5,'KNOWN']]);
-  assert.equal(domain.metrics.find(m=>m.id==='PHASES').value,4);assert.equal(domain.metrics.some(m=>m.id==='GATES'),false);
+  assert.deepEqual(domain.stages.map(s=>s.id),['SHOT_PRODUCTION','SCENE_EDIT','EPISODE_EDIT']);
+  assert.deepEqual(domain.stages.map(s=>[s.count,s.denominator,s.denominatorState]),[[1,3,'KNOWN'],[1,4,'KNOWN'],[1,5,'KNOWN']]);
+  assert.equal(domain.metrics.find(m=>m.id==='PHASES').value,3);assert.equal(domain.metrics.some(m=>m.id==='GATES'),false);
   assert.equal(JSON.stringify([f.snapshot,f.operations]),before);
+  const designOnly=productionStageFixture();designOnly.add('SHOT_PLAN_INPUT_LOCK','design-complete-scene');const designStage=productionDomain(await designOnly.buildActionQueue()).stages.find(s=>s.id==='SHOT_PRODUCTION');assert.equal(designStage.count,0,'passing design/input does not claim any locked shot');assert.equal(designStage.denominator,3);
 });
 test('creator exit progress deduplicates the actual object and checks every current output plus rights gates',async()=>{
   const f=productionStageFixture();f.add('SHOT_LOCK','same-shot');f.add('SHOT_LOCK','same-shot',{blocked:true});
   f.add('SHOT_LOCK','released-shot');f.add('SHOT_LOCK','inactive-shot',{active:false});
-  const stage=productionDomain(await f.buildActionQueue()).stages.find(s=>s.id==='SHOT_GENERATION');
+  const stage=productionDomain(await f.buildActionQueue()).stages.find(s=>s.id==='SHOT_PRODUCTION');
   assert.equal(stage.count,1);assert.equal(stage.denominator,3);assert.equal(stage.denominatorState,'KNOWN');
 });
 test('missing, duplicated and wrong-scope exit definitions keep creator counts and denominators unknown',async()=>{
@@ -139,7 +140,7 @@ test('raw canonical phase counts and preparation discovery cannot establish crea
   const f=projectionFixture();for(const phase of f.snapshot.productionModel.productionPhases){phase.denominatorState='KNOWN';phase.denominator=142;phase.currentObjectCount=142;}
   f.snapshot.productionModel.shots=[{id:'legacy-shot',scopeRole:'EVIDENCE_ONLY'}];
   const stages=productionDomain(await f.buildActionQueue()).stages;
-  assert.equal(stages.length,4);assert.ok(stages.every(s=>s.count===0&&s.denominator===null&&s.denominatorState==='UNKNOWN'));
+  assert.equal(stages.length,3);assert.ok(stages.every(s=>s.count===0&&s.denominator===null&&s.denominatorState==='UNKNOWN'));
 });
 test('current production requests preserve their exact canonical gate and prohibited capabilities after collapse',async()=>{
   const f=productionStageFixture(),work=f.add('STORYBOARD_DIALOGUE','shot-exact',{released:false});
@@ -149,8 +150,10 @@ test('current production requests preserve their exact canonical gate and prohib
   assert(entry);assert.equal(entry.productionGateId,'STORYBOARD_DIALOGUE');assert.equal(entry.productionPhaseId,'PREVIS');
   const collapsed=queue.workUnits.find(i=>i.workUnitKey===entry.workUnitKey);assert.equal(collapsed.productionGateId,'STORYBOARD_DIALOGUE');
   assert.equal(collapsed.permissions.canAuthorizeCodex,false);assert.equal(collapsed.permissions.canAuthorizeExternal,false);
-  assert.equal(productionDomain(queue).stages.find(s=>s.id==='SHOT_GENERATION').status,'ACTIVE');
-  assert.notEqual(productionDomain(queue).stages.find(s=>s.id==='SHOT_BREAKDOWN').status,'ACTIVE');
+  assert.equal(productionDomain(queue).stages.find(s=>s.id==='SHOT_PRODUCTION').status,'ACTIVE');
+  assert.equal(productionDomain(queue).stages.some(s=>s.id==='SHOT_BREAKDOWN'||s.id==='SHOT_GENERATION'),false);
+  assert.equal(productionDomain(queue).stages.find(s=>s.id==='SCENE_EDIT').status,'UNKNOWN');
+  assert.equal(collapsed.productionPhaseId,'PREVIS');
 });
 
 function exactMaterialFixture(lifecycleState='IN_PROGRESS',runState='RUNNING') {

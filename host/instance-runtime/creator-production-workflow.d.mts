@@ -1,4 +1,4 @@
-export type CreatorProductionStageId = 'SHOT_BREAKDOWN' | 'SHOT_GENERATION' | 'SCENE_EDIT' | 'EPISODE_EDIT';
+export type CreatorProductionStageId = 'SHOT_PRODUCTION' | 'SCENE_EDIT' | 'EPISODE_EDIT';
 export type CreatorProductionGateScope = 'SHOT' | 'SCENE' | 'EPISODE' | 'PROJECT';
 export type CreatorProductionSubarea = 'WORKSPACE' | 'EXPORT_CHECKS';
 export type CreatorProductionStage = Readonly<{
@@ -17,3 +17,5 @@ export function creatorProductionGateDefinition(gateId: unknown): CreatorProduct
 export function creatorProductionStageForGate(gateId: unknown): CreatorProductionStageId | null;
 export function creatorProductionStageDefinition(id: unknown): CreatorProductionStage | null;
 export function creatorProductionScopeForGate(gateId: unknown): CreatorProductionGateScope | null;
+
+export function resolveCreatorProductionStage(value:unknown):{stageId:CreatorProductionStageId;defaultGateId:string}|null;

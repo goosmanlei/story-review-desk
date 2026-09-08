@@ -1,4 +1,6 @@
 import {withInstanceMediaRead} from '../_media-read';
+import {ANIMATIC_NS,animaticCandidateMatchesJob} from '../../../../host/instance-runtime/animatic-service.mjs';
+import {domainRepository} from '../../instance/_domain';
 import {domainReferenceEligibility} from '../../../../host/instance-runtime/domain-reference.mjs';
 import { readFile } from 'node:fs/promises';
 import {
@@ -379,6 +381,21 @@ export async function POST(request: Request) {
   try {
     const { data, idempotencyKey, ifMatch } = await validateMutationRequest(request);
     const body = await request.json() as Record<string, unknown>;
+    if(body.executorKind==='DETERMINISTIC_RENDER'){
+      // Deterministic results are registered atomically by the worker. The HTTP
+      // endpoint can only replay a verified receipt, never author a render fact.
+      const repo=await domainRepository();return withInstanceMediaRead(async()=>repo.readTransaction(async tx=>{
+        const record=await tx.getAux(ANIMATIC_NS.jobs,String(body.renderJobId||''));
+        const job=record&&!record.deleted?JSON.parse(Buffer.from(record.bytes).toString('utf8')):null;
+        const event=(await listAllEvents('asset-version')).find(e=>e.eventId===job?.result?.registrationEventId);
+        const media=job?.result?await tx.getMedia(job.result.familyId,job.result.versionId):null;
+        const registrationVerified=Boolean(media&&media.sha256===job.result.sha256&&media.byteSize===job.result.byteSize&&media.relativePath===job.result.relativePath&&media.metadata?.registrationEventId===event?.eventId);
+        if(!event||!animaticCandidateMatchesJob(event,[{...job,registrationVerified}])||body.versionId!==event.versionId||body.familyId!==event.familyId||body.sha256!==event.sha256)throw new HttpError(409,'没有与精确产物相符的已完成受控预演任务');
+        const file=await hashStableFile(await safeReviewPendingPath(String(event.path)));
+        if(file.sha256!==event.sha256||file.size!==event.byteSize)throw new HttpError(409,'预演候选实际文件与完成回执不符');
+        return jsonResponse({event,eventId:event.eventId,replayed:true,versionId:event.versionId,sha256:event.sha256,mediaUrl:'/api/v8/media/'+event.mediaToken});
+      }));
+    }
     const rawRequestHash = mutationRequestHash('asset-version', body);
     const replay = await replayIdempotentEvent('asset-version', idempotencyKey, rawRequestHash);
     if (replay) {

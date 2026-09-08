@@ -19,7 +19,7 @@ const views=[
   ['story','故事创作','故事','来源资料、故事结构与叙事拆解'],
   ['settings','故事设定','设定','主体分类、空间设定与实体关系'],
   ['materials','素材管理','素材','实体素材目录、集场筛选与统一素材信息卡'],
-  ['pipeline','全剧制作','制作','四阶段创作、对象检查与正式审阅'],
+  ['pipeline','全剧制作','制作','镜头制作、场景剪辑与分集成片'],
   ['system','系统管理','管理','使用与初始化、系统配置、数据与运行'],
 ];
 const storyModes=[['source','来源资料'],['story-structure','故事结构'],['logic','叙事拆解']];
@@ -33,7 +33,7 @@ const phases=[
 const workflows=[
   ['故事 → 剧本','STORY → SCREENPLAY','准备来源资料','从来源资料开始，整理故事结构、分集剧情与逐场正文。','story','当前场次'],
   ['剧本 → 素材','SCREENPLAY → MATERIALS','等待当前剧本','根据剧本登记人物、地点、道具与声音需求，再制作和审阅素材。','materials','当前素材需求'],
-  ['剧本 + 素材 → 全剧制作','SCREENPLAY + MATERIALS → PRODUCTION','等待场景与输入确认','场正文与镜头意图确认后建立正式镜头计划，按四阶段完成拆镜、生成与剪辑。','pipeline','当前正式镜头'],
+  ['剧本 + 素材 → 全剧制作','SCREENPLAY + MATERIALS → PRODUCTION','等待场景与输入确认','场正文与镜头意图确认后建立正式镜头计划，按镜头制作六步骤和后续场景、分集剪辑推进。','pipeline','当前正式镜头'],
 ];
 function tabs(items:string[][],selected:string,select:(id:string)=>void,label:string,className:string,prefix:string) {
   return <nav className={className} role="tablist" aria-label={label}>{items.map(([id,title],index)=><button key={id} id={`${prefix}-${id}`} role="tab" aria-controls={`${prefix}-panel`} aria-selected={selected===id} tabIndex={selected===id?0:-1} className={selected===id?'active':''} onClick={()=>select(id)} onKeyDown={event=>{

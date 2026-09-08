@@ -1050,7 +1050,7 @@ export async function buildActionQueue() {
       nextActionText: needsNewCandidate
         ? '准备覆盖全部当前场次且exact-once的新分集方案内容'
         : waitingSourceSync ? '在localhost主机工作器中显式apply受控源同步，并等待SUCCEEDED证明' : '提交本集六项判断，再明确确认本集正文并放行',
-      unlockText: '本集放行并受控同步后，本集各场可以独立进入镜头拆解；全剧汇总仍单独核验',
+      unlockText: '本集放行并受控同步后，本集各场可以独立进入镜头制作；全剧汇总仍单独核验',
       candidateAvailability: episodePlanCandidate ? 'AVAILABLE' : 'NOT_PRODUCED',
       currentVersionRole: episodePlanCandidate ? 'CANDIDATE' : 'PROPOSAL_BASE_ONLY',
       hardBlockers: [],
@@ -1082,7 +1082,7 @@ export async function buildActionQueue() {
       ownerModule:'STORY_CREATION',workstream:'EPISODE_PLANNING',priorityTier:'MAINLINE',businessOrder:55_000,workflowStep:null,
       subjectType:'EPISODE_NARRATIVE',subjectKind:'EPISODE_NARRATIVE',subjectId:uid,title:'本集叙事已放行 · 待受控同步',coordinates:{episodeUid:uid},
       reasonCodes:['EPISODE_NARRATIVE_SOURCE_SYNC_REQUIRED'],reasonText:'本集已正式通过；源同步尚未完成，其他集不参与本次门禁。',
-      nextActionText:'使用本集精确审阅事件预览并执行实例受控源同步',unlockText:'仅本集场景进入镜头拆解，不采用全剧方案或代作场级审阅',
+      nextActionText:'使用本集精确审阅事件预览并执行实例受控源同步',unlockText:'仅本集场景进入镜头制作，不采用全剧方案或代作场级审阅',
       dependency:{frontier:true,depth:0,blockers:[],directUnlockCount:0,transitiveUnlockCount:0},
       permissions:{canSubmitReview:false,canAuthorizeCodex:false,canAuthorizeExternal:false,canRegisterResult:false},
       navigationIntent:{href:href('/',{view:'story',storyMode:'logic',episodePlanRevision:revisionId,episodeUid:uid}),label:'查看本集同步凭证'},basis:review,
@@ -1191,7 +1191,7 @@ export async function buildActionQueue() {
         canAuthorizeExternal: false,
         canRegisterResult: false,
       },
-      navigationIntent: template.episodeNarrativeReleaseId ? {href:href('/',{view:'pipeline',creatorStage:'shot-breakdown',preparationEpisode:episodeId,preparationScene:sceneId}),label:`打开${subjectLabel}`} : isCoverage
+      navigationIntent: template.episodeNarrativeReleaseId ? {href:href('/',{view:'pipeline',creatorStage:'shot-production',preparationEpisode:episodeId,preparationScene:sceneId}),label:`打开${subjectLabel}`} : isCoverage
         ? { href: href('/', { view: 'story', storyMode: 'audit', confirmScene: sceneId, creativeRevision: subjectId }), label: `打开${subjectLabel}` }
         : {
             href: href('/', {
@@ -2411,14 +2411,14 @@ export async function buildActionQueue() {
           ? `${activeProductionWorks.length}个当前制作工作项；各阶段分别按同类出口统计`
           : productionCounts.ready || productionCounts.inProgress || productionCounts.blocked || productionCounts.waiting
             ? `${productionCounts.ready + productionCounts.inProgress}个当下可开展、${productionCounts.waiting}个等待、${productionCounts.blocked}个阻断的制作工作单元`
-          : '按镜头拆解、镜头生成、场景剪辑和分集成片推进；正式制作范围尚未锁定',
+          : '按镜头制作、场景剪辑和分集成片推进；正式制作范围尚未锁定',
         nextUnlockText: currentProductionWork?.unlockText
           || '正式分集方案与场级创作逐步同步后，按已锁范围建立镜头计划与制作分母',
         navigationIntent: { href: href('/', { view: 'pipeline' }), label: '进入全剧制作' },
         counts: productionCounts,
         metrics: [
           { id: 'ACTIVE_WORK_ITEMS', label: '当前工作项', value: activeProductionWorks.length, denominator: null, denominatorState: 'UNKNOWN', unit: '项' },
-          { id: 'PHASES', label: '制作阶段', value: CREATOR_PRODUCTION_STAGES.length, denominator: CREATOR_PRODUCTION_STAGES.length, denominatorState: 'KNOWN', unit: '阶段' },
+          { id: 'PHASES', label: '制作模块', value: CREATOR_PRODUCTION_STAGES.length, denominator: CREATOR_PRODUCTION_STAGES.length, denominatorState: 'KNOWN', unit: '模块' },
         ],
         stages: productionStages,
       },

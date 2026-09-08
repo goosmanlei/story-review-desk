@@ -7,7 +7,7 @@ import {visibleText} from './review-semantics';
 import './entity-workspace.css';
 import './workflow-production.css';
 import './preparation-workspace.css';
-import {CREATOR_PRODUCTION_STAGES,creatorProductionStageForGate,creatorProductionStageDefinition,creatorProductionGateDefinition,type CreatorProductionStageId} from './creator-production-workflow';
+import {CREATOR_PRODUCTION_STAGES,creatorProductionStageForGate,creatorProductionStageDefinition,creatorProductionGateDefinition,resolveCreatorProductionStage,type CreatorProductionStageId} from './creator-production-workflow';
 type Scene={sceneId:string;displayId:string;episodeUid:string;sceneContentHash:string;sourceSummary?:Record<string,unknown>;preparation:Record<string,unknown>;navigationOnly?:boolean};
 type State={releaseId:string;revisionId:string|null;content:{basis:Record<string,unknown>;scenes:Scene[];episodes?:Array<{episodeUid:string;displayId:string;title:string;sceneIds:string[]}>}|null;candidate:{revisionId:string;contentHash:string;episodes:Array<{episodeUid:string;displayId:string;title:string;sceneIds:string[]}>;scenes:Array<{id:string;displayId:string;title:string}>}|null;comments:Array<{sceneId:string;text:string;revisionId:string;preparationRevisionId:string}>;stale:boolean;readOnly?:boolean};
 const editableKeys=new Set(['sceneRole','audienceTakeaway','informationBoundary','beats','visualIntent','soundAndDialogueIntent','entityStateRequirements','timeAndSpace','materialGaps','nextPreparationAction','reviewFocus']);
@@ -59,17 +59,17 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
   restore();window.addEventListener('popstate',restore,true);return()=>window.removeEventListener('popstate',restore,true);
  },[]);
  const definition=workflow||remoteWorkflow;
- const configuredGates=definition?.gates||[],requestedGate=gateSelection||initialGateId||'';
+ const requestedStage=stageSelection||initialCreatorStageId||'',resolvedStage=resolveCreatorProductionStage(requestedStage);
+ const configuredGates=definition?.gates||[],requestedGate=gateSelection||initialGateId||resolvedStage?.defaultGateId||'';
  const exactGate=configuredGates.find(g=>g.id===requestedGate||slug(g.id)===requestedGate);
  const phaseEntry=configuredGates.find(g=>g.phaseId===initialPhaseId);
- const requestedStage=stageSelection||initialCreatorStageId||'';
- const stage=CREATOR_PRODUCTION_STAGES.find(s=>s.id===requestedStage||slug(s.id)===requestedStage)||(!requestedStage?creatorProductionStageDefinition(creatorProductionStageForGate(exactGate?.id||phaseEntry?.id||'')||''):null)||CREATOR_PRODUCTION_STAGES[0];
+ const stage=CREATOR_PRODUCTION_STAGES.find(s=>s.id===resolvedStage?.stageId)||(!requestedStage?creatorProductionStageDefinition(creatorProductionStageForGate(exactGate?.id||phaseEntry?.id||'')||''):null)||CREATOR_PRODUCTION_STAGES[0];
  const stageGates=stage.gateIds.flatMap(id=>configuredGates.filter(g=>g.id===id));
  const gate=exactGate||stageGates.find(g=>g.id===stage.defaultGateId);
  const gateDefinition=creatorProductionGateDefinition(gate?.id||'');
  const configuredScopeMismatch=Boolean(gate&&gateDefinition&&(gate.phaseId!==gateDefinition.phaseId||gate.scopeType&&gate.scopeType!==gateDefinition.scopeType));
- const stageError=requestedStage&&!CREATOR_PRODUCTION_STAGES.some(s=>s.id===requestedStage||slug(s.id)===requestedStage)?'链接指定的制作阶段无法定位，未切换到其他阶段。':requestedGate&&!exactGate?'链接指定的制作检查无法定位，未打开其他检查。':exactGate&&!stage.gateIds.includes(exactGate.id)?'制作阶段与检查不匹配，未改绑到其他对象。':configuredScopeMismatch?'检查配置的阶段或作用域与正式契约不匹配，未打开其他对象。':'';
- const episodeMode=stage.id==='EPISODE_EDIT',breakdownMode=stage.id==='SHOT_BREAKDOWN';
+ const stageError=requestedStage&&!resolvedStage?'链接指定的制作阶段无法定位，未切换到其他阶段。':requestedGate&&!exactGate?'链接指定的制作检查无法定位，未打开其他检查。':exactGate&&!stage.gateIds.includes(exactGate.id)?'制作阶段与检查不匹配，未改绑到其他对象。':configuredScopeMismatch?'检查配置的阶段或作用域与正式契约不匹配，未打开其他对象。':'';
+ const episodeMode=stage.id==='EPISODE_EDIT',shotProductionMode=stage.id==='SHOT_PRODUCTION',breakdownMode=shotProductionMode&&gate?.id==='SHOT_PLAN_INPUT_LOCK';
  const episodes=state?.candidate?.episodes||state?.content?.episodes||[];
  // Formal episode navigation is independent of an absent/stale preparation draft.
  // A navigation-only row has no preparation hash or editable body to rebind.
@@ -108,7 +108,8 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  const exportChecks=stageGates.filter(g=>stage.exportGateIds.includes(g.id)),regularChecks=stageGates.filter(g=>!stage.exportGateIds.includes(g.id));
  const checkButtons=(checks:typeof stageGates)=><div className="preparation-check-list">{checks.map(g=><button type="button" key={g.id} data-production-check={g.id} disabled={Boolean(selectionError)} aria-pressed={g.id===gate?.id} onClick={()=>chooseCheck(stage.id,g.id)}><strong>{g.label}</strong>{g.purpose&&<span>{g.purpose}</span>}</button>)}</div>;
  return <section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
-  <nav className="creator-production-stages" aria-label="全剧制作四阶段">{CREATOR_PRODUCTION_STAGES.map((s,i)=><button type="button" key={s.id} data-creator-stage={s.id} disabled={Boolean(selectionError)} aria-pressed={s.id===stage.id} onClick={()=>chooseCheck(s.id,s.defaultGateId)}><small>{String(i+1).padStart(2,'0')}</small><strong>{s.label}</strong></button>)}</nav>
+  <nav className="creator-production-stages" aria-label="全剧制作模块">{CREATOR_PRODUCTION_STAGES.map((s,i)=><button type="button" key={s.id} data-creator-stage={s.id} disabled={Boolean(selectionError)} aria-pressed={s.id===stage.id} onClick={()=>chooseCheck(s.id,s.defaultGateId)}><small>{String(i+1).padStart(2,'0')}</small><strong>{s.label}</strong></button>)}</nav>
+  {shotProductionMode&&<nav className="shot-production-step-navigation" aria-label="镜头制作六步骤">{checkButtons(regularChecks)}</nav>}
   <nav className="preparation-episode-chips" aria-label="制作上下文分集">{episodes.map(ep=><button type="button" key={ep.episodeUid} data-preparation-episode={ep.episodeUid} aria-pressed={ep.episodeUid===episode?.episodeUid} onClick={()=>chooseEpisode(ep.episodeUid)}><b>{ep.displayId}</b><span>{ep.title}</span></button>)}{state&&!episodes.length&&<p>尚未建立候选分集。正式制作范围仍待确定。</p>}</nav>
   {error&&<p className="workflow-warning" role="alert">{error}<button type="button" onClick={()=>setAttempt(v=>v+1)}>重新读取</button></p>}
   {configurationError&&<p className="workflow-warning" role="alert">{configurationError}。没有使用另一套检查模板。</p>}
@@ -119,10 +120,10 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
    {!episodeMode&&<aside className="preparation-scene-directory"><nav aria-label="制作上下文场次">{episodeScenes.map(s=><button type="button" key={s.sceneId} data-preparation-scene={s.sceneId} aria-current={scene?.sceneId===s.sceneId?'location':undefined} onClick={()=>chooseScene(s.sceneId)}><b>{s.displayId}</b><span>{(!state?.stale?state?.candidate?.scenes.find(c=>c.id===s.sceneId)?.title:undefined)||String(s.sourceSummary?.title||'场准备')}</span></button>)}</nav>{state&&!episodeScenes.length&&<p>此集尚无可定位的场准备。</p>}</aside>}
    <main className="preparation-stage-workspace" data-creator-scope={navigationScopeType}>
     <header className="preparation-stage-heading"><div><small>{navigationScopeType==='PROJECT'?'全剧导出检查':episodeMode?episode?.displayId:[episode?.displayId,scene?.displayId].filter(Boolean).join(' / ')}</small><h2>{selectionError?'制作上下文需核对':episodeMode?(episode?.title||'选择分集'):source?.title||String(scene?.sourceSummary?.title||'选择本场')}</h2><p>{stage.purpose}</p></div>{scene&&typeof state?.content?.basis.candidateRevisionId==='string'&&<a href={'?view=story&storyMode=logic&narrativeLevel=scene&episodePlanRevision='+encodeURIComponent(state.content.basis.candidateRevisionId)+'&episode='+encodeURIComponent(scene.episodeUid)+'&scene='+encodeURIComponent(scene.sceneId)}>阅读对应正文 →</a>}</header>
-    {!!regularChecks.length&&<details className="preparation-stage-checks"><summary>阶段检查{gate&&canonicalScopeType!=='PROJECT'?' · '+gate.label:''}</summary>{checkButtons(regularChecks)}</details>}
+    {!shotProductionMode&&!!regularChecks.length&&<details className="preparation-stage-checks"><summary>阶段检查{gate&&canonicalScopeType!=='PROJECT'?' · '+gate.label:''}</summary>{checkButtons(regularChecks)}</details>}
     {!!exportChecks.length&&<details className="preparation-stage-checks preparation-export-checks" open={navigationScopeType==='PROJECT'}><summary>全剧导出检查 · 独立全剧范围</summary><p>当前分集仅用于阅读导航。这些检查覆盖全剧，不作为所选分集的通过或采用。</p>{checkButtons(exportChecks)}</details>}
     {!selectionError&&!stageError&&(stageContext&&renderStage?renderStage(stageContext):<section className="workflow-empty"><h3>本上下文尚未建立正式制作对象</h3><p>{!gate||!canonicalScopeType?'检查配置或精确作用域尚未可读，不能从阶段名称推断正式范围。':'准备稿不解锁制作。需由已采用正文和精确输入建立对应正式对象后，才能判断缺项及推进动作。'}</p><small>正式范围与进度：待确定（UNKNOWN）</small></section>)}
-    {breakdownMode&&scene&&!scene.navigationOnly&&!stageError&&<section className="preparation-authoring-basis" aria-label="本场镜头拆解准备依据">
+    {breakdownMode&&scene&&!scene.navigationOnly&&!stageError&&<section className="preparation-authoring-basis" aria-label="本场镜头设计准备依据">
      <header><h3>本场制作准备稿</h3><p>{state?.stale?'依据待重核，只读保留原稿。':'围绕镜头表达整理本场意图与素材要求；未创建正式镜头或生成授权。'}</p></header>
      <nav className="preparation-section-tabs" aria-label="本场准备内容">{tabs.map(t=><button type="button" key={t.id} aria-pressed={section===t.id} onClick={()=>setSection(t.id)}>{t.label}</button>)}</nav>
      {editing?<><PreparationEditor value={draft} onChange={setDraft}/><div className="preparation-editor-actions"><button type="button" disabled={busy||state?.stale} onClick={()=>void submit('save')}>保存本场准备稿</button><button type="button" onClick={()=>setEditing(false)}>取消编辑</button></div></>:<div className="preparation-reading-surface">{section==='INTENT'&&<details className="preparation-source"><summary>本场正文摘要依据</summary><PreparationValue value={scene.sourceSummary}/></details>}{currentTab.keys.map(key=>Object.hasOwn(scene.preparation,key)&&<section className="preparation-field" key={key}><h4>{labels[key]||key}</h4><PreparationValue value={scene.preparation[key]}/></section>)}{editable&&<button type="button" className="preparation-edit-button" onClick={()=>{setDraft(structuredClone(scene.preparation));setEditing(true);}}>编辑本场准备内容</button>}</div>}

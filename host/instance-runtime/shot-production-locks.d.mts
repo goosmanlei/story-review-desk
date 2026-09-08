@@ -1,0 +1,10 @@
+export type ShotProductionMember={workItemId:string;slot:string;familyId:string;versionId:string;sha256:string};
+export type ShotProductionFinding={outcome:'PASS';note:string};
+export type ShotProductionEvidence={schemaVersion:'1.0';kind:'INPUT_LOCK'|'KEYFRAME'|'SHOT_LOCK';productionPlanId:string;productionRevisionId:string;inputHash?:string;shotId?:string;timingHash?:string;visualHash?:string;overlayHash?:string;boundaryHash?:string;strategyHash?:string;members?:ShotProductionMember[];observedImageIds?:string[];jointFindings?:Partial<Record<'continuity'|'composition',ShotProductionFinding>>;observedVideoIds?:string[];videoFindings?:Partial<Record<'action'|'camera'|'consistency'|'timing'|'adjacency',ShotProductionFinding>>;keyframeSetId?:string;adjacentShotIds?:string[]};
+export type ShotProductionEvidenceTemplate={required:boolean;evidence:ShotProductionEvidence|null;requiredObservedImageIds?:string[];requiredObservedVideoIds?:string[];requiresJointReview?:boolean;observationMedia?:Array<{versionId:string;familyId:string;sha256:string;kind:'IMAGE'|'VIDEO';mediaUrl:string}>};
+export const SHOT_LOCK_NS:Record<string,string>;
+export function validateShotProductionEvidence(value:unknown):ShotProductionEvidence|null;
+export function buildShotProductionManifest(tx:unknown,input:{workItemId:string;api?:unknown;model?:unknown;state?:unknown}):Promise<Record<string,unknown>>;
+export function readShotProductionReviewEvidence(tx:unknown,options:{workItemId:string;versionId?:string;api?:unknown;model?:unknown;state?:unknown}):Promise<ShotProductionEvidenceTemplate>;
+export function recordShotProductionReview(tx:unknown,options:{reviewEventId:string;api?:unknown;model?:unknown;state?:unknown}):Promise<unknown>;
+export function applyShotProductionLocksProjection<T>(tx:unknown,model:T,options?:{state?:unknown;view?:unknown}):Promise<T&{shotInputLocks:Record<string,unknown>[];shotKeyframeSets:Record<string,unknown>[];shotLocks:Record<string,unknown>[]} >;

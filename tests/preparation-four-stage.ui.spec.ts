@@ -32,12 +32,12 @@ const episode=(page:Page,id:string)=>page.locator('[data-preparation-episode="'+
 async function context(page:Page){await expect(page.locator('[data-stage-context]')).toBeVisible();return JSON.parse(await page.locator('[data-stage-context]').innerText());}
 function clean(f:Awaited<ReturnType<typeof fixture>>){expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);expect(f.writes).toEqual([]);}
 
-test('四阶段并列与永久集chips取代五阶段平铺，前三阶段共用左场右工作区',async({page})=>{
- const f=await fixture(page);await expect(page.getByRole('navigation',{name:'全剧制作四阶段'}).getByRole('button')).toHaveText(['01镜头拆解','02镜头生成','03场景剪辑','04分集成片']);
+test('三模块与镜头制作六子步骤保持永久集场上下文',async({page})=>{
+ const f=await fixture(page);await expect(page.getByRole('navigation',{name:'全剧制作模块'}).getByRole('button')).toHaveText(['01镜头制作','02场景剪辑','03分集成片']);
  await episode(page,'episode-second').click();await expect(page.locator('[data-preparation-scene="scene-second"]')).toHaveAttribute('aria-current','location');await expect(page.getByText('第二集独有作用',{exact:true})).toBeVisible();
- await stage(page,'SHOT_GENERATION').click();expect(await context(page)).toMatchObject({creatorStageId:'SHOT_GENERATION',navigationScopeType:'SCENE',scopeType:'SHOT',episodeUid:'episode-second',sceneId:'scene-second',gateId:'STORYBOARD_DIALOGUE'});
+ await page.locator('[data-production-check=STORYBOARD_DIALOGUE]').click();expect(await context(page)).toMatchObject({creatorStageId:'SHOT_PRODUCTION',navigationScopeType:'SCENE',scopeType:'SHOT',episodeUid:'episode-second',sceneId:'scene-second',gateId:'STORYBOARD_DIALOGUE'});
  await expect(page.locator('.production-flow-phases,.production-flow-gates,.production-context-bar,.production-context-readiness')).toHaveCount(0);
- const checks=page.locator('.preparation-stage-checks').first();await expect(checks).not.toHaveAttribute('open','');await checks.locator('summary').click();await expect(checks.locator('[data-production-check]')).toHaveCount(5);
+ const checks=page.getByRole('navigation',{name:'镜头制作六步骤'});await expect(checks.locator('[data-production-check]')).toHaveCount(6);const stepBounds=await checks.boundingBox(),episodeBounds=await page.getByRole('navigation',{name:'制作上下文分集'}).boundingBox();expect(stepBounds!.y+stepBounds!.height).toBeLessThanOrEqual(episodeBounds!.y);
  const [left,right]=await Promise.all([page.locator('.preparation-scene-directory').boundingBox(),page.locator('.preparation-stage-workspace').boundingBox()]);expect(right!.x).toBeGreaterThan(left!.x+left!.width);clean(f);
 });
 
@@ -54,13 +54,13 @@ test('分集成片全宽不携带场，导出检查保持PROJECT而非所选EPIS
 
 test('精确检查深链跨原phase保留真实SHOT与SCENE作用域',async({page})=>{
  const f=await fixture(page,{query:'productionGate=keyframes&preparationEpisode=episode-second&preparationScene=scene-second'});
- expect(await context(page)).toMatchObject({creatorStageId:'SHOT_GENERATION',scopeType:'SHOT',navigationScopeType:'SCENE',gateId:'KEYFRAMES',sceneId:'scene-second'});
- await page.locator('.preparation-stage-checks > summary').click();await page.locator('[data-production-check="ANIMATIC_LOCK"]').click();
- expect(await context(page)).toMatchObject({creatorStageId:'SHOT_GENERATION',scopeType:'SCENE',navigationScopeType:'SCENE',gateId:'ANIMATIC_LOCK',phaseId:'PREVIS'});clean(f);
+ expect(await context(page)).toMatchObject({creatorStageId:'SHOT_PRODUCTION',scopeType:'SHOT',navigationScopeType:'SCENE',gateId:'KEYFRAMES',sceneId:'scene-second'});
+ await page.locator('[data-production-check="ANIMATIC_LOCK"]').click();
+ expect(await context(page)).toMatchObject({creatorStageId:'SHOT_PRODUCTION',scopeType:'SCENE',navigationScopeType:'SCENE',gateId:'ANIMATIC_LOCK',phaseId:'PREVIS'});clean(f);
 });
 
 test('错误stage与gate组合失败关闭，不借首检查或首场打开正式工作区',async({page})=>{
- const f=await fixture(page,{query:'creatorStage=shot-breakdown&productionGate=keyframes&preparationEpisode=episode-second&preparationScene=scene-second'});
+ const f=await fixture(page,{query:'creatorStage=scene-edit&productionGate=keyframes&preparationEpisode=episode-second&preparationScene=scene-second'});
  await expect(page.getByRole('alert')).toContainText('制作阶段与检查不匹配');await expect(page.locator('[data-stage-context]')).toHaveCount(0);await expect(page.getByRole('button',{name:'编辑本场准备内容',exact:true})).toHaveCount(0);expect(new URL(page.url()).searchParams.get('productionGate')).toBe('keyframes');clean(f);
 });
 
@@ -81,7 +81,7 @@ test('作者保存继续精确CAS且冻结对白/绑定/授权保留，冲突不
  await page.waitForTimeout(250);expect(f.writes).toHaveLength(1);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
 });
 
-test('390px只读四阶段和两级目录可达无横向溢出，历史评论原scope不改',async({page})=>{
+test('390px只读三模块六步骤和两级目录可达无横向溢出，历史评论原scope不改',async({page})=>{
  await page.setViewportSize({width:390,height:844});const f=await fixture(page,{readonly:true});await expect(page.getByText('原修订的精确场意见',{exact:false})).toBeVisible();await expect(page.getByText('记录于原准备稿修订 · 保留历史依据',{exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'编辑本场准备内容',exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'保存准备意见',exact:true})).toHaveCount(0);expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);
  await stage(page,'EPISODE_EDIT').focus();await page.keyboard.press('Enter');expect(await context(page)).toMatchObject({navigationScopeType:'EPISODE'});expect(await page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390);clean(f);
@@ -89,6 +89,6 @@ test('390px只读四阶段和两级目录可达无横向溢出，历史评论原
 
 test('阶段按钮不能把明确错误的永久场静默换成首场',async({page})=>{
  const f=await fixture(page,{query:'creatorStage=shot-breakdown&preparationEpisode=episode-second&preparationScene=scene-missing'});
- await expect(page.getByRole('alert')).toContainText('永久场身份不在当前准备稿中');await expect(stage(page,'SHOT_GENERATION')).toBeDisabled();await expect(page.locator('[data-stage-context]')).toHaveCount(0);expect(new URL(page.url()).searchParams.get('preparationScene')).toBe('scene-missing');
- await episode(page,'episode-second').click();await expect(page.getByRole('alert')).toHaveCount(0);await expect(stage(page,'SHOT_GENERATION')).toBeEnabled();expect(await context(page)).toMatchObject({episodeUid:'episode-second',sceneId:'scene-second'});clean(f);
+ await expect(page.getByRole('alert')).toContainText('永久场身份不在当前准备稿中');await expect(stage(page,'SHOT_PRODUCTION')).toBeDisabled();await expect(page.locator('[data-stage-context]')).toHaveCount(0);expect(new URL(page.url()).searchParams.get('preparationScene')).toBe('scene-missing');
+ await episode(page,'episode-second').click();await expect(page.getByRole('alert')).toHaveCount(0);await expect(stage(page,'SHOT_PRODUCTION')).toBeEnabled();expect(await context(page)).toMatchObject({episodeUid:'episode-second',sceneId:'scene-second'});clean(f);
 });

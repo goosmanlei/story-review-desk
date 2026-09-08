@@ -1,0 +1,9 @@
+export type AnimaticMedia={familyId:string;versionId:string;sha256:string};
+export type AnimaticTimeline={schemaVersion:'1.0';sceneId:string;shotPlanRevisionId:string;fps:24;width:1920;height:1080;shots:Array<{shotId:string;durationFrames:number;panels:Array<{id:string;media:AnimaticMedia;startFrame:number;endFrame:number;motion:'STILL'|'PUSH_IN'|'PULL_OUT'}>;beats:Array<{id:string;frame:number;label:string}>}>;audio:Array<{id:string;anchorShotId:string;offsetFrames:number;sourceInFrames:number;durationFrames:number;media:AnimaticMedia;role:'DIALOGUE'|'MUSIC'|'SFX';temporary:boolean;volume:number;muted:boolean;lineIds:string[]}>;cards:Array<{id:string;shotId:string;startFrame:number;endFrame:number;textLines:string[];fontMedia:AnimaticMedia;style:{fontSize:number;x:number;y:number;color:string};specRevisionId:string;specHash:string}>};
+export function validateAnimaticTimeline(input:unknown,basis?:{sceneId?:string;shotPlanRevisionId?:string;shotIds?:string[]}):AnimaticTimeline;
+export function animaticHash(value:unknown):string;
+export function selectAnimaticLockForShot(locks:any[],scope:{sceneId:string;shotPlanRevisionId:string;shotId:string}):{lock:any;slice:any}|null;
+export function animaticSchedule(value:AnimaticTimeline):{shots:Array<{shotId:string;startFrame:number;endFrame:number}>;totalFrames:number};
+export function animaticMediaBindings(value:AnimaticTimeline):AnimaticMedia[];
+export function animaticHashes(value:AnimaticTimeline):{timelineHash:string;totalFrames:number;shotSlices:Array<{shotId:string;durationFrames:number;timingHash:string;visualHash:string;overlayHash:string;boundaryHash:string}>};
+export function animaticImpact(previous:AnimaticTimeline|null,next:AnimaticTimeline):Array<{shotId:string;timingChanged:boolean;visualChanged:boolean;overlayChanged:boolean;boundaryChanged:boolean}>;

@@ -1,0 +1,12 @@
+import type {AnimaticTimeline,AnimaticMedia} from './animatic-model.mjs';
+export type AnimaticState={requiredCards:Array<{requirementId:string;specRevisionId:string;specHash:string;textLines:string[]}>;sceneId:string;releaseId:string;revisionId:string|null;timelineRevisionId:string|null;content:AnimaticTimeline|null;hashes:{timelineHash:string;totalFrames:number}|null;impact:Array<{shotId:string;timingChanged:boolean;visualChanged:boolean;overlayChanged:boolean;boundaryChanged:boolean}>;stale:boolean;blockers:string[];availableMedia:Array<AnimaticMedia&{label:string;kind:string;path:string;mediaUrl:string}>;jobs:Array<{jobId:string;status:string;timelineRevisionId:string;error?:string;result?:{mediaUrl:string;versionId:string;sha256:string}|null}>;lock:{timelineRevisionId:string;reviewEventId:string}|null;basis:{sceneId:string;shotPlanRevisionId:string;shots:Array<{shotId:string;title:string;durationFrames:number}>}|null};
+export const ANIMATIC_NS:Record<string,string>;
+export function readAnimaticState(tx:unknown,options:{sceneId:string;model?:unknown}):Promise<AnimaticState>;
+export function readPublicAnimaticState(model:unknown,sceneId:string):AnimaticState&{readOnly:true};
+export function saveAnimaticTimeline(tx:unknown,input:unknown,options?:{model?:unknown}):Promise<unknown>;
+export function enqueueAnimaticRender(tx:unknown,input:unknown,options?:{model?:unknown}):Promise<unknown>;
+export function applyAnimaticProjection<T>(tx:unknown,model:T):Promise<T>;
+export function animaticCandidateMatchesJob(candidate:Record<string,unknown>,jobs:unknown):boolean;
+export function lockAnimaticTimeline(tx:unknown,input:{sceneId:string;timelineRevisionId:string;renderJobId:string;reviewEventId:string}):Promise<unknown>;
+export function assertAnimaticInputs(tx:unknown,content:AnimaticTimeline,model:unknown,options?:{render?:boolean}):Promise<unknown>;
+export function reconcileAnimaticLocks(model:unknown,state:unknown):Array<Record<string,unknown>>;

@@ -6,6 +6,7 @@ import { projectIdFor } from './instance-profile';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {EntityMaterialCatalog,MaterialReviewPoints} from './entity-material-catalog';
+import {ProductionMaterialCatalog} from './production-material-catalog';
 import {MaterialProgressBadge} from './material-appearance';
 import {
   episodePlanIsCurrent,
@@ -895,7 +896,20 @@ function AssetReviewForm({
   </section>;
 }
 
-export function MaterialProductionCenter({ model: summaryModel, snapshotId, catalogLoading=false, stateProjection: liveProjection, viewState, onViewStateChange, onOpenStoryScene, onOpenConsumer }: Props) {
+export function MaterialProductionCenter(props:Props) {
+  const [catalog,setCatalog]=useState<'basic'|'production'>('basic');
+  useEffect(()=>{const read=()=>setCatalog(new URL(window.location.href).searchParams.get('materialCatalog')==='production'?'production':'basic');read();window.addEventListener('popstate',read);window.addEventListener('review:material-catalog-location',read);return()=>{window.removeEventListener('popstate',read);window.removeEventListener('review:material-catalog-location',read);};},[]);
+  function selectCatalog(next:'basic'|'production'){
+    const url=new URL(window.location.href);url.searchParams.set('materialCatalog',next);
+    for(const key of ['material','family','version','asset','materialPanel','productionMaterial','productionMaterialVersion'])url.searchParams.delete(key);
+    window.history.replaceState(window.history.state,'',url);setCatalog(next);
+    props.onViewStateChange({...props.viewState,requirementId:null,familyId:null,versionId:null});
+    window.dispatchEvent(new Event('review:material-catalog-location'));
+  }
+  return <><div className="material-catalog-tabs" role="tablist" aria-label="素材目录视图"><button type="button" role="tab" aria-selected={catalog==='basic'} onClick={()=>selectCatalog('basic')}>基础素材</button><button type="button" role="tab" aria-selected={catalog==='production'} onClick={()=>selectCatalog('production')}>制作过程素材</button></div>{catalog==='production'?<ProductionMaterialCatalog model={props.model} snapshotId={props.snapshotId}/>:<BasicMaterialProductionCenter {...props}/>}</>;
+}
+
+function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalogLoading=false, stateProjection: liveProjection, viewState, onViewStateChange, onOpenStoryScene, onOpenConsumer }: Props) {
   const [detail, setDetail] = useState<{id:string;snapshotId:string;page:PagedProductionPayload['page']} | null>(null);
   const [detailFailure,setDetailFailure]=useState<{id:string;snapshotId?:string;attempt:number;message:string}|null>(null);
   const [detailAttempt, setDetailAttempt] = useState(0);

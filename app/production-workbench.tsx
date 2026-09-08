@@ -1,5 +1,10 @@
 'use client';
+import {ShotProductionWorkspace} from './shot-production-workspace';
+import {AnimaticWorkspace} from './animatic-workspace';
 import {EpisodeProductionEntry} from './episode-production-entry';
+import {ShotProductionRecipeEditor} from './shot-production-recipe-editor';
+import {ShotProductionEvidencePanel,useShotProductionEvidence} from './shot-production-review-evidence';
+import type {ShotProductionEvidence} from '../host/instance-runtime/shot-production-locks.mjs';
 
 import {useInstanceProfile} from './instance-context';
 import type { ReviewSpec, ConfigurationBinding, Configuration, ConfigurationRef } from '../host/instance-runtime/configuration-model.mjs';
@@ -1676,8 +1681,9 @@ async function mediaToken(versionId: string) {
 export function useOriginalMediaUrl(version?: V7AssetVersion | null) {
   const { hostedReadOnly } = useRuntimeMode();
   const [resolved, setResolved] = useState<{ versionId: string; url: string | null; error: string }>({ versionId: '', url: null, error: '' });
-  const eligible = Boolean(!hostedReadOnly && version && version.outputState === 'PRESENT' && version.path && version.sha256);
-  const directUrl = version?.mediaUrl || (version?.mediaToken ? '/api/v8/media/' + version.mediaToken : null);
+  const publicOriginal=typeof version?.mediaUrl==='string'&&/^\/media\/animatic\/[A-Za-z0-9_-]+\.(?:png|jpe?g|webp|gif|avif|wav|mp3|m4a|flac|ogg|aac|mp4|webm|mov|json|txt)$/.test(version.mediaUrl)?version.mediaUrl:null;
+  const eligible = Boolean((!hostedReadOnly||publicOriginal) && version && version.outputState === 'PRESENT' && version.path && version.sha256);
+  const directUrl = hostedReadOnly?publicOriginal:version?.mediaUrl || (version?.mediaToken ? '/api/v8/media/' + version.mediaToken : null);
   useEffect(() => {
     let alive = true;
     if (!version || !eligible || directUrl) return;
@@ -1851,13 +1857,14 @@ type Draft = {
   note: string;
   findings: Record<string, DraftFinding>;
   rightsConfirmed: boolean;
+  shotProductionEvidence?: ShotProductionEvidence;
   revision: RevisionInstructions;
   updatedAt?: string;
 };
 type StoredDraft = Partial<Draft> & { decision?: LegacyReviewDecision | '' };
 
 function draftSignature(value: Draft) {
-  return JSON.stringify({ action: value.action, note: value.note, findings: value.findings, rightsConfirmed: value.rightsConfirmed, revision: value.revision });
+  return JSON.stringify({ action: value.action, note: value.note, findings: value.findings, rightsConfirmed: value.rightsConfirmed, shotProductionEvidence: value.shotProductionEvidence, revision: value.revision });
 }
 
 function storyboardReviewTarget(model: ProductionModel, shot: V7Shot) {
@@ -1917,6 +1924,7 @@ function normalizeDraft(value: StoredDraft | null | undefined, criteria: Criteri
     action: value?.action || legacyAction,
     note: value?.note || '',
     rightsConfirmed: Boolean(value?.rightsConfirmed),
+    shotProductionEvidence: value?.shotProductionEvidence?.schemaVersion==='1.0'?value.shotProductionEvidence:undefined,
     revision: {
       preserve: value?.revision?.preserve || '',
       change: value?.revision?.change || '',
@@ -1997,6 +2005,8 @@ function ReviewDraft({ model, shot, workPackage, item, version, reviewContext, m
         : [projectIdFor(model), '全剧终审'];
   const storageKey = [item.id, version?.id || 'NO_VERSION', version?.sha256 || 'NO_SHA', contextHash, item.reviewSpec?.hash || 'LEGACY'].join(':');
   const criteriaKey = `${item.reviewSpec?.hash || 'LEGACY'}:${criteria.map((criterion) => criterion.id).join('|')}`;
+  const productionEvidenceRequired=Boolean((item as V7WorkItem&{shotProductionPlanId?:string}).shotProductionPlanId&&['SHOT_INPUT_LOCK','START_FRAME','INTERMEDIATE_FRAME','END_FRAME','LOCKED_SHOT'].includes(item.deliverableKey||''));
+  const productionEvidence=useShotProductionEvidence({required:productionEvidenceRequired&&!hostedReadOnly,workItemId:item.id,versionId:version?.id,snapshotId:operations.snapshotId||model.snapshotManifest?.snapshotId||'',revisionKey:operations.operationalRevision||'',value:draft.shotProductionEvidence,onChange:value=>setDraft(current=>({...current,shotProductionEvidence:value}))});
   const fileReady = version?.outputState === 'PRESENT' && Boolean(version.sha256);
   const rightsUnknown = version?.projectRightsGate === 'UNKNOWN';
   const rightsBlocked = version?.projectRightsGate === 'BLOCKED';
@@ -2171,6 +2181,7 @@ function ReviewDraft({ model, shot, workPackage, item, version, reviewContext, m
       setMessage(!mediaVerified ? '请先确认已加载与SHA一致的原件，再提交裁决' : '正式提交需要已生成且带哈希的版本、最新运行快照和明确裁决');
       return;
     }
+    if (draft.action==='APPROVE_AND_RELEASE'&&productionEvidenceRequired&&!productionEvidence.ready){setMessage('请先完成当前精确制作输入及媒体观察验收');return;}
     if (draft.action !== 'APPROVE_AND_RELEASE' && !draft.note.trim()) {
       setMessage(actionLabel(draft.action) + '必须填写可执行的具体原因');
       return;
@@ -2224,7 +2235,8 @@ function ReviewDraft({ model, shot, workPackage, item, version, reviewContext, m
         change: instructionLines(draft.revision.change),
         mustNotRegress: instructionLines(draft.revision.mustNotRegress),
       } : null;
-      const semanticKey = await stableDigest(JSON.stringify({ snapshotId, reviewContextRef: reviewContext.id, productionPhaseId, productionGateId, scopeType: reviewContext.scopeType, scopeId: reviewContext.scopeId, workPackageId: workPackage.id, workItemId: item.id, versionId: version.id, versionSha256: version.sha256, contextHash, criterionFindings, action: draft.action, revisionInstructions, rightsUnknownConfirmation, note: draft.note.trim() }));
+      const shotProductionEvidence=productionEvidenceRequired?draft.shotProductionEvidence:undefined;
+      const semanticKey = await stableDigest(JSON.stringify({ snapshotId, shotProductionEvidence, reviewContextRef: reviewContext.id, productionPhaseId, productionGateId, scopeType: reviewContext.scopeType, scopeId: reviewContext.scopeId, workPackageId: workPackage.id, workItemId: item.id, versionId: version.id, versionSha256: version.sha256, contextHash, criterionFindings, action: draft.action, revisionInstructions, rightsUnknownConfirmation, note: draft.note.trim() }));
       const response = await fetch('/api/v8/reviews', {
         method: 'POST',
         headers: {
@@ -2249,6 +2261,7 @@ function ReviewDraft({ model, shot, workPackage, item, version, reviewContext, m
           subjectId: item.id,
           contextHash,
           criterionFindings,
+          ...(shotProductionEvidence?{shotProductionEvidence}:{}),
           action: draft.action,
           revisionInstructions,
           rightsUnknownConfirmation,
@@ -2342,13 +2355,18 @@ function ReviewDraft({ model, shot, workPackage, item, version, reviewContext, m
       const finding = draft.findings[criterion.id] || { verdict: '', note: '' };
       return <article key={criterion.id} className={(finding.verdict ? `is-${finding.verdict.toLowerCase()} ` : '') + (activeCriterionIndex === criterionIndex ? 'is-keyboard-active' : '')} onClick={() => setActiveCriterionIndex(criterionIndex)}><div><small>{visibleText(criterion.label)}</small><p>{visibleText(criterion.question)}</p></div><div className="creator-verdict-buttons" role="radiogroup" aria-label={visibleText(criterion.label) + '结论'}>{([['PASS', 'P · 通过'], ['FAIL', 'F · 有问题'], ['NA', 'N · 不适用']] as const).filter(([v])=>v!=='NA' || !("allowNA" in criterion) || criterion.allowNA).map(([verdict, label]) => <button type="button" role="radio" aria-checked={finding.verdict === verdict} disabled={!draftable || submitting} className={finding.verdict === verdict ? 'active' : ''} key={verdict} onClick={() => { setDraft((value) => ({ ...value, findings: { ...value.findings, [criterion.id]: { ...(value.findings[criterion.id] || { verdict: '', note: '' }), verdict: value.findings[criterion.id]?.verdict === verdict ? '' : verdict } } })); setActiveCriterionIndex(Math.min(criteria.length - 1, criterionIndex + 1)); }}>{label}</button>)}</div><label><span>该项说明</span><input disabled={immutableDecisionApplied} value={finding.note} onFocus={() => { setActiveCriterionIndex(criterionIndex); assistantDrafts.activateField(`criterion:${criterion.id}`); }} onChange={(event) => setDraft((value) => ({ ...value, findings: { ...value.findings, [criterion.id]: { ...finding, note: event.target.value } } }))} placeholder={finding.verdict === 'FAIL' ? '写明可执行的问题与修改方向' : '可选'} /></label></article>;
     })}</div>
+    {productionEvidenceRequired&&<>
+      {productionEvidence.loading&&<p role="status">正在核对本次制作验收的精确输入…</p>}
+      {productionEvidence.error&&<p role="alert">{productionEvidence.error}<button type="button" onClick={productionEvidence.refresh}>重读验收依据</button></p>}
+      {productionEvidence.template&&<ShotProductionEvidencePanel template={productionEvidence.template} evidence={draft.shotProductionEvidence} onChange={value=>setDraft(current=>({...current,shotProductionEvidence:value}))} disabled={hostedReadOnly||!draftable||submitting} versions={model.assetVersions}/>}
+    </>}
     <fieldset className="v8-decision-choice"><legend>选择正式结论</legend><div className="v6-decision-buttons" role="radiogroup" aria-label="正式审阅结论">{(['APPROVE_AND_RELEASE', 'REQUEST_REVISION', 'DO_NOT_USE'] as const).map((action) => <button type="button" role="radio" aria-checked={draft.action === action} disabled={!draftable || submitting || (action === 'APPROVE_AND_RELEASE' && rightsBlocked)} className={draft.action === action ? 'active' : ''} key={action} onClick={() => setDraft((value) => ({ ...value, action: value.action === action ? '' : action }))}><b>{actionLabel(action)}</b><small>{action === 'APPROVE_AND_RELEASE' ? '采用当前版本并重算下游资格' : action === 'REQUEST_REVISION' ? '保留当前版本并进入返修' : '保留审计，禁止下游使用'}</small></button>)}</div></fieldset>
     {draft.action === 'REQUEST_REVISION' && <fieldset className="creator-revision-brief"><legend>下一版返修约束</legend><p>每行一条。下一轮执行应保留已正确部分，只修改明确问题，并防止已经通过的要素退化。</p><label><span>必须保留</span><textarea disabled={immutableDecisionApplied} value={draft.revision.preserve} onFocus={() => assistantDrafts.activateField('preserve')} onChange={(event) => setDraft((value) => ({ ...value, revision: { ...value.revision, preserve: event.target.value } }))} placeholder={'例如：保留当前低机位与人物身份\n保留已正确的南门方向'} /></label><label className="is-required"><span>必须修改</span><textarea disabled={immutableDecisionApplied} value={draft.revision.change} onFocus={() => assistantDrafts.activateField('change')} onChange={(event) => setDraft((value) => ({ ...value, revision: { ...value.revision, change: event.target.value } }))} placeholder={'至少一条，例如：修正右手六指\n把醋缸内首级压到液面以下'} /></label><label><span>禁止退化</span><textarea disabled={immutableDecisionApplied} value={draft.revision.mustNotRegress} onFocus={() => assistantDrafts.activateField('mustNotRegress')} onChange={(event) => setDraft((value) => ({ ...value, revision: { ...value.revision, mustNotRegress: event.target.value } }))} placeholder={'例如：不得镜像门向\n不得更换人物面孔或服装'} /></label></fieldset>}
     {rightsUnknown && draft.action === 'APPROVE_AND_RELEASE' && <label className="v8-rights-confirmation"><input disabled={immutableDecisionApplied} type="checkbox" checked={draft.rightsConfirmed} onChange={(event) => setDraft((value) => ({ ...value, rightsConfirmed: event.target.checked }))} /><span><b>仅限本项目内部生产确认</b>我确认当前依据足以让该版本进入本剧项目内部下游；原始权利事实仍保留UNKNOWN，商业发行法律核验并未完成。</span></label>}
     {rightsBlocked && <p className="v8-inline-error">该版本存在不可豁免的项目内权利阻断；只能退回修改或禁止使用，不能通过并放行。</p>}
     <label><span>总体备注{draft.action && (draft.action !== 'APPROVE_AND_RELEASE' || rightsUnknown) ? '（必填）' : '（通过可选）'}</span><textarea disabled={immutableDecisionApplied} value={draft.note} onFocus={() => assistantDrafts.activateField('note')} onChange={(event) => setDraft((value) => ({ ...value, note: event.target.value }))} placeholder={rightsUnknown && draft.action === 'APPROVE_AND_RELEASE' ? '写明仅限本项目内部使用的依据；商业发行法律核验仍为UNKNOWN…' : '说明总体结论、关键问题与下一版修改方向…'} /></label>
     <button type="button" disabled={hostedReadOnly || !assistantDrafts.hasTargets} onClick={assistantDrafts.askAboutActiveDraft}>结合这条意见问助手</button>
-    <footer><button disabled={hostedReadOnly || !reviewable || !draft.action || !allCriteriaDecided || !failedCriteriaExplained || !decisionConsistent || !revisionActionable || submitting || (draft.action !== 'APPROVE_AND_RELEASE' && !draft.note.trim()) || (draft.action === 'APPROVE_AND_RELEASE' && rightsUnknown && (!draft.rightsConfirmed || !draft.note.trim())) || (draft.action === 'APPROVE_AND_RELEASE' && rightsBlocked)} onClick={() => void submitReview()}>{submitting ? '提交中…' : hostedReadOnly ? '远端镜像不可正式提交' : `确认提交：${actionLabel(draft.action)}`}</button><button onClick={saveDraft}>立即保存</button><button onClick={() => void copyDraft()}>复制记录</button><button className="quiet" onClick={clearDraft}>清除草稿</button>{clearedDraft && <button className="quiet" onClick={undoClearDraft}>撤销清除</button>}</footer>
+    <footer><button disabled={hostedReadOnly || !reviewable || !draft.action || !allCriteriaDecided || !failedCriteriaExplained || !decisionConsistent || !revisionActionable || submitting || (draft.action==='APPROVE_AND_RELEASE'&&productionEvidenceRequired&&!productionEvidence.ready) || (draft.action !== 'APPROVE_AND_RELEASE' && !draft.note.trim()) || (draft.action === 'APPROVE_AND_RELEASE' && rightsUnknown && (!draft.rightsConfirmed || !draft.note.trim())) || (draft.action === 'APPROVE_AND_RELEASE' && rightsBlocked)} onClick={() => void submitReview()}>{submitting ? '提交中…' : hostedReadOnly ? '远端镜像不可正式提交' : `确认提交：${actionLabel(draft.action)}`}</button><button onClick={saveDraft}>立即保存</button><button onClick={() => void copyDraft()}>复制记录</button><button className="quiet" onClick={clearDraft}>清除草稿</button>{clearedDraft && <button className="quiet" onClick={undoClearDraft}>撤销清除</button>}</footer>
     <p role="status" aria-live="polite" aria-atomic="true">{message + (draft.updatedAt ? ' · ' + draft.updatedAt : '')}{operations.operationalRevision ? ' · ' + operations.operationalRevision : ''}</p>
     {storageError && <p className="v8-inline-error">本机草稿存储不可用。离开前请先“复制记录”；导航时会再次尝试保存并明确提示风险。</p>}
     {submittedEventId && <section className="v8-review-receipt" role="status" aria-live="polite"><div><small>REVIEW APPLIED</small><b>{`${reviewContext.scopeId} 正式审阅已应用`}</b><p>{submittedEventId}</p>{item.pipelineStageCode === 'P07' && !submittedNextShot && <span>应用后的投影中没有其他可提交镜头；可返回队列查看等待关系。</span>}</div><div>{submittedNextShot && submittedNextTarget?.workPackage && submittedNextTarget.item && <button onClick={() => { refreshSubmittedProjection(); onNavigate({ shotId: submittedNextShot.id, workPackageId: submittedNextTarget.workPackage?.id, workItemId: submittedNextTarget.item?.id, familyId: submittedNextTarget.family?.id || null, versionId: submittedNextTarget.version?.id || null }); }}>{`审下一张可提交：${submittedNextShot.id}`}</button>}{onOpenReviewOverview && <button onClick={() => { refreshSubmittedProjection(); onOpenReviewOverview(); }}>返回校准镜头队列</button>}<button className="quiet" onClick={() => { refreshSubmittedProjection(); setSubmittedEventId(null); setSubmittedNextShotId(null); operations.refresh(); }}>{isShotScope ? '留在本镜' : '留在当前范围'}</button></div></section>}
@@ -2389,7 +2407,7 @@ function ScopedReviewContextPanel({ context, evidenceCatalog }: { context: Scope
   const audience = context.judgment?.audienceTakeaway || unknownClaim(`${context.scopeId}结束时观众所得为UNKNOWN。`);
   const question = context.judgment?.reviewQuestion || unknownClaim(`${context.scopeId}的正式判断问题为UNKNOWN。`);
   return <section className="v8-review-context creator-scoped-review-context">
-    <header><div><small>{`${context.scopeType} REVIEW CONTEXT`}</small><h3>{`${context.scopeId} · ${scopeLabelText}正式审阅边界`}</h3><p>当前页面中的镜头只用于浏览组成部分，不构成这一审阅对象的身份。</p></div><span className={context.reviewable && context.semanticStatus !== 'UNKNOWN_STALE_BINDING' ? 'tone-good' : 'tone-danger'}>{context.semanticStatus === 'AUTHORED_DRAFT' ? '已显式创作 · 待审定' : context.semanticStatus === 'ASSEMBLED_WITH_UNKNOWNS' ? '来源已组装 · 含UNKNOWN' : '绑定已失效 · 禁止提交'}</span></header>
+    <header><div><small>{`${context.scopeType} REVIEW CONTEXT`}</small><h3>{`${context.scopeId} · ${scopeLabelText}正式审阅边界`}</h3><p>{context.scopeType==='SHOT'?'正式审阅绑定本镜永久身份、当前制作工作项与精确版本。':'当前页面中的镜头用于浏览组成部分；正式裁决绑定此处完整范围。'}</p></div><span className={context.reviewable && context.semanticStatus !== 'UNKNOWN_STALE_BINDING' ? 'tone-good' : 'tone-danger'}>{context.semanticStatus === 'AUTHORED_DRAFT' ? '已显式创作 · 待审定' : context.semanticStatus === 'ASSEMBLED_WITH_UNKNOWNS' ? '来源已组装 · 含UNKNOWN' : '绑定已失效 · 禁止提交'}</span></header>
     <div className="v8-context-position"><b>{context.scopeType}</b><span>{context.scopeId}</span><i>→</i><b>正式对象</b><span>{scopeLabelText}</span><i>→</i><b>提交资格</b><span>{context.reviewable ? '可在候选齐备后审阅' : '当前不可审阅'}</span></div>
     <div className="v8-context-grid"><ClaimBlock label={`${scopeLabelText}叙事目的`} claim={purpose} catalog={evidenceCatalog} /><ClaimBlock label={`${scopeLabelText}观众所得`} claim={audience} catalog={evidenceCatalog} /><ClaimBlock label={`${scopeLabelText}核心判断问题`} claim={question} catalog={evidenceCatalog} /></div>
     {context.scene && <details open className="v8-context-scene"><summary>整场剧情、空间与连续性</summary><div><article><b>场次与剧本片段</b><p>{visibleText([context.scene.id, context.scene.slugline, context.scene.scriptExcerpt].filter(Boolean).join(' · '))}</p></article><article><b>人物路线</b><p>{visibleText(context.scene.route || 'UNKNOWN')}</p></article><article><b>道具与状态</b><p>{visibleText(context.scene.keyPropsAndState || 'UNKNOWN')}</p></article><article><b>连续性要求</b><p>{visibleText(context.scene.continuity || 'UNKNOWN')}</p></article></div></details>}
@@ -2397,6 +2415,12 @@ function ScopedReviewContextPanel({ context, evidenceCatalog }: { context: Scope
     {context.project && <div className="creator-project-gates"><article><b>覆盖范围</b><p>{`${context.project.episodeIds?.length || 0}集 · ${context.project.sceneCount ?? 'UNKNOWN'}场 · 镜头分母按当前ShotPlanSet锁定`}</p></article><article><b>商业发行合规</b><p>{visibleText(context.project.commercialReleaseCompliance || 'UNKNOWN')}</p></article><article><b>边界</b><p>项目内采用不等于对外发行或法律核验完成。</p></article></div>}
     <footer><span>范围上下文哈希</span><code>{context.contextHash}</code><EvidenceDetails refs={context.sourceRefs || []} catalog={evidenceCatalog} label="查看范围上下文依据内容" /></footer>
   </section>;
+}
+
+function TextReviewOriginal({url,sha256,onReady,onError}:{url:string;sha256:string;onReady:()=>void;onError:()=>void}){
+  const [content,setContent]=useState('正在读取文本原件…');const callbacks=useRef({onReady,onError});callbacks.current={onReady,onError};
+  useEffect(()=>{let active=true;fetch(url,{cache:'no-store'}).then(async response=>{if(!response.ok)throw Error('文本原件无法读取');const bytes=await response.arrayBuffer();const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(n=>n.toString(16).padStart(2,'0')).join('');if(hash!==sha256)throw Error('文本原件与登记SHA不一致');if(active){setContent(new TextDecoder().decode(bytes));callbacks.current.onReady();}}).catch(error=>{if(active){setContent(error instanceof Error?error.message:'文本原件无法核验');callbacks.current.onError();}});return()=>{active=false;};},[url,sha256]);
+  return <pre className="production-text-original" aria-label="SHA核验的文本原件">{content}</pre>;
 }
 
 function ReviewTargetPanel({
@@ -2445,9 +2469,9 @@ function ReviewTargetPanel({
   const isInspectingDependency = Boolean(inspectedFamily && inspectedFamily.id !== family?.id);
   const projectedItem = withReviewProjection(item, effectiveReview);
   const isShotScope = reviewContext?.scopeType === 'SHOT';
-  const scopePurpose = isShotScope ? shot.reviewContext.shot.purpose.text : reviewContext?.judgment?.purpose?.text || `${reviewContext?.scopeId || item.scopeId}的独立叙事目的为UNKNOWN。`;
-  const scopeAudience = isShotScope ? shot.reviewContext.shot.audienceTakeaway.text : reviewContext?.judgment?.audienceTakeaway?.text || `${reviewContext?.scopeId || item.scopeId}结束时观众所得为UNKNOWN。`;
-  const scopeQuestion = isShotScope ? shot.reviewContext.shot.reviewQuestion.text : reviewContext?.judgment?.reviewQuestion?.text || `${reviewContext?.scopeId || item.scopeId}的正式判断问题为UNKNOWN。`;
+  const scopePurpose = (isShotScope ? shot.reviewContext?.shot?.purpose?.text : null) || reviewContext?.judgment?.purpose?.text || `${reviewContext?.scopeId || item.scopeId}的独立叙事目的为UNKNOWN。`;
+  const scopeAudience = (isShotScope ? shot.reviewContext?.shot?.audienceTakeaway?.text : null) || reviewContext?.judgment?.audienceTakeaway?.text || `${reviewContext?.scopeId || item.scopeId}结束时观众所得为UNKNOWN。`;
+  const scopeQuestion = (isShotScope ? shot.reviewContext?.shot?.reviewQuestion?.text : null) || reviewContext?.judgment?.reviewQuestion?.text || `${reviewContext?.scopeId || item.scopeId}的正式判断问题为UNKNOWN。`;
   const scopeNoun = isShotScope ? '本镜' : reviewContext?.scopeType === 'SCENE' ? '整场' : reviewContext?.scopeType === 'EPISODE' ? '整集' : reviewContext?.scopeType === 'PROJECT' ? '全剧' : '当前范围';
   return <section className="v8-review-target">
     <header><div><small>FORMAL DECISION TARGET · OUTPUT ONLY</small><h3>{visibleText(family?.label || workItemLabel(item))}</h3><p>{version ? `${visibleText(version.label)} · ${version.sha256 ? 'SHA ' + version.sha256 : '无文件哈希'}` : '计划定义 · 尚无可审文件'}</p></div><StatusHeadline record={projectedItem} compact /></header>
@@ -2460,7 +2484,8 @@ function ReviewTargetPanel({
         {originalMediaUrl && kind === 'VIDEO' && <video controls preload="metadata" src={originalMediaUrl} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持视频播放。</video>}
         {!originalMediaUrl && version?.outputState === 'PRESENT' && version.path && version.sha256 && !originalMediaError && <div><b>正在解析与登记SHA一致的原件…</b><p>{visibleText(version.path)}</p></div>}
         {(!version || version.outputState !== 'PRESENT' || !version.path || !version.sha256) && <div><b>当前没有可正式裁决的原件</b><p>{visibleText(version?.path || recipe?.output.path || '固定输出路径未登记')}</p><small>仍可核对执行配方和依赖，但不能提交结果裁决。</small></div>}
-        {originalMediaUrl && kind === 'UNKNOWN' && <div><b>该文件需在原件窗口核对</b><p>{visibleText(version?.path)}</p><small>当前类型不支持内嵌预览。</small></div>}
+        {originalMediaUrl && kind === 'UNKNOWN' && /\.(json|txt|md)$/i.test(version?.path||'') && version?.sha256 && <TextReviewOriginal url={originalMediaUrl} sha256={version.sha256} onReady={onMediaReady} onError={onMediaError}/> }
+        {originalMediaUrl && kind === 'UNKNOWN' && !/\.(json|txt|md)$/i.test(version?.path||'') && <div><b>该文件需在原件窗口核对</b><p>{visibleText(version?.path)}</p><small>当前类型不支持内嵌预览。</small></div>}
       </div></figure>
       {showComparison && comparisonVersion && <figure><figcaption><b>B · 只作比较证据</b><span>{visibleText(comparisonVersion.label)}</span></figcaption><div className="v8-review-media is-evidence">
         {comparisonMediaUrl && comparisonKind === 'IMAGE' && <img src={comparisonMediaUrl} alt={visibleText(comparisonFamily?.label || comparisonVersion.id) + '比较证据'} />}
@@ -2730,7 +2755,8 @@ function RecipeExecutionControls({ recipe, context }: { recipe: ExecutionRecipe;
   </section>;
 }
 
-export function RecipePanel({ definitionRef, recipe, error, title = '制作依据：附件、Prompt、模型与固定输出', executionContext, defaultOpen = false, reviewerView = false, expanded = false, compact = false }: { definitionRef?: string | null; recipe: ExecutionRecipe | null; error?: string; title?: string; executionContext?: ExecutionUiContext; defaultOpen?: boolean; reviewerView?: boolean; expanded?: boolean; compact?: boolean }) {
+export function RecipePanel({ definitionRef, recipe, error, title = '制作依据：附件、Prompt、模型与固定输出', executionContext, authorWorkItemId, defaultOpen = false, reviewerView = false, expanded = false, compact = false }: { definitionRef?: string | null; recipe: ExecutionRecipe | null; error?: string; title?: string; executionContext?: ExecutionUiContext; authorWorkItemId?:string; defaultOpen?: boolean; reviewerView?: boolean; expanded?: boolean; compact?: boolean }) {
+  const {hostedReadOnly}=useRuntimeMode();
   const packageJson = recipe ? JSON.stringify(reviewerView ? reviewerCallPackage(recipe) : recipeCallPackage(recipe), null, 2) : '';
   const packageMarkdown = recipe ? recipeCallPackageMarkdown(recipe, reviewerView) : '';
   const completePrompt = recipe ? completeProductionPrompt(recipe) : '';
@@ -2751,7 +2777,7 @@ export function RecipePanel({ definitionRef, recipe, error, title = '制作依�
     {!reviewerView && recipe.reviewSpec && <><p><b>执行定义附带的审阅提示</b><span>{visibleText(recipe.reviewSpec.question)}</span></p><ul>{recipe.reviewSpec.criteria.map((criterion) => <li key={criterion}>{visibleText(criterion)}</li>)}</ul></>}
     {executionContext && <RecipeExecutionControls key={`${recipe.id}:${recipe.currentRevisionId}:${executionContext.workItemId}:${executionContext.configurationBinding?.configurationHash || "LEGACY"}`} recipe={recipe} context={executionContext} />}
     {!reviewerView && <details><summary>查看执行脚本全文（语义化展示）</summary><pre>{visibleText(recipe.rawSourceBlock)}</pre></details>}
-  </div>}</Wrapper>;
+  </div>}{authorWorkItemId&&!reviewerView&&<ShotProductionRecipeEditor key={authorWorkItemId} workItemId={authorWorkItemId} definitionRef={definitionRef} readOnly={hostedReadOnly}/>}</Wrapper>;
 }
 
 type WorkbenchSurface = 'PRE_OUTPUT' | 'REVIEW' | 'REVIEW_BLOCKED' | 'REVISION' | 'RELEASED' | 'FORBIDDEN';
@@ -2799,9 +2825,9 @@ function ScopeStageContext({ model, shot, workPackage, item, task, reviewContext
     const currentGroupShotIds = group?.shotIds.filter((id) => currentShotIds.has(id)) || [];
     return <>
       {group && <section className="creator-scope-summary"><header><small>连续性组位置</small><h3>{visibleText(group.label)}</h3></header><div><p><b>当前镜头范围</b>{currentGroupShotIds.length ? currentGroupShotIds.join(' · ') : 'UNKNOWN · 历史关系见页面底部只读证据区'}</p><p><b>空间坐标</b>{[...group.locs, ...group.zones, ...group.cameras].join(' · ') || 'UNKNOWN'}</p><p><b>状态变化</b>{visibleText(group.stateFrom)} → {visibleText(group.stateTo)}</p><p><b>冻结点</b>{visibleText(group.freezeFrom)} → {visibleText(group.freezeTo)}</p></div></section>}
-      {reviewContext && reviewContext.scopeType !== 'SHOT'
+      {reviewContext && (reviewContext.scopeType !== 'SHOT'||!shot.reviewContext)
         ? <ScopedReviewContextPanel context={reviewContext} evidenceCatalog={model.reviewContextCatalog?.evidenceCatalog ?? {}} />
-        : <ReviewContextPanel context={shot.reviewContext} evidenceCatalog={model.reviewContextCatalog?.evidenceCatalog ?? {}} />}
+        : shot.reviewContext?<ReviewContextPanel context={shot.reviewContext} evidenceCatalog={model.reviewContextCatalog?.evidenceCatalog ?? {}} />:<p>本镜审阅上下文尚未就绪。</p>}
     </>;
   }
 
@@ -2944,12 +2970,36 @@ function WorkPackageDetail({ model, shot, workPackage, context, operations, onNa
         <section className="creator-info-layers" aria-label="制作与审计信息分层">
           <details open={surface !== 'REVIEW' && surface !== 'RELEASED' && surface !== 'FORBIDDEN'}><summary><b>制作信息</b><span>依赖、版本、完整调用包、授权与结果登记</span></summary>
             <section className="v6-required-assets"><header><div><small>OUTPUT + INPUT + COMPANION PLAN</small><h3>{workItemLabel(selectedItem) + '的输出与依赖'}</h3><p>{surface === 'REVIEW' ? '选择依赖或历史版本只建立B侧比较；正式裁决始终绑定主输出当前版本。' : '主输出、输入依赖和伴随计划交付物分开显示；没有文件与SHA时不进入正式审阅。输入素材可回到“素材管理”的统一素材信息卡。'}</p></div><span>{allowedFamilies.length}</span></header>{allowedFamilies.length ? <div>{outputFamily && <AssetMiniCard model={model} family={outputFamily} selected={selectedFamily?.id === outputFamily.id} role="主输出" onSelect={selectFamily} />}{inputFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="输入依赖" onSelect={selectFamily} onOpenMaterial={onOpenMaterial} />)}{companionFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="伴随计划交付物（未闭环）" onSelect={selectFamily} />)}</div> : <p className="v6-empty-note">本工作项没有独立资产记录。</p>}</section>
-            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
+            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel authorWorkItemId={selectedItem.id.startsWith('SP-WI-')&&selectedItem.activeInCurrentProduction===true&&['STORYBOARD','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'].includes(selectedItem.deliverableKey||'')?selectedItem.id:undefined} definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
           </details>
           <details open={surface === 'RELEASED' || surface === 'FORBIDDEN'}><summary><b>审计信息</b><span>生命周期、技术坐标、SHA与解锁条件</span></summary><div className="v7-outcome-grid"><article><span>解决什么问题</span><p>{visibleText(step.purpose)}</p></article><article><span>重点审阅什么</span><p>{visibleText(step.reviewFocus)}</p></article><article><span>产出什么</span><p>{visibleText(step.output)}</p></article><article><span>通过后解锁</span><p>{visibleText(step.unlock)}</p></article></div><UnifiedStatusPanel record={{ ...(activeItem || withReviewProjection(selectedItem, operations.effective)), applicabilityState: workPackage.applicabilityState }} /><div className="v6-stage-evidence"><p><b>当前对象</b><code>{publicRef(selectedItem.id)}<br />{stageDisplay(selectedItem.pipelineStageCode)}</code></p><p><b>执行配方／来源定位</b>{publicRef(selectedItem.executionDefinitionRef) || '不适用'}<br />{visibleText(selectedItem.sourceRef)}</p></div></details>
         </section>
       </>}
     </section>;
+}
+
+/** The process-material catalogue opens the same work-product information card.
+ * Selection is validated before mounting; it never creates a second review or
+ * adoption target and a navigation anchor never changes the package scope. */
+export function ProductionWorkItemInformationCard({model,workItemId,familyId,versionId,onNavigate,onOpenMaterial}:{
+  model:ProductionModel;workItemId:string;familyId:string;versionId?:string|null;onNavigate:ProductionNavigate;onOpenMaterial?:(requirementId:string)=>void;
+}) {
+  const item=model.workItems.find(row=>row.id===workItemId);
+  const packages=model.workPackages.filter(row=>row.workItemRefs.includes(workItemId));
+  const workPackage=packages.length===1?packages[0]:null;
+  const family=model.assetFamilies.find(row=>row.id===familyId);
+  const bound=Boolean(item&&[item.outputAssetRef,...item.inputAssetRefs,...(item.additionalOutputAssetRefs||[])].includes(familyId));
+  const validVersion=!versionId||Boolean(family&&(family.versionRefs.includes(versionId)&&model.assetVersions.some(row=>row.id===versionId&&row.familyId===familyId)||(family.expectedOutputRefs||[]).includes(versionId)&&(model.expectedOutputs||[]).some(row=>row.id===versionId&&row.familyId===familyId)));
+  const shot=workPackage?model.shots.find(row=>row.id===(workPackage.scopeType==='SHOT'?workPackage.scopeId:item?.shotId)&&workPackage.shotIds.includes(row.id))||model.shots.find(row=>workPackage.shotIds.includes(row.id)):null;
+  const reviewContext=item&&workPackage?workProductReviewContext(model,item,workPackage):null;
+  const outputFamily=item?model.assetFamilies.find(row=>row.id===item.outputAssetRef):null;
+  const decisionVersion=currentVersion(model,outputFamily);
+  const operations=useReviewOperations(item&&bound&&validVersion?item.id:null,decisionVersion?.id||null,reviewContext?.contextHash||null);
+  if(!item||!workPackage||!shot||!family||!bound||!validVersion||!model.workflowSteps.some(step=>step.id===workPackage.stepId))return <section role="alert" className="material-info-card">制作素材的工作项、范围或版本绑定无法精确核验，已停止默认回退。请重新读取目录。</section>;
+  const context:ProductionContext={shotId:shot.id,workPackageId:workPackage.id,workItemId:item.id,familyId:family.id,versionId:versionId||family.currentVersionId||family.currentExpectedOutputId||null,phaseId:item.phaseId,gateId:item.gateId};
+  return <article className="material-info-card production-material-info-card" data-family-id={family.id} data-work-item-id={item.id}>
+    <WorkPackageDetail model={model} shot={shot} workPackage={workPackage} context={context} operations={operations} onNavigate={onNavigate} onOpenMaterial={onOpenMaterial}/>
+  </article>;
 }
 
 function CalibrationJourneyBar({ model, shot, projection, onNavigate }: { model: ProductionModel; shot: V7Shot; projection?: OperationalStateProjection | null; onNavigate: ProductionNavigate }) {
@@ -3455,6 +3505,8 @@ function FullProductionWorkbenchReady({ model, context, onNavigate, onOpenMateri
 
   return <section className="production-v2-full-workbench is-contextual creator-production-stage-body" data-navigation-scope={navigationScopeType} data-formal-scope={activeGate.scopeType}>
     {activeGate.id==='SHOT_PLAN_INPUT_LOCK' && contextualEpisodeUid && contextualSceneId && <EpisodeProductionEntry episodeUid={contextualEpisodeUid} sceneId={contextualSceneId}/>}
+    {contextualSceneId && activeGate.id==='ANIMATIC_LOCK' && <AnimaticWorkspace sceneId={contextualSceneId}/>}
+    {contextualSceneId && ['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK'].includes(activeGate.id) && <ShotProductionWorkspace sceneId={contextualSceneId} episodeUid={contextualEpisodeUid} gateId={activeGate.id} shotId={context.shotId||undefined}/>}
     {(declaredCurrentShotSpecs !== currentShotSpecs || declaredCurrentP07 !== currentP07) && <p role="alert">正式镜头或粗分镜声明数量与精确绑定不一致，当前分母保持 UNKNOWN，请核查输入。</p>}
 
     {dataWindow && (dataWindow.loading || dataWindow.hasMore || dataWindow.error || dataWindow.total === null) && <section className={`paged-data-window ${dataWindow.error ? 'has-error' : ''}`} role={dataWindow.error ? 'alert' : 'status'}>

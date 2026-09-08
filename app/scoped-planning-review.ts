@@ -27,3 +27,11 @@ export const SHOT_DESIGN_CRITERIA_V2 = [
   ['boundary','设计采用边界','是否只采用镜头设计和范围；实际素材、权利、LOC/STATE/ZONE/CAM/FREEZE、Prompt及生成授权仍由后续输入锁独立检查？'],
 ] as const;
 export type ScopedPlanningKind=keyof typeof SCOPED_PLANNING_CRITERIA;
+
+// New candidates freeze this complete V3 standard; V1/V2 wording stays intact.
+export const SHOT_DESIGN_CRITERIA_V3 = [
+  ...SHOT_DESIGN_CRITERIA_V2,
+  ['design-spec','镜头规格','景别、机位、运镜、构图、人物表演和光线是否明确，未知是否如实标注？'],
+  ['estimated-timing','设计估时','估时是否为可复核的设计建议，尚未冒充实际对白时长或 Animatic 锁时？'],
+  ['frame-strategy','关键帧策略','单首帧、首尾帧或多关键帧策略及依据是否合理，首尾状态和本场相邻镜头是否准确？'],
+] as const;
