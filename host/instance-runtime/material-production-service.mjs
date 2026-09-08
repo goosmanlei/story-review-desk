@@ -49,13 +49,14 @@ async function context(tx,requirementId,api){
  productionId(requirementId);const view=await tx.readView();if(!view.snapshot)fail('当前实例没有已发布资料');
  const model=view.snapshot.productionModel,current=await currentGraph(tx,view),graph=current.graph,state=operationalState(view,api);
  const legacy=await legacyAudioRevisionContext(tx,{view,model,graph,current,state,requirementId,api});if(legacy)return legacy;
- const rows=(model.materialRequirements||[]).filter(r=>r.id===requirementId),requirement=rows[0],demand=graph.requirements.find(r=>r.id===requirementId),representation=graph.representations.find(r=>r.id===demand?.representationId);
+ const rows=(model.materialRequirements||[]).filter(r=>r.id===requirementId);let requirement=rows[0];const demand=graph.requirements.find(r=>r.id===requirementId),representation=graph.representations.find(r=>r.id===demand?.representationId);
  if(rows.length!==1||requirement?.requirementClass!=='REQUIRED'||requirement.sourceKind!=='DOMAIN_GRAPH'||!demand||!representation||requirement.scopeRole==='EVIDENCE_ONLY'||requirement.activeInCurrentProduction===false)fail('仅支持当前领域图谱中的正式必需素材需求');
  if(requirement.representationRef!==representation.id||requirement.requirementHash!==domainHash({demand,representation})||!same(requirement.assetFamilyRefs||[],representation.assetFamilyIds))fail('需求与表现的精确基线不一致');
  const head=await tx.getAux('domain-graph','current');if(head?.revisionId!==current.revisionId||head.sha256!==model.domainGraphRef?.sha256||head.sha256!==domainHash(graph))fail('领域图谱发布基线或当前头已变化');
  const entity=graph.entities.find(e=>e.id===representation.entityId),domainState=representation.stateId?graph.states.find(s=>s.id===representation.stateId&&s.entityId===entity?.id):null;
  const blockers=[],base={view,model,state,graph,requirement,demand,representation,api};
  const revision=await materialProductionRevisionContext(tx,base);
+ if(revision){requirement=revision.requirement;base.requirement=requirement;}
  if(!revision&&((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId)))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
  if(revision)blockers.push(...revision.blockers);
  if(!['IMAGE','AUDIO'].includes(demand.mediaType))blockers.push('首次建档当前仅支持图片或声音基础素材');

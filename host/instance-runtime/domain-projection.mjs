@@ -58,6 +58,16 @@ export function projectDomainGraph(snapshot,graph,reference,{initialization=null
  const priorRepresentationPolicies=model.domainRepresentationPolicyBindings||{};const representationPolicies=Object.fromEntries(graph.representations.filter(r=>['IDENTITY','VOICE_IDENTITY'].includes(r.type)).map(r=>[r.id,preserveReferencePolicies&&priorRepresentationPolicies[r.id]||structuredClone((config?.domain||defaultDomainConfiguration()).referencePolicies.find(p=>p.id===(r.type==='VOICE_IDENTITY'?'VOICE_MASTER':'CLEAN_MASTER'))||null)]));model.domainRepresentationPolicyBindings=representationPolicies;
 
  const introduced=graph.requirements.map(demand=>{const representation=graph.representations.find(r=>r.id===demand.representationId);const category=config?.taxonomy?.categories?.find(c=>[c.id,c.label].includes(demand.category)||c.types?.some(t=>[t.id,t.label].includes(demand.category)));const type=category?.types?.find(t=>[t.id,t.label].includes(demand.category));const row={id:demand.id,title:demand.title,requirementClass:'REQUIRED',sourceKind:'DOMAIN_GRAPH',domainManaged:true,representationRef:demand.representationId,entityRef:representation.entityId,stateRef:representation.stateId,mediaType:demand.mediaType,mediaKind:['IMAGE','VIDEO'].includes(demand.mediaType)?'VISUAL':demand.mediaType,category:demand.category,businessCategoryPrimary:category?.label||demand.category,businessCategorySecondary:type?.label||demand.category,assetFamilyRefs:[...representation.assetFamilyIds],sceneIds:demand.scope.filter(s=>s.scopeType==='SCENE').map(s=>s.scopeId),episodeUids:demand.scope.filter(s=>s.scopeType==='EPISODE').map(s=>s.scopeId),episodeIds:[],shotIds:demand.scope.filter(s=>s.scopeType==='SHOT').map(s=>s.scopeId),scopeBindings:demand.scope,reuseScope:demand.reuseScope,acceptanceCriteria:demand.acceptanceCriteria,sourceBindings:demand.evidence,sourceRef:'domain-graph:'+reference.revisionId+'#'+demand.id,productionLane:type?.productionLane||'MANUAL_OR_ASSISTED',acceptanceProfile:representation.type,formalAdoptionPerformed:false};return{...row,requirementHash:domainHash({demand,representation})};});
+ // These are host-authored production links, not domain authoring fields.
+ // Preserve explicit values (including conflicts) only while the requirement's
+ // exact demand/representation hash is unchanged; the revision guard still
+ // rejects changed ownership. Missing historic links are resolved from their
+ // immutable plan source by the material workspace, never invented here.
+ for(const requirement of introduced){
+  const prior=priorRequirements.find(row=>row.id===requirement.id&&row.sourceKind==='DOMAIN_GRAPH');
+  if(prior?.requirementHash!==requirement.requirementHash)continue;
+  for(const key of ['materialWorkItemRef','plannedAssetFamilyId'])if(Object.hasOwn(prior,key))requirement[key]=structuredClone(prior[key]);
+ }
  model.materialRequirements=[...priorRequirements.filter(r=>r.sourceKind!=='DOMAIN_GRAPH'),...introduced];if(config&&introduced.length){const bindings=bindConfiguration(result,config);for(const demand of introduced){const prior=priorRequirements.find(r=>r.id===demand.id);demand.configurationBinding=prior?.configurationBinding||bindings['material:'+demand.id];demand.reviewSpec=demand.configurationBinding?.reviewSpec;}}
 
  if(initialization)model.initialization={...initialization,formalAdoptionPerformed:false};

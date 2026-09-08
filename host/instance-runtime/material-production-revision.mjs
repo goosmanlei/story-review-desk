@@ -3,6 +3,7 @@ import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
 import {inspectExecutionDefinitionHash,executionDefinitionHash} from './execution-definition-hash.mjs';
+import {resolveMaterialProductionRequirement} from './material-production-requirement.mjs';
 import {domainReferenceEligibility} from './domain-reference.mjs';
 
 const fail=message=>{throw Object.assign(new Error(message),{code:'DOMAIN_CONFLICT'});};
@@ -18,7 +19,8 @@ export async function materialProductionRevisionContext(tx,c){
  const plans=(c.model.materialProductionPlans||[]).filter(p=>p.requirementId===c.requirement.id);
  if(plans.length!==1)return null;
  const plan=plans[0],family=owned(c.model.assetFamilies,plan.familyId,'基础素材族'),work=owned(c.model.materialWorkItems,plan.workItemId,'基础素材工作项');
- if(!same(c.representation.assetFamilyIds,[family.id])||family.materialProductionPlanId!==plan.id||work.materialProductionPlanId!==plan.id||family.ownerRef!==work.id||work.outputAssetRef!==family.id||work.requirementRef!==c.requirement.id||c.requirement.materialWorkItemRef!==work.id||c.requirement.plannedAssetFamilyId!==family.id||work.requirementHash!==c.requirement.requirementHash||plan.requirementHash!==c.requirement.requirementHash)fail('当前需求已偏离首次制作建档闭包，不能借返修迁移归属');
+ const requirement=await resolveMaterialProductionRequirement(tx,{...c,plan,family,work});
+ if(!same(c.representation.assetFamilyIds,[family.id])||family.materialProductionPlanId!==plan.id||work.materialProductionPlanId!==plan.id||family.ownerRef!==work.id||work.outputAssetRef!==family.id||work.requirementRef!==c.requirement.id||requirement.materialWorkItemRef!==work.id||requirement.plannedAssetFamilyId!==family.id||work.requirementHash!==c.requirement.requirementHash||plan.requirementHash!==c.requirement.requirementHash)fail('当前需求已偏离首次制作建档闭包，不能借返修迁移归属');
  const definition=owned(c.view.recipes.executionDefinitions,work.executionDefinitionRef,'当前基础素材调用定义'),output=owned(c.model.expectedOutputs,family.currentExpectedOutputId,'当前预期产物');
  if(definition.materialProductionPlanId!==plan.id||definition.workItemRef!==work.id||definition.materialRequirementHash!==c.requirement.requirementHash||definition.output?.expectedOutputRef!==output.id||definition.output?.assetFamilyRef!==family.id||definition.output?.path!==output.targetPath||output.familyId!==family.id||output.materialProductionPlanId!==plan.id||output.executionDefinitionRef!==definition.id||!family.expectedOutputRefs.includes(output.id)||!inspectExecutionDefinitionHash(definition).valid)fail('当前素材调用定义、预期产物或固定哈希不一致');
  const sourceRow=definition.id===plan.definitionId?plan:(c.model.materialProductionRecipeRevisions||[]).find(r=>r.definitionId===definition.id&&r.materialProductionPlanId===plan.id);
@@ -74,7 +76,7 @@ export async function materialProductionRevisionContext(tx,c){
  const reviews=(events.review||[]).filter(e=>e.applicationStatus==='APPLIED'&&e.effect==='APPLIED'&&e.subjectType==='ASSET'&&e.familyId===family.id);
  const adoptedId=c.state.assetFamiliesById?.[family.id]?.currentVersionId||null,adopted=adoptedId?c.state.assetVersionsById[adoptedId]:null,meta=await tx.getMetadata();
  const revisionBasis={materialProductionPlanId:plan.id,familyId:family.id,workItemId:work.id,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),parentVersionId:parent?.versionId||null,parentVersionSha256:parent?.sha256||null,parentCandidate:eventBinding(parent),parentReview:eventBinding(latest(reviews.filter(e=>e.versionId===parent?.versionId&&e.versionSha256===parent?.sha256))),familyReviewHead:eventBinding(latest(reviews)),adoptedVersion:adopted?{versionId:adopted.id,sha256:adopted.sha256}:null,requestHeads:requests.map(eventBinding),runHeads:runs.map(eventBinding),plannedVersionLabel,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch,...(failedAttempt?{failedAttempt}: {})};
- return {plan,family,work,definition,output,parent,media,revisionBasis,plannedVersionLabel,blockers:[...new Set(blockers)]};
+ return {plan,requirement,family,work,definition,output,parent,media,revisionBasis,plannedVersionLabel,blockers:[...new Set(blockers)]};
 }
 
 export async function compileMaterialProductionRevision(tx,c,content,draftRevisionId,registeredInput){

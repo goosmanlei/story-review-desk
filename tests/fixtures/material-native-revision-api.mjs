@@ -78,5 +78,5 @@ export async function apiFixture(t){
    ...(action==='APPROVE_AND_RELEASE'?{rightsUnknownConfirmation:{confirmed:true,scope:'PROJECT_INTERNAL_ONLY',basis:'Test-authored synthetic PNG fixture; no commercial or real production claim.'}}:{}),note:'Isolated real-repository formal review protocol test.'});
   assert.equal(response.status,201,JSON.stringify(response.body));assert.equal(response.body.event.applicationStatus,'APPLIED');assert.equal(response.body.event.effect,'APPLIED');return response.body.event;
  };
- return {...f,store,adapter,materialPost,workspace,saveBody,provision,beginRun,register,review,evidence,post,runs,versions,reviews,externalCalls:()=>externalCalls};
+ return {...f,store,adapter,materialPost,workspace,saveBody,provision,beginRun,register,review,evidence,post,requests,runs,versions,reviews,externalCalls:()=>externalCalls};
 }
