@@ -96,6 +96,12 @@ export type Configuration = {
     assistantEnabled: boolean;
     preferredCollaborator: string;
     defaultExecutor: string;
+    codexBridge: {
+      autoStart: boolean;
+      model: string;
+      maxConcurrent: number;
+      idleTtlSeconds: number;
+    };
   };
   presentation: {
     storyTitle: string;
@@ -121,6 +127,9 @@ export type ConfigurationBinding = {
   createdBy?: string;
 };
 export function defaultConfiguration(profile?: unknown): Configuration;
+export const DEFAULT_CODEX_BRIDGE_CONFIGURATION: Readonly<Configuration["collaboration"]["codexBridge"]>;
+export function normalizeCodexBridgeConfiguration(value?: unknown): Configuration["collaboration"]["codexBridge"];
+export function normalizeConfiguration(config: Configuration): Configuration;
 export function validateConfiguration(
   config: unknown,
   previous?: Configuration,

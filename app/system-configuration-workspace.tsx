@@ -894,6 +894,71 @@ export function SystemConfigurationWorkspace() {
                   c.presentation.trialLabel = v;
                 }),
               )}
+              <h3>Codex Bridge 服务</h3>
+              <div className="configuration-options">
+                <label>
+                  <input
+                    disabled={readonly}
+                    type="checkbox"
+                    checked={config.collaboration.codexBridge.autoStart}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.collaboration.codexBridge.autoStart = e.target.checked;
+                      })
+                    }
+                  />
+                  随本地审阅台自动启动 Bridge
+                </label>
+              </div>
+              <div className="configuration-form-grid">
+                {text(
+                  "Bridge 模型",
+                  config.collaboration.codexBridge.model,
+                  (value) =>
+                    edit((c) => {
+                      c.collaboration.codexBridge.model = value.trim();
+                    }),
+                  false,
+                  "只填写模型标识；Bridge 继续使用宿主机 Codex CLI 登录态。",
+                )}
+                <label className="configuration-field">
+                  最大并发会话数
+                  <input
+                    aria-label="最大并发会话数"
+                    disabled={readonly}
+                    type="number"
+                    min={1}
+                    max={8}
+                    step={1}
+                    value={config.collaboration.codexBridge.maxConcurrent}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.collaboration.codexBridge.maxConcurrent = Number(e.target.value);
+                      })
+                    }
+                  />
+                  <small className="configuration-field-help">允许 1 到 8 个隔离会话同时处理。</small>
+                </label>
+                <label className="configuration-field">
+                  空闲回收时间（秒）
+                  <input
+                    aria-label="空闲回收时间（秒）"
+                    disabled={readonly}
+                    type="number"
+                    min={0}
+                    max={86400}
+                    step={1}
+                    value={config.collaboration.codexBridge.idleTtlSeconds}
+                    onChange={(e) =>
+                      edit((c) => {
+                        c.collaboration.codexBridge.idleTtlSeconds = Number(e.target.value);
+                      })
+                    }
+                  />
+                  <small className="configuration-field-help">0 表示会话完成后立即回收；最大 86400 秒。</small>
+                </label>
+              </div>
+              <p>配置发布后，在下次启动本地实例时生效。Bridge 启动失败只会让助手显示未连接，不阻断审阅台；服务启动本身不会发起模型请求。</p>
               <p>执行方式只是默认选择，每次执行仍需绑定具体对象与授权。</p>
             </>
           )}

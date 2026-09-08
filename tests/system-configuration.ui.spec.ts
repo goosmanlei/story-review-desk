@@ -31,6 +31,11 @@ test("five configuration sections publish a preview while preserving existing ob
     await expect(page.locator(".configuration-editor")).toBeVisible();
   }
   await expect(page.getByText('版本与维护',{exact:true})).toHaveCount(0);
+  await page.getByRole('button',{name:'AI与界面',exact:true}).click();
+  await expect(page.getByText('Codex Bridge 服务',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('Bridge 模型',{exact:true})).toBeVisible();
+  await expect(page.getByLabel('最大并发会话数',{exact:true})).toHaveValue('5');
+  await expect(page.getByLabel('空闲回收时间（秒）',{exact:true})).toHaveValue('600');
   await page.getByRole('button',{name:'项目与画面',exact:true}).click();
   await page.getByLabel("审阅台名称", { exact: true }).fill(title);
   await page.getByRole("button", { name: "保存草稿", exact: true }).click();

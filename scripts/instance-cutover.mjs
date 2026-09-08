@@ -28,7 +28,7 @@ async function processes(){return (await runMaintenanceProcess('ps',['-axo','pid
 async function hostProcesses(root){
  const rows=await processes(),selected=new Map();
  for(const row of rows)if(row.command.includes(root)&&/instance-(?:bridge|maintenance-worker)\.mjs|codex_conversation_bridge\.py/.test(row.command))selected.set(row.pid,row);
- for(const name of ['runtime/assistant/public/.bridge.lock','runtime/locks/maintenance-host.json']){try{const content=(await regular(path.join(root,name))).toString(),pid=name.endsWith('.json')?JSON.parse(content).pid:Number(content.split('\n')[0]),row=rows.find(r=>r.pid===pid);if(row){check(/codex_conversation_bridge\.py|instance-maintenance-worker\.mjs/.test(row.command),'A runtime lock points to an unrelated live process');selected.set(pid,row);}}catch(e){if(e.code!=='ENOENT')throw e;}}
+ for(const name of ['runtime/assistant/public/.bridge.lock','runtime/locks/codex-bridge-host.json','runtime/locks/maintenance-host.json']){try{const content=(await regular(path.join(root,name))).toString(),pid=name.endsWith('.json')?JSON.parse(content).pid:Number(content.split('\n')[0]),row=rows.find(r=>r.pid===pid);if(row){check(/codex_conversation_bridge\.py|instance-(?:bridge|maintenance-worker)\.mjs/.test(row.command),'A runtime lock points to an unrelated live process');selected.set(pid,row);}}catch(e){if(e.code!=='ENOENT')throw e;}}
  // Descendants of these verified bridge/maintenance processes belong to their
  // runtime, never to another localhost service selected by its port number.
  let grew;do{grew=false;for(const row of rows)if(selected.has(row.parentPid)&&!selected.has(row.pid)){selected.set(row.pid,row);grew=true;}}while(grew);

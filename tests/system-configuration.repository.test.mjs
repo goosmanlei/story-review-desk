@@ -12,6 +12,8 @@ import {
   validateConfiguration,
   reviewSpec,
   configHash,
+  projectConfiguration,
+  semanticConfiguration,
 } from "../host/instance-runtime/configuration-model.mjs";
 import {
   initializeConfiguration,
@@ -215,6 +217,9 @@ test("source compilation preserves event candidates even when compiler does not 
 test("unsupported nested fields, invalid fixed profiles, alias collisions, incomplete confirmation and dependency cycles are rejected", () => {
   for (const mutate of [
     (c) => (c.collaboration.providerApiKey = "private"),
+    (c) => (c.collaboration.codexBridge.maxConcurrent = 9),
+    (c) => (c.collaboration.codexBridge.idleTtlSeconds = -1),
+    (c) => (c.collaboration.codexBridge.model = "bad model"),
     (c) => {
       c.reviewProfiles[0].subjectKind = "ASSET";
     },
@@ -228,6 +233,28 @@ test("unsupported nested fields, invalid fixed profiles, alias collisions, incom
     mutate(c);
     assert.throws(() => validateConfiguration(c));
   }
+});
+test("Codex Bridge settings project into the host profile without rebinding review semantics", () => {
+  const profile = blankProfile();
+  const snapshot = blankSnapshot(profile).snapshot;
+  const config = defaultConfiguration(profile);
+  const beforeSemantic = configHash(semanticConfiguration(config));
+  config.collaboration.codexBridge = {
+    autoStart: true,
+    model: "gpt-5.6-sol",
+    maxConcurrent: 5,
+    idleTtlSeconds: 15,
+  };
+  const validated = validateConfiguration(config);
+  const projected = projectConfiguration(snapshot, validated, {}, {
+    revisionId: "irv_test",
+    sha256: "0".repeat(64),
+  });
+  assert.deepEqual(
+    projected.instance.assistant.codexBridge,
+    validated.collaboration.codexBridge,
+  );
+  assert.equal(configHash(semanticConfiguration(validated)), beforeSemantic);
 });
 test("production standards render actual scoped evidence instead of borrowing navigation-shot identity", () => {
   const c = defaultConfiguration();

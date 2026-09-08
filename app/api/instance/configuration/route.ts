@@ -6,7 +6,7 @@ import {
   exportConfigurationTemplate,
   type ConfigurationState,
 } from "../../../../host/instance-runtime/configuration-service.mjs";
-import { validateConfiguration, configurationObjects, profileFor, configHash, defaultConfiguration } from "../../../../host/instance-runtime/configuration-model.mjs";
+import { validateConfiguration, configurationObjects, profileFor, configHash, defaultConfiguration, normalizeConfiguration } from "../../../../host/instance-runtime/configuration-model.mjs";
 import {
   errorResponse,
   hostedReadOnlyMode,
@@ -26,15 +26,16 @@ export async function GET(request: Request) {
       const data = await reviewData();
       const value = data.productionModel.systemConfiguration;
       if (!value) throw new HttpError(503, "此镜像尚无系统配置");
+      const configuration = normalizeConfiguration(value.config);
       return jsonResponse({
-        configuration: value.config,
+        configuration,
         defaults: defaultConfiguration(),
         revisionId: value.reference.revisionId,
         sha256: value.reference.sha256,
         releaseId: "HOSTED_READ_ONLY",
-        reviewCatalog: reviewCatalog(value.config),
+        reviewCatalog: reviewCatalog(configuration),
         boundStandards: [...new Map(configurationObjects(data).flatMap(({object})=>object.configurationBinding ? [[object.configurationBinding.reviewSpec.hash,object.configurationBinding.reviewSpec]] : [])).values()],
-        bindings: configurationObjects(data).flatMap(({key,kind,object})=>object.configurationBinding ? [{key,kind,title:object.title || object.sceneTitle || object.sceneId || key,profileId:object.configurationBinding.reviewSpec.profileId,defaultProfileId:profileFor(value.config,kind,object),reviewSpecHash:object.configurationBinding.reviewSpec.hash,configurationHash:object.configurationBinding.configurationHash}] : []),
+        bindings: configurationObjects(data).flatMap(({key,kind,object})=>object.configurationBinding ? [{key,kind,title:object.title || object.sceneTitle || object.sceneId || key,profileId:object.configurationBinding.reviewSpec.profileId,defaultProfileId:profileFor(configuration,kind,object),reviewSpecHash:object.configurationBinding.reviewSpec.hash,configurationHash:object.configurationBinding.configurationHash}] : []),
         history: [],
         initialized: true,
         readOnly: true,
@@ -68,6 +69,8 @@ export async function GET(request: Request) {
       const trial = (await tx.getAux("local-trial-index", "scopes"));
       const scopes = trial ? JSON.parse(trial.bytes.toString()) : [];
       const saved = draft ? JSON.parse(draft.bytes.toString()) : null;
+      if (saved?.configuration)
+        saved.configuration = normalizeConfiguration(saved.configuration);
       return {
         ...state,
         readOnly: instanceReadOnlyMode(),

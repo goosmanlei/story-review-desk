@@ -10,5 +10,6 @@ test('provider key configuration names a variable, never changes Codex auth or s
  const config=defaultConfiguration();config.collaboration.apiKeyEnvName='STORY_OPENAI_API_KEY';assert.equal(validateConfiguration(config).collaboration.apiKeyEnvName,'STORY_OPENAI_API_KEY');
  const projected=projectConfiguration(blankSnapshot(blankProfile()).snapshot,config,{},{});assert.equal(projected.instance.capabilities.apiKeyEnvName,'STORY_OPENAI_API_KEY');
  const legacy=defaultConfiguration();delete legacy.collaboration.apiKeyEnvName;assert.doesNotThrow(()=>validateConfiguration(legacy));
+ const legacyBridge=defaultConfiguration();delete legacyBridge.collaboration.codexBridge;assert.deepEqual(validateConfiguration(legacyBridge).collaboration.codexBridge,{autoStart:false,model:'gpt-5.6-sol',maxConcurrent:5,idleTtlSeconds:600});
  config.collaboration.apiKeyEnvName='sk-not-a-config-value';assert.throws(()=>validateConfiguration(config));
 });

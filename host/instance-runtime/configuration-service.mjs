@@ -5,6 +5,7 @@ import {
   configHash,
   profileFor,
   defaultConfiguration,
+  normalizeConfiguration,
   validateConfiguration,
   semanticConfiguration,
   configurationObjects,
@@ -157,8 +158,10 @@ export async function getConfiguration(tx) {
   const view = (await configurationView(tx)),
     record = (await configurationRecord(tx, view));
   const configuration =
-    record?.value.configuration ||
-    migrateConfiguration(view.snapshot, view.profile);
+    normalizeConfiguration(
+      record?.value.configuration ||
+        migrateConfiguration(view.snapshot, view.profile),
+    );
   const bindings =
     record?.value.bindings ||
     bindConfiguration(view.snapshot, configuration, {}, [], true);
@@ -258,8 +261,10 @@ export async function previewConfiguration(
     "配置已变化，请重新读取",
   );
   const previous =
-    record?.value.configuration ||
-    migrateConfiguration(view.snapshot, view.profile);
+    normalizeConfiguration(
+      record?.value.configuration ||
+        migrateConfiguration(view.snapshot, view.profile),
+    );
   const config = validateConfiguration(configuration, previous);
   assert(
     Array.isArray(upgradeKeys) &&
@@ -548,9 +553,11 @@ export async function getConfigurationRevision(tx, revisionId) {
     record && !record.deleted && sha256(record.bytes) === record.sha256,
     "配置历史不可用",
   );
+  const value = JSON.parse(record.bytes);
   return {
     revisionId: record.revisionId,
     sha256: record.sha256,
-    ...JSON.parse(record.bytes),
+    ...value,
+    configuration: normalizeConfiguration(value.configuration),
   };
 }

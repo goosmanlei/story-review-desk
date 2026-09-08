@@ -9,6 +9,12 @@ export const CONFIG_ID = "system-configuration";
 export const TEMPLATE_ID = "film-production";
 export const clone = (value) => structuredClone(value);
 export const configHash = (value) => sha256(canonicalJson(value));
+export const DEFAULT_CODEX_BRIDGE_CONFIGURATION = Object.freeze({
+  autoStart: false,
+  model: "gpt-5.6-sol",
+  maxConcurrent: 5,
+  idleTtlSeconds: 600,
+});
 export const episodeIds = [
   "opening-boundary",
   "episode-purpose",
@@ -443,6 +449,9 @@ export function defaultConfiguration(profile = {}) {
         profile.capabilities?.preferredCollaborator || "HUMAN_AI",
       defaultExecutor: "USER_EXTERNAL",
       apiKeyEnvName: profile.capabilities?.apiKeyEnvName || "OPENAI_API_KEY",
+      codexBridge: normalizeCodexBridgeConfiguration(
+        profile.assistant?.codexBridge,
+      ),
     },
     presentation: {
       storyTitle: profile.storyTitle || "新故事",
@@ -481,6 +490,19 @@ const string = (value, path, max = 4000) => {
   if (typeof value !== "string" || !value.trim() || value.length > max)
     fail("内容为空或过长", path);
 };
+export function normalizeCodexBridgeConfiguration(value) {
+  if (value === undefined)
+    return clone(DEFAULT_CODEX_BRIDGE_CONFIGURATION);
+  return clone(value);
+}
+export function normalizeConfiguration(config) {
+  const normalized = clone(config);
+  if (normalized?.collaboration)
+    normalized.collaboration.codexBridge = normalizeCodexBridgeConfiguration(
+      normalized.collaboration.codexBridge,
+    );
+  return normalized;
+}
 function shape(value, keys, path) {
   if (
     !value ||
@@ -642,8 +664,13 @@ function validateShapes(c) {
     shape(row, ["id", "label"], "theme");
   shape(
     c.collaboration,
-    ["assistantEnabled", "preferredCollaborator", "defaultExecutor", ...(c.collaboration?.apiKeyEnvName!==undefined?["apiKeyEnvName"]:[])],
+    ["assistantEnabled", "preferredCollaborator", "defaultExecutor", "codexBridge", ...(c.collaboration?.apiKeyEnvName!==undefined?["apiKeyEnvName"]:[])],
     "collaboration",
+  );
+  shape(
+    c.collaboration.codexBridge,
+    ["autoStart", "model", "maxConcurrent", "idleTtlSeconds"],
+    "collaboration.codexBridge",
   );
   shape(
     c.presentation,
@@ -675,6 +702,8 @@ function validateShapes(c) {
   for (const cat of c.taxonomy.categories) uniqueAliases(cat.types, cat.id);
 }
 export function validateConfiguration(config, previous) {
+  config = normalizeConfiguration(config);
+  if (previous) previous = normalizeConfiguration(previous);
   validateShapes(config);
   if (
     !config ||
@@ -930,6 +959,19 @@ export function validateConfiguration(config, previous) {
   )
     fail("协作配置无效");
   if(config.collaboration.apiKeyEnvName!==undefined&&(!/^[A-Z][A-Z0-9_]{2,127}$/.test(config.collaboration.apiKeyEnvName)||!config.collaboration.apiKeyEnvName.endsWith('_API_KEY')))fail('只填写以 _API_KEY 结尾的环境变量名，不填写密钥');
+  const bridge = config.collaboration.codexBridge;
+  if (
+    typeof bridge.autoStart !== "boolean" ||
+    typeof bridge.model !== "string" ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(bridge.model) ||
+    !Number.isInteger(bridge.maxConcurrent) ||
+    bridge.maxConcurrent < 1 ||
+    bridge.maxConcurrent > 8 ||
+    !Number.isInteger(bridge.idleTtlSeconds) ||
+    bridge.idleTtlSeconds < 0 ||
+    bridge.idleTtlSeconds > 86_400
+  )
+    fail("Codex Bridge 服务配置无效", "collaboration.codexBridge");
   for (const k of ["storyTitle", "title", "mark", "description", "trialLabel"])
     string(config.presentation[k], k, k === "mark" ? 4 : 300);
   if (
@@ -1232,6 +1274,10 @@ export function projectConfiguration(snapshot, config, bindings, reference) {
     },
     title: presentation.title,
     storyTitle: presentation.storyTitle,
+    assistant: {
+      ...out.instance?.assistant,
+      codexBridge: clone(config.collaboration.codexBridge),
+    },
     capabilities: {
       ...out.instance?.capabilities,
       landingView: presentation.landingView,

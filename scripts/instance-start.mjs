@@ -9,6 +9,7 @@ import { runMaintenanceProcess } from './instance-maintenance.mjs';
 import { assertFrozenStart } from './instance-freeze-proof.mjs';
 import { dockerHostPath } from '../host/instance-runtime/docker-path.mjs';
 import {providerKeyEnvironment} from '../host/instance-runtime/provider-environment.mjs';
+import {bridgeServiceConfiguration,startManagedBridge} from './instance-bridge.mjs';
 
 export async function publishStorageOwner(runtime, inspection, endpoint) {
   if (!inspection?.State?.Running || inspection.State.Paused || inspection.State.Restarting || !/^[a-f0-9]{64}$/.test(inspection.Id || '') || !/^sha256:[a-f0-9]{64}$/.test(inspection.Image || '')) throw new Error('New storage owner must be one running Docker container');
@@ -61,10 +62,11 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
   const aiEnabled = Boolean(key);
   const env = { ...process.env, ...instanceEnvironment(runtime, { port: values.port, aiEnabled }), OPENAI_API_KEY: '', [keyEnvironment]:'', REVIEW_OPENAI_API_KEY_FILE: '/dev/null' };
   const services = aiEnabled ? ['review-site', 'shot-production-worker', 'comment-polish-worker', 'material-review-worker'] : ['review-site', 'shot-production-worker'];
+  const bridgePlan=bridgeServiceConfiguration(runtime.profile);
   const baseArgs = ['compose', '--project-name', runtime.composeProject, '--file', path.join(applicationRoot, 'compose.yaml')];
   if (aiEnabled) baseArgs.push('--profile', 'assistant-ai');
   if (values.check) {
-    process.stdout.write(JSON.stringify({ mode: 'PLAN_ONLY', action: values['build-only'] ? 'BUILD_ONLY' : 'START', instanceId: runtime.instanceId, projectId: runtime.profile.projectId, releaseId: runtime.releaseId, repositoryRevision: runtime.repositoryRevision, instanceRoot: runtime.root, composeProject: runtime.composeProject, url: 'http://localhost:' + env.REVIEW_PORT, services, credentialsIncluded: false, parentProjectRequired: false }, null, 2) + '\n');
+    process.stdout.write(JSON.stringify({ mode: 'PLAN_ONLY', action: values['build-only'] ? 'BUILD_ONLY' : 'START', instanceId: runtime.instanceId, projectId: runtime.profile.projectId, releaseId: runtime.releaseId, repositoryRevision: runtime.repositoryRevision, instanceRoot: runtime.root, composeProject: runtime.composeProject, url: 'http://localhost:' + env.REVIEW_PORT, services, credentialsIncluded: false, parentProjectRequired: false, bridge:{status:values['build-only']?'NOT_STARTED_BUILD_ONLY':bridgePlan.enabled?'WILL_START':'DISABLED_BY_CONFIGURATION',autoStart:bridgePlan.autoStart,assistantEnabled:runtime.profile.capabilities?.assistantEnabled!==false,model:bridgePlan.model,maxConcurrent:bridgePlan.maxConcurrent,idleTtlSeconds:bridgePlan.idleTtlSeconds,modelCalls:0} }, null, 2) + '\n');
     return;
   }
   for (const directory of ['data', 'media', 'scratch', 'backups', 'runtime', 'runtime/locks', 'runtime/logs', 'runtime/assistant', 'runtime/assistant/public', 'runtime/private', 'runtime/private/provider']) {
@@ -120,7 +122,9 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
     await startMaintenanceWorker(runtime.root,'http://127.0.0.1:'+env.REVIEW_PORT);
     const {startGitCheckpointWorker}=await import('./instance-git-checkpoint.mjs');
     const gitCheckpoint=await startGitCheckpointWorker(runtime.root);
-    process.stdout.write(JSON.stringify({ gitCheckpoint,status: 'STARTED', instanceId: runtime.instanceId, url: 'http://localhost:' + env.REVIEW_PORT, backend: isPostgres ? 'postgres' : 'sqlite', storageOwner: owner.mode, ...(isPostgres ? {} : {sqliteOwner: owner.mode}), containerId: owner.containerId, assistantWorkers: aiEnabled ? 'ENABLED' : 'DISABLED_NO_KEY', bridge: 'HOST_START_REQUIRED' }, null, 2) + '\n');
+    let bridge;
+    try{bridge=await startManagedBridge(runtime);}catch(error){bridge={status:'DEGRADED',reason:error instanceof Error?error.message:'Bridge 启动失败',modelCalls:0};}
+    process.stdout.write(JSON.stringify({ gitCheckpoint,status: 'STARTED', instanceId: runtime.instanceId, url: 'http://localhost:' + env.REVIEW_PORT, backend: isPostgres ? 'postgres' : 'sqlite', storageOwner: owner.mode, ...(isPostgres ? {} : {sqliteOwner: owner.mode}), containerId: owner.containerId, assistantWorkers: aiEnabled ? 'ENABLED' : 'DISABLED_NO_KEY', bridge }, null, 2) + '\n');
   } finally {
     await rm(secretDirectory, { recursive: true, force: true });
   }
