@@ -54,7 +54,7 @@ async function context(tx,requirementId,api){
  if(requirement.representationRef!==representation.id||requirement.requirementHash!==domainHash({demand,representation})||!same(requirement.assetFamilyRefs||[],representation.assetFamilyIds))fail('需求与表现的精确基线不一致');
  const head=await tx.getAux('domain-graph','current');if(head?.revisionId!==current.revisionId||head.sha256!==model.domainGraphRef?.sha256||head.sha256!==domainHash(graph))fail('领域图谱发布基线或当前头已变化');
  const entity=graph.entities.find(e=>e.id===representation.entityId),domainState=representation.stateId?graph.states.find(s=>s.id===representation.stateId&&s.entityId===entity?.id):null;
- const blockers=[],base={view,model,state,graph,requirement,demand,representation};
+ const blockers=[],base={view,model,state,graph,requirement,demand,representation,api};
  const revision=await materialProductionRevisionContext(tx,base);
  if(!revision&&((representation.assetFamilyIds||[]).length||requirement.materialWorkItemRef||requirement.plannedAssetFamilyId||(model.materialWorkItems||[]).some(w=>w.requirementRef===requirementId)))blockers.push('此需求已有制作对象，请沿既有素材版本流程处理');
  if(revision)blockers.push(...revision.blockers);
