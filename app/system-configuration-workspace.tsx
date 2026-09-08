@@ -157,22 +157,28 @@ export function SystemConfigurationWorkspace() {
     value: string,
     onChange: (value: string) => void,
     multiline = false,
+    help = "",
   ) => (
     <label key={label} className="configuration-field">
       {label}
       {multiline ? (
         <textarea
+          aria-label={label}
+          aria-describedby={help ? `configuration-${group}-${label}-help` : undefined}
           disabled={readonly}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
       ) : (
         <input
+          aria-label={label}
+          aria-describedby={help ? `configuration-${group}-${label}-help` : undefined}
           disabled={readonly}
           value={value}
           onChange={(e) => onChange(e.target.value)}
         />
       )}
+      {help && <small id={`configuration-${group}-${label}-help`} className="configuration-field-help">{help}</small>}
     </label>
   );
   const section = CONFIGURATION_SECTIONS.find(section => section.groups.some(([id]) => id === group))!;
@@ -618,13 +624,18 @@ export function SystemConfigurationWorkspace() {
           )}
           {group === "technical" && (
             <>
-              <div className="configuration-form-grid">{text("故事名称",config.presentation.storyTitle,v=>edit(c=>{c.presentation.storyTitle=v;}))}{text("审阅台名称",config.presentation.title,v=>edit(c=>{c.presentation.title=v;}))}</div>
+              <div className="configuration-form-grid">
+                {text("故事名称",config.presentation.storyTitle,v=>edit(c=>{c.presentation.storyTitle=v;}),false,"显示在故事上下文与相关页面中，用来识别当前故事；不会改变已有内容或永久身份。")}
+                {text("审阅台名称",config.presentation.title,v=>edit(c=>{c.presentation.title=v;}),false,"显示在侧栏、页脚等审阅台品牌位置；不会改变项目或实例身份。")}
+              </div>
               <h3>内部画面基线</h3>
               <div className="configuration-form-grid configuration-picture-grid">
                 {text("画幅", config.technical.picture.aspectRatio, (v) =>
                   edit((c) => {
                     c.technical.picture.aspectRatio = v;
                   }),
+                  false,
+                  "规定后续画面构图的宽高比例，并与下方像素尺寸相互校验。",
                 )}
                 {(["width", "height", "fps"] as const).map((k, i) =>
                   text(
@@ -635,11 +646,19 @@ export function SystemConfigurationWorkspace() {
                         c.technical.picture[k] =
                           v === "" || v === "UNKNOWN" ? "UNKNOWN" : Number(v);
                       }),
+                    false,
+                    [
+                      "与高度共同组成后续制作和技术审阅采用的目标分辨率。",
+                      "与宽度共同组成后续制作和技术审阅采用的目标分辨率。",
+                      "作为后续画面制作与技术审阅采用的目标时间基准。",
+                    ][i],
                   ),
                 )}
                 <label className="configuration-field">
                   确认状态
                   <select
+                    aria-label="内部画面基线确认状态"
+                    aria-describedby="configuration-technical-picture-confirmation-help"
                     disabled={readonly}
                     value={config.technical.picture.confirmation}
                     onChange={(e) =>
@@ -658,6 +677,7 @@ export function SystemConfigurationWorkspace() {
                       </option>
                     ))}
                   </select>
+                  <small id="configuration-technical-picture-confirmation-help" className="configuration-field-help">表示整组画面参数的可信度；选择“已确认”前，画幅、宽度、高度和帧率必须完整。</small>
                 </label>
               </div>
               <h3>目标交付规格</h3>
@@ -678,11 +698,21 @@ export function SystemConfigurationWorkspace() {
                       edit((c) => {
                         c.technical.delivery[k] = v;
                       }),
+                    false,
+                    [
+                      "决定按哪个发布渠道的要求准备和审阅交付内容。",
+                      "作为内容尺度、表达方式与适龄判断的目标人群依据。",
+                      "规定目标文件的编码格式，供交付准备与技术审阅核对。",
+                      "规定目标色彩空间或制式，供调色与技术审阅核对。",
+                      "规定目标音频响度标准，供混音与技术审阅核对。",
+                    ][i],
                   ),
                 )}
                 <label className="configuration-field">
                   确认状态
                   <select
+                    aria-label="目标交付规格确认状态"
+                    aria-describedby="configuration-technical-delivery-confirmation-help"
                     disabled={readonly}
                     value={config.technical.delivery.confirmation}
                     onChange={(e) =>
@@ -701,6 +731,7 @@ export function SystemConfigurationWorkspace() {
                       </option>
                     ))}
                   </select>
+                  <small id="configuration-technical-delivery-confirmation-help" className="configuration-field-help">表示整组交付要求的可信度；选择“已确认”前，平台、受众、编码、色彩和响度必须完整。</small>
                 </label>
               </div>
               <p>未知项保留 UNKNOWN。规格发布不会改写已生成文件的实际参数。</p>

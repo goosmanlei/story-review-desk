@@ -15,6 +15,7 @@
 .configuration-editor h2{font-size:21px;margin:0 0 4px}.configuration-editor h3{font-size:17px;margin:20px 0 6px}
 .configuration-editor p{color:var(--muted);margin:6px 0 12px}.configuration-field{display:flex;flex-direction:column;gap:5px;font-size:14px;margin:8px 0;min-width:0}
 .configuration-field input,.configuration-field select,.configuration-field textarea{width:100%;padding:7px 9px;font-size:16px;box-sizing:border-box;min-width:0}
+.configuration-field-help{color:var(--muted);font-size:12px;line-height:1.45;overflow-wrap:anywhere}
 .configuration-field textarea{min-height:90px;resize:vertical}.configuration-form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px}
 .configuration-picture-grid{grid-template-columns:repeat(5,minmax(0,1fr))}.configuration-delivery-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
 .configuration-card{border:1px solid var(--line);background:var(--paper-bright);padding:14px;border-radius:3px;margin:12px 0}
