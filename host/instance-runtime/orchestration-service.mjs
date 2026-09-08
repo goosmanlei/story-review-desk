@@ -77,6 +77,11 @@ class Store {
     await this.put('decisions/' + decision.id, decision);
     await this.event(config, 'DECISION_REQUIRED', {decision}); return decision;
   }
+  async clearDependencyDecisions(config, taskId) {
+    for (const decision of await this.list('decisions/')) if (decision.taskId === taskId && decision.type === 'DEPENDENCY_BLOCKED' && decision.status === 'OPEN') {
+      decision.status = 'RESOLVED'; decision.response = {action: 'dependency-completed'}; decision.resolvedAt = stamp(); await this.put('decisions/' + decision.id, decision); await this.event(config, 'DECISION_RESOLVED', {decisionId: decision.id, action: 'dependency-completed'});
+    }
+  }
 }
 
 export async function readOrchestration(tx, input = {}) {
@@ -163,7 +168,7 @@ export async function writeOrchestration(tx, input) {
   } else if (input.command === 'scheduler-open') {
     only('MAIN'); requireValue(config.enabled && config.status === 'ACTIVE', 'Mode is not active');
     const token = capability(args), schedulerId = text(args.schedulerId, 'schedulerId', 150), old = config.scheduler;
-    config.scheduler = {id: schedulerId, tokenHash: sha256(token), generation: (old?.generation || 0) + 1, threadId: old?.threadId || null, lastEventSeq: old?.lastEventSeq || 0};
+    config.scheduler = {id: schedulerId, tokenHash: sha256(token), generation: (old?.generation || 0) + 1, threadId: old?.threadId || null, lastEventSeq: old?.lastEventSeq || 0, blocked: old?.blocked || null};
     for (const run of await store.list('runs/')) if (run.status === 'RUNNING') {
       run.status = 'RESULT_UNKNOWN'; await store.put('runs/' + run.id, run);
       const task = await store.task(run.taskId); task.status = 'BLOCKED'; task.blockReason = 'RESULT_UNKNOWN'; await store.save(task);
@@ -175,8 +180,9 @@ export async function writeOrchestration(tx, input) {
     config.scheduler.threadId = args.threadId; config.scheduler.lastEventSeq = args.lastEventSeq; output = {scheduler: clean(config.scheduler)};
   } else if (input.command === 'scheduler-blocked') {
     only('SCHEDULER'); text(args.code, 'code', 150); text(args.summary, 'summary');
-    config.scheduler.blocked = {code: args.code, summary: args.summary, threadId: args.threadId || null, turnId: args.turnId || null};
-    output = {decision: await store.decision(config, 'SCHEDULER_BLOCKED', null, args.summary, {code: args.code, threadId: args.threadId || null, turnId: args.turnId || null})};
+    const decision = await store.decision(config, 'SCHEDULER_BLOCKED', null, args.summary, {code: args.code, threadId: args.threadId || null, turnId: args.turnId || null});
+    config.scheduler.blocked = {code: args.code, summary: args.summary, threadId: args.threadId || null, turnId: args.turnId || null, decisionId: decision.id};
+    output = {decision};
   } else if (input.command === 'submit') {
     only('MAIN'); requireValue(config.enabled && config.authorization, 'Mode authorization required');
     requireValue(!args.parentId, 'Only the scheduler state machine may derive QA and rework children');
@@ -189,7 +195,7 @@ export async function writeOrchestration(tx, input) {
   } else if (input.command === 'claim') {
     only('SCHEDULER'); requireValue(WORKER_KINDS.includes(args.kind), 'Invalid worker kind');
     const token = capability(args), workerId = text(args.workerId, 'workerId', 150);
-    if (config.status !== 'ACTIVE') output = null;
+    if (config.status !== 'ACTIVE' || config.scheduler.blocked) output = null;
     else {
       const tasks = await store.list('tasks/'), allRuns = await store.list('runs/'), activeRuns = allRuns.filter(run => heldRuns.has(run.status));
       const used = activeRuns.filter(run => run.kind === args.kind).length;
@@ -206,6 +212,7 @@ export async function writeOrchestration(tx, input) {
       const task = eligible[0];
       if (!task) output = null;
       else {
+        await store.clearDependencyDecisions(config, task.id);
         const phase = task.status === 'FINALIZING' ? 'FINALIZE' : task.kind.endsWith('_QA') ? 'QA' : 'WORK';
         const run = {id: id('run'), taskId: task.id, rootId: task.rootId, workerId, tokenHash: sha256(token), generation: config.scheduler.generation, runtimeEpoch: metadata.runtimeEpoch, kind: task.kind, phase, status: 'RUNNING', resources: task.resources, createdAt: stamp()};
         task.status = phase === 'FINALIZE' ? 'FINALIZING_RUNNING' : 'RUNNING'; task.currentRunId = run.id;
@@ -282,7 +289,7 @@ export async function writeOrchestration(tx, input) {
       const deps = task.dependencies.map(dependency => tasks.find(item => item.id === dependency));
       if (deps.every(dependency => dependency?.status === 'DONE')) {
         task.status = 'READY'; await store.save(task);
-        for (const decision of await store.list('decisions/')) if (decision.taskId === task.id && decision.type === 'DEPENDENCY_BLOCKED' && decision.status === 'OPEN') {decision.status = 'RESOLVED'; decision.response = {action: 'dependency-completed'}; decision.resolvedAt = stamp(); await store.put('decisions/' + decision.id, decision); await store.event(config, 'DECISION_RESOLVED', {decisionId: decision.id, action: 'dependency-completed'});}
+        await store.clearDependencyDecisions(config, task.id);
       }
       else if (deps.some(dependency => !dependency || dependency.status === 'CANCELLED' || dependency.status === 'BLOCKED' || dependency.status === 'AWAITING_DECISION')) await store.decision(config, 'DEPENDENCY_BLOCKED', task, 'Dependency requires a decision', {dependencies: task.dependencies});
     }
@@ -304,7 +311,7 @@ export async function writeOrchestration(tx, input) {
     only('MAIN'); const decision = await store.get('decisions/' + text(args.decisionId, 'decisionId', 100));
     requireValue(decision?.status === 'OPEN', 'Decision already resolved', 'ORCHESTRATION_DECISION_CLOSED'); text(args.comment, 'decision comment');
     requireValue(['resume', 'retry', 'cancel', 'scale'].includes(args.action), 'Invalid decision action');
-    if (args.action === 'scale') config.concurrency = concurrency(config.concurrency, args.concurrency);
+    if (args.action === 'scale') {requireValue(decision.type === 'CONCURRENCY', 'Scale separately without consuming a task or scheduler decision'); config.concurrency = concurrency(config.concurrency, args.concurrency);}
     else if (decision.taskId) {
       const task = await store.task(decision.taskId), root = task.id === task.rootId ? task : await store.task(task.rootId);
       if (decision.type === 'RESULT_UNKNOWN') {
@@ -333,7 +340,10 @@ export async function writeOrchestration(tx, input) {
           task.status = prior?.phase === 'FINALIZE' ? 'FINALIZING' : task.dependencies.length ? 'WAITING_DEPENDENCIES' : 'READY'; task.currentRunId = null; task.blockReason = null; await store.save(task);
         }
       }
-    } else if (decision.type === 'SCHEDULER_BLOCKED') config.scheduler.blocked = null;
+    } else if (decision.type === 'SCHEDULER_BLOCKED') {
+      requireValue(['resume', 'retry'].includes(args.action), 'Scheduler retry needs an explicit resume or retry decision');
+      requireValue(config.scheduler.blocked?.decisionId === decision.id, 'A different scheduler decision is current'); config.scheduler.blocked = null;
+    }
     decision.status = 'RESOLVED'; decision.response = clean(args); decision.resolvedAt = stamp(); await store.put('decisions/' + decision.id, decision); await store.event(config, 'DECISION_RESOLVED', {decisionId: decision.id, action: args.action}); output = {decision, config: clean(config)};
   } else if (['pause', 'resume', 'stop'].includes(input.command)) {
     only('MAIN'); requireValue(config.enabled, 'Mode has not been activated'); config.status = input.command === 'resume' ? 'ACTIVE' : input.command === 'pause' ? 'PAUSED' : (await store.list('runs/')).some(run => ['RUNNING', 'CANCEL_REQUESTED'].includes(run.status)) ? 'STOPPING' : 'STOPPED';

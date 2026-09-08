@@ -130,6 +130,7 @@ test('runner generation restart fences old worker and requires reconciliation be
   const opened = await f.call('scheduler-open', {schedulerId: 'scheduler-next', capabilityToken: capability()}, f.main); f.scheduler = {kind: 'SCHEDULER', ...opened.scheduler};
   await assert.rejects(f.submitWork(author), {code: 'ORCHESTRATION_LEASE_LOST'});
   const decision = (await f.read()).decisions[0]; assert.equal(decision.type, 'RESULT_UNKNOWN');
+  await assert.rejects(f.call('decision', {decisionId: decision.id, action: 'scale', comment: 'Must not consume this decision', concurrency: {CREATIVE: 4}}, f.main));
   await assert.rejects(f.call('decision', {decisionId: decision.id, action: 'retry', comment: 'Blind retry'}, f.main), {code: 'ORCHESTRATION_RECONCILIATION_REQUIRED'});
   await f.call('decision', {decisionId: decision.id, action: 'retry', comment: 'Exact turn confirmed stopped with no output', reconciliation: {status: 'CONFIRMED_NOT_RUNNING', runId: author.run.id, threadId: 'thread-one', turnId: 'turn-one', evidenceRef: 'readback:turn-one'}}, f.main);
   assert.ok(await f.claim('CREATIVE'));
@@ -208,7 +209,18 @@ test('dependency recovery automatically resolves obsolete blockage decisions', a
   await f.call('tick', {}, f.scheduler);
   const status = await f.read(); assert.ok(status.decisions.some(item => item.type === 'DEPENDENCY_BLOCKED'));
   await f.call('decision', {decisionId: status.decisions.find(item => item.type === 'UNAVAILABLE').id, action: 'retry', comment: 'Service recovered'}, f.main);
-  await f.submitWork(await f.claim('CREATIVE', dep.id)); await f.qa(await f.claim('CREATIVE_QA')); await f.finalize(await f.claim('CREATIVE', dep.id)); await f.call('tick', {}, f.scheduler);
+  await f.submitWork(await f.claim('CREATIVE', dep.id)); await f.qa(await f.claim('CREATIVE_QA')); await f.finalize(await f.claim('CREATIVE', dep.id)); await f.claim('CREATIVE', child.id); await f.call('tick', {}, f.scheduler);
   assert.equal((await f.read()).decisions.filter(item => item.type === 'DEPENDENCY_BLOCKED').length, 0);
-  assert.equal((await f.read({query: 'task', taskId: child.id})).task.status, 'READY');
+  assert.equal((await f.read({query: 'task', taskId: child.id})).task.status, 'RUNNING');
+});
+
+test('scheduler credit failure stays blocked across restart until its own explicit decision', async () => {
+  const f = await fixture().start(); await f.submit();
+  const {decision} = await f.call('scheduler-blocked', {code: 'INSUFFICIENT_CREDIT', summary: 'Actual provider credit error', threadId: 'scheduler-thread'}, f.scheduler);
+  await f.call('scale', {concurrency: {CREATIVE: 4}}, f.main); assert.equal(await f.claim('CREATIVE'), null);
+  const opened = await f.call('scheduler-open', {schedulerId: 'restart', capabilityToken: capability()}, f.main); f.scheduler = {kind: 'SCHEDULER', ...opened.scheduler};
+  assert.equal(await f.claim('CREATIVE'), null);
+  await assert.rejects(f.call('decision', {decisionId: decision.id, action: 'cancel', comment: 'Not an explicit retry'}, f.main));
+  await f.call('decision', {decisionId: decision.id, action: 'resume', comment: 'User confirmed credit recovery'}, f.main);
+  assert.ok(await f.claim('CREATIVE'));
 });
