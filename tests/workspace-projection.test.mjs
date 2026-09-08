@@ -47,6 +47,8 @@ test('read-only projection identifies a published snapshot and does not expose l
  assert.equal(result.freshness.mode,'PUBLISHED_READ_ONLY');assert.equal(result.freshness.runtimeEpoch,null);
  assert.equal(result.freshness.repositoryRevision,null);assert.equal(result.freshness.eventSequence,null);
  assert.equal(result.freshness.snapshotId,'snapshot-a');assert.match(result.audit.authority,/只读快照/);
+ assert.match(result.audit.interfaces.find(row=>row.path==='/api/instance/orchestration').purpose,/仅本地 GET/);
+ assert.equal('orchestration' in result,false,'audit lists the interface without exporting the private ledger');
 });
 
 const require=createRequire(import.meta.url),ts=require('typescript');

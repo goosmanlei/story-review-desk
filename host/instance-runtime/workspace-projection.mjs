@@ -114,6 +114,7 @@ export function projectWorkspaceModules({model={},queue=null,operations=null,met
    {path:'/api/instance/domain-workspaces',purpose:'主体与空间的已发布关系、显式保存草稿、预览与确认。'},
    {path:'/api/v8/operations/snapshot',purpose:'正式事件、运行修订和精确对象的有效投影。'},
    {path:'/api/instance/maintenance',purpose:'完整备份、验证、只读导出及隔离恢复的主机任务状态。'},
+   {path:'/api/instance/orchestration',purpose:'仅本地 GET：当前实例协作模式、任务和 Worker 的安全投影；后台心跳独立标明时效，不进入故事进展或只读导出。'},
   ]};
  return {modules,freshness,audit};
 }

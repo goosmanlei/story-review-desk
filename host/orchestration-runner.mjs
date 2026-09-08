@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile, rename, lstat, realpath, open, unlink, rmdi
 import path from 'node:path';
 import { runInstanceCli } from './instance-runtime/transport.mjs';
 import { OrchestrationCodex, OrchestrationCodexError, validateModelChoice } from './orchestration-codex.mjs';
+import { writeOrchestrationHeartbeat } from './instance-runtime/orchestration-dashboard-runtime.mjs';
 import { createOrchestrationGitTools, gitArtifactSha256, runOrchestrationGit as git, assertSafeGitMutation } from './orchestration-git.mjs';
 export { gitArtifactSha256 } from './orchestration-git.mjs';
 
@@ -245,6 +246,11 @@ export class OrchestrationRunner {
     await writePrivateJson(path.join(this.privateRoot, 'runner-state.json'), { schemaVersion: '1.0', instanceId: this.instanceId, projectRoot: this.projectRoot,
       runtimeEpoch: this.runtimeEpoch, status, updatedAt: new Date().toISOString(), observed: this.observed,
       active: [...this.active.values()].map(item => ({ kind: item.kind, taskId: item.taskId, runId: item.runId })), ...fields });
+    // Optional display telemetry must not change scheduling or durable task authority.
+    // If unavailable, the browser reports UNKNOWN after the short freshness window.
+    await writeOrchestrationHeartbeat(this.instanceRoot, {instanceId:this.instanceId, runtimeEpoch:this.runtimeEpoch,
+      status:this.schedulerSuspended && status === 'RUNNING' ? 'BLOCKED' : status,
+      active:[...this.active.values()]}).catch(() => {});
   }
   async initialize() {
     this.lock = await acquireRunnerLock(this.privateRoot, { projectRoot: this.projectRoot, instanceId: this.instanceId, runtimeEpoch: this.runtimeEpoch });
@@ -341,7 +347,9 @@ export class OrchestrationRunner {
     }
     const mode = state.config?.status || state.config?.mode;
     if (mode === 'STOPPED' || mode === 'STOPPING') this.shuttingDown = true;
-    if (this.shuttingDown || mode === 'PAUSED' || this.schedulerSuspended) return state;
+    if (this.shuttingDown || mode === 'PAUSED' || this.schedulerSuspended) {
+      await this.save(this.shuttingDown ? 'STOPPING' : this.schedulerSuspended ? 'BLOCKED' : 'RUNNING'); return state;
+    }
     // Idle polling is read-only. A full queue scan is due only after a state event or each minute of pending work.
     if (state.tasks.length && (state.lastEventSeq !== this.lastTickEvent || Date.now() - (this.lastTickAt || 0) >= 60000)) {
       await this.ledger.write('tick', {}, this.scheduler); this.lastTickAt = Date.now();
@@ -475,6 +483,7 @@ export class OrchestrationRunner {
     try {
       while (!this.shuttingDown) { const state = await this.pump(); if (!this.shuttingDown) await wait(state.tasks.length ? this.pollMs : Math.max(10000, this.pollMs)); }
       while (this.active.size) {
+        await this.save('STOPPING');
         const state = await this.ledger.read();
         for (const run of state.runs || []) if (run.status === 'CANCEL_REQUESTED') {
           const record = this.active.get(run.id);
