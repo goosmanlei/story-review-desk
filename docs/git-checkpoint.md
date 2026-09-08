@@ -1,6 +1,6 @@
 # 项目 Git 业务快照
 
-干净核心软件与具体故事使用不同私有仓库。核心软件代码提交由维护者按发布里程碑完成；本工作器只提交绑定故事的业务快照及精确注册媒体，不扫描父目录、不代提交其他暂存内容。
+干净核心软件使用公开仓库，具体故事使用独立私有仓库。核心软件代码提交由维护者按发布里程碑完成；本工作器只提交绑定故事的业务快照及精确注册媒体，不扫描父目录、不代提交其他暂存内容。
 
 ## 明确启用
 
@@ -26,7 +26,7 @@
       "snapshotPath": "project-data",
       "mediaPrefix": "instances/my-story/media",
       "core": {
-        "repository": "账号/干净核心私有仓库",
+        "repository": "账号/干净核心公开仓库",
         "commit": "完整40位提交SHA",
         "packageRoot": "/故事项目/review-software",
         "packageManifestSha256": "software-manifest.json原始字节的SHA256"
