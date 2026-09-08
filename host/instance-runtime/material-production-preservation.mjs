@@ -1,3 +1,4 @@
+import {preserveLegacyAudioProjection} from './material-legacy-audio-preservation.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
@@ -136,6 +137,7 @@ function mergeFrozen(target,key,rows){
 /** Preserve a host-authored material closure before reapplying the current domain graph.
  * A plan proves its original binding; it cannot reinstate a subsequently removed relation. */
 export function preserveMaterialProductionProjection({snapshot,recipes,baseSnapshot,baseRecipes,documents}){
+ ({snapshot,recipes}=preserveLegacyAudioProjection({snapshot,recipes,baseSnapshot,baseRecipes,documents}));
  const prior=baseSnapshot.productionModel||{},plans=prior.materialProductionPlans||[];
  if(!plans.length)return {snapshot,recipes};
  unique(plans.map(plan=>plan.id),'基础素材建档计划');

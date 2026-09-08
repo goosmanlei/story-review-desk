@@ -387,6 +387,20 @@ function assertMaterialRevisionParent(
   parentVersionId: string | null,
   parentVersionSha256: string | null,
 ) {
+  if (typeof definition.legacyMaterialRecipeRevisionId === 'string') {
+    const model = data.productionModel as unknown as Record<string, unknown>;
+    const rows = (Array.isArray(model.legacyMaterialRecipeRevisions) ? model.legacyMaterialRecipeRevisions : []) as Record<string, unknown>[];
+    const matches = rows.filter(row => row.id === definition.legacyMaterialRecipeRevisionId && row.definitionId === definition.id);
+    const revision = matches.length === 1 ? matches[0] : null;
+    const output = definition.output as Record<string, unknown> | undefined;
+    if (!revision || revision.familyId !== output?.assetFamilyRef || revision.workItemId !== definition.workItemRef
+      || revision.expectedOutputId !== output?.expectedOutputRef || revision.definitionHash !== definition.definitionHash
+      || revision.parentVersionId !== definition.parentVersionId || revision.parentVersionId !== parentVersionId
+      || revision.parentVersionSha256 !== parentVersionSha256 || definition.parentVersionSha256 !== parentVersionSha256) {
+      throw new HttpError(422, 'candidate parent must exactly match the legacy audio revision source and SHA');
+    }
+    return;
+  }
   if (typeof definition.materialProductionPlanId !== 'string') return;
   const model = data.productionModel as unknown as Record<string, unknown>;
   const plans = Array.isArray(model.materialProductionPlans) ? model.materialProductionPlans as Record<string, unknown>[] : [];
@@ -400,7 +414,8 @@ function assertMaterialRevisionParent(
     || revision.familyId !== output?.assetFamilyRef || revision.workItemId !== definition.workItemRef
     || revision.expectedOutputId !== output?.expectedOutputRef || revision.definitionHash !== definition.definitionHash
     || revision.parentVersionId !== definition.parentVersionId || revision.parentVersionId !== parentVersionId
-    || revision.parentVersionSha256 !== parentVersionSha256) {
+    || revision.parentVersionSha256 !== parentVersionSha256
+    || Object.prototype.hasOwnProperty.call(definition, 'parentVersionSha256') && definition.parentVersionSha256 !== parentVersionSha256) {
     throw new HttpError(422, 'candidate parent must exactly match the native material revision source and SHA');
   }
 }

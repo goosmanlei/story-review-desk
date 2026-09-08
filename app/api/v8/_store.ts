@@ -4,6 +4,7 @@ import {shotProductionExecutionEntries} from '../../../host/instance-runtime/sho
 import type {ExecutionRuntime} from '../../../host/instance-runtime/execution-epoch.mjs';
 import { projectEpisodeNarrativeReleases, assertScopedEpisodeSceneBasis, assertScopedSceneSyncBinding, SCENE_SYNC_PROTOCOL } from './episode-plan-reviews/_release';
 import {applyDomainInvalidations} from '../../../host/instance-runtime/domain-invalidation.mjs';
+import {domainProductionProofs} from '../../../host/instance-runtime/domain-production-lineage.mjs';
 import {episodePlanContentFromRecord, type EpisodePlanContent} from '../../episode-plan-context';
 import {resolveFormalReviewSpec, candidateReviewSpec} from './_review-spec';
 import {automaticEpisodeSubmissions} from './episode-plan-reviews/_automatic';
@@ -1673,12 +1674,20 @@ export function assetReviewContextHash(
     .filter((requirement) => requirement.assetFamilyRefs.includes(familyId))
     .map((requirement) => ({ id: requirement.id, requirementHash: requirement.requirementHash }))
     .sort((left, right) => left.id.localeCompare(right.id));
+  // Only versions with an actual recorded production-domain change enter this
+  // context protocol. Unaffected historical review hashes remain unchanged.
+  const domainInvalidations = (data.productionModel.domainInvalidations || []).filter(row => row.familyId === familyId && row.versionIds.includes(versionId));
+  const family = data.productionModel.assetFamilies.find(row => row.id === familyId);
+  const domainContextHash = (family as unknown as {domainContext?:{hash?:string}})?.domainContext?.hash || null;
   return stableObjectHash({
     subjectType: 'ASSET',
     familyId,
     versionId,
     versionSha256: versionSha256.toLowerCase(),
     materialRequirements,
+    // Bind the local history too: a later A → B → A change must not resurrect
+    // an approval from the previous occurrence of A without a fresh review.
+    ...(domainInvalidations.length ? {domainContextHash,domainInvalidationHash:stableObjectHash(domainInvalidations)} : {}),
   });
 }
 
@@ -4120,6 +4129,25 @@ export function projectOperationalState(
       materialItemByDefinition.set(String(previous.definitionId), work);
     }
   }
+  // Explicit legacy AUDIO revision rows preserve adopted predecessor consumers
+  // without declaring the legacy family to be a native first-setup plan.
+  const legacyAudioRevisions = (Array.isArray(nativeModel.legacyMaterialRecipeRevisions) ? nativeModel.legacyMaterialRecipeRevisions : []) as Array<Record<string, unknown>>;
+  for (const revision of legacyAudioRevisions) {
+    const work = (data.productionModel.materialWorkItems || []).find(w => w.id === revision.workItemId);
+    const family = data.productionModel.assetFamilies.find(f => f.id === revision.familyId);
+    const output = (data.productionModel.expectedOutputs || []).find(o => o.id === revision.expectedOutputId);
+    if (!work || !family || !output || (family as unknown as Record<string, unknown>).kind !== 'AUDIO' || family.ownerRef !== work.id || work.outputAssetRef !== family.id
+      || work.executionDefinitionRef !== revision.definitionId || family.currentExpectedOutputId !== output.id
+      || output.executionDefinitionRef !== revision.definitionId || output.familyId !== family.id
+      || output.legacyMaterialRecipeRevisionId !== revision.id || output.legacyVersionId !== family.id + '@' + output.plannedVersionLabel
+      || revision.requirementId !== work.requirementRef || revision.requirementHash !== work.requirementHash
+      || !/^LA-RECIPE-[a-f0-9]{24}$/.test(String(revision.id || '')) || !(family.expectedOutputRefs || []).includes(output.id)) continue;
+    nativeRevisionFamilyIds.add(family.id);
+    for (const previous of legacyAudioRevisions.filter(r => r.familyId === family.id && r.workItemId === work.id && r.requirementHash === work.requirementHash)) {
+      materialItemByDefinition.set(String(previous.previousDefinitionId), work);
+      materialItemByDefinition.set(String(previous.definitionId), work);
+    }
+  }
   const versions = new Map<string, ProjectedVersion>();
   for (const source of data.productionModel.assetVersions) {
     const version: ProjectedVersion = { ...source, source: 'BASE_SNAPSHOT' };
@@ -4316,8 +4344,23 @@ export function projectOperationalState(
 
   // Relationship changes invalidate only the recorded versions and their exact descendants.
   // Review events remain immutable; the current usability projection carries the reason.
-  const domainInvalidations=((data.productionModel as unknown as Record<string,unknown>).domainInvalidations||[]) as Array<{familyId:string;versionIds:string[]}>;
-  applyDomainInvalidations(domainInvalidations,versions);
+  const domainInvalidations=data.productionModel.domainInvalidations||[];
+  const currentDomainHashes = new Map(data.productionModel.assetFamilies.map(family => [family.id,
+    (family as unknown as {domainContext?:{hash?:string}}).domainContext?.hash || '',
+  ]));
+  const reviewedDomainBindings = new Map<string,{familyId:string;sha256:string;domainContextHash:string;reviewEventId:string;reviewEventSequence:number}>();
+  for (const review of effectiveMediaReviews) {
+    if (review.subjectType !== 'ASSET' || review.action !== 'APPROVE_AND_RELEASE'
+      || (assetChainIssuesByTarget.get(mediaReviewTargetKey(review)) || []).length) continue;
+    const versionId=String(review.versionId||''),familyId=String(review.familyId||''),version=versions.get(versionId);
+    const sha256=String(review.versionSha256||'').toLowerCase(),domainContextHash=currentDomainHashes.get(familyId)||'';
+    if (!version || version.familyId !== familyId || version.sha256 !== sha256
+      || version.canFlowDownstream !== true || version.lifecycleState !== 'RELEASED' || version.historyRole !== 'CURRENT'
+      || review.contextHash !== assetReviewContextHash(data,familyId,versionId,sha256)) continue;
+    reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash,reviewEventId:String(review.eventId||''),reviewEventSequence:Number(review.eventSequence)||0});
+  }
+  const freshProductionProofs=domainInvalidations.length?domainProductionProofs({candidates:currentCandidates,requests:executionRequests,runs:currentRuns,versions}):new Map();
+  applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes,freshProductionProofs});
 
   for (const family of families.values()) {
     const familyVersions = [...versions.values()].filter((version) => version.familyId === family.id);

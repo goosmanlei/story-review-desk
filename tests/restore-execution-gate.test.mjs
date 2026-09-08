@@ -170,8 +170,19 @@ test('SQLite backup restore, archive import and explicit epoch reset preserve im
 
 test('Postgres restore has no epoch-preserving import bypass and all restore paths use the gate identity',()=>{
  const postgres=readFileSync(path.join(root,'host/instance-runtime/postgres.mjs'),'utf8');
- assert.match(postgres,/options\.resetEpoch===false[\s\S]*RESTORE_EPOCH_REQUIRED/);
- assert.equal((postgres.match(/restoredRuntimeEpoch\(randomUUID\(\)\)/g)||[]).length,2);
+ const ast=ts.createSourceFile('postgres.mjs',postgres,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS);
+ for(const name of ['importPostgresState','importPostgresRows']){
+  const declaration=ast.statements.find(node=>ts.isFunctionDeclaration(node)&&node.name?.text===name);
+  assert(declaration,name+' must remain an explicit audited restore entry');
+  const body=declaration.body.getText(ast);
+  assert.match(body,/options\.resetEpoch===false[\s\S]*RESTORE_EPOCH_REQUIRED/,name+' cannot preserve an old execution epoch');
+  assert.equal((body.match(/restoredRuntimeEpoch\(randomUUID\(\)\)/g)||[]).length,1,name+' must create its own fresh epoch');
+  assert.match(body,/runtime_epoch:restoredRuntimeEpoch\(randomUUID\(\)\)/,name+' must bind that epoch into imported metadata');
+ }
+ const unit=ast.statements.find(node=>ts.isClassDeclaration(node)&&node.name?.text==='PgUnit');
+ const reset=unit?.members.find(node=>ts.isMethodDeclaration(node)&&node.name.getText(ast)==='resetRuntimeEpoch');
+ assert(reset,'Explicit runtime reset must remain audited');
+ assert.match(reset.body.getText(ast),/UPDATE repository_meta SET runtime_epoch=[\s\S]*restoredRuntimeEpoch\(randomUUID\(\)\)/);
  const sqlite=readFileSync(path.join(root,'host/instance-runtime/index.mjs'),'utf8');
  assert.equal((sqlite.match(/restoredRuntimeEpoch\(randomUUID\(\)\)/g)||[]).length,3);
  for(const file of ['scripts/instance-transfer.mjs','scripts/instance-pg-transfer.mjs','scripts/instance-git-export.mjs'])assert.match(readFileSync(path.join(root,file),'utf8'),/OLD_REQUESTS_BLOCKED_NEW_AUTHORIZATION_REQUIRED/);
@@ -189,6 +200,7 @@ test('PostgreSQL transaction reset fences old authorization and epoch-preserving
  class Pool{on(){}async connect(){connects++;return client;}async end(){}}
  const postgres=moduleLoader({pg:{default:{Pool}}})(path.join(root,'host/instance-runtime/postgres.mjs'));
  await assert.rejects(postgres.importPostgresState({resetEpoch:false}),e=>e.code==='RESTORE_EPOCH_REQUIRED');assert.equal(connects,0);
+ await assert.rejects(postgres.importPostgresRows({resetEpoch:false}),e=>e.code==='RESTORE_EPOCH_REQUIRED');assert.equal(connects,0);
  const repository=new postgres.PostgresRepository({instanceId:restored.instanceId,connection:{}});
  const meta=await repository.writeTransaction(tx=>tx.resetRuntimeEpoch());
  assert.equal(updates,1);assert.match(meta.runtimeEpoch,/^restore_v1_/);
