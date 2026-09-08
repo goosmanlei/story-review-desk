@@ -10,13 +10,15 @@ import {pathToFileURL} from 'node:url';
 import {resolveInstance,openInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {canonicalSha256,archiveRowHashes} from '../host/instance-runtime/archive-integrity.mjs';
-import {writeArchiveFile,readArchiveFile,ARCHIVE_FILE_FORMAT} from '../host/instance-runtime/archive-file.mjs';
-import {retirementManifestFromArchive,validateRetirementBackupManifest} from '../host/instance-runtime/media-retirement-transfer.mjs';
-import {GIT_BUSINESS_PROTOCOL,gitBusinessState,projectGitBusinessArchive} from '../host/instance-runtime/git-business-archive.mjs';
+import {writeArchiveRowsFile,hashArchiveRows,readArchiveFile,ARCHIVE_FILE_FORMAT} from '../host/instance-runtime/archive-file.mjs';
+import {openArchiveRowsFile} from '../host/instance-runtime/archive-file-reader.mjs';
+import {MAX_DECLARED_ARCHIVE_BYTES} from '../host/instance-runtime/archive-stream-validation.mjs';
+import {retirementManifestFromArchive,retirementManifestFromFrozenRows,validateRetirementBackupManifest,validateRetirementBackupManifestFromFrozenRows} from '../host/instance-runtime/media-retirement-transfer.mjs';
+import {GIT_BUSINESS_PROTOCOL,gitBusinessState,projectGitBusinessArchive,projectGitBusinessRows,scanGitBusinessArchive} from '../host/instance-runtime/git-business-archive.mjs';
 import {validateArchive} from '../host/instance-runtime/postgres.mjs';
 import {runPostgresMaintenance} from './instance-postgres.mjs';
-import {restoreArchiveWithMedia} from './instance-transfer.mjs';
-const RESTORE_TEXT='# 可恢复业务快照\n\n这不是完整实例备份，也不是只读网站导出。保留正式业务历史、文档原始字节和有效媒体；不保留助手会话、运行任务、凭证和心跳。完整备份应另外保存。\n\n先取得清单 core 指定的干净软件精确提交及发行包，核验 packageManifestSha256；执行 git lfs pull 取得归档和有效媒体。不要把 LFS 指针当作媒体文件。\n\n在该软件包中执行：\n\n    node --max-old-space-size=4096 scripts/instance-git-export.mjs verify --snapshot /仓库/业务快照目录 --repository /仓库\n    node --max-old-space-size=4096 scripts/instance-git-export.mjs restore --snapshot /仓库/业务快照目录 --repository /仓库 --output /全新实例目录\n\n恢复会创建独立 PostgreSQL 实例和新运行期，不覆盖当前实例，私人助手任务不恢复，旧生产授权在新运行期不可执行；已提交／运行中／结果不明请求须先核查真实终态，新执行须明确重新授权。API 密钥和 Git/Codex 本机认证须独立配置。正式行 SHA 与表行摘要以 manifest.json 为准；只归一化运行 epoch 和仓库计数。\n';
+import {restoreArchiveWithMedia,restoreArchiveRowsWithMedia} from './instance-transfer.mjs';
+const RESTORE_TEXT='# 可恢复业务快照\n\n这不是完整实例备份，也不是只读网站导出。保留正式业务历史、文档原始字节和有效媒体；不保留助手会话、运行任务、凭证和心跳。完整备份应另外保存。\n\n先取得清单 core 指定的干净软件精确提交及发行包，核验 packageManifestSha256；执行 git lfs pull 取得归档和有效媒体。不要把 LFS 指针当作媒体文件。\n\n归档验证与恢复使用有界逐行通路，无需手动提高 Node 堆内存。在该软件包中执行：\n\n    node scripts/instance-git-export.mjs verify --snapshot /仓库/业务快照目录 --repository /仓库\n    node scripts/instance-git-export.mjs restore --snapshot /仓库/业务快照目录 --repository /仓库 --output /全新实例目录\n\n恢复会创建独立 PostgreSQL 实例和新运行期，不覆盖当前实例，私人助手任务不恢复，旧生产授权在新运行期不可执行；已提交／运行中／结果不明请求须先核查真实终态，新执行须明确重新授权。API 密钥和 Git/Codex 本机认证须独立配置。正式行 SHA 与表行摘要以 manifest.json 为准；只归一化运行 epoch 和仓库计数。\n';
 const relative=value=>{if(typeof value!=='string'||path.isAbsolute(value)||/[\\\0]/.test(value)||value.split('/').some(part=>!part||part==='.'||part==='..'))throw Error('Explicit safe project-relative path required');return value;};
 const digest=async filename=>{const hash=createHash('sha256');for await(const chunk of createReadStream(filename))hash.update(chunk);return hash.digest('hex');};
 async function regular(root,name){name=relative(name);const filename=path.join(root,name),info=await lstat(filename);if(!info.isFile()||info.isSymbolicLink()||await realpath(filename)!==filename)throw Error('Snapshot/media must be canonical regular files');return filename;}
@@ -33,23 +35,24 @@ export async function exportGitSnapshot(instancePath,output,{expectedFingerprint
  }
  const repo=await openInstanceRepository(instance);
  try{return await repo.withMediaReadLease(async()=>{
+  const target=path.resolve(output);if(target===instance.root||target.startsWith(instance.root+path.sep))throw Error('Snapshot output must be outside the live instance');
+  const raw=path.join(target,'repository.jsonl'),gzip=path.join(target,'repository.jsonl.gz');
   const frozen=await repo.readTransaction(async tx=>{
    const light=await gitBusinessState(tx);if(light.fingerprint!==expectedFingerprint)throw Error('Content changed before freeze; retry after a new lightweight read');
-   const source=await tx.exportState();validateArchive(source,instance.instanceId);
-   const projected=projectGitBusinessArchive(source);validateArchive(projected.archive,instance.instanceId);
+   const projected=await scanGitBusinessArchive(tx);
    if(projected.business.fingerprint!==light.fingerprint)throw Error('Lightweight and complete business fingerprint differ');
-   const retirement=await retirementManifestFromArchive(projected.archive);
-   return {...projected,retirement};
+   const retirement=await retirementManifestFromFrozenRows(projected.frozenRetirement);
+   await mkdir(target,{mode:0o700});if(await realpath(target)!==target)throw Error('Snapshot output must be canonical');
+   const archiveFile=await writeArchiveRowsFile(raw,{...projected,iterate:projected.createIterator()});
+   if(archiveFile.bytes!==projected.archiveBytes)throw Error('Git archive physical size changed between frozen passes');
+   return {business:projected.business,metadata:projected.metadata,media:projected.media,tableDigests:projected.tableDigests,excludedNamespaces:projected.excludedNamespaces,exportSha256:projected.exportSha256,retirement,archiveFile};
   });
-  const target=path.resolve(output);if(target===instance.root||target.startsWith(instance.root+path.sep))throw Error('Snapshot output must be outside the live instance');
-  await mkdir(target,{mode:0o700});if(await realpath(target)!==target)throw Error('Snapshot output must be canonical');
-  const raw=path.join(target,'repository.jsonl'),archiveFile=await writeArchiveFile(raw,frozen.archive),gzip=path.join(target,'repository.jsonl.gz');
   await pipeline(createReadStream(raw),createGzip({level:6}),createWriteStream(gzip,{flags:'wx',mode:0o600}));
   await verifyFiles(instance.root,frozen.retirement.files);
-  const metadata=frozen.archive.tables.repository_meta[0],body={schemaVersion:'1.0',kind:GIT_BUSINESS_PROTOCOL,instanceId:instance.instanceId,releaseId:metadata.current_release_id,repositoryRevision:metadata.repository_revision,
+  const metadata=frozen.metadata,body={schemaVersion:'1.0',kind:GIT_BUSINESS_PROTOCOL,instanceId:instance.instanceId,releaseId:metadata.current_release_id,repositoryRevision:metadata.repository_revision,
    businessFingerprint:frozen.business.fingerprint,schemaHash:frozen.business.schemaHash,core,mediaPrefix,
-   database:{path:'repository.jsonl.gz',format:ARCHIVE_FILE_FORMAT,sha256:await digest(gzip),bytes:(await lstat(gzip)).size,uncompressedBytes:archiveFile.bytes,archiveSha256:frozen.archive.exportSha256},
-   documentation:{path:'RESTORE.md',sha256:sha256(RESTORE_TEXT)},tableDigests:frozen.tableDigests,media:frozen.archive.tables.media_versions,files:frozen.retirement.files,mediaRetirement:frozen.retirement,
+   database:{path:'repository.jsonl.gz',format:ARCHIVE_FILE_FORMAT,sha256:await digest(gzip),bytes:(await lstat(gzip)).size,uncompressedBytes:frozen.archiveFile.bytes,archiveSha256:frozen.exportSha256},
+   documentation:{path:'RESTORE.md',sha256:sha256(RESTORE_TEXT)},tableDigests:frozen.tableDigests,media:frozen.media,files:frozen.retirement.files,mediaRetirement:frozen.retirement,
    excludedNamespaces:frozen.excludedNamespaces,originalRetainedRowBytesPreserved:true,normalizedRuntimeMetadata:true,
    privateConversationHistoryIncluded:false,providerCredentialsIncluded:false,runtimeIncluded:false,fullBackup:false};
   const manifest={...body,manifestSha256:sha256(canonicalJson(body))};
@@ -80,8 +83,44 @@ async function readGitSnapshot(snapshot,repository){
   return {manifest,archive,mediaRoot};
  }finally{await rm(temp,{recursive:true,force:true});}
 }
-export async function verifyGitSnapshot(snapshot,repository){const {manifest}=await readGitSnapshot(snapshot,repository);return {status:'GIT_BUSINESS_VERIFIED',instanceId:manifest.instanceId,businessFingerprint:manifest.businessFingerprint,manifestSha256:manifest.manifestSha256,mediaFiles:manifest.files.length,fullBackup:false};}
-export async function restoreGitSnapshot(snapshot,repository,output){const {manifest,archive,mediaRoot}=await readGitSnapshot(snapshot,repository);const proof=await restoreArchiveWithMedia(mediaRoot,output,manifest,archive);return {...proof,status:'GIT_BUSINESS_RESTORED_VERIFIED',privateConversationHistoryRestored:false,oldPendingRequests:'INELIGIBLE_REQUIRES_RESULT_CHECK',productionAuthorization:'OLD_REQUESTS_BLOCKED_NEW_AUTHORIZATION_REQUIRED',fullBackup:false,core:manifest.core};}
+// This bound belongs only to the indexed, row-streamed path. The legacy object
+// reader above deliberately retains its original 4 GiB limit.
+export const GIT_STREAM_MAX_ARCHIVE_BYTES=MAX_DECLARED_ARCHIVE_BYTES;
+export async function withVerifiedGitSnapshot(snapshot,repository,callback){
+ if(typeof callback!=='function')throw Error('Verified Git snapshot callback required');
+ snapshot=await realpath(snapshot);repository=await realpath(repository);
+ const manifestFile=await regular(snapshot,'manifest.json');if((await lstat(manifestFile)).size>16*1024**2)throw Error('Git manifest exceeds bounded metadata capacity');
+ const manifest=JSON.parse(await readFile(manifestFile,'utf8')),{manifestSha256,...body}=manifest;
+ if(body.kind!==GIT_BUSINESS_PROTOCOL||body.schemaVersion!=='1.0'||sha256(canonicalJson(body))!==manifestSha256||body.fullBackup!==false||body.privateConversationHistoryIncluded!==false||body.providerCredentialsIncluded!==false)throw Error('Invalid Git business manifest');
+ coreBinding(body.core);relative(body.mediaPrefix);
+ if(body.documentation?.path!=='RESTORE.md'||await digest(await regular(snapshot,'RESTORE.md'))!==body.documentation.sha256)throw Error('Restore instructions SHA differs from the immutable snapshot manifest');
+ const mediaDirectory=await realpath(path.join(repository,body.mediaPrefix));if(!mediaDirectory.startsWith(repository+path.sep)||path.basename(mediaDirectory)!=='media')throw Error('Manifest media prefix escapes the explicit Git checkout');
+ const mediaRoot=path.dirname(mediaDirectory),gzip=await regular(snapshot,body.database.path);
+ if((await lstat(gzip)).size!==body.database.bytes||await digest(gzip)!==body.database.sha256)throw Error('Git archive bytes or LFS materialization differ');
+ if(body.database.format!==ARCHIVE_FILE_FORMAT||!Number.isSafeInteger(body.database.uncompressedBytes)||body.database.uncompressedBytes<=0||body.database.uncompressedBytes>GIT_STREAM_MAX_ARCHIVE_BYTES)throw Error('Git archive exceeds supported streamed restore capacity');
+ const temp=await mkdtemp(path.join(snapshot,'.verify-')),raw=path.join(temp,'repository.jsonl');let bytes=0,compressedBytes=0,reader;const compressedHash=createHash('sha256');
+ try{
+  await pipeline(createReadStream(gzip),new Transform({transform(chunk,_encoding,done){compressedBytes+=chunk.length;compressedHash.update(chunk);done(compressedBytes>body.database.bytes?Error('Compressed size exceeds manifest'):null,chunk);}}),createGunzip(),new Transform({transform(chunk,_encoding,done){bytes+=chunk.length;done(bytes>body.database.uncompressedBytes?Error('Decompressed size exceeds manifest'):null,chunk);}}),createWriteStream(raw,{flags:'wx',mode:0o600}));
+  if(compressedBytes!==body.database.bytes||compressedHash.digest('hex')!==body.database.sha256)throw Error('Compressed archive changed during complete reading');
+  if(bytes!==body.database.uncompressedBytes)throw Error('Decompressed size differs');
+  reader=await openArchiveRowsFile(raw,{maxBytes:GIT_STREAM_MAX_ARCHIVE_BYTES});
+  const {exportSha256,...header}=reader.header;
+  const original=await hashArchiveRows(header,reader.tableNames,reader.iterate);
+  if(original.exportSha256!==exportSha256||exportSha256!==body.database.archiveSha256)throw Error('Git archive logical checksum differs');
+  const projected=await projectGitBusinessRows(reader);
+  if(projected.business.fingerprint!==body.businessFingerprint||projected.business.schemaHash!==body.schemaHash||canonicalJson(projected.tableDigests)!==canonicalJson(body.tableDigests)||projected.exportSha256!==exportSha256)throw Error('Git archive schema, exclusions or retained row digests differ');
+  await validateRetirementBackupManifestFromFrozenRows(projected.frozenRetirement,manifest);await verifyFiles(mediaRoot,manifest.files);
+  await reader.assertUnchanged();
+  return await callback({manifest,reader,mediaRoot,frozenRetirement:projected.frozenRetirement,rowHashes:projected.rowHashes});
+ }finally{try{if(reader)await reader.close();}finally{await rm(temp,{recursive:true,force:true});}}
+}
+export async function verifyGitSnapshot(snapshot,repository){return withVerifiedGitSnapshot(snapshot,repository,({manifest})=>({status:'GIT_BUSINESS_VERIFIED',instanceId:manifest.instanceId,businessFingerprint:manifest.businessFingerprint,manifestSha256:manifest.manifestSha256,mediaFiles:manifest.files.length,fullBackup:false}));}
+export async function restoreGitSnapshot(snapshot,repository,output){
+ return withVerifiedGitSnapshot(snapshot,repository,async({manifest,reader,mediaRoot})=>{
+  const proof=await restoreArchiveRowsWithMedia(mediaRoot,output,manifest,reader);
+  return {...proof,status:'GIT_BUSINESS_RESTORED_VERIFIED',privateConversationHistoryRestored:false,oldPendingRequests:'INELIGIBLE_REQUIRES_RESULT_CHECK',productionAuthorization:'OLD_REQUESTS_BLOCKED_NEW_AUTHORIZATION_REQUIRED',fullBackup:false,core:manifest.core};
+ });
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){
  try{
   const {values,positionals}=parseArgs({allowPositionals:true,options:{instance:{type:'string'},output:{type:'string'},snapshot:{type:'string'},repository:{type:'string'},'expected-fingerprint':{type:'string'},'media-prefix':{type:'string'},'core-repository':{type:'string'},'core-commit':{type:'string'},'package-sha':{type:'string'}}});

@@ -35,6 +35,11 @@ function decode(row) {
 function archiveAdapter(archive) {
   const { exportSha256, ...body } = archive;
   check(canonicalSha256(body) === exportSha256, 'Archive hash differs');
+  return frozenRowsAdapter(archive);
+}
+// No live repository reads. Callers separately validate the complete source;
+// this adapter checks all retained retirement evidence and registrations.
+function frozenRowsAdapter(archive) {
   const tables = archive.tables;
   for (const name of ['repository_meta', 'record_heads', 'record_revisions', 'media_versions', 'media_aliases']) check(Array.isArray(tables?.[name]), 'Missing archive table: ' + name);
   check(tables.repository_meta.length === 1 && tables.repository_meta[0].instance_id === archive.instanceId, 'Archive metadata identity differs');
@@ -142,6 +147,14 @@ export async function retirementManifestFromArchive(archive) {
   return retirementAwareMediaManifest(adapter.tx, adapter.media);
 }
 
+/** Only for rows frozen by the complete streaming repository validator.
+ * Not a replacement archive and never assigned a fabricated export SHA. */
+export async function retirementManifestFromFrozenRows(frozen) {
+  const adapter=frozenRowsAdapter(frozen);
+  validateRetirementEvidence(frozen,adapter);
+  return retirementAwareMediaManifest(adapter.tx,adapter.media);
+}
+
 /** Exactly one read-only transaction; no live aux reads after the archive is frozen. */
 export async function freezeRetirementBackup(repository, instanceId, validateArchive) {
   return repository.readTransaction(async tx => {
@@ -165,6 +178,19 @@ export async function validateRetirementBackupManifest(archive, manifest) {
   const overlay = await retirementManifestFromArchive(archive);
   check(equal(manifest.files, overlay.files), 'Backup files differ from archive retirement authority');
   // Legacy packages remain valid only when no media has retirement state.
+  check(manifest.mediaRetirement === undefined ? overlay.retired.length === 0 : equal(manifest.mediaRetirement, overlay), 'Backup retirement projection differs/missing');
+  return overlay;
+}
+
+/** The complete source schema, row bytes and export SHA must already be checked
+ * by a streaming archive validator. This subset is never a fabricated archive. */
+export async function validateRetirementBackupManifestFromFrozenRows(frozen, manifest) {
+  check(manifest.instanceId === frozen.instanceId, 'Backup instance differs');
+  const metadata = frozen.tables.repository_meta[0];
+  check(manifest.releaseId === metadata.current_release_id && manifest.repositoryRevision === metadata.repository_revision, 'Backup release/repository snapshot differs');
+  check(equal(registrationManifest(frozen.tables.media_versions), registrationManifest(manifest.media)), 'Backup media differs from database authority');
+  const overlay = await retirementManifestFromFrozenRows(frozen);
+  check(equal(manifest.files, overlay.files), 'Backup files differ from archive retirement authority');
   check(manifest.mediaRetirement === undefined ? overlay.retired.length === 0 : equal(manifest.mediaRetirement, overlay), 'Backup retirement projection differs/missing');
   return overlay;
 }

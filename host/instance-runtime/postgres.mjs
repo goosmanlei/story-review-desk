@@ -8,9 +8,11 @@ import { RepositoryError, canonicalJson, sha256, projectionFingerprintNamespaces
 import { APPLICATION_ID, SCHEMA_VERSION } from './schema.mjs';
 import { installQueryModel, rebuildQueryModel } from './query-model.mjs';
 import { BUSINESS_TABLES, POSTGRES_SCHEMA, POSTGRES_SCHEMA_VERSION } from './postgres-schema.mjs';
-import {mediaRetirementOverlay} from './media-retirement.mjs';
+import {mediaRetirementOverlay,RETIREMENT_NAMESPACES} from './media-retirement.mjs';
 import {canonicalSha256,archiveRowHashes} from './archive-integrity.mjs';
-import {writeArchiveFile} from './archive-file.mjs';
+import {writeArchiveFile,hashArchiveRows,ARCHIVE_FILE_FORMAT} from './archive-file.mjs';
+import {validateArchiveRows,assertArchiveRowsUnchanged,decodeArchiveRow,MAX_DECLARED_ARCHIVE_BYTES} from './archive-stream-validation.mjs';
+import {DEFAULT_ARCHIVE_MAX_ROW_BYTES} from './archive-file-reader.mjs';
 const contexts = new AsyncLocalStorage();
 const mediaLeaseContexts = new AsyncLocalStorage();
 const MEDIA_GATE_NAMESPACE = 'media-maintenance-gates';
@@ -36,6 +38,51 @@ const parse = x => JSON.parse(Buffer.from(x).toString('utf8'));
 const now = () => new Date().toISOString();
 const readOnlyProcess = () => process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1';
 const number = x => {const n=Number(x);ensure(Number.isSafeInteger(n),'INTEGER_RANGE','Database integer exceeds safe range');return n;};
+const archiveRowOrder=Object.freeze({repository_meta:'singleton',record_revisions:'namespace,record_key,revision_number',record_heads:'namespace,record_key',document_aliases:'alias',releases:'release_id',domain_events:'storage_sequence',media_versions:'media_id,version_id',media_aliases:'alias,media_id,version_id'});
+const retirementNamespaces=new Set(Object.values(RETIREMENT_NAMESPACES).map(name=>'aux:'+name));
+/** The existing exportState representation, shared with encoded-row streams. */
+export function encodeArchiveRow(row){return Object.fromEntries(Object.entries(row).map(([key,value])=>[key,Buffer.isBuffer(value)?{encoding:'base64',bytes:value.toString('base64')}:['repository_revision','storage_sequence','original_sequence','byte_size'].includes(key)&&value!==null?number(value):value]));}
+
+/** Complete validateArchive row semantics, without retaining any body bytes.
+ * Table/row order is arbitrary: canonical NDJSON has heads before revisions.
+ * Outer archive SHA validation remains the file reader/hash-stream caller's job. */
+export function createArchiveStreamValidator(header,tableNames,instanceId,{expectedMeta}={}){
+ ensure(header?.schemaVersion===SCHEMA_VERSION&&header.applicationId===APPLICATION_ID&&header.instanceId===instanceId,'INSTANCE_MISMATCH','Archive identity/schema mismatch');
+ ensure(Array.isArray(tableNames)&&[...tableNames].sort().join(',')===[...BUSINESS_TABLES].sort().join(','),'EXPORT_TABLES_MISMATCH','Archive business table set differs');
+ const allowed=new Set(tableNames),finished=new Set(),chains=new Map(),heads=new Map(),revisionIds=new Set(),references=new Set();let metaCount=0,done=false;
+ return{
+  accept(table,row){
+   ensure(!done&&allowed.has(table)&&!finished.has(table),'EXPORT_TABLES_MISMATCH','Archive table was repeated or already closed');
+   ensure(row&&typeof row==='object'&&!Array.isArray(row),'EXPORT_ROW_MISMATCH','Archive row must be an object');
+   const r=Object.fromEntries(Object.entries(row).map(([key,value])=>{if(value===null||typeof value!=='object')return[key,value];ensure(value.encoding==='base64'&&typeof value.bytes==='string','EXPORT_BYTES_MISMATCH','Invalid base64');const decoded=Buffer.from(value.bytes,'base64');ensure(decoded.toString('base64')===value.bytes,'EXPORT_BYTES_MISMATCH','Invalid base64');return[key,decoded];}));
+   if(table==='record_revisions'){
+    ensure(sha256(r.content_bytes)===r.content_sha256,'INTEGRITY_FAILED','Record bytes mismatch');
+    const key=canonicalJson([r.namespace,r.record_key]),chain=chains.get(key)||[];
+    chain.push({number:r.revision_number,id:r.revision_id,previous:r.previous_revision_id});chains.set(key,chain);revisionIds.add(r.revision_id);
+   }
+   if(table==='record_heads'){
+    const key=canonicalJson([r.namespace,r.record_key]);ensure(!heads.has(key),'INTEGRITY_FAILED','Head mismatch');heads.set(key,r.revision_id);
+   }
+   if(table==='domain_events'){
+    const event=parse(r.event_bytes);ensure(sha256(r.event_bytes)===r.event_sha256&&event.eventId===r.event_id&&(event.eventKind||event.eventType)===r.event_kind&&(event.idempotencyKeyHash||null)===r.idempotency_key_hash,'INTEGRITY_FAILED','Event bytes mismatch');
+   }
+   if(table==='releases'){
+    ensure(sha256(r.snapshot_bytes)===r.snapshot_sha256&&sha256(r.recipes_bytes)===r.recipes_sha256&&parse(r.snapshot_bytes).snapshotId===parse(r.recipes_bytes).snapshotId,'INTEGRITY_FAILED','Release bytes mismatch');
+    const sources=JSON.parse(r.source_revision_ids_json);ensure(Array.isArray(sources),'INTEGRITY_FAILED','Release source binding missing');references.add(r.profile_revision_id);for(const id of sources)references.add(id);
+   }
+   if(table==='repository_meta'){
+    metaCount++;ensure(r.instance_id===instanceId,'INSTANCE_MISMATCH','Metadata identity mismatch');
+    if(expectedMeta!==undefined)ensure(canonicalJson(row)===canonicalJson(expectedMeta),'INTEGRITY_FAILED','Archive metadata changed within the frozen snapshot');
+   }
+  },
+  finishTable(table){ensure(!done&&allowed.has(table)&&!finished.has(table),'EXPORT_TABLES_MISMATCH','Archive table was repeated or already closed');finished.add(table);},
+  finish(){
+   ensure(!done&&finished.size===allowed.size,'EXPORT_TABLES_MISMATCH','Archive table set is incomplete');
+   for(const [key,chain]of chains){chain.sort((a,b)=>a.number-b.number);let previous=null;for(let i=0;i<chain.length;i++){const revision=chain[i];ensure(revision.number===i+1&&revision.previous===previous,'INTEGRITY_FAILED','Revision chain mismatch');previous=revision.id;}ensure(heads.has(key),'INTEGRITY_FAILED','Missing head');ensure(heads.get(key)===previous,'INTEGRITY_FAILED','Head mismatch');heads.delete(key);}
+   ensure(heads.size===0,'INTEGRITY_FAILED','Head mismatch');ensure([...references].every(id=>revisionIds.has(id)),'INTEGRITY_FAILED','Release source binding missing');ensure(metaCount===1,'INSTANCE_MISMATCH','Metadata identity mismatch');done=true;
+  },
+ };
+}
 const rowRecord = r => r ? {namespace:r.namespace,key:r.record_key,revisionId:r.revision_id,revision:number(r.revision_number),previousRevisionId:r.previous_revision_id,bytes:Buffer.from(r.content_bytes),sha256:r.content_sha256,mediaType:r.media_type,metadata:JSON.parse(r.metadata_json),deleted:Boolean(r.deleted),createdAt:r.created_at}:null;
 const orderedEvents = rows => rows.map(r=>parse(r.event_bytes)).sort((a,b)=>{const l=Number.isSafeInteger(a.eventSequence)&&a.eventSequence>0?a.eventSequence:null,r=Number.isSafeInteger(b.eventSequence)&&b.eventSequence>0?b.eventSequence:null;return l!==null&&r!==null&&l!==r?r-l:l!==null&&r===null?-1:l===null&&r!==null?1:String(b.recordedAt).localeCompare(String(a.recordedAt))||String(b.eventId).localeCompare(String(a.eventId));});
 async function configurationProjection(unit,profile,snapshot,recipes){
@@ -162,6 +209,31 @@ class PgUnit {
   for(const alias of aliases){const r=await this.run('INSERT INTO media_aliases VALUES($1,$2,$3) ON CONFLICT DO NOTHING',[text(alias,'alias'),mediaId,versionId]);if(r.rowCount)await this.bump();}return this.getMedia(mediaId,versionId);
  }
  async resetRuntimeEpoch(){this.assertWrite();await this.run('UPDATE repository_meta SET runtime_epoch=$1,repository_revision=repository_revision+1 WHERE singleton=1',[restoredRuntimeEpoch(randomUUID())]);return this.repositoryState();}
+ async *iterateArchiveRows(table){
+  ensure(BUSINESS_TABLES.includes(table),'EXPORT_TABLES_MISMATCH','Unknown archive table');let failure;
+  await this.query(`DECLARE review_archive_rows NO SCROLL CURSOR FOR SELECT * FROM ${table} ORDER BY ${archiveRowOrder[table]}`);
+  try{for(;;){const result=await this.query('FETCH FORWARD 1 FROM review_archive_rows');if(!result.rows.length)break;ensure(result.rows.length===1,'INTEGRITY_FAILED','Archive cursor exceeded one row');yield encodeArchiveRow(result.rows[0]);}}
+  catch(error){failure=error;throw error;}
+  finally{try{await this.query('CLOSE review_archive_rows');}catch(error){if(!failure)throw error;}}
+ }
+ async scanValidatedArchive({maxBytes=MAX_DECLARED_ARCHIVE_BYTES,maxRowBytes=DEFAULT_ARCHIVE_MAX_ROW_BYTES,maxRows=1000000}={}){
+  ensure(!this.writable,'READ_ONLY_TRANSACTION','Archive scan requires a read-only transaction');
+  for(const [value,ceiling]of[[maxBytes,MAX_DECLARED_ARCHIVE_BYTES],[maxRowBytes,DEFAULT_ARCHIVE_MAX_ROW_BYTES],[maxRows,1000000]])ensure(Number.isSafeInteger(value)&&value>0&&value<=ceiling,'ARCHIVE_LIMIT','Archive scan capacity must stay within the complete-reader limits');
+  const meta=encodeArchiveRow(await this.meta()),sequence=await this.one('SELECT COALESCE(max(storage_sequence),0) AS n FROM domain_events');
+  const header=Object.freeze({schemaVersion:SCHEMA_VERSION,applicationId:APPLICATION_ID,instanceId:meta.instance_id,sequence:[{name:'domain_events',seq:number(sequence.n)}],mediaIncluded:false});
+  const tableNames=Object.freeze([...BUSINESS_TABLES].sort()),validator=createArchiveStreamValidator(header,tableNames,this.repository.instanceId,{expectedMeta:meta});
+  const tables={repository_meta:[],record_revisions:[],record_heads:[],media_versions:[],media_aliases:[]};
+  // SHA-256 always occupies 64 ASCII bytes. Count the exact NDJSON_1 header,
+  // each encoded row and the end record before any backup target is created.
+  let archiveBytes=Buffer.byteLength(canonicalJson({format:ARCHIVE_FILE_FORMAT,header:{...header,exportSha256:'0'.repeat(64)},tableNames}))+1,rowCount=0;
+  ensure(archiveBytes-1<=Math.min(maxRowBytes,1024*1024)&&archiveBytes<=maxBytes,'ARCHIVE_LIMIT','Archive header exceeds complete-reader capacity');
+  const proof=await hashArchiveRows(header,tableNames,table=>this.iterateArchiveRows(table),{
+   onRow:(table,row)=>{validator.accept(table,row);const rowBytes=Buffer.byteLength(canonicalJson({table,row}));rowCount++;archiveBytes+=rowBytes+1;ensure(rowBytes<=maxRowBytes&&rowCount<=maxRows&&archiveBytes<=maxBytes,'ARCHIVE_LIMIT','Archive exceeds complete-reader capacity');if(table==='record_revisions'||table==='record_heads'){if(retirementNamespaces.has(row.namespace))tables[table].push(row);}else if(Object.hasOwn(tables,table))tables[table].push(row);},
+   onTableEnd:table=>validator.finishTable(table),
+  });
+  validator.finish();archiveBytes+=Buffer.byteLength(canonicalJson({end:true,rows:rowCount}))+1;ensure(archiveBytes<=maxBytes,'ARCHIVE_LIMIT','Archive end record exceeds complete-reader capacity');
+  return{header,tableNames,...proof,archiveBytes,frozenRetirement:{instanceId:meta.instance_id,tables},metadata:{instanceId:meta.instance_id,releaseId:meta.current_release_id,repositoryRevision:meta.repository_revision}};
+ }
  async exportState(){
   const tables={};const order={repository_meta:'singleton',record_revisions:'namespace,record_key,revision_number',record_heads:'namespace,record_key',document_aliases:'alias',releases:'release_id',domain_events:'storage_sequence',media_versions:'media_id,version_id',media_aliases:'alias,media_id,version_id'};
   for(const table of BUSINESS_TABLES)tables[table]=(await this.all(`SELECT * FROM ${table} ORDER BY ${order[table]}`)).map(row=>Object.fromEntries(Object.entries(row).map(([k,v])=>[k,Buffer.isBuffer(v)?{encoding:'base64',bytes:v.toString('base64')}:['repository_revision','storage_sequence','original_sequence','byte_size'].includes(k)&&v!==null?number(v):v])));
@@ -335,6 +407,40 @@ export async function importPostgresState({archive,...options}){
   await repo.writeTransaction(async tx=>{const release=await tx.readRelease();if(release)await rebuildQueryModel(tx,{releaseId:release.releaseId,snapshot:parse(release.snapshotBytes),recipes:parse(release.recipesBytes)});});
   const proof=await verifyImportedRepository(repo,expectedRowHashes,expectedMeta);
   Object.defineProperty(repo,'importVerification',{value:proof,enumerable:false,writable:false,configurable:false});
+  return repo;
+ }catch(error){await repo.close().catch(()=>{});throw error;}
+}
+
+/** File-backed NDJSON import: validate the complete source before opening the
+ * empty-target transaction, then re-read/validate/hash each inserted row. */
+export async function importPostgresRows({reader,...options}){
+ if(options.resetEpoch===false)throw new RepositoryError('RESTORE_EPOCH_REQUIRED','Archive import always requires a fresh restoration epoch');
+ ensure(!readOnlyProcess(),'READ_ONLY','Cannot import read-only repository');
+ ensure(options.backend===undefined||options.backend==='postgres','BACKEND_MISMATCH','Stream PostgreSQL importer requires a PostgreSQL target');
+ const before=await validateArchiveRows(reader,{instanceId:options.instanceId,createValidator:createArchiveStreamValidator,collectRetirement:false});
+ const expectedMeta=Object.freeze({...before.metadata,runtime_epoch:restoredRuntimeEpoch(randomUUID()),repository_revision:number(number(before.metadata.repository_revision)+1)});
+ const connection=await postgresConnection(options);
+ await emptySchema(connection,async c=>{
+  const columns=new Map();for(const table of BUSINESS_TABLES)columns.set(table,(await c.query('SELECT column_name FROM information_schema.columns WHERE table_schema=$1 AND table_name=$2 ORDER BY ordinal_position',['public',table])).rows.map(r=>r.column_name));
+  const after=await validateArchiveRows(reader,{instanceId:options.instanceId,createValidator:createArchiveStreamValidator,collectRetirement:false,onRow:async(table,encoded)=>{
+   const allowed=columns.get(table),row=decodeArchiveRow(encoded);ensure(allowed&&Object.keys(row).sort().join(',')===[...allowed].sort().join(','),'EXPORT_ROW_MISMATCH','Archive columns differ');
+   await c.query(`INSERT INTO ${table}(${allowed.join(',')}) VALUES(${allowed.map((_,i)=>`$${i+1}`).join(',')})`,allowed.map(k=>row[k]));
+  }});
+  assertArchiveRowsUnchanged(before,after);
+  await c.query("SELECT setval(pg_get_serial_sequence('domain_events','storage_sequence'),$1,$2)",[Math.max(before.sequenceHigh,1),before.sequenceHigh>0]);
+  await c.query('UPDATE repository_meta SET runtime_epoch=$1,repository_revision=repository_revision+1 WHERE singleton=1',[expectedMeta.runtime_epoch]);
+  const actualMeta=(await c.query('SELECT * FROM repository_meta WHERE singleton=1')).rows;
+  ensure(actualMeta.length===1&&canonicalJson(encodeArchiveRow(actualMeta[0]))===canonicalJson(expectedMeta),'INTEGRITY_FAILED','Restored metadata differs before commit');
+  // Check actual inserted rows as well: a DB cast/constraint/trigger must not
+  // normalize an encoded archive row and only be discovered after COMMIT.
+  await verifyRestoredRows(new PgUnit(c,null,true),options.instanceId,before.rowHashes,expectedMeta);
+  await reader.assertUnchanged();
+ });
+ const repo=await openPostgresRepository({...options,connection});
+ try{
+  await repo.writeTransaction(async tx=>{const release=await tx.readRelease();if(release)await rebuildQueryModel(tx,{releaseId:release.releaseId,snapshot:parse(release.snapshotBytes),recipes:parse(release.recipesBytes)});});
+  const proof=await verifyImportedRepository(repo,before.rowHashes,expectedMeta);
+  Object.defineProperty(repo,'importVerification',{value:Object.freeze({...proof,streamedSource:Object.freeze({format:reader.format,fileSha256:before.file.sha256,fileBytes:before.file.bytes,exportSha256:before.exportSha256,rows:before.rows,semanticPasses:2,rowHashesSha256:before.rowHashesSha256})}),enumerable:false,writable:false,configurable:false});
   return repo;
  }catch(error){await repo.close().catch(()=>{});throw error;}
 }
