@@ -76,7 +76,7 @@ test('URL view overrides the configured default and back to the root restores it
   await expect(page.getByRole('heading', { name: '素材管理', exact: true })).toBeVisible();
   await page.goto('/?view=pipeline');
   await expect(page.getByRole('heading', { name: '从拆镜表达，到整集成片', exact: true })).toBeVisible();
-  await expect(page.getByRole('navigation',{name:'全剧制作四阶段',exact:true}).getByRole('button')).toHaveCount(4);
+  await expect(page.getByRole('navigation',{name:'全剧制作模块',exact:true}).getByRole('button')).toHaveCount(3);
   await page.goto('/?view=not-a-view');
   await expect(page.getByRole('heading', { name: '从来源核对、结构理解到分集与逐场成稿', exact: true })).toBeVisible();
 });
@@ -131,9 +131,9 @@ test('empty stories preserve the original desk shell, palette, navigation and wo
   await expect(page.getByRole('heading', { name: '素材管理', exact: true })).toBeVisible();
   await page.getByRole('navigation', { name: '主导航' }).getByRole('button', { name: '全剧制作', exact: true }).click();
   const production=page.getByRole('region',{name:'场景上下文的全剧制作',exact:true});
-  const stages=production.getByRole('navigation',{name:'全剧制作四阶段',exact:true});
-  await expect(stages.getByRole('button')).toHaveCount(4);
-  await expect(stages.locator('button strong')).toHaveText(['镜头拆解','镜头生成','场景剪辑','分集成片']);
+  const stages=production.getByRole('navigation',{name:'全剧制作模块',exact:true});
+  await expect(stages.getByRole('button')).toHaveCount(3);
+  await expect(stages.locator('button strong')).toHaveText(['镜头制作','场景剪辑','分集成片']);
   const episodes=production.getByRole('navigation',{name:'制作上下文分集',exact:true});
   await expect(episodes.getByRole('button')).toHaveCount(0);
   await expect(episodes).toContainText('尚未建立候选分集。正式制作范围仍待确定。');
@@ -158,14 +158,19 @@ test('empty stories preserve the original desk shell, palette, navigation and wo
     const expected=configuration.workflow.gates.filter(gate=>stage.gateIds.includes(gate.id));
     expect(expected.map(gate=>gate.id).sort()).toEqual([...stage.gateIds].sort());
     await expect(production.locator('[data-production-check]')).toHaveCount(expected.length);
-    // Only this stage's checks exist, and each group stays behind a disclosure.
-    const checkGroups=production.locator('details.preparation-stage-checks');
+    // Six shot-production steps stay visible before scene/shot selection. Other
+    // modules keep their grouped checks, including separate project exports.
+    const isShotProduction=stage.id==='SHOT_PRODUCTION';
+    const checkGroups=isShotProduction?production.getByRole('navigation',{name:'镜头制作六步骤',exact:true}):production.locator('details.preparation-stage-checks');
     await expect(checkGroups).toHaveCount(stage.exportGateIds.length?2:1);
+    if(isShotProduction)await expect(checkGroups.getByRole('button')).toHaveCount(6);
     for(const group of await checkGroups.all()){
-      if(await group.getAttribute('open')!==null)await group.locator('summary').click();
-      await expect(group).not.toHaveAttribute('open','');
-      await expect(group.locator('[data-production-check]:visible')).toHaveCount(0);
-      await group.locator('summary').click();
+      if(!isShotProduction){
+        if(await group.getAttribute('open')!==null)await group.locator('summary').click();
+        await expect(group).not.toHaveAttribute('open','');
+        await expect(group.locator('[data-production-check]:visible')).toHaveCount(0);
+        await group.locator('summary').click();
+      }
       for(const button of await group.locator('[data-production-check]').all()){
         const gateId=await button.getAttribute('data-production-check');
         const gate=expected.find(item=>item.id===gateId);

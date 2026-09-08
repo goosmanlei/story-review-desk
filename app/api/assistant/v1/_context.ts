@@ -320,7 +320,7 @@ async function assembleCatalog(data: ReviewData, operations: Operations, recipes
       ...rows(item.inputVersionBindings).map((binding) => `version:${str(binding.versionId || binding.assetVersionRef)}`),
     ]), 'CURRENT', str(item.shotPlanSetRevisionId) || undefined));
   }
-  resources.push(resource('project:production', '全剧制作 · 四个创作阶段', 'PRODUCTION_OVERVIEW', {
+  resources.push(resource('project:production', '全剧制作 · 三个制作模块', 'PRODUCTION_OVERVIEW', {
     creatorStages: CREATOR_PRODUCTION_STAGES,
     phases: (model.productionPhases || []).map((entry) => pick(entry, ['id', 'label', 'purpose', 'denominatorState', 'denominator', 'discoveredCount', 'currentObjectCount', 'releasedObjectCount', 'flowBlockReasons'])),
     gates: (model.productionGates || []).map((entry) => pick(entry, ['id', 'phaseId', 'label', 'purpose', 'scopeType', 'denominatorState', 'denominator', 'discoveredCount'])),

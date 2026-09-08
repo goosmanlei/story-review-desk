@@ -25,6 +25,7 @@ async function fixture(page:Page,{readonly=false,saved=false,materials=false}={}
   if(url.pathname==='/api/instance/documents')return json({documents:[]});
   if(url.pathname==='/api/instance/sources')return json({releaseId:'r1',sources:[]});
   if(url.pathname==='/api/instance/material-directory')return json({releaseId:'r1',revisionId:'dir-1',graph,bindings:[],trials:[],staleIds:[]});
+  if(url.pathname==='/api/trial/scopes'&&req.method()==='GET')return json({scopes:[],defaultScopeId:null});
   if(url.pathname==='/api/instance/production-preparation')return json({releaseId:'r1',revisionId:null,content:null,candidate:null,comments:[],materialLinks:null,stale:false,readOnly:readonly});
   if(url.pathname==='/api/instance/authoring')return json({releaseId:'r1',roots:[],initializationReady:true,sourceBindings:[]});
   if(url.pathname==='/api/instance/setting-extraction')return json({releaseId:'r1',sources:[],results:[],input:null,task:null,capability:{initialize:false},readOnly:readonly});

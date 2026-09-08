@@ -1,5 +1,6 @@
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
 import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
+import {shotProductionExecutionEntries} from '../../../host/instance-runtime/shot-production-gates.mjs';
 import type {ExecutionRuntime} from '../../../host/instance-runtime/execution-epoch.mjs';
 import { projectEpisodeNarrativeReleases, assertScopedEpisodeSceneBasis, assertScopedSceneSyncBinding, SCENE_SYNC_PROTOCOL } from './episode-plan-reviews/_release';
 import {applyDomainInvalidations} from '../../../host/instance-runtime/domain-invalidation.mjs';
@@ -3606,16 +3607,13 @@ function gateShotPlanDerivedOperationalProjection(
   scopeLocksById: Record<string, Record<string, unknown> | undefined>,
 ) {
   const shotPlans = data.productionModel.shotPlanSetRevisions || [];
-  const scopeLockByScene = new Map(
-    Object.values(scopeLocksById)
-      .filter((lock): lock is Record<string, unknown> => Boolean(
-        lock
-        && lock.scopeType === 'SCENE'
-        && typeof lock.scopeId === 'string'
-        && lock.lockPurpose === 'SHOT_PLAN_SET',
-      ))
-      .map((lock) => [String(lock.scopeId), lock]),
-  );
+  const scopeLocks = Object.values(scopeLocksById)
+    .filter((lock): lock is Record<string, unknown> => Boolean(
+      lock
+      && lock.scopeType === 'SCENE'
+      && typeof lock.scopeId === 'string'
+      && lock.lockPurpose === 'SHOT_PLAN_SET',
+    ));
   const exactCurrentPlan = (
     sceneId: string,
     revisionId: string,
@@ -3637,7 +3635,8 @@ function gateShotPlanDerivedOperationalProjection(
       ? plan.shotIds.filter((id): id is string => typeof id === 'string' && Boolean(id))
       : [];
     const structure = structuresById[`SHOT_PLAN_SET::${planId}`];
-    const scopeLock = scopeLockByScene.get(sceneId);
+    const locksForScene = scopeLocks.filter((lock) => lock.scopeId === sceneId);
+    const scopeLock = locksForScene.length === 1 ? locksForScene[0] : undefined;
     return Boolean(
       planId
       && plan.id === revisionId
@@ -3688,15 +3687,34 @@ function gateShotPlanDerivedOperationalProjection(
     });
   };
 
+  const productionPlans = ((data.productionModel as unknown as {
+    shotProductionPlans?: Array<{id: string; sceneId: string; scopeRole: string; workItemIds?: string[];
+      content: {shotPlanRevisionId: string; shotPlanHash: string}}>
+  }).shotProductionPlans || []).filter((plan) => plan.scopeRole === 'CURRENT');
+  const inCurrentProductionPlan = (
+    ownerId: string | undefined, sceneId: string, revisionId: string,
+    revisionHash: string, workItemIds: string[],
+  ) => {
+    if (!ownerId) return true; // Original design-only work keeps its legacy gate.
+    const plans = productionPlans.filter((plan) => plan.sceneId === sceneId);
+    if (plans.length !== 1 || !workItemIds.length) return false;
+    const plan = plans[0];
+    if (plan.content?.shotPlanRevisionId !== revisionId || plan.content.shotPlanHash !== revisionHash) return false;
+    if (plan.workItemIds === undefined) return plan.id === ownerId;
+    return Array.isArray(plan.workItemIds)
+      && new Set(plan.workItemIds).size === plan.workItemIds.length
+      && workItemIds.every((id) => plan.workItemIds!.includes(id));
+  };
   for (const work of data.productionModel.workItems) {
     if (
       (work.deliverableKey !== 'SHOT_INPUT_LOCK' && !work.shotProductionPlanId)
       || !work.shotPlanSetRevisionId
       || !work.shotPlanSetRevisionHash
     ) continue;
-    const activeProductionPlans=((data.productionModel as unknown as {shotProductionPlans?:Array<{id:string;scopeRole:string;workItemIds?:string[]}>}).shotProductionPlans||[]).filter(p=>p.scopeRole==='CURRENT');
-    const productionCurrent=!work.shotProductionPlanId||activeProductionPlans.some(p=>p.workItemIds?p.workItemIds.includes(work.id):p.id===work.shotProductionPlanId);
-    const current = productionCurrent && exactCurrentPlan(
+    const current = inCurrentProductionPlan(
+      work.shotProductionPlanId, String(work.sceneId || ''),
+      work.shotPlanSetRevisionId, work.shotPlanSetRevisionHash, [work.id],
+    ) && exactCurrentPlan(
       String(work.sceneId || ''),
       work.shotPlanSetRevisionId,
       work.shotPlanSetRevisionHash,
@@ -3706,9 +3724,13 @@ function gateShotPlanDerivedOperationalProjection(
   }
   for (const workPackage of data.productionModel.workPackages) {
     if (!workPackage.shotPlanSetRevisionId || !workPackage.shotPlanSetRevisionHash) continue;
-    const activeProductionPlans=((data.productionModel as unknown as {shotProductionPlans?:Array<{id:string;scopeRole:string;workItemIds?:string[]}>}).shotProductionPlans||[]).filter(p=>p.scopeRole==='CURRENT');
-    const productionCurrent=!workPackage.shotProductionPlanId||activeProductionPlans.some(p=>p.workItemIds?Boolean(workPackage.workItemRefs?.length)&&workPackage.workItemRefs!.every(id=>p.workItemIds!.includes(id)):p.id===workPackage.shotProductionPlanId);
-    const current = productionCurrent && exactCurrentPlan(
+    const members = workPackage.workItemRefs || [];
+    const current = inCurrentProductionPlan(
+      workPackage.shotProductionPlanId, String(workPackage.sceneId || ''),
+      workPackage.shotPlanSetRevisionId, workPackage.shotPlanSetRevisionHash, members,
+    ) && (!workPackage.shotProductionPlanId || members.every((id) => (
+      projection.workItemsById[id]?.shotPlanCurrentBindingState === 'CURRENT'
+    ))) && exactCurrentPlan(
       String(workPackage.sceneId || ''),
       workPackage.shotPlanSetRevisionId,
       workPackage.shotPlanSetRevisionHash,
@@ -4296,6 +4318,19 @@ export function projectOperationalState(
     }
   }
 
+
+  // A mirror can display formal release history, but only its exact exported
+  // media closure can be presented as presently available to downstream work.
+  const publicBindings=(data.productionModel as unknown as {publicExportMediaBindings?:Array<{familyId:string;versionId:string;sha256:string}>}).publicExportMediaBindings;
+  if(hostedReadOnlyMode()&&Array.isArray(publicBindings)){
+    const available=new Set(publicBindings.map(binding=>`${binding.familyId}\u0000${binding.versionId}\u0000${binding.sha256}`)),unavailable=new Set<string>();
+    for(const version of versions.values())if(!available.has(`${version.familyId}\u0000${version.id}\u0000${version.sha256}`)){
+      unavailable.add(version.id);version.canFlowDownstream=false;version.flowBlockReasons=[...new Set([...(version.flowBlockReasons||[]),'PUBLIC_MEDIA_NOT_EXPORTED'])];Object.assign(version,{publicMediaAvailability:'NOT_EXPORTED'});
+    }
+    for(const family of families.values())if(unavailable.has(family.currentVersionId||'')||unavailable.has(family.decisionVersionId||'')){
+      family.canFlowDownstream=false;family.flowBlockReasons=[...new Set([...(family.flowBlockReasons||[]),'PUBLIC_MEDIA_NOT_EXPORTED'])];Object.assign(family,{publicMediaAvailability:'NOT_EXPORTED'});
+    }
+  }
 
   // P07 continuity is bound to the exact adopted parent bytes.  Replaying a
   // valid child review must not keep that child flowing after its parent family
@@ -5018,7 +5053,7 @@ async function buildOperationalSnapshot() {
     releasedVersionIds: releasedP07VersionIds,
     source: p07Rollup.source,
   };
-  stateProjection.configuredGatesByWorkItem=configuredGates(data.productionModel as unknown as Record<string,unknown>,stateProjection);
+  stateProjection.configuredGatesByWorkItem=configuredGates(data.productionModel as unknown as Record<string,unknown>,stateProjection,shotProductionExecutionEntries(data.productionModel,stateProjection,gateCatalog));
   for(const work of [...data.productionModel.workItems,...(data.productionModel.materialWorkItems||[])]){
     const definition=gateCatalog.executionDefinitions.find(d=>d.id===work.executionDefinitionRef);
     const upload=(definition?.upload||{}) as {items?:Array<Record<string,unknown>>};const uploads=upload.items||[];

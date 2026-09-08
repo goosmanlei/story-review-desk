@@ -157,6 +157,8 @@ async function fixture(page: Page, { readOnly = false, extraMaterials = 0 } = {}
     // Independent episode production now reads this endpoint even with no formal
     // release. Keep the legacy browser fixture isolated from every live API.
     if (url.pathname === '/api/v8/episode-production') return json({snapshotId:snapshot.snapshotId,episode:{episodeUid:url.searchParams.get('episodeUid'),displayId:'E01'},sceneId:url.searchParams.get('sceneId'),release:null,plans:[],wholePlanAdopted:false,formalShotCount:null});
+    if (url.pathname === '/api/instance/shot-production') return json({sceneId:url.searchParams.get('sceneId'),releaseId:'release-r1',readOnly,basis:null,blockers:['尚未建立正式镜头设计'],defaultContent:null,currentPlan:null,draft:null,draftHeadRevisionId:null,availableInputs:[],jobs:[],readiness:{ready:false,readyCount:0,shotCount:null,shots:[]}});
+    if (url.pathname === '/api/trial/scopes') return json({scopes:[],defaultScopeId:null});
     if (url.pathname === '/api/v8/ui/materials') return json(pagePayload(url.searchParams.get('requirementId')));
     if (url.pathname === '/api/v8/ui/production') return json({ snapshotId: snapshot.snapshotId, page: { workItems: [], workPackages: [], shots: [], assetFamilies: [], assetVersions: [], expectedOutputs: [] }, count: 0, total: 0, nextCursor: null, hasMore: false });
     if (url.pathname === '/api/instance/domain-workspaces') {
@@ -294,7 +296,7 @@ test('只读响应下设定、素材与准备稿不暴露写按钮，也不发�
   await expect(page.locator('.material-info-card[data-material-info-id]')).toBeVisible();
   await expect(page.getByRole('button', { name: /维护这项状态定义|新增状态或发展条件|登记素材需求|维护选中素材的定义与参考|确认本模块更新/ })).toHaveCount(0);
   await page.goto('/?view=pipeline');
-  await expect(page.getByRole('navigation', { name: '全剧制作四阶段', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '全剧制作模块', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: /编辑本场准备内容|保存本场准备稿|保存准备意见/ })).toHaveCount(0);
   expect(f.writes).toEqual([]); clean(f);
 });

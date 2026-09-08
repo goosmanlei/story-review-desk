@@ -29,6 +29,7 @@ async function fixture(page:Page){
   if(url.pathname==='/api/instance/profile')return json(profile);
   if(url.pathname==='/api/v8/ui/bootstrap')return json({data:snapshot,snapshotId:snapshot.snapshotId});
   if(url.pathname==='/api/v8/episode-production')return json({snapshotId:snapshot.snapshotId,episode:{episodeUid:url.searchParams.get('episodeUid'),displayId:'E01'},sceneId:url.searchParams.get('sceneId'),release:null,plans:[],wholePlanAdopted:false,formalShotCount:null});
+  if(url.pathname==='/api/instance/shot-production')return json({sceneId:url.searchParams.get('sceneId'),releaseId:'release-pipeline-entry',readOnly:true,basis:null,blockers:['尚未建立正式镜头设计'],defaultContent:null,currentPlan:null,draft:null,draftHeadRevisionId:null,availableInputs:[],jobs:[],readiness:{ready:false,readyCount:0,shotCount:null,shots:[]}});
   if(url.pathname==='/api/v8/ui/production'){
    state.productionRequests.push(url.search);
    return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-pipeline-entry',page:{workItems:[],workPackages:[],shots:[],assetFamilies:[],assetVersions:[],expectedOutputs:[]},count:0,total:0,nextCursor:null,hasMore:false,appliedFilters:{}});
@@ -45,23 +46,32 @@ async function fixture(page:Page){
 type Fixture=Awaited<ReturnType<typeof fixture>>;
 function clean(f:Fixture){expect(f.productionRequests.length,'Populated shell must actually read the paged production endpoint').toBeGreaterThan(0);expect(f.unexpected).toEqual([]);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);}
 const navigationError=(page:Page)=>page.getByRole('alert').filter({hasText:/无法.*定位|未回退|停止静默回退/});
-const phases=(page:Page)=>page.getByRole('navigation',{name:'全剧制作四阶段'});
+const phases=(page:Page)=>page.getByRole('navigation',{name:'全剧制作模块'});
 
 test('已有故事正文但零正式镜头：初始入口展示筹备，刷新不产生虚构镜头或导航错误',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=pipeline');
  await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();await expect(page.getByText('先核对当前场的制作意图',{exact:true})).toBeVisible();
- await expect(phases(page).getByRole('button')).toHaveCount(4);await expect(navigationError(page)).toHaveCount(0);
+ await expect(phases(page).getByRole('button')).toHaveCount(3);await expect(navigationError(page)).toHaveCount(0);
  await expect.poll(()=>new URL(page.url()).searchParams.get('productionObject')).toBe('UNKNOWN');expect(new URL(page.url()).searchParams.has('shot')).toBe(false);
  await page.reload();await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();await expect(navigationError(page)).toHaveCount(0);expect(new URL(page.url()).searchParams.has('shot')).toBe(false);
- await phases(page).getByRole('button',{name:/镜头生成/}).click();await expect.poll(()=>new URL(page.url()).searchParams.get('productionPhase')).toBe('previs');await expect.poll(()=>new URL(page.url()).searchParams.get('productionGate')).toBe('storyboard-dialogue');await expect.poll(()=>new URL(page.url()).searchParams.get('creatorStage')).toBe('shot-generation');
- await page.reload();await expect(phases(page).getByRole('button',{name:/镜头生成/})).toHaveAttribute('aria-pressed','true');await expect(page.locator('.production-v2-empty-state')).toContainText('尚未建立本项正式制作对象');await expect(navigationError(page)).toHaveCount(0);expect(new URL(page.url()).searchParams.has('shot')).toBe(false);clean(f);
+ const steps=page.getByRole('navigation',{name:'镜头制作六步骤'});await expect(steps.getByRole('button')).toHaveCount(6);
+ await steps.locator('[data-production-check="STORYBOARD_DIALOGUE"]').click();await expect.poll(()=>new URL(page.url()).searchParams.get('productionPhase')).toBe('previs');await expect.poll(()=>new URL(page.url()).searchParams.get('productionGate')).toBe('storyboard-dialogue');await expect.poll(()=>new URL(page.url()).searchParams.get('creatorStage')).toBe('shot-production');
+ await page.reload();await expect(phases(page).getByRole('button',{name:/镜头制作/})).toHaveAttribute('aria-pressed','true');await expect(page.locator('.production-v2-empty-state')).toContainText('尚未建立本项正式制作对象');await expect(navigationError(page)).toHaveCount(0);expect(new URL(page.url()).searchParams.has('shot')).toBe(false);clean(f);
 });
 
-test('零正式镜头的旧精确检查深链归入四阶段且保持 UNKNOWN 范围',async({page})=>{
+test('零正式镜头的旧精确检查深链归入三个模块且保持 UNKNOWN 范围',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=pipeline&productionPhase=shot-finish&productionGate=keyframes&productionScope=SHOT&productionObject=UNKNOWN');
- await expect(phases(page).getByRole('button',{name:/镜头生成/})).toHaveAttribute('aria-pressed','true');await expect(navigationError(page)).toHaveCount(0);
- await expect(page.locator('.production-v2-full-workbench')).toBeVisible();await expect(page.locator('.production-v2-full-workbench')).toContainText('UNKNOWN');expect(new URL(page.url()).searchParams.get('productionPhase')).toBe('shot-finish');expect(new URL(page.url()).searchParams.get('productionGate')).toBe('keyframes');expect(new URL(page.url()).searchParams.get('creatorStage')).toBe('shot-generation');
- expect(new URL(page.url()).searchParams.has('shot')).toBe(false);await page.reload();await expect(phases(page).getByRole('button',{name:/镜头生成/})).toHaveAttribute('aria-pressed','true');await expect(navigationError(page)).toHaveCount(0);clean(f);
+ await expect(phases(page).getByRole('button',{name:/镜头制作/})).toHaveAttribute('aria-pressed','true');await expect(navigationError(page)).toHaveCount(0);
+ await expect(page.locator('.production-v2-full-workbench')).toBeVisible();await expect(page.locator('.production-v2-full-workbench')).toContainText('UNKNOWN');expect(new URL(page.url()).searchParams.get('productionPhase')).toBe('shot-finish');expect(new URL(page.url()).searchParams.get('productionGate')).toBe('keyframes');expect(new URL(page.url()).searchParams.get('creatorStage')).toBe('shot-production');
+ expect(new URL(page.url()).searchParams.has('shot')).toBe(false);await page.reload();await expect(phases(page).getByRole('button',{name:/镜头制作/})).toHaveAttribute('aria-pressed','true');await expect(navigationError(page)).toHaveCount(0);clean(f);
+});
+
+for(const [legacy,gate]of [['shot-breakdown','SHOT_PLAN_INPUT_LOCK'],['shot-generation','STORYBOARD_DIALOGUE']] as const)test('历史模块深链 '+legacy+' 定位到镜头制作的精确子步骤',async({page})=>{
+ const f=await fixture(page);await page.goto('/?view=pipeline&creatorStage='+legacy);
+ await expect(phases(page).getByRole('button',{name:/镜头制作/})).toHaveAttribute('aria-pressed','true');
+ await expect(page.getByRole('navigation',{name:'镜头制作六步骤'}).locator('[data-production-check="'+gate+'"]').first()).toHaveAttribute('aria-pressed','true');
+ await expect(navigationError(page)).toHaveCount(0);expect(new URL(page.url()).searchParams.has('shot')).toBe(false);
+ await page.reload();await expect(page.locator('[data-production-check="'+gate+'"]').first()).toHaveAttribute('aria-pressed','true');clean(f);
 });
 
 for(const [key,value,extra]of [

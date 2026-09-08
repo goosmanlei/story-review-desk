@@ -4,7 +4,7 @@ import {defaultConfiguration} from '../host/instance-runtime/configuration-model
 import {workflowOverview} from '../host/instance-runtime/workflow-overview.mjs';
 import {CREATOR_PRODUCTION_STAGES} from '../host/instance-runtime/creator-production-workflow.mjs';
 
-test('四个制作阶段以同一真实主页面上下文留存视觉验收图',async({page},testInfo)=>{
+test('三个制作模块以同一真实主页面上下文留存视觉验收图',async({page},testInfo)=>{
  const f=await fixture(page);
  await page.setViewportSize({width:1440,height:1000});
  await page.goto('/?view=pipeline&creatorStage=shot-breakdown&preparationEpisode=episode-alpha&preparationScene=scene-alpha');
@@ -53,18 +53,21 @@ async function fixture(page:Page,{readonly=false,conflict=false}={}){
  });return Object.assign(state,{prep,configuration});
 }
 
-test('流程配置按四阶段与阶段内检查组织，导出检查保留全剧范围',async({page})=>{
+test('流程配置按三个模块与阶段内检查组织，导出检查保留全剧范围',async({page})=>{
  const f=await fixture(page),original=JSON.stringify(f.configuration);
  await page.goto('/?view=system&systemTab=configuration');
  await page.getByRole('navigation',{name:'系统配置分组'}).getByRole('button',{name:'素材与制作',exact:true}).click();
  await page.getByRole('navigation',{name:'素材与制作'}).getByRole('button',{name:'制作流程',exact:true}).click();
- const nav=page.getByRole('navigation',{name:'流程配置四阶段'});
- await expect(nav.getByRole('button')).toHaveCount(4);
- await nav.getByRole('button',{name:'02 镜头生成',exact:true}).click();
+ const nav=page.getByRole('navigation',{name:'流程配置制作模块'});
+ await expect(nav.getByRole('button')).toHaveCount(3);
+ await nav.getByRole('button',{name:'01 镜头制作',exact:true}).click();
+ await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true})).toHaveValue('SHOT_PLAN_INPUT_LOCK');
+ await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true}).locator('option')).toHaveCount(6);
+ expect(await page.getByRole('combobox',{name:'本阶段检查项',exact:true}).locator('option').evaluateAll(options=>options.map(option=>(option as HTMLOptionElement).value))).toEqual(['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE','ANIMATIC_LOCK','KEYFRAMES','SHOT_VIDEO','SHOT_LOCK']);
+ await page.getByRole('combobox',{name:'本阶段检查项',exact:true}).selectOption('STORYBOARD_DIALOGUE');
  await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true})).toHaveValue('STORYBOARD_DIALOGUE');
- await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true}).locator('option')).toHaveCount(5);
  await expect(page.getByText(/检查对象：单个镜头/)).toBeVisible();
- await nav.getByRole('button',{name:'04 分集成片',exact:true}).click();
+ await nav.getByRole('button',{name:'03 分集成片',exact:true}).click();
  await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true}).locator('option')).toHaveCount(6);
  await expect(page.getByRole('combobox',{name:'本阶段检查项',exact:true}).locator('optgroup[label="导出时核对"]')).toHaveCount(1);
  await page.getByRole('combobox',{name:'本阶段检查项',exact:true}).selectOption('RIGHTS_SAFETY_TECH');
@@ -72,7 +75,7 @@ test('流程配置按四阶段与阶段内检查组织，导出检查保留全�
  expect(f.configuration.workflow.phases).toHaveLength(5);expect(f.configuration.workflow.gates).toHaveLength(15);
  expect(JSON.stringify(f.configuration)).toBe(original);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);
 });
-test('四阶段配置只编辑选中的原检查记录，保存仍携带精确CAS并保留冲突草稿',async({page})=>{
+test('三个模块配置只编辑选中的原检查记录，保存仍携带精确CAS并保留冲突草稿',async({page})=>{
  const f=await fixture(page),requests:Array<{body:Record<string,unknown>;etag:string|undefined}>=[];
  await page.route('**/api/instance/configuration',async route=>{
   if(route.request().method()!=='PUT')return route.fallback();
@@ -82,7 +85,8 @@ test('四阶段配置只编辑选中的原检查记录，保存仍携带精确CA
  await page.goto('/?view=system&systemTab=configuration');
  await page.getByRole('navigation',{name:'系统配置分组'}).getByRole('button',{name:'素材与制作',exact:true}).click();
  await page.getByRole('navigation',{name:'素材与制作'}).getByRole('button',{name:'制作流程',exact:true}).click();
- await page.getByRole('navigation',{name:'流程配置四阶段'}).getByRole('button',{name:'02 镜头生成',exact:true}).click();
+ await page.getByRole('navigation',{name:'流程配置制作模块'}).getByRole('button',{name:'01 镜头制作',exact:true}).click();
+ await page.getByRole('combobox',{name:'本阶段检查项',exact:true}).selectOption('STORYBOARD_DIALOGUE');
  await page.getByLabel('检查项名称',{exact:true}).fill('独立检查文案草稿');
  await page.getByRole('button',{name:'保存草稿',exact:true}).click();
  await expect(page.getByRole('alert')).toContainText('CAS_CONFLICT');
@@ -95,15 +99,15 @@ test('四阶段配置只编辑选中的原检查记录，保存仍携带精确CA
 });
 test('当前工作整体以三链和所选阶段组织，配置阶段与准备任务不建立正式分母',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=overview');await expect(page.getByRole('region',{name:'流程驱动的当前工作'})).toBeVisible();await expect(page.getByText('核对当前分集任务',{exact:true})).toBeVisible();
- await page.getByRole('navigation',{name:'三条主体工作链'}).getByRole('button',{name:/全剧制作/}).click();await expect(page.locator('.flow-stage-tabs').getByRole('button')).toHaveCount(4);for(const stage of CREATOR_PRODUCTION_STAGES)await expect(page.locator('.flow-stage-tabs').getByRole('button',{name:new RegExp(stage.label)})).toBeVisible();await expect(page.getByText('第1阶段 · 前置筹备',{exact:true})).toBeVisible();await expect(page.getByText('2 场候选准备内容，独立于正式门禁进度。',{exact:true})).toBeVisible();await expect(page.locator('.workflow-stage-inspector')).toContainText('正式分母未锁定');await expect(page.locator('.current-work-rollup')).toHaveCount(0);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
+ await page.getByRole('navigation',{name:'三条主体工作链'}).getByRole('button',{name:/全剧制作/}).click();await expect(page.locator('.flow-stage-tabs').getByRole('button')).toHaveCount(3);for(const stage of CREATOR_PRODUCTION_STAGES)await expect(page.locator('.flow-stage-tabs').getByRole('button',{name:new RegExp(stage.label)})).toBeVisible();await expect(page.getByText('第1阶段 · 前置筹备',{exact:true})).toBeVisible();await expect(page.getByText('2 场候选准备内容，独立于正式门禁进度。',{exact:true})).toBeVisible();await expect(page.locator('.workflow-stage-inspector')).toContainText('正式分母未锁定');await expect(page.locator('.current-work-rollup')).toHaveCount(0);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
 });
 test('当前工作在共享变更事件后自动更新，不要求重新进入页面',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=overview');const chains=page.getByRole('navigation',{name:'三条主体工作链'});await expect(chains.getByText('当前分集准备说明待核对',{exact:true})).toBeVisible();f.headline='新投影已到达';await page.evaluate(()=>window.dispatchEvent(new Event('review:operations-updated')));await expect(chains.getByText('新投影已到达',{exact:true})).toBeVisible();expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);
 });
-test('全剧制作以同一永久集场切换四阶段，重复显示场号不发生错绑',async({page})=>{
+test('镜头制作在六步骤间保留同一永久集场，重复显示场号不发生错绑',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=pipeline');await page.locator('[data-preparation-episode="episode-beta"]').click();await expect(page.locator('[data-preparation-scene="scene-beta"]')).toHaveAttribute('aria-current','location');await expect(page.getByRole('heading',{name:'开门相见',exact:true})).toBeVisible();await expect(page.getByText('让观众看到两人第一次见面',{exact:true})).toBeVisible();
- await page.locator('[data-creator-stage="SHOT_GENERATION"]').click();await expect(page.locator('[data-preparation-scene="scene-beta"]')).toHaveAttribute('aria-current','location');await expect(page.getByRole('heading',{name:'本上下文尚未建立正式制作对象',exact:true})).toBeVisible();
- await page.locator('[data-creator-stage="SHOT_BREAKDOWN"]').click();await expect(page.getByText('让观众看到两人第一次见面',{exact:true})).toBeVisible();expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
+ await page.locator('[data-production-check="STORYBOARD_DIALOGUE"]').click();await expect(page.locator('[data-preparation-scene="scene-beta"]')).toHaveAttribute('aria-current','location');await expect(page.getByRole('heading',{name:'本上下文尚未建立正式制作对象',exact:true})).toBeVisible();
+ await page.locator('[data-production-check="SHOT_PLAN_INPUT_LOCK"]').click();await expect(page.getByText('让观众看到两人第一次见面',{exact:true})).toBeVisible();expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
 });
 test('准备稿保存仍精确CAS，冲突保留作者文字且不自动重试',async({page})=>{
  const f=await fixture(page,{conflict:true});await page.goto('/?view=pipeline');await page.getByRole('button',{name:'编辑本场准备内容',exact:true}).click();const field=page.getByRole('textbox',{name:'本场作用',exact:true});await field.fill('尚未保存的本场作用');await page.getByRole('button',{name:'保存本场准备稿',exact:true}).click();await expect(page.getByRole('alert')).toContainText('CAS_CONFLICT');await expect(field).toHaveValue('尚未保存的本场作用');expect(f.writes).toHaveLength(1);expect(f.writes[0]).toMatchObject({action:'save',expectedReleaseId:'release-fixture',expectedRevisionId:'prep-fixture'});const body=f.writes[0].content as {scenes:Array<Record<string,unknown>>};expect(body.scenes[0].sceneId).toBe('scene-alpha');expect(body.scenes[0].sceneContentHash).toBe('a'.repeat(64));expect((body.scenes[0].preparation as Record<string,unknown>).generationAuthorized).toBe(false);await page.waitForTimeout(300);expect(f.writes).toHaveLength(1);expect(f.errors).toEqual([]);

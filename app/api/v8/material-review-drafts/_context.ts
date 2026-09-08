@@ -1,4 +1,5 @@
 import {withInstanceMediaRead} from '../_media-read';
+import {inspectExecutionDefinitionHash} from '../../../../host/instance-runtime/execution-definition-hash.mjs';
 import {resolveFormalReviewSpec} from '../_review-spec';
 import {
   assetReviewContextHash,
@@ -339,8 +340,7 @@ export async function buildMaterialReviewAuthorityContext({
   if (recipes.snapshotId === data.snapshotId) {
     const currentDefinition = (recipes.executionDefinitions as unknown as Row[]).find((item) => item.id === executionDefinitionId) || null;
     if (currentDefinition) {
-      const normalizedDefinition = Object.fromEntries(Object.entries(currentDefinition).filter(([key]) => !['definitionHash', 'currentRevisionId'].includes(key)));
-      const calculatedDefinitionHash = stableObjectHash(normalizedDefinition);
+      const calculatedDefinitionHash = inspectExecutionDefinitionHash(currentDefinition).calculatedHash;
       const declaredDefinitionHash = exactSha(currentDefinition.definitionHash || calculatedDefinitionHash);
       if (declaredDefinitionHash === definitionHashAtExecution && calculatedDefinitionHash !== definitionHashAtExecution) {
         throw new HttpError(409, 'current production definition claims the candidate hash but its content contradicts that hash');

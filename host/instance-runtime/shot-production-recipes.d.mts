@@ -1,5 +1,10 @@
 export const SHOT_RECIPE_NS:{drafts:string;jobs:string;requests:string};
 export function validateShotRecipeContent(value:unknown):any;
+export function shotRecipeDefinitionBindingReasons(model:unknown,state:unknown,definition:unknown):string[];
+export function shotRecipeProductionBasis(model:any,work:any,plan:any,inputs:any[]):any;
+export function selectShotRecipeInputFamilies(model:any,work:any,settings:any):{familyIds:string[];blockers:string[]};
+export function shotRecipeExpectedOutput(model:any,sourceModel:any,familyId:string):any;
+export function compileShotRecipePreview(context:any,content:unknown,options:{draftRevisionId:string}):any;
 export function getShotRecipeWorkspace(tx:any,input:{workItemId:string;api:any}):Promise<any>;
 export function saveShotRecipeDraft(tx:any,input:any,options:{api:any}):Promise<any>;
 export function previewShotRecipe(tx:any,input:any,options:{api:any}):Promise<any>;

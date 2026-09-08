@@ -64,20 +64,33 @@ async function event(tx, current, eventType, payload) {
   return { ...body, hash: eventHash };
 }
 function verifyRepository(repository) { ensure(repository.backend === 'postgres', 'POSTGRES_REQUIRED', 'Trial execution requires authoritative PostgreSQL'); }
+function currentAuthorization(current, value) {
+  ensure(value?.instanceId === current.view.instanceId && value?.runtimeEpoch === current.view.runtimeEpoch,
+    'RUNTIME_EPOCH_CONFLICT', 'Restored trial authorization cannot dispatch; prepare a new authorized scope and recipe');
+}
+function expectedRuntime(current, body) {
+  ensure(typeof body.runtimeEpoch === 'string' && body.runtimeEpoch === current.view.runtimeEpoch,
+    'RUNTIME_EPOCH_CONFLICT', 'Request must name the current instance runtime epoch');
+}
 function validKey(value) { ensure(typeof value === 'string' && /^[A-Za-z0-9._:-]{8,160}$/.test(value), 'IDEMPOTENCY_REQUIRED', 'Invalid idempotency key'); }
 async function mutate(repository, action, body, options, callback) {
   verifyRepository(repository); text(options.scopeId, 'scopeId'); validKey(options.idempotencyKey);
   ensure(!body.scopeId || body.scopeId === options.scopeId, 'RECIPE_SCOPE', 'Body and selected scope differ');
   if (options.root && repository.options?.root) ensure(await realpath(options.root) === await realpath(repository.options.root), 'INSTANCE_MISMATCH', 'Media root differs from the repository instance');
   return repository.writeTransaction(async (tx) => {
-    const current = await state(tx, options.scopeId), bindingHash = hash({ action, body }), prior = await tx.getAux(current.namespace, `idempotency/${options.idempotencyKey}`);
+    const current = await state(tx, options.scopeId);
+    if (['reserve', 'start', 'result'].includes(action)) expectedRuntime(current, body);
+    if (['reserve', 'start', 'prepare-recipe'].includes(action)) currentAuthorization(current, current.config);
+    const bindingHash = hash({ action, body }), prior = await tx.getAux(current.namespace, `idempotency/${options.idempotencyKey}`);
     if (prior && !prior.deleted) {
-      const receipt = parse(prior.bytes); ensure(receipt.binding_hash === bindingHash, 'IDEMPOTENCY_CONFLICT', 'Request key was used with different inputs');
+      const receipt = parse(prior.bytes);
+      if (['reserve', 'start', 'prepare-recipe', 'result'].includes(action)) currentAuthorization(current, receipt);
+      ensure(receipt.binding_hash === bindingHash, 'IDEMPOTENCY_CONFLICT', 'Request key was used with different inputs');
       return { ...JSON.parse(receipt.response), replayed: true };
     }
     ensure(options.ifMatch === current.mutationEtag, 'CAS_CONFLICT', 'Trial scope changed; inspect its current ETag');
     const result = { ...await callback(tx, current), mutationEtag: current.mutationEtag, formalProjectChanged: false, replayed: false };
-    await putRow(tx, current, 'idempotency', options.idempotencyKey, { key: options.idempotencyKey, binding_hash: bindingHash, response: canonicalJson(result) });
+    await putRow(tx, current, 'idempotency', options.idempotencyKey, { key: options.idempotencyKey, binding_hash: bindingHash, response: canonicalJson(result), instanceId: current.view.instanceId, runtimeEpoch: current.view.runtimeEpoch });
     return result;
   });
 }
@@ -122,6 +135,7 @@ async function verifyOutputVacant(tx, recipe, root) {
   ensure(!(await tx.listMedia()).some((item) => item.relativePath === recipe.output.relativePath || item.mediaId === recipe.subjectId && item.versionId === recipe.output.versionId), 'OUTPUT_REGISTERED', 'Output path or version is already registered');
 }
 function normalizeRecipe(recipe, current) {
+  currentAuthorization(current, current.config);
   ensure(recipe && typeof recipe === 'object' && !Array.isArray(recipe), 'RECIPE_REQUIRED', 'Complete recipe required');
   for (const key of ['id', 'subjectId', 'label', 'model', 'fullPrompt']) text(recipe[key], `recipe.${key}`);
   ensure(recipe.mediaKind === 'IMAGE', 'IMAGE_ONLY', 'Audio must use the existing Seed Audio run protocol');
@@ -130,7 +144,7 @@ function normalizeRecipe(recipe, current) {
   ensure(recipe.authorization?.maxOutputs === 1, 'ONE_CANDIDATE', 'Authorization must permit exactly one candidate');
   text(recipe.authorization.id, 'authorization.id'); text(recipe.authorization.userInstruction, 'authorization.userInstruction'); privateOutput(recipe.output);
   ensure(!recipe.scopeId || recipe.scopeId === current.scopeId, 'RECIPE_SCOPE', 'Recipe belongs to another scope');
-  const result = { ...recipe, scopeId: current.scopeId, sourceReleaseId: current.view.releaseId, cost: 1, maximumOutputs: 1, countsTowardFormalProject: false, proposedParameters: recipe.proposedParameters ?? {}, metadataPreparation: recipe.metadataPreparation ?? {}, reviewCriteria: recipe.reviewCriteria ?? criteria };
+  const result = { ...recipe, instanceId: current.view.instanceId, runtimeEpoch: current.view.runtimeEpoch, scopeId: current.scopeId, sourceReleaseId: current.view.releaseId, cost: 1, maximumOutputs: 1, countsTowardFormalProject: false, proposedParameters: recipe.proposedParameters ?? {}, metadataPreparation: recipe.metadataPreparation ?? {}, reviewCriteria: recipe.reviewCriteria ?? criteria };
   ensure(Array.isArray(result.reviewCriteria) && result.reviewCriteria.length > 0 && new Set(result.reviewCriteria.map((item) => item.id)).size === result.reviewCriteria.length && result.reviewCriteria.every((item) => item.id && item.label && item.description), 'REVIEW_CRITERIA', 'Unique complete review criteria required');
   return result;
 }
@@ -143,9 +157,9 @@ export async function instanceTrialInspect(repository, { scopeId } = {}) {
   verifyRepository(repository);
   return repository.readTransaction(async (tx) => {
     const index = await indexState(tx), view = await tx.readView();
-    if (!scopeId) return { instanceId: view.instanceId, releaseId: view.releaseId, scopeIds: index.scopes, indexRevisionId: index.record?.revisionId ?? null, formalProjectChanged: false };
+    if (!scopeId) return { instanceId: view.instanceId, runtimeEpoch: view.runtimeEpoch, releaseId: view.releaseId, scopeIds: index.scopes, indexRevisionId: index.record?.revisionId ?? null, formalProjectChanged: false };
     const current = await state(tx, scopeId);
-    return { instanceId: view.instanceId, releaseId: view.releaseId, config: current.config, scopeId, mutationEtag: current.mutationEtag, recipes: current.recipes.map(decode), assets: current.assets.map((entry) => ({ ...decode(entry), lifecycle: entry.row.lifecycle })), executions: current.executions.map((entry) => publicExecution(decode(entry))), budgets: kinds.map((kind) => budget(current, kind)), formalProjectChanged: false };
+    return { instanceId: view.instanceId, runtimeEpoch: view.runtimeEpoch, releaseId: view.releaseId, config: current.config, scopeId, mutationEtag: current.mutationEtag, recipes: current.recipes.map(decode), assets: current.assets.map((entry) => ({ ...decode(entry), lifecycle: entry.row.lifecycle })), executions: current.executions.map((entry) => publicExecution(decode(entry))), budgets: kinds.map((kind) => budget(current, kind)), formalProjectChanged: false };
   });
 }
 export async function instanceTrialPrepareScope(repository, body, options = {}) {
@@ -156,18 +170,19 @@ export async function instanceTrialPrepareScope(repository, body, options = {}) 
   text(body.authorization.id, 'authorization.id'); text(body.authorization.userInstruction, 'authorization.userInstruction');
   for (const kind of kinds) ensure(Number.isSafeInteger(body.limits?.[kind]) && body.limits[kind] >= 0, 'BUDGET_INVALID', 'All budgets must be explicit nonnegative integers');
   return repository.writeTransaction(async (tx) => {
+    const view = await tx.readView();
     const namespace = `local-trial:${body.scope.id}`, bindingHash = hash({ action: 'prepare-scope', body }), prior = await tx.getAux(namespace, `idempotency/${options.idempotencyKey}`);
-    if (prior) { const receipt = parse(prior.bytes); ensure(receipt.binding_hash === bindingHash, 'IDEMPOTENCY_CONFLICT', 'Scope request differs'); return { ...JSON.parse(receipt.response), replayed: true }; }
-    const index = await indexState(tx), view = await tx.readView();
+    if (prior) { const receipt = parse(prior.bytes); currentAuthorization({view}, receipt); ensure(receipt.binding_hash === bindingHash, 'IDEMPOTENCY_CONFLICT', 'Scope request differs'); return { ...JSON.parse(receipt.response), replayed: true }; }
+    const index = await indexState(tx);
     ensure(body.expectedReleaseId === view.releaseId && view.releaseId, 'RELEASE_CONFLICT', 'Published release differs');
     ensure(body.expectedIndexRevisionId === (index.record?.revisionId ?? null), 'CAS_CONFLICT', 'Trial index changed');
     ensure(!index.scopes.includes(body.scope.id) && !await tx.getAux(namespace, 'meta/config'), 'SCOPE_EXISTS', 'Trial scope already exists');
-    const config = { schemaVersion: 'trial-control/1.0', mode: 'LOCAL_TRIAL', instanceId: view.instanceId, scope: { ...body.scope, formalDenominatorEffect: 'NONE' }, limits: body.limits, authorization: body.authorization, sourceReleaseId: view.releaseId, snapshotId: view.snapshot.snapshotId, story: body.story ?? { episodes: [], sourceScenes: [], shotProposals: [], dialogue: [] }, checkpoint: { id: 'GENERATION_AUTHORIZED', state: 'USER_CONFIRMED', decision: body.authorization.userInstruction, next: 'MATERIAL_REVIEW', includesRightsAttestation: false } };
+    const config = { schemaVersion: 'trial-control/1.0', mode: 'LOCAL_TRIAL', instanceId: view.instanceId, runtimeEpoch: view.runtimeEpoch, scope: { ...body.scope, formalDenominatorEffect: 'NONE' }, limits: body.limits, authorization: body.authorization, sourceReleaseId: view.releaseId, snapshotId: view.snapshot.snapshotId, story: body.story ?? { episodes: [], sourceScenes: [], shotProposals: [], dialogue: [] }, checkpoint: { id: 'GENERATION_AUTHORIZED', state: 'USER_CONFIRMED', decision: body.authorization.userInstruction, next: 'MATERIAL_REVIEW', includesRightsAttestation: false } };
     await tx.putAux({ namespace, key: 'meta/config', bytes: canonicalJson({ key: 'config', value: canonicalJson(config) }), expectedRevisionId: null, metadata: { authorityDomain: 'LOCAL_TRIAL', deliveryScopeId: body.scope.id } });
     await tx.putAux({ namespace: 'local-trial-index', key: 'scopes', bytes: canonicalJson([...index.scopes, body.scope.id]), expectedRevisionId: index.record?.revisionId ?? null });
     const current = await state(tx, body.scope.id), created = await event(tx, current, 'TRIAL_GENERATION_SCOPE_PREPARED', { scopeId: current.scopeId, authorization: body.authorization, sourceReleaseId: view.releaseId, actor: 'CODEX', reviewEffect: 'NO_REVIEW_OR_RELEASE' });
     const result = { scope: config.scope, config, event: created, mutationEtag: current.mutationEtag, formalProjectChanged: false, replayed: false };
-    await putRow(tx, current, 'idempotency', options.idempotencyKey, { key: options.idempotencyKey, binding_hash: bindingHash, response: canonicalJson(result) }); return result;
+    await putRow(tx, current, 'idempotency', options.idempotencyKey, { key: options.idempotencyKey, binding_hash: bindingHash, response: canonicalJson(result), instanceId: current.view.instanceId, runtimeEpoch: current.view.runtimeEpoch }); return result;
   });
 }
 async function preflightRecipe(tx, current, supplied, root) {
@@ -199,7 +214,7 @@ export async function instanceTrialPrepareRecipe(repository, body, options = {})
 export async function instanceTrialReserve(repository, body, options = {}) {
   return mutate(repository, 'reserve', body, options, async (tx, current) => {
     const entry = current.recipes.find((item) => item.row.id === body.recipeId); ensure(entry, 'RECIPE_NOT_FOUND', 'Recipe not found');
-    const recipe = decode(entry); ensure(recipe.output && recipe.authorization?.maxOutputs === 1 && hash(recipe) === entry.row.hash, 'RECIPE_NOT_EXECUTABLE', 'Recipe has no frozen one-call authorization');
+    const recipe = decode(entry); currentAuthorization(current, recipe); ensure(recipe.output && recipe.authorization?.maxOutputs === 1 && hash(recipe) === entry.row.hash, 'RECIPE_NOT_EXECUTABLE', 'Recipe has no frozen one-call authorization');
     ensure(recipe.sourceReleaseId === current.view.releaseId, 'RELEASE_CONFLICT', 'Published release changed after recipe preparation');
     ensure(recipe.runtimeBlockers.length === 0 && recipe.mediaKind === 'IMAGE', 'RECIPE_BLOCKED', 'Recipe cannot use this image executor');
     const logicalMediaId = recipe.originalSubjectId ?? recipe.subjectId;
@@ -211,15 +226,20 @@ export async function instanceTrialReserve(repository, body, options = {}) {
     ensure(budget(current, recipe.mediaKind).available >= 1, 'BUDGET_EXHAUSTED', 'Trial budget exhausted');
     await verifySources(tx, recipe, options.root); await verifyOutputVacant(tx, recipe, options.root);
     const leaseMs = body.leaseMs ?? 3600000; ensure(Number.isSafeInteger(leaseMs) && leaseMs >= 1000 && leaseMs <= 3600000, 'LEASE_INVALID', 'Lease must be between one second and one hour');
-    const now = Date.now(), input = { scopeId: current.scopeId, recipeId: recipe.id, recipeHash: hash(recipe), authorizationId: recipe.authorization.id, sourceReleaseId: current.view.releaseId, bindings: recipe.inputBindings, sourceBindings: recipe.sourceBindings, model: recipe.model, parameters: recipe.proposedParameters, fullPrompt: recipe.fullPrompt, output: recipe.output, maxOutputs: 1 };
-    const requestId = `xreq_${randomUUID()}`, request = { requestId, executionRequestId: requestId, recipeId: recipe.id, mediaId: recipe.subjectId, logicalMediaId, scopeId: current.scopeId, authorizationId: recipe.authorization.id, state: 'CLAIMED', executor: 'CODEX', workerId: text(body.workerId, 'workerId'), maxOutputs: 1, registeredOutputs: 0, input, inputHash: hash(input), promptHash: sha256(recipe.fullPrompt), fullPrompt: recipe.fullPrompt, leaseToken: randomUUID(), leaseExpiresAt: now + leaseMs, fencingToken: prior.length + 1, createdAt: now, reservedAmount: 1, mediaKind: recipe.mediaKind };
+    const now = Date.now(), input = { instanceId: current.view.instanceId, runtimeEpoch: current.view.runtimeEpoch, scopeId: current.scopeId, recipeId: recipe.id, recipeHash: hash(recipe), authorizationId: recipe.authorization.id, sourceReleaseId: current.view.releaseId, bindings: recipe.inputBindings, sourceBindings: recipe.sourceBindings, model: recipe.model, parameters: recipe.proposedParameters, fullPrompt: recipe.fullPrompt, output: recipe.output, maxOutputs: 1 };
+    const requestId = `xreq_${randomUUID()}`, request = { requestId, instanceId: current.view.instanceId, runtimeEpoch: current.view.runtimeEpoch, executionRequestId: requestId, recipeId: recipe.id, mediaId: recipe.subjectId, logicalMediaId, scopeId: current.scopeId, authorizationId: recipe.authorization.id, state: 'CLAIMED', executor: 'CODEX', workerId: text(body.workerId, 'workerId'), maxOutputs: 1, registeredOutputs: 0, input, inputHash: hash(input), promptHash: sha256(recipe.fullPrompt), fullPrompt: recipe.fullPrompt, leaseToken: randomUUID(), leaseExpiresAt: now + leaseMs, fencingToken: prior.length + 1, createdAt: now, reservedAmount: 1, mediaKind: recipe.mediaKind };
     await putRow(tx, current, 'executions', requestId, { id: requestId, recipe_id: recipe.id, state: request.state, body: canonicalJson(request) });
     await putRow(tx, current, 'reservations', requestId, { id: requestId, kind: recipe.mediaKind, amount: 1, state: 'RESERVED', actual: 0 });
     await event(tx, current, 'TRIAL_EXECUTION_REQUEST_RESERVED', { ...request, leaseToken: '[HOST_ONLY]' }); return { execution: request };
   });
 }
-function boundRequest(current, body, allowed, { unexpired = false } = {}) {
+function boundRequest(current, body, allowed, { unexpired = false, reconcile = false } = {}) {
   const entry = current.executions.find((item) => item.row.id === body.requestId); ensure(entry, 'EXECUTION_NOT_FOUND', 'Execution request not found'); const request = decode(entry);
+  ensure(request.instanceId === current.view.instanceId && typeof request.runtimeEpoch === 'string'
+    && request.input?.instanceId === request.instanceId && request.input.runtimeEpoch === request.runtimeEpoch
+    && hash(request.input) === request.inputHash, 'RUNTIME_EPOCH_CONFLICT', 'Execution lacks its original runtime binding');
+  if (reconcile) ensure(body.originRuntimeEpoch === request.runtimeEpoch, 'RUNTIME_EPOCH_CONFLICT', 'Reconciliation must name the exact original runtime epoch');
+  else currentAuthorization(current, request);
   ensure(allowed.includes(request.state), 'EXECUTION_STATE', `Execution ${request.state} cannot accept this action`);
   ensure(request.leaseToken === body.leaseToken && request.fencingToken === body.fencingToken && (!unexpired || request.leaseExpiresAt > Date.now()), 'LEASE_CONFLICT', 'Lease/fencing token differs or dispatch lease expired');
   ensure(request.inputHash === body.inputHash && request.promptHash === body.promptHash, 'INPUT_HASH_MISMATCH', 'Exact input and complete prompt hashes required'); return { entry, request };
@@ -227,6 +247,7 @@ function boundRequest(current, body, allowed, { unexpired = false } = {}) {
 export async function instanceTrialStart(repository, body, options = {}) {
   return mutate(repository, 'start', body, options, async (tx, current) => {
     const { entry, request } = boundRequest(current, body, ['CLAIMED'], { unexpired: true }), recipe = decode(current.recipes.find((item) => item.row.id === request.recipeId));
+    currentAuthorization(current, recipe);
     ensure(recipe.sourceReleaseId === current.view.releaseId, 'RELEASE_CONFLICT', 'Published release changed before dispatch');
     ensure(!request.dispatchedAt, 'ALREADY_DISPATCHED', 'Request already consumed its dispatch');
     await verifySources(tx, recipe, options.root); await verifyOutputVacant(tx, recipe, options.root);
@@ -239,9 +260,13 @@ const blocked = (metadata, qa, key) => metadata[key] === 'BLOCKED' || qa[key] ==
 export async function instanceTrialResult(repository, body, options = {}) {
   ensure(['SUCCEEDED', 'FAILED', 'RESULT_UNKNOWN'].includes(body.outcome), 'RESULT_OUTCOME', 'Unsupported result outcome');
   return mutate(repository, 'result', body, options, async (tx, current) => {
-    const { entry, request } = boundRequest(current, body, body.reconciled === true ? ['RUNNING', 'RESULT_UNKNOWN'] : ['RUNNING']);
+    const { entry, request } = boundRequest(current, body, body.reconciled === true ? ['RUNNING', 'RESULT_UNKNOWN'] : ['RUNNING'], {reconcile: body.reconciled === true});
     const recipe = decode(current.recipes.find((item) => item.row.id === request.recipeId)), receipt = body.receipt ?? {}, qa = body.qa ?? {}, metadata = { ...recipe.metadataPreparation, ...body.metadata };
-    ensure(receipt.dispatchId === request.dispatchId, 'RECEIPT_BINDING', 'Receipt must identify the exact dispatch');
+    ensure(Boolean(request.dispatchedAt && request.dispatchId) && receipt.dispatchId === request.dispatchId, 'RECEIPT_BINDING', 'Receipt must identify the exact dispatch');
+    if (body.reconciled === true) {
+      text(receipt.requestId, 'receipt.requestId');
+      ensure(!request.receipt?.requestId || request.receipt.requestId === receipt.requestId, 'RECEIPT_BINDING', 'Reconciliation cannot replace the original provider request');
+    }
     if (body.outcome === 'FAILED') ensure(receipt.definitiveFailure === true, 'UNKNOWN_NOT_FAILURE', 'Only definitive provider failures may be FAILED');
     let asset = null;
     if (body.outcome === 'SUCCEEDED') {
@@ -263,7 +288,7 @@ export async function instanceTrialResult(repository, body, options = {}) {
     // Failures and unknown results consume their one call; neither creates free retries.
     await putRow(tx, current, 'reservations', request.requestId, { ...reservation.row, state: 'SETTLED', actual: 1 }, reservation);
     await putRow(tx, current, 'executions', request.requestId, { ...entry.row, state: request.state, body: canonicalJson(request) }, entry);
-    await event(tx, current, 'TRIAL_EXECUTION_RESULT_RECORDED', { requestId: request.requestId, outcome: body.outcome, receipt, assetId: asset?.id ?? null, sha256: asset?.sha256 ?? null, lifecycle: asset ? 'REVIEW_PENDING' : null, retryAllowed: false, reconciled: body.reconciled === true });
+    await event(tx, current, 'TRIAL_EXECUTION_RESULT_RECORDED', { requestId: request.requestId, outcome: body.outcome, receipt, assetId: asset?.id ?? null, sha256: asset?.sha256 ?? null, lifecycle: asset ? 'REVIEW_PENDING' : null, retryAllowed: false, runtimeEpoch: current.view.runtimeEpoch, originRuntimeEpoch: request.runtimeEpoch, reconciled: body.reconciled === true });
     return { execution: publicExecution(request), asset };
   });
 }

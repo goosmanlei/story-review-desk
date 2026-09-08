@@ -66,7 +66,15 @@ async function verifiedFile(root, file) {
   if ((await lstat(filename)).size !== file.bytes || await hashFile(filename) !== file.sha256) throw new Error('Hosted file SHA/size mismatch: '+file.path);
   return filename;
 }
-const forbiddenMedia = item => item.metadata?.authorityDomain === 'LOCAL_TRIAL' || Boolean(item.metadata?.deliveryScopeId || item.metadata?.sourceRole || item.metadata?.private) || item.aliases.some(alias => /(?:^|\/)(?:review-audio|private|trial)(?:\/|$)/i.test(alias));
+const publicMediaDomains=new Set(['FORMAL','IMPORTED_EVIDENCE']);
+const forbiddenMedia = item => {
+  const metadata=item.metadata||{};
+  return !publicMediaDomains.has(metadata.authorityDomain)
+    || metadata.visibility!==undefined&&metadata.visibility!=='PUBLIC'
+    || metadata.countsTowardFormalProject===false
+    || Boolean(metadata.deliveryScopeId||metadata.trialScopeId||metadata.trialAssetId||metadata.sourceRole||metadata.private)
+    || (item.aliases||[]).some(alias=>/(?:^|\/)(?:review-audio|private|trial)(?:\/|$)/i.test(alias));
+};
 export function selectHostedMedia(rows) {
   const blockedHashes = new Set(rows.filter(forbiddenMedia).map(item=>item.sha256));
   const outputs = new Map();

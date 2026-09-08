@@ -1,4 +1,5 @@
 import {withInstanceMediaRead} from '../_media-read';
+import {inspectExecutionDefinitionHash} from '../../../../host/instance-runtime/execution-definition-hash.mjs';
 import {ANIMATIC_NS,animaticCandidateMatchesJob} from '../../../../host/instance-runtime/animatic-service.mjs';
 import {domainRepository} from '../../instance/_domain';
 import {domainReferenceEligibility} from '../../../../host/instance-runtime/domain-reference.mjs';
@@ -134,9 +135,7 @@ export function projectProductionEvidence(
     ? sources.definitions.find((item) => item.id === executionDefinitionId) || null
     : null;
   const declaredDefinitionHash = exactSha(definition?.definitionHash);
-  const calculatedDefinitionHash = definition
-    ? stableObjectHash(Object.fromEntries(Object.entries(definition).filter(([key]) => !['definitionHash', 'currentRevisionId'].includes(key))))
-    : null;
+  const calculatedDefinitionHash = inspectExecutionDefinitionHash(definition).calculatedHash;
   const recipePromptHash = definition ? stableObjectHash(definition.prompt ?? null) : null;
   let executionDefinition: ProductionEvidenceField;
   if (!executionDefinitionId || !definitionHashAtExecution || !callPackageHash) {
@@ -305,12 +304,52 @@ function isMaterializedVersion(version: ReturnType<typeof knownVersion>) {
 
 function defaultVersionId(
   familyId: string,
-  plannedVersionId: string,
+  expectedOutput: { id: string; familyId: string; legacyVersionId?: string | null; plannedVersionLabel?: string | null },
   data: Awaited<ReturnType<typeof validateMutationRequest>>['data'],
   candidates: Awaited<ReturnType<typeof listAllEvents>>,
 ) {
+  const plannedVersionId = expectedOutput.legacyVersionId || '';
   if (plannedVersionId && !plannedVersionId.startsWith(`${familyId}@`)) {
-    throw new HttpError(409, 'ExpectedOutput legacyVersionId is bound to another asset family');
+    // Native plan outputs are logical aliases, not materialized AssetVersion IDs.
+    // A later recipe may retain the first output alias; prove that complete
+    // same-family plan chain before deriving the new planned version label.
+    const namespace = /^(SP|MP)-EO-[a-f0-9]{24}$/.exec(plannedVersionId)?.[1];
+    const model = data.productionModel;
+    const family = model.assetFamilies.find((row) => row.id === familyId);
+    const aliases = (model.expectedOutputs || []).filter((row) => row.id === plannedVersionId);
+    const alias = aliases.length === 1 ? aliases[0] : null;
+    const marker = namespace === 'SP' ? 'shotProductionPlanId' : 'materialProductionPlanId';
+    const record = expectedOutput as unknown as Record<string, unknown>;
+    const familyRecord = family as unknown as Record<string, unknown> | undefined;
+    const aliasRecord = alias as unknown as Record<string, unknown> | null;
+    const planId = record[marker];
+    const modelRecord = model as unknown as Record<string, unknown>;
+    const plans = modelRecord[namespace === 'SP' ? 'shotProductionPlans' : 'materialProductionPlans'];
+    const planRows = Array.isArray(plans) ? plans as Record<string, unknown>[] : [];
+    const matches = planRows.filter((row) => row.id === planId);
+    const plan = matches.length === 1 ? matches[0] : null;
+    const workRows = namespace === 'SP' ? model.workItems : model.materialWorkItems || [];
+    const work = workRows.find((row) => row.id === family?.ownerRef && row.outputAssetRef === familyId);
+    const sourceBound = namespace === 'SP'
+      ? Array.isArray(plan?.workItemIds) && plan.workItemIds.includes(work?.id)
+      : plan?.familyId === familyId && plan?.workItemId === work?.id && plan?.expectedOutputId === plannedVersionId;
+    if (!namespace || !new RegExp(`^${namespace}-EO-[a-f0-9]{24}$`).test(expectedOutput.id)
+      || !new RegExp(`^${namespace}-AF-[a-f0-9]{24}$`).test(familyId)
+      || !new RegExp(`^${namespace}-PLAN-[a-f0-9]{24}$`).test(String(planId || ''))
+      || !alias || alias.familyId !== familyId || expectedOutput.familyId !== familyId
+      || !family?.expectedOutputRefs?.includes(alias.id) || !family.expectedOutputRefs.includes(expectedOutput.id)
+      || aliasRecord?.[marker] !== planId || familyRecord?.[marker] !== planId
+      || !work || (work as unknown as Record<string, unknown>)[marker] !== planId || !sourceBound) {
+      throw new HttpError(409, 'ExpectedOutput legacy alias lacks an exact same-family production plan binding');
+    }
+    if (!/^V\d{3,}$/.test(expectedOutput.plannedVersionLabel || '')) {
+      throw new HttpError(409, 'ExpectedOutput plannedVersionLabel is invalid');
+    }
+    const versionId = `${familyId}@${expectedOutput.plannedVersionLabel}`;
+    if (isMaterializedVersion(knownVersion(data, candidates, versionId))) {
+      throw new HttpError(409, 'ExpectedOutput planned version is already materialized');
+    }
+    return { versionId, plannedVersionId, nativeOutput: true };
   }
   if (plannedVersionId && !isMaterializedVersion(knownVersion(data, candidates, plannedVersionId))) {
     return { versionId: plannedVersionId, plannedVersionId };
@@ -327,6 +366,17 @@ function defaultVersionId(
     };
   }
   return { versionId: `${familyId}@EVENT-${stableObjectHash(ids).slice(0, 24).toUpperCase()}`, plannedVersionId };
+}
+
+function realizedExpectedOutput(
+  expectedOutput: { id: string; familyId: string; legacyVersionId?: string | null },
+  candidates: Awaited<ReturnType<typeof listAllEvents>>,
+) {
+  return candidates.find((candidate) => candidate.familyId === expectedOutput.familyId && (
+    candidate.expectedOutputId === expectedOutput.id
+    || (expectedOutput.legacyVersionId?.startsWith(`${expectedOutput.familyId}@`)
+      && candidate.plannedVersionId === expectedOutput.legacyVersionId)
+  ));
 }
 
 export async function GET(request: Request) {
@@ -530,10 +580,7 @@ export async function POST(request: Request) {
     return{filePath,file};
     });
     const suppliedVersionId = body.versionId == null || body.versionId === '' ? '' : assertStableId(body.versionId, 'versionId');
-    const alreadyRealized = existingCandidates.find((candidate) => (
-      candidate.expectedOutputId === expectedOutputId
-      || (expectedOutput.legacyVersionId && candidate.plannedVersionId === expectedOutput.legacyVersionId)
-    ));
+    const alreadyRealized = realizedExpectedOutput(expectedOutput, existingCandidates);
     if (alreadyRealized) {
       throw new HttpError(409, 'ExpectedOutput already has a registered realizing AssetVersion', {
         expectedOutputId,
@@ -542,10 +589,13 @@ export async function POST(request: Request) {
     }
     const defaultVersion = defaultVersionId(
       familyId,
-      typeof expectedOutput.legacyVersionId === 'string' ? expectedOutput.legacyVersionId : '',
+      expectedOutput,
       data,
       existingCandidates,
     );
+    if (defaultVersion.nativeOutput && suppliedVersionId && suppliedVersionId !== defaultVersion.versionId) {
+      throw new HttpError(422, 'versionId must match the native ExpectedOutput plannedVersionLabel');
+    }
     const versionId = suppliedVersionId || defaultVersion.versionId;
     if (suppliedVersionId && !suppliedVersionId.startsWith(`${familyId}@`)) {
       throw new HttpError(422, 'versionId must belong to familyId');

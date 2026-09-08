@@ -38,8 +38,39 @@ export function resolveShotProductionScope(model,sceneId) {
     if(matches.length!==1||shot.sceneId!==sceneId||shot.shotPlanSetRevisionId!==plan.id||shot.shotPlanSetRevisionHash!==plan.contentHash)fail('镜头不属于当前正式计划','DOMAIN_CONFLICT');
     return {...spec,id:spec.shotId};
   });
-  return {sceneId,episodeUid:episodeRelease.episodeUid,plan,shots,episodeRelease,scopeLock};
+  return {sceneId,episodeUid:episodeRelease.episodeUid,plan,shots,episodeRelease,scopeLock,materialModel:model};
 }
+
+/** Resolve one speaker's selected, exact voice identity without including other audio. */
+export function resolveDialogueVoiceBinding(model,line={},inputs=[]){
+  const graph=model?.materialDirectory?.graph||model?.domainGraph;
+  const speakers=list(graph?.entities).filter(entity=>entity.id===line.speakerEntityId&&entity.type&&entity.type!=='UNRESOLVED'&&['F','A','L'].includes(entity.authority));
+  if(!line.speakerEntityId||speakers.length!==1)return {binding:null,blockers:['INPUT_SPEAKER_VOICE_MASTER_NOT_UNIQUE']};
+  const representations=list(graph?.representations).filter(r=>r.entityId===line.speakerEntityId&&r.type==='VOICE_IDENTITY'&&['F','A','L'].includes(r.authority));
+  const candidates=[];let invalid=false;
+  for(const input of list(inputs)){
+    if(!input||typeof input!=='object')continue;
+    const requirements=list(model?.materialRequirements).filter(r=>r.id===input.requirementId&&r.requirementClass==='REQUIRED'&&list(r.assetFamilyRefs).includes(input.familyId));
+    const families=list(model?.assetFamilies).filter(f=>f.id===input.familyId&&f.kind==='AUDIO');
+    if(requirements.length!==1||families.length!==1){if(representations.some(r=>list(r.assetFamilyIds).includes(input.familyId)))invalid=true;continue;}
+    const requirement=requirements[0],matching=representations.filter(r=>list(r.assetFamilyIds).includes(input.familyId)
+      &&(requirement.representationRef===r.id||list(r.requirementIds).includes(requirement.id)||list(graph?.requirements).some(d=>d.id===requirement.id&&d.representationId===r.id)));
+    if(matching.length!==1){if(matching.length>1)invalid=true;continue;}
+    const representation=matching[0];
+    let media;try{media=exactProductionMedia(input);}catch{invalid=true;continue;}
+    if(!hashPattern.test(requirement.requirementHash||'')){invalid=true;continue;}
+    candidates.push({schemaVersion:'DIALOGUE_VOICE_BINDING_V1',speakerEntityId:line.speakerEntityId,speakerEntityHash:productionHash(speakers[0]),requirementId:requirement.id,requirementHash:requirement.requirementHash,representationId:representation.id,representationHash:productionHash(representation),...media,purpose:input.purpose||'REFERENCE'});
+  }
+  return {binding:!invalid&&candidates.length===1?candidates[0]:null,blockers:invalid||candidates.length!==1?['INPUT_SPEAKER_VOICE_MASTER_NOT_UNIQUE']:[]};
+}
+function validateFrozenVoiceBinding(binding,line,inputs){
+  object(binding,['schemaVersion','speakerEntityId','speakerEntityHash','requirementId','requirementHash','representationId','representationHash','familyId','versionId','sha256','purpose'],'对白声音基线');
+  if(binding.schemaVersion!=='DIALOGUE_VOICE_BINDING_V1'||binding.speakerEntityId!==line.speakerEntityId||!hashPattern.test(binding.speakerEntityHash||'')||!hashPattern.test(binding.requirementHash||'')||!hashPattern.test(binding.representationHash||''))fail('对白声音基线的身份或关系哈希无效');
+  productionId(binding.requirementId,'声音需求');productionId(binding.representationId,'声音表现');exactProductionMedia(binding);nonblank(binding.purpose,'声音用途',300);
+  if(list(inputs).filter(input=>input.requirementId===binding.requirementId&&input.familyId===binding.familyId&&input.versionId===binding.versionId&&input.sha256===binding.sha256&&input.purpose===binding.purpose).length!==1)fail('对白声音基线不属于本镜精确选用输入');
+  return binding;
+}
+const visualInputs=settings=>settings.inputs.filter(input=>!settings.dialogueLines.some(line=>line.voiceBinding?.requirementId===input.requirementId&&line.voiceBinding?.familyId===input.familyId));
 
 export function defaultShotProductionPlan(scope) {
   return {schemaVersion:SHOT_PRODUCTION_VERSION,sceneId:scope.sceneId,shotPlanRevisionId:scope.plan.id,shotPlanHash:scope.plan.contentHash,shots:scope.shots.map(s=>({shotId:s.id,keyframeStrategy:s.design?.keyframeStrategy||{mode:'UNDECIDED',reason:'等待确认本镜关键帧策略',intermediateFrameCount:0},dialogueLines:[],inputs:[],space:{loc:'UNKNOWN',state:'UNKNOWN',zone:'UNKNOWN',camera:'UNKNOWN',freeze:'UNKNOWN'},handles:{headFrames:0,tailFrames:0},videoBranch:'UNKNOWN'}))};
@@ -59,11 +90,11 @@ export function validateShotProductionPlan(content,scope) {
     nonblank(strategy.reason,'关键帧策略依据');
     if(!['UNKNOWN','SILENT','AUDIO_DRIVEN','POST_LIP'].includes(s.videoBranch))fail('请选择镜头声音／口型分支');
     const dialogueLines=rows(s.dialogueLines,'对白',500).map(line=>{
-      object(line,['id','text','speakerEntityId','purpose','performance'],'对白');
+      object(line,['id','text','speakerEntityId','purpose','performance','voiceBinding'],'对白');
       productionId(line.id,'对白身份');if(lineIds.has(line.id))fail('对白身份重复');lineIds.add(line.id);
       nonblank(line.text,'实际台词');nonblank(line.performance,'对白表演说明');
       if(!['TEMPORARY','FINAL'].includes(line.purpose))fail('对白用途缺项');
-      return {id:line.id,text:line.text,speakerEntityId:line.speakerEntityId===null?null:productionId(line.speakerEntityId,'说话者'),purpose:line.purpose,performance:line.performance};
+      return {id:line.id,text:line.text,speakerEntityId:line.speakerEntityId===null?null:productionId(line.speakerEntityId,'说话者'),purpose:line.purpose,performance:line.performance,...(line.voiceBinding!==undefined?{voiceBinding:line.voiceBinding}:{})};
     });
     if(s.videoBranch==='SILENT'&&dialogueLines.length)fail('无对白分支不能同时登记对白');
     const seen=new Set(),required=new Set(scope.shots[i].materialRequirementRefs||[]);
@@ -74,6 +105,14 @@ export function validateShotProductionPlan(content,scope) {
       const key=requirementId+':'+media.familyId;if(seen.has(key))fail('本镜输入绑定重复');seen.add(key);
       return {...media,requirementId,purpose:input.purpose===undefined?'REFERENCE':nonblank(input.purpose,'输入用途',300)};
     });
+    for(const line of dialogueLines){
+      if(scope.materialModel){
+        // Normalization is saved by the existing draft writer. Historical plan
+        // compilation uses this frozen baseline without consulting today's graph.
+        const {binding}=resolveDialogueVoiceBinding(scope.materialModel,line,inputs);
+        if(binding)line.voiceBinding=binding;else delete line.voiceBinding;
+      }else if(line.voiceBinding)validateFrozenVoiceBinding(line.voiceBinding,line,inputs);
+    }
     object(s.space,['loc','state','zone','camera','freeze'],'空间条件');
     const space={};for(const key of ['loc','state','zone','camera','freeze'])space[key]=nonblank(s.space[key],`空间条件${key}`,300);
     object(s.handles,['headFrames','tailFrames'],'剪辑余量');
@@ -121,8 +160,8 @@ export function compileShotProductionPlan(scope,content,{id,revisionId,sourceRef
   }
   const inputLock=output('SCENE',scope.sceneId,scope.shots.map(s=>s.id),'SHOT_INPUT_LOCK');
   for(const shot of content.shots){
-    const board=output('SHOT',shot.shotId,[shot.shotId],'STORYBOARD');board.inputAssetRefs=unique(shot.inputs.map(i=>i.familyId));
-    for(const line of shot.dialogueLines)output('SHOT',shot.shotId,[shot.shotId],'DIALOGUE_DRY',line.id,{lineId:line.id,dialogue:line,productionPurpose:line.purpose});
+    const board=output('SHOT',shot.shotId,[shot.shotId],'STORYBOARD');board.inputAssetRefs=unique(visualInputs(shot).map(i=>i.familyId));
+    for(const line of shot.dialogueLines){const dialogue=output('SHOT',shot.shotId,[shot.shotId],'DIALOGUE_DRY',line.id,{lineId:line.id,dialogue:line,productionPurpose:line.purpose});dialogue.inputAssetRefs=line.voiceBinding?[line.voiceBinding.familyId]:[];}
     if(shot.keyframeStrategy.mode!=='UNDECIDED'){
       output('SHOT',shot.shotId,[shot.shotId],'START_FRAME');
       if(['START_END','MULTI_KEYFRAME'].includes(shot.keyframeStrategy.mode))output('SHOT',shot.shotId,[shot.shotId],'END_FRAME');
@@ -133,7 +172,7 @@ export function compileShotProductionPlan(scope,content,{id,revisionId,sourceRef
   const animatic=output('SCENE',scope.sceneId,scope.shots.map(s=>s.id),'ANIMATIC');
   animatic.inputAssetRefs=workItems.filter(w=>['STORYBOARD','DIALOGUE_DRY'].includes(w.deliverableKey)).map(w=>w.outputAssetRef);
   for(const item of workItems){
-    if(['START_FRAME','END_FRAME','INTERMEDIATE_FRAME'].includes(item.deliverableKey))item.inputAssetRefs=unique([...(content.shots.find(s=>s.shotId===item.shotId)?.inputs||[]).map(i=>i.familyId)]);
+    if(['START_FRAME','END_FRAME','INTERMEDIATE_FRAME'].includes(item.deliverableKey))item.inputAssetRefs=unique(visualInputs(content.shots.find(s=>s.shotId===item.shotId)).map(i=>i.familyId));
     if(item.deliverableKey==='SHOT_VIDEO')item.inputAssetRefs=workItems.filter(w=>w.shotId===item.shotId&&['START_FRAME','END_FRAME','INTERMEDIATE_FRAME','DIALOGUE_DRY'].includes(w.deliverableKey)).map(w=>w.outputAssetRef);
     if(item.deliverableKey==='LOCKED_SHOT')item.inputAssetRefs=workItems.filter(w=>w.shotId===item.shotId&&w.deliverableKey==='SHOT_VIDEO').map(w=>w.outputAssetRef);
   }
@@ -142,7 +181,7 @@ export function compileShotProductionPlan(scope,content,{id,revisionId,sourceRef
   const signature=item=>({scopeId:item.scopeId,deliverableKey:item.deliverableKey,slot:item.outputSlot,basisHash:item.outputBasisHash});
   for(const item of workItems.filter(w=>!['ANIMATIC','SHOT_VIDEO','LOCKED_SHOT'].includes(w.deliverableKey))){
     const settings=content.shots.find(s=>s.shotId===item.shotId),spec=scope.shots.find(s=>s.id===item.shotId);
-    const basis=item.deliverableKey==='SHOT_INPUT_LOCK'?content.shots.map(s=>({shotId:s.shotId,inputs:s.inputs,space:s.space})):item.deliverableKey==='DIALOGUE_DRY'?item.dialogue:{spec,inputs:settings.inputs,space:settings.space,...(item.gateId==='KEYFRAMES'?{strategy:settings.keyframeStrategy}:{}),slot:item.outputSlot};
+    const basis=item.deliverableKey==='SHOT_INPUT_LOCK'?content.shots.map(s=>({shotId:s.shotId,inputs:s.inputs,space:s.space})):item.deliverableKey==='DIALOGUE_DRY'?item.dialogue:{spec,inputs:visualInputs(settings),space:settings.space,...(item.gateId==='KEYFRAMES'?{strategy:settings.keyframeStrategy}:{}),slot:item.outputSlot};
     item.outputBasisHash=productionHash(basis);
   }
   animatic.outputBasisHash=productionHash({shotIds:scope.shots.map(s=>s.id),inputs:workItems.filter(w=>['STORYBOARD','DIALOGUE_DRY'].includes(w.deliverableKey)).map(signature)});
@@ -194,6 +233,7 @@ export function shotProductionReadiness(model,state,sceneId) {
     if(settings.videoBranch==='UNKNOWN')blockers.push('VIDEO_BRANCH_REQUIRED');
     const board=uniqueWork(spec.id,'STORYBOARD');if(!released(board))blockers.push('STORYBOARD_NOT_RELEASED');
     const lines=works.filter(w=>w.shotId===spec.id&&w.deliverableKey==='DIALOGUE_DRY');
+    for(const line of settings.dialogueLines)blockers.push(...resolveDialogueVoiceBinding(model,line,inputs).blockers);
     if(lines.length!==settings.dialogueLines.length||settings.dialogueLines.some(line=>{const matches=lines.filter(w=>w.lineId===line.id);return matches.length!==1||productionHash(matches[0].dialogue)!==productionHash(line)||!released(matches[0]);}))blockers.push('DIALOGUE_NOT_RELEASED');
     if(['AUDIO_DRIVEN','POST_LIP'].includes(settings.videoBranch)&&(!settings.dialogueLines.length||settings.dialogueLines.some(l=>l.purpose!=='FINAL')))blockers.push('FINAL_DIALOGUE_REQUIRED');
     const timing=selectAnimaticLockForShot(model.animaticLocks,{sceneId,shotPlanRevisionId:scope.plan.id,shotId:spec.id}),slice=timing?.slice;

@@ -1,5 +1,8 @@
+import {selectShotRecipeInputFamilies,shotRecipeProductionBasis} from './shot-production-recipe-basis.mjs';
+export {selectShotRecipeInputFamilies,shotRecipeProductionBasis,shotRecipeDefinitionBindingReasons} from './shot-production-recipe-basis.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
+import {executionDefinitionHash,SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA} from './execution-definition-hash.mjs';
 import {productionHash,productionId,productionBindingReasons,shotProductionEntryGates} from './shot-production-model.mjs';
 import {readCurrentShotProductionModel} from './shot-production-service.mjs';
 import {selectAnimaticLockForShot} from './animatic-model.mjs';
@@ -16,13 +19,6 @@ export function validateShotRecipeContent(value){
  if(!value.parameters||typeof value.parameters!=='object'||Array.isArray(value.parameters)||canonicalJson(value.parameters).length>20000)fail('参数必须是有限的JSON对象','DOMAIN_INVALID');
  const check=(v,depth=0)=>{if(depth>8)fail('参数嵌套过深','DOMAIN_INVALID');if(typeof v==='number'&&!Number.isFinite(v))fail('参数数字必须有限','DOMAIN_INVALID');if(v&&typeof v==='object')for(const [k,x] of Object.entries(v)){if(/^(api.?key|authorization|token|secret|password|headers|url|endpoint|base.?url|command|script|path|file|output|input)$/i.test(k)||['__proto__','prototype','constructor'].includes(k))fail('调用参数不得包含凭证、路径或执行指令','DOMAIN_INVALID');check(x,depth+1);}};check(value.parameters);
  return JSON.parse(canonicalJson(value));
-}
-/** Dialogue references belong to the line's speaker, never all audio in a shot. */
-export function selectShotRecipeInputFamilies(model,work,settings){
- if(work.deliverableKey!=='DIALOGUE_DRY')return{familyIds:[...new Set(work.inputAssetRefs||[])],blockers:[]};
- const speaker=work.dialogue?.speakerEntityId,graph=model.materialDirectory?.graph||model.domainGraph,representations=(graph?.representations||[]).filter(r=>r.entityId===speaker&&r.type==='VOICE_IDENTITY'&&r.authority!=='U');
- const allowed=new Set(representations.flatMap(r=>r.assetFamilyIds||[])),families=[...new Set((settings.inputs||[]).filter(b=>allowed.has(b.familyId)&&(model.assetFamilies||[]).some(f=>f.id===b.familyId&&f.kind==='AUDIO')).map(b=>b.familyId))];
- return{familyIds:families.length===1?families:[],blockers:!speaker||families.length!==1?['SPEAKER_VOICE_MASTER_NOT_UNIQUE']:[]};
 }
 export function shotRecipeExpectedOutput(model,sourceModel,familyId){
  const family=(model.assetFamilies||[]).find(f=>f.id===familyId),source=(sourceModel.assetFamilies||[]).find(f=>f.id===familyId),id=family?.currentExpectedOutputId||source?.currentExpectedOutputId;
@@ -45,9 +41,9 @@ async function context(tx,workItemId,api){
  if(work.deliverableKey==='DIALOGUE_DRY'&&!inputs.length)blockers.push('角色声音母版尚未就绪');
  const output=shotRecipeExpectedOutput(model,view.snapshot.productionModel,family.id);if(!output)blockers.push('当前预期产物未登记');
  const selectedLock=selectAnimaticLockForShot(model.animaticLocks,{sceneId:plan.sceneId,shotPlanRevisionId:plan.content.shotPlanRevisionId,shotId:work.shotId});
- const timing=selectedLock?.shotSlices?.find(s=>s.shotId===work.shotId)||null;
+ const timing=selectedLock?.slice||null;
  const frameSet=(model.shotKeyframeSets||[]).find(s=>s.scopeRole==='CURRENT'&&s.shotId===work.shotId)||null;
- const basis={workItemId:work.id,outputBasisHash:work.outputBasisHash,shotPlanRevisionId:plan.content.shotPlanRevisionId,inputs:inputs.map(({label,...b})=>b),...(work.deliverableKey==='SHOT_VIDEO'?{timing,frameSetId:frameSet?.id||null,keyframeMembers:frameSet?.members||[],handles:settings.handles,videoBranch:settings.videoBranch}:['START_FRAME','END_FRAME','INTERMEDIATE_FRAME'].includes(work.deliverableKey)?{timing,keyframeStrategy:settings.keyframeStrategy}:{} )};
+ const basis=shotRecipeProductionBasis(model,work,plan,inputs);
  return {view,model,state,work,plan,family,settings,spec,inputs,output,timing,frameSet,basis,basisHash:productionHash(basis),blockers:[...new Set(blockers)]};
 }
 export async function getShotRecipeWorkspace(tx,{workItemId,api}){
@@ -63,7 +59,11 @@ export async function saveShotRecipeDraft(tx,input,{api}){
 export async function previewShotRecipe(tx,input,{api}){
  const c=await context(tx,input.workItemId,api),record=await tx.getAux(SHOT_RECIPE_NS.drafts,input.workItemId),draft=read(record);
  if(!draft||record.revisionId!==input.draftRevisionId||draft.baseReleaseId!==c.view.releaseId||draft.basisHash!==c.basisHash)fail('调用包草稿或实际输入闭包已变化');if(c.blockers.length)fail('调用包前置条件未就绪：'+c.blockers.join('、'));
- const content=validateShotRecipeContent(draft.content);
+ return compileShotRecipePreview(c,draft.content,{draftRevisionId:record.revisionId});
+}
+/** Pure compilation after the transactional source and entry gates have passed. */
+export function compileShotRecipePreview(c,content,{draftRevisionId}){
+ content=validateShotRecipeContent(content);
  if(c.family.kind==='VIDEO'){
   const frames=Number(c.timing?.durationFrames??c.timing?.localDurationFrames),minimum=frames+Number(c.settings.handles.headFrames)+Number(c.settings.handles.tailFrames);
   if(!Number.isSafeInteger(frames)||frames<=0||content.parameters.fps!==24||!Number.isFinite(content.parameters.durationSeconds)||content.parameters.durationSeconds*24<minimum)fail('视频参数须明确24fps，并覆盖锁定时长和前后剪辑余量');
@@ -72,11 +72,12 @@ export async function previewShotRecipe(tx,input,{api}){
  const nextNumber=Math.max(0,...(c.model.expectedOutputs||[]).filter(o=>o.familyId===c.family.id).map(o=>Number(String(o.plannedVersionLabel||'').replace(/^V/,''))||0))+1;
  const versionLabel='V'+String(nextNumber).padStart(3,'0'),extension=c.family.kind==='IMAGE'?'.png':c.family.kind==='AUDIO'?'.wav':'.mp4';
  const needsNewOutput=Boolean(currentVersion||c.output.expectationState==='REALIZED'||(c.model.assetVersions||[]).some(v=>v.familyId===c.family.id));
- const output=needsNewOutput?{...c.output,id:'SP-EO-'+productionHash({workItemId:c.work.id,draftRevisionId:record.revisionId}).slice(0,24),targetPath:'media/_review_pending/shot-production/'+c.family.id+'/'+versionLabel+extension,plannedVersionLabel:versionLabel,expectationState:'PLANNED',realizedVersionId:null}:c.output;
- const id='SP-CALL-'+productionHash({workItemId:c.work.id,draftRevisionId:record.revisionId}).slice(0,24),revisionId=id+':r1';
+ const output=needsNewOutput?{...c.output,id:'SP-EO-'+productionHash({workItemId:c.work.id,draftRevisionId:draftRevisionId}).slice(0,24),targetPath:'media/_review_pending/shot-production/'+c.family.id+'/'+versionLabel+extension,plannedVersionLabel:versionLabel,expectationState:'PLANNED',realizedVersionId:null}:c.output;
+ const id='SP-CALL-'+productionHash({workItemId:c.work.id,draftRevisionId:draftRevisionId}).slice(0,24),revisionId=id+':r1';
  const definition={id,title:c.work.label,pipelineStageCode:c.work.pipelineStageCode,executorKind:'MODEL_CALL',definitionStatus:'DEFINED',workItemRef:c.work.id,currentRevisionId:revisionId,upload:{rawText:c.inputs.map(i=>i.label).join('\n'),items:c.inputs.map(({label,...b})=>b)},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:output.targetPath,mediaType:c.family.kind,assetFamilyRef:c.family.id,expectedOutputRef:output.id},declaredGate:'READY_TO_START',rawSourceBlock:canonicalJson(content),authoringContent:content,productionBasis:c.basis,productionBasisHash:c.basisHash,parentVersionId:currentVersion?.id||null};
- definition.definitionHash=productionHash(definition);
- const body={workItemId:c.work.id,draftRevisionId:record.revisionId,expectedReleaseId:c.view.releaseId,basisHash:c.basisHash,definition,expectedOutput:output,previousDefinitionId:c.work.executionDefinitionRef||null};return {...body,previewHash:productionHash(body),modelCalls:0};
+ definition.definitionHashSchemaVersion=SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA;
+ definition.definitionHash=executionDefinitionHash(definition);
+ const body={workItemId:c.work.id,draftRevisionId:draftRevisionId,expectedReleaseId:c.view.releaseId,basisHash:c.basisHash,definition,expectedOutput:output,previousDefinitionId:c.work.executionDefinitionRef||null};return {...body,previewHash:productionHash(body),modelCalls:0};
 }
 export async function enqueueShotRecipe(tx,input,{api}){
  const old=read(await tx.getAux(SHOT_RECIPE_NS.requests,input.requestId));if(old){if(old.requestHash!==productionHash(input))fail('请求编号已经用于其他调用包');return old.result;}

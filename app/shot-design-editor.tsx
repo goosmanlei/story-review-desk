@@ -44,8 +44,9 @@ export function ShotDesignEditor({plan,coverage,sceneId,snapshotId,readOnly,onSa
    if(!bindingResponse.ok||binding.snapshotId!==snapshotId||!binding.mutationEtag)throw Error('当前依据已变化，请保留草稿并重新核对。');
    submitted=true;
    const response=await fetch('/api/v8/creative-revisions',{method:'POST',headers:{'Content-Type':'application/json','If-Match':binding.mutationEtag,'Idempotency-Key':`shot-design-${crypto.randomUUID()}`},body:JSON.stringify({snapshotId,subjectKind:'SHOT_PLAN_SET',subjectId:plan.template.planId,baseRevisionHash:plan.template.revisionHash,planningContractVersion:'3.0',authorityClass:'A',basisBindings:plan.basisBindings,content:{sceneId,identityChangeReason:reason,shots:rows}})});
-   const result=await response.json() as {error?:string};
-   if(!response.ok){submitted=false;throw Error(result.error||'候选登记失败');}
+   const result=await response.json() as {error?:string;creativeRevisionId?:string};
+   if(!response.ok){if(response.status<500)submitted=false;throw Error(result.error||'候选登记失败');}
+   if(!result?.creativeRevisionId?.trim())throw Error('候选登记回执不完整');
    setEditing(false);setMessage('镜头设计候选已登记，请在本场完成独立正式审阅。');onSaved();window.dispatchEvent(new CustomEvent('review:operations-updated'));
   }catch(error){if(submitted)setUncertain(true);setMessage((error instanceof Error?error.message:'提交未确认')+(submitted?' 请先核查当前候选；没有自动重试。':''));}finally{setBusy(false);}
  }
@@ -53,7 +54,7 @@ export function ShotDesignEditor({plan,coverage,sceneId,snapshotId,readOnly,onSa
  return <section className="shot-design-editor" aria-label="结构化镜头设计编辑">
   {!editing?<button type="button" onClick={begin}>{source?.shots?.length?'编辑新镜头设计候选':'编写镜头设计'}</button>:<>
    <p>每镜先明确表达、构图与设计估时。保存会登记新候选，正式审阅与实际输入锁定各自完成。</p>
-   <div className="shot-design-editor-layout"><aside><nav aria-label="编辑中的镜头">{shots.map((shot,index)=><button key={shot.shotId} type="button" aria-pressed={index===selected} onClick={()=>setSelected(index)}>{index+1}. {shot.title||'未命名镜头'}</button>)}</nav><button type="button" onClick={add}>增加镜头</button></aside>
+   <fieldset disabled={busy||uncertain} className="shot-design-authoring-fields"><div className="shot-design-editor-layout"><aside><nav aria-label="编辑中的镜头">{shots.map((shot,index)=><button key={shot.shotId} type="button" aria-pressed={index===selected} onClick={()=>setSelected(index)}>{index+1}. {shot.title||'未命名镜头'}</button>)}</nav><button type="button" onClick={add}>增加镜头</button></aside>
     <main>{selectedShot&&<>
      <p className="shot-design-identity">永久镜头：{selectedShot.shotId}</p>
      <div className="shot-design-actions"><button type="button" disabled={selected===0} onClick={()=>move(-1)}>前移</button><button type="button" disabled={selected===shots.length-1} onClick={()=>move(1)}>后移</button><button type="button" onClick={()=>{setShots(rows=>rows.filter((_,i)=>i!==selected));setSelected(Math.max(0,selected-1));}}>移除本镜</button></div>
@@ -69,7 +70,7 @@ export function ShotDesignEditor({plan,coverage,sceneId,snapshotId,readOnly,onSa
      {selectedShot.design!.keyframeStrategy.mode==='MULTI_KEYFRAME'&&<label>中间关键帧数量<input type="number" min="1" max="100" step="1" value={selectedShot.design!.keyframeStrategy.intermediateFrameCount} onChange={e=>updateDesign({keyframeStrategy:{...selectedShot.design!.keyframeStrategy,intermediateFrameCount:Number(e.target.value)}})}/></label>}
      <label>关键帧策略依据<textarea value={selectedShot.design!.keyframeStrategy.reason} onChange={e=>updateDesign({keyframeStrategy:{...selectedShot.design!.keyframeStrategy,reason:e.target.value}})}/></label>
     </>}</main></div>
-   <label>镜头增删或身份变更理由<textarea value={reason} onChange={e=>setReason(e.target.value)}/></label>
+   <label>镜头增删或身份变更理由<textarea value={reason} onChange={e=>setReason(e.target.value)}/></label></fieldset>
    <div className="shot-design-actions"><button type="button" disabled={busy||uncertain||!shots.length} onClick={()=>void save()}>{busy?'正在登记…':'登记镜头设计候选'}</button><button type="button" disabled={busy} onClick={()=>{if(confirm('放弃本次未保存镜头设计？'))setEditing(false);}}>取消编辑</button>{uncertain&&<button type="button" onClick={()=>{setEditing(false);onSaved();}}>核查当前候选</button>}</div>
   </>}
   {message&&<p role="status">{message}</p>}

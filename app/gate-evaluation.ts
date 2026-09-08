@@ -1,6 +1,5 @@
 import {executionRuntimeReason,type ExecutionRuntime} from '../host/instance-runtime/execution-epoch.mjs';
 import {domainReferenceEligibility} from '../host/instance-runtime/domain-reference.mjs';
-import {shotProductionEntryGates} from '../host/instance-runtime/shot-production-model.mjs';
 import type { Configuration } from "../host/instance-runtime/configuration-model.mjs";
 type Row = Record<string, unknown>;
 const rows = (v: unknown): Row[] => (Array.isArray(v) ? (v as Row[]) : []);
@@ -18,6 +17,7 @@ export type ConfiguredGate = {
 export function configuredGates(
   model: Row,
   projection: EligibilitySnapshot["stateProjection"],
+  productionEntries: Record<string, string[]> = {},
 ): Record<string, ConfiguredGate> {
   const work = rows(model.workItems).filter(
       (w) => w.activeInCurrentProduction === true,
@@ -45,12 +45,11 @@ export function configuredGates(
               : record(model.instance).projectId || "",
     );
   const result: Record<string, ConfiguredGate> = {};
-  const productionEntries=shotProductionEntryGates(model,projection);
   for (const w of [...work, ...materials]) {
     const b = bindings(w),
       flow = b.workflow as Configuration["workflow"] | undefined,
       g = flow?.gates.find((g) => g.id === w.gateId),
-      entryReasons: string[] = [...(productionEntries[String(w.id)]||[])],
+      entryReasons: string[] = [...(productionEntries[String(w.id)]||(w.shotProductionPlanId?['SHOT_PRODUCTION_GATE_PROJECTION_REQUIRED']:[]))],
       exitReasons: string[] = [],
       missingOutputTypes: string[] = [];
     result[String(w.id)] = {

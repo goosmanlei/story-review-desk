@@ -1,4 +1,5 @@
 'use client';
+import {instanceCandidateRelativePath} from '../host/instance-runtime/media-paths.mjs';
 import {ShotProductionWorkspace} from './shot-production-workspace';
 import {AnimaticWorkspace} from './animatic-workspace';
 import {EpisodeProductionEntry} from './episode-production-entry';
@@ -134,6 +135,7 @@ export type CharacterCardSpec =
     };
 
 export type MaterialRequirement = {
+  sourceKind?: string;
   reviewSpec?: ReviewSpec; configurationBinding?: ConfigurationBinding; businessCategoryPrimaryId?:string;businessCategorySecondaryId?:string;
   id: string;
   title: string;
@@ -600,6 +602,7 @@ type RevisionInstructions = {
 };
 
 export type ExecutionUiContext = {
+  expectedOutput?: ExpectedOutput | null;
   configurationBinding?: import("../host/instance-runtime/configuration-model.mjs").ConfigurationBinding;
   snapshotId: string;
   mutationEtag: string | null;
@@ -1404,7 +1407,7 @@ export type ExecutionRecipe = {
   model: { branch: string | null; rawRule: string; resolution: string };
   parametersRaw?: string | null;
   prompt: { main: string | null; negative: string | null; negativeApplication: string };
-  output: { path: string; mediaType: string; assetFamilyRef?: string | null };
+  output: { path: string; mediaType: string; assetFamilyRef?: string | null; expectedOutputRef?: string | null };
   declaredGate: string;
   rawSourceBlock: string;
 };
@@ -2418,7 +2421,8 @@ function ScopedReviewContextPanel({ context, evidenceCatalog }: { context: Scope
 }
 
 function TextReviewOriginal({url,sha256,onReady,onError}:{url:string;sha256:string;onReady:()=>void;onError:()=>void}){
-  const [content,setContent]=useState('正在读取文本原件…');const callbacks=useRef({onReady,onError});callbacks.current={onReady,onError};
+  const [content,setContent]=useState('正在读取文本原件…');const callbacks=useRef({onReady,onError});
+  useEffect(()=>{callbacks.current={onReady,onError};},[onReady,onError]);
   useEffect(()=>{let active=true;fetch(url,{cache:'no-store'}).then(async response=>{if(!response.ok)throw Error('文本原件无法读取');const bytes=await response.arrayBuffer();const hash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(n=>n.toString(16).padStart(2,'0')).join('');if(hash!==sha256)throw Error('文本原件与登记SHA不一致');if(active){setContent(new TextDecoder().decode(bytes));callbacks.current.onReady();}}).catch(error=>{if(active){setContent(error instanceof Error?error.message:'文本原件无法核验');callbacks.current.onError();}});return()=>{active=false;};},[url,sha256]);
   return <pre className="production-text-original" aria-label="SHA核验的文本原件">{content}</pre>;
 }
@@ -2608,7 +2612,7 @@ function RecipeExecutionControls({ recipe, context }: { recipe: ExecutionRecipe;
   const [message, setMessage] = useState('这里只创建明确范围的执行授权，不会在浏览器中直接调用模型。');
   const [busy, setBusy] = useState(false);
   const [executionRequestId, setExecutionRequestId] = useState('');
-  const [resultPath, setResultPath] = useState('');
+  const resultPath = context.expectedOutput?.targetPath || '';
   const [resultLabel, setResultLabel] = useState('');
   const [runId, setRunId] = useState('');
   const [runState, setRunState] = useState('');
@@ -2655,13 +2659,20 @@ function RecipeExecutionControls({ recipe, context }: { recipe: ExecutionRecipe;
 
   async function registerCandidate() {
     if (!context.familyId) { setMessage('当前工作项没有输出资产族，不能登记候选。'); return; }
+    const expectedOutput = context.expectedOutput;
+    if (!expectedOutput) { setMessage('当前工作项缺少精确预期产物，请刷新并核对当前目标。'); return; }
     const normalizedPath = normalizedProjectRelativePath(resultPath);
     if (normalizedPath.error) { setMessage(normalizedPath.error); return; }
-    if (!normalizedPath.normalized.startsWith('production/generated/')) {
-      setMessage('候选登记只接受 production/generated/**/_review_pending/** 下的已有文件。');
+    if (!expectedOutput || expectedOutput.familyId !== context.familyId
+      || expectedOutput.id !== recipe.output.expectedOutputRef
+      || recipe.output.assetFamilyRef !== context.familyId
+      || normalizedPath.normalized !== recipe.output.path
+      || expectedOutput.expectationState !== 'PLANNED') {
+      setMessage('当前预期产物与调用包不一致，请刷新并核对当前目标。');
       return;
     }
-    if (!normalizedPath.normalized.includes('/_review_pending/')) { setMessage('候选登记只接受 production/generated/**/_review_pending/** 下的已有文件。'); return; }
+    try { instanceCandidateRelativePath(normalizedPath.normalized, context.familyId); }
+    catch { setMessage('当前预期产物不是受控候选媒体路径。'); return; }
     if (!executionRequestId.startsWith('xreq_')) { setMessage('请填写与本结果绑定的 Execution Request ID。'); return; }
     if (!runId.startsWith('run_')) { setMessage('请填写已进入 SUCCEEDED 的 Run ID；文件存在或平台提示成功都不能替代Run证据。'); return; }
     if (!actualPrompt.trim()) { setMessage('实际Prompt不能为空；外部调整过时必须粘贴最终实际Prompt。'); return; }
@@ -2673,13 +2684,16 @@ function RecipeExecutionControls({ recipe, context }: { recipe: ExecutionRecipe;
         snapshotId: context.snapshotId,
         familyId: context.familyId,
         path: normalizedPath.normalized,
+        expectedOutputId: expectedOutput.id,
         label: resultLabel.trim() || undefined,
         note: '由创作者工作台登记已有_review_pending结果；不移动媒体。',
         runId: runId.trim(),
         executionRequestId: executionRequestId.trim(),
         executionDefinitionId: recipe.id,
         callPackageHash: recipe.definitionHash,
-        actualPrompt: { ...recipe.prompt, main: actualPrompt.trim(), negative: actualNegativePrompt.trim() },
+        actualPrompt: actualPrompt === (recipe.prompt.main || '') && actualNegativePrompt === (recipe.prompt.negative || '')
+          ? recipe.prompt
+          : { ...recipe.prompt, main: actualPrompt, negative: actualNegativePrompt },
         inputBindings,
         parentVersionId: context.parentVersionId,
       };
@@ -2750,7 +2764,7 @@ function RecipeExecutionControls({ recipe, context }: { recipe: ExecutionRecipe;
     <button type="button" className="creator-authorize-button" disabled={hostedReadOnly || busy || !context.familyId || !context.canAuthorize} onClick={() => void authorize()}>{busy ? '正在处理…' : hostedReadOnly ? '远端镜像不可授权生成' : `标记可生成 · ${executor === 'CODEX' ? 'Codex执行' : '我在外部执行'}`}</button>
     {!context.canAuthorize && <p className="creator-execution-gate">当前不能授权生成：{visibleText(context.authorizeReason)}</p>}
     {executor === 'USER_EXTERNAL' && executionRequestId.startsWith('xreq_') && <section className="creator-external-run"><header><div><b>记录外部平台运行</b><span>{runState ? `当前：${visibleText(runState)}` : '尚未登记提交'}</span></div><code>{executionRequestId}</code></header><label><span>平台任务ID（建议填写）</span><input value={providerRunId} onChange={(event) => setProviderRunId(event.target.value)} placeholder="historyId / requestId / taskId" /></label><label><span>情况说明（失败／结果不明必填）</span><textarea value={runNote} onChange={(event) => setRunNote(event.target.value)} placeholder="记录平台提示、核查入口或失败原因；不要粘贴密钥" /></label><div>{!runId && <button type="button" disabled={hostedReadOnly || busy} onClick={() => void reportExternalRun('SUBMITTED')}>已提交到外部平台</button>}{runId && ['SUBMITTED', 'RUNNING', ''].includes(runState) && <><button type="button" disabled={hostedReadOnly || busy} onClick={() => void reportExternalRun('SUCCEEDED')}>已有明确结果</button><button type="button" disabled={hostedReadOnly || busy} onClick={() => void reportExternalRun('FAILED')}>执行失败</button><button type="button" disabled={hostedReadOnly || busy} onClick={() => void reportExternalRun('RESULT_UNKNOWN')}>结果不明</button></>}</div>{runId && <p>本次Run：<code>{runId}</code>{runState === 'SUCCEEDED' ? ' · 可继续登记候选' : ''}</p>}</section>}
-    <details className="creator-candidate-import"><summary>登记已有候选结果</summary><p>这里只登记已存在于项目 <code>_review_pending</code> 的文件，不上传二进制、不移动媒体，也不代表正式放行。必须绑定已授权请求和已成功Run；附件、模型和参数若偏离已授权调用包，应先更新配方并重新授权。</p><label><span>项目相对路径</span><input value={resultPath} onChange={(event) => setResultPath(event.target.value)} placeholder="production/generated/.../_review_pending/.../文件名.png" /></label><div><label><span>候选标签（可选）</span><input value={resultLabel} onChange={(event) => setResultLabel(event.target.value)} placeholder="例如：返修V002" /></label><label><span>Run ID（必填）</span><input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="run_…" /></label></div><label><span>Execution Request ID（必填）</span><input value={executionRequestId} onChange={(event) => setExecutionRequestId(event.target.value)} placeholder="xreq_…" /></label><label><span>实际使用的完整主Prompt</span><textarea value={actualPrompt} onChange={(event) => setActualPrompt(event.target.value)} /><small>若在外部平台改过Prompt，必须用最终实际文本替换这里的配方原文。</small></label><label><span>实际使用的完整负面Prompt</span><textarea value={actualNegativePrompt} onChange={(event) => setActualNegativePrompt(event.target.value)} /><small>没有负面Prompt时保持为空；不得把改动只留在平台历史中。</small></label><button type="button" disabled={hostedReadOnly || busy || !context.familyId} onClick={() => void registerCandidate()}>{busy ? '正在处理…' : hostedReadOnly ? '远端镜像不可登记候选' : '预检并登记已有结果'}</button></details>
+    <details className="creator-candidate-import"><summary>登记已有候选结果</summary><p>这里只登记已存在于项目 <code>_review_pending</code> 的文件，不上传二进制、不移动媒体，也不代表正式放行。必须绑定已授权请求和已成功Run；附件、模型和参数若偏离已授权调用包，应先更新配方并重新授权。</p><label><span>已冻结的候选目标路径</span><input value={resultPath} readOnly placeholder="尚无精确预期产物" /></label><div><label><span>候选标签（可选）</span><input value={resultLabel} onChange={(event) => setResultLabel(event.target.value)} placeholder="例如：返修V002" /></label><label><span>Run ID（必填）</span><input value={runId} onChange={(event) => setRunId(event.target.value)} placeholder="run_…" /></label></div><label><span>Execution Request ID（必填）</span><input value={executionRequestId} onChange={(event) => setExecutionRequestId(event.target.value)} placeholder="xreq_…" /></label><label><span>实际使用的完整主Prompt</span><textarea value={actualPrompt} onChange={(event) => setActualPrompt(event.target.value)} /><small>若在外部平台改过Prompt，必须用最终实际文本替换这里的配方原文。</small></label><label><span>实际使用的完整负面Prompt</span><textarea value={actualNegativePrompt} onChange={(event) => setActualNegativePrompt(event.target.value)} /><small>没有负面Prompt时保持为空；不得把改动只留在平台历史中。</small></label><button type="button" disabled={hostedReadOnly || busy || !context.familyId} onClick={() => void registerCandidate()}>{busy ? '正在处理…' : hostedReadOnly ? '远端镜像不可登记候选' : '预检并登记已有结果'}</button></details>
     <p role="status" aria-live="polite">{message}</p>
   </section>;
 }
@@ -2970,7 +2984,7 @@ function WorkPackageDetail({ model, shot, workPackage, context, operations, onNa
         <section className="creator-info-layers" aria-label="制作与审计信息分层">
           <details open={surface !== 'REVIEW' && surface !== 'RELEASED' && surface !== 'FORBIDDEN'}><summary><b>制作信息</b><span>依赖、版本、完整调用包、授权与结果登记</span></summary>
             <section className="v6-required-assets"><header><div><small>OUTPUT + INPUT + COMPANION PLAN</small><h3>{workItemLabel(selectedItem) + '的输出与依赖'}</h3><p>{surface === 'REVIEW' ? '选择依赖或历史版本只建立B侧比较；正式裁决始终绑定主输出当前版本。' : '主输出、输入依赖和伴随计划交付物分开显示；没有文件与SHA时不进入正式审阅。输入素材可回到“素材管理”的统一素材信息卡。'}</p></div><span>{allowedFamilies.length}</span></header>{allowedFamilies.length ? <div>{outputFamily && <AssetMiniCard model={model} family={outputFamily} selected={selectedFamily?.id === outputFamily.id} role="主输出" onSelect={selectFamily} />}{inputFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="输入依赖" onSelect={selectFamily} onOpenMaterial={onOpenMaterial} />)}{companionFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="伴随计划交付物（未闭环）" onSelect={selectFamily} />)}</div> : <p className="v6-empty-note">本工作项没有独立资产记录。</p>}</section>
-            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel authorWorkItemId={selectedItem.id.startsWith('SP-WI-')&&selectedItem.activeInCurrentProduction===true&&['STORYBOARD','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'].includes(selectedItem.deliverableKey||'')?selectedItem.id:undefined} definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
+            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel authorWorkItemId={selectedItem.id.startsWith('SP-WI-')&&selectedItem.activeInCurrentProduction===true&&['STORYBOARD','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'].includes(selectedItem.deliverableKey||'')?selectedItem.id:undefined} definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, expectedOutput: (model.expectedOutputs || []).find(output => output.id === outputFamily?.currentExpectedOutputId && output.familyId === outputFamily.id) || null, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
           </details>
           <details open={surface === 'RELEASED' || surface === 'FORBIDDEN'}><summary><b>审计信息</b><span>生命周期、技术坐标、SHA与解锁条件</span></summary><div className="v7-outcome-grid"><article><span>解决什么问题</span><p>{visibleText(step.purpose)}</p></article><article><span>重点审阅什么</span><p>{visibleText(step.reviewFocus)}</p></article><article><span>产出什么</span><p>{visibleText(step.output)}</p></article><article><span>通过后解锁</span><p>{visibleText(step.unlock)}</p></article></div><UnifiedStatusPanel record={{ ...(activeItem || withReviewProjection(selectedItem, operations.effective)), applicabilityState: workPackage.applicabilityState }} /><div className="v6-stage-evidence"><p><b>当前对象</b><code>{publicRef(selectedItem.id)}<br />{stageDisplay(selectedItem.pipelineStageCode)}</code></p><p><b>执行配方／来源定位</b>{publicRef(selectedItem.executionDefinitionRef) || '不适用'}<br />{visibleText(selectedItem.sourceRef)}</p></div></details>
         </section>

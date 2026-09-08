@@ -3,6 +3,7 @@ import { preserveConfigurationProjection } from './instance-runtime/configuratio
 import { preserveDomainProjection } from './instance-runtime/domain-projection.mjs';
 import {preserveScopedProductionProjection} from './instance-runtime/scoped-production-projection.mjs';
 import {preserveShotProductionProjection,preserveShotRecipeProjection} from './instance-runtime/shot-production-preservation.mjs';
+import {preserveMaterialProductionProjection,preserveMaterialProductionRequirementProvenance} from './instance-runtime/material-production-preservation.mjs';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import { mkdir, mkdtemp, realpath, lstat, readFile, writeFile, rm, open, utimes } from 'node:fs/promises';
@@ -213,7 +214,9 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const scoped=preserveScopedProductionProjection({snapshot:projected.snapshot,baseSnapshot:publishedSnapshot,documents,events});
     const production=preserveShotProductionProjection({snapshot:scoped,baseSnapshot:publishedSnapshot,documents});
     const productionRecipes=preserveShotRecipeProjection({snapshot:production,recipes:projected.recipes,baseSnapshot:publishedSnapshot,baseRecipes:JSON.parse(baseRelease.recipesBytes),documents});
-    snapshotBytes=Buffer.from(canonicalJson(preserveDomainProjection({snapshot:productionRecipes.snapshot,baseSnapshot:publishedSnapshot,events})));recipesBytes=Buffer.from(canonicalJson(productionRecipes.recipes));
+    const materialProduction=preserveMaterialProductionProjection({snapshot:productionRecipes.snapshot,recipes:productionRecipes.recipes,baseSnapshot:publishedSnapshot,baseRecipes:JSON.parse(baseRelease.recipesBytes),documents});
+    const domain=preserveDomainProjection({snapshot:materialProduction.snapshot,baseSnapshot:publishedSnapshot,events});
+    snapshotBytes=Buffer.from(canonicalJson(preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot})));recipesBytes=Buffer.from(canonicalJson(materialProduction.recipes));
     return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };
   } finally { await rm(scratch, { recursive: true, force: true }); }
 }

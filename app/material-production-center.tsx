@@ -8,6 +8,7 @@ import { createPortal } from 'react-dom';
 import {EntityMaterialCatalog,MaterialReviewPoints} from './entity-material-catalog';
 import {ProductionMaterialCatalog} from './production-material-catalog';
 import {MaterialProgressBadge} from './material-appearance';
+import {MaterialProductionSetupEditor} from './material-production-setup-editor';
 import {
   episodePlanIsCurrent,
   mediaKind,
@@ -1081,7 +1082,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           <CharacterCardRequirementPreview requirement={selectedRequirement} />
           {selectedFamily
             ? <>{!isHistoricalVersion && <RecipePanel expanded compact definitionRef={selectedItem?.executionDefinitionRef} recipe={recipe} error={recipeError} title="" defaultOpen reviewerView />}<MaterialCandidateProductionFacts key={`${selectedFamily.id}:${selectedVersion?.id || 'NO_VERSION'}:${selectedVersion?.sha256 || 'NO_SHA'}:${selectedVersion?.outputState || 'NO_OUTPUT'}`} family={selectedFamily} version={selectedVersion} historical={isHistoricalVersion} /></>
-            : <p className="v6-empty-note">尚未建立可绑定的资产族；生产资料仍为待补齐。</p>}
+            : <><p className="v6-empty-note">尚未建立可绑定的资产族；生产资料仍为待补齐。</p>{selectedRequirement.sourceKind === 'DOMAIN_GRAPH' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} />}</>}
         </section>
         <section className="material-purpose-usage" data-material-section="purpose-usage">
           <header><h3>用途与使用位置</h3></header>

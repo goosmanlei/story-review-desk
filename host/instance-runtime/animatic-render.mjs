@@ -16,6 +16,7 @@ async function confinedOutput(root,relative){if(!relative.startsWith('media/_rev
 export async function renderAnimatic({repository,instanceRoot,job,content,assertHeld=async()=>{},run=animaticProcess}){
  content=validateAnimaticTimeline(content);if(content.shots.some(s=>!s.panels.length))throw Error('缺少粗分镜');if(!/^animatic_render_[A-Za-z0-9-]+$/.test(job.jobId||''))throw Error('渲染任务身份无效');const root=await realpath(instanceRoot);if(root!==path.resolve(instanceRoot))throw Error('实例根目录不规范');let scratch=root;for(const part of ['scratch','animatic']){scratch=path.join(scratch,part);await mkdir(scratch,{recursive:true});if((await lstat(scratch)).isSymbolicLink()||await realpath(scratch)!==scratch)throw Error('渲染缓存目录不能经过符号链接');}const work=await mkdtemp(path.join(scratch,job.jobId+'-')),files=new Map();
  try{
+ if(content.cards.length&&!/\bdrawtext\b/.test(await run('ffmpeg',['-hide_banner','-filters'])))throw Error('预演工作器的 FFmpeg 缺少 drawtext 字体排版能力；此含人物卡任务未生成，须修复工作器后重新核对');
  for(const [index,binding] of job.inputBindings.entries()){
   await assertHeld();const media=await repository.readTransaction(tx=>tx.getMedia(binding.familyId,binding.versionId));if(!media||media.sha256!==binding.sha256||media.relativePath!==binding.relativePath)throw Error('渲染输入版本已变化');const bytes=await readRegisteredMediaBytes(instanceRoot,media);const ext=path.extname(media.relativePath).toLowerCase();if(!['.png','.jpg','.jpeg','.webp','.wav','.mp3','.m4a','.flac','.ttf','.otf'].includes(ext))throw Error('预演输入格式不在白名单');const file=path.join(work,`input-${index}${ext}`);await writeFile(file,bytes,{flag:'wx'});files.set(binding.versionId,file);
  }
@@ -29,7 +30,7 @@ export async function renderAnimatic({repository,instanceRoot,job,content,assert
  const list=path.join(work,'cuts.txt');await writeFile(list,segments.map(file=>`file '${filterPath(file)}'`).join('\n')+'\n',{flag:'wx'});const base=path.join(work,'cuts.mp4');await run('ffmpeg',['-nostdin','-v','error','-f','concat','-safe','0','-i',list,'-c','copy','-n',base]);
  const args=['-nostdin','-v','error','-i',base],filters=[],audioLabels=[];let audioIndex=1;
  for(const clip of content.audio.filter(a=>!a.muted&&a.volume>0)){
-  const source=files.get(clip.media.versionId);if(!source)throw Error('声音输入未冻结');const probe=JSON.parse(await run('ffprobe',['-v','error','-show_entries','format=duration','-of','json',source]));if(Number(probe.format?.duration)+1/24<(clip.sourceInFrames+clip.durationFrames)/24)throw Error('声音片段超过实际源文件时长');
+  const source=files.get(clip.media.versionId);if(!source)throw Error('声音输入未冻结');const probe=JSON.parse(await run('ffprobe',['-v','error','-show_entries','format=duration','-of','json',source]));if(!Number.isFinite(Number(probe.format?.duration))||Number(probe.format.duration)+1/24<(clip.sourceInFrames+clip.durationFrames)/24)throw Error('声音片段超过实际源文件时长或时长无法核验');
   args.push('-i',source);const start=schedule.shots.find(s=>s.shotId===clip.anchorShotId).startFrame+clip.offsetFrames,label=`a${audioIndex}`;
   filters.push(`[${audioIndex}:a]atrim=start=${clip.sourceInFrames/24}:duration=${clip.durationFrames/24},asetpts=PTS-STARTPTS,volume=${clip.volume},adelay=${Math.round(start*1000/24)}:all=1[${label}]`);audioLabels.push(`[${label}]`);audioIndex++;
  }

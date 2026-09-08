@@ -155,13 +155,14 @@ const selectedFamilyIds = new Set(
 );
 const materialFamilyIds=new Set(selectedFamilyIds),animaticVersionIds=new Set((reviewData.productionModel.publicProductionMedia||reviewData.productionModel.publicAnimaticMedia||[]).map(m=>m.versionId));
 const publicBindings=reviewData.productionModel.publicExportMediaBindings,publicVersionIds=Array.isArray(publicBindings)?new Set(publicBindings.map(b=>b.versionId)):null;
+const isExactPublicMediaEvent=event=>publicBindings?.some(binding=>binding.familyId===event.familyId&&binding.versionId===event.versionId&&binding.sha256===(event.versionSha256||event.sha256));
 for(const item of reviewData.productionModel.publicAnimaticMedia||[])selectedFamilyIds.add(item.familyId);
 for(const item of reviewData.productionModel.workItems||[])if(item.scopeRole==='CURRENT'&&selectedFamilyIds.has(item.outputAssetRef))selectedWorkItemIds.add(item.id);
 const assetVersions = (await events('asset-version')).filter((event) => (
-  publicVersionIds?publicVersionIds.has(event.versionId):(materialFamilyIds.has(String(event.familyId || '')) || animaticVersionIds.has(event.versionId))
+  publicVersionIds?isExactPublicMediaEvent(event):(materialFamilyIds.has(String(event.familyId || '')) || animaticVersionIds.has(event.versionId))
 ));
 const candidateRequestIds = new Set(assetVersions.filter(event=>!['DETERMINISTIC_RENDER','DETERMINISTIC_MANIFEST'].includes(event.executorKind)).map((event) => String(event.executionRequestId || '')));
-const materialReviews=(await events('review')).filter(event=>['ASSET','WORK_PRODUCT'].includes(event.subjectType)&&(publicVersionIds?publicVersionIds.has(event.versionId):(materialFamilyIds.has(event.familyId)||animaticVersionIds.has(event.versionId))));
+const materialReviews=(await events('review')).filter(event=>['ASSET','WORK_PRODUCT'].includes(event.subjectType)&&(publicVersionIds?isExactPublicMediaEvent(event):(materialFamilyIds.has(event.familyId)||animaticVersionIds.has(event.versionId))));
 const candidateExecutionRequests = allExecutionRequests.filter((event) => (
   candidateRequestIds.has(String(event.executionRequestId || ''))
 ));

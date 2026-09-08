@@ -29,7 +29,9 @@ export function ShotProductionRecipeEditor({workItemId,definitionRef,readOnly=fa
    const requestId='recipe-'+crypto.randomUUID(),body=action==='save'?{action,requestId,workItemId,expectedReleaseId:state.releaseId,expectedDraftRevisionId:state.draftHeadRevisionId,content}:{action,requestId,workItemId,draftRevisionId:state.draft?.revisionId,...(action==='publish'?{previewHash:preview?.previewHash}:{})};
    const operations=await readManagementResponse<{mutationEtag:string}>(await fetch('/api/v8/operations/snapshot?summary=1',{cache:'no-store'}));if(!operations.mutationEtag)throw Error('当前运行快照不可用');
    submitted=true;const response=await fetch('/api/instance/shot-production/recipes',{method:'POST',headers:{'Content-Type':'application/json','If-Match':operations.mutationEtag,'Idempotency-Key':requestId},body:JSON.stringify(body)});
-   if(!response.ok){submitted=false;await readManagementResponse(response);}const result=await readManagementResponse<Preview&{jobId?:string}>(response);submitted=false;
+   if(response.status>=400&&response.status<500)submitted=false;if(!response.ok)await readManagementResponse(response);
+   const result=await response.json() as Preview&{jobId?:string;status?:string;revisionId?:string};
+   if(!result||typeof result!=='object'||Array.isArray(result)||(action==='save'?typeof result.revisionId!=='string'||!result.revisionId.trim():action==='preview'?typeof result.previewHash!=='string'||!result.previewHash.trim():typeof result.jobId!=='string'||!result.jobId.trim()||result.status!=='QUEUED'))throw Error('服务返回的操作回执缺少草稿版本或任务依据');submitted=false;
    if(action==='preview'){setPreview(result);setMessage('请核对完整调用包和精确附件，再登记为当前执行定义。');}
    else if(action==='save'){setDirty(false);setRefresh(value=>value+1);}
    else{setPreview(null);setMessage('调用包登记任务已排队'+(result.jobId?'：'+result.jobId:'')+'。工作器处理后再按现有生成授权流程执行。');window.dispatchEvent(new Event('review:operations-updated'));}
