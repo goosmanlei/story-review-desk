@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {canonicalJson,sha256} from './instance-runtime/bytes.mjs';
 import {requireSource} from './instance-source-proof.mjs';
+import {legacyAudioCandidateProof} from './instance-legacy-audio-candidate-proof.mjs';
 
 const hash = value => sha256(canonicalJson(value));
 const check = (value,message) => requireSource(value,'SOURCE_REGISTERED_CANDIDATE_BINDING',message);
@@ -45,8 +46,9 @@ function historicalExpectationProof({requirements,events,model,activeMedia,pinne
   // Native source preservation owns these families. Do not infer ownership
   // from an ID prefix or include their independently authored output slots.
   const nativeFamilies=new Set([...(model.materialProductionPlans||[]).map(p=>p.familyId),...(model.workItems||[]).filter(w=>(model.shotProductionPlans||[]).some(p=>p.workItemIds?.includes(w.id))).map(w=>w.outputAssetRef)]);
+  const legacyRevisionOutputs=new Set((model.legacyMaterialRecipeRevisions||[]).map(r=>r.expectedOutputId));
   const historyIds=new Set(records.map(r=>r.expectedOutputId));
-  const currentOutputs=(model.expectedOutputs||[]).filter(o=>!nativeFamilies.has(o.familyId)&&!historyIds.has(o.id)).map(outputBinding).sort((a,b)=>a.id.localeCompare(b.id));
+  const currentOutputs=(model.expectedOutputs||[]).filter(o=>!nativeFamilies.has(o.familyId)&&!legacyRevisionOutputs.has(o.id)&&!historyIds.has(o.id)).map(outputBinding).sort((a,b)=>a.id.localeCompare(b.id));
   check(new Set(currentOutputs.map(r=>r.id)).size===currentOutputs.length,'Published ExpectedOutput identity is duplicated');
   return {currentOutputs,records:records.sort((a,b)=>a.versionId.localeCompare(b.versionId))};
 }
@@ -55,6 +57,11 @@ function historicalExpectationProof({requirements,events,model,activeMedia,pinne
  * families. This never supplies missing authoring, adopts a version or permits
  * a model call. All inputs come from the same capture/active-media read scope. */
 export function registeredMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler}) {
+  // Revalidate this separate authority before omitting any event from the old
+  // reader. A prefix or caller-supplied self-declaration is never sufficient.
+  const legacyProof=legacyAudioCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler});
+  const delegated=new Map((legacyProof?.records||[]).map(r=>[r.eventId,r.eventSha256]));
+  const readerEvents=events.filter(e=>!delegated.has(e.eventId)||delegated.get(e.eventId)!==hash(e));
   const registryAlias='production/00_control/registries/material_requirements.json';
   const registryRows=documents.filter(row=>row.aliases?.includes(registryAlias));
   if(!registryRows.length)return null;
@@ -63,8 +70,8 @@ export function registeredMaterialCandidateProof({documents,events,activeMedia,p
   const requirements=registry.requirements||[];
   const planned=new Set(requirements.filter(r=>r.planned_family_id&&r.planned_output_path).map(r=>r.planned_family_id));
   const declared=new Set(requirements.flatMap(r=>Array.isArray(r.asset_family_refs)?r.asset_family_refs:[]));
-  const selected=events.filter(e=>e.eventKind==='asset-version'&&e.schemaVersion==='1.1'&&declared.has(e.familyId)&&!planned.has(e.familyId));
-  const hasHistory=events.some(e=>e.eventKind==='asset-version'&&e.schemaVersion==='1.1'&&requirements.some(r=>r.planned_family_id===e.familyId&&r.planned_output_path&&r.planned_output_path!==e.path));
+  const selected=readerEvents.filter(e=>e.eventKind==='asset-version'&&e.schemaVersion==='1.1'&&declared.has(e.familyId)&&!planned.has(e.familyId));
+  const hasHistory=readerEvents.some(e=>e.eventKind==='asset-version'&&e.schemaVersion==='1.1'&&requirements.some(r=>r.planned_family_id===e.familyId&&r.planned_output_path&&r.planned_output_path!==e.path));
   if(!selected.length&&!hasHistory)return null;
   check(baseRelease?.releaseId&&baseRelease.snapshotBytes&&baseRelease.recipesBytes,'Published release is required');
   const snapshot=json(baseRelease.snapshotBytes),recipes=json(baseRelease.recipesBytes),model=snapshot.productionModel;
@@ -73,7 +80,7 @@ export function registeredMaterialCandidateProof({documents,events,activeMedia,p
   const cleanupAlias=path.posix.join(path.posix.dirname(compiler.snapshotBuilderPath),'asset_cleanup_contract.py');
   const cleanupDoc=source(documents,cleanupAlias);
   check(builderDoc.metadata?.sourceRole==='INSTANCE_EXTENSION'&&cleanupDoc.metadata?.sourceRole==='INSTANCE_EXTENSION','Candidate compatibility requires approved compiler extensions');
-  const historicalExpectations=historicalExpectationProof({requirements,events,model,activeMedia,pinnedMediaHashes,compiler});
+  const historicalExpectations=historicalExpectationProof({requirements,events:readerEvents,model,activeMedia,pinnedMediaHashes,compiler});
   const records=[];const identities=new Set(),paths=new Set();
   for(const event of selected){
     check(!identities.has(event.versionId)&&!paths.has(event.path),'Duplicate candidate version/path');identities.add(event.versionId);paths.add(event.path);
@@ -113,9 +120,9 @@ export function registeredMaterialCandidateProof({documents,events,activeMedia,p
 // Audited syntax contracts, not project/family IDs. Unknown compiler behavior
 // must receive a new reviewed adapter contract instead of a broad fallback.
 export const registeredCandidateSupport = String.raw`
-def prepare_registered_material_candidates(root, tree, proof, document_pins, media_pins, native_proof=None, compiler_paths=None):
+def prepare_registered_material_candidates(root, tree, proof, document_pins, media_pins, native_proof=None, compiler_paths=None, legacy_audio_proof=None):
     import ast, copy, hashlib, importlib, json
-    if not proof and not native_proof:
+    if not proof and not native_proof and not legacy_audio_proof:
         return (lambda value: value), (lambda module: None), (lambda: None)
     def require(ok, message):
         if not ok:
@@ -124,7 +131,7 @@ def prepare_registered_material_candidates(root, tree, proof, document_pins, med
         return hashlib.sha256(value).hexdigest()
     def canonical(value):
         return json.dumps(value,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()
-    for value,schema in [(proof,'REGISTERED_MATERIAL_CANDIDATE_COMPATIBILITY_V1'),(native_proof,'NATIVE_MATERIAL_CANDIDATE_PROOF_V1')]:
+    for value,schema in [(proof,'REGISTERED_MATERIAL_CANDIDATE_COMPATIBILITY_V1'),(native_proof,'NATIVE_MATERIAL_CANDIDATE_PROOF_V1'),(legacy_audio_proof,'LEGACY_AUDIO_CANDIDATE_PROOF_V1')]:
         if value:
             require(value.get('schemaVersion')==schema and (value.get('records') or value.get('historicalExpectations',{}).get('records')), 'unknown or empty proof contract')
             require(digest(canonical({k:v for k,v in value.items() if k!='proofSha256'}))==value['proofSha256'], 'proof hash differs')
@@ -133,18 +140,24 @@ def prepare_registered_material_candidates(root, tree, proof, document_pins, med
     source_rows=([proof['registry'],proof['builder'],proof['cleanup'],*[r['promptSource'] for r in proof['records']]] if proof else [])
     if native_proof:
         source_rows += [source for row in native_proof['records'] for source in row['sourceProof']]
+    if legacy_audio_proof:
+        source_rows += [source for row in legacy_audio_proof['records'] for source in row['sourceProof']]
     source_rows += [{'path':alias,'sha256':document_pins.get(alias)} for alias in [paths['builder'],cleanup_alias]]
     for item in source_rows:
         require(item.get('sha256') and document_pins.get(item['path'])==item['sha256'] and digest((root/item['path']).read_bytes())==item['sha256'], 'pinned source bytes differ')
-    eligible={};native_events={}
+    eligible={};native_events={};legacy_audio_events={}
     historical=(proof or {}).get('historicalExpectations')
     historical_rows=historical['records'] if historical else []
-    for row in (proof['records'] if proof else []) + (native_proof['records'] if native_proof else []) + historical_rows:
+    for row in (proof['records'] if proof else []) + (native_proof['records'] if native_proof else []) + (legacy_audio_proof['records'] if legacy_audio_proof else []) + historical_rows:
         require(media_pins.get(row['path'])==row['sha256'], 'media pin differs')
         content=(root/row['path']).read_bytes()
         require(digest(content)==row['sha256'] and len(content)==row['byteSize'], 'candidate bytes differ')
         for event in row['eventProof']:
             require(digest((root/event['path']).read_bytes())==event['sha256'], 'frozen event bytes differ')
+        for media in row.get('mediaProof',[]):
+            require(media_pins.get(media['path'])==media['sha256'], 'legacy audio media pin differs')
+            content=(root/media['path']).read_bytes()
+            require(digest(content)==media['sha256'] and len(content)==media['byteSize'], 'legacy audio parent/output bytes differ')
     for row in proof['records'] if proof else []:
         require(row['path'] not in eligible, 'duplicate legacy output path')
         eligible[row['path']]=row
@@ -152,6 +165,10 @@ def prepare_registered_material_candidates(root, tree, proof, document_pins, med
         require(row['eventPath'] not in native_events and row['path'] not in eligible, 'duplicate native event or legacy output')
         require(digest((root/row['eventPath']).read_bytes())==row['eventSha256'], 'native event bytes differ')
         native_events[row['eventPath']]=row
+    for row in legacy_audio_proof['records'] if legacy_audio_proof else []:
+        require(row['eventPath'] not in legacy_audio_events and row['eventPath'] not in native_events and row['path'] not in eligible, 'duplicate delegated legacy audio event')
+        require(digest((root/row['eventPath']).read_bytes())==row['eventSha256'], 'legacy audio event bytes differ')
+        legacy_audio_events[row['eventPath']]=row
     cleanup_path=root/cleanup_alias
     cleanup_tree=ast.parse(cleanup_path.read_text(encoding='utf8'))
     candidates=[n for n in cleanup_tree.body if isinstance(n,ast.FunctionDef) and n.name=='registered_material_candidate_paths']
@@ -237,16 +254,16 @@ if candidate is not None:
             if family_id in __instance_registered_candidate_families:
                 planned_by_family.setdefault(family_id, requirement)
 """).body
-    delegated=set()
+    delegated=set();delegated_audio=set()
     def delegate_native(event_path):
         relative=event_path.resolve().relative_to(root.resolve()).as_posix()
-        row=native_events.get(relative)
+        row=native_events.get(relative) or legacy_audio_events.get(relative)
         if row is None:
             return False
-        require(digest(event_path.read_bytes())==row['eventSha256'], 'native event changed during delegation')
-        delegated.add(relative)
+        require(digest(event_path.read_bytes())==row['eventSha256'], 'delegated candidate event changed')
+        (delegated if relative in native_events else delegated_audio).add(relative)
         return True
-    if native_events:
+    if native_events or legacy_audio_events:
         loops=[n for n in validator.body if isinstance(n,ast.For) and isinstance(n.target,ast.Name) and n.target.id=='event_path']
         require(len(loops)==1, 'exact event reader loop missing')
         # Native plans are separately validated by the host. Keep original event
@@ -286,6 +303,7 @@ if candidate is not None:
         require(observed==set(eligible)|{r['path'] for r in historical_rows}, 'legacy candidate closure was not consumed')
         require(not historical or count_report is not None, 'historical expectation closure was not checked')
         require(delegated==set(native_events), 'native candidate closure was not delegated')
+        require(delegated_audio==set(legacy_audio_events), 'legacy audio candidate closure was not delegated')
         for item in source_rows:
             require(digest((root/item['path']).read_bytes())==item['sha256'], 'compiler rewrote pinned source bytes')
         model=json.loads((root/paths['snapshot']).read_text(encoding='utf8'))['productionModel']
@@ -294,6 +312,9 @@ if candidate is not None:
         for row in native_events.values():
             versions=[v for v in model['assetVersions'] if v['id']==row['versionId']]
             require(not versions or len(versions)==1 and row.get('baseVersionHash') and digest(canonical(versions[0]))==row['baseVersionHash'], 'native event candidate leaked into or changed immutable base versions')
+        for row in legacy_audio_events.values():
+            versions=[v for v in model['assetVersions'] if v['id']==row['versionId']]
+            require(not versions or len(versions)==1 and row.get('baseVersionHash') and digest(canonical(versions[0]))==row['baseVersionHash'], 'legacy audio candidate leaked into or changed immutable base versions')
         if historical:
             verify_expected_outputs({k:len(model.get(k,[])) for k in declared_counts},model,final=True)
         for row in eligible.values():
@@ -308,6 +329,8 @@ if candidate is not None:
                 report['historicalExpectations']=count_report
         if native_proof:
             report['nativeCandidateDelegation']={'schemaVersion':native_proof['schemaVersion'],'proofSha256':native_proof['proofSha256'],'releaseId':native_proof['releaseId'],'candidateValidatorAstSha256':validator_sha,'eventIds':sorted(r['eventId'] for r in native_events.values()),'originalEventFilesPreserved':True,'baseCandidateVersionsCreated':0}
+        if legacy_audio_proof:
+            report['legacyAudioCandidateDelegation']={'schemaVersion':legacy_audio_proof['schemaVersion'],'proofSha256':legacy_audio_proof['proofSha256'],'releaseId':legacy_audio_proof['releaseId'],'candidateValidatorAstSha256':validator_sha,'eventIds':sorted(r['eventId'] for r in legacy_audio_events.values()),'originalEventFilesPreserved':True,'baseCandidateVersionsCreated':0}
         return report
     return transform,install,finish
 `;
