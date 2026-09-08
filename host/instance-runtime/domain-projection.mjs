@@ -83,7 +83,10 @@ export function projectDomainGraph(snapshot,graph,reference,{initialization=null
   const adopted=preserveEquivalentContext(old,next,before);
   if(old?.hash&&old.hash!==adopted.hash){
    const invalidation={familyId:family.id,previousHash:old.hash,currentHash:adopted.hash,versionIds:[...new Set([...(model.assetVersions||[]),...eventVersions].filter(version=>version.familyId===family.id&&version.sha256).map(version=>version.versionId||version.id))]};
-   if(invalidation.versionIds.length&&!model.domainInvalidations.some(row=>row.familyId===family.id&&row.previousHash===old.hash&&row.currentHash===adopted.hash))model.domainInvalidations.push(invalidation);
+   // Every actual transition is a new occurrence, including repeated A → B
+   // transitions after returning to A. The hash-change guard above excludes
+   // no-op projection; historical occurrences must never deduplicate this one.
+   if(invalidation.versionIds.length)model.domainInvalidations.push(invalidation);
   }
   family.domainContext=adopted;
  }

@@ -45,3 +45,10 @@ test('even a resolution binding cannot automatically recover an unrecorded desce
  const f=recoveryFixture();f.options.currentDomainHashes.set('child','f'.repeat(64));f.options.reviewedDomainBindings.set('c',{familyId:'child',sha256:'c'.repeat(64),domainContextHash:'f'.repeat(64)});
  assert.ok(applyDomainInvalidations(f.invalidations,f.versions,f.options).includes('c'));
 });
+test('a previously directly invalidated child keeps its ancestor invalidation after only the parent is re-reviewed',()=>{
+ const f=recoveryFixture(),hash='f'.repeat(64);
+ f.invalidations.unshift({familyId:'child',previousHash:'d'.repeat(64),currentHash:hash,versionIds:['c']});
+ f.options.currentDomainHashes.set('child',hash);f.options.reviewedDomainBindings.set('c',{familyId:'child',sha256:'c'.repeat(64),domainContextHash:hash});
+ const stale=applyDomainInvalidations(f.invalidations,f.versions,f.options);
+ assert.ok(!stale.includes('a'));assert.ok(stale.includes('c'));assert.equal(f.versions.get('a').canFlowDownstream,true);assert.equal(f.versions.get('c').canFlowDownstream,false);
+});
