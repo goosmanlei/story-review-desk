@@ -1,6 +1,10 @@
+import {canonicalJson,sha256} from './bytes.mjs';
+const inputTuple=b=>({familyId:b.familyId||b.assetFamilyRef,versionId:b.versionId||b.assetVersionRef,sha256:b.sha256});
 /** Mutates only the disposable usability projection. Immutable reviews are untouched. */
-export function applyDomainInvalidations(invalidations,versions,{reviewedDomainBindings=new Map(),currentDomainHashes=new Map(),freshProductionProofs=new Map()}={}){
+export function applyDomainInvalidations(invalidations,versions,{reviewedDomainBindings=new Map(),currentDomainHashes=new Map(),freshProductionProofs=new Map(),compatibilityExceptions=new Map()}={}){
   const stale=new Set(invalidations.flatMap(row=>row.versionIds.filter(id=>versions.get(id)?.familyId===row.familyId)));
+  const causes=new Map();
+  invalidations.forEach((row,index)=>{for(const id of row.versionIds)if(versions.get(id)?.familyId===row.familyId)causes.set(id,new Set([...(causes.get(id)||[]),index]));});
   const recorded=new Set(stale);
   const descendants=new Set();
   let expanded=true;
@@ -9,6 +13,13 @@ export function applyDomainInvalidations(invalidations,versions,{reviewedDomainB
       const id=binding.versionId||binding.assetVersionRef,parent=versions.get(id);
       return parent&&stale.has(id)&&binding.sha256===parent.sha256;
     })){descendants.add(version.id);if(!stale.has(version.id)){stale.add(version.id);expanded=true;}}
+  }}
+  // Keep every cause in the complete historical closure, including cases where
+  // a version has both a direct occurrence and an inherited occurrence.
+  let causesChanged=true;
+  while(causesChanged){causesChanged=false;for(const version of versions.values())for(const binding of version.inputVersionBindings||[]){
+    const parent=versions.get(binding.versionId||binding.assetVersionRef);if(!parent||binding.sha256!==parent.sha256)continue;
+    for(const index of causes.get(parent.id)||[]){const existing=causes.get(version.id)||new Set();if(!existing.has(index)){existing.add(index);causes.set(version.id,existing);causesChanged=true;}}
   }}
   // Preserve the complete historical descendant closure before resolving an
   // individually reviewed root. Reapproving identical parent bytes is not
@@ -20,7 +31,7 @@ export function applyDomainInvalidations(invalidations,versions,{reviewedDomainB
     const version=versions.get(id),binding=reviewedDomainBindings.get(id);
     const currentHash=currentDomainHashes.get(version.familyId);
     const latest=invalidations.filter(row=>row.familyId===version.familyId).at(-1);
-    return binding&&binding.familyId===version.familyId&&binding.sha256===version.sha256
+    return binding&&!binding.compatibilityOnly&&binding.familyId===version.familyId&&binding.sha256===version.sha256
       && /^[a-f0-9]{64}$/.test(String(version.sha256||''))
       && /^[a-f0-9]{64}$/.test(String(currentHash||''))
       && binding.domainContextHash===currentHash&&latest?.currentHash===currentHash;
@@ -58,6 +69,22 @@ export function applyDomainInvalidations(invalidations,versions,{reviewedDomainB
       }
     }
     if(valid&&floor>0&&proof.authorizedSequence>floor&&proof.submittedSequence>proof.authorizedSequence){stale.delete(id);recovered.set(id,floor);progressed=true;}
+  }}
+  // Business compatibility is NOT fresh production. It covers only explicitly
+  // listed original versions, exact SHA and every recorded/inherited occurrence.
+  // Never use it to populate the newer-execution review-sequence barrier above.
+  let compatibleProgress=true;
+  while(compatibleProgress){compatibleProgress=false;for(const id of stale){
+    const version=versions.get(id),proof=compatibilityExceptions.get(id),indexes=causes.get(id);
+    if(!version||!proof||!indexes?.size||proof.versionId!==id||proof.familyId!==version.familyId||proof.sha256!==version.sha256||!proof.domainContextHash||proof.domainContextHash!==currentDomainHashes.get(version.familyId)||!(proof.occurrenceHashes instanceof Map))continue;
+    if([...indexes].some(i=>proof.occurrenceHashes.get(i)!==sha256(canonicalJson(invalidations[i]))))continue;
+    const actual=(version.inputVersionBindings||[]).map(inputTuple);
+    if(canonicalJson(actual)!==canonicalJson(proof.inputBindings))continue;
+    const parentsCurrent=actual.every(binding=>{const parent=versions.get(binding.versionId);return parent&&parent.familyId===binding.familyId&&parent.sha256===binding.sha256&&!stale.has(parent.id)&&parent.canFlowDownstream===true;});
+    if(!parentsCurrent)continue;
+    // The preexisting candidate/review/rights state remains exactly as projected.
+    // A compatibility record never creates approval or flips canFlowDownstream.
+    stale.delete(id);compatibleProgress=true;
   }}
   for(const id of stale){const version=versions.get(id);if(!version)continue;
     if(!['DO_NOT_USE','RIGHTS_HOLD'].includes(String(version.lifecycleState)))version.lifecycleState='REVISION_REQUIRED';

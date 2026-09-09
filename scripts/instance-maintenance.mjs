@@ -10,6 +10,7 @@ const allowed = new Set(['instance-entity-migration.mjs','instance-material-dire
 const sha = value => createHash('sha256').update(value).digest('hex');
 allowed.add('instance-episode-source.mjs');
 allowed.add('instance-trial-worker.mjs');
+allowed.add('instance-domain-production-compatibility.mjs');
 const inContainer = () => process.platform === 'linux' && (process.env.REVIEW_SQLITE_OWNER === 'CONTAINER'||process.env.REVIEW_DATABASE_BACKEND==='postgres') && existsSync('/.dockerenv');
 const json = value => JSON.stringify(value);
 export function flagValue(argv, name) {
@@ -97,7 +98,8 @@ export async function delegateInstanceMaintenance(script, argv, { resolveOwner, 
       if(!['instance-source.mjs','instance-extension.mjs','instance-verify.mjs','instance-export-hosted.mjs'].includes(script)){
         const {runPostgresMaintenance}=await import('./instance-postgres.mjs');let forwarded=replaceFlag(argv,'--instance','/instance');const mounts=[];
         for(const name of ['--file','--manifest','--source']){const input=flagValue(argv,name);if(!input)continue;const source=await regularFile(input),target='/maintenance/input-'+mounts.length;mounts.push({source,target,readOnly:true});forwarded=replaceFlag(forwarded,name,target);}
-        const stdout=(await runPostgresMaintenance(instance,['scripts/'+script,...forwarded],{mounts})).toString();if(emit)process.stdout.write(stdout);return {delegated:true,stdout,stderr:''};
+        const readOnly=script==='instance-domain-production-compatibility.mjs'&&forwarded[0]==='preview';
+        const stdout=(await runPostgresMaintenance(instance,['scripts/'+script,...forwarded],{mounts,readOnly})).toString();if(emit)process.stdout.write(stdout);return {delegated:true,stdout,stderr:''};
       }
     }
   }
@@ -122,15 +124,15 @@ export async function delegateInstanceMaintenance(script, argv, { resolveOwner, 
     else { command = argv[index]; break; }
   }
   if (['instance-source.mjs', 'instance-extension.mjs'].includes(script) && ['apply', 'resume'].includes(command) && !owner.running) throw new Error('Source apply/resume requires its verified running Docker owner');
-  if (owner.readOnly && (script === 'instance-document.mjs' && command === 'put' || ['instance-source.mjs', 'instance-extension.mjs'].includes(script) && ['apply', 'resume'].includes(command) || script === 'instance-stage-media.mjs'||script==='instance-configuration.mjs'&&command==='initialize'||script==='instance-guidance.mjs'&&command==='apply')) throw new Error('The Docker instance is read-only');
+  if (owner.readOnly && (script === 'instance-document.mjs' && command === 'put' || ['instance-source.mjs', 'instance-extension.mjs'].includes(script) && ['apply', 'resume'].includes(command) || script === 'instance-stage-media.mjs'||script==='instance-configuration.mjs'&&command==='initialize'||['instance-guidance.mjs','instance-domain-production-compatibility.mjs'].includes(script)&&command==='apply')) throw new Error('The Docker instance is read-only');
   let forwarded = instance && !owner.backupOnly ? replaceFlag(argv, '--instance', '/instance') : [...argv];
   const inputs = []; const outputs = []; const mounts = [];
-  const useExec = owner.running && ['instance-source.mjs', 'instance-extension.mjs', 'instance-configuration.mjs', 'instance-document.mjs', 'instance-guidance.mjs', 'instance-verify.mjs'].includes(script);
+  const useExec = owner.running && ['instance-source.mjs', 'instance-extension.mjs', 'instance-configuration.mjs', 'instance-document.mjs', 'instance-guidance.mjs', 'instance-domain-production-compatibility.mjs', 'instance-verify.mjs'].includes(script);
   try {
-    for (const name of ['instance-source.mjs', 'instance-extension.mjs'].includes(script) ? ['--manifest'] : ['instance-document.mjs','instance-configuration.mjs','instance-guidance.mjs'].includes(script) ? ['--file'] : script === 'instance-stage-media.mjs' ? ['--source'] : []) {
+    for (const name of ['instance-source.mjs', 'instance-extension.mjs'].includes(script) ? ['--manifest'] : ['instance-document.mjs','instance-configuration.mjs','instance-guidance.mjs','instance-domain-production-compatibility.mjs'].includes(script) ? ['--file'] : script === 'instance-stage-media.mjs' ? ['--source'] : []) {
       const filename = flagValue(argv, name); if (!filename) continue;
       const source = await regularFile(filename);
-      if (useExec || ['instance-source.mjs', 'instance-extension.mjs', 'instance-configuration.mjs', 'instance-document.mjs', 'instance-guidance.mjs'].includes(script)) {
+      if (useExec || ['instance-source.mjs', 'instance-extension.mjs', 'instance-configuration.mjs', 'instance-document.mjs', 'instance-guidance.mjs','instance-domain-production-compatibility.mjs'].includes(script)) {
         const bytes = await readFile(source); if (bytes.length > 32 * 1024 * 1024) throw new Error('Maintenance inline input exceeds 32 MiB');
         inputs.push({ flag: name, bytesBase64: bytes.toString('base64'), sha256: sha(bytes) });
       } else { const target = `/maintenance/input-${mounts.length}`; mounts.push(...bind(source, target, true)); forwarded = replaceFlag(forwarded, name, target); }

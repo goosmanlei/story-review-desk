@@ -3,6 +3,7 @@ import {inspectExecutionDefinitionHash} from '../../../../host/instance-runtime/
 import {resolveFormalReviewSpec} from '../_review-spec';
 import {
   assetReviewContextHash,
+  hasMaterialRequirementCompatibility,
   hashStableFile,
   HttpError,
   listAllEvents,
@@ -354,7 +355,8 @@ export async function buildMaterialReviewAuthorityContext({
       : {};
     if (
       String(exactDefinition.materialRequirementRef || '') !== requirementId
-      || String(exactDefinition.materialRequirementHash || '') !== String(requirement.requirementHash || '')
+      || (String(exactDefinition.materialRequirementHash || '') !== String(requirement.requirementHash || '')
+        && !hasMaterialRequirementCompatibility(data, requirementId, String(exactDefinition.materialRequirementHash || ''), String(requirement.requirementHash || '')))
       || String(exactOutput.assetFamilyRef || '') !== familyId
     ) {
       throw new HttpError(409, 'hash-matched production definition contradicts the current material binding');

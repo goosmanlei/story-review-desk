@@ -19,17 +19,24 @@ function isPureStoryRelation(relation,graph,configuration){
  }))return false;
  return true;
 }
-function contextFactory(graph,referencePolicies,representationPolicies,configuration){
- return ids=>{
+/** Exact local production slice; current full requirement hashes remain separate
+ * from the historical media contracts. No fields are dropped for compatibility. */
+export function domainProductionSlice(graph,ids,{referencePolicies={},representationPolicies={},configuration=defaultDomainConfiguration()}={}){
   const representations=graph.representations.filter(rep=>ids.includes(rep.id)),entityIds=new Set(representations.map(rep=>rep.entityId));
   const states=graph.states.filter(state=>representations.some(rep=>rep.stateId===state.id));
   const entities=graph.entities.filter(entity=>entityIds.has(entity.id));
   const relations=graph.relations.filter(edge=>ids.includes(edge.from.id)||ids.includes(edge.to.id)||entityIds.has(edge.from.id)||entityIds.has(edge.to.id)||states.some(state=>[edge.from.id,edge.to.id].includes(state.id)));
   const productionRelations=relations.filter(relation=>!isPureStoryRelation(relation,graph,configuration));
-  return {hashSchemaVersion:'3.0',representationIds:ids,entityIds:[...entityIds],relationIds:relations.map(relation=>relation.id),
-   hash:domainHash({representations,states,entities,relations:productionRelations,
+  return {representations,states,entities,requirements:graph.requirements.filter(demand=>ids.includes(demand.representationId)),relations:productionRelations,
     referencePolicies:productionRelations.filter(relation=>relation.referencePolicyId).map(relation=>({relationId:relation.id,policy:referencePolicies[relation.id]})),
-    representationPolicies:representations.filter(rep=>representationPolicies[rep.id]).map(rep=>({representationId:rep.id,policy:representationPolicies[rep.id]}))})};
+    representationPolicies:representations.filter(rep=>representationPolicies[rep.id]).map(rep=>({representationId:rep.id,policy:representationPolicies[rep.id]}))};
+}
+function contextFactory(graph,referencePolicies,representationPolicies,configuration){
+ return ids=>{
+  const {requirements,...slice}=domainProductionSlice(graph,ids,{referencePolicies,representationPolicies,configuration});
+  const entityIds=new Set(slice.representations.map(rep=>rep.entityId));
+  const relations=graph.relations.filter(edge=>ids.includes(edge.from.id)||ids.includes(edge.to.id)||entityIds.has(edge.from.id)||entityIds.has(edge.to.id)||slice.states.some(state=>[edge.from.id,edge.to.id].includes(state.id)));
+  return {hashSchemaVersion:'3.0',representationIds:ids,entityIds:[...entityIds],relationIds:relations.map(relation=>relation.id),hash:domainHash(slice)};
  };
 }
 function previousRepresentationIds(graph,key,id){
@@ -124,7 +131,7 @@ export function preserveDomainProjection({snapshot,baseSnapshot,events=[]}){
  if(prior.initialization)next.productionModel.initialization=structuredClone(prior.initialization);
  // Directory placement is navigation metadata, not a replacement for frozen inputs.
  // Keep it through compilation; readers revalidate each exact requirement/representation hash.
- for(const key of ['materialDirectory','productionReset'])if(prior[key])next.productionModel[key]=structuredClone(prior[key]);
+ for(const key of ['materialDirectory','productionReset','domainProductionCompatibilities'])if(prior[key])next.productionModel[key]=structuredClone(prior[key]);
  if(!prior.domainGraphRef){const directory=refreshDirectoryProjection(next.productionModel);if(directory)next.productionModel.materialDirectory=directory;return next;}
  if(!prior.domainGraph||domainHash(prior.domainGraph)!==prior.domainGraphRef.sha256)throw Object.assign(new Error('已确认素材关系与精确修订SHA不一致'),{code:'DOMAIN_CONFLICT'});
  next.productionModel.domainOwnership=structuredClone(prior.domainOwnership||{});next.productionModel.domainRepresentationPolicyBindings=structuredClone(prior.domainRepresentationPolicyBindings||{});next.productionModel.domainInvalidations=structuredClone(prior.domainInvalidations||[]);next.productionModel.domainReferencePolicyBindings=structuredClone(prior.domainReferencePolicyBindings||Object.fromEntries((prior.domainReferenceRules||[]).filter(r=>r.policy).map(r=>[r.relationId,r.policy])));

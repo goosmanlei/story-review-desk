@@ -67,7 +67,7 @@ for (const name of await readdir(path.join(applicationRoot, 'host'))) if (/^(?:i
 await tree('workers', (filename) => filename.endsWith('.mjs'));
 await copy('docs/instance-isolation.md');
 await copy('docs/system-configuration.md');
-for(const name of ['system-management.md','story-settings.md','material-relationship-architecture.md','git-checkpoint.md'])await copy('docs/'+name);
+for(const name of ['system-management.md','story-settings.md','material-relationship-architecture.md','git-checkpoint.md','domain-production-compatibility.md'])await copy('docs/'+name);
 for (const name of await readdir(path.join(applicationRoot, 'scripts'))) {
   if ((/^instance-.*\.mjs$/.test(name) && !name.includes('-test')) || ['build-runtime.mjs', 'prepare-hosted-runtime.mjs', 'deploy-local.mjs', 'export-hosted-material-events.mjs'].includes(name)) await copy('scripts/' + name);
 }
@@ -81,6 +81,7 @@ packageJson.name = 'story-review-software';
 packageJson.scripts = { dev: 'REVIEW_NODE_DEV=1 vinext dev', build: 'node scripts/build-runtime.mjs', start: 'vinext start',
   'project:create': 'node scripts/instance-project-create.mjs', 'instance:create': 'node scripts/instance-create.mjs', 'instance:start': 'node scripts/instance-start.mjs',
   'instance:guidance': 'node scripts/instance-guidance.mjs', 'instance:configuration': 'node scripts/instance-configuration.mjs', 'instance:document': 'node scripts/instance-document.mjs', 'instance:verify': 'node scripts/instance-verify.mjs', 'instance:source': 'node scripts/instance-source.mjs', 'instance:extension': 'node scripts/instance-extension.mjs',
+  'instance:domain-compatibility': 'node scripts/instance-domain-production-compatibility.mjs',
   'instance:migrate': 'node scripts/instance-migrate.mjs', 'instance:sources': 'node scripts/instance-sources.mjs', 'instance:initialize': 'node scripts/instance-initialize.mjs', 'instance:relations': 'node scripts/instance-relations.mjs', 'instance:authoring': 'node scripts/instance-authoring.mjs',
   'instance:backup': 'node scripts/instance-backup.mjs', 'instance:restore': 'node scripts/instance-restore.mjs', 'instance:copy': 'node scripts/instance-copy.mjs',
   'instance:trial': 'node scripts/instance-trial-worker.mjs',

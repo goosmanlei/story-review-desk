@@ -148,7 +148,7 @@ export function preserveMaterialProductionProjection({snapshot,recipes,baseSnaps
  // graph: subsequent explicit domain changes invalidate current eligibility,
  // while the original production source and history remain immutable.
  for(const closure of closures)assertMaterialClosure(prior,baseRecipes,closure);
- const revisions=materialProductionRevisionClosures({model:prior,recipes:baseRecipes,documents,initialClosures:closures});
+ const revisions=materialProductionRevisionClosures({model:prior,recipes:baseRecipes,documents,initialClosures:closures,instanceId:baseSnapshot.instance?.instanceId});
  mergeFrozen(model,'materialProductionPlans',plans);
  if(revisions.length)mergeFrozen(model,'materialProductionRecipeRevisions',revisions.map(({row})=>row));
  preserveMembers(model,catalog,prior,baseRecipes,closures,revisions);

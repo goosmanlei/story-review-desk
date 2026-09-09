@@ -3,7 +3,7 @@ import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
 import {inspectExecutionDefinitionHash,executionDefinitionHash} from './execution-definition-hash.mjs';
-import {resolveMaterialProductionRequirement} from './material-production-requirement.mjs';
+import {resolveMaterialProductionRequirement,currentMaterialRequirementBridge} from './material-production-requirement.mjs';
 import {domainReferenceEligibility} from './domain-reference.mjs';
 
 const fail=message=>{throw Object.assign(new Error(message),{code:'DOMAIN_CONFLICT'});};
@@ -20,9 +20,13 @@ export async function materialProductionRevisionContext(tx,c){
  if(plans.length!==1)return null;
  const plan=plans[0],family=owned(c.model.assetFamilies,plan.familyId,'基础素材族'),work=owned(c.model.materialWorkItems,plan.workItemId,'基础素材工作项');
  const requirement=await resolveMaterialProductionRequirement(tx,{...c,plan,family,work});
- if(!same(c.representation.assetFamilyIds,[family.id])||family.materialProductionPlanId!==plan.id||work.materialProductionPlanId!==plan.id||family.ownerRef!==work.id||work.outputAssetRef!==family.id||work.requirementRef!==c.requirement.id||requirement.materialWorkItemRef!==work.id||requirement.plannedAssetFamilyId!==family.id||work.requirementHash!==c.requirement.requirementHash||plan.requirementHash!==c.requirement.requirementHash)fail('当前需求已偏离首次制作建档闭包，不能借返修迁移归属');
+ const metadata=await tx.getMetadata(),compatibilityBindings=[];
+ const compatibleHash=beforeHash=>{const bridge=currentMaterialRequirementBridge(c.model,{requirement:c.requirement,demand:c.demand,representation:c.representation,beforeHash,instanceId:metadata.instanceId,runtimeEpoch:metadata.runtimeEpoch});for(const link of bridge?.links||bridge&&[bridge]||[])if(!compatibilityBindings.some(b=>b.proofHash===link.proofHash&&b.beforeHash===link.beforeHash))compatibilityBindings.push(link);};
+ compatibleHash(plan.requirementHash);compatibleHash(work.requirementHash);
+ if(!same(c.representation.assetFamilyIds,[family.id])||family.materialProductionPlanId!==plan.id||work.materialProductionPlanId!==plan.id||family.ownerRef!==work.id||work.outputAssetRef!==family.id||work.requirementRef!==c.requirement.id||requirement.materialWorkItemRef!==work.id||requirement.plannedAssetFamilyId!==family.id||work.requirementHash!==plan.requirementHash)fail('当前需求已偏离首次制作建档闭包，不能借返修迁移归属');
  const definition=owned(c.view.recipes.executionDefinitions,work.executionDefinitionRef,'当前基础素材调用定义'),output=owned(c.model.expectedOutputs,family.currentExpectedOutputId,'当前预期产物');
- if(definition.materialProductionPlanId!==plan.id||definition.workItemRef!==work.id||definition.materialRequirementHash!==c.requirement.requirementHash||definition.output?.expectedOutputRef!==output.id||definition.output?.assetFamilyRef!==family.id||definition.output?.path!==output.targetPath||output.familyId!==family.id||output.materialProductionPlanId!==plan.id||output.executionDefinitionRef!==definition.id||!family.expectedOutputRefs.includes(output.id)||!inspectExecutionDefinitionHash(definition).valid)fail('当前素材调用定义、预期产物或固定哈希不一致');
+ compatibleHash(definition.materialRequirementHash);
+ if(definition.materialProductionPlanId!==plan.id||definition.workItemRef!==work.id||definition.output?.expectedOutputRef!==output.id||definition.output?.assetFamilyRef!==family.id||definition.output?.path!==output.targetPath||output.familyId!==family.id||output.materialProductionPlanId!==plan.id||output.executionDefinitionRef!==definition.id||!family.expectedOutputRefs.includes(output.id)||!inspectExecutionDefinitionHash(definition).valid)fail('当前素材调用定义、预期产物或固定哈希不一致');
  const sourceRow=definition.id===plan.definitionId?plan:(c.model.materialProductionRecipeRevisions||[]).find(r=>r.definitionId===definition.id&&r.materialProductionPlanId===plan.id);
  if(!sourceRow)fail('当前调用定义没有受控固定源');
  const source=await tx.readDocumentRevision(sourceRow.sourceRevisionId);
@@ -76,6 +80,7 @@ export async function materialProductionRevisionContext(tx,c){
  const reviews=(events.review||[]).filter(e=>e.applicationStatus==='APPLIED'&&e.effect==='APPLIED'&&e.subjectType==='ASSET'&&e.familyId===family.id);
  const adoptedId=c.state.assetFamiliesById?.[family.id]?.currentVersionId||null,adopted=adoptedId?c.state.assetVersionsById[adoptedId]:null,meta=await tx.getMetadata();
  const revisionBasis={materialProductionPlanId:plan.id,familyId:family.id,workItemId:work.id,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),parentVersionId:parent?.versionId||null,parentVersionSha256:parent?.sha256||null,parentCandidate:eventBinding(parent),parentReview:eventBinding(latest(reviews.filter(e=>e.versionId===parent?.versionId&&e.versionSha256===parent?.sha256))),familyReviewHead:eventBinding(latest(reviews)),adoptedVersion:adopted?{versionId:adopted.id,sha256:adopted.sha256}:null,requestHeads:requests.map(eventBinding),runHeads:runs.map(eventBinding),plannedVersionLabel,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch,...(failedAttempt?{failedAttempt}: {})};
+ if(compatibilityBindings.length)revisionBasis.requirementCompatibilities=compatibilityBindings.map(({compatibilityId,proofHash,requirementId,beforeHash,afterHash,representationId,representationHash})=>({compatibilityId,proofHash,requirementId,beforeHash,afterHash,representationId,representationHash}));
  return {plan,requirement,family,work,definition,output,parent,media,revisionBasis,plannedVersionLabel,blockers:[...new Set(blockers)]};
 }
 
@@ -88,7 +93,7 @@ export async function compileMaterialProductionRevision(tx,c,content,draftRevisi
  const expectedOutput={...r.output,id:outputId,targetPath,plannedVersionLabel:r.plannedVersionLabel,legacyVersionId:r.plan.expectedOutputId,expectationState:'PLANNED',realizedVersionId:null,sourceRef:sourcePath,executionDefinitionRef:definitionId};
  const {inputBindings,...authoringContent}=content;
  const previousDefinition=Object.fromEntries(Object.entries(r.definition).filter(([key])=>!['sourceRef','sourceRevisionId','sourceSha256'].includes(key)));
- const executionDefinition={...previousDefinition,id:definitionId,currentRevisionId:definitionId+':r1',upload:{rawText:inputs.map(b=>b.path).join('\n'),items:inputs},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:targetPath,mediaType:r.family.kind,assetFamilyRef:r.family.id,expectedOutputRef:outputId},rawSourceBlock:canonicalJson(authoringContent),authoringContent,parentVersionId:r.parent.versionId,parentVersionSha256:r.parent.sha256};
+ const executionDefinition={...previousDefinition,id:definitionId,currentRevisionId:definitionId+':r1',materialRequirementHash:c.requirement.requirementHash,upload:{rawText:inputs.map(b=>b.path).join('\n'),items:inputs},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:targetPath,mediaType:r.family.kind,assetFamilyRef:r.family.id,expectedOutputRef:outputId},rawSourceBlock:canonicalJson(authoringContent),authoringContent,parentVersionId:r.parent.versionId,parentVersionSha256:r.parent.sha256};
  executionDefinition.definitionHash=executionDefinitionHash(executionDefinition);
  const promptRevision={id:executionDefinition.currentRevisionId,executionDefinitionId:definitionId,definitionHash:executionDefinition.definitionHash,prompt:executionDefinition.prompt};
  const assetFamily={...structuredClone(r.family),currentExpectedOutputId:outputId,expectedOutputRefs:[...r.family.expectedOutputRefs,outputId]},materialWorkItem={...structuredClone(r.work),executionDefinitionRef:definitionId,promptRef:executionDefinition.currentRevisionId,inputAssetRefs:inputBindings.map(b=>b.familyId)};

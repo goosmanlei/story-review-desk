@@ -18,13 +18,13 @@ const transitions={PLANNED:['PLANNED','SUBMITTED','CANCELLED'],SUBMITTED:['SUBMI
  * descendant from an old/late-registered output. This grants no execution or
  * Review authority: it only supplies a lower bound on proven production time.
  * Historical rows without this evidence retain their previous held state. */
-export function domainProductionProofs({candidates=[],requests=[],runs=[],versions}){
+export function domainProductionProofs({candidates=[],requests=[],runs=[],versions,allowInputless=false}){
  const result=new Map(),byVersion=group(candidates,'versionId'),candidateRequests=group(candidates,'executionRequestId'),byRequest=group(requests,'executionRequestId'),runsByRequest=group(runs,'executionRequestId');
  for(const [versionId,rows]of byVersion){
   if(rows.length!==1)continue;const c=rows[0],v=versions.get(versionId);if(candidateRequests.get(c.executionRequestId)?.length!==1)continue;
   if(!v||c.eventKind!=='asset-version'||c.schemaVersion!=='1.1'||!sequence(c)||!text(c.eventId)||c.familyId!==v.familyId||c.sha256!==v.sha256||!sha.test(c.sha256||'')||c.path!==v.path||!Number.isSafeInteger(c.byteSize)||c.byteSize<=0||c.outputState!=='PRESENT'||c.expectationState!=='REALIZED'||c.registrationState!=='CANDIDATE_REGISTERED_EXPECTED_OUTPUT_REALIZED'||!text(c.expectedOutputId)||!text(c.runId)||!text(c.executionRequestId)||!text(c.executionDefinitionId)||!sha.test(c.callPackageHash||'')||c.executionDefinitionHash!==c.callPackageHash||!text(c.snapshotId))continue;
   const bindings=c.inputBindings;
-  if(!Array.isArray(bindings)||!bindings.length||bindings.some((b,i)=>!object(b)||Object.keys(b).sort().join(',')!=='assetFamilyRef,assetVersionRef,order,path,sha256'||b.order!==i+1||!text(b.path)||!text(b.assetFamilyRef)||!text(b.assetVersionRef)||!sha.test(b.sha256||''))||new Set(bindings.map(b=>b.assetFamilyRef)).size!==bindings.length||c.inputBindingsHash!==hash(bindings))continue;
+  if(!Array.isArray(bindings)||!bindings.length&&allowInputless!==true||bindings.some((b,i)=>!object(b)||Object.keys(b).sort().join(',')!=='assetFamilyRef,assetVersionRef,order,path,sha256'||b.order!==i+1||!text(b.path)||!text(b.assetFamilyRef)||!text(b.assetVersionRef)||!sha.test(b.sha256||''))||new Set(bindings.map(b=>b.assetFamilyRef)).size!==bindings.length||c.inputBindingsHash!==hash(bindings))continue;
   const inputs=bindings.map(input);
   if(!same(inputs,(v.inputVersionBindings||[]).map(input))||inputs.some(b=>{const p=versions.get(b.versionId);return !p||p.familyId!==b.familyId||p.sha256!==b.sha256;}))continue;
   const qs=ordered(byRequest.get(c.executionRequestId)||[]),rs=ordered(runsByRequest.get(c.executionRequestId)||[]);

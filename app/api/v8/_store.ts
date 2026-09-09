@@ -5,6 +5,8 @@ import type {ExecutionRuntime} from '../../../host/instance-runtime/execution-ep
 import { projectEpisodeNarrativeReleases, assertScopedEpisodeSceneBasis, assertScopedSceneSyncBinding, SCENE_SYNC_PROTOCOL } from './episode-plan-reviews/_release';
 import {applyDomainInvalidations} from '../../../host/instance-runtime/domain-invalidation.mjs';
 import {domainProductionProofs} from '../../../host/instance-runtime/domain-production-lineage.mjs';
+import {inspectExecutionDefinitionHash} from '../../../host/instance-runtime/execution-definition-hash.mjs';
+import {buildDomainProductionCompatibilityIndex, domainCompatibilityExceptions, findCompatibleReviewBinding, findCompatibleRequirementBinding, findHistoricalCompatibleRequirementBinding, type DomainProductionCompatibilityIndex} from '../../../host/instance-runtime/domain-production-compatibility.mjs';
 import {episodePlanContentFromRecord, type EpisodePlanContent} from '../../episode-plan-context';
 import {resolveFormalReviewSpec, candidateReviewSpec} from './_review-spec';
 import {automaticEpisodeSubmissions} from './episode-plan-reviews/_automatic';
@@ -2635,7 +2637,32 @@ export function assetReviewOwnership(data: ReviewData, familyId: string) {
   };
 }
 
-function reviewBindsCurrentGraph(data: ReviewData, event: EventRecord) {
+// A bridge proves only the frozen requirement's relationship to another exact
+// hash. It never rewrites a recipe, preparation input or current review context.
+export function hasMaterialRequirementCompatibility(data: ReviewData, requirementId: string, beforeHash: string, afterHash: string, historicalOnly = false) {
+  if (!beforeHash || !afterHash) return false;
+  if (beforeHash === afterHash) return true;
+  const instanceId = data.instance?.instanceId;
+  if (!instanceId) return false;
+  const model = data.productionModel;
+  const demands = (model.domainGraph?.requirements || []).filter(row => row.id === requirementId);
+  if (demands.length !== 1) return false;
+  const representations = (model.domainGraph?.representations || []).filter(row => row.id === demands[0].representationId);
+  if (representations.length !== 1) return false;
+  if (!historicalOnly && (model.materialRequirements || []).filter(row => row.id === requirementId && row.requirementHash === afterHash).length !== 1) return false;
+  const query = {instanceId, requirementId, beforeHash, afterHash, representationId: representations[0].id, representationHash: stableObjectHash(representations[0])};
+  return Boolean((historicalOnly ? findHistoricalCompatibleRequirementBinding : findCompatibleRequirementBinding)(model, query));
+}
+
+function compatibleReviewBinding(index: DomainProductionCompatibilityIndex | undefined, event: EventRecord) {
+  return index ? findCompatibleReviewBinding(index, {
+    familyId: String(event.familyId || ''), versionId: String(event.versionId || ''),
+    sha256: String(event.versionSha256 || '').toLowerCase(), reviewEventId: String(event.eventId || ''),
+    reviewContextHash: String(event.contextHash || ''), reviewEventHash: stableObjectHash(event),
+  }) : null;
+}
+
+function reviewBindsCurrentGraph(data: ReviewData, event: EventRecord, compatibilityIndex?: DomainProductionCompatibilityIndex) {
   const subjectType = String(event.subjectType || '');
   const subjectId = String(event.subjectId || '');
   const familyId = String(event.familyId || '');
@@ -2662,7 +2689,8 @@ function reviewBindsCurrentGraph(data: ReviewData, event: EventRecord) {
     const contextHash = String(event.contextHash || '');
     if (!versionId || !versionSha256 || !contextHash) return false;
     return contextHash === assetReviewContextHash(data, familyId, versionId, versionSha256)
-      || contextHash === legacyAssetReviewContextHash(data, familyId, versionId, versionSha256);
+      || contextHash === legacyAssetReviewContextHash(data, familyId, versionId, versionSha256)
+      || Boolean(compatibleReviewBinding(compatibilityIndex, event));
   }
   if (subjectType !== 'WORK_PRODUCT') return false;
   const workItem = data.productionModel.workItems.find((item) => item.id === subjectId);
@@ -2794,7 +2822,24 @@ function versionBindings(data: ReviewData, candidates: EventRecord[]) {
   return result;
 }
 
-function currentMediaReviewLineage(data: ReviewData, reviews: EventRecord[], candidates: EventRecord[]) {
+type ReviewProjectionAuthority = {executionDefinitions?: unknown[]};
+
+function currentReviewCompatibilityIndex(data: ReviewData, currentCandidates: EventRecord[], authority: ReviewProjectionAuthority) {
+  // Keep full identities and input closure; a family/version/SHA-only index
+  // cannot prove that an inherited domain dependency is covered.
+  const versions = new Map<string, unknown>(data.productionModel.assetVersions.map(version => [version.id, version]));
+  for (const candidate of [...currentCandidates].reverse()) {
+    if (!candidate.versionId || !candidate.familyId || !candidate.sha256) continue;
+    versions.set(String(candidate.versionId), {
+      id: String(candidate.versionId), familyId: String(candidate.familyId), sha256: String(candidate.sha256).toLowerCase(),
+      executionDefinitionRef: candidate.executionDefinitionId,
+      inputVersionBindings: Array.isArray(candidate.inputBindings) ? candidate.inputBindings : [],
+    });
+  }
+  return buildDomainProductionCompatibilityIndex(data.productionModel, {instanceId: data.instance?.instanceId || '', executionDefinitions: authority.executionDefinitions, versions});
+}
+
+function currentMediaReviewLineage(data: ReviewData, reviews: EventRecord[], candidates: EventRecord[], compatibilityIndex?: DomainProductionCompatibilityIndex) {
   const bindings = versionBindings(data, candidates);
   const rightsFacts = currentVersionRightsFacts(data, candidates);
   const identityBound = appliedReviewEvents(reviews)
@@ -2805,7 +2850,7 @@ function currentMediaReviewLineage(data: ReviewData, reviews: EventRecord[], can
         binding
         && binding.familyId === event.familyId
         && binding.sha256 === String(event.versionSha256 || '').toLowerCase()
-        && reviewBindsCurrentGraph(data, event)
+        && reviewBindsCurrentGraph(data, event, compatibilityIndex)
       );
     });
   const latestByVersion = new Map<string, EventRecord>();
@@ -2820,8 +2865,8 @@ function currentMediaReviewLineage(data: ReviewData, reviews: EventRecord[], can
   return { bindings, rightsFacts, rightsDriftVersionIds };
 }
 
-function applicableReviewEvents(data: ReviewData, reviews: EventRecord[], candidates: EventRecord[]) {
-  const { bindings, rightsFacts, rightsDriftVersionIds } = currentMediaReviewLineage(data, reviews, candidates);
+function applicableReviewEvents(data: ReviewData, reviews: EventRecord[], candidates: EventRecord[], compatibilityIndex?: DomainProductionCompatibilityIndex) {
+  const { bindings, rightsFacts, rightsDriftVersionIds } = currentMediaReviewLineage(data, reviews, candidates, compatibilityIndex);
   return appliedReviewEvents(reviews)
     .filter((event) => !['STRUCTURE', 'CREATIVE_REVISION'].includes(String(event.subjectType || '')))
     .filter((event) => {
@@ -2833,7 +2878,7 @@ function applicableReviewEvents(data: ReviewData, reviews: EventRecord[], candid
       && binding.familyId === event.familyId
       && binding.sha256 === String(event.versionSha256 || '').toLowerCase()
       && rightsFacts.get(String(event.versionId || '')) === String(event.projectRightsGateAtReview || '')
-      && reviewBindsCurrentGraph(data, event)
+      && reviewBindsCurrentGraph(data, event, compatibilityIndex)
     );
   });
 }
@@ -3304,6 +3349,7 @@ export function assetReviewTransitionProjection(
     runs: EventRecord[];
     sourceOperations: EventRecord[];
   },
+  authority: ReviewProjectionAuthority = {},
 ): ReviewCorrectionProjection {
   const normalizedTarget = {
     familyId: String(target.familyId || ''),
@@ -3311,7 +3357,7 @@ export function assetReviewTransitionProjection(
     sha256: String(target.sha256 || '').toLowerCase(),
   };
   const currentCandidates = events.candidates.filter((event) => candidateBindsCurrentGraph(data, event));
-  const applicableReviews = applicableReviewEvents(data, events.reviews, currentCandidates);
+  const applicableReviews = applicableReviewEvents(data, events.reviews, currentCandidates, currentReviewCompatibilityIndex(data, currentCandidates, authority));
   const { effectiveMediaReviews, assetChainIssuesByTarget } = latestApplicableMediaReviewProjection(applicableReviews);
   const targetKey = ['ASSET', normalizedTarget.familyId, normalizedTarget.versionId, normalizedTarget.sha256].join('::');
   const chainIssues = assetChainIssuesByTarget.get(targetKey) || [];
@@ -3831,8 +3877,10 @@ export function projectedReviewIndexes(
   reviews: EventRecord[],
   candidates: EventRecord[],
   sourceOperations: EventRecord[] = [],
+  authority: ReviewProjectionAuthority = {},
 ) {
-  const applicable = applicableReviewEvents(data, reviews, candidates);
+  const currentCandidates = candidates.filter(event => candidateBindsCurrentGraph(data, event));
+  const applicable = applicableReviewEvents(data, reviews, currentCandidates, currentReviewCompatibilityIndex(data, currentCandidates, authority));
   const { effectiveMediaReviews } = latestApplicableMediaReviewProjection(applicable);
   const effectiveReviews = [
     ...applicable.filter((event) => !['ASSET', 'WORK_PRODUCT'].includes(String(event.subjectType || ''))),
@@ -4081,13 +4129,16 @@ export function projectOperationalState(
   runs: EventRecord[],
   sourceOperations: EventRecord[] = [],
   executionRequests: EventRecord[] = [],
+  authority: ReviewProjectionAuthority = {},
 ) {
   const currentCandidates = candidates.filter((event) => candidateBindsCurrentGraph(data, event));
+  const compatibilityOptions = {instanceId: data.instance?.instanceId || '', executionDefinitions: authority.executionDefinitions};
+  const reviewCompatibilityIndex = currentReviewCompatibilityIndex(data, currentCandidates, authority);
   // Runs are immutable execution evidence.  A rebuild expires the authorization
   // lease, but it must never hide an unresolved provider attempt or make retry
   // look safe merely because the snapshot id changed.
   const currentRuns = runs;
-  const applicableReviews = applicableReviewEvents(data, reviews, currentCandidates);
+  const applicableReviews = applicableReviewEvents(data, reviews, currentCandidates, reviewCompatibilityIndex);
   const {
     effectiveMediaReviews,
     assetChainIssuesByTarget,
@@ -4097,6 +4148,7 @@ export function projectOperationalState(
     data,
     reviews,
     currentCandidates,
+    reviewCompatibilityIndex,
   ).rightsDriftVersionIds;
   const materialItemByDefinition = new Map(
     (data.productionModel.materialWorkItems || [])
@@ -4118,14 +4170,17 @@ export function projectOperationalState(
     if (!plan || !work || !family || !output || plan.familyId !== family.id || plan.workItemId !== work.id
       || family.ownerRef !== work.id || work.outputAssetRef !== family.id || work.executionDefinitionRef !== revision.definitionId
       || family.currentExpectedOutputId !== output.id || output.familyId !== family.id || output.executionDefinitionRef !== revision.definitionId
-      || revision.requirementHash !== work.requirementHash || revision.requirementId !== work.requirementRef
+      || revision.requirementId !== work.requirementRef
+      || !hasMaterialRequirementCompatibility(data, String(work.requirementRef || ''), String(work.requirementHash || ''), String(revision.requirementHash || ''))
       || !/^MP-PLAN-[a-f0-9]{24}$/.test(String(plan.id || ''))
       || (family as unknown as Record<string, unknown>).materialProductionPlanId !== plan.id
       || (work as unknown as Record<string, unknown>).materialProductionPlanId !== plan.id || output.materialProductionPlanId !== plan.id
       || output.legacyVersionId !== plan.expectedOutputId || !(family.expectedOutputRefs || []).includes(output.id)) continue;
     nativeRevisionFamilyIds.add(family.id);
     materialItemByDefinition.set(String(plan.definitionId), work);
-    for (const previous of nativeRevisions.filter(r => r.materialProductionPlanId === plan.id && r.familyId === family.id && r.workItemId === work.id && r.requirementHash === work.requirementHash)) {
+    for (const previous of nativeRevisions.filter(r => r.materialProductionPlanId === plan.id && r.familyId === family.id && r.workItemId === work.id
+      && r.requirementId === work.requirementRef
+      && hasMaterialRequirementCompatibility(data, String(work.requirementRef || ''), String(work.requirementHash || ''), String(r.requirementHash || ''), true))) {
       materialItemByDefinition.set(String(previous.definitionId), work);
     }
   }
@@ -4165,6 +4220,13 @@ export function projectOperationalState(
       ? candidate.executionDefinitionId
       : null;
     const materialItem = executionDefinitionRef ? materialItemByDefinition.get(executionDefinitionRef) : null;
+    const exactDefinitions = (authority.executionDefinitions || []).filter((value): value is Record<string, unknown> => Boolean(value && typeof value === 'object'
+      && (value as Record<string, unknown>).id === executionDefinitionRef));
+    const exactDefinition = exactDefinitions.length === 1 && exactDefinitions[0].definitionHash === candidate.executionDefinitionHash
+      && inspectExecutionDefinitionHash(exactDefinitions[0]).valid ? exactDefinitions[0] : null;
+    const requirementRef = exactDefinition ? String(exactDefinition.materialRequirementRef || '') : materialItem?.requirementRef;
+    // Prefer the immutable executed recipe hash, never the current demand hash.
+    const requirementHash = exactDefinition ? String(exactDefinition.materialRequirementHash || '') : materialItem?.requirementHash;
     versions.set(id, {
       id,
       familyId,
@@ -4196,9 +4258,9 @@ export function projectOperationalState(
             sha256: String(binding.sha256 || '').toLowerCase(),
           }))
         : [],
-      materialRequirementBindings: materialItem?.requirementRef && materialItem.requirementHash ? [{
-        requirementRef: materialItem.requirementRef,
-        requirementHash: materialItem.requirementHash,
+      materialRequirementBindings: requirementRef && requirementHash ? [{
+        requirementRef,
+        requirementHash,
         executionDefinitionRef,
         definitionHash: typeof candidate.executionDefinitionHash === 'string' ? candidate.executionDefinitionHash : null,
       }] : [],
@@ -4348,19 +4410,22 @@ export function projectOperationalState(
   const currentDomainHashes = new Map(data.productionModel.assetFamilies.map(family => [family.id,
     (family as unknown as {domainContext?:{hash?:string}}).domainContext?.hash || '',
   ]));
-  const reviewedDomainBindings = new Map<string,{familyId:string;sha256:string;domainContextHash:string;reviewEventId:string;reviewEventSequence:number}>();
+  const compatibilityIndex = buildDomainProductionCompatibilityIndex(data.productionModel, {...compatibilityOptions, versions});
+  const reviewedDomainBindings = new Map<string,{familyId:string;sha256:string;domainContextHash:string;reviewEventId:string;reviewEventSequence:number;compatibilityOnly?:boolean}>();
   for (const review of effectiveMediaReviews) {
     if (review.subjectType !== 'ASSET' || review.action !== 'APPROVE_AND_RELEASE'
       || (assetChainIssuesByTarget.get(mediaReviewTargetKey(review)) || []).length) continue;
     const versionId=String(review.versionId||''),familyId=String(review.familyId||''),version=versions.get(versionId);
     const sha256=String(review.versionSha256||'').toLowerCase(),domainContextHash=currentDomainHashes.get(familyId)||'';
     if (!version || version.familyId !== familyId || version.sha256 !== sha256
-      || version.canFlowDownstream !== true || version.lifecycleState !== 'RELEASED' || version.historyRole !== 'CURRENT'
-      || review.contextHash !== assetReviewContextHash(data,familyId,versionId,sha256)) continue;
-    reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash,reviewEventId:String(review.eventId||''),reviewEventSequence:Number(review.eventSequence)||0});
+      || version.canFlowDownstream !== true || version.lifecycleState !== 'RELEASED' || version.historyRole !== 'CURRENT') continue;
+    const exactCurrent = review.contextHash === assetReviewContextHash(data,familyId,versionId,sha256);
+    if (!exactCurrent && !compatibleReviewBinding(compatibilityIndex, review)) continue;
+    reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash,reviewEventId:String(review.eventId||''),reviewEventSequence:Number(review.eventSequence)||0,
+      ...(!exactCurrent ? {compatibilityOnly:true} : {})});
   }
   const freshProductionProofs=domainInvalidations.length?domainProductionProofs({candidates:currentCandidates,requests:executionRequests,runs:currentRuns,versions}):new Map();
-  applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes,freshProductionProofs});
+  applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes,freshProductionProofs,compatibilityExceptions:domainCompatibilityExceptions(compatibilityIndex)});
 
   for (const family of families.values()) {
     const familyVersions = [...versions.values()].filter((version) => version.familyId === family.id);
@@ -4759,11 +4824,11 @@ export function projectOperationalState(
       .map((familyId) => families.get(familyId))
       .map((family) => family?.currentVersionId ? versions.get(family.currentVersionId) : null)
       .filter(Boolean) as ProjectedVersion[];
-    const matchingBindings = currentVersions.flatMap((version) => version.materialRequirementBindings || [])
-      .filter((binding) => binding.requirementRef === source.id);
-    const bindingStale = currentVersions.length > 0 && !matchingBindings.some(
-      (binding) => binding.requirementHash === source.requirementHash,
-    );
+    const matchingVersions = currentVersions.filter(version => (version.materialRequirementBindings || []).some(binding => binding.requirementRef === source.id
+      && (binding.requirementHash === source.requirementHash
+        || (Boolean(compatibilityIndex.byVersion.get(version.id)?.length)
+          && hasMaterialRequirementCompatibility(data, source.id, String(binding.requirementHash || ''), source.requirementHash)))));
+    const bindingStale = currentVersions.length > 0 && !matchingVersions.length;
     const coveredVersions = currentVersions.filter((version) => (
       version.outputState === 'PRESENT'
       && version.lifecycleState === 'RELEASED'
@@ -5004,8 +5069,8 @@ async function buildOperationalSnapshot(productionAuxRevision?:string|null) {
   const applicableVerifications = applicableVerificationEvents(data, verifications);
   const verificationsByIssue = latestBy([...applicableVerifications].reverse(), (event) => String(event.issueId || event.subjectId || ''));
   const scriptCommentThreads = projectScriptCommentEvents(scriptCommentEvents);
-  const mediaStateProjection = projectOperationalState(data, reviews, candidates, runs, sourceOperations, executionRequests);
-  const projectedReviews = projectedReviewIndexes(data, reviews, candidates, sourceOperations);
+  const mediaStateProjection = projectOperationalState(data, reviews, candidates, runs, sourceOperations, executionRequests, {executionDefinitions: gateCatalog.executionDefinitions});
+  const projectedReviews = projectedReviewIndexes(data, reviews, candidates, sourceOperations, {executionDefinitions: gateCatalog.executionDefinitions});
   const scriptScenesById = Object.fromEntries(
     projectedReviews.bySubject
       .filter(({ event }) => event.subjectType === 'SCRIPT_SCENE')

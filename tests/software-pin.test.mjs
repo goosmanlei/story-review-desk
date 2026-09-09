@@ -24,6 +24,10 @@ test('explicit unversioned development software packages reproducibly in differe
  assert.equal(manifest.copiedBusinessData,false);
  assert.deepEqual(manifest.productionStorySpecificHits,[]);
  assert.ok(manifest.files.length>100);
+ assert(manifest.files.some(file=>file.path==='docs/domain-production-compatibility.md'));
+ assert(manifest.files.some(file=>file.path==='scripts/instance-domain-production-compatibility.mjs'));
+ const issuedPackage=JSON.parse(await readFile(path.join(root,'first','package.json'),'utf8'));
+ assert.equal(issuedPackage.scripts['instance:domain-compatibility'],'node scripts/instance-domain-production-compatibility.mjs');
  assert.equal(manifest.skills.length,1);
  const skill=manifest.skills[0];assert.equal(skill.name,'story-review-orchestrator');
  assert(skill.files.includes(skill.path+'/SKILL.md'));assert(skill.files.includes(skill.path+'/agents/openai.yaml'));

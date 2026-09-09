@@ -2,6 +2,7 @@ import {assertFailedMaterialAttempt,materialEventBinding} from './material-produ
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
+import {findHistoricalCompatibleRequirementBinding} from './domain-production-compatibility.mjs';
 const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
 const fail=message=>{throw Object.assign(new Error(message),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});};
 const one=(rows,id,label)=>{const found=(rows||[]).filter(r=>r.id===id);if(found.length!==1)fail(label+'必须精确且唯一');return found[0];};
@@ -11,7 +12,7 @@ const workMutable=['executionDefinitionRef','promptRef','inputAssetRefs','lifecy
 const outputMutable=['id','targetPath','plannedVersionLabel','legacyVersionId','expectationState','realizedVersionId','sourceRef','executionDefinitionRef'];
 
 /** Verify each immutable native successor source and its exact predecessor chain. */
-export function materialProductionRevisionClosures({model,recipes,documents,initialClosures}){
+export function materialProductionRevisionClosures({model,recipes,documents,initialClosures,instanceId}){
  const rows=model.materialProductionRecipeRevisions||[];
  if(new Set(rows.map(r=>r.id)).size!==rows.length||new Set(rows.map(r=>r.definitionId)).size!==rows.length||new Set(rows.map(r=>r.expectedOutputId)).size!==rows.length)fail('基础素材后继版本记录不能重复');
  const closures=rows.map(row=>{
@@ -20,7 +21,27 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
   if(doc.length!==1||doc[0].deleted||doc[0].sha256!==row.sourceSha256||sha256(doc[0].bytes)!==row.sourceSha256||doc[0].metadata?.sourceRole!=='MATERIAL_PRODUCTION_RECIPE'||!doc[0].aliases?.includes(row.sourcePath))fail('基础素材后继调用定义缺少精确受控固定源');
   let body;try{body=JSON.parse(Buffer.from(doc[0].bytes).toString('utf8'));}catch{fail('基础素材后继固定源不是合法 JSON');}
   const plan=initial.plan;
-  if(body.schemaVersion!=='MATERIAL_PRODUCTION_RECIPE_V1'||body.id!==row.id||body.sourcePath!==row.sourcePath||row.sourcePath!=='story/material-production/recipes/'+row.id+'.json'||body.materialProductionPlanId!==plan.id||row.requirementId!==plan.requirementId||row.representationId!==plan.representationId||row.familyId!==plan.familyId||row.workItemId!==plan.workItemId||row.requirementHash!==plan.requirementHash||body.requirementId!==row.requirementId||body.representationId!==row.representationId||body.basisHash!==row.basisHash||domainHash(body.basis)!==row.basisHash||body.basis.requirementHash!==row.requirementHash)fail('基础素材后继源身份、需求或输入闭包不一致');
+  if(body.schemaVersion!=='MATERIAL_PRODUCTION_RECIPE_V1'||body.id!==row.id||body.sourcePath!==row.sourcePath||row.sourcePath!=='story/material-production/recipes/'+row.id+'.json'||body.materialProductionPlanId!==plan.id||row.requirementId!==plan.requirementId||row.representationId!==plan.representationId||row.familyId!==plan.familyId||row.workItemId!==plan.workItemId||body.requirementId!==row.requirementId||body.representationId!==row.representationId||body.basisHash!==row.basisHash||domainHash(body.basis)!==row.basisHash||body.basis.requirementHash!==row.requirementHash)fail('基础素材后继源身份、需求或输入闭包不一致');
+  const frozenRepresentation=body.basis.representation,frozenDemand=body.basis.demand;
+  if(frozenDemand?.id!==row.requirementId||frozenDemand.representationId!==row.representationId||frozenRepresentation?.id!==row.representationId
+   ||!same(frozenRepresentation,initial.body.graphBinding.afterRepresentation)||domainHash({demand:frozenDemand,representation:frozenRepresentation})!==row.requirementHash
+   ||!same(body.requirementBefore,body.requirementAfter)||body.requirementAfter?.requirementHash!==row.requirementHash||body.requirementAfter.id!==row.requirementId||body.requirementAfter.representationRef!==row.representationId||!same(body.requirementAfter.assetFamilyRefs,[plan.familyId]))fail('基础素材后继源未自证其完整需求与表现哈希');
+  if(row.requirementHash!==plan.requirementHash){
+   // The immutable recipe belongs to its own then-current demand, which may
+   // legitimately no longer be current. This history check never grants use.
+   const representation=frozenRepresentation,requirementId=row.requirementId,representationId=row.representationId,representationHash=domainHash(representation);
+   const declared=body.basis.revision?.requirementCompatibilities,fields=['compatibilityId','proofHash','requirementId','beforeHash','afterHash','representationId','representationHash'];
+   if(!Array.isArray(declared)||!declared.length||declared.length>64||declared.some(b=>!b||typeof b!=='object'||Array.isArray(b))||new Set(declared.map(b=>b.proofHash+':'+b.beforeHash+':'+b.afterHash)).size!==declared.length)fail('后继配方未冻结唯一兼容依据');
+   let previousHash=plan.requirementHash,previousDemand=initial.body.graphBinding.requirement;
+   const visited=new Set([previousHash]);
+   for(const link of declared){
+    if(Object.keys(link).sort().join(',')!==[...fields].sort().join(',')||link.requirementId!==requirementId||link.representationId!==representationId||link.representationHash!==representationHash||link.beforeHash!==previousHash||visited.has(link.afterHash))fail('后继兼容依据身份或顺序无效');
+    const verified=findHistoricalCompatibleRequirementBinding(model,{...link,instanceId});
+    if(!verified||verified.eligibility!=='HISTORICAL_ONLY'||(verified.links||[verified]).length!==1||fields.some(k=>(verified.links||[verified])[0][k]!==link[k])||!same(verified.beforeDemand,previousDemand))fail('后继配方的兼容证明与受控历史不同');
+    previousHash=link.afterHash;previousDemand=verified.afterDemand;visited.add(previousHash);
+   }
+   if(previousHash!==row.requirementHash||!same(previousDemand,frozenDemand))fail('后继配方的兼容路径不完整或夹带额外证明');
+  }
   const rb=body.basis.revision,candidate=body.parentCandidate;
   if(!rb||rb.materialProductionPlanId!==plan.id||rb.familyId!==plan.familyId||rb.workItemId!==plan.workItemId||rb.parentVersionId!==row.parentVersionId||rb.parentVersionSha256!==row.parentVersionSha256||body.parentVersionId!==row.parentVersionId||body.parentVersionSha256!==row.parentVersionSha256||rb.definitionId!==row.previousDefinitionId||rb.expectedOutputId!==row.previousExpectedOutputId||body.previousDefinitionId!==row.previousDefinitionId||body.previousExpectedOutputId!==row.previousExpectedOutputId||candidate?.versionId!==row.parentVersionId||candidate.familyId!==row.familyId||candidate.sha256!==row.parentVersionSha256||!rb.failedAttempt&&(candidate.expectedOutputId!==row.previousExpectedOutputId||candidate.executionDefinitionId!==row.previousDefinitionId||candidate.callPackageHash!==rb.definitionHash)||rb.parentCandidate?.eventId!==candidate.eventId||rb.parentCandidate?.sha256!==domainHash(candidate)||!/^[a-f0-9]{64}$/.test(row.parentVersionSha256||''))fail('基础素材后继版本缺少精确实际父候选和旧调用包证据');
   if(rb.failedAttempt){

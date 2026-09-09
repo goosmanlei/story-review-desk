@@ -15,7 +15,7 @@ const events=(view,kind)=>view.eventsByKind?.[kind]||[];
 export function episodeSourceCompiler(api) {
   function stateFor(view) {
     const data=view.snapshot,reviews=events(view,'review'),candidates=events(view,'creative-revision'),ops=events(view,'source-operation');
-    const media=api.projectOperationalState(data,reviews,events(view,'asset-version'),events(view,'run'),ops,events(view,'execution-request'));
+    const media=api.projectOperationalState(data,reviews,events(view,'asset-version'),events(view,'run'),ops,events(view,'execution-request'),{executionDefinitions:view.recipes?.executionDefinitions||[]});
     const releases=api.projectEpisodeNarrativeReleases(data,candidates,reviews,events(view,'episode-plan-submission'),ops);
     const scriptScenesById=Object.fromEntries(api.projectedReviewIndexes(data,reviews,events(view,'asset-version'),ops).bySubject.filter(r=>r.event.subjectType==='SCRIPT_SCENE').map(({projection,event})=>[String(event.subjectId),{...projection,subjectId:event.subjectId,subjectRevisionHash:event.subjectRevisionHash,contextHash:event.businessContextHash||event.contextHash,source:'APPLIED_SCRIPT_SCENE_REVIEW_EVENT_PROJECTION'}]));
     const base={...media,scriptScenesById,episodeNarrativeReleasesByUid:releases};

@@ -22,6 +22,7 @@ import {
   operationalSnapshot,
   optionalString,
   replayIdempotentEvent,
+  recipeCatalog,
   safeGeneratedPath,
   storyConfirmationTargets,
   validateMutationRequest,
@@ -892,7 +893,7 @@ export async function POST(request: Request) {
             executionRequests: locked.executionRequests.events,
             runs: locked.runs.events,
             sourceOperations: locked.sourceOperations.events,
-          });
+          }, {executionDefinitions: (await recipeCatalog()).executionDefinitions});
           const correctionState = transition.state;
           const correctionHeadEventId = transition.headEventId;
           const projectedAssetReview = locked.reviews.projectedByAssetVersion.find((entry) => (

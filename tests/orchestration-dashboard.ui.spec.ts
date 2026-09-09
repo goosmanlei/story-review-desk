@@ -92,8 +92,11 @@ test('automatic GETs stop at their bound, on idle/error, while hidden and after 
   for(let i=0;i<60;i++){await page.clock.runFor(5001);await expect.poll(()=>f.reads.length).toBe(initial+i+1);await expect(page.getByRole('button',{name:'手动刷新'})).toBeEnabled();}
   await expect(page.getByText('本轮自动刷新已达上限，请手动刷新。')).toBeVisible();await page.clock.runFor(20000);expect(f.reads.length).toBe(initial+60);
   await page.getByRole('button',{name:'手动刷新'}).click();await expect.poll(()=>f.reads.length).toBe(initial+61);
-  await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));});await page.clock.runFor(10000);expect(f.reads.length).toBe(initial+61);
+  // 请求计数只证明已发出；先等读取完成，避免虚拟时钟把在途请求推到超时。
+  await expect(page.getByRole('button',{name:'手动刷新'})).toBeEnabled();await expect(page.getByRole('alert')).toHaveCount(0);
+  await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'hidden'});document.dispatchEvent(new Event('visibilitychange'));});await expect(page.getByText('页面不可见，自动刷新已暂停。',{exact:true})).toBeVisible();await page.clock.runFor(10000);expect(f.reads.length).toBe(initial+61);
   await page.evaluate(()=>{Object.defineProperty(document,'visibilityState',{configurable:true,value:'visible'});document.dispatchEvent(new Event('visibilitychange'));});
+  await expect(page.getByText('有运行中或排队任务时每 5 秒刷新，最多 60 次；读取失败或离开页面即停止。',{exact:true})).toBeVisible();
   f.setValue({...f.getValue(),autoRefresh:false});await page.clock.runFor(5001);await expect.poll(()=>f.reads.length).toBe(initial+62);await expect(page.getByRole('button',{name:'手动刷新'})).toBeEnabled();await page.clock.runFor(10000);expect(f.reads.length).toBe(initial+62);
   f.setValue({...f.getValue(),autoRefresh:true});f.setFailure(true);await page.getByRole('button',{name:'手动刷新'}).click();await expect(page.getByRole('alert')).toBeVisible();const failed=f.reads.length;await page.clock.runFor(20000);expect(f.reads.length).toBe(failed);
   f.setFailure(false);await page.getByRole('button',{name:'手动刷新'}).click();await expect(page.getByRole('button',{name:'手动刷新'})).toBeEnabled();const beforeLeave=f.reads.length;

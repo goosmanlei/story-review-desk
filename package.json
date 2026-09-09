@@ -13,6 +13,8 @@
     "instance:create": "node scripts/instance-create.mjs",
     "instance:start": "node scripts/instance-start.mjs",
     "instance:guidance": "node scripts/instance-guidance.mjs",
+    "instance:domain-compatibility": "node scripts/instance-domain-production-compatibility.mjs",
+    "test:domain-compatibility": "node --test tests/domain-production-compatibility.test.mjs tests/domain-invalidation.test.mjs tests/domain-inputless-production.test.mjs tests/domain-compatibility-store.test.mjs tests/domain-compatibility-review-context.test.mjs tests/material-native-domain-compatibility.test.mjs tests/domain-production-compatibility-service.test.mjs",
     "instance:skills": "node scripts/instance-skills.mjs",
     "orchestrate": "node scripts/instance-orchestration.mjs",
     "test:orchestration": "node --test tests/orchestration-*.test.mjs tests/instance-skills.test.mjs",

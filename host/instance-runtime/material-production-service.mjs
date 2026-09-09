@@ -33,7 +33,7 @@ export function validateMaterialProductionContent(value){
 function operationalState(view,api){
  if(!api?.projectOperationalState)fail('缺少正式运行态验证器');
  const e=view.eventsByKind||{};
- return api.projectOperationalState(view.snapshot,e.review||[],e['asset-version']||[],e.run||[],e['source-operation']||[],e['execution-request']||[]);
+ return api.projectOperationalState(view.snapshot,e.review||[],e['asset-version']||[],e.run||[],e['source-operation']||[],e['execution-request']||[],{executionDefinitions:view.recipes?.executionDefinitions||[]});
 }
 async function registeredInput(tx,model,state,binding){
  const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('参考版本尚未按精确 SHA 正式放行：'+reasons.join('、'));
