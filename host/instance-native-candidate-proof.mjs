@@ -84,7 +84,7 @@ export function nativeMaterialCandidateProof({documents,events,activeMedia,pinne
   if(mp.length){
    const plan=mp[0];productionKind='MP';work=one(model.materialWorkItems,w=>w.id===plan.workItemId,'Native material work');
    const successors=(model.materialProductionRecipeRevisions||[]).filter(r=>r.materialProductionPlanId===plan.id);
-   check(definition.materialProductionPlanId===plan.id&&(plan.definitionId===definition.id||successors.some(r=>r.definitionId===definition.id)),'Unknown native material definition');sourceRows=[plan,...successors];
+   check(definition.materialProductionPlanId===plan.id&&(plan.definitionId===definition.id||successors.some(r=>r.definitionId===definition.id)),'Unknown native material definition');sourceRows=[plan,...successors,...successors.flatMap(row=>Object.values(row.domainSources||{}).map(ref=>({sourcePath:ref.path,sourceRevisionId:ref.revisionId,sourceSha256:ref.sha256})))];sourceRows=[...new Map(sourceRows.map(row=>[row.sourceRevisionId,row])).values()];
   }else{
    productionKind='SP';work=one(model.workItems,w=>w.outputAssetRef===family.id,'Native shot work');
    const plan=one(spPlans,p=>p.id===work.shotProductionPlanId&&p.workItemIds.includes(work.id),'Native shot owner plan');

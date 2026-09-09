@@ -8,9 +8,13 @@ const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
  * The published snapshot and immutable sources remain unchanged. Explicit
  * conflicting links are never repaired, and current domain input must still
  * equal the exact first-setup demand/representation closure. */
-export async function resolveMaterialProductionRequirement(tx,{plan,requirement,family,work,demand,representation}){
+export async function resolveMaterialProductionRequirement(tx,{plan,requirement,family,work,demand,representation,requirementBaseline}){
  const links={materialWorkItemRef:work.id,plannedAssetFamilyId:family.id};
  for(const [key,value] of Object.entries(links))if(Object.hasOwn(requirement,key)&&requirement[key]!==value)fail();
+ if(requirementBaseline){
+  if(requirement.id!==plan.requirementId||requirement.requirementHash!==requirementBaseline.requirementHash||!same(demand,requirementBaseline.authority.demand)||!same(representation,requirementBaseline.authority.representation)||requirementBaseline.requirementAfter.materialWorkItemRef!==work.id||requirementBaseline.requirementAfter.plannedAssetFamilyId!==family.id)fail();
+  return {...requirement,...links};
+ }
  if(Object.keys(links).every(key=>Object.hasOwn(requirement,key)))return requirement;
  const {body}=materialProductionPlanGraphClosure({plan,document:await tx.readDocumentRevision(plan.sourceRevisionId)});
  if(requirement.id!==plan.requirementId||requirement.requirementHash!==plan.requirementHash

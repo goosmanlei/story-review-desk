@@ -1,0 +1,10 @@
+import type {InstanceReadUnit} from './index.mjs';
+import type {MaterialProductionContent,MaterialProductionPlan} from './material-production-service.mjs';
+export const MATERIAL_REBASE_MODE:'REQUIREMENT_REBASE';
+export const MATERIAL_REBASE_SCHEMA:'MATERIAL_PRODUCTION_REQUIREMENT_REBASE_V1';
+export const MATERIAL_REBASE_SOURCE:'MATERIAL_PRODUCTION_REQUIREMENT_REBASE';
+export type MaterialProductionRebaseAcknowledgement={confirmed:true;beforeHash:string;afterHash:string;note:string};
+export function readMaterialProductionRebaseAnchor(tx:InstanceReadUnit,input:Record<string,any>):Promise<Record<string,any>|null>;
+export function materialProductionRebaseContext(tx:InstanceReadUnit,context:Record<string,any>):Promise<Record<string,any>>;
+export function validateRebaseAcknowledgement(value:unknown,context:Record<string,any>):MaterialProductionRebaseAcknowledgement;
+export function compileMaterialProductionRebase(tx:InstanceReadUnit,context:Record<string,any>,content:MaterialProductionContent,draftRevisionId:string,registeredInput:(...args:any[])=>Promise<Record<string,any>>,acknowledgement:unknown):Promise<{domainEvidenceDocuments:Array<Record<string,any>>;plan:MaterialProductionPlan}>;

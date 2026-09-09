@@ -11,7 +11,7 @@ const workMutable=['executionDefinitionRef','promptRef','inputAssetRefs','lifecy
 const outputMutable=['id','targetPath','plannedVersionLabel','legacyVersionId','expectationState','realizedVersionId','sourceRef','executionDefinitionRef'];
 
 /** Verify each immutable native successor source and its exact predecessor chain. */
-export function materialProductionRevisionClosures({model,recipes,documents,initialClosures}){
+export function materialProductionRevisionClosures({model,recipes,documents,initialClosures,verifiedAncestors=[]}){
  const rows=model.materialProductionRecipeRevisions||[];
  if(new Set(rows.map(r=>r.id)).size!==rows.length||new Set(rows.map(r=>r.definitionId)).size!==rows.length||new Set(rows.map(r=>r.expectedOutputId)).size!==rows.length)fail('基础素材后继版本记录不能重复');
  const closures=rows.map(row=>{
@@ -41,7 +41,7 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
   return {row,body,definition,output,initial};
  });
  for(const initial of initialClosures){
-  const chain=closures.filter(c=>c.row.materialProductionPlanId===initial.plan.id);let previousDefinition=initial.body.executionDefinition,previousOutput=initial.body.expectedOutput,previousFamily=initial.body.assetFamily,previousWork=initial.body.materialWorkItem;const visited=new Set(),actualAncestors=new Map();
+  const chain=closures.filter(c=>c.row.materialProductionPlanId===initial.plan.id);let previousDefinition=initial.body.executionDefinition,previousOutput=initial.body.expectedOutput,previousFamily=initial.body.assetFamily,previousWork=initial.body.materialWorkItem;const visited=new Set(),actualAncestors=new Map(verifiedAncestors.map(a=>[a.definitionId,a.output]));
   while(true){
    const next=chain.filter(c=>c.row.previousDefinitionId===previousDefinition.id);if(next.length>1)fail('同素材族后继调用包不得分叉');if(!next.length)break;
    const c=next[0];if(visited.has(c.row.id))fail('素材后继调用包形成循环');visited.add(c.row.id);

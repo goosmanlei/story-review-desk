@@ -1,3 +1,4 @@
+import {materialProductionCurrentBasisReasons} from '../../../host/instance-runtime/material-production-current-basis.mjs';
 import {assetContextReviewedBindings} from '../../../host/instance-runtime/asset-context-revalidation-preservation.mjs';
 import {materialRequirementSelectionReasons} from '../../../host/instance-runtime/material-requirement-disposition.mjs';
 import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
@@ -5211,6 +5212,8 @@ async function buildOperationalSnapshot(productionAuxRevision?:string|null) {
   stateProjection.configuredGatesByWorkItem=configuredGates(data.productionModel as unknown as Record<string,unknown>,stateProjection,shotProductionExecutionEntries(data.productionModel,stateProjection,gateCatalog));
   for(const work of [...data.productionModel.workItems,...(data.productionModel.materialWorkItems||[])]){
     const definition=gateCatalog.executionDefinitions.find(d=>d.id===work.executionDefinitionRef);
+    const nativeReasons=materialProductionCurrentBasisReasons(data.productionModel as unknown as Record<string,unknown>,work as unknown as Record<string,unknown>,definition as unknown as Record<string,unknown>|undefined);
+    if(nativeReasons.length)stateProjection.configuredGatesByWorkItem[work.id].entryReasons.push(...nativeReasons);
     const upload=(definition?.upload||{}) as {items?:Array<Record<string,unknown>>};const uploads=upload.items||[];
     stateProjection.executionGatesByWorkItem[work.id]=definition?executionEligibilityReasons({stateProjection,p07Released},definition,{workItemId:work.id,familyId:work.outputAssetRef,inputBindings:uploads.map(b=>({...b,sha256:stateProjection.assetVersionsById[String(b.assetVersionRef)]?.sha256}))}):['EXECUTION_DEFINITION_NOT_READY'];
   }
