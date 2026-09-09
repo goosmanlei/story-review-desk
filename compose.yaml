@@ -32,7 +32,8 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      # Historical release proof transport can exceed 128 MiB on active projects.
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
       - /instance/runtime:rw,noexec,nosuid,nodev,size=16m
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/v8/snapshot').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -64,7 +65,7 @@ services:
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=128m
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
       - /instance/runtime:rw,noexec,nosuid,nodev,size=16m
     restart: unless-stopped
   comment-polish-worker:

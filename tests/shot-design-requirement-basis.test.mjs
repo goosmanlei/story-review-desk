@@ -10,6 +10,7 @@ import {readFileSync} from 'node:fs';
 import ts from 'typescript';
 import {deriveShotDesignRequirementBasisV3,assertShotDesignRequirementBasisV3Current,shotDesignRequirementBasisSchema} from '../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {applyRequirementCompositionCoverage} from '../host/instance-runtime/material-requirement-composition.mjs';
+import {directoryProjection} from '../host/instance-runtime/directory-projection.mjs';
 
 const clone=structuredClone,sceneId='scene:room',requirementId='demand:room';
 const evidence=[{sourceId:'source:script',revisionId:'source:revision1',sha256:'a'.repeat(64),locator:'scene:room/block:1',quote:'The visitor enters the dark room.'}];
@@ -29,6 +30,72 @@ function firstFamily(f,{directory=false}={}){
  r.sourceRef='story/material-production/plans/plan:room.json#requirement';r.materialWorkItemRef='work:room';r.plannedAssetFamilyId='family:room';return after;
 }
 const derive=snapshot=>deriveShotDesignRequirementBasisV3(snapshot.productionModel,sceneId);
+function withDirectoryMetadata(f,change=()=>{}){
+ const edge={id:'directory:room-state',type:'HAS_STATE',from:{kind:'ENTITY',id:'entity:room'},to:{kind:'STATE',id:'state:room-night'},label:'Categorized by state',authority:'L',appliesTo:'DIRECTORY_METADATA_ONLY',semanticEffect:'NONE',evidence:clone(evidence)};
+ change(edge);const snapshot=clone(f.snapshot);
+ snapshot.productionModel.materialDirectory=directoryProjection(snapshot.productionModel,{newRelations:[edge]});
+ return snapshot;
+}
+test('real directory projection metadata edges without scope neither become story relations nor change V3 semantics',()=>{
+ const f=fixture(),baseline=derive(f.snapshot),snapshot=withDirectoryMetadata(f),before=JSON.stringify(snapshot);
+ const edge=snapshot.productionModel.materialDirectory.graph.relations.find(r=>r.id==='directory:room-state');
+ assert.equal(edge.directoryOnly,true);assert.equal(Object.hasOwn(edge,'scope'),false);
+ assert.deepEqual(derive(snapshot),baseline);assert.equal(JSON.stringify(snapshot),before);
+ const changed=withDirectoryMetadata(f,edge=>{edge.label='Reworded display grouping';edge.evidence[0].quote='A directory-only description.';});
+ assert.deepEqual(derive(changed),baseline);
+ assert.deepEqual(baseline.bindings[0].graphClosure.relations.map(r=>r.id),['relation:visitor-room']);
+});
+for(const field of ['appliesTo','semanticEffect'])test('directory relation missing '+field+' is not silently exempted from scope validation',()=>{
+ const f=fixture();assert.throws(()=>derive(withDirectoryMetadata(f,edge=>{delete edge[field];})),/关系适用范围必须为完整列表/);
+});
+test('an authored relation cannot evade its scope requirement with all three directory markers',()=>{
+ const f=fixture(),model=f.snapshot.productionModel,edge=model.domainGraph.relations[0];
+ Object.assign(edge,{directoryOnly:true,appliesTo:'DIRECTORY_METADATA_ONLY',semanticEffect:'NONE'});delete edge.scope;
+ model.domainGraphRef.sha256=domainHash(model.domainGraph);
+ assert.throws(()=>derive(f.snapshot),/关系适用范围必须为完整列表/);
+});
+test('ordinary authored missing scope still fails and meaningful relation changes remain in the V3 hash',()=>{
+ const f=fixture(),baseline=derive(withDirectoryMetadata(f));
+ const malformed=clone(f.snapshot);delete malformed.productionModel.domainGraph.relations[0].scope;
+ malformed.productionModel.domainGraphRef.sha256=domainHash(malformed.productionModel.domainGraph);
+ assert.throws(()=>derive(malformed),/关系适用范围必须为完整列表/);
+ const graph=clone(f.graph);graph.relations[0].purpose='Visitor must remain outside the door';
+ const changed={graph,snapshot:project(f.snapshot,graph)};
+ assert.notEqual(derive(withDirectoryMetadata(changed)).contentHash,baseline.contentHash);
+ assert.equal(derive(withDirectoryMetadata(changed)).bindings[0].graphClosure.relations[0].purpose,graph.relations[0].purpose);
+});
+function withDirectoryState(f,change=()=>{}){
+ const snapshot=clone(f.snapshot),model=snapshot.productionModel,rep=f.graph.representations[0];
+ const state={id:'directory:display-state',entityId:rep.entityId,label:'Reference display',dimensions:{displayContext:'TEMPLATE',placementStatus:'UNKNOWN',acoustics:'dry'},scope:[],authority:'L',appliesTo:'DIRECTORY_METADATA_ONLY',temporalAssertion:'NONE',evidence:clone(evidence)};
+ change(state);
+ const binding={requirementId,requirementHash:model.materialRequirements[0].requirementHash,representationId:rep.id,representationHash:domainHash(rep),entityId:rep.entityId,stateId:state.id};
+ model.materialDirectory=directoryProjection(model,{newStates:[state],directoryBindings:[binding]});
+ return snapshot;
+}
+test('projected directory state opaque dimensions remain in the semantic hash without invented taxonomy entries',()=>{
+ const f=fixture(),snapshot=withDirectoryState(f),before=JSON.stringify(snapshot),basis=derive(snapshot);
+ const state=basis.bindings[0].conditions.state.value;
+ assert.deepEqual(state.dimensions,{displayContext:'TEMPLATE',placementStatus:'UNKNOWN',acoustics:'dry'});
+ assert.deepEqual(basis.bindings[0].graphClosure.states.find(row=>row.id===state.id),state);
+ assert.equal(basis.bindings[0].graphClosure.definitions.stateDimensions.some(row=>row.id==='displayContext'),false);
+ assert.equal(JSON.stringify(snapshot),before);
+ assert.notEqual(derive(withDirectoryState(f,state=>{state.dimensions.displayContext='INSTANCE';})).contentHash,basis.contentHash);
+ const changed=clone(snapshot);changed.productionModel.systemConfiguration.config.domain.stateDimensions.find(row=>row.id==='acoustics').label='Updated room acoustics policy';
+ assert.notEqual(derive(changed).contentHash,basis.contentHash);
+});
+for(const field of ['appliesTo','temporalAssertion'])test('directory state missing '+field+' cannot bypass formal dimension definitions',()=>{
+ assert.throws(()=>derive(withDirectoryState(fixture(),state=>{delete state[field];})),/stateDimensions未唯一解析/);
+});
+test('authored state with directory markers and authored representation still require defined dimensions',()=>{
+ for(const collection of ['states','representations']){
+  const f=fixture(),model=f.snapshot.productionModel,row=model.domainGraph[collection][0];
+  row.dimensions.displayContext='Unregistered authored condition';
+  Object.assign(row,{directoryOnly:true,appliesTo:'DIRECTORY_METADATA_ONLY',temporalAssertion:'NONE'});
+  model.domainGraphRef.sha256=domainHash(model.domainGraph);
+  if(collection==='representations')model.materialRequirements[0].requirementHash=domainHash({demand:model.domainGraph.requirements[0],representation:row});
+  assert.throws(()=>derive(f.snapshot),/stateDimensions未唯一解析/);
+ }
+});
 function composedFixture(){
  const f=fixture(),childId='demand:component';
  f.graph.representations.push({...clone(f.graph.representations[0]),id:'rep:component',requirementIds:[childId]});

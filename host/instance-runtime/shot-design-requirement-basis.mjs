@@ -93,7 +93,13 @@ function semanticGraphClosure(model,graph,seeds,sceneId,coverage){
  const selected=new Map(),add=(kind,id)=>{if(!id)return;const collection={ENTITY:'entities',STATE:'states',REPRESENTATION:'representations'}[kind];if(!collection)fail('未知关系端点类型');const row=exact(graph[collection],id,collection);selected.set(kind+':'+id,{kind,row});};
  for(const [kind,id] of seeds)add(kind,id);
  const rootKeys=new Set(selected.keys());
- const relations=sorted(graph.relations.filter(edge=>[edge.from,edge.to].some(end=>rootKeys.has(end?.kind+':'+end?.id))&&relationAppliesToScene(model,edge,sceneId,coverage)));
+ // refreshDirectoryProjection adds categorization edges from the registered
+ // directory. They explicitly assert no story semantics and have no authored
+ // scope. Do not reinterpret that absence as global scope; original DOMAIN
+ // edges still require their full scope even if they carry directory markers.
+ const authoredRelationIds=new Set((model.domainGraph?.relations||[]).map(edge=>edge.id));
+ const directoryMetadata=edge=>!authoredRelationIds.has(edge.id)&&edge.directoryOnly===true&&edge.appliesTo==='DIRECTORY_METADATA_ONLY'&&edge.semanticEffect==='NONE';
+ const relations=sorted(graph.relations.filter(edge=>!directoryMetadata(edge)&&[edge.from,edge.to].some(end=>rootKeys.has(end?.kind+':'+end?.id))&&relationAppliesToScene(model,edge,sceneId,coverage)));
  for(const edge of relations)for(const end of [edge.from,edge.to])add(end.kind,end.id);
  // Referenced endpoint bodies, including their own identity/state, are semantic
  // conditions too. Unrelated graph components are outside this scene's basis.
@@ -104,7 +110,12 @@ function semanticGraphClosure(model,graph,seeds,sceneId,coverage){
  const entities=sorted([...selected.values()].filter(v=>v.kind==='ENTITY').map(v=>v.row));
  const states=sorted([...selected.values()].filter(v=>v.kind==='STATE').map(v=>v.row));
  const pick=(collection,ids)=>[...new Set(ids)].sort().map(id=>structuredClone(exact(config[collection],id,collection)));
- const dimensions=[...representations,...states].flatMap(row=>Object.keys(row.dimensions||{}));
+ // Directory state labels are retained verbatim in states/conditions, including
+ // opaque dimensions absent from the formal domain taxonomy. Registered keys
+ // still bind their definitions; authored STATE/REP keys never get this rule.
+ const authoredStateIds=new Set((model.domainGraph?.states||[]).map(row=>row.id));
+ const directoryState=row=>!authoredStateIds.has(row.id)&&row.directoryOnly===true&&row.appliesTo==='DIRECTORY_METADATA_ONLY'&&row.temporalAssertion==='NONE';
+ const dimensions=[...representations.flatMap(row=>Object.keys(row.dimensions||{})),...states.flatMap(row=>Object.keys(row.dimensions||{}).filter(key=>!directoryState(row)||config.stateDimensions.some(definition=>definition.id===key)))];
  return {entities,states,representations:representations.map(representationValue),relations,
   referencePolicies:relations.filter(edge=>edge.referencePolicyId).map(edge=>({relationId:edge.id,policy:policy(edge.referencePolicyId,model.domainReferencePolicyBindings,edge.id)})),
   representationPolicies:representations.filter(rep=>['IDENTITY','VOICE_IDENTITY'].includes(rep.type)).map(rep=>({representationId:rep.id,policy:policy(rep.type==='IDENTITY'?'CLEAN_MASTER':'VOICE_MASTER',model.domainRepresentationPolicyBindings,rep.id)})),
