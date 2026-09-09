@@ -8,6 +8,7 @@ import {createInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {mkdtemp,mkdir,rm} from 'node:fs/promises';
 import path from 'node:path';
 import {episodeHttp} from './episode-scope-http.mjs';
+import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {validateModernEventClosure,frozenEventManifest,digest} from '../host/instance-modern-event-validator.mjs';
 import {preserveScopedProductionProjection} from '../host/instance-runtime/scoped-production-projection.mjs';
 
@@ -25,7 +26,8 @@ test('causal endpoint source treatment belongs to the review closure',()=>{const
 export async function exerciseEpisodeScope(planningVersion = '1.0', {afterSync} = {}) {
   const demandBased=planningVersion!=='1.0',requirementSchema=planningVersion==='3.0'?'3.0':'2.0';
   const f=prepared(),profile=blankProfile({title:'单集推进隔离测试',episodePlanId:f.candidate.subjectId});const blank=blankSnapshot(profile);
-  const snapshot={...blank.snapshot,...f.snapshot,instance:profile,scope:{...blank.snapshot.scope,storyScenes:1},productionModel:{...blank.snapshot.productionModel,...f.snapshot.productionModel,instance:profile},sourceHashes:{productionMapSha256:hash('continuity')}};
+  const spatialSource=canonicalJson({version:'1.0',locations:[{id:'ROOM-LETTER',name:'Neutral letter room'}],minimal_location_packages:{'ROOM-LETTER':{name:'Neutral letter room',fact_boundary:'Synthetic test geometry',lock_boundary:'Preserve the test door and table',zones:[{id:'ZONE-LETTER'}],cameras:[{id:'CAM-LETTER',zoneId:'ZONE-LETTER',from:'south doorway',looks:'north'}]}}});
+  const snapshot={...blank.snapshot,...f.snapshot,instance:profile,scope:{...blank.snapshot.scope,storyScenes:1},productionModel:{...blank.snapshot.productionModel,...f.snapshot.productionModel,instance:profile},sourceHashes:{productionMapSha256:sha256(spatialSource)}};
   snapshot.productionModel.scenes=[{id:'OLD',title:'旧场',shotIds:[]}];snapshot.productionModel.systemModel={stateModel:{reviewContract:{schemaVersion:'2.2',actions:['APPROVE_AND_RELEASE','REQUEST_REVISION','DO_NOT_USE']}}};
   snapshot.productionModel.episodePlanRevisions=[{id:'plan:proposal',planId:f.candidate.subjectId,scopeRole:'PROPOSAL',revisionState:'PROPOSAL',revisionHash:f.candidate.baseRevisionHash,episodes:[{episodeUid:'episode:old',sceneIds:['OLD']}],retiredEpisodeUids:[]}];
   if(process.env.EPISODE_HTTP_QA==='1'){
@@ -43,7 +45,11 @@ export async function exerciseEpisodeScope(planningVersion = '1.0', {afterSync} 
   const append=async(kind,payload)=>{const {eventId,eventKind,eventSequence,recordedAt,requestHash,idempotencyKeyHash,...body}=payload;return repo.writeTransaction(async tx=>(await tx.appendEvent({kind,idempotencyKey:'test-'+eventId,requestHash:hash(body),eventSchemaVersion:body.schemaVersion,authorityDomain:'FORMAL',payload:body})).event);};
   let http;
   try {
-    await repo.writeTransaction(tx=>tx.publishRelease({snapshot,recipes:{...blank.recipes,snapshotId:snapshot.snapshotId},expectedReleaseId:null,sourceRevisionIds:[]}));
+    await repo.writeTransaction(async tx=>{
+      const map=await tx.putDocument({documentId:'spatial:episode-scope-map',aliases:['data/production_map_spec.json'],expectedRevisionId:null,bytes:spatialSource,metadata:{sourceRole:'MACHINE_MODEL_SOURCE'}});
+      assert.equal(map.sha256,snapshot.sourceHashes.productionMapSha256);
+      await tx.publishRelease({snapshot,recipes:{...blank.recipes,snapshotId:snapshot.snapshotId},expectedReleaseId:null,sourceRevisionIds:[map.revisionId]});
+    });
     let candidate=await append('creative-revision',{...f.candidate,eventId:'test:plan'});
     let submission=await append('episode-plan-submission',{...f.submission,eventId:'test:submission',subjectRevisionId:candidate.creativeRevisionId,creativeRevisionId:candidate.creativeRevisionId});
     if(process.env.EPISODE_HTTP_QA==='1'){
