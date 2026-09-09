@@ -1,3 +1,4 @@
+import {assertEpisodeReviewSpecInheritance,hasEpisodeReviewSpecInheritance} from './instance-runtime/episode-review-spec-inheritance.mjs';
 import {decodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
 import {validateAssetContextLedger} from './instance-runtime/asset-context-revalidation-model.mjs';
 import {validateUnstartedCancellationEvents} from './instance-runtime/execution-cancellation.mjs';
@@ -116,6 +117,10 @@ export function validateModernEventClosure({events,snapshot,binding,historicalCo
     const before=ordered.filter(e=>e.eventSequence<event.eventSequence);
     const eventsByKind={};for(const e of [...before].reverse())(eventsByKind[e.eventKind]||=[]).push(e);
     return {snapshot:historicalSnapshot(event),eventsByKind};
+  }
+  for(const event of ordered.filter(hasEpisodeReviewSpecInheritance)){
+    assertEpisodeReviewSpecInheritance({event,model:historicalSnapshot(event).productionModel,events:ordered});
+    recordIds.add(event.eventId);relationIds.add(event.eventId);
   }
   for(const c of modernCandidates){
     requireThat(c.schemaVersion==='2.0'&&c.criteriaVersion==='2.0'&&c.revisionId===c.creativeRevisionId,'modern candidate envelope unsupported');

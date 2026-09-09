@@ -1,3 +1,4 @@
+import {hasEpisodeReviewSpecInheritance} from './instance-runtime/episode-review-spec-inheritance.mjs';
 // Host-only capture of immutable published history. Never derive historical
 // material/source state from fields supplied by the event being validated.
 import {gzipSync,gunzipSync} from 'node:zlib';
@@ -13,7 +14,7 @@ const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
 const fail=message=>{throw Object.assign(new Error('Historical event context: '+message),{code:'SOURCE_HISTORICAL_EVENT_CONTEXT'});};
 const requireThat=(ok,message)=>{if(!ok)fail(message);};
 const sha=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
-const selected=events=>events.flatMap(event=>cancellationMarker(event)?[{event,role:'UNSTARTED_CANCELLATION'}]:event.eventKind==='creative-revision'&&event.scopedReviewSpec?[{event,role:'CREATION'}]:event.eventKind==='source-operation'&&event.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1'?[{event,role:'SOURCE_RESULT'}]:event.eventKind==='asset-context-revalidation'?[{event,role:'ASSET_CONTEXT'}]:[]);
+const selected=events=>events.flatMap(event=>cancellationMarker(event)?[{event,role:'UNSTARTED_CANCELLATION'}]:hasEpisodeReviewSpecInheritance(event)||event.eventKind==='creative-revision'&&event.scopedReviewSpec?[{event,role:'CREATION'}]:event.eventKind==='source-operation'&&event.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1'?[{event,role:'SOURCE_RESULT'}]:event.eventKind==='asset-context-revalidation'?[{event,role:'ASSET_CONTEXT'}]:[]);
 const profileKeys=['schemaVersion','instanceId','projectId','title','storyTitle','episodePlanId','locale','branding','assistant','sourceBindings','capabilities','configurationRef'];
 function verifiedRecord(row,revisionId,expectedHash,label){
   requireThat(row&&!row.deleted&&row.revisionId===revisionId&&sha(row.sha256)&&sha256(row.bytes)===row.sha256&&(!expectedHash||row.sha256===expectedHash),label+' original revision/bytes are unavailable or changed');

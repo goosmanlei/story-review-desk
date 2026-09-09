@@ -3,7 +3,7 @@ import { narrativeExcerpt, validateNarrativeRevision } from '../_narrative-revis
 import {assertScopedEpisodeSceneBasis} from '../episode-plan-reviews/_release';
 import {scopedPlanningReviewSpec} from '../episode-plan-reviews/_planning';
 import type { NarrativeRevision } from '../../../narrative-revision';
-import {configHash,reviewSpec} from '../../../../host/instance-runtime/configuration-model.mjs';
+import {episodeCandidateConfiguration} from '../../../../host/instance-runtime/episode-review-spec-inheritance.mjs';
 import { episodeExcerptBlocks } from '../_episode-evidence';
 import { episodePlanIdFor } from '../../../instance-profile';
 import {
@@ -26,6 +26,8 @@ import {
   operationalSnapshot,
   optionalString,
   replayIdempotentEvent,
+  reviewData,
+  instanceRepository,
   stableObjectHash,
   validateMutationRequest,
 } from '../_store';
@@ -37,6 +39,10 @@ const subjectKinds = new Set([
 const writableSubjectKinds = new Set(['EPISODE_PLAN', 'SCENE_COVERAGE', 'SHOT_PLAN_SET']);
 const authorityClasses = new Set(['A', 'L']);
 const scopeTypes = new Set(['SHOT', 'SCENE', 'EPISODE', 'PROJECT']);
+async function candidateConfiguration(data: Awaited<ReturnType<typeof reviewData>>,subjectId:string,creativeRevisionId:string,criteriaVersion?:string){
+  try{return episodeCandidateConfiguration({model:data.productionModel,events:await listAllEvents('creative-revision'),subjectId,creativeRevisionId,criteriaVersion});}
+  catch(reason){throw new HttpError(409,reason instanceof Error?reason.message:'分集冻结标准无法核验');}
+}
 const requiredBasisTypes: Record<string, string[]> = {
   EPISODE_PLAN: ['STORY_REVISION', 'SCRIPT_REVISION'],
   SCENE_COVERAGE: ['SCENE_SCRIPT_REVISION', 'EPISODE_PLAN_REVISION', 'CONTINUITY_SPEC'],
@@ -1066,6 +1072,7 @@ export async function POST(request: Request) {
     const snapshotId = assertStableId(body.snapshotId, 'snapshotId', 200);
     const subjectKind = assertStableId(body.subjectKind, 'subjectKind', 32);
     const subjectId = assertStableId(body.subjectId, 'subjectId');
+    if(subjectKind==='EPISODE_PLAN'&&['reviewSpec','configurationBinding','reviewSpecInheritance'].some(key=>Object.hasOwn(body,key)))throw new HttpError(422,'分集冻结标准及继承证据由服务端核验，不能由作者请求提供');
     const baseRevisionHash = assertSha256(body.baseRevisionHash, 'baseRevisionHash');
     const rawContent = assertJsonObject(body.content, 'content', subjectKind === 'EPISODE_PLAN' ? 5_000_000 : 250_000);
     const note = optionalString(body.note, 20_000);
@@ -1142,6 +1149,7 @@ export async function POST(request: Request) {
       ...(requirementBased ? {planningContractVersion,materialRequirementSet} : {}),
     }).slice(0, 32)}`;
     const criteriaVersion = subjectKind === 'EPISODE_PLAN' && (content as { episodes?: Array<{ reviewDossier: { schemaVersion: string } }> }).episodes?.every((episode) => episode.reviewDossier.schemaVersion === '1.1') ? '2.0' : undefined;
+    const episodeConfiguration=subjectKind==='EPISODE_PLAN'?await candidateConfiguration(data,subjectId,creativeRevisionId,criteriaVersion):{};
     const contextHash = stableObjectHash({ subjectKind, subjectId, baseRevisionHash, basisBindingsHash, ...(criteriaVersion ? { criteriaVersion } : {}), ...(planningContractVersion === '3.0' ? {planningContractVersion} : {}) });
     const semanticRequest = {
       snapshotId,
@@ -1157,7 +1165,7 @@ export async function POST(request: Request) {
       businessContextHash: contextHash,
       bindingVersion: '2.0',
       ...(criteriaVersion ? { criteriaVersion } : {}),
-      ...(subjectKind==='EPISODE_PLAN'&&data.productionModel.systemConfiguration?(()=>{const c=data.productionModel.systemConfiguration.config;const spec=reviewSpec(c,'EPISODE_PLAN',{});return {reviewSpec:spec,configurationBinding:{key:`candidate:${creativeRevisionId}`,kind:'EPISODE_PLAN',reviewSpec:spec,technical:c.technical,workflow:c.workflow,sources:c.sources,configurationHash:configHash(c),createdBy:'CANDIDATE_REGISTRATION'}};})():{}),
+      ...episodeConfiguration,
       basisBindings: canonicalBasisBindings,
       ...(['SCENE_COVERAGE','SHOT_PLAN_SET'].includes(subjectKind) && (subjectKind==='SCENE_COVERAGE'?data.productionModel.sceneCoveragePlanRevisions:data.productionModel.shotPlanSetRevisions)?.some(row=>row.planId===subjectId&&row.episodeNarrativeReleaseId) ? {scopeType:'SCENE',scopeId:(content as {sceneId:string}).sceneId,scopedReviewSpec:scopedPlanningReviewSpec(subjectKind as 'SCENE_COVERAGE'|'SHOT_PLAN_SET', requirementBased ? planningContractVersion : '1.0')} : {}),
       basisBindingsHash,
@@ -1181,11 +1189,21 @@ export async function POST(request: Request) {
       '2.0',
       async (locked) => {
         if (subjectKind === 'EPISODE_PLAN') {
+          const lockedData=await reviewData();
+          if(episodeConfiguration.reviewSpecInheritance){
+            const repository=await instanceRepository(),recordedBefore=new Date().toISOString();
+            if(!repository)throw new HttpError(409,'冻结标准继承必须使用受控实例历史');
+            let publication;
+            try{publication=await repository.readPublishedReleaseAt({recordedBefore,snapshotId:lockedData.snapshotId});}
+            catch{throw new HttpError(409,'最新先前发布历史不唯一，请等待来源可明确核验后重读');}
+            if(!publication||publication.createdAt>=recordedBefore||publication.releaseId!==(await repository.getMetadata()).releaseId)throw new HttpError(409,'继承候选需要唯一且严格先前的当前发布，不能与来源发布同毫秒登记');
+          }
+          if(stableObjectHash(await candidateConfiguration(lockedData,subjectId,creativeRevisionId,criteriaVersion))!==stableObjectHash(episodeConfiguration))throw new HttpError(409,'分集方案最新前驱或冻结标准已变化，请重读后登记');
           const lockedContent = canonicalEpisodePlanContent(
-            data,
+            lockedData,
             subjectId,
             rawContent,
-            await episodePlanIdentityLedger(data),
+            await episodePlanIdentityLedger(lockedData),
           );
           if (stableObjectHash(lockedContent) !== contentHash) {
             throw new HttpError(409, 'EpisodePlan identity ledger changed before the candidate append; reload and retry');

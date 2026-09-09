@@ -1,3 +1,4 @@
+import {createEpisodeReviewSpecArchiveValidator} from './episode-review-spec-archive.mjs';
 import {createMaterialProductionRebaseArchiveValidator} from './material-production-rebase-archive.mjs';
 import {createAssetContextArchiveValidator} from './asset-context-revalidation-archive.mjs';
 import {createExecutionCancellationArchiveValidator} from './execution-cancellation-archive.mjs';
@@ -78,6 +79,6 @@ export function validateMaterialUsageArchive(archive,{encoded=true}={}){
 }
 
 export function createMaterialUsageArchiveValidator(){
- const usage=createMaterialUsageOnlyArchiveValidator(),context=createAssetContextArchiveValidator(),cancellation=createExecutionCancellationArchiveValidator(),rebase=createMaterialProductionRebaseArchiveValidator();
- return {accept(...args){usage.accept(...args);context.accept(...args);cancellation.accept(...args);rebase.accept(...args);},finish(){usage.finish();context.finish();cancellation.finish();rebase.finish();}};
+ const usage=createMaterialUsageOnlyArchiveValidator(),context=createAssetContextArchiveValidator(),cancellation=createExecutionCancellationArchiveValidator(),rebase=createMaterialProductionRebaseArchiveValidator(),episodeSpec=createEpisodeReviewSpecArchiveValidator();
+ return {accept(...args){usage.accept(...args);context.accept(...args);cancellation.accept(...args);rebase.accept(...args);episodeSpec.accept(...args);},finish(){usage.finish();context.finish();cancellation.finish();rebase.finish();episodeSpec.finish();}};
 }
