@@ -3,7 +3,7 @@ import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { blankProfile, blankSnapshot } from '../host/instance-runtime/blank.mjs';
-import { installHostedMedia, verifyHostedExport } from './instance-hosted-export.mjs';
+import { installHostedMedia, snapshotShards, verifyHostedExport } from './instance-hosted-export.mjs';
 
 const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const explicitHostedBuild = Boolean(process.env.REVIEW_EXPORT_DIR);
@@ -17,11 +17,6 @@ const sourceShardRoot = path.join(siteRoot, 'data');
 const reviewCoreFilename = 'review-data-core.generated.json';
 const reviewProductionAFilename = 'review-data-production-a.generated.json';
 const reviewProductionBFilename = 'review-data-production-b.generated.json';
-const productionShardAKeys = new Set([
-  'schemaVersion', 'policy', 'reviewContextCatalog', 'workflowSteps',
-  'continuityGroups', 'stageDefinitions', 'episodes', 'scenes', 'segments',
-  'beats', 'shots', 'reviewContexts', 'structureCards', 'executionRecipeSummary',
-]);
 
 async function loadReviewData() {
   try {
@@ -78,16 +73,11 @@ if (hostedEvents?.snapshotId !== reviewData.snapshotId || hostedEvents?.mode !==
   throw new Error('hosted material events do not match the current review snapshot');
 }
 
-const { productionModel, ...reviewDataCore } = reviewData;
-const productionModelA = {};
-const productionModelB = {};
-for (const [key, value] of Object.entries(productionModel)) {
-  (productionShardAKeys.has(key) ? productionModelA : productionModelB)[key] = value;
-}
+const [reviewDataCore, productionShardA, productionShardB] = snapshotShards(reviewData);
 const outputs = [
   [reviewCoreFilename, reviewDataCore],
-  [reviewProductionAFilename, { snapshotId: reviewData.snapshotId, productionModel: productionModelA }],
-  [reviewProductionBFilename, { snapshotId: reviewData.snapshotId, productionModel: productionModelB }],
+  [reviewProductionAFilename, productionShardA],
+  [reviewProductionBFilename, productionShardB],
   ['review-recipes.generated.json', recipes],
   ['hosted-material-events.generated.json', hostedEvents],
 ].map(([filename, value]) => {

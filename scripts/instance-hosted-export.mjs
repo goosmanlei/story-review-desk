@@ -18,8 +18,9 @@ import {episodeSourceCompiler} from '../host/instance-runtime/episode-source-syn
 import {fileURLToPath} from 'node:url';
 
 const JSON_FILES = ['review-data-core.generated.json', 'review-data-production-a.generated.json', 'review-data-production-b.generated.json', 'review-recipes.generated.json', 'hosted-material-events.generated.json'];
-const PRODUCTION_A_KEYS = new Set(['schemaVersion','policy','reviewContextCatalog','workflowSteps','continuityGroups','stageDefinitions','episodes','scenes','segments','beats','shots','reviewContexts','structureCards','executionRecipeSummary']);
-function snapshotShards(snapshot) {
+// 导出和构建共用整字段分片；制作准备随场／镜头放入 A，不截断正文。
+const PRODUCTION_A_KEYS = new Set(['schemaVersion','policy','reviewContextCatalog','workflowSteps','continuityGroups','stageDefinitions','episodes','scenes','segments','beats','shots','reviewContexts','structureCards','executionRecipeSummary','productionPreparation']);
+export function snapshotShards(snapshot) {
   const {productionModel,...core}=snapshot;
   const a={},b={};
   for(const [key,value] of Object.entries(productionModel)) (PRODUCTION_A_KEYS.has(key)?a:b)[key]=value;

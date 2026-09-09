@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {cp,mkdtemp,mkdir,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {inspectPackageSource,readPackageSource,assertPackageSourceUnchanged} from '../scripts/instance-package-source.mjs';
 import {verifySoftwarePin} from '../scripts/instance-software-pin.mjs';
 import {assertHostedBuildOutput,assertHostedExportUnchanged} from '../scripts/instance-build-output.mjs';
+import {snapshotShards} from '../scripts/instance-hosted-export.mjs';
 const sha=b=>createHash('sha256').update(b).digest('hex');
 async function temporary(t){const root=await realpath(await mkdtemp(path.join(tmpdir(),'core-delivery-integrity-')));t.after(()=>rm(root,{recursive:true,force:true}));return root;}
 const noGit=()=>{throw Error('No source Git root');};
@@ -86,4 +89,38 @@ test('wrapper checks emitted artifacts and export identity before replacing prev
  assert(source.indexOf('verifySoftwarePin(project);verifyProjectRevision()')<source.indexOf('await rename(destination,'));
  assert(source.includes('REVIEW_EXPECTED_EXPORT_MANIFEST_SHA256:exported.manifest.manifestSha256'));
  const preparation=await readFile(new URL('../scripts/prepare-hosted-runtime.mjs',import.meta.url),'utf8');assert(preparation.includes('Hosted export differs from the build-frozen manifest'));
+});
+
+test('生产准备按整字段分片，导出与构建逐字一致，仍拒绝超限且不覆盖旧产物',async t=>{
+ const root=await temporary(t),limit=16*1024*1024,unit=1024*1024;
+ const snapshot={schemaVersion:'1.0',snapshotId:'snapshot:large-neutral-fixture',productionModel:{
+  scenes:[{id:'scene:fixture',body:'a'.repeat(9*unit)}],
+  productionPreparation:{authorCuts:[{id:'cut:fixture',text:'b'.repeat(5*unit)}]},
+  materialDirectory:{description:'c'.repeat(12*unit)},
+  domainProductionCompatibilities:[{id:'proof:fixture',scope:['scene:fixture'],history:'保留历史'}],
+  futureUnknownField:{nested:['完整保留新增字段']},
+ }};
+ const parts=snapshotShards(snapshot),serialize=value=>JSON.stringify(value)+'\n';
+ assert(Buffer.byteLength(serialize({...parts[2].productionModel,productionPreparation:snapshot.productionModel.productionPreparation}))>limit);
+ assert(parts.every(part=>Buffer.byteLength(serialize(part))<=limit));
+ assert.deepEqual({...parts[0],productionModel:{...parts[1].productionModel,...parts[2].productionModel}},snapshot);
+ assert.equal(parts[1].productionModel.productionPreparation,snapshot.productionModel.productionPreparation);
+ assert.equal(Object.hasOwn(parts[2].productionModel,'productionPreparation'),false);
+ // 只复制源码，避免并行测试的临时数据库在复制期间退出／删除。
+ for(const dir of ['scripts','host'])await cp(new URL('../'+dir,import.meta.url),path.join(root,dir),{recursive:true,filter:source=>!['test','tests','__pycache__'].includes(path.basename(source))&&!path.basename(source).startsWith('.')});
+ for(const dir of ['app','data'])await mkdir(path.join(root,dir));
+ const source=path.join(root,'app/review-data.generated.json');await writeFile(source,serialize(snapshot));
+ await writeFile(path.join(root,'data/review-recipes.generated.json'),serialize({snapshotId:snapshot.snapshotId}));
+ await writeFile(path.join(root,'data/hosted-material-events.generated.json'),serialize({snapshotId:snapshot.snapshotId,mode:'HOSTED_READ_ONLY_EVENT_PROJECTION'}));
+ const run=()=>promisify(execFile)(process.execPath,[path.join(root,'scripts/prepare-hosted-runtime.mjs')],{cwd:root,env:{...process.env,REVIEW_EXPORT_DIR:'',REVIEW_LEGACY_FIXTURE:'1'},maxBuffer:1024*1024});
+ await run();const manifestPath=path.join(root,'public/runtime/manifest.json'),manifestBytes=await readFile(manifestPath),manifest=JSON.parse(manifestBytes);
+ assert.equal(manifest.files.length,5);assert.equal(manifest.maxAssetBytes,limit);
+ for(const [i,file] of manifest.files.entries()){
+  const bytes=await readFile(path.join(root,'public/runtime',file.filename));assert.equal(bytes.length,file.sizeBytes);assert.equal(sha(bytes),file.sha256);assert(bytes.length<=limit);
+  if(i<3)assert.equal(bytes.toString(),serialize(parts[i]));
+ }
+ snapshot.productionModel.productionPreparation.authorCuts[0].text='x'.repeat(17*unit);await writeFile(source,serialize(snapshot));
+ await assert.rejects(run(),/review-data-production-a.generated.json.*16777216/);
+ assert.deepEqual(await readFile(manifestPath),manifestBytes);
+ for(const file of manifest.files){const bytes=await readFile(path.join(root,'public/runtime',file.filename));assert.equal(bytes.length,file.sizeBytes);assert.equal(sha(bytes),file.sha256);}
 });
