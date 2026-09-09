@@ -4,6 +4,7 @@ import {gzipSync,gunzipSync} from 'node:zlib';
 import {openSync,closeSync,fstatSync,readFileSync,lstatSync,realpathSync,constants} from 'node:fs';
 import path from 'node:path';
 import {canonicalJson,sha256} from './instance-runtime/bytes.mjs';
+import {cancellationMarker,cancellationPublication} from './instance-runtime/execution-cancellation.mjs';
 
 const schemaVersion='HISTORICAL_EVENT_CONTEXTS_V1';
 const maxReleaseBytes=128*1024*1024;
@@ -12,7 +13,7 @@ const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
 const fail=message=>{throw Object.assign(new Error('Historical event context: '+message),{code:'SOURCE_HISTORICAL_EVENT_CONTEXT'});};
 const requireThat=(ok,message)=>{if(!ok)fail(message);};
 const sha=value=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
-const selected=events=>events.flatMap(event=>event.eventKind==='creative-revision'&&event.scopedReviewSpec?[{event,role:'CREATION'}]:event.eventKind==='source-operation'&&event.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1'?[{event,role:'SOURCE_RESULT'}]:event.eventKind==='asset-context-revalidation'?[{event,role:'ASSET_CONTEXT'}]:[]);
+const selected=events=>events.flatMap(event=>cancellationMarker(event)?[{event,role:'UNSTARTED_CANCELLATION'}]:event.eventKind==='creative-revision'&&event.scopedReviewSpec?[{event,role:'CREATION'}]:event.eventKind==='source-operation'&&event.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1'?[{event,role:'SOURCE_RESULT'}]:event.eventKind==='asset-context-revalidation'?[{event,role:'ASSET_CONTEXT'}]:[]);
 const profileKeys=['schemaVersion','instanceId','projectId','title','storyTitle','episodePlanId','locale','branding','assistant','sourceBindings','capabilities','configurationRef'];
 function verifiedRecord(row,revisionId,expectedHash,label){
   requireThat(row&&!row.deleted&&row.revisionId===revisionId&&sha(row.sha256)&&sha256(row.bytes)===row.sha256&&(!expectedHash||row.sha256===expectedHash),label+' original revision/bytes are unavailable or changed');
@@ -115,7 +116,11 @@ export async function captureHistoricalEventContexts(tx,{events,instanceId}){
   for(const {event,role} of selected(events)){
     requireThat(Number.isSafeInteger(event.eventSequence)&&event.eventSequence>0&&Number.isFinite(Date.parse(event.recordedAt)),'historical event lacks a real sequence/timestamp');
     let release;
-    if(role==='CREATION'||role==='ASSET_CONTEXT'){
+    if(role==='UNSTARTED_CANCELLATION'){
+      const mutation=event.cancellationReceipt?.mutation;requireThat(mutation&&mutation.runtime?.instanceId===instanceId,'cancellation actual mutation identity missing');
+      release=await tx.readPublishedReleaseAt({recordedBefore:event.recordedAt,snapshotId:mutation.snapshotId});
+      requireThat(release&&Date.parse(release.createdAt)<Date.parse(event.recordedAt)&&same(cancellationPublication(release),Object.fromEntries(Object.keys(cancellationPublication(release)).map(k=>[k,mutation[k]]))),'cancellation actual prior publication differs');
+    }else if(role==='CREATION'||role==='ASSET_CONTEXT'){
       requireThat(typeof event.creationSnapshotId==='string'&&event.creationSnapshotId===event.snapshotId,'candidate creation snapshot differs');
       release=role==='ASSET_CONTEXT'?await assetContextBaseRelease(tx,event):await tx.readPublishedReleaseAt({recordedBefore:event.recordedAt,snapshotId:event.creationSnapshotId});
       requireThat(release&&Date.parse(release.createdAt)<Date.parse(event.recordedAt)&&release.snapshotId===event.creationSnapshotId,'candidate has no exact prior publication');
@@ -154,7 +159,9 @@ export function historicalEventContextReader(bundle,{events,expectedHash,instanc
     requireThat(c&&c.role===role&&c.eventSha256===hash(event)&&release,'captured historical event differs');used.add(c.releaseId);
     requireThat(r.publicProfile?.instanceId===instanceId&&r.profileProof?.revisionId===release.profileRevisionId&&sha(r.profileProof?.sha256),'captured profile proof differs');
     requireThat(Array.isArray(r.sourceProof)&&Array.isArray(release.sourceRevisionIds)&&new Set(r.sourceProof.map(p=>p.revisionId)).size===r.sourceProof.length&&r.sourceProof.every(p=>typeof p.documentId==='string'&&sha(p.sha256))&&release.sourceRevisionIds.every(id=>r.sourceProof.some(p=>p.revisionId===id)),'captured source closure differs');
-    if(role==='CREATION'||role==='ASSET_CONTEXT')requireThat(release.snapshotId===event.creationSnapshotId&&event.snapshotId===event.creationSnapshotId&&Date.parse(release.createdAt)<Date.parse(event.recordedAt),'captured creation publication differs');
+    if(role==='UNSTARTED_CANCELLATION'){
+      const mutation=event.cancellationReceipt?.mutation;requireThat(mutation&&same(cancellationPublication(release),Object.fromEntries(Object.keys(cancellationPublication(release)).map(k=>[k,mutation[k]])))&&Date.parse(release.createdAt)<Date.parse(event.recordedAt),'captured cancellation mutation publication differs');
+    }else if(role==='CREATION'||role==='ASSET_CONTEXT')requireThat(release.snapshotId===event.creationSnapshotId&&event.snapshotId===event.creationSnapshotId&&Date.parse(release.createdAt)<Date.parse(event.recordedAt),'captured creation publication differs');
     else requireThat(release.releaseId===event.resultReleaseId&&release.snapshotId===event.snapshotId&&release.snapshotId===event.newSnapshotId&&release.snapshotSha256===event.transactionProof?.snapshotSha256&&Date.parse(release.createdAt)<=Date.parse(event.recordedAt)&&r.sourceProof.some(p=>p.revisionId===event.transactionProof.sourceRevisionId&&p.sha256===event.transactionProof.sourceSha256),'captured source result proof differs');
   }
   requireThat(used.size===releaseMap.size,'unused historical release injected');

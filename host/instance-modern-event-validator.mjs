@@ -1,5 +1,6 @@
 import {decodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
 import {validateAssetContextLedger} from './instance-runtime/asset-context-revalidation-model.mjs';
+import {validateUnstartedCancellationEvents} from './instance-runtime/execution-cancellation.mjs';
 import {historicalEventContextReader} from './instance-historical-event-context.mjs';
 import {decodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
 import {validateMaterialUsageLedger} from './instance-runtime/material-usage-model.mjs';
@@ -105,6 +106,8 @@ export function validateModernEventClosure({events,snapshot,binding,historicalCo
   for(const id of usageIds){recordIds.add(id);relationIds.add(id);}
   const latestCandidate=(event,subjectId)=>candidates.filter(c=>c.eventSequence<event.eventSequence&&(!subjectId||c.subjectId===subjectId)).at(-1);
   const historicalSnapshot=historicalEventContextReader(historicalContexts,{events,expectedHash:binding.historicalContextsHash,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,directory:runtime.historicalContextDirectory});
+  const cancellationRows=validateUnstartedCancellationEvents({events,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,releaseContext:event=>historicalSnapshot.releaseContext(event).release});
+  for(const row of cancellationRows){recordIds.add(row.eventId);relationIds.add(row.eventId);}
   const contextDocuments=decodeAssetContextDocuments(assetContextSources);
   const contextRows=validateAssetContextLedger({snapshot,documents:contextDocuments,events,releaseContext:event=>historicalSnapshot.releaseContext(event)});
   if(contextRows.length||assetContextSources.length||binding.assetContextSourcesHash!==undefined)requireThat(assetContextDocumentsHash(assetContextSources)===binding.assetContextSourcesHash,'asset context fixed source capture differs');

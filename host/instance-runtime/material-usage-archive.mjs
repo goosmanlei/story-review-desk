@@ -1,4 +1,5 @@
 import {createAssetContextArchiveValidator} from './asset-context-revalidation-archive.mjs';
+import {createExecutionCancellationArchiveValidator} from './execution-cancellation-archive.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {MATERIAL_USAGE_EVENT,MATERIAL_USAGE_SOURCE,validateMaterialUsageLedger} from './material-usage-model.mjs';
 
@@ -76,6 +77,6 @@ export function validateMaterialUsageArchive(archive,{encoded=true}={}){
 }
 
 export function createMaterialUsageArchiveValidator(){
- const usage=createMaterialUsageOnlyArchiveValidator(),context=createAssetContextArchiveValidator();
- return {accept(...args){usage.accept(...args);context.accept(...args);},finish(){usage.finish();context.finish();}};
+ const usage=createMaterialUsageOnlyArchiveValidator(),context=createAssetContextArchiveValidator(),cancellation=createExecutionCancellationArchiveValidator();
+ return {accept(...args){usage.accept(...args);context.accept(...args);cancellation.accept(...args);},finish(){usage.finish();context.finish();cancellation.finish();}};
 }

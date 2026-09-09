@@ -1,4 +1,5 @@
 import {encodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
+import {cancellationMarker} from './instance-runtime/execution-cancellation.mjs';
 // Validation delegation only. The original full event directory remains untouched.
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -48,7 +49,7 @@ export async function validateModernEventsInChild({events,baseRelease,eventDirec
   const hasUsage=materialUsageSources.length||events.some(e=>e.eventKind==='material-usage-review'||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))||materialUsageLedger!==undefined&&(!Array.isArray(materialUsageLedger)||materialUsageLedger.length);
   const contextLedger=snapshot.productionModel?.assetContextRevalidationLedger;
   const hasContext=assetContextSources.length||events.some(e=>e.eventKind==='asset-context-revalidation'||e.subjectType==='ASSET_CONTEXT'||Object.hasOwn(e,'revalidationRevisionId'))||contextLedger!==undefined&&(!Array.isArray(contextLedger)||contextLedger.length);
-  const required=hasContext||hasUsage||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
+  const required=hasContext||hasUsage||events.some(cancellationMarker)||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
   if(!required)return null;
   const validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
   return withHistoricalEventTransport(historicalContexts,async({historicalContexts:transported,directory})=>{
