@@ -1,3 +1,4 @@
+import {createImageTechnicalSpec,imageTechnicalReviewText,validateImagePurposeProfiles} from './image-technical-spec.mjs';
 import { defaultDomainConfiguration, validateDomainConfiguration } from "./domain-model.mjs";
 import { deliveryAliases, productionGroups } from "./review-standard-catalog.mjs";
 import { standardDefaults } from "./review-standard-defaults.mjs";
@@ -505,7 +506,7 @@ function validateShapes(c) {
       "sources",
       "collaboration",
       "presentation",
-      ...(c.schemaVersion === "2.0" ? ["domain"] : []),
+      ...(["2.0", "2.1"].includes(c.schemaVersion) ? ["domain"] : []),
     ],
     "configuration",
   );
@@ -613,7 +614,8 @@ function validateShapes(c) {
       ],
       "gate",
     );
-  shape(c.technical, ["picture", "delivery"], "technical");
+  shape(c.technical, ["picture", "delivery", ...(c.schemaVersion === "2.1" ? ["imagePurposeProfiles"] : [])], "technical");
+  if(c.schemaVersion === "2.1")validateImagePurposeProfiles(c.technical.imagePurposeProfiles);
   shape(
     c.technical.picture,
     ["aspectRatio", "width", "height", "fps", "confirmation"],
@@ -679,7 +681,7 @@ export function validateConfiguration(config, previous) {
   validateShapes(config);
   if (
     !config ||
-    !["1.0", "2.0"].includes(config.schemaVersion) ||
+    !["1.0", "2.0", "2.1"].includes(config.schemaVersion) ||
     config.template?.id !== TEMPLATE_ID ||
     !["1.0", "1.1"].includes(config.template?.version)
   )
@@ -694,14 +696,14 @@ export function validateConfiguration(config, previous) {
     "sources",
     "collaboration",
     "presentation",
-    ...(config.schemaVersion === "2.0" ? ["domain"] : []),
+    ...(["2.0", "2.1"].includes(config.schemaVersion) ? ["domain"] : []),
   ];
   if (
     Object.keys(config).some((k) => !top.includes(k)) ||
     top.some((k) => config[k] == null)
   )
     fail("配置分组不完整或包含不支持字段");
-  if (config.schemaVersion === "2.0") validateDomainConfiguration(config.domain);
+  if (["2.0", "2.1"].includes(config.schemaVersion)) validateDomainConfiguration(config.domain);
   const profiles = ids(config.reviewProfiles, "reviewProfiles");
   if (!profiles.has("episode-plan") || !profiles.has("script-scene"))
     fail("缺少必要审阅模板");
@@ -1019,6 +1021,7 @@ export function reviewSpec(
   { legacy = false, shotContext, scopeContext } = {},
 ) {
   const profileId = profileFor(config, kind, object);
+  const imageBinding = legacy ? null : createImageTechnicalSpec(config,kind,object);
   const profile = config.reviewProfiles.find((p) => p.id === profileId) || (!legacy && kind==='WORK_PRODUCT' ? shotPrevisReviewProfile(object) : null);
   if (profile && profile.subjectKind !== kind)
     fail("审阅模板与对象类型不一致", profileId);
@@ -1088,13 +1091,14 @@ export function reviewSpec(
   }
   if (!legacy && criteria?.length && kind !== "EPISODE_PLAN") {
     const picture = config.technical.picture;
-    const specs = `本对象制作基线：${picture.aspectRatio}，${picture.width}×${picture.height}，${picture.fps} fps（${picture.confirmation}）。未确认值仍为 UNKNOWN，须以实际文件核验。`;
+    const specs = imageBinding ? imageTechnicalReviewText(imageBinding.technicalSpec) : `本对象制作基线：${picture.aspectRatio}，${picture.width}×${picture.height}，${picture.fps} fps（${picture.confirmation}）。未确认值仍为 UNKNOWN，须以实际文件核验。`;
     const continuity = `连续性依据：${config.sources.continuity.specAlias || "UNKNOWN"}；检查主题：${config.sources.continuity.themes.map((t) => t.label).join("、")}；必需坐标：${config.sources.continuity.requiredCoordinates.join("、")}。缺失依据须明确说明。`;
-    criteria = criteria.map((c) => ({
+    const hasTechnicalCriterion=criteria.some(c=>/technical|quality|output|delivery/.test(c.id));
+    criteria = criteria.map((c,i) => ({
       ...c,
       question:
         c.question +
-        (/technical|quality|output|delivery/.test(c.id)
+        ((/technical|quality|output|delivery/.test(c.id) || imageBinding && !hasTechnicalCriterion && i===criteria.length-1)
           ? ` ${specs}`
           : /continuity/.test(c.id)
             ? ` ${continuity}`
@@ -1112,6 +1116,7 @@ export function reviewSpec(
           lastQuestion: profile.lastQuestion,
         }
       : {}),
+    ...(imageBinding || {}),
     configurationHash: configHash(semanticConfiguration(config)),
   };
   return { ...value, hash: configHash(value) };
@@ -1196,6 +1201,7 @@ export function bindConfiguration(
       key,
       kind,
       reviewSpec: spec,
+      ...(spec.technicalSpec ? {technicalSpec:clone(spec.technicalSpec),technicalSpecHash:spec.technicalSpecHash} : {}),
       technical: clone(config.technical),
       productionLane:
         kind === "ASSET"

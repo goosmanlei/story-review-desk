@@ -1,3 +1,4 @@
+import {imageTechnicalBinding} from './image-technical-spec.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
 import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,shotProductionEntryGates,productionBindingReasons} from './shot-production-model.mjs';
@@ -114,7 +115,7 @@ export async function applyShotProductionJob(tx,{jobId,api}){
   for(const [index,[id,label,code,purpose,reviewFocus,output,unlock]] of stepTexts.entries())if(!(out.workflowSteps||[]).some(s=>s.id===id))out.workflowSteps=[...(out.workflowSteps||[]),{id,order:index+1,label,technicalCodes:[code],purpose,reviewFocus,output,unlock}];
   const config=out.systemConfiguration?.config;if(!config)fail('当前实例缺少冻结的制作审阅配置');
   const bindings=bindConfiguration(snapshot,config);
-  for(const item of reuse.additions.workItems){const row=out.workItems.find(w=>w.id===item.id);row.configurationBinding=bindings['work:'+item.id];row.reviewSpec=row.configurationBinding?.reviewSpec;if(!row.reviewSpec?.hash)fail('制作项缺少精确审阅标准：'+item.deliverableKey);}
+  for(const item of reuse.additions.workItems){const row=out.workItems.find(w=>w.id===item.id);row.configurationBinding=bindings['work:'+item.id];row.reviewSpec=row.configurationBinding?.reviewSpec;if(!row.reviewSpec?.hash)fail('制作项缺少精确审阅标准：'+item.deliverableKey);const imageSpec=imageTechnicalBinding(row.configurationBinding);if(imageSpec){Object.assign(row,structuredClone(imageSpec));for(const target of [...reuse.additions.assetFamilies.filter(f=>f.ownerRef===row.id),...reuse.additions.expectedOutputs.filter(o=>o.familyId===row.outputAssetRef)]){const original=(target.familyId?out.expectedOutputs:out.assetFamilies).find(r=>r.id===target.id);Object.assign(original,structuredClone(imageSpec));}}}
   // These are new production objects. Frozen ShotSpec bytes and old reviews are untouched.
   snapshot.snapshotId='snapshot_'+productionHash({previous:view.snapshot.snapshotId,plan:plan.id,sourceSha256:source.sha256}).slice(0,32);
   const recipes={...view.recipes,snapshotId:snapshot.snapshotId};

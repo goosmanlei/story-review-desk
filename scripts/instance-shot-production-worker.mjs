@@ -10,6 +10,7 @@ import {runShotProductionManifestIteration} from '../host/instance-runtime/shot-
 import {runShotRecipeIteration} from '../host/instance-runtime/shot-production-recipes.mjs';
 import {runMaterialProductionIteration} from '../host/instance-runtime/material-production-service.mjs';
 import {runMaterialUsageIteration} from '../host/instance-runtime/material-usage-service.mjs';
+import {runAssetContextRevalidationIteration} from '../host/instance-runtime/asset-context-revalidation-service.mjs';
 import {runSpatialShotViewIteration} from '../host/instance-runtime/spatial-shot-view-service.mjs';
 import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mjs';
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
@@ -30,6 +31,7 @@ export async function shotProductionWorker(instanceRoot,{once=false}={}){
  try{do{
   const material=await runMaterialProductionIteration({repository,api});if(material.processed)process.stdout.write(JSON.stringify(material)+'\n');
   const usage=await runMaterialUsageIteration({repository,api});if(usage.processed)process.stdout.write(JSON.stringify(usage)+'\n');
+  const revalidation=await runAssetContextRevalidationIteration({repository,api});if(revalidation.processed)process.stdout.write(JSON.stringify(revalidation)+'\n');
   const spatial=await runSpatialShotViewIteration({repository});if(spatial.processed)process.stdout.write(JSON.stringify(spatial)+'\n');
   const result=await runShotProductionWorkerIteration({repository,api});if(result.processed)process.stdout.write(JSON.stringify(result)+'\n');
   const recipe=await runShotRecipeIteration({repository,api});if(recipe.processed)process.stdout.write(JSON.stringify(recipe)+'\n');

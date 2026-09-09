@@ -9,6 +9,7 @@ import { useRuntimeMode } from "./runtime-mode";
 import "./system-configuration.css";
 import { ReviewStandardsEditor } from "./review-standards-editor";
 import { DomainConfigurationEditor } from "./domain-configuration-editor";
+import { ImagePurposeConfiguration } from "./image-purpose-configuration";
 import { CREATOR_PRODUCTION_STAGES, creatorProductionStageForGate, creatorProductionStageDefinition, creatorProductionGateDefinition } from "./creator-production-workflow";
 const groups = CONFIGURATION_SECTIONS.flatMap(section => section.groups);
 type Group = ConfigurationGroup;
@@ -218,7 +219,7 @@ export function SystemConfigurationWorkspace() {
             </p>
           </header>
           {group === "review" && <ReviewStandardsEditor config={config} state={state} profileId={profileId} onSelect={setProfileId} onEdit={edit} readonly={Boolean(readonly)} upgradeKeys={upgradeKeys} onUpgrade={keys=>{setUpgradeKeys(keys);setDirty(true);setPreview(null);}} />}
-          {group === "entities" && <DomainConfigurationEditor value={config.domain} mode="structure" readonly={Boolean(readonly)} onChange={domain=>edit(c=>{c.schemaVersion="2.0";c.domain=domain;})} />}
+          {group === "entities" && <DomainConfigurationEditor value={config.domain} mode="structure" readonly={Boolean(readonly)} onChange={domain=>edit(c=>{if(c.schemaVersion!=="2.1")c.schemaVersion="2.0";c.domain=domain;})} />}
           {group === "taxonomy" && (
             <>
               <h3>素材目录分类</h3>
@@ -681,6 +682,7 @@ export function SystemConfigurationWorkspace() {
                 </label>
               </div>
               <p>画面基线发布不会改写已生成文件的实际参数。</p>
+              <ImagePurposeConfiguration config={config} state={state} readonly={Boolean(readonly)} onEdit={edit} upgradeKeys={upgradeKeys} onUpgrade={keys=>{setUpgradeKeys(keys);setDirty(true);setPreview(null);}} />
             </>
           )}
           {group === "sources" && (
@@ -734,7 +736,7 @@ export function SystemConfigurationWorkspace() {
           )}
           {group === "references" && (
             <>
-              <DomainConfigurationEditor value={config.domain} mode="references" readonly={Boolean(readonly)} onChange={domain=>edit(c=>{c.schemaVersion="2.0";c.domain=domain;})} />
+              <DomainConfigurationEditor value={config.domain} mode="references" readonly={Boolean(readonly)} onChange={domain=>edit(c=>{if(c.schemaVersion!=="2.1")c.schemaVersion="2.0";c.domain=domain;})} />
               <h3>连续性检查</h3>
               {text(
                 "当前规范的实例文档别名",

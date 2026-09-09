@@ -1,3 +1,4 @@
+import {encodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
 // Validation delegation only. The original full event directory remains untouched.
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -42,14 +43,16 @@ export async function withHistoricalEventTransport(bundle,callback){
 }
 
 export async function validateModernEventsInChild({events,baseRelease,eventDirectory,historicalContexts,documents=[]}){
-  const materialUsageSources=encodeMaterialUsageDocuments(documents);
+  const materialUsageSources=encodeMaterialUsageDocuments(documents),assetContextSources=encodeAssetContextDocuments(documents);
   const snapshot=JSON.parse(baseRelease.snapshotBytes),materialUsageLedger=snapshot.productionModel?.materialUsageLedger;
   const hasUsage=materialUsageSources.length||events.some(e=>e.eventKind==='material-usage-review'||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))||materialUsageLedger!==undefined&&(!Array.isArray(materialUsageLedger)||materialUsageLedger.length);
-  const required=hasUsage||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
+  const contextLedger=snapshot.productionModel?.assetContextRevalidationLedger;
+  const hasContext=assetContextSources.length||events.some(e=>e.eventKind==='asset-context-revalidation'||e.subjectType==='ASSET_CONTEXT'||Object.hasOwn(e,'revalidationRevisionId'))||contextLedger!==undefined&&(!Array.isArray(contextLedger)||contextLedger.length);
+  const required=hasContext||hasUsage||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
   if(!required)return null;
   const validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
   return withHistoricalEventTransport(historicalContexts,async({historicalContexts:transported,directory})=>{
-  const input={events,snapshot,...(hasUsage?{materialUsageSources}:{}),...(transported?{historicalContexts:transported}:{}),binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),...(hasUsage?{materialUsageSourcesHash:materialUsageDocumentsHash(materialUsageSources)}:{}),...(historicalContexts?{historicalContextsHash:historicalContexts.contextsHash}:{}),eventDirectory,eventManifest:frozenEventManifest(events)}};
+  const input={events,snapshot,...(hasContext?{assetContextSources}:{}),...(hasUsage?{materialUsageSources}:{}),...(transported?{historicalContexts:transported}:{}),binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),...(hasContext?{assetContextSourcesHash:assetContextDocumentsHash(assetContextSources)}:{}),...(hasUsage?{materialUsageSourcesHash:materialUsageDocumentsHash(materialUsageSources)}:{}),...(historicalContexts?{historicalContextsHash:historicalContexts.contextsHash}:{}),eventDirectory,eventManifest:frozenEventManifest(events)}};
   const softwareRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
   const code=`import {loadModernEventRuntime,validateModernEventClosure,readFrozenModernEventInput} from ${JSON.stringify(validator.href)};const input=await readFrozenModernEventInput(process.stdin);const runtime=loadModernEventRuntime(${JSON.stringify(softwareRoot)});runtime.historicalContextDirectory=${JSON.stringify(directory)};const result=validateModernEventClosure(input,runtime);process.stdout.write(JSON.stringify(result));`;
   const proof=await new Promise((resolve,reject)=>{

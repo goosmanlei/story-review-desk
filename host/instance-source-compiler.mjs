@@ -1,3 +1,5 @@
+import {historicalEventContextReader} from './instance-historical-event-context.mjs';
+import {preserveAssetContextRevalidations} from './instance-runtime/asset-context-revalidation-preservation.mjs';
 import { nativeMaterialCandidateProof, assertNativeCandidatePreservation } from './instance-native-candidate-proof.mjs';
 import {legacyAudioCandidateProof,assertLegacyAudioCandidatePreservation} from './instance-legacy-audio-candidate-proof.mjs';
 import { registeredMaterialCandidateProof } from './instance-registered-material-candidates.mjs';
@@ -230,7 +232,9 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const materialProvenance=preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot});
     const spatial=await preserveProductionSpatialProjection({snapshot:materialProvenance,baseSnapshot:publishedSnapshot,documents});
     const usage=preserveMaterialUsageProjection({snapshot:spatial,recipes:materialProduction.recipes,baseSnapshot:publishedSnapshot,documents,events});
-    snapshotBytes=Buffer.from(canonicalJson(usage.snapshot));recipesBytes=Buffer.from(canonicalJson(usage.recipes));
+    const contextReader=historicalEventContextReader(historicalContexts,{events,expectedHash:historicalContexts?.contextsHash,instanceId:profile.instanceId});
+    const revalidated=preserveAssetContextRevalidations({snapshot:usage.snapshot,recipes:usage.recipes,baseSnapshot:publishedSnapshot,documents,events,releaseContext:event=>contextReader.releaseContext(event)});
+    snapshotBytes=Buffer.from(canonicalJson(revalidated.snapshot));recipesBytes=Buffer.from(canonicalJson(revalidated.recipes));
     const nativeCandidatePreservation = assertNativeCandidatePreservation({proof:nativeCandidateProof,snapshot:JSON.parse(snapshotBytes),recipes:JSON.parse(recipesBytes),events});
     const legacyAudioCandidatePreservation = assertLegacyAudioCandidatePreservation({proof:legacyAudioProof,snapshot:JSON.parse(snapshotBytes),recipes:JSON.parse(recipesBytes),events});
     return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(nativeCandidatePreservation ? { nativeCandidatePreservation } : {}), ...(legacyAudioCandidatePreservation ? {legacyAudioCandidatePreservation} : {}), ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };

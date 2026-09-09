@@ -208,6 +208,12 @@ class ReadUnit {
     return row ? { releaseId: row.release_id, snapshotId: row.snapshot_id, snapshotBytes: Buffer.from(row.snapshot_bytes), snapshotSha256: row.snapshot_sha256,
       recipesBytes: Buffer.from(row.recipes_bytes), recipesSha256: row.recipes_sha256, sourceRevisionIds: JSON.parse(row.source_revision_ids_json), profileRevisionId: row.profile_revision_id, createdAt: row.created_at } : null;
   }
+  readPublishedReleaseTimeGroup({recordedBefore,inclusive=true}) {
+    const cutoff=publishedReleaseCutoff(recordedBefore),comparison=inclusive?'<=':'<';
+    const rows=this.db.prepare(`SELECT release_id,snapshot_id,snapshot_sha256,recipes_sha256,source_revision_ids_json,profile_revision_id,created_at FROM releases WHERE created_at=(SELECT max(created_at) FROM releases WHERE created_at${comparison}?) ORDER BY release_id LIMIT 201`).all(cutoff);
+    ensure(rows.length<=200,'HISTORICAL_RELEASE_AMBIGUOUS','Publication timestamp group exceeds bound');
+    return rows.map(r=>({releaseId:r.release_id,snapshotId:r.snapshot_id,snapshotSha256:r.snapshot_sha256,recipesSha256:r.recipes_sha256,sourceRevisionIds:JSON.parse(r.source_revision_ids_json),profileRevisionId:r.profile_revision_id,createdAt:r.created_at}));
+  }
   readPublishedReleaseAt({recordedBefore,snapshotId}) {
     const cutoff=publishedReleaseCutoff(recordedBefore);
     // Do not filter by snapshotId: a newer publication with a different snapshot
@@ -406,6 +412,7 @@ export class InstanceRepository {
   readDocumentRevision(...args) { return this._read('readDocumentRevision', args); }
   readRelease(...args) { return this._read('readRelease', args); }
   readPublishedReleaseAt(...args) { return this._read('readPublishedReleaseAt', args); }
+  readPublishedReleaseTimeGroup(...args) { return this._read('readPublishedReleaseTimeGroup', args); }
   listDocuments(...args) { return this._read('listDocuments', args); }
   getConfig(...args) { return this._read('getConfig', args); }
   getProfile() { return this._read('getProfile', []); }

@@ -1,3 +1,6 @@
+import {resolveImageTechnicalSpec,readImageTechnicalFacts,assertImageTechnicalApproval} from '../../../../host/instance-runtime/image-technical-spec.mjs';
+function imageTechnicalFailure(reason:unknown):never { throw new HttpError(409,reason instanceof Error?reason.message:'图像规格检查失败'); }
+function imageTechnicalRead<T>(fn:()=>T):T { try{return fn();}catch(reason){return imageTechnicalFailure(reason);} }
 import {withInstanceMediaRead} from '../_media-read';
 import {resolveFormalReviewSpec,reviewFindingsIssues} from '../_review-spec';
 import { projectIdFor, episodePlanIdFor } from '../../../instance-profile';
@@ -22,6 +25,7 @@ import {
   operationalSnapshot,
   optionalString,
   replayIdempotentEvent,
+  recipeCatalog,
   safeGeneratedPath,
   storyConfirmationTargets,
   validateMutationRequest,
@@ -865,6 +869,18 @@ export async function POST(request: Request) {
         if(subjectType==='WORK_PRODUCT'&&action==='APPROVE_AND_RELEASE'){const entry=locked.stateProjection.configuredGatesByWorkItem?.[String(semanticRequest.workItemId)]?.entryReasons||[];if(entry.length)throw new HttpError(409,'当前配置的前置门禁未通过',{reasons:entry});}
         if (reviewedVersion?.verifiedPath && reviewedVersion.verifiedFile) {
           await assertStableFileIdentity(reviewedVersion.verifiedPath, reviewedVersion.verifiedFile);
+        }
+        if(action==='APPROVE_AND_RELEASE'&&['ASSET','WORK_PRODUCT'].includes(subjectType)&&reviewedVersion?.verifiedPath){
+          const familyId=String(semanticRequest.familyId||''),versionId=String(semanticRequest.versionId||'');
+          const candidate=locked.candidates.events.find(e=>e.familyId===familyId&&e.versionId===versionId);
+          const base=data.productionModel.assetVersions.find(v=>v.id===versionId&&v.familyId===familyId);
+          const definitionId=String(candidate?.executionDefinitionId||base?.executionDefinitionRef||'');
+          const definition=(await recipeCatalog()).executionDefinitions.find(d=>d.id===definitionId);
+          const binding=imageTechnicalRead(()=>resolveImageTechnicalSpec(data.productionModel,{familyId,expectedOutputId:String(candidate?.expectedOutputId||base?.expectedOutputId||''),definition}));
+          if(binding){
+            const facts=await readImageTechnicalFacts(reviewedVersion.verifiedPath,{sha256:String(semanticRequest.versionSha256),byteSize:reviewedVersion.verifiedFile?.size}).catch(imageTechnicalFailure);
+            imageTechnicalRead(()=>assertImageTechnicalApproval(binding,facts));
+          }
         }
         if (reviewedCreativeRevisionId) {
           const revision = locked.creativeRevisions.events.find((item) => (

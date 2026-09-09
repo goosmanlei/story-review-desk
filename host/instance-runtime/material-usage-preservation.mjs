@@ -10,7 +10,7 @@ export async function materialUsageMediaCurrent(tx,source){
  if(!resolved||resolved.mediaId!==source.familyId||resolved.versionId!==source.versionId||resolved.sha256!==source.sha256||resolved.relativePath!==media.relativePath||resolved.byteSize!==media.byteSize)return false;
  return !source.media||usageHash({mediaId:media.mediaId,versionId:media.versionId,sha256:media.sha256,relativePath:media.relativePath,byteSize:media.byteSize})===usageHash(source.media);
 }
-export async function loadMaterialUsageEvidence(tx,model,{view}={}){
+async function loadMaterialUsageOnly(tx,model,{view}={}){
  view ||= await tx.readView();
  if(Object.hasOwn(model,'materialUsageLedger')&&!Array.isArray(model.materialUsageLedger))fail('用途ledger必须为数组');
  const events=await tx.listEvents(),refs=list(model.materialUsageLedger);
@@ -37,4 +37,10 @@ export function preserveMaterialUsageProjection({snapshot,recipes,baseSnapshot,d
  delete snapshot.productionModel.materialUsageEvidence;
  validateMaterialUsageLedger({snapshot,documents,events});
  return {snapshot,recipes};
+}
+
+export async function loadMaterialUsageEvidence(tx,model,options={}){
+ const result=await loadMaterialUsageOnly(tx,model,options);
+ const {loadAssetContextRevalidationEvidence}=await import('./asset-context-revalidation-preservation.mjs');
+ return loadAssetContextRevalidationEvidence(tx,result,options);
 }

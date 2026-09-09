@@ -426,6 +426,8 @@ export type ScopedReviewContext = {
 };
 
 export type V7AssetVersion = LifecycleProjection & {
+  imageTechnicalFacts?: import('../host/instance-runtime/image-technical-spec.mjs').ImageTechnicalFacts;
+  imageTechnicalSpecHash?: string;
   id: string;
   familyId: string;
   label: string;

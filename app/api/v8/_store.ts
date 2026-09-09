@@ -1,3 +1,4 @@
+import {assetContextReviewedBindings} from '../../../host/instance-runtime/asset-context-revalidation-preservation.mjs';
 import {materialRequirementSelectionReasons} from '../../../host/instance-runtime/material-requirement-disposition.mjs';
 import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
 import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
@@ -573,7 +574,7 @@ function hasProductionAux(data:ReviewData){
   return Boolean((production.shotProductionPlans||[]).length||(production.spatialShotViews||[]).length||data.sourceHashes?.productionMapSha256);
 }
 async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
-  if(Object.hasOwn(data.productionModel,'materialUsageLedger')||Object.hasOwn(data.productionModel,'materialUsageEvidence')){
+  if(Object.hasOwn(data.productionModel,'materialUsageLedger')||Object.hasOwn(data.productionModel,'materialUsageEvidence')||Object.hasOwn(data.productionModel,'assetContextRevalidationLedger')||Object.hasOwn(data.productionModel,'assetContextRevalidationEvidence')){
     const {loadMaterialUsageEvidence}=await import('../../../host/instance-runtime/material-usage-preservation.mjs');
     data={...data,productionModel:await loadMaterialUsageEvidence(repository,data.productionModel)};
   }
@@ -2312,6 +2313,8 @@ type StatusProjection = {
 };
 
 type ProjectedVersion = AssetVersion & StatusProjection & {
+  imageTechnicalFacts?: unknown;
+  imageTechnicalSpecHash?: unknown;
   label?: string;
   mediaToken?: string | null;
   source?: 'BASE_SNAPSHOT' | 'ASSET_VERSION_EVENT';
@@ -4222,6 +4225,8 @@ export function projectOperationalState(
         expectedOutputId: candidate.expectedOutputId,
       } : null,
       executionDefinitionRef,
+      ...(Object.hasOwn(candidate,'imageTechnicalFacts')?{imageTechnicalFacts:structuredClone(candidate.imageTechnicalFacts)}:{}),
+      ...(Object.hasOwn(candidate,'imageTechnicalSpecHash')?{imageTechnicalSpecHash:candidate.imageTechnicalSpecHash}:{}),
       inputVersionBindings: Array.isArray(candidate.inputBindings)
           ? (candidate.inputBindings as Array<Record<string, unknown>>).map((binding) => ({
             assetFamilyRef: String(binding.assetFamilyRef || ''),
@@ -4394,6 +4399,7 @@ export function projectOperationalState(
       || review.contextHash !== assetReviewContextHash(data,familyId,versionId,sha256)) continue;
     reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash,reviewEventId:String(review.eventId||''),reviewEventSequence:Number(review.eventSequence)||0});
   }
+  for(const [id,binding] of assetContextReviewedBindings(data.productionModel,versions,{contextHashForVersion:(source:{familyId:string;versionId:string;sha256:string})=>assetReviewContextHash(data,source.familyId,source.versionId,source.sha256)}))reviewedDomainBindings.set(id,binding);
   const freshProductionProofs=domainInvalidations.length?domainProductionProofs({candidates:currentCandidates,requests:executionRequests,runs:currentRuns,versions}):new Map();
   applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes,freshProductionProofs});
 
@@ -4917,6 +4923,8 @@ export function projectOperationalState(
       sha256: version.sha256,
       label: version.label,
       mediaToken: version.mediaToken,
+      ...(Object.hasOwn(version,'imageTechnicalFacts')?{imageTechnicalFacts:version.imageTechnicalFacts}:{}),
+      ...(Object.hasOwn(version,'imageTechnicalSpecHash')?{imageTechnicalSpecHash:version.imageTechnicalSpecHash}:{}),
       inputVersionBindings: version.inputVersionBindings || [],
       expectedOutputId: version.expectedOutputId || null,
       realizes: version.realizes || null,

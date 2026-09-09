@@ -1,3 +1,6 @@
+import {resolveImageTechnicalSpec,readImageTechnicalFacts} from '../../../../host/instance-runtime/image-technical-spec.mjs';
+function imageTechnicalFailure(reason:unknown):never { throw new HttpError(409,reason instanceof Error?reason.message:'图像规格检查失败'); }
+function imageTechnicalRead<T>(fn:()=>T):T { try{return fn();}catch(reason){return imageTechnicalFailure(reason);} }
 import {withInstanceMediaRead} from '../_media-read';
 import {inspectExecutionDefinitionHash} from '../../../../host/instance-runtime/execution-definition-hash.mjs';
 import {ANIMATIC_NS,animaticCandidateMatchesJob} from '../../../../host/instance-runtime/animatic-service.mjs';
@@ -472,6 +475,7 @@ export async function POST(request: Request) {
   try {
     const { data, idempotencyKey, ifMatch } = await validateMutationRequest(request);
     const body = await request.json() as Record<string, unknown>;
+    if(['imageTechnicalFacts','imageTechnicalSpecHash','technicalSpec','technicalSpecHash'].some(k=>Object.hasOwn(body,k)))throw new HttpError(422,'image technical facts and specifications are server-owned fields');
     if(body.executorKind==='DETERMINISTIC_RENDER'){
       // Deterministic results are registered atomically by the worker. The HTTP
       // endpoint can only replay a verified receipt, never author a render fact.
@@ -604,7 +608,8 @@ export async function POST(request: Request) {
       throw new HttpError(422, 'CODEX result actualPrompt must exactly match the authorized call package');
     }
 
-    const {filePath,file}=await withInstanceMediaRead(async()=>{
+    const imageTechnicalBinding=imageTechnicalRead(()=>resolveImageTechnicalSpec(data.productionModel,{familyId,workItemId:String(definition.workItemRef||''),expectedOutputId,definition}));
+    const {filePath,file,imageTechnicalFacts}=await withInstanceMediaRead(async()=>{
     const filePath = await safeReviewPendingPath(projectPath, familyId);
     const file = await hashStableFile(filePath);
     if (textCandidateExtensions.has(candidateExtension)) {
@@ -618,7 +623,8 @@ export async function POST(request: Request) {
       }
       if (text.includes('\u0000')) throw new HttpError(400, 'text candidate contains NUL bytes');
     }
-    return{filePath,file};
+    const imageTechnicalFacts=imageTechnicalBinding?await readImageTechnicalFacts(filePath,{sha256:file.sha256,byteSize:file.size}).catch(imageTechnicalFailure):null;
+    return{filePath,file,imageTechnicalFacts};
     });
     const suppliedVersionId = body.versionId == null || body.versionId === '' ? '' : assertStableId(body.versionId, 'versionId');
     const alreadyRealized = realizedExpectedOutput(expectedOutput, existingCandidates);
@@ -690,6 +696,7 @@ export async function POST(request: Request) {
       path: projectPath,
       sha256: file.sha256,
       byteSize: file.size,
+      ...(imageTechnicalBinding?{imageTechnicalFacts,imageTechnicalSpecHash:imageTechnicalBinding.technicalSpecHash}:{}),
       mediaToken: token,
       expectedOutputId,
       realizationRelation: 'REALIZES',
@@ -748,6 +755,8 @@ export async function POST(request: Request) {
         if (!lockedDefinition || lockedDefinition.definitionHash !== callPackageHash) {
           throw new HttpError(409, 'candidate call package changed while registration was in flight');
         }
+        const lockedImageBinding=imageTechnicalRead(()=>resolveImageTechnicalSpec(data.productionModel,{familyId,workItemId:String(lockedDefinition.workItemRef||''),expectedOutputId,definition:lockedDefinition}));
+        if(stableObjectHash(lockedImageBinding)!==stableObjectHash(imageTechnicalBinding))throw new HttpError(409,'图像规格在登记时变化');
         const lockedRequest = projectedExecutionRequests(locked.executionRequests.events, locked.candidates.events)
           .find((item) => item.executionRequestId === executionRequestId) || null;
         if (!lockedRequest || !['AUTHORIZED', 'CLAIMED'].includes(String(lockedRequest.requestState || lockedRequest.status || ''))) {

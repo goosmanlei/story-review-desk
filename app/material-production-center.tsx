@@ -10,6 +10,8 @@ import {ProductionMaterialCatalog} from './production-material-catalog';
 import {MaterialProgressBadge} from './material-appearance';
 import {MaterialProductionSetupEditor} from './material-production-setup-editor';
 import {MaterialUsageEditor} from './material-usage-editor';
+import {ImageTechnicalSpecPanel} from './image-technical-spec-panel';
+import {AssetContextRevalidationEditor} from './asset-context-revalidation-editor';
 import {currentMaterialDirectoryRow,materialRequirementLink} from './material-requirement-presentation';
 import {
   episodePlanIsCurrent,
@@ -1085,6 +1087,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           </div>
           <section className="material-review-zone" data-material-section="review">
             <MaterialReviewPoints requirement={selectedRequirement} version={selectedVersion} historical={isHistoricalVersion}/>
+            {currentProductionTarget && !isHistoricalVersion && selectedFamily?.kind==='IMAGE' && selectedVersion?.sha256 && selectedVersion.reviewDecision==='RELEASED' && selectedVersion.legacyState?.approvalStatus==='APPROVED' && !selectedVersion.canFlowDownstream && <AssetContextRevalidationEditor target={{familyId:selectedFamily.id,versionId:selectedVersion.id,sha256:selectedVersion.sha256}} mediaToken={selectedVersion.mediaToken || undefined}/>}
             {selectedFamily
               ? <AssetReviewForm key={`${selectedRequirement.requirementHash}:${selectedRequirement.reviewSpec?.hash || 'LEGACY'}:${selectedVersion?.id || viewState.versionId || 'NO_VERSION'}`} requirement={selectedRequirement} family={selectedFamily} version={selectedVersion} operations={operations} />
               : <div className="v6-empty-note"><b>Review 区已保留</b><p>当前还没有资产族或候选文件；登记文件与 SHA-256 后在这里进行 AI 辅助与正式人工 Review。</p></div>}
@@ -1093,6 +1096,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
         <section className="material-production-materials" data-material-section="production" data-production-version-id={selectedVersion?.id || explicitSelectedExpected?.id || 'NO_VERSION'}>
           <header><h3>全部生产资料</h3><span>{isHistoricalVersion ? `${visibleText(selectedVersion?.label || '历史版本')} · 版本绑定资料` : selectedVersion ? `${visibleText(selectedVersion.label)} · 最新生产资料` : composition ? '由各项素材共同满足' : hasUsageBindings ? '已有图片用途审阅记录' : '尚未产出 · 最新生产资料'}</span></header>
           <CharacterCardRequirementPreview requirement={selectedRequirement} />
+          {!isHistoricalVersion && <ImageTechnicalSpecPanel spec={selectedRequirement.configurationBinding?.technicalSpec} hash={selectedRequirement.configurationBinding?.technicalSpecHash} facts={selectedVersion?.imageTechnicalSpecHash===selectedRequirement.configurationBinding?.technicalSpecHash?selectedVersion?.imageTechnicalFacts:undefined} versionSha256={selectedVersion?.sha256} />}
           {selectedFamily
             ? <>{!isHistoricalVersion && <RecipePanel expanded compact definitionRef={selectedItem?.executionDefinitionRef} recipe={recipe} error={recipeError} title="" defaultOpen reviewerView />}<MaterialCandidateProductionFacts key={`${selectedFamily.id}:${selectedVersion?.id || 'NO_VERSION'}:${selectedVersion?.sha256 || 'NO_SHA'}:${selectedVersion?.outputState || 'NO_OUTPUT'}`} family={selectedFamily} version={selectedVersion} historical={isHistoricalVersion} /></>
             : composition ? <p>逐项完成上方素材后，这项组合需求才会就绪。</p> : <>{currentProductionTarget&&!hasUsageBindings&&<p className="v6-empty-note">{usageOnlyLeaf?'这项需求尚未绑定产物，可制作新图或审阅已有图片的新用途。':'这项需求尚未绑定产物，可建立制作资料并生成候选。'}</p>}{usageOnlyLeaf&&!hasUsageBindings&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>} {currentProductionTarget&&!hasEligibleUsage&&selectedRequirement.sourceKind === 'DOMAIN_GRAPH' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} />}</>}

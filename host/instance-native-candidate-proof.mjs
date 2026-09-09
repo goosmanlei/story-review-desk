@@ -1,3 +1,4 @@
+import {resolveImageTechnicalSpec} from './instance-runtime/image-technical-spec.mjs';
 import path from 'node:path';
 import {canonicalJson,sha256} from './instance-runtime/bytes.mjs';
 import {inspectExecutionDefinitionHash} from './instance-runtime/execution-definition-hash.mjs';
@@ -76,6 +77,8 @@ export function nativeMaterialCandidateProof({documents,events,activeMedia,pinne
   check(!seen.has(event.versionId)&&!paths.has(event.path),'Native candidate version/path is duplicated');seen.add(event.versionId);paths.add(event.path);
   const family=one(model.assetFamilies,f=>f.id===event.familyId,'Native family'),output=one(model.expectedOutputs,o=>o.id===event.expectedOutputId,'Native ExpectedOutput'),definition=one(recipes.executionDefinitions,d=>d.id===event.executionDefinitionId,'Native definition');
   check(inspectExecutionDefinitionHash(definition).valid&&definition.executorKind==='MODEL_CALL','Unknown native executor/definition hash');
+  const technical=resolveImageTechnicalSpec(model,{familyId:family.id,expectedOutputId:output.id,definition});
+  if(technical)check(event.imageTechnicalSpecHash===technical.technicalSpecHash&&event.imageTechnicalFacts?.schemaVersion==='IMAGE_TECHNICAL_FACTS_V1'&&event.imageTechnicalFacts.sha256===event.sha256&&event.imageTechnicalFacts.byteSize===event.byteSize,'Typed native image lacks exact server technical facts');
   const mp=mpPlans.filter(p=>p.familyId===family.id);check(mp.length<=1,'Native material family has ambiguous plans');
   let work,sourceRows,productionKind;
   if(mp.length){

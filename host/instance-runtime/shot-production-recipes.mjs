@@ -1,3 +1,4 @@
+import {imageTechnicalBinding} from './image-technical-spec.mjs';
 import {selectShotRecipeInputFamilies,shotRecipeProductionBasis} from './shot-production-recipe-basis.mjs';
 export {selectShotRecipeInputFamilies,shotRecipeProductionBasis,shotRecipeDefinitionBindingReasons} from './shot-production-recipe-basis.mjs';
 import {randomUUID} from 'node:crypto';
@@ -77,6 +78,7 @@ export function compileShotRecipePreview(c,content,{draftRevisionId}){
  const id='SP-CALL-'+productionHash({workItemId:c.work.id,draftRevisionId:draftRevisionId}).slice(0,24),revisionId=id+':r1';
  const definition={id,title:c.work.label,pipelineStageCode:c.work.pipelineStageCode,executorKind:'MODEL_CALL',definitionStatus:'DEFINED',workItemRef:c.work.id,currentRevisionId:revisionId,upload:{rawText:c.inputs.map(i=>i.label).join('\n'),items:c.inputs.map(({label,...b})=>b)},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:output.targetPath,mediaType:c.family.kind,assetFamilyRef:c.family.id,expectedOutputRef:output.id},declaredGate:'READY_TO_START',rawSourceBlock:canonicalJson(content),authoringContent:content,productionBasis:c.basis,productionBasisHash:c.basisHash,parentVersionId:currentVersion?.id||null};
  if(c.work.productionSchemaVersion==='2.0')Object.assign(definition,{productionSchemaVersion:'2.0',stagePolicy:c.work.stagePolicy,productionPurpose:c.work.productionPurpose,allowedUse:c.work.allowedUse});
+ const imageSpec=imageTechnicalBinding(c.work.configurationBinding);if(imageSpec){if(productionHash(imageTechnicalBinding(c.output))!==productionHash(imageSpec)||productionHash(imageTechnicalBinding(c.family))!==productionHash(imageSpec))fail('图像调用包冻结规格不一致');Object.assign(definition,structuredClone(imageSpec));}
  definition.definitionHashSchemaVersion=SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA;
  definition.definitionHash=executionDefinitionHash(definition);
  const body={workItemId:c.work.id,draftRevisionId:draftRevisionId,expectedReleaseId:c.view.releaseId,basisHash:c.basisHash,definition,expectedOutput:output,previousDefinitionId:c.work.executionDefinitionRef||null};return {...body,previewHash:productionHash(body),modelCalls:0};

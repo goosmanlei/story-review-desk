@@ -1,4 +1,5 @@
-import {assertFailedMaterialAttempt,FAILED_OUTPUT_REMAKE_SCHEMA} from './material-production-failed-attempt.mjs';
+import {imageTechnicalBinding} from './image-technical-spec.mjs';
+import {assertFailedMaterialAttempt,failedMaterialParentBinding,FAILED_OUTPUT_REMAKE_SCHEMA} from './material-production-failed-attempt.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
@@ -31,9 +32,11 @@ export async function materialProductionRevisionContext(tx,c){
  if(!same(definition,{...sourceBody.executionDefinition,sourceRef:sourceRow.sourcePath,sourceRevisionId:source.revisionId,sourceSha256:source.sha256}))fail('当前素材调用定义与固定源内容不同');
  const events=c.view.eventsByKind||{},candidates=(events['asset-version']||[]).filter(e=>e.familyId===family.id),parentCandidates=candidates.filter(e=>e.expectedOutputId===output.id),blockers=[];
  let parent=latest(parentCandidates),parentDefinition=definition,parentOutput=output,parentSource=sourceRow,failedAttempt=null,media=null;
- const failedRemake=parentCandidates.length===0&&Boolean(definition.parentVersionId&&definition.parentVersionSha256);
+ let failedParent=null;
+ if(parentCandidates.length===0&&definition.parentVersionId){try{failedParent=failedMaterialParentBinding(definition,{sourceDocument:source,fail});}catch(e){blockers.push(String(e.message||e));}}
+ const failedRemake=Boolean(failedParent);
  if(failedRemake){
-  const actual=candidates.filter(e=>e.versionId===definition.parentVersionId&&e.sha256===definition.parentVersionSha256);
+  const actual=candidates.filter(e=>e.versionId===failedParent.versionId&&e.sha256===failedParent.sha256);
   if(actual.length===1){parent=actual[0];parentDefinition=owned(c.view.recipes.executionDefinitions,parent.executionDefinitionId,'失败重制的实际父调用定义');parentOutput=owned(c.model.expectedOutputs,parent.expectedOutputId,'失败重制的实际父预期产物');parentSource=parentDefinition.id===plan.definitionId?plan:(c.model.materialProductionRecipeRevisions||[]).find(r=>r.definitionId===parentDefinition.id&&r.materialProductionPlanId===plan.id);}
  }
  if(!parent||!failedRemake&&new Set(parentCandidates.map(e=>e.versionId)).size!==1)blockers.push('当前素材预期产物尚未形成唯一实际候选，不能新建后继版本');
@@ -67,7 +70,7 @@ export async function materialProductionRevisionContext(tx,c){
    let absent=false;try{await c.api.safeReviewPendingPath(output.targetPath,family.id);}catch(e){if(e.code==='ENOENT')absent=true;else throw e;}if(!absent)fail('失败预期产物路径仍有实际文件，不能跳过未登记产物');
    const attemptRequests=(events['execution-request']||[]).filter(e=>e.executionDefinitionId===definition.id),ids=new Set(attemptRequests.map(e=>e.executionRequestId)),attemptRuns=(events.run||[]).filter(e=>e.executionDefinitionId===definition.id||ids.has(e.executionRequestId));
    failedAttempt={schemaVersion:FAILED_OUTPUT_REMAKE_SCHEMA,definitionId:definition.id,definitionHash:definition.definitionHash,expectedOutputId:output.id,expectedOutputHash:domainHash(output),source:{path:sourceRow.sourcePath,revisionId:sourceRow.sourceRevisionId,sha256:sourceRow.sourceSha256},parentDefinitionId:parentDefinition.id,parentDefinitionHash:parentDefinition.definitionHash,parentExpectedOutputId:parentOutput.id,parentExpectedOutputHash:domainHash(parentOutput),parentSource:{path:parentSource.sourcePath,revisionId:parentSource.sourceRevisionId,sha256:parentSource.sourceSha256},parentRun:runs.find(r=>r.runId===parent.runId),parentMedia:{mediaId:media?.mediaId,versionId:media?.versionId,sha256:media?.sha256,relativePath:media?.relativePath,byteSize:media?.byteSize,registrationEventId:media?.metadata?.registrationEventId||null},absence:{path:output.targetPath,versionId,candidates:0,registeredMedia:0,fileState:'ABSENT'},requests:attemptRequests,runs:attemptRuns,requestHeads:latestPer(attemptRequests,'executionRequestId').map(eventBinding),runHeads:latestPer(attemptRuns,'runId').map(eventBinding)};
-   assertFailedMaterialAttempt(failedAttempt,{definition,output,parentCandidate:parent,parentDefinition,parentOutput,fail});
+   assertFailedMaterialAttempt(failedAttempt,{definition,output,parentCandidate:parent,parentDefinition,parentOutput,sourceDocument:source,fail});
   }catch(e){failedAttempt=null;blockers.push('当前素材预期产物尚未形成候选；失败重制核查未通过：'+String(e.message||e));}
  }
  const labels=(c.model.expectedOutputs||[]).filter(o=>o.familyId===family.id).map(o=>o.plannedVersionLabel);
@@ -87,6 +90,7 @@ export async function compileMaterialProductionRevision(tx,c,content,draftRevisi
  const targetPath='media/_review_pending/material-production/'+r.family.id+'/'+r.plannedVersionLabel+(r.family.kind==='IMAGE'?'.png':'.wav');
  const expectedOutput={...r.output,id:outputId,targetPath,plannedVersionLabel:r.plannedVersionLabel,legacyVersionId:r.plan.expectedOutputId,expectationState:'PLANNED',realizedVersionId:null,sourceRef:sourcePath,executionDefinitionRef:definitionId};
  const {inputBindings,...authoringContent}=content;
+ const imageSpec=imageTechnicalBinding(r.definition);for(const row of [r.family,r.work,r.output,r.work.configurationBinding])if(domainHash(imageTechnicalBinding(row))!==domainHash(imageSpec))fail('后继图像配方的冻结规格不一致');
  const previousDefinition=Object.fromEntries(Object.entries(r.definition).filter(([key])=>!['sourceRef','sourceRevisionId','sourceSha256'].includes(key)));
  const executionDefinition={...previousDefinition,id:definitionId,currentRevisionId:definitionId+':r1',upload:{rawText:inputs.map(b=>b.path).join('\n'),items:inputs},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:targetPath,mediaType:r.family.kind,assetFamilyRef:r.family.id,expectedOutputRef:outputId},rawSourceBlock:canonicalJson(authoringContent),authoringContent,parentVersionId:r.parent.versionId,parentVersionSha256:r.parent.sha256};
  executionDefinition.definitionHash=executionDefinitionHash(executionDefinition);

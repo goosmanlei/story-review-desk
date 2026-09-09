@@ -1,3 +1,4 @@
+import {createAssetContextArchiveValidator} from './asset-context-revalidation-archive.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {MATERIAL_USAGE_EVENT,MATERIAL_USAGE_SOURCE,validateMaterialUsageLedger} from './material-usage-model.mjs';
 
@@ -7,7 +8,7 @@ const hash=value=>sha256(canonicalJson(value));
 const sorted=rows=>[...rows].sort((a,b)=>String(a.id).localeCompare(String(b.id)));
 /** Small semantic companion to the existing complete byte/row scan. Retains
  * usage source bytes and adoption events, never historical snapshot bodies. */
-export function createMaterialUsageArchiveValidator(){
+function createMaterialUsageOnlyArchiveValidator(){
   const documents=[],events=[],aliases=new Map(),releases=new Map(),historicalRefs=new Map();let currentReleaseId=null,instanceId=null,sourceBytes=0;
   return {
     accept(table,row,parsedSnapshot){
@@ -72,4 +73,9 @@ export function validateMaterialUsageArchive(archive,{encoded=true}={}){
     validator.accept(table,decoded);
   }
   validator.finish();
+}
+
+export function createMaterialUsageArchiveValidator(){
+ const usage=createMaterialUsageOnlyArchiveValidator(),context=createAssetContextArchiveValidator();
+ return {accept(...args){usage.accept(...args);context.accept(...args);},finish(){usage.finish();context.finish();}};
 }

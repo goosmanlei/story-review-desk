@@ -1,8 +1,9 @@
 import {domainHash,validateRequirementReplacementTransition} from './domain-model.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
+import {assertAssetContextSource} from './asset-context-revalidation-model.mjs';
 
-export const REPLACEMENT_EXECUTION_JOB_NAMESPACES=['material-production-jobs','material-usage-jobs','shot-production-jobs','shot-production-recipe-jobs','shot-production-manifest-jobs','animatic-render-jobs','animatic-reconciliations','spatial-shot-view-jobs'];
+export const REPLACEMENT_EXECUTION_JOB_NAMESPACES=['material-production-jobs','material-usage-jobs','asset-context-revalidation-jobs','shot-production-jobs','shot-production-recipe-jobs','shot-production-manifest-jobs','animatic-render-jobs','animatic-reconciliations','spatial-shot-view-jobs'];
 const list=v=>Array.isArray(v)?v:[];
 const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
 const current=w=>w?.scopeRole!=='EVIDENCE_ONLY'&&w?.scopeRole!=='HISTORICAL'&&w?.activeInCurrentProduction!==false;
@@ -156,7 +157,14 @@ export async function inspectMaterialRequirementReplacementExecution(tx,{nextGra
   for(const record of await tx.listAux(namespace)){
    if(record.deleted)continue;let job;try{job=JSON.parse(Buffer.from(record.bytes).toString('utf8'));}catch{reason('REPLACEMENT_HOST_JOB_SCOPE_UNKNOWN',namespace+'/'+record.key);continue;}
    if(!job||typeof job!=='object'||Array.isArray(job)){reason('REPLACEMENT_HOST_JOB_SCOPE_UNKNOWN',namespace+'/'+record.key);continue;}
-   const jobRequirementId=job.requirementId||job.input?.requirementId||job.preview?.plan?.requirementId,jobWorkId=job.workItemId||job.input?.workItemId||job.preview?.workItemId,jobSceneId=job.sceneId||job.input?.sceneId||job.preview?.sceneId,jobWork=allWorks.find(w=>w.id===jobWorkId);
+   let contextRequirementId;
+   if(namespace==='asset-context-revalidation-jobs'&&!['SUCCEEDED','FAILED','CANCELLED','RECONCILED_UNREGISTERED'].includes(job.status)){
+    try{
+     const body=assertAssetContextSource(job.preview?.revalidation);contextRequirementId=body.basis.current.requirementId;
+     if(job.requirementId!==contextRequirementId||job.revalidationId!==body.revalidationId||job.instanceId!==body.basis.instanceId||job.runtimeEpoch!==body.basis.runtimeEpoch||job.preview.previewHash!==domainHash(body)||job.input?.previewHash!==job.preview.previewHash||['familyId','versionId','sha256'].some(k=>job.input?.[k]!==body.basis.source[k]))throw Error('Context job differs from its frozen preview');
+    }catch{reason('REPLACEMENT_HOST_JOB_SCOPE_UNKNOWN',namespace+'/'+record.key);}
+   }
+   const jobRequirementId=contextRequirementId||job.requirementId||job.input?.requirementId||job.preview?.plan?.requirementId,jobWorkId=job.workItemId||job.input?.workItemId||job.preview?.workItemId,jobSceneId=job.sceneId||job.input?.sceneId||job.preview?.sceneId,jobWork=allWorks.find(w=>w.id===jobWorkId);
    const related=requirementIds.has(jobRequirementId)||works.has(jobWorkId)||scenes.has(jobSceneId)||scenes.has(jobWork?.sceneId)||designIds.has(job.preview?.definition?.productionBasis?.shotPlanRevisionId);
    if(!jobRequirementId&&!jobWorkId&&!jobSceneId&&!['SUCCEEDED','FAILED','CANCELLED','RECONCILED_UNREGISTERED'].includes(job.status))reason('REPLACEMENT_HOST_JOB_SCOPE_UNKNOWN',namespace+'/'+record.key);
    if(!related)continue;

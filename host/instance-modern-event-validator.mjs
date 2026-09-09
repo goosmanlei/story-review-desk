@@ -1,3 +1,5 @@
+import {decodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
+import {validateAssetContextLedger} from './instance-runtime/asset-context-revalidation-model.mjs';
 import {historicalEventContextReader} from './instance-historical-event-context.mjs';
 import {decodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
 import {validateMaterialUsageLedger} from './instance-runtime/material-usage-model.mjs';
@@ -38,7 +40,9 @@ export function loadModernEventRuntime(softwareRoot) {
       const absolute = fs.realpathSync(filename);
       requireThat(absolute.startsWith(path.join(root,'app')+path.sep), 'runtime TypeScript must come from this installed application');
       const bytes = fs.readFileSync(absolute); loaded.set(path.relative(root,absolute),digest(bytes));
-      module._compile(ts.transpileModule(bytes.toString('utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,absolute);
+      // Node16 retains native import(fileURL), used by controlled media/repository
+      // readers. CommonJS rewrites it to require(fileURL), which Node cannot load.
+      module._compile(ts.transpileModule(bytes.toString('utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.Node16,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,absolute);
     };
   }
   try {
@@ -70,7 +74,7 @@ export function frozenEventManifest(events) {
   return {count:rows.length,eventSequenceHighWater:Math.max(0,...rows.map(row=>Number(row.eventSequence)||0)),events:rows,eventsHash:digest(rows)};
 }
 
-export function validateModernEventClosure({events,snapshot,binding,historicalContexts,materialUsageSources=[]},runtime) {
+export function validateModernEventClosure({events,snapshot,binding,historicalContexts,materialUsageSources=[],assetContextSources=[]},runtime) {
   const {api}=runtime, before=canonical(events), manifest=frozenEventManifest(events);
   requireThat(binding && text(binding.releaseId) && sha(binding.snapshotSha256) && text(binding.snapshotId),'exact base release binding required');
   requireThat(snapshot?.snapshotId===binding.snapshotId && digest(snapshot)===binding.snapshotCanonicalSha256,'frozen snapshot bytes/canonical binding mismatch');
@@ -101,6 +105,10 @@ export function validateModernEventClosure({events,snapshot,binding,historicalCo
   for(const id of usageIds){recordIds.add(id);relationIds.add(id);}
   const latestCandidate=(event,subjectId)=>candidates.filter(c=>c.eventSequence<event.eventSequence&&(!subjectId||c.subjectId===subjectId)).at(-1);
   const historicalSnapshot=historicalEventContextReader(historicalContexts,{events,expectedHash:binding.historicalContextsHash,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,directory:runtime.historicalContextDirectory});
+  const contextDocuments=decodeAssetContextDocuments(assetContextSources);
+  const contextRows=validateAssetContextLedger({snapshot,documents:contextDocuments,events,releaseContext:event=>historicalSnapshot.releaseContext(event)});
+  if(contextRows.length||assetContextSources.length||binding.assetContextSourcesHash!==undefined)requireThat(assetContextDocumentsHash(assetContextSources)===binding.assetContextSourcesHash,'asset context fixed source capture differs');
+  for(const row of contextRows){recordIds.add(row.event.eventId);relationIds.add(row.event.eventId);}
   function scopedViewBefore(event){
     const before=ordered.filter(e=>e.eventSequence<event.eventSequence);
     const eventsByKind={};for(const e of [...before].reverse())(eventsByKind[e.eventKind]||=[]).push(e);
