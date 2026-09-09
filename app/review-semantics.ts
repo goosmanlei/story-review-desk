@@ -108,6 +108,8 @@ export function visibleText(raw: unknown) {
   for (const [order, label] of Object.entries(legacyWorkflowLabels)) {
     value = replaceToken(value, `W${String(order).padStart(2, '0')}`, label);
   }
+  value = replaceToken(value, 'MATERIAL_REQUIREMENT_BASIS_CHANGED', '素材需求、实体或状态已变化，请核对新基线后制作');
+  value = replaceToken(value, 'CANCEL_UNSTARTED', '撤销未启动授权');
   value = value.replaceAll('_', ' ');
   return value;
 }

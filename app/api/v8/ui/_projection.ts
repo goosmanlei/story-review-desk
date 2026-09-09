@@ -1,3 +1,4 @@
+import {currentMaterialRequirementRows} from '../../../../host/instance-runtime/material-requirement-disposition.mjs';
 type ProductionRecord = Record<string, unknown> & {
   shots?: Array<Record<string, unknown> & { id: string; sceneId?: string; episodeId?: string; workPackageRefs?: string[]; issueRefs?: string[] }>;
   workPackages?: Array<Record<string, unknown> & { id: string; workItemRefs?: string[] }>;
@@ -150,8 +151,7 @@ export function productionBootstrapSeed(model: ProductionRecord) {
     issues: (model.issues ?? []).filter((item) => issueIds.has(item.id)),
     counts: {
       ...((model.counts ?? {}) as Record<string, unknown>),
-      requiredMaterialRequirements: (model.materialRequirements ?? [])
-        .filter((item) => item.requirementClass === 'REQUIRED').length,
+      requiredMaterialRequirements: currentMaterialRequirementRows(model,{atomicOnly:true}).length,
     },
     systemModel: model.systemModel,
     executionRecipeSummary: recipeSummary ? {

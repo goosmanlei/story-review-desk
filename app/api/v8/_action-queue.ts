@@ -1245,6 +1245,8 @@ export async function buildActionQueue() {
     && projection.workItemsById[work.id]?.shotPlanCurrentBindingState === 'CURRENT'
   ));
   for (const work of shotInputLockItems) {
+    const previsFirst = (work as unknown as Record<string,unknown>).productionSchemaVersion === '2.0'
+      && (work as unknown as Record<string,unknown>).stagePolicy === 'PREVIS_FIRST_V1';
     const state = projection.workItemsById[work.id] || work;
     if (state.canFlowDownstream === true || state.lifecycleState === 'RELEASED') continue;
     const shotId = String(work.shotId || work.scopeId || '');
@@ -1271,8 +1273,8 @@ export async function buildActionQueue() {
       coordinates: { episodeId: episodeId || undefined, sceneId, shotId },
       reasonCodes: ['SHOT_EXACT_INPUT_LOCK_REQUIRED'],
       reasonText: '正式ShotSpec与场级镜头分母已建立；当前仍缺剧本修订、采用素材版本哈希及LOC/STATE/ZONE/CAM/FREEZE等逐镜精确绑定。',
-      nextActionText: '在镜头设计与输入锁定门禁补齐并核对本镜全部精确输入',
-      unlockText: '全部字段精确锁定后，才可进入粗分镜／对白并行；当前不会生成或放行任何素材。',
+      nextActionText: previsFirst ? '核对本镜正式视觉素材版本及空间，建立逐镜输入锁' : '在镜头设计与输入锁定门禁补齐并核对本镜全部精确输入',
+      unlockText: previsFirst ? '本镜视觉输入锁与 Animatic 锁时通过后可制作正式关键帧；粗分镜和临时对白可先行。' : '全部字段精确锁定后，才可进入粗分镜／对白并行；当前不会生成或放行任何素材。',
       candidateAvailability: 'NOT_APPLICABLE',
       currentVersionRole: 'SHOT_SPEC_CURRENT_INPUTS_READY_TO_LOCK',
       hardBlockers: [],

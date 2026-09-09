@@ -14,7 +14,7 @@ function fixture(){
  const spec={shotId,sceneId,order:1,title:'打开信',narrativeBeat:'收到来信',audienceTakeaway:'来信改变决定',materialRequirementRefs:[],inputBindings:[]};
  const content={sceneId,identityChangeReason:'NO_IDENTITY_CHANGE',shots:[spec]};
  const design={id:'design-letter',scopeId:sceneId,sceneId,episodeUid,content,contentHash:productionHash(content)};
- const scope={sceneId,episodeUid,plan:design,shots:[{...spec,id:shotId}]},settings=defaultShotProductionPlan(scope);
+ const scope={sceneId,episodeUid,plan:design,shots:[{...spec,id:shotId}]},settings=defaultShotProductionPlan(scope,{schemaVersion:'1.0'});
  settings.shots[0].keyframeStrategy={mode:'START_END',reason:'打开信前后的动作状态',intermediateFrameCount:0};
  const documents=[],doc=(path,revisionId,value,role)=>{const bytes=canonicalJson(value),result={revisionId,aliases:[path],bytes,sha256:sha256(bytes),metadata:{sourceRole:role}};documents.push(result);return result;};
  const makePlan=(id,settings)=>{const sourcePath=`story/shot-production/${id}.json`,sourceRevisionId=`source-${id}`;

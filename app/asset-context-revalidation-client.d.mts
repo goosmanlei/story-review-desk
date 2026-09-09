@@ -1,0 +1,10 @@
+import type {AssetContextTarget,AssetContextContent,AssetContextWorkspace,AssetContextDraft} from '../host/instance-runtime/asset-context-revalidation-service.mjs';
+export type ContextEditableDraft=Omit<AssetContextContent,'criterionFindings'>&{originalViewed:boolean;criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA'|'';note:string}>};
+export type ContextPending={action:'save'|'publish';target:AssetContextTarget;requestId:string;basisHash:string;releaseId:string;oldDraftRevisionId:string|null;content:AssetContextContent};
+export type ContextLocalDraft={target:AssetContextTarget;basisHash:string;releaseId:string;content:ContextEditableDraft};
+export function sameContextTarget(a:unknown,b:unknown):boolean;
+export function validContextWorkspace(value:unknown,target:AssetContextTarget):AssetContextWorkspace;
+export function validContextReceipt(value:unknown,action:'save'|'preview'|'publish',workspace:AssetContextWorkspace):Record<string,unknown>;
+export function validContextPending(value:unknown,target:AssetContextTarget):ContextPending;
+export function validContextLocalDraft(value:unknown,target:AssetContextTarget):ContextLocalDraft;
+export function reconcileContextPending(pending:ContextPending,workspace:AssetContextWorkspace):{confirmed:boolean;job?:AssetContextWorkspace['jobs'][number];draft?:AssetContextDraft};

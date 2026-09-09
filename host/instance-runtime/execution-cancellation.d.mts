@@ -1,0 +1,11 @@
+import type {InstanceReadUnit} from './index.mjs';
+type Row=Record<string,unknown>;
+export const UNSTARTED_CANCELLATION_SCHEMA:'UNSTARTED_REQUEST_CANCELLATION_V1';
+export function cancellationMarker(event:Row):boolean;
+export function cancellationHeadProof(event:Row):{eventId:unknown;eventSequence:unknown;sha256:string};
+export function unstartedRequestHistory(events:Row[],executionRequestId:string,runtime:Row):{head:Row;history:Row[];historyHash:string;notCalledEvidence:Row[]};
+export function cancellationPublication(release:unknown):Row;
+export type UnstartedCancellationBasis={head:Row;history:Row[];historyHash:string;notCalledEvidence:Row[];runtime:Row;publication:Row};
+export function readUnstartedCancellationBasis(tx:InstanceReadUnit,input:{executionRequestId:string}):Promise<UnstartedCancellationBasis>;
+export function buildUnstartedCancellation(basis:UnstartedCancellationBasis,input:unknown,options:{snapshotId:string;expectedEtag:string;note:string}):Row;
+export function validateUnstartedCancellationEvents(input:{events:Row[];instanceId:string;releaseContext:(event:Row)=>unknown}):Array<{eventId:unknown;executionRequestId:unknown;receiptHash:string}>;

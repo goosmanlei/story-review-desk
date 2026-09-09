@@ -1,6 +1,7 @@
+import {imageTechnicalBinding} from './image-technical-spec.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
-import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,productionBindingReasons} from './shot-production-model.mjs';
+import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,shotProductionEntryGates,productionBindingReasons} from './shot-production-model.mjs';
 import {bindConfiguration} from './configuration-model.mjs';
 import {applyAnimaticProjection,reconcileAnimaticLocks} from './animatic-service.mjs';
 import {applyShotProductionLocksProjection} from './shot-production-locks.mjs';
@@ -9,6 +10,8 @@ import {episodeSourceCompiler} from './episode-source-sync.mjs';
 import {reuseShotProductionObjects} from './shot-production-reuse.mjs';
 import {shotProductionExecutionEntries} from './shot-production-gates.mjs';
 import {applyProductionSpatialProjection} from './spatial-production.mjs';
+import {loadMaterialUsageEvidence} from './material-usage-preservation.mjs';
+import {requirementInputFamilyIds} from './material-requirement-composition.mjs';
 
 export const SHOT_PRODUCTION_NS={drafts:'shot-production-drafts',requests:'shot-production-requests',jobs:'shot-production-jobs'};
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
@@ -18,7 +21,7 @@ const put=(tx,namespace,key,value,expectedRevisionId=null)=>tx.putAux({namespace
 /** Read from a single transaction. AUX render proofs must not be cached with a release. */
 export async function readCurrentShotProductionModel(tx,{api}={}) {
   if(!api?.projectOperationalState)fail('缺少正式运行态验证器');
-  const view=await tx.readView(),model=await applyProductionSpatialProjection(tx,await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}})),{view});
+  const view=await tx.readView(),model=await loadMaterialUsageEvidence(tx,await applyProductionSpatialProjection(tx,await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}})),{view}),{view});
   const snapshot={...view.snapshot,productionModel:model};
   const state=episodeSourceCompiler(api).stateFor({...view,snapshot});
   model.animaticLocks=reconcileAnimaticLocks(model,state);
@@ -50,12 +53,13 @@ export async function getShotProductionWorkspace(tx,{sceneId,api}) {
   let basis=null,content=null,blockers=[];try{const scope=currentScope(model,state,sceneId);basis={sceneId,episodeUid:scope.episodeUid,shotPlanRevisionId:scope.plan.id,shotPlanHash:scope.plan.contentHash,shots:scope.shots};content=defaultShotProductionPlan(scope);}catch(e){blockers=[e.message];}
   const plan=(model.shotProductionPlans||[]).find(p=>p.sceneId===sceneId&&p.scopeRole==='CURRENT');
   const jobs=(await tx.listAux(SHOT_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.sceneId===sceneId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20);
-  const availableInputs=(model.materialRequirements||[]).flatMap(r=>(r.assetFamilyRefs||[]).flatMap(familyId=>{const f=state.assetFamiliesById?.[familyId],v=state.assetVersionsById?.[f?.currentVersionId];return v?.sha256&&v.path?[{requirementId:r.id,familyId,versionId:v.id,sha256:v.sha256,label:r.title||f.label,canFlowDownstream:f.canFlowDownstream===true&&v.canFlowDownstream===true}]:[];}));
+  const availableInputs=(model.materialRequirements||[]).flatMap(r=>requirementInputFamilyIds(model,state,r).flatMap(familyId=>{const f=state.assetFamiliesById?.[familyId],v=state.assetVersionsById?.[f?.currentVersionId];return v?.sha256&&v.path?[{requirementId:r.id,familyId,versionId:v.id,sha256:v.sha256,label:r.title||f.label,canFlowDownstream:f.canFlowDownstream===true&&v.canFlowDownstream===true}]:[];}));
   const graph=model.materialDirectory?.graph||model.domainGraph||{},availableSpace={sourceSha256:model.spatialEvidence?.sourceSha256||null,version:model.spatialEvidence?.version||null,locations:(model.spatialEvidence?.locationPackages||[]).map(p=>({id:p.id,label:p.name||p.id,zones:(p.zones||[]).map(z=>({id:z.id,label:z.name||z.id})),cameras:(p.cameras||[]).map(c=>({id:c.id,label:[c.from,c.looks,c.use].filter(Boolean).join(' · ')||c.id,zoneIds:c.zoneIds||[c.zoneId].filter(Boolean)}))})),states:(graph.states||[]).filter(s=>(graph.entities||[]).some(e=>e.id===s.entityId&&e.type==='LOCATION')).map(s=>({id:s.id,label:s.label||s.id})),localViews:(model.spatialShotViews||[]).filter(r=>r.scopeRole==='CURRENT'&&r.content?.sceneBinding?.sceneId===sceneId).map(r=>({id:r.id,viewId:r.viewId,label:r.content.camera.purpose,locationId:r.content.base.locationId,zoneId:r.content.base.zoneId,cameraId:r.content.camera.id,sourceRevisionId:r.sourceRevisionId,sourceSha256:r.sourceSha256}))};
   const manifestTargets=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)&&['SHOT_INPUT_LOCK','LOCKED_SHOT'].includes(w.deliverableKey)).map(w=>({workItemId:w.id,shotId:w.shotId,gateId:w.gateId,label:w.label}));
   const sceneWorkIds=new Set((model.workItems||[]).filter(w=>w.sceneId===sceneId).map(w=>w.id));
   const manifestJobs=(model.shotProductionManifestJobs||[]).filter(j=>sceneWorkIds.has(j.workItemId)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(({jobId,workItemId,status,error})=>({jobId,workItemId,status,error}));
-  return {sceneId,releaseId:view.releaseId,basis,blockers,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),availableInputs,availableSpace,manifestTargets,manifestJobs,jobs};
+  const entryGates=shotProductionEntryGates(model,state),stageEntries=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)).map(w=>({id:w.id,shotId:w.shotId,deliverableKey:w.deliverableKey,gateId:w.gateId,label:w.label,blockers:entryGates[w.id]||['PRODUCTION_WORK_CLOSURE_CHANGED']}));
+  return {sceneId,releaseId:view.releaseId,basis,blockers,stageEntries,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),availableInputs,availableSpace,manifestTargets,manifestJobs,jobs};
 }
 export async function saveShotProductionDraft(tx,input,{api}){
   const {view,model,state}=await readCurrentShotProductionModel(tx,{api});if(view.releaseId!==input.expectedReleaseId)fail('发布版本已变化，请重新核对');
@@ -69,13 +73,13 @@ export async function previewShotProduction(tx,input,{api}) {
   if(!draft||record.revisionId!==input.draftRevisionId||view.releaseId!==draft.baseReleaseId)fail('草稿或发布基线已变化，请重新保存核对');
   const scope=currentScope(model,state,input.sceneId),content=validateShotProductionPlan(draft.content,scope);
   // Bindings can be incomplete in a production plan; they cannot claim a lock.
-  for(const shot of content.shots)for(const binding of shot.inputs){const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('输入绑定不能采用：'+reasons.join('、'));}
+  for(const shot of content.shots){for(const binding of shot.inputs){const reasons=productionBindingReasons(model,state,binding);if(reasons.length)fail('输入绑定不能采用：'+reasons.join('、'));}for(const binding of shot.previsInputs||[]){const reasons=productionBindingReasons(model,state,binding,{consumerRole:'PREVIS_TIMING'});if(reasons.length)fail('预演参考不能采用：'+reasons.join('、'));}}
   const id='SP-PLAN-'+productionHash({sceneId:input.sceneId,draftRevisionId:record.revisionId}).slice(0,24);
   const compiled=compileShotProductionPlan(scope,content,{id,revisionId:record.revisionId,sourceRef:'PREVIEW_ONLY'});
   const old=(model.shotProductionPlans||[]).find(p=>p.sceneId===input.sceneId&&p.scopeRole==='CURRENT');
   const reuse=reuseShotProductionObjects(model,old,compiled);
   const body={schemaVersion:'1.0',sceneId:input.sceneId,expectedReleaseId:view.releaseId,draftRevisionId:record.revisionId,contentHash:productionHash(content),productionPlanId:id,shotPlanRevisionId:scope.plan.id,shotCount:scope.shots.length,workItemCount:reuse.additions.workItems.length,outputCount:reuse.additions.expectedOutputs.length,replacedProductionPlanId:old?.id||null,previousWorkItemIds:reuse.retiredWorkItemIds,reusedWorkItemIds:reuse.reusedWorkItemIds};
-  return {...body,previewHash:productionHash(body),checks:['仅建立本场过程素材的制作需求，不伪造实际版本','保留旧计划与素材历史','输入、声音、锁时和关键帧仍须分别验收','未就绪镜头保持阻断，尚不调用视频模型']};
+  return {...body,previewHash:productionHash(body),checks:['仅建立本场过程素材的制作需求，不伪造实际版本','保留旧计划与素材历史','输入、声音、锁时和关键帧仍须分别验收',...(content.schemaVersion==='2.0'?['粗分镜和临时对白按本镜本句条件并行；正式视觉输入逐镜锁定']:['未就绪镜头保持阻断，尚不调用视频模型'])]};
 }
 export async function enqueueShotProduction(tx,input,{api}){
   productionId(input.requestId);const previous=read(await tx.getAux(SHOT_PRODUCTION_NS.requests,input.requestId));if(previous){if(previous.requestHash!==productionHash(input))fail('请求编号已用于其他操作');return previous.result;}
@@ -111,7 +115,7 @@ export async function applyShotProductionJob(tx,{jobId,api}){
   for(const [index,[id,label,code,purpose,reviewFocus,output,unlock]] of stepTexts.entries())if(!(out.workflowSteps||[]).some(s=>s.id===id))out.workflowSteps=[...(out.workflowSteps||[]),{id,order:index+1,label,technicalCodes:[code],purpose,reviewFocus,output,unlock}];
   const config=out.systemConfiguration?.config;if(!config)fail('当前实例缺少冻结的制作审阅配置');
   const bindings=bindConfiguration(snapshot,config);
-  for(const item of reuse.additions.workItems){const row=out.workItems.find(w=>w.id===item.id);row.configurationBinding=bindings['work:'+item.id];row.reviewSpec=row.configurationBinding?.reviewSpec;if(!row.reviewSpec?.hash)fail('制作项缺少精确审阅标准：'+item.deliverableKey);}
+  for(const item of reuse.additions.workItems){const row=out.workItems.find(w=>w.id===item.id);row.configurationBinding=bindings['work:'+item.id];row.reviewSpec=row.configurationBinding?.reviewSpec;if(!row.reviewSpec?.hash)fail('制作项缺少精确审阅标准：'+item.deliverableKey);const imageSpec=imageTechnicalBinding(row.configurationBinding);if(imageSpec){Object.assign(row,structuredClone(imageSpec));for(const target of [...reuse.additions.assetFamilies.filter(f=>f.ownerRef===row.id),...reuse.additions.expectedOutputs.filter(o=>o.familyId===row.outputAssetRef)]){const original=(target.familyId?out.expectedOutputs:out.assetFamilies).find(r=>r.id===target.id);Object.assign(original,structuredClone(imageSpec));}}}
   // These are new production objects. Frozen ShotSpec bytes and old reviews are untouched.
   snapshot.snapshotId='snapshot_'+productionHash({previous:view.snapshot.snapshotId,plan:plan.id,sourceSha256:source.sha256}).slice(0,32);
   const recipes={...view.recipes,snapshotId:snapshot.snapshotId};

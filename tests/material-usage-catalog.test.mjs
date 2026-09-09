@@ -1,0 +1,12 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
+import ts from 'typescript';
+const emit=source=>ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText;
+const taxonomy=await import('data:text/javascript;base64,'+Buffer.from(emit(readFileSync(new URL('../app/material-taxonomy.ts',import.meta.url),'utf8'))).toString('base64'));
+const source=readFileSync(new URL('../app/material-production-center.tsx',import.meta.url),'utf8'),ast=ts.createSourceFile('center.tsx',source,ts.ScriptTarget.Latest,true,ts.ScriptKind.TSX);
+const declarations=ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='creatorStageFor');assert.equal(declarations.length,1);
+const stage=Function('projectMaterialCreatorStage',emit(declarations[0].getText(ast))+';return creatorStageFor;')(taxonomy.projectMaterialCreatorStage);
+test('catalog shows an actually covered reused image as approved without inventing a producer',()=>{const r={requirementClass:'REQUIRED',assetFamilyRefs:[],coverageSatisfied:true,bindingStale:false,materialWorkItemRef:null,materialUsageBindings:[{eligible:true}]};assert.equal(stage(r,null,null).creatorStage,'APPROVED');assert.equal(r.materialWorkItemRef,null);assert.deepEqual(r.assetFamilyRefs,[]);});
+test('rejected usage or incomplete ALL collection returns to defined in the same catalog',()=>{for(const extra of [{materialUsageBindings:[{eligible:false}]},{composition:{mode:'ALL',requiredComponents:[{id:'a'},{id:'b'}]}}])assert.equal(stage({requirementClass:'REQUIRED',coverageSatisfied:false,bindingStale:false,...extra},null,null).creatorStage,'INITIAL');assert.equal(stage({requirementClass:'REQUIRED',coverageSatisfied:true,bindingStale:true},null,null).creatorStage,'INITIAL');});
+test('a real producer hard gate is never overridden by a coverage badge',()=>{const result=stage({requirementClass:'REQUIRED',coverageSatisfied:true,bindingStale:false},{id:'actual:producer',lifecycleState:'RESULT_UNKNOWN'},null);assert.equal(result.creatorStage,'INITIAL');assert.equal(result.executionBlocked,true);});

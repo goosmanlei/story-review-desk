@@ -21,6 +21,9 @@ export type ConfigurationState = {
     defaultProfileId?: string | null;
     reviewSpecHash: string;
     configurationHash: string;
+    imageTechnicalUpgradeEligible?: boolean;
+    technicalSpec?: import("./image-technical-spec.mjs").ImageTechnicalSpec;
+    technicalSpecHash?: string;
   }>;
   history: Array<{
     revisionId: string;

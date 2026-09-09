@@ -12,7 +12,7 @@ const workMutable=['executionDefinitionRef','promptRef','inputAssetRefs','lifecy
 const outputMutable=['id','targetPath','plannedVersionLabel','legacyVersionId','expectationState','realizedVersionId','sourceRef','executionDefinitionRef'];
 
 /** Verify each immutable native successor source and its exact predecessor chain. */
-export function materialProductionRevisionClosures({model,recipes,documents,initialClosures,instanceId}){
+export function materialProductionRevisionClosures({model,recipes,documents,initialClosures,instanceId,verifiedAncestors=[]}){
  const rows=model.materialProductionRecipeRevisions||[];
  if(new Set(rows.map(r=>r.id)).size!==rows.length||new Set(rows.map(r=>r.definitionId)).size!==rows.length||new Set(rows.map(r=>r.expectedOutputId)).size!==rows.length)fail('基础素材后继版本记录不能重复');
  const closures=rows.map(row=>{
@@ -24,7 +24,7 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
   if(body.schemaVersion!=='MATERIAL_PRODUCTION_RECIPE_V1'||body.id!==row.id||body.sourcePath!==row.sourcePath||row.sourcePath!=='story/material-production/recipes/'+row.id+'.json'||body.materialProductionPlanId!==plan.id||row.requirementId!==plan.requirementId||row.representationId!==plan.representationId||row.familyId!==plan.familyId||row.workItemId!==plan.workItemId||body.requirementId!==row.requirementId||body.representationId!==row.representationId||body.basisHash!==row.basisHash||domainHash(body.basis)!==row.basisHash||body.basis.requirementHash!==row.requirementHash)fail('基础素材后继源身份、需求或输入闭包不一致');
   const frozenRepresentation=body.basis.representation,frozenDemand=body.basis.demand;
   if(frozenDemand?.id!==row.requirementId||frozenDemand.representationId!==row.representationId||frozenRepresentation?.id!==row.representationId
-   ||!same(frozenRepresentation,initial.body.graphBinding.afterRepresentation)||domainHash({demand:frozenDemand,representation:frozenRepresentation})!==row.requirementHash
+   ||!same(frozenRepresentation,(initial.body.graphBinding?.afterRepresentation||initial.body.basis.representation))||domainHash({demand:frozenDemand,representation:frozenRepresentation})!==row.requirementHash
    ||!same(body.requirementBefore,body.requirementAfter)||body.requirementAfter?.requirementHash!==row.requirementHash||body.requirementAfter.id!==row.requirementId||body.requirementAfter.representationRef!==row.representationId||!same(body.requirementAfter.assetFamilyRefs,[plan.familyId]))fail('基础素材后继源未自证其完整需求与表现哈希');
   if(row.requirementHash!==plan.requirementHash){
    // The immutable recipe belongs to its own then-current demand, which may
@@ -32,7 +32,7 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
    const representation=frozenRepresentation,requirementId=row.requirementId,representationId=row.representationId,representationHash=domainHash(representation);
    const declared=body.basis.revision?.requirementCompatibilities,fields=['compatibilityId','proofHash','requirementId','beforeHash','afterHash','representationId','representationHash'];
    if(!Array.isArray(declared)||!declared.length||declared.length>64||declared.some(b=>!b||typeof b!=='object'||Array.isArray(b))||new Set(declared.map(b=>b.proofHash+':'+b.beforeHash+':'+b.afterHash)).size!==declared.length)fail('后继配方未冻结唯一兼容依据');
-   let previousHash=plan.requirementHash,previousDemand=initial.body.graphBinding.requirement;
+   let previousHash=plan.requirementHash,previousDemand=(initial.body.graphBinding?.requirement||initial.body.basis.demand);
    const visited=new Set([previousHash]);
    for(const link of declared){
     if(Object.keys(link).sort().join(',')!==[...fields].sort().join(',')||link.requirementId!==requirementId||link.representationId!==representationId||link.representationHash!==representationHash||link.beforeHash!==previousHash||visited.has(link.afterHash))fail('后继兼容依据身份或顺序无效');
@@ -46,7 +46,8 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
   if(!rb||rb.materialProductionPlanId!==plan.id||rb.familyId!==plan.familyId||rb.workItemId!==plan.workItemId||rb.parentVersionId!==row.parentVersionId||rb.parentVersionSha256!==row.parentVersionSha256||body.parentVersionId!==row.parentVersionId||body.parentVersionSha256!==row.parentVersionSha256||rb.definitionId!==row.previousDefinitionId||rb.expectedOutputId!==row.previousExpectedOutputId||body.previousDefinitionId!==row.previousDefinitionId||body.previousExpectedOutputId!==row.previousExpectedOutputId||candidate?.versionId!==row.parentVersionId||candidate.familyId!==row.familyId||candidate.sha256!==row.parentVersionSha256||!rb.failedAttempt&&(candidate.expectedOutputId!==row.previousExpectedOutputId||candidate.executionDefinitionId!==row.previousDefinitionId||candidate.callPackageHash!==rb.definitionHash)||rb.parentCandidate?.eventId!==candidate.eventId||rb.parentCandidate?.sha256!==domainHash(candidate)||!/^[a-f0-9]{64}$/.test(row.parentVersionSha256||''))fail('基础素材后继版本缺少精确实际父候选和旧调用包证据');
   if(rb.failedAttempt){
    const previous=one(recipes.executionDefinitions,row.previousDefinitionId,'失败尝试调用定义'),previousOutput=one(model.expectedOutputs,row.previousExpectedOutputId,'失败尝试预期产物'),parentDefinition=one(recipes.executionDefinitions,candidate.executionDefinitionId,'实际父调用定义'),parentOutput=one(model.expectedOutputs,candidate.expectedOutputId,'实际父预期产物'),p=rb.failedAttempt;
-   assertFailedMaterialAttempt(p,{definition:previous,output:previousOutput,parentCandidate:candidate,parentDefinition,parentOutput,fail});
+   const previousSources=(documents||[]).filter(d=>d.revisionId===previous.sourceRevisionId);
+   assertFailedMaterialAttempt(p,{definition:previous,output:previousOutput,parentCandidate:candidate,parentDefinition,parentOutput,sourceDocument:previousSources.length===1?previousSources[0]:null,fail});
    const source=d=>({path:d.sourceRef,revisionId:d.sourceRevisionId,sha256:d.sourceSha256});
    if(!same(p.source,source(previous))||!same(p.parentSource,source(parentDefinition))||p.requestHeads.some(e=>!(rb.requestHeads||[]).some(h=>same(h,e)))||p.runHeads.some(e=>!(rb.runHeads||[]).some(h=>same(h,e)))||!(rb.runHeads||[]).some(h=>same(h,materialEventBinding(p.parentRun))))fail('失败重制缺少固定源及原始请求/运行哈希');
   }
@@ -61,7 +62,7 @@ export function materialProductionRevisionClosures({model,recipes,documents,init
   return {row,body,definition,output,initial};
  });
  for(const initial of initialClosures){
-  const chain=closures.filter(c=>c.row.materialProductionPlanId===initial.plan.id);let previousDefinition=initial.body.executionDefinition,previousOutput=initial.body.expectedOutput,previousFamily=initial.body.assetFamily,previousWork=initial.body.materialWorkItem;const visited=new Set(),actualAncestors=new Map();
+  const chain=closures.filter(c=>c.row.materialProductionPlanId===initial.plan.id);let previousDefinition=initial.body.executionDefinition,previousOutput=initial.body.expectedOutput,previousFamily=initial.body.assetFamily,previousWork=initial.body.materialWorkItem;const visited=new Set(),actualAncestors=new Map(verifiedAncestors.map(a=>[a.definitionId,a.output]));
   while(true){
    const next=chain.filter(c=>c.row.previousDefinitionId===previousDefinition.id);if(next.length>1)fail('同素材族后继调用包不得分叉');if(!next.length)break;
    const c=next[0];if(visited.has(c.row.id))fail('素材后继调用包形成循环');visited.add(c.row.id);

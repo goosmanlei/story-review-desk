@@ -1,4 +1,5 @@
 import { canonicalJson, sha256 } from './bytes.mjs';
+import {validateRequirementCompositions} from './material-requirement-composition.mjs';
 
 const fail = message => { throw Object.assign(new Error(message), { code: 'DOMAIN_INVALID' }); };
 const object = (v, name) => { if (!v || typeof v !== 'object' || Array.isArray(v)) fail(`${name}必须是对象`); return v; };
@@ -40,7 +41,51 @@ export function validateDomainGraph(input,options={}){
   if(t.acyclic&&!r.historicalOnly){const a=`${t.class}:${r.from.kind}:${r.from.id}`,b=`${t.class}:${r.to.kind}:${r.to.id}`;adjacent.set(a,[...(adjacent.get(a)||[]),b]);}}
  const done=new Set(),active=new Set();function visit(id){if(active.has(id))fail('生产参考或有向状态依赖存在循环');if(done.has(id))return;active.add(id);for(const n of adjacent.get(id)||[])visit(n);active.delete(id);done.add(id);}for(const id of adjacent.keys())visit(id);
  for(const r of g.requirements){text(r.title,'需求名称',300);if(!repById.has(r.representationId))fail('需求表现不存在');if(!['IMAGE','AUDIO','VIDEO','TEXT'].includes(r.mediaType))fail('需求媒介无效');text(r.category,'需求类型',300);text(r.reuseScope,'复用范围',1000);scopes(r.scope);evidence(r.evidence,options.sourceBindings);strings(r.acceptanceCriteria,'验收要求');if(!r.acceptanceCriteria.length)fail('素材需求必须有验收要求');}
+ validateRequirementCompositions(g.requirements,{knownRequirementIds:options.knownCompositionRequirementIds||options.knownRequirementIds||[]});
+ validateRequirementReplacements(g);
+ if(options.previousGraph)validateRequirementReplacementTransition(options.previousGraph,g);
  return g;
 }
 export function validateInitializationContent(input){const v=object(input,'初始化草稿');keys(v,['schemaVersion','title','summary','configuration','graph','uncertainties','sourceBindings'],'初始化草稿');if(v.schemaVersion!=='1.0')fail('初始化草稿版本无效');text(v.title,'故事名称',300);if(typeof v.summary!=='string'||v.summary.length>100000)fail('故事说明无效');strings(v.uncertainties,'待确认问题');list(v.sourceBindings,'来源绑定',5000);for(const b of v.sourceBindings)evidence([b],null);object(v.configuration,'系统配置');validateDomainGraph(v.graph,{configuration:v.configuration.domain||defaultDomainConfiguration(),sourceBindings:v.sourceBindings});return structuredClone(v);}
 export function graphImpact(previous,next){const a=new Map(),b=new Map();for(const k of ['entities','states','representations','relations','requirements']){for(const x of previous[k])a.set(`${k}:${x.id}`,domainHash(x));for(const x of next[k])b.set(`${k}:${x.id}`,domainHash(x));}const changedIds=new Set([...b.keys()].filter(id=>a.get(id)!==b.get(id)).map(id=>id.split(':').slice(1).join(':')));return {added:[...b.keys()].filter(k=>!a.has(k)).length,changed:[...b.keys()].filter(k=>a.has(k)&&a.get(k)!==b.get(k)).length,removed:[...a.keys()].filter(k=>!b.has(k)).length,affectedRepresentationIds:next.representations.filter(r=>changedIds.has(r.id)||changedIds.has(r.entityId)||changedIds.has(r.stateId)||next.relations.some(e=>changedIds.has(e.id)&&[e.from.id,e.to.id].includes(r.id))).map(r=>r.id),referenceCount:next.relations.filter(r=>r.referencePolicyId).length,unknownCount:next.relations.filter(r=>r.authority==='U'||r.status==='UNKNOWN').length};}
+
+/** Only this new declaration is strict; unchanged pre-replacement graphs keep their contract. */
+export function validateRequirementReplacements(graph){
+ const replacements=graph.requirements.filter(r=>Object.hasOwn(r,'replaces'));if(!replacements.length)return graph;
+ const demands=new Map(graph.requirements.map(r=>[r.id,r])),reps=new Map(graph.representations.map(r=>[r.id,r])),successors=new Map();
+ const scopeSet=row=>{if(!Array.isArray(row.scope)||!row.scope.length)fail('替代需求必须有精确适用范围');const values=row.scope.map(s=>{keys(s,['scopeType','scopeId','revisionId'],'替代范围');return canonicalJson(s);});if(new Set(values).size!==values.length)fail('替代需求范围不能重复');return values.sort();};
+ for(const r of replacements){
+  const replacement=object(r.replaces,'需求替代');if(Object.keys(replacement).sort().join(',')!=='requirementHash,requirementId')fail('需求替代必须且仅包含requirementId与requirementHash');identifier(replacement.requirementId,'被替代需求');if(!/^[a-f0-9]{64}$/.test(replacement.requirementHash))fail('被替代需求SHA无效');
+  const old=demands.get(replacement.requirementId),rep=reps.get(r.representationId),oldRep=reps.get(old?.representationId);
+  if(!old||old.id===r.id||!rep||!oldRep)fail('替代必须指向另一个已存在的领域需求');
+  if(successors.has(old.id))fail('同一需求不能有多个当前替代者');successors.set(old.id,r.id);
+  if(r.mediaType!=='IMAGE'||old.mediaType!=='IMAGE')fail('当前替代合同仅支持IMAGE需求');
+  if(!r.composition||r.composition.schemaVersion!=='1.0'||r.composition.mode!=='ALL'||!r.composition.requiredComponents?.length||rep.assetFamilyIds.length)fail('替代者必须是无生产族的ALL汇总需求');
+  if(rep.entityId!==oldRep.entityId)fail('替代需求不得改变原主体');
+  if(domainHash({demand:old,representation:oldRep})!==replacement.requirementHash)fail('被替代需求与精确原哈希不一致');
+  const allowed=scopeSet(old);if(canonicalJson(scopeSet(r))!==canonicalJson(allowed))fail('替代需求不得改变原永久适用范围');
+  const seen=new Set(),visiting=new Set(),leafScopes=[];
+  function component(id){if(id===old.id||id===r.id)fail('替代组件不能引用旧宽泛需求或替代者自身');if(visiting.has(id))fail('替代组件存在循环');if(seen.has(id))return;visiting.add(id);const child=demands.get(id);if(!child||child.mediaType!=='IMAGE')fail('替代组件必须是已有精确IMAGE领域需求');const cs=scopeSet(child);if(cs.some(s=>!allowed.includes(s)))fail('替代组件超出原永久适用范围');if(child.composition){for(const c of child.composition.requiredComponents)component(c.requirementId);}else leafScopes.push(...cs);visiting.delete(id);seen.add(id);}
+  for(const c of r.composition.requiredComponents)component(c.requirementId);
+  if(canonicalJson([...new Set(leafScopes)].sort())!==canonicalJson(allowed))fail('替代组件未完整覆盖原适用范围');
+ }
+ const done=new Set(),active=new Set();function visit(id){if(active.has(id))fail('需求替代存在循环');if(done.has(id))return;active.add(id);const next=successors.get(id);if(next)visit(next);active.delete(id);done.add(id);}for(const id of successors.keys())visit(id);
+ return graph;
+}
+/** An applied replacement is append-only. Deleting it must never resurrect the old green row. */
+export function validateRequirementReplacementTransition(previous,next){
+ const oldClaims=(previous?.requirements||[]).filter(r=>Object.hasOwn(r,'replaces')),newClaims=(next?.requirements||[]).filter(r=>Object.hasOwn(r,'replaces'));
+ if(!oldClaims.length&&!newClaims.length)return next;
+ validateRequirementReplacements(next);
+ for(const old of oldClaims){const fresh=next.requirements.find(r=>r.id===old.id);if(!fresh||canonicalJson(fresh.replaces)!==canonicalJson(old.replaces))fail('已发布的需求替代声明不得删除或重新绑定');}
+ for(const claim of newClaims){
+  if(oldClaims.some(r=>r.id===claim.id))continue;
+  if((previous?.requirements||[]).some(r=>r.id===claim.id))fail('需求替代必须使用新ALL身份，不得改绑既有需求');
+  const old=(previous?.requirements||[]).find(r=>r.id===claim.replaces.requirementId),fresh=next.requirements.find(r=>r.id===claim.replaces.requirementId);
+  if(!old||canonicalJson(old)!==canonicalJson(fresh))fail('首次替代必须保留已发布原需求字节，不能同批创建或修改父定义');
+  const rep=previous.representations.find(r=>r.id===old.representationId),newRep=next.representations.find(r=>r.id===old.representationId);
+  if(!rep||canonicalJson(rep)!==canonicalJson(newRep))fail('首次替代必须保留原表现字节');
+  for(const [collection,id]of [['entities',rep.entityId],['states',rep.stateId]])if(id&&canonicalJson(previous[collection].find(r=>r.id===id))!==canonicalJson(next[collection].find(r=>r.id===id)))fail('首次替代不得同时改变原主体或状态');
+ }
+ return next;
+}

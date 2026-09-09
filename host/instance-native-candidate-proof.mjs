@@ -1,8 +1,10 @@
+import {resolveImageTechnicalSpec} from './instance-runtime/image-technical-spec.mjs';
 import path from 'node:path';
 import {canonicalJson,sha256} from './instance-runtime/bytes.mjs';
 import {inspectExecutionDefinitionHash} from './instance-runtime/execution-definition-hash.mjs';
 import {preserveMaterialProductionProjection} from './instance-runtime/material-production-preservation.mjs';
 import {preserveShotProductionProjection,preserveShotRecipeProjection} from './instance-runtime/shot-production-preservation.mjs';
+import {shotProductionInputConsumptionReasons} from './instance-runtime/shot-production-stage-policy.mjs';
 
 const hash=value=>sha256(canonicalJson(value));
 const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
@@ -29,6 +31,8 @@ function inputProof(input,definition,{events,model,activeMedia,pinnedMediaHashes
  const expected=(definition.upload?.items||[]).map((b,i)=>({order:b.order??i+1,path:b.path,assetFamilyRef:b.assetFamilyRef,assetVersionRef:b.assetVersionRef,sha256:b.sha256}));
  check(Array.isArray(input)&&same(input,expected),'Candidate inputs differ from the frozen ordered upload list');
  for(const b of input){
+  const consumerWork=[...(model.workItems||[]),...(model.materialWorkItems||[])].find(w=>w.id===definition.workItemRef);
+  check(!shotProductionInputConsumptionReasons(model,consumerWork,b).length,'Native input is not approved for this production use');
   check(Number.isSafeInteger(b.order)&&b.order>0&&safe(b.path)&&b.assetFamilyRef&&b.assetVersionRef&&hex(b.sha256),'Native input binding is incomplete');
   const v=versionEvidence(model,events,b.assetVersionRef,'Native input version');check(v.familyId===b.assetFamilyRef&&v.path===b.path&&v.sha256===b.sha256,'Native input identity/path/SHA differs');
   const media=one(activeMedia,m=>m.mediaId===b.assetFamilyRef&&m.versionId===b.assetVersionRef,'Native input media');check(formal(media)&&media.sha256===b.sha256&&pinnedMediaHashes[b.path]===b.sha256,'Native input has no exact active formal byte pin');
@@ -73,12 +77,14 @@ export function nativeMaterialCandidateProof({documents,events,activeMedia,pinne
   check(!seen.has(event.versionId)&&!paths.has(event.path),'Native candidate version/path is duplicated');seen.add(event.versionId);paths.add(event.path);
   const family=one(model.assetFamilies,f=>f.id===event.familyId,'Native family'),output=one(model.expectedOutputs,o=>o.id===event.expectedOutputId,'Native ExpectedOutput'),definition=one(recipes.executionDefinitions,d=>d.id===event.executionDefinitionId,'Native definition');
   check(inspectExecutionDefinitionHash(definition).valid&&definition.executorKind==='MODEL_CALL','Unknown native executor/definition hash');
+  const technical=resolveImageTechnicalSpec(model,{familyId:family.id,expectedOutputId:output.id,definition});
+  if(technical)check(event.imageTechnicalSpecHash===technical.technicalSpecHash&&event.imageTechnicalFacts?.schemaVersion==='IMAGE_TECHNICAL_FACTS_V1'&&event.imageTechnicalFacts.sha256===event.sha256&&event.imageTechnicalFacts.byteSize===event.byteSize,'Typed native image lacks exact server technical facts');
   const mp=mpPlans.filter(p=>p.familyId===family.id);check(mp.length<=1,'Native material family has ambiguous plans');
   let work,sourceRows,productionKind;
   if(mp.length){
    const plan=mp[0];productionKind='MP';work=one(model.materialWorkItems,w=>w.id===plan.workItemId,'Native material work');
    const successors=(model.materialProductionRecipeRevisions||[]).filter(r=>r.materialProductionPlanId===plan.id);
-   check(definition.materialProductionPlanId===plan.id&&(plan.definitionId===definition.id||successors.some(r=>r.definitionId===definition.id)),'Unknown native material definition');sourceRows=[plan,...successors];
+   check(definition.materialProductionPlanId===plan.id&&(plan.definitionId===definition.id||successors.some(r=>r.definitionId===definition.id)),'Unknown native material definition');sourceRows=[plan,...successors,...successors.flatMap(row=>Object.values(row.domainSources||{}).map(ref=>({sourcePath:ref.path,sourceRevisionId:ref.revisionId,sourceSha256:ref.sha256})))];sourceRows=[...new Map(sourceRows.map(row=>[row.sourceRevisionId,row])).values()];
   }else{
    productionKind='SP';work=one(model.workItems,w=>w.outputAssetRef===family.id,'Native shot work');
    const plan=one(spPlans,p=>p.id===work.shotProductionPlanId&&p.workItemIds.includes(work.id),'Native shot owner plan');

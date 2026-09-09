@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,writeFile} from 'node:fs/promises';
+import {mkdir,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
 import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {domainHash} from '../host/instance-runtime/domain-model.mjs';
@@ -10,6 +10,7 @@ import {preserveMaterialProductionProjection} from '../host/instance-runtime/mat
 import {domainProductionSlice} from '../host/instance-runtime/domain-projection.mjs';
 import {findCompatibleRequirementBinding,findHistoricalCompatibleRequirementBinding,validateDomainProductionCompatibilityRecord} from '../host/instance-runtime/domain-production-compatibility.mjs';
 import {sealCompatibility} from './fixtures/domain-production-compatibility.mjs';
+import {validateMaterialProductionRebaseArchive} from '../host/instance-runtime/material-production-rebase-archive.mjs';
 
 // Only isolated synthetic repositories and tiny registered fixture bytes.
 // No provider, official instance, deployment, native image or audio is opened.
@@ -49,11 +50,11 @@ async function addScope(repo,label){
 async function materialProductionFixture(t){const f=await baseMaterialProductionFixture(t);await addScope(f.repo,'original');return f;}
 async function frozen(f){const v=await f.repo.readView();return{baseSnapshot:v.snapshot,baseRecipes:v.recipes,documents:await Promise.all(v.sourceRevisionIds.map(id=>f.repo.readDocumentRevision(id)))};}
 function preserve(input){return preserveMaterialProductionProjection({...input,snapshot:structuredClone(input.baseSnapshot),recipes:structuredClone(input.baseRecipes)});}
-async function proofFor(f,{before,after},label){
+async function proofFor(f,{before,after},label,{includeOccurrences=false}={}){
  const old=before.snapshot.productionModel,current=after.snapshot.productionModel,meta=await f.repo.getMetadata();
  const slice=m=>domainProductionSlice(m.domainGraph,[imageRepresentationId],{configuration:m.systemConfiguration.config.domain,referencePolicies:m.domainReferencePolicyBindings,representationPolicies:m.domainRepresentationPolicyBindings});
  const beforeDemand=old.domainGraph.requirements.find(r=>r.id===imageRequirementId),afterDemand=current.domainGraph.requirements.find(r=>r.id===imageRequirementId),representation=current.domainGraph.representations.find(r=>r.id===imageRepresentationId);
- const record=sealCompatibility({schemaVersion:'DOMAIN_PRODUCTION_COMPATIBILITY_V1',compatibilityId:'compatibility:'+label,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch,beforeGraphRef:old.domainGraphRef,afterGraphRef:current.domainGraphRef,beforeSlice:slice(old),afterSlice:slice(current),metadataApprovals:[],occurrences:[],requirementBindings:[{requirementId:imageRequirementId,beforeHash:domainHash({demand:beforeDemand,representation}),afterHash:domainHash({demand:afterDemand,representation}),representationId:imageRepresentationId,representationHash:domainHash(representation),beforeDemand,afterDemand}],versionBindings:[],approval:{confirmed:true,reason:'Synthetic host test: same physical contract, exact published source and additive scene scope.'}});
+ const record=sealCompatibility({schemaVersion:'DOMAIN_PRODUCTION_COMPATIBILITY_V1',compatibilityId:'compatibility:'+label,instanceId:meta.instanceId,runtimeEpoch:meta.runtimeEpoch,beforeGraphRef:old.domainGraphRef,afterGraphRef:current.domainGraphRef,beforeSlice:slice(old),afterSlice:slice(current),metadataApprovals:[],occurrences:includeOccurrences?(current.domainInvalidations||[]).map((o,index)=>({index,hash:domainHash(o),familyId:o.familyId,previousHash:o.previousHash,currentHash:o.currentHash})).filter(o=>o.index>=(old.domainInvalidations||[]).length):[],requirementBindings:[{requirementId:imageRequirementId,beforeHash:domainHash({demand:beforeDemand,representation}),afterHash:domainHash({demand:afterDemand,representation}),representationId:imageRepresentationId,representationHash:domainHash(representation),beforeDemand,afterDemand}],versionBindings:[],approval:{confirmed:true,reason:'Synthetic host test: same physical contract, exact published source and additive scene scope.'}});
  assert(validateDomainProductionCompatibilityRecord(record,{model:current,instanceId:meta.instanceId}));return record;
 }
 async function install(f,record){await f.repo.writeTransaction(async tx=>{const v=await tx.readView(),snapshot=structuredClone(v.snapshot);snapshot.productionModel.domainProductionCompatibilities=[...(snapshot.productionModel.domainProductionCompatibilities||[]),structuredClone(record)];await tx.publishRelease({snapshot,recipes:v.recipes,expectedReleaseId:v.releaseId,sourceRevisionIds:v.sourceRevisionIds});});}
@@ -137,4 +138,52 @@ test('a valid requirement proof cannot authorize UNKNOWN-rights reference media'
  const author={...content('Reference remains subject to actual rights gates.'),inputBindings:[{familyId:f.first.plan.familyId,versionId:f.first.candidate.versionId,sha256:f.first.candidate.sha256}]};
  await assert.rejects(f.repo.writeTransaction(tx=>saveMaterialProductionDraft(tx,{requirementId:imageRequirementId,expectedReleaseId:w.releaseId,expectedDraftRevisionId:w.draftHeadRevisionId,expectedBasisHash:w.basisHash,content:author},{api})),/参考版本/);
  assert.deepEqual(await f.repo.exportState(),before);
+});
+
+// Cross-feature contracts use actual isolated source/media/event rows. The
+// file inspector is intentionally real; these tests never synthesize a provider
+// success when the fixture has only a failed, unregistered expected output.
+function inspectFixtureMedia(f){
+ api.safeGeneratedPath=async(relative,binding)=>{const file=path.resolve(f.root,relative);assert.ok(file.startsWith(f.root+path.sep));assert.equal(sha256(await readFile(file)),binding.sha256);return file;};
+ api.safeReviewPendingPath=async relative=>{const file=path.resolve(f.root,relative);assert.ok(file.startsWith(f.root+path.sep));await readFile(file);return file;};
+}
+async function failCurrent(f){
+ const v=await f.repo.readView(),plan=v.snapshot.productionModel.materialProductionPlans[0],work=v.snapshot.productionModel.materialWorkItems.find(w=>w.id===plan.workItemId),definition=v.recipes.executionDefinitions.find(d=>d.id===work.executionDefinitionRef),binding={executionRequestId:'failed:'+definition.id,executionDefinitionId:definition.id,callPackageHash:definition.definitionHash,inputBindingsHash:domainHash([])};
+ await append(f.repo,'execution-request',{...binding,workItemId:work.id,familyId:plan.familyId,executor:'CODEX',requestState:'CLAIMED',maxOutputs:1});
+ await append(f.repo,'run',{...binding,runId:'failed-run:'+definition.id,runState:'FAILED',note:'Explicit synthetic provider rejection, no output and no provider call in this fixture.'});
+ return definition;
+}
+async function explicitRebase(f,key){
+ const mode='REQUIREMENT_REBASE',w=await f.repo.readTransaction(tx=>getMaterialProductionWorkspace(tx,{requirementId:imageRequirementId,mode,api}));
+ const draft=await f.repo.writeTransaction(tx=>saveMaterialProductionDraft(tx,{requirementId:imageRequirementId,mode,expectedReleaseId:w.releaseId,expectedDraftRevisionId:w.draftHeadRevisionId,expectedBasisHash:w.basisHash,content:content(key),acknowledgement:{confirmed:true,beforeHash:w.rebase.beforeHash,afterHash:w.rebase.afterHash,note:'Same permanent owner and unchanged scope; explicitly reauthor this changed physical definition.'}},{api}));
+ const preview=await f.repo.readTransaction(tx=>previewMaterialProduction(tx,{requirementId:imageRequirementId,mode,draftRevisionId:draft.revisionId},{api}));
+ const job=await f.repo.writeTransaction(tx=>enqueueMaterialProduction(tx,{requirementId:imageRequirementId,mode,draftRevisionId:draft.revisionId,previewHash:preview.previewHash,requestId:key},{api}));
+ return f.repo.writeTransaction(tx=>applyMaterialProductionJob(tx,{jobId:job.jobId,api}));
+}
+
+test('compatible ordinary successor may fail without output; remake keeps the actual earlier parent and frozen compatibility history',async t=>{
+ const f=await compatibleFixture(t);inspectFixtureMedia(f);await provision(f.repo,'cross:compatible-v002');const failed=await failCurrent(f),w=await workspace(f.repo);
+ assert.deepEqual(w.blockers,[]);assert.equal(w.parentVersionId,f.first.candidate.versionId);assert.equal(w.plannedVersionLabel,'V003');assert.equal(w.basis.revision.failedAttempt.definitionId,failed.id);
+ await provision(f.repo,'cross:compatible-v003');const input=await frozen(f),result=preserve(input);
+ assert.deepEqual(result.recipes,input.baseRecipes);assert.deepEqual(result.snapshot.productionModel.materialProductionPlans,[f.first.plan]);assert.equal(input.baseSnapshot.productionModel.materialProductionRecipeRevisions.at(-1).parentVersionId,f.first.candidate.versionId);
+ assert.equal((await f.repo.listMedia()).length,1);
+});
+
+test('explicit rebase then compatible scope and failed ordinary successor preserve both independent proof chains and validate archived original rows',async t=>{
+ const f=await materialProductionFixture(t);inspectFixtureMedia(f);await provision(f.repo,'cross:rebase-first');const first=await register(f),v=await f.repo.readView(),rep=v.snapshot.productionModel.domainGraph.representations.find(r=>r.id===imageRepresentationId);
+ await changeDomain(f.repo,'MATERIAL',[{collection:'representations',id:rep.id,beforeHash:domainHash(rep),value:{...rep,label:'Explicit new physical fixture state'}}]);
+ await assert.rejects(workspace(f.repo),{code:'DOMAIN_CONFLICT'});
+ const rebased=await explicitRebase(f,'cross:rebase-v002'),second=await register(f),beforeScope=await frozen(f),change=await addScope(f.repo,'after-rebase');
+ // Retain a synthetic archived invalidation occurrence as well as requirement
+ // links: a historical compatibility receipt must still verify its exact row.
+ await f.repo.writeTransaction(async tx=>{const v=await tx.readView(),snapshot=structuredClone(v.snapshot);snapshot.productionModel.domainInvalidations.push({familyId:first.plan.familyId,previousHash:domainHash(change.before.snapshot.productionModel.domainGraph),currentHash:change.after.snapshot.productionModel.assetFamilies.find(row=>row.id===first.plan.familyId).domainContext.hash,versionIds:[second.candidate.versionId]});await tx.publishRelease({snapshot,recipes:v.recipes,expectedReleaseId:v.releaseId,sourceRevisionIds:v.sourceRevisionIds});});change.after=await f.repo.readView();
+ const record=await proofFor(f,change,'after-rebase',{includeOccurrences:true});assert.ok(record.occurrences.length);await install(f,record);
+ const current=await workspace(f.repo);assert.deepEqual(current.blockers,[]);assert.equal(current.basis.revision.rebaseId,rebased.recipeRevisionId);assert.equal(current.basis.revision.requirementCompatibilities.length,1);assert.equal(current.basis.revision.requirementCompatibilities[0].beforeHash,rebased.requirementHash);
+ await provision(f.repo,'cross:after-rebase-compatible-v003');await failCurrent(f);const failed=await workspace(f.repo);assert.deepEqual(failed.blockers,[]);assert.equal(failed.parentVersionId,second.candidate.versionId);assert.equal(failed.plannedVersionLabel,'V004');await provision(f.repo,'cross:after-rebase-compatible-v004');
+ const input=await frozen(f),projected=preserve(input);assert.deepEqual(projected.recipes,input.baseRecipes);assert.deepEqual(projected.snapshot.productionModel.materialProductionPlans,[first.plan]);assert.deepEqual(input.baseSnapshot.productionModel.materialProductionRecipeRevisions[0],beforeScope.baseSnapshot.productionModel.materialProductionRecipeRevisions[0]);
+ const archive=await f.repo.exportState();validateMaterialProductionRebaseArchive(archive);
+ const lostOccurrence=structuredClone(archive),release=lostOccurrence.tables.releases.find(row=>row.release_id===lostOccurrence.tables.repository_meta[0].current_release_id),snapshot=JSON.parse(Buffer.from(release.snapshot_bytes.bytes,'base64'));snapshot.productionModel.domainInvalidations=[];const bytes=Buffer.from(canonicalJson(snapshot));release.snapshot_bytes={encoding:'base64',bytes:bytes.toString('base64')};release.snapshot_sha256=sha256(bytes);
+ assert.throws(()=>validateMaterialProductionRebaseArchive(lostOccurrence),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});
+ const missing=structuredClone(input);missing.baseSnapshot.productionModel.domainProductionCompatibilities=[];assert.throws(()=>preserve(missing),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});
+ const foreign=structuredClone(input);foreign.baseSnapshot.instance.instanceId='another-instance';assert.throws(()=>preserve(foreign),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});
 });

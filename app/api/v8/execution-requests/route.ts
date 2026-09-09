@@ -1,4 +1,6 @@
 import { executionRuntimeReason, restoredUnresolvedRunsForWorkItem } from '../../../../host/instance-runtime/execution-epoch.mjs';
+import {UNSTARTED_CANCELLATION_SCHEMA,cancellationHeadProof,readUnstartedCancellationBasis,buildUnstartedCancellation} from '../../../../host/instance-runtime/execution-cancellation.mjs';
+import {canonicalJson} from '../../../../host/instance-runtime/bytes.mjs';
 import { createHash } from 'node:crypto';
 import {
   appendEvent,
@@ -7,6 +9,7 @@ import {
   errorResponse,
   eventLimit,
   HttpError,
+  instanceRepository,
   jsonResponse,
   listAllEvents,
   mutationRequestHash,
@@ -58,8 +61,16 @@ export async function GET(request: Request) {
       .slice(0, limit);
     const ids = new Set(latest.map((event) => event.executionRequestId));
     const events = allEvents.filter((event) => ids.has(event.executionRequestId)).slice(0, limit);
-    return jsonResponse({ requests: latest, events, count: latest.length, totalEvents: events.length });
+    let cancellation;
+    if(url.searchParams.has('cancellation')){
+      if(url.searchParams.get('cancellation')!=='1'||!executionRequestId)throw new HttpError(400,'cancellation inspection requires one exact executionRequestId');
+      const repository=await instanceRepository();if(!repository)throw new HttpError(503,'cancellation inspection requires an explicit instance');
+      const basis=await repository.readTransaction(tx=>readUnstartedCancellationBasis(tx,{executionRequestId}));
+      cancellation={schemaVersion:UNSTARTED_CANCELLATION_SCHEMA,purpose:'CANCEL_UNSTARTED_ALLOCATION',requestSnapshotId:basis.head.snapshotId,expectedHead:cancellationHeadProof(basis.head),historyHash:basis.historyHash,notCalledEvidence:basis.notCalledEvidence,currentPublication:basis.publication,eligible:basis.notCalledEvidence.length>0,blockers:basis.notCalledEvidence.length?[]:['未提供精确旧请求的已记录 NOT_CALLED 核验依据；零 Run 不等于提供商未调用证明。']};
+    }
+    return jsonResponse({ requests: latest, events, count: latest.length, totalEvents: events.length,...(cancellation?{cancellation}:{}) });
   } catch (reason) {
+    if((reason as {code?:string})?.code==='EXECUTION_CANCELLATION_CONFLICT')return errorResponse(new HttpError(409,(reason as Error).message),'execution cancellation unavailable');
     return errorResponse(reason, 'execution request events are unavailable');
   }
 }
@@ -86,6 +97,19 @@ export async function POST(request: Request) {
     const snapshotId = assertStableId(body.snapshotId, 'snapshotId', 200);
     const action = body.action == null || body.action === '' ? 'AUTHORIZE' : assertStableId(body.action, 'action', 24);
     if (!actions.has(action)) throw new HttpError(400, 'action must be AUTHORIZE, CLAIM or CANCEL');
+    if(Object.hasOwn(body,'cancellation')&&action!=='CANCEL')throw new HttpError(422,'cancellation receipt is only available for CANCEL');
+
+    if(action==='CANCEL'&&Object.hasOwn(body,'cancellation')){
+      if(snapshotId!==data.snapshotId)throw new HttpError(412,'body snapshotId does not match the current base snapshot');
+      const executionRequestId=parseExecutionRequestId(body.executionRequestId),note=optionalString(body.note,20_000),repository=await instanceRepository();
+      if(!repository)throw new HttpError(503,'versioned cancellation requires an explicit instance');
+      const prepare=()=>repository.readTransaction(async tx=>buildUnstartedCancellation(await readUnstartedCancellationBasis(tx,{executionRequestId}),body.cancellation,{snapshotId,expectedEtag:ifMatch,note}));
+      const payload=await prepare();
+      const {event,replayed,operations}=await appendEvent('execution-request',idempotencyKey,mutationRequestHash('execution-request',payload),ifMatch,{...payload,rawRequestHash},'1.1',async()=>{
+        if(canonicalJson(await prepare())!==canonicalJson(payload))throw new HttpError(409,'unstarted cancellation closure changed before append');
+      });
+      return jsonResponse({eventId:event.eventId,executionRequestId:event.executionRequestId,status:event.requestState,replayed,event,operationRevision:operations.operationRevision,operationalRevision:operations.operationalRevision,etag:operations.etag,mutationEtag:operations.mutationEtag},{status:replayed?200:201,headers:{ETag:operations.etag}});
+    }
 
     if (action === 'AUTHORIZE') {
       if (snapshotId !== data.snapshotId) throw new HttpError(412, 'body snapshotId does not match the current base snapshot');
@@ -282,6 +306,7 @@ export async function POST(request: Request) {
       mutationEtag: operations.mutationEtag,
     }, { status: replayed ? 200 : 201, headers: { ETag: operations.etag } });
   } catch (reason) {
+    if((reason as {code?:string})?.code==='EXECUTION_CANCELLATION_CONFLICT')return errorResponse(new HttpError(409,(reason as Error).message),'execution cancellation unavailable');
     return errorResponse(reason, 'invalid execution request event');
   }
 }

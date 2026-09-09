@@ -1,3 +1,4 @@
+import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {currentGraph} from './domain-service.mjs';
 import {directoryProjection} from './material-directory.mjs';
@@ -95,7 +96,7 @@ export async function projectPreparationUsage(tx){
   const references=[];
   for(const ref of link.references||[]){
    const requirement=unique(view.snapshot.productionModel.materialRequirements,ref.requirementId),before=directoryRequirement(ctx.oldDirectory,ref.requirementId),after=directoryRequirement(ctx.directory,ref.requirementId);
-   const valid=Boolean(unique(link.references,ref.requirementId,'requirementId')&&scopeValid&&requirement?.requirementClass==='REQUIRED'&&requirement.requirementHash===ref.requirementHash&&before&&after&&hash(before)===hash(after)&&ctx.effective?.bindings.some(b=>b.requirementId===ref.requirementId));
+   const valid=Boolean(unique(link.references,ref.requirementId,'requirementId')&&scopeValid&&requirement?.requirementClass==='REQUIRED'&&!materialRequirementSelectionReasons(view.snapshot.productionModel,ref.requirementId,{use:'CURRENT_INPUT'}).length&&requirement.requirementHash===ref.requirementHash&&before&&after&&hash(before)===hash(after)&&ctx.effective?.bindings.some(b=>b.requirementId===ref.requirementId));
    if(valid)references.push({...ref,validity:'EXACT_CURRENT_EVIDENCE'});
    else pending.push({sceneId:link.sceneId,requirementId:ref.requirementId,reason:!scopeValid?'SCENE_OR_PREPARATION_CHANGED':!requirement||requirement.requirementHash!==ref.requirementHash?'REQUIREMENT_CHANGED':'DIRECTORY_BINDING_CHANGED'});
   }
@@ -118,7 +119,7 @@ function canonicalScene(row,scene,episode,candidate,preparation,provenance){
 }
 function validateReferences(rows,sceneId,ctx){
  if(!Array.isArray(rows)||new Set(rows.map(r=>r.requirementId)).size!==rows.length)invalid('用途引用必须唯一：'+sceneId);
- for(const ref of rows){const requirement=unique(ctx.view.snapshot.productionModel.materialRequirements,ref.requirementId);if(!requirement||requirement.requirementClass!=='REQUIRED'||requirement.requirementHash!==ref.requirementHash||!ctx.effective?.bindings.some(b=>b.requirementId===ref.requirementId))invalid('用途必须绑定当前有效需求及目录：'+ref.requirementId);if(typeof ref.reason!=='string'||!ref.reason.trim()||typeof ref.matchKind!=='string'||!ref.matchKind.trim())invalid('用途缺少具体依据：'+ref.requirementId);}
+ for(const ref of rows){const requirement=unique(ctx.view.snapshot.productionModel.materialRequirements,ref.requirementId);if(!requirement||materialRequirementSelectionReasons(ctx.view.snapshot.productionModel,ref.requirementId,{use:'CURRENT_INPUT'}).length||requirement.requirementClass!=='REQUIRED'||requirement.requirementHash!==ref.requirementHash||!ctx.effective?.bindings.some(b=>b.requirementId===ref.requirementId))invalid('用途必须绑定当前有效需求及目录：'+ref.requirementId);if(typeof ref.reason!=='string'||!ref.reason.trim()||typeof ref.matchKind!=='string'||!ref.matchKind.trim())invalid('用途缺少具体依据：'+ref.requirementId);}
 }
 export async function previewPreparationRevalidation(tx,input,validateFacts){
  const projected=await projectPreparationUsage(tx),ctx=projected.ctx,{view,content,candidate}=ctx;

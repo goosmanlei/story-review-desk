@@ -1,6 +1,7 @@
 import {refreshDirectoryProjection} from './directory-projection.mjs';
 import { bindConfiguration } from './configuration-model.mjs';
-import { domainHash, emptyDomainGraph, defaultDomainConfiguration } from './domain-model.mjs';
+import { domainHash, emptyDomainGraph, defaultDomainConfiguration, validateRequirementReplacementTransition } from './domain-model.mjs';
+import {projectMaterialRequirementDispositions} from './material-requirement-disposition.mjs';
 
 
 const STORY_FIELDS=new Set(['id','type','from','to','label','purpose','inherit','exclude','scope','authority','status','evidence','historicalOnly']);
@@ -55,6 +56,7 @@ function preserveEquivalentContext(old,next,before){
 /** This projection adds relationships; it never rewrites an existing asset verdict. */
 export function projectDomainGraph(snapshot,graph,reference,{initialization=null,eventVersions=[],preserveReferencePolicies=false,directorySource}={}){
  const result=structuredClone(snapshot);const model=result.productionModel;const previousGraph=model.domainGraph;
+ validateRequirementReplacementTransition(previousGraph,graph);
  model.domainGraph=structuredClone(graph);model.domainGraphRef=reference;
  const priorRequirements=model.materialRequirements||[];
  const occupied=new Set(priorRequirements.filter(r=>r.sourceKind!=='DOMAIN_GRAPH').map(r=>r.id));
@@ -71,6 +73,9 @@ export function projectDomainGraph(snapshot,graph,reference,{initialization=null
  // rejects changed ownership. Missing historic links are resolved from their
  // immutable plan source by the material workspace, never invented here.
  for(const requirement of introduced){
+  const demand=graph.requirements.find(row=>row.id===requirement.id);
+  if(Object.hasOwn(demand,'composition'))requirement.composition=structuredClone(demand.composition);
+  if(Object.hasOwn(demand,'replaces'))requirement.replaces=structuredClone(demand.replaces);
   const prior=priorRequirements.find(row=>row.id===requirement.id&&row.sourceKind==='DOMAIN_GRAPH');
   if(prior?.requirementHash!==requirement.requirementHash)continue;
   for(const key of ['materialWorkItemRef','plannedAssetFamilyId'])if(Object.hasOwn(prior,key))requirement[key]=structuredClone(prior[key]);
@@ -109,6 +114,7 @@ export function projectDomainGraph(snapshot,graph,reference,{initialization=null
  }
  model.domainReferenceTargets=Object.fromEntries([...byFamily].map(([familyId,ids])=>{const reps=graph.representations.filter(r=>ids.includes(r.id));const entityIds=[...new Set(reps.map(r=>r.entityId))];return[familyId,{entityIds,entityTypes:[...new Set(graph.entities.filter(e=>entityIds.includes(e.id)).map(e=>e.type))],representationTypes:[...new Set(reps.map(r=>r.type))],unresolved:reps.some(r=>r.type==='UNRESOLVED')||reps.some(r=>['IDENTITY','APPEARANCE','HEAD','BODY','VOICE_IDENTITY'].includes(r.type))&&graph.entities.some(e=>entityIds.includes(e.id)&&(e.type==='UNRESOLVED'||e.authority==='U')),masterPolicy:representationPolicies[reps.find(r=>r.type==='VOICE_IDENTITY')?.id||reps.find(r=>r.type==='IDENTITY')?.id]||null}];}));
  model.domainReferenceRules=graph.relations.filter(r=>r.referencePolicyId&&!r.historicalOnly).flatMap(relation=>{const target=graph.representations.find(r=>r.id===relation.to.id),source=graph.representations.find(r=>r.id===relation.from.id);const policy=policyBindings[relation.id];return(target?.assetFamilyIds||[]).map(familyId=>({targetFamilyId:familyId,sourceFamilyIds:source?.assetFamilyIds||[],sourceRepresentationId:source?.id,relationId:relation.id,relationHash:domainHash(relation),policyId:relation.referencePolicyId,policy:policy||null,type:relation.type,sourceEntityId:source?.entityId,targetEntityId:target?.entityId,sourceRepresentationType:source?.type,inherit:relation.inherit,exclude:relation.exclude,purpose:relation.purpose,status:relation.status,authority:relation.authority}));});
+ model.materialRequirements=projectMaterialRequirementDispositions(model);
  const directory=refreshDirectoryProjection(model,directorySource);if(directory)model.materialDirectory=directory;
  result.creativeLineage={...result.creativeLineage,domainGraphRef:reference};
  return result;
@@ -140,10 +146,14 @@ export function preserveDomainProjection({snapshot,baseSnapshot,events=[]}){
  // Independently registered requirements are persistent instance data, outside legacy compiler ownership.
  const authored=(prior.materialRequirements||[]).filter(r=>r.sourceKind==='DOMAIN_GRAPH');
  next.productionModel.materialRequirements=[...(model.materialRequirements||[]).filter(r=>!authored.some(a=>a.id===r.id)),...structuredClone(authored)];
+ // A source compiler can omit host-owned graph fields. The exact prior graph
+ // was SHA-verified above; restoring it is replay, not first authoring.
+ if(prior.domainGraph.requirements.some(r=>Object.hasOwn(r,'replaces')))next.productionModel.domainGraph=structuredClone(prior.domainGraph);
  const result=projectDomainGraph(next,prior.domainGraph,prior.domainGraphRef,{eventVersions:events.filter(e=>e.eventKind==='asset-version'),preserveReferencePolicies:true});
  const familyIds=new Set((result.productionModel.assetFamilies||[]).map(f=>f.id)),requirementIds=new Set((result.productionModel.materialRequirements||[]).map(r=>r.id));
  result.productionModel.domainRelationAudit=prior.domainGraph.representations.flatMap(r=>[...r.assetFamilyIds.filter(id=>!familyIds.has(id)).map(id=>({representationId:r.id,kind:'ASSET_FAMILY',id,status:'HISTORICAL_UNBOUND'})),...r.requirementIds.filter(id=>!requirementIds.has(id)).map(id=>({representationId:r.id,kind:'MATERIAL_REQUIREMENT',id,status:'HISTORICAL_UNBOUND'}))]);
  for(const demand of result.productionModel.materialRequirements||[])if(demand.sourceKind==='DOMAIN_GRAPH'&&demand.scopeBindings.some(s=>s.scopeType==='SCENE'&&!(result.productionModel.sceneScriptRevisions||[]).some(r=>r.sceneId===s.scopeId&&r.id===s.revisionId)||s.scopeType==='EPISODE'&&!(result.productionModel.episodePlanRevisions||[]).some(r=>r.id===s.revisionId&&r.episodes?.some(e=>e.episodeUid===s.scopeId)))){demand.requirementClass='EVIDENCE_ONLY';demand.domainScopeStatus='STALE_SCOPE_REQUIRES_EXPLICIT_REBIND';}
+ result.productionModel.materialRequirements=projectMaterialRequirementDispositions(result.productionModel);
  const directory=refreshDirectoryProjection(result.productionModel);if(directory)result.productionModel.materialDirectory=directory;
  return result;
 }

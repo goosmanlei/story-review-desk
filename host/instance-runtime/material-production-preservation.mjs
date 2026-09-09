@@ -3,6 +3,9 @@ import {canonicalJson,sha256} from './bytes.mjs';
 import {domainHash} from './domain-model.mjs';
 import {inspectExecutionDefinitionHash} from './execution-definition-hash.mjs';
 import {materialProductionRevisionClosures} from './material-production-revision-preservation.mjs';
+import {materialProductionRebaseClosures} from './material-production-rebase-preservation.mjs';
+
+export {materialProductionRevisionClosures as materialProductionLegacyRevisionClosures};
 
 const fail=message=>{throw Object.assign(new Error(message),{code:'MATERIAL_PRODUCTION_SOURCE_CONFLICT'});};
 const same=(left,right)=>canonicalJson(left)===canonicalJson(right);
@@ -107,9 +110,10 @@ function assertMaterialClosure(prior,catalog,{plan,body,doc}){
  const current=one(catalog.executionDefinitions,row=>row.id===work.executionDefinitionRef&&row.workItemRef===work.id,'基础素材当前调用定义');
  one(catalog.promptRevisions,row=>row.id===work.promptRef&&row.executionDefinitionId===current.id,'基础素材当前提示词修订');
 }
-function preserveMembers(model,catalog,prior,baseRecipes,closures,revisions){
+function preserveMembers(model,catalog,prior,baseRecipes,closures,revisions,historicalContextIds=[]){
  const familyIds=new Set(closures.map(({plan})=>plan.familyId)),workIds=new Set(closures.map(({plan})=>plan.workItemId));
- const workRows=(prior.materialWorkItems||[]).filter(row=>workIds.has(row.id)),contextIds=new Set(workRows.map(row=>row.reviewContextRef));
+ const workRows=(prior.materialWorkItems||[]).filter(row=>workIds.has(row.id)),contextIds=new Set([...workRows.map(row=>row.reviewContextRef),...historicalContextIds]);
+ for(const id of contextIds)one(prior.reviewContexts,row=>row.id===id,'基础素材历史审阅上下文');
  if((model.workItems||[]).some(row=>workIds.has(row.id)))fail('源编译不能把基础素材工作项复制为全剧制作工作项');
  for(const [key,rows] of [
   ['assetFamilies',(prior.assetFamilies||[]).filter(row=>familyIds.has(row.id))],
@@ -147,11 +151,25 @@ export function preserveMaterialProductionProjection({snapshot,recipes,baseSnaps
  // Member and recipe validation is deliberately independent of the current
  // graph: subsequent explicit domain changes invalidate current eligibility,
  // while the original production source and history remain immutable.
- for(const closure of closures)assertMaterialClosure(prior,baseRecipes,closure);
- const revisions=materialProductionRevisionClosures({model:prior,recipes:baseRecipes,documents,initialClosures:closures,instanceId:baseSnapshot.instance?.instanceId});
+ const proof=materialProductionRebaseClosures({model:prior,recipes:baseRecipes,documents,initialClosures:closures,validateLegacySegment:materialProductionRevisionClosures,instanceId:baseSnapshot.instance?.instanceId});
+ const revisions=proof.revisions;
+ for(const closure of closures){
+  const anchor=proof.anchors.find(value=>value.plan.id===closure.plan.id);
+  if(anchor?.body.schemaVersion==='MATERIAL_PRODUCTION_REQUIREMENT_REBASE_V1'){
+   // The complete current member is validated against the explicit chain above.
+   // Check original immutable source members with only the separately proven
+   // semantic fields restored in this local audit view; no stored row changes.
+   const view={...prior,materialWorkItems:prior.materialWorkItems.map(work=>{
+    if(work.id!==closure.plan.workItemId)return work;
+    const original={...work,requirementHash:closure.body.materialWorkItem.requirementHash,reviewContextRef:closure.body.materialWorkItem.reviewContextRef};
+    delete original.materialProductionRequirementRebaseId;return original;
+   })};
+   assertMaterialClosure(view,baseRecipes,closure);
+  }else assertMaterialClosure(prior,baseRecipes,closure);
+ }
  mergeFrozen(model,'materialProductionPlans',plans);
  if(revisions.length)mergeFrozen(model,'materialProductionRecipeRevisions',revisions.map(({row})=>row));
- preserveMembers(model,catalog,prior,baseRecipes,closures,revisions);
+ preserveMembers(model,catalog,prior,baseRecipes,closures,revisions,proof.contextIds);
  return {snapshot:next,recipes:catalog};
 }
 

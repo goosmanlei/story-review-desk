@@ -1,4 +1,6 @@
+import {validateHostedAssetContexts} from '../host/instance-asset-context-proof.mjs';
 import { createHash } from 'node:crypto';
+import {validateHostedMaterialUsages} from '../host/instance-material-usage-proof.mjs';
 
 /** Public, read-only projection. Private assistant, trial and source-audio bytes never enter this bundle. */
 export async function hostedEventProjection(view) {
@@ -305,6 +307,8 @@ const bundle = {
     review: [...episodePlanReviews,...scopedReviews,...materialReviews].filter((event,index,rows)=>rows.findIndex(row=>row.eventId===event.eventId)===index).sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
     'source-operation': [...episodePlanSourceOperations,...scopedOperations].sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0)),
     'script-comment': storyComments,
+    ...((await events('material-usage-review')).length?{'material-usage-review':await events('material-usage-review')}:{}),
+    ...((await events('asset-context-revalidation')).length?{'asset-context-revalidation':await events('asset-context-revalidation')}:{}),
   },
   counts: {
     executionRequestEvents: executionRequests.length,
@@ -319,8 +323,16 @@ const bundle = {
     scopedReviewEvents:scopedReviews.length,
     materialReviewEvents:materialReviews.length,
     scopedSourceOperationEvents:scopedOperations.length,
+    ...((await events('material-usage-review')).length?{materialUsageReviewEvents:(await events('material-usage-review')).length}:{}),
   },
 };
+// The complete source adoption events belong to the old ASSET history. Carry
+// their original objects without creating another adoption or a review purpose.
+const usageAdoptions=new Set((reviewData.productionModel.materialUsageEvidence||[]).map(r=>r.body.basis.source.adoption.eventId));
+for(const event of await events('review'))if(usageAdoptions.has(event.eventId)&&!bundle.events.review.some(r=>r.eventId===event.eventId)){bundle.events.review.push(event);bundle.counts.materialReviewEvents++;}
+if(usageAdoptions.size)bundle.events.review.sort((a,b)=>Number(b.eventSequence||0)-Number(a.eventSequence||0));
+validateHostedAssetContexts(reviewData,bundle);
+validateHostedMaterialUsages(reviewData,bundle);
 const serialized = `${JSON.stringify(bundle)}\n`;
 if (Buffer.byteLength(serialized) > 12 * 1024 * 1024) {
   throw new Error('hosted read-only event projection exceeds the 12 MiB compact safety budget');

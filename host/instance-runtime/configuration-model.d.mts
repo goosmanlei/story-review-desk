@@ -1,3 +1,4 @@
+import type {ImagePurposeProfiles,ImageTechnicalSpec} from './image-technical-spec.mjs';
 export type Criterion = {
   id: string;
   label: string;
@@ -8,6 +9,8 @@ export type Criterion = {
 };
 export type ReviewSpec = {
   legacy?: boolean;
+  technicalSpec?: ImageTechnicalSpec;
+  technicalSpecHash?: string;
   profileId: string;
   criteria: Criterion[];
   configurationHash: string;
@@ -41,7 +44,7 @@ export type Category = {
   types: MaterialType[];
 };
 export type Configuration = {
-  schemaVersion: "1.0" | "2.0";
+  schemaVersion: "1.0" | "2.0" | "2.1";
   domain?: import("./domain-model.mjs").DomainConfiguration;
   template: { id: string; version: string };
   reviewProfiles: ReviewProfile[];
@@ -67,6 +70,7 @@ export type Configuration = {
     earlyAmbience: boolean;
   };
   technical: {
+    imagePurposeProfiles?: ImagePurposeProfiles;
     picture: {
       aspectRatio: string;
       width: number | "UNKNOWN";
@@ -117,6 +121,8 @@ export type ConfigurationRef = { revisionId: string; sha256: string };
 export type ConfigurationBinding = {
   key: string;
   kind: string;
+  technicalSpec?: ImageTechnicalSpec;
+  technicalSpecHash?: string;
   reviewSpec: ReviewSpec;
   productionLane?: string;
   defaultExecutor?: string;

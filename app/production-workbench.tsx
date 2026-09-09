@@ -135,6 +135,12 @@ export type CharacterCardSpec =
     };
 
 export type MaterialRequirement = {
+  replaces?: {requirementId:string;requirementHash:string};
+  currentDisposition?: import('../host/instance-runtime/material-requirement-disposition.mjs').RequirementDisposition['kind'];
+  requirementReplacement?: {protocol:'MATERIAL_REQUIREMENT_REPLACEMENT_V1';status:'VALID'|'INVALID';replaces:{requirementId:string;requirementHash:string}|null;replacedByRequirementId:string|null;reasons:string[]};
+  composition?: import('../host/instance-runtime/material-requirement-composition.mjs').RequirementComposition;
+  compositionCoverage?: import('../host/instance-runtime/material-requirement-composition.mjs').CompositionCoverage;
+  materialUsageBindings?: import('../host/instance-runtime/material-usage-model.mjs').MaterialUsageBinding[];
   sourceKind?: string;
   reviewSpec?: ReviewSpec; configurationBinding?: ConfigurationBinding; businessCategoryPrimaryId?:string;businessCategorySecondaryId?:string;
   id: string;
@@ -420,6 +426,8 @@ export type ScopedReviewContext = {
 };
 
 export type V7AssetVersion = LifecycleProjection & {
+  imageTechnicalFacts?: import('../host/instance-runtime/image-technical-spec.mjs').ImageTechnicalFacts;
+  imageTechnicalSpecHash?: string;
   id: string;
   familyId: string;
   label: string;
@@ -1030,6 +1038,7 @@ const stageToStep: Record<string, V7WorkflowStep['id']> = {
 const deliverableLabels: Record<string, string> = {
   LOC_STATE: '本连续性组地点状态',
   STORYBOARD: '单镜构图草图',
+  DIALOGUE_TEMP: '本句临时对白（预演锁时）',
   DIALOGUE_DRY: '本句对白干声',
   ANIMATIC: '全场有声动态分镜',
   START_FRAME: '正式首帧',
@@ -2990,7 +2999,7 @@ function WorkPackageDetail({ model, shot, workPackage, context, operations, onNa
         <section className="creator-info-layers" aria-label="制作与审计信息分层">
           <details open={surface !== 'REVIEW' && surface !== 'RELEASED' && surface !== 'FORBIDDEN'}><summary><b>制作信息</b><span>依赖、版本、完整调用包、授权与结果登记</span></summary>
             <section className="v6-required-assets"><header><div><small>OUTPUT + INPUT + COMPANION PLAN</small><h3>{workItemLabel(selectedItem) + '的输出与依赖'}</h3><p>{surface === 'REVIEW' ? '选择依赖或历史版本只建立B侧比较；正式裁决始终绑定主输出当前版本。' : '主输出、输入依赖和伴随计划交付物分开显示；没有文件与SHA时不进入正式审阅。输入素材可回到“素材管理”的统一素材信息卡。'}</p></div><span>{allowedFamilies.length}</span></header>{allowedFamilies.length ? <div>{outputFamily && <AssetMiniCard model={model} family={outputFamily} selected={selectedFamily?.id === outputFamily.id} role="主输出" onSelect={selectFamily} />}{inputFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="输入依赖" onSelect={selectFamily} onOpenMaterial={onOpenMaterial} />)}{companionFamilies.map((family) => <AssetMiniCard key={family.id} model={model} family={family} selected={selectedFamily?.id === family.id} role="伴随计划交付物（未闭环）" onSelect={selectFamily} />)}</div> : <p className="v6-empty-note">本工作项没有独立资产记录。</p>}</section>
-            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel authorWorkItemId={selectedItem.id.startsWith('SP-WI-')&&selectedItem.activeInCurrentProduction===true&&['STORYBOARD','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'].includes(selectedItem.deliverableKey||'')?selectedItem.id:undefined} definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, expectedOutput: (model.expectedOutputs || []).find(output => output.id === (outputFamily?.nextExpectedOutputId || outputFamily?.currentExpectedOutputId) && output.familyId === outputFamily?.id) || null, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
+            <div className="creator-production-evidence"><VersionPanel model={model} family={selectedFamily || outputFamily} selectedVersionId={context.versionId} heading={selectedFamily && selectedFamily.id !== outputFamily?.id ? '依赖／伴随项版本（只读证据）' : '主输出版本与历史'} onSelectVersion={(versionId) => onNavigate({ ...context, shotId: shot.id, familyId: (selectedFamily || outputFamily)?.id || null, versionId })} /><RecipePanel authorWorkItemId={selectedItem.id.startsWith('SP-WI-')&&selectedItem.activeInCurrentProduction===true&&['STORYBOARD','DIALOGUE_TEMP','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'].includes(selectedItem.deliverableKey||'')?selectedItem.id:undefined} definitionRef={selectedItem.executionDefinitionRef} recipe={recipe} error={recipeError} defaultOpen={surface === 'PRE_OUTPUT' || surface === 'REVISION' || surface === 'REVIEW_BLOCKED'} executionContext={surface === 'PRE_OUTPUT' || surface === 'REVISION' ? { snapshotId, expectedOutput: (model.expectedOutputs || []).find(output => output.id === (outputFamily?.nextExpectedOutputId || outputFamily?.currentExpectedOutputId) && output.familyId === outputFamily?.id) || null, configurationBinding:selectedItem.configurationBinding, mutationEtag: operations.mutationEtag, shotId: shot.id, workPackageId: workPackage.id, workItemId: selectedItem.id, familyId: outputFamily?.id || null, parentVersionId: lineageParentVersion?.id || null, canAuthorize: authorizationGate.canAuthorize, authorizeReason: authorizationGate.reason } : undefined} /></div>
           </details>
           <details open={surface === 'RELEASED' || surface === 'FORBIDDEN'}><summary><b>审计信息</b><span>生命周期、技术坐标、SHA与解锁条件</span></summary><div className="v7-outcome-grid"><article><span>解决什么问题</span><p>{visibleText(step.purpose)}</p></article><article><span>重点审阅什么</span><p>{visibleText(step.reviewFocus)}</p></article><article><span>产出什么</span><p>{visibleText(step.output)}</p></article><article><span>通过后解锁</span><p>{visibleText(step.unlock)}</p></article></div><UnifiedStatusPanel record={{ ...(activeItem || withReviewProjection(selectedItem, operations.effective)), applicabilityState: workPackage.applicabilityState }} /><div className="v6-stage-evidence"><p><b>当前对象</b><code>{publicRef(selectedItem.id)}<br />{stageDisplay(selectedItem.pipelineStageCode)}</code></p><p><b>执行配方／来源定位</b>{publicRef(selectedItem.executionDefinitionRef) || '不适用'}<br />{visibleText(selectedItem.sourceRef)}</p></div></details>
         </section>
@@ -3308,7 +3317,7 @@ function FullProductionScopeSelector({ model, gate, packages, activePackage, onS
     <label><span>场</span><select value={selectedSceneId} onChange={(event) => chooseScene(event.target.value)}>{sceneIds.map((id) => { const scene = model.scenes.find((record) => record.id === id); return <option key={id} value={id}>{`${id} · ${visibleText(scene?.title || '场次')}`}</option>; })}</select></label>
     <i>→</i>
     <label><span>当前镜</span><select value={selectedId} onChange={(event) => choose(event.target.value)}>{shotPackages.map((record) => <option key={record.id} value={record.id}>{nativeScopeTitle(model, record)}</option>)}</select></label>
-    {gate.id === 'STORYBOARD_DIALOGUE' && <p><span>并行泳道</span><b>画面粗分镜 ∥ 对白干声</b><small>两条泳道分别审阅、共同决定Animatic是否可开始。</small></p>}
+    {gate.id === 'STORYBOARD_DIALOGUE' && <p><span>并行泳道</span><b>画面粗分镜 ∥ 临时／正式对白</b><small>分别审阅；预演中每句明确选用一条音轨。</small></p>}
   </section>;
 }
 

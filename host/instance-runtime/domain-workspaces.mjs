@@ -7,6 +7,7 @@ import {projectDomainGraph} from './domain-projection.mjs';
 import {materialDirectorySource} from './material-directory.mjs';
 import {refreshDirectoryProjection} from './directory-projection.mjs';
 import {domainOwnership,domainCollections,domainOwners,objectKey,applyDomainChanges} from './domain-ownership.mjs';
+import {assertMaterialRequirementReplacementExecution} from './material-requirement-replacement-execution.mjs';
 
 const fail=(message,code='DOMAIN_CONFLICT')=>{throw Object.assign(new Error(message),{code});};
 const read=record=>record?JSON.parse(record.bytes):null;
@@ -34,8 +35,8 @@ export async function getDomainWorkspace(tx,owner) {
 
 async function validate(tx,view,graph) {
   const bindings=evidenceBindings(graph);
-  validateDomainGraph(graph,{configuration:configOf(view),sourceBindings:bindings,knownFamilyIds:(view.snapshot.productionModel.assetFamilies||[]).map(r=>r.id),knownRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).map(r=>r.id)});
   const previous=await currentGraph(tx,view);
+  validateDomainGraph(graph,{previousGraph:previous.graph,configuration:configOf(view),sourceBindings:bindings,knownFamilyIds:(view.snapshot.productionModel.assetFamilies||[]).map(r=>r.id),knownRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).map(r=>r.id),knownCompositionRequirementIds:(view.snapshot.productionModel.materialRequirements||[]).filter(r=>r.sourceKind!=='DOMAIN_GRAPH'&&r.requirementClass==='REQUIRED').map(r=>r.id)});
   await verifyDomainWorkspaceEvidence(tx,graph,previous.graph);await verifyQuotes(tx,graph);await validateIdentities(tx,graph,view);
   return bindings;
 }
@@ -79,6 +80,7 @@ export async function saveDomainWorkspace(tx,input) {
   enforceNewOwnership(current.graph,applied.graph,input.changes,input.owner,configOf(view),applied.ownership);
   validateChangedScopes(view,current.graph,input.changes);
   await validate(tx,view,applied.graph);
+  await assertMaterialRequirementReplacementExecution(tx,{view,previousGraph:current.graph,nextGraph:applied.graph});
   const record=await save(tx,'domain-workspace-drafts',input.owner,{schemaVersion:'1.0',owner:input.owner,baseReleaseId:view.releaseId,baseGraphRevisionId:current.revisionId,baseOwnershipHash:domainHash(ownership),changes:input.changes},input.expectedDraftRevisionId);
   return {revisionId:record.revisionId,releaseId:view.releaseId,formalAdoptionPerformed:false};
 }
@@ -95,6 +97,8 @@ export async function previewDomainWorkspace(tx,{owner,draftRevisionId}) {
   validateChangedScopes(view,previous.graph,draft.changes);
   const sourceBindings=await validate(tx,view,next.graph);
   const impact=graphImpact(previous.graph,next.graph);
+  const replacementExecution=await assertMaterialRequirementReplacementExecution(tx,{view,previousGraph:previous.graph,nextGraph:next.graph});
+  if(replacementExecution.replacementRefs.length)impact.replacementExecution=replacementExecution;
   const projected=await projectedSnapshot(tx,view,previous.graph,next,draft.changes,{revisionId:'PREVIEW_ONLY',sha256:domainHash(next.graph)});
   impact.affectedFamilies=(projected.productionModel.assetFamilies||[]).filter(f=>f.domainContext?.hash!==(view.snapshot.productionModel.assetFamilies||[]).find(old=>old.id===f.id)?.domainContext?.hash).map(f=>({familyId:f.id,representationIds:f.domainContext?.representationIds||[]}));
   impact.affectedRepresentationIds=[...new Set(impact.affectedFamilies.flatMap(f=>f.representationIds))];
@@ -119,6 +123,7 @@ export async function publishDomainWorkspace(tx,input) {
   const preview=await previewDomainWorkspace(tx,input);if(preview.previewHash!==input.previewHash)fail('预览已变化，请重新核对');
   const view=await tx.readView(),previous=await currentGraph(tx,view),draft=read(await tx.getAux('domain-workspace-drafts',input.owner));
   const ownership=domainOwnership(previous.graph,configOf(view),view.snapshot.productionModel.domainOwnership||{}),next=applyDomainChanges(previous.graph,draft.changes,input.owner,ownership);
+  await assertMaterialRequirementReplacementExecution(tx,{view,previousGraph:previous.graph,nextGraph:next.graph});
   await validateIdentities(tx,next.graph,view,{register:true});
   const head=await tx.getAux('domain-graph','current'),record=await save(tx,'domain-graph','current',next.graph,head?.revisionId||null);
   const snapshot=await projectedSnapshot(tx,view,previous.graph,next,draft.changes,{revisionId:record.revisionId,sha256:record.sha256});

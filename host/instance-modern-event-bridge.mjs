@@ -1,22 +1,61 @@
+import {encodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
+import {cancellationMarker} from './instance-runtime/execution-cancellation.mjs';
 // Validation delegation only. The original full event directory remains untouched.
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
-import {readFile} from 'node:fs/promises';
+import os from 'node:os';
+import {readFile,mkdtemp,realpath,chmod,writeFile,rm} from 'node:fs/promises';
 import {digest,frozenEventManifest} from './instance-modern-event-validator.mjs';
+import {historicalEventContextsHash} from './instance-historical-event-context.mjs';
+import {encodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
 
 // Historical excerpt hashes use JSON.stringify(scriptBlocks), whose object field
 // order is part of the evidence. Canonical hashes still guard the independent
 // manifest, but the child transport must retain the captured object order.
 export const serializeModernEventInput=input=>JSON.stringify(input);
 
-export async function validateModernEventsInChild({events,baseRelease,eventDirectory}){
-  const required=events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined);
+// Only this host creates the directory. Neither event data nor stdin can choose
+// its location. Original release bytes remain independently verified by child.
+export async function withHistoricalEventTransport(bundle,callback){
+  if(!bundle)return callback({historicalContexts:undefined,directory:undefined});
+  if(historicalEventContextsHash(bundle)!==bundle.contextsHash)throw Error('Historical event transport capture hash differs');
+  if(bundle.releases.length===0)return callback({historicalContexts:bundle,directory:undefined});
+  const scratch=await mkdtemp(path.join(os.tmpdir(),'review-historical-events-'));
+  try{
+    await chmod(scratch,0o700);const directory=await realpath(scratch),written=new Set();
+    const historicalContexts={...bundle,releases:[]};
+    for(const row of bundle.releases){
+      const transported={...row};
+      for(const key of ['snapshotBytes','recipesBytes']){
+        const payload=row[key];
+        if(payload?.encoding!=='GZIP_BASE64'||typeof payload.data!=='string'||'file'in payload||!/^[a-f0-9]{64}$/.test(payload.compressedSha256)||!Number.isSafeInteger(payload.compressedByteSize)||payload.compressedByteSize<=0||payload.compressedByteSize>128*1024*1024)throw Error('Historical event transport requires bounded captured inline bytes');
+        const bytes=Buffer.from(payload.data,'base64');
+        if(bytes.toString('base64')!==payload.data||bytes.length!==payload.compressedByteSize||digest(bytes)!==payload.compressedSha256)throw Error('Historical event transport compressed bytes differ');
+        const file=payload.compressedSha256+'.gz';
+        if(!written.has(file)){await writeFile(path.join(directory,file),bytes,{mode:0o600,flag:'wx'});written.add(file);}
+        const descriptor={...payload};delete descriptor.data;transported[key]={...descriptor,file};
+      }
+      historicalContexts.releases.push(transported);
+    }
+    if(historicalEventContextsHash(historicalContexts)!==bundle.contextsHash)throw Error('Historical event transport changed capture binding');
+    return await callback({historicalContexts,directory});
+  }finally{await rm(scratch,{recursive:true,force:true});}
+}
+
+export async function validateModernEventsInChild({events,baseRelease,eventDirectory,historicalContexts,documents=[]}){
+  const materialUsageSources=encodeMaterialUsageDocuments(documents),assetContextSources=encodeAssetContextDocuments(documents);
+  const snapshot=JSON.parse(baseRelease.snapshotBytes),materialUsageLedger=snapshot.productionModel?.materialUsageLedger;
+  const hasUsage=materialUsageSources.length||events.some(e=>e.eventKind==='material-usage-review'||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))||materialUsageLedger!==undefined&&(!Array.isArray(materialUsageLedger)||materialUsageLedger.length);
+  const contextLedger=snapshot.productionModel?.assetContextRevalidationLedger;
+  const hasContext=assetContextSources.length||events.some(e=>e.eventKind==='asset-context-revalidation'||e.subjectType==='ASSET_CONTEXT'||Object.hasOwn(e,'revalidationRevisionId'))||contextLedger!==undefined&&(!Array.isArray(contextLedger)||contextLedger.length);
+  const required=hasContext||hasUsage||events.some(cancellationMarker)||events.some(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2'||e.eventKind==='creative-revision'&&(e.subjectKind==='EPISODE_PLAN'&&e.content?.narrativeRevision!==undefined||e.scopedReviewSpec)||e.eventKind==='source-operation'&&e.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1');
   if(!required)return null;
-  const snapshot=JSON.parse(baseRelease.snapshotBytes),validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
-  const input={events,snapshot,binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),eventDirectory,eventManifest:frozenEventManifest(events)}};
+  const validator=new URL('./instance-modern-event-validator.mjs',import.meta.url);
+  return withHistoricalEventTransport(historicalContexts,async({historicalContexts:transported,directory})=>{
+  const input={events,snapshot,...(hasContext?{assetContextSources}:{}),...(hasUsage?{materialUsageSources}:{}),...(transported?{historicalContexts:transported}:{}),binding:{releaseId:baseRelease.releaseId,snapshotId:snapshot.snapshotId,snapshotSha256:digest(baseRelease.snapshotBytes),snapshotCanonicalSha256:digest(snapshot),...(hasContext?{assetContextSourcesHash:assetContextDocumentsHash(assetContextSources)}:{}),...(hasUsage?{materialUsageSourcesHash:materialUsageDocumentsHash(materialUsageSources)}:{}),...(historicalContexts?{historicalContextsHash:historicalContexts.contextsHash}:{}),eventDirectory,eventManifest:frozenEventManifest(events)}};
   const softwareRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
-  const code=`import {loadModernEventRuntime,validateModernEventClosure,readFrozenModernEventInput} from ${JSON.stringify(validator.href)};const input=await readFrozenModernEventInput(process.stdin);const result=validateModernEventClosure(input,loadModernEventRuntime(${JSON.stringify(softwareRoot)}));process.stdout.write(JSON.stringify(result));`;
+  const code=`import {loadModernEventRuntime,validateModernEventClosure,readFrozenModernEventInput} from ${JSON.stringify(validator.href)};const input=await readFrozenModernEventInput(process.stdin);const runtime=loadModernEventRuntime(${JSON.stringify(softwareRoot)});runtime.historicalContextDirectory=${JSON.stringify(directory)};const result=validateModernEventClosure(input,runtime);process.stdout.write(JSON.stringify(result));`;
   const proof=await new Promise((resolve,reject)=>{
     const child=spawn(process.execPath,['--input-type=module','-e',code],{cwd:softwareRoot,env:{PATH:process.env.PATH||'/usr/bin:/bin',LANG:'C.UTF-8',REVIEW_INSTANCE_READ_ONLY:'1'},stdio:['pipe','pipe','pipe']});
     let stdout='',stderr='',settled=false;const timer=setTimeout(()=>child.kill('SIGKILL'),120000);
@@ -29,6 +68,7 @@ export async function validateModernEventsInChild({events,baseRelease,eventDirec
   });
   proof.validatorSha256=digest(await readFile(validator));
   return {proof,proofSha256:digest(proof)};
+  });
 }
 
 export const modernEventSemanticSupport=String.raw`

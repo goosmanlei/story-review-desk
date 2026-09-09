@@ -1,18 +1,25 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {productionHash,resolveShotProductionScope,defaultShotProductionPlan,compileShotProductionPlan} from '../host/instance-runtime/shot-production-model.mjs';
+import {productionHash,resolveShotProductionScope,defaultShotProductionPlan,compileShotProductionPlan,shotProductionVisualInputHash} from '../host/instance-runtime/shot-production-model.mjs';
 import {recordShotProductionReview,readShotProductionReviewEvidence,applyShotProductionLocksProjection,SHOT_LOCK_NS,validateShotProductionEvidence} from '../host/instance-runtime/shot-production-locks.mjs';
 import {productionSpaceReasons} from '../host/instance-runtime/shot-production-space.mjs';
-import {previewShotProductionManifest,enqueueShotProductionManifest,claimShotProductionManifest,writeShotProductionManifest,finishShotProductionManifest,applyShotProductionManifestProjection,shotManifestCandidateMatchesJob,runShotProductionManifestIteration,SHOT_MANIFEST_NS} from '../host/instance-runtime/shot-production-manifest.mjs';
+import {previewShotProductionManifest,enqueueShotProductionManifest,claimShotProductionManifest,writeShotProductionManifest,finishShotProductionManifest,applyShotProductionManifestProjection,shotManifestCandidateMatchesJob,runShotProductionManifestIteration} from '../host/instance-runtime/shot-production-manifest.mjs';
 import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {mkdtemp,mkdir,writeFile,readFile,rm,symlink} from 'node:fs/promises';
 import path from 'node:path';
 
-function fixture(){
+function fixture({schemaVersion='1.0',withVoice=false}={}){
  const sceneId='SCENE-test',episodeUid='EP-test',content={sceneId,shots:[1,2].map(i=>({shotId:'SHOT-'+i,sceneId,order:i,materialRequirementRefs:['REQ-'+i]}))},plan={id:'DESIGN-1',scopeId:sceneId,episodeUid,scopeRole:'CURRENT',sourceOperationId:'SYNC-1',sourceSyncState:'SUCCEEDED',content,contentHash:productionHash(content),episodeNarrativeReleaseId:'EP-RELEASE'};
  const model={shotPlanSetRevisions:[plan],episodeNarrativeReleases:[{id:'EP-RELEASE',episodeUid,scopeRole:'CURRENT',sourceSyncState:'SOURCE_CURRENT',reviewInput:{scenes:[{id:sceneId,contentHash:productionHash('script')} ]}}],sceneScriptRevisions:[{sceneId,scopeRole:'CURRENT',episodeNarrativeReleaseId:'EP-RELEASE',contentHash:productionHash('script')}],scopeLocks:[{id:'scope-lock',scopeType:'SCENE',scopeId:sceneId,lockPurpose:'SHOT_PLAN_SET',lockState:'LOCKED',denominatorState:'KNOWN',shotPlanSetRevisionId:plan.id,shotPlanSetRevisionHash:plan.contentHash,shotIds:content.shots.map(s=>s.shotId)}],shots:content.shots.map(s=>({...s,id:s.shotId,scopeRole:'CURRENT',activeInCurrentProduction:true,shotPlanSetRevisionId:plan.id,shotPlanSetRevisionHash:plan.contentHash})),materialRequirements:[1,2].map(i=>({id:'REQ-'+i,requirementClass:'REQUIRED',assetFamilyRefs:['BASE-'+i],entityRef:'ROOM-ENTITY',stateRef:'ROOM-STATE'})),domainGraph:{entities:[{id:'ROOM-ENTITY',type:'LOCATION'}],states:[{id:'ROOM-STATE',entityId:'ROOM-ENTITY',authority:'L'}],representations:[]},spatialEvidence:{sourceRef:'production/maps.json',sourceSha256:productionHash('map'),locations:[{id:'ROOM'}],locationPackages:[{id:'ROOM',zones:[{id:'ZONE'}],cameras:[{id:'CAM',zoneId:'ZONE'}]}]},sourceHashes:{productionMapSha256:productionHash('map')}};
- const scope=resolveShotProductionScope(model,sceneId),settings=defaultShotProductionPlan(scope);
+ if(withVoice){
+  for(const shot of content.shots)shot.materialRequirementRefs.push('REQ-VOICE');
+  plan.contentHash=productionHash(content);model.scopeLocks[0].shotPlanSetRevisionHash=plan.contentHash;model.shots.forEach(s=>s.shotPlanSetRevisionHash=plan.contentHash);
+  model.materialRequirements.push({id:'REQ-VOICE',requirementClass:'REQUIRED',assetFamilyRefs:['VOICE'],representationRef:'REP-VOICE'});
+  model.domainGraph.representations.push({id:'REP-VOICE',entityId:'SPEAKER',type:'VOICE_IDENTITY',assetFamilyIds:['VOICE'],requirementIds:['REQ-VOICE']});
+ }
+ const scope=resolveShotProductionScope(model,sceneId),settings=defaultShotProductionPlan(scope,{schemaVersion});
  for(const [index,s] of settings.shots.entries())Object.assign(s,{keyframeStrategy:{mode:'START_END',reason:'明确起止姿态',intermediateFrameCount:0},space:{loc:'ROOM',zone:'ZONE',camera:'CAM',state:'ROOM-STATE',freeze:productionHash('map')},inputs:[{requirementId:'REQ-'+(index+1),familyId:'BASE-'+(index+1),versionId:'BASE-'+(index+1)+'@V1',sha256:productionHash('base'+index),purpose:'REFERENCE'}],videoBranch:'SILENT'});
+ if(withVoice)for(const s of settings.shots)s.inputs.push({requirementId:'REQ-VOICE',familyId:'VOICE',versionId:'VOICE@V1',sha256:productionHash('voice'),purpose:'VOICE_MASTER'});
  Object.assign(model,compileShotProductionPlan(scope,settings,{id:'PROD-1',revisionId:'PROD-REV-1',sourceRef:'story/production.json'}));
  model.shotProductionPlans=[{id:'PROD-1',sceneId,scopeRole:'CURRENT',sourceRevisionId:'PROD-REV-1',content:settings,contentHash:productionHash(settings),workItemIds:model.workItems.map(w=>w.id)}];
  const state={assetFamiliesById:{},assetVersionsById:{}},aux=new Map(),media=new Map(),view={releaseId:'RELEASE-instance',snapshot:{snapshotId:'SNAP-1',productionModel:model,creativeLineage:{spatialEvidence:model.spatialEvidence},sourceHashes:model.sourceHashes},eventsByKind:{review:[]}};let sequence=0;
@@ -92,8 +99,8 @@ test('evidence rejects unsupported fields and immutable proof corruption fails c
  const result=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(result.shotKeyframeSets[0].scopeRole,'EVIDENCE_ONLY');assert.ok(result.shotKeyframeSets[0].staleReasons.includes('LOCK_PROOF_HASH_MISMATCH'));
 });
 
-async function manifestFixture(t){
- const f=fixture(),parent=path.resolve('tests/.test-tmp');await mkdir(parent,{recursive:true});const root=await mkdtemp(path.join(parent,'shot-manifest-'));await mkdir(path.join(root,'media'));
+async function manifestFixture(t,options){
+ const f=fixture(options),parent=path.resolve('tests/.test-tmp');await mkdir(parent,{recursive:true});const root=await mkdtemp(path.join(parent,'shot-manifest-'));await mkdir(path.join(root,'media'));
  for(let i=0;i<f.settings.shots.length;i++){const b=f.settings.shots[i].inputs[0];const bytes=Buffer.from(canonicalJson('base'+i));await writeFile(path.join(root,'media',b.versionId),bytes);f.media.get(b.familyId+'|'+b.versionId).byteSize=bytes.length;}
  t.after(()=>rm(root,{recursive:true,force:true}));const repository={readOnly:false,readTransaction:fn=>fn(f.tx),writeTransaction:fn=>fn(f.tx),withMediaReadLease:fn=>fn({assertHeld:async()=>{}})};
  return{...f,root,repository,api:{projectOperationalState:()=>f.state}};
@@ -118,4 +125,83 @@ test('manifest refuses symlink output and unknown completion never retries',asyn
  const first=await runShotProductionManifestIteration({repository:f.repository,instanceRoot:f.root,workerId:'WORKER-1',api:f.api,write:async({job})=>{const target=path.join(f.root,job.expectedOutput.targetPath);await mkdir(path.dirname(target),{recursive:true});await writeFile(target,'unregistered');throw Error('completion transport failed');}});assert.equal(first.status,'RESULT_UNKNOWN');assert.equal((await runShotProductionManifestIteration({repository:f.repository,instanceRoot:f.root,workerId:'WORKER-1',api:f.api})).processed,false);assert.equal(f.view.eventsByKind['asset-version'],undefined);
  await assert.rejects(enqueueShotProductionManifest(f.tx,{workItemId,requestId:'manifest:unknown:2',expectedReleaseId:preview.expectedReleaseId,manifestHash:preview.manifestHash},{model:f.model,state:f.state}),/结果待核/);
  const g=await manifestFixture(t),p=await previewShotProductionManifest(g.tx,{workItemId:g.work('SHOT_INPUT_LOCK').id,model:g.model,state:g.state}),q=await enqueueShotProductionManifest(g.tx,{workItemId:g.work('SHOT_INPUT_LOCK').id,requestId:'manifest:symlink:1',expectedReleaseId:p.expectedReleaseId,manifestHash:p.manifestHash},{model:g.model,state:g.state}),claim=await claimShotProductionManifest(g.tx,{jobId:q.jobId,workerId:'WORKER-1'},{model:g.model,state:g.state});await symlink(g.root,path.join(g.root,'media','_review_pending'));await assert.rejects(writeShotProductionManifest({repository:g.repository,instanceRoot:g.root,job:claim.job}),/符号链接/);
+});
+
+test('V2 visual input lock is one SHOT and ignores missing voices and unrelated shot media',async()=>{
+ const f=fixture({schemaVersion:'2.0',withVoice:true}),w=f.work('SHOT_INPUT_LOCK'),t=await f.template(w);
+ assert.equal(w.scopeType,'SHOT');assert.equal(w.scopeId,'SHOT-1');assert.equal(f.model.workItems.filter(w=>w.deliverableKey==='SHOT_INPUT_LOCK').length,2);
+ assert.equal(t.evidence.shotId,'SHOT-1');assert.equal(t.evidence.inputHash,shotProductionVisualInputHash(f.model,f.settings.shots[0]));
+ assert.deepEqual(f.settings.shots[0].visualRequirementIds,['REQ-1']);
+ f.state.assetFamiliesById.VOICE.canFlowDownstream=false;f.media.delete('VOICE|VOICE@V1');
+ f.state.assetFamiliesById['BASE-2'].canFlowDownstream=false;f.media.delete('BASE-2|BASE-2@V1');
+ const record=await f.apply(f.review(w,t.evidence));assert.equal(record.shotId,'SHOT-1');assert.equal(record.perShotHashes.length,1);assert.equal(record.inputBindings.length,1);assert.deepEqual(record.inputBindings[0].inputs,[f.settings.shots[0].inputs[0]]);
+ const projected=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.deepEqual(projected.shotInputLocks[0].applicableShotIds,['SHOT-1']);
+ const other=f.work('SHOT_INPUT_LOCK','SHOT-2');await assert.rejects(f.apply(f.review(other,(await f.template(other)).evidence)),/实际采用/);
+});
+test('V2 visual lock still requires own source, state, adopted exact SHA and rejects PREVIS media',async()=>{
+ for(const mode of ['source','sha','adoption','previs']){
+  const f=fixture({schemaVersion:'2.0'}),w=f.work('SHOT_INPUT_LOCK');
+  if(mode==='source')f.tx.getPublishedDocument=async()=>null;
+  if(mode==='sha')f.media.get('BASE-1|BASE-1@V1').sha256=productionHash('changed');
+  if(mode==='adoption')f.state.assetFamiliesById['BASE-1'].canFlowDownstream=false;
+  if(mode==='previs'){
+   const board=f.work('STORYBOARD'),family=f.model.assetFamilies.find(a=>a.id===board.outputAssetRef),version=f.state.assetVersionsById[f.version(board)];
+   f.settings.shots[0].inputs[0]={requirementId:'REQ-1',familyId:family.id,versionId:version.id,sha256:version.sha256,purpose:'REFERENCE'};
+   f.model.materialRequirements[0].assetFamilyRefs=[family.id];
+   w.outputBasisHash=compileShotProductionPlan(resolveShotProductionScope(f.model,'SCENE-test'),f.settings,{id:'PROD-1',revisionId:'PROD-REV-1',sourceRef:'story/production.json'}).workItems.find(n=>n.id===w.id).outputBasisHash;
+  }
+  await assert.rejects(f.apply(f.review(w,(await f.template(w)).evidence)),/源字节|受管实际媒体|实际采用/);
+  assert.equal((await f.tx.listAux(SHOT_LOCK_NS.records)).length,0);
+ }
+});
+test('V2 visual lock reuse is local; unrelated shot and voice changes do not alter its immutable proof',async()=>{
+ const f=fixture({schemaVersion:'2.0',withVoice:true}),w=f.work('SHOT_INPUT_LOCK'),record=await f.apply(f.review(w,(await f.template(w)).evidence));
+ const old=f.model.shotProductionPlans[0],original=canonicalJson(record);old.scopeRole='EVIDENCE_ONLY';
+ const next={...structuredClone(old),id:'PROD-2',sourceRevisionId:'PROD-REV-2',scopeRole:'CURRENT'};
+ next.content.shots[0].inputs[1].sha256=productionHash('voice changed');next.content.shots[1].inputs[0].sha256=productionHash('other image changed');f.model.shotProductionPlans.unshift(next);
+ let p=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(p.shotInputLocks[0].scopeRole,'CURRENT');assert.deepEqual(p.shotInputLocks[0].applicableShotIds,['SHOT-1']);
+ next.content.shots[0].inputs[0].sha256=productionHash('own image changed');p=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(p.shotInputLocks[0].scopeRole,'EVIDENCE_ONLY');
+ assert.equal(canonicalJson(JSON.parse(f.aux.get(SHOT_LOCK_NS.records+'|'+record.id).bytes)),original);
+});
+test('V2 own visual lock permits its keyframe set before other shot input locks or final voice',async()=>{
+ const f=fixture({schemaVersion:'2.0',withVoice:true});f.state.assetFamiliesById.VOICE.canFlowDownstream=false;
+ const set=await approveFrames(f);assert.equal(set.scopeRole,'CURRENT');
+ const p=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(p.shotInputLocks.length,1);assert.equal(p.shotInputLocks[0].shotId,'SHOT-1');
+ const other=f.work('START_FRAME','SHOT-2'),t=await f.template(other);t.evidence.observedImageIds=t.requiredObservedImageIds;t.evidence.jointFindings=joint;
+ await assert.rejects(f.apply(f.review(other,t.evidence)),/本镜实际输入/);
+});
+test('V2 manifest renders only own visual inputs and preserves exact protocol and review-required status',async t=>{
+ const f=await manifestFixture(t,{schemaVersion:'2.0',withVoice:true}),w=f.work('SHOT_INPUT_LOCK'),options={model:f.model,state:f.state};
+ f.state.assetFamiliesById.VOICE.canFlowDownstream=false;f.media.delete('BASE-2|BASE-2@V1');
+ const preview=await previewShotProductionManifest(f.tx,{workItemId:w.id,...options});
+ assert.equal(preview.content.protocol,'SHOT_PRODUCTION_MANIFEST_V2');assert.equal(preview.content.stagePolicy,'PREVIS_FIRST_V1');assert.equal(preview.content.shotId,'SHOT-1');assert.equal(preview.inputBindings.length,1);assert.equal(preview.inputBindings[0].familyId,'BASE-1');
+ const queued=await enqueueShotProductionManifest(f.tx,{workItemId:w.id,requestId:'manifest:v2:1',expectedReleaseId:preview.expectedReleaseId,manifestHash:preview.manifestHash},options);
+ const claimed=await claimShotProductionManifest(f.tx,{jobId:queued.jobId,workerId:'WORKER-1'},options),result=await writeShotProductionManifest({repository:f.repository,instanceRoot:f.root,job:claimed.job});
+ const content=JSON.parse(await readFile(path.join(f.root,result.relativePath),'utf8'));assert.equal(content.inputBindings.length,1);assert.equal(content.formalReviewCreated,false);assert.equal(content.lockState,'REVIEW_REQUIRED');assert.equal(f.view.eventsByKind.review.length,0);
+ await finishShotProductionManifest(f.tx,{jobId:queued.jobId,jobRevisionId:claimed.jobRevisionId,workerId:'WORKER-1',result},options);
+ const candidate=f.view.eventsByKind['asset-version'][0];assert.equal(candidate.productionSchemaVersion,'2.0');assert.equal(candidate.stagePolicy,'PREVIS_FIRST_V1');assert.equal(candidate.productionPurpose,'FINAL_PRODUCTION');assert.equal(candidate.allowedUse,'PRODUCTION');assert.equal(candidate.executorKind,'DETERMINISTIC_MANIFEST');assert.equal(candidate.modelRunId,undefined);assert.equal(f.view.eventsByKind.review.length,0);
+});
+test('V2 shot lock accepts PREVIS Animatic only as adopted exact review evidence',async()=>{
+ const f=fixture({schemaVersion:'2.0'});await approveFrames(f);const video=f.work('SHOT_VIDEO');f.review(video,null);const lock=f.work('LOCKED_SHOT');
+ const t=await f.template(lock),animatic=f.work('ANIMATIC'),animaticVersion=f.version(animatic),options={model:f.model,state:f.state};
+ const preview=await previewShotProductionManifest(f.tx,{workItemId:lock.id,...options});assert.deepEqual(preview.content.reviewEvidenceBindings,[{familyId:animatic.outputAssetRef,versionId:animaticVersion,sha256:f.state.assetVersionsById[animaticVersion].sha256,consumerRole:'PREVIS_TIMING'}]);
+ t.evidence.observedVideoIds=t.requiredObservedVideoIds;t.evidence.videoFindings=Object.fromEntries(['action','camera','consistency','timing','adjacency'].map(k=>[k,finding('实际视频与预演逐项核对：'+k)]));
+ const record=await f.apply(f.review(lock,t.evidence));assert.equal(record.kind,'SHOT_LOCK');
+ f.state.assetFamiliesById[animatic.outputAssetRef].canFlowDownstream=false;
+ await assert.rejects(f.template(lock),/预演版本尚未实际放行/);
+ const p=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(p.shotLocks[0].scopeRole,'EVIDENCE_ONLY');assert.equal(p.shotKeyframeSets[0].scopeRole,'CURRENT');
+});
+test('V2 visual lock rejects missing own visual requirements and frozen space',async()=>{
+ for(const mode of ['input','space']){
+  const f=fixture({schemaVersion:'2.0'}),w=f.work('SHOT_INPUT_LOCK');
+  if(mode==='input')f.settings.shots[0].inputs=[];else f.settings.shots[0].space.camera='UNKNOWN';
+  w.outputBasisHash=compileShotProductionPlan(resolveShotProductionScope(f.model,'SCENE-test'),f.settings,{id:'PROD-1',revisionId:'PROD-REV-1',sourceRef:'story/production.json'}).workItems.find(n=>n.id===w.id).outputBasisHash;
+  await assert.rejects(f.apply(f.review(w,(await f.template(w)).evidence)),mode==='input'?/本镜视觉输入锁尚缺实际素材/:/SPACE_BINDING_REQUIRED/);
+  assert.equal(f.aux.size,0);
+ }
+});
+test('V2 local timing changes reopen only the affected keyframe set and retain its visual input lock',async()=>{
+ const f=fixture({schemaVersion:'2.0'}),first=await approveFrames(f),other=f.work('SHOT_INPUT_LOCK','SHOT-2');await f.apply(f.review(other,(await f.template(other)).evidence));const second=await approveFrames(f,'SHOT-2');
+ f.model.animaticLocks[0].shotSlices[0].timingHash=productionHash('longer first shot');
+ const p=await applyShotProductionLocksProjection(f.tx,f.model,{state:f.state});assert.equal(p.shotKeyframeSets.find(s=>s.id===first.id).scopeRole,'EVIDENCE_ONLY');assert.equal(p.shotKeyframeSets.find(s=>s.id===second.id).scopeRole,'CURRENT');assert.equal(p.shotInputLocks.filter(s=>s.scopeRole==='CURRENT').length,2);
 });

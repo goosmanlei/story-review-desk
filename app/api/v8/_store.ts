@@ -1,3 +1,10 @@
+import {materialProductionCurrentBasisReasons} from '../../../host/instance-runtime/material-production-current-basis.mjs';
+import {assetContextReviewedBindings} from '../../../host/instance-runtime/asset-context-revalidation-preservation.mjs';
+import {materialRequirementSelectionReasons} from '../../../host/instance-runtime/material-requirement-disposition.mjs';
+import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
+import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
+import {applyRequirementCompositionCoverage,type RequirementCoverageRow} from '../../../host/instance-runtime/material-requirement-composition.mjs';
+import {projectMaterialUsages,effectiveRequirementFamilyIds,materialUsageBindingsFor} from '../../../host/instance-runtime/material-usage-model.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
 import {shotManifestCandidateMatchesJob} from '../../../host/instance-runtime/shot-production-manifest.mjs';
 import {shotProductionExecutionEntries} from '../../../host/instance-runtime/shot-production-gates.mjs';
@@ -570,6 +577,10 @@ function hasProductionAux(data:ReviewData){
   return Boolean((production.shotProductionPlans||[]).length||(production.spatialShotViews||[]).length||data.sourceHashes?.productionMapSha256);
 }
 async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+  if(Object.hasOwn(data.productionModel,'materialUsageLedger')||Object.hasOwn(data.productionModel,'materialUsageEvidence')||Object.hasOwn(data.productionModel,'assetContextRevalidationLedger')||Object.hasOwn(data.productionModel,'assetContextRevalidationEvidence')){
+    const {loadMaterialUsageEvidence}=await import('../../../host/instance-runtime/material-usage-preservation.mjs');
+    data={...data,productionModel:await loadMaterialUsageEvidence(repository,data.productionModel)};
+  }
   const production=data.productionModel as unknown as {shotProductionPlans?:unknown[]};
   if(!hasProductionAux(data))return data;
   const {applyProductionSpatialProjection}=await import('../../../host/instance-runtime/spatial-production.mjs');
@@ -961,6 +972,8 @@ export function currentCreativeSubjectBaseHash(
 export type AdoptedMaterialStateProjection = {
   assetFamiliesById?: Record<string, Record<string, unknown> | undefined>;
   assetVersionsById?: Record<string, Record<string, unknown> | undefined>;
+  materialRequirementsById?: Record<string, Record<string, unknown> | undefined>;
+  materialUsageBindings?: unknown[];
 };
 
 export function deriveCurrentAdoptedMaterialSet(
@@ -972,9 +985,12 @@ export function deriveCurrentAdoptedMaterialSet(
   const scopedCoverage = data.productionModel.sceneCoveragePlanRevisions?.find(row => row.scopeId === sceneId && row.scopeRole === 'CURRENT' && row.episodeNarrativeReleaseId);
   const coverageRefs = scopedCoverage ? [...new Set(((scopedCoverage.content as {beats?:Array<{materialRequirementRefs:string[]}>})?.beats || []).flatMap(beat => beat.materialRequirementRefs))] : [];
   const scopedFamilies = coverageRefs.flatMap(ref => {
+    if(materialRequirementSelectionReasons(data.productionModel,ref,{use:'CURRENT_INPUT'}).length)throw new HttpError(409,'本场意图引用已拆分或异常需求，须显式采用新用途');
     const requirement = data.productionModel.materialRequirements?.find(r => r.id === ref && r.requirementClass === 'REQUIRED');
-    if (!requirement || !Array.isArray(requirement.assetFamilyRefs) || !requirement.assetFamilyRefs.length) throw new HttpError(409, '本场已采用镜头意图仍有未绑定素材需求，不能把缺项当作空输入集');
-    return requirement.assetFamilyRefs.map(String);
+    const familyIds=requirement && (requirement.composition || !requirement.assetFamilyRefs?.length)
+      ? requirementInputFamilyIds(data.productionModel,state,requirement) : requirement?.assetFamilyRefs || [];
+    if (!familyIds.length) throw new HttpError(409, '本场已采用镜头意图仍有未齐套或未绑定素材需求，不能把缺项当作空输入集');
+    return familyIds.map(String);
   });
   const familyRefs = [...new Set([
     ...scopedFamilies,
@@ -1003,7 +1019,17 @@ export function deriveCurrentAdoptedMaterialSet(
 
 /** V2 authoring freezes demand and setting facts, never pretends missing media
  * are adopted inputs. Operational material status is deliberately not hashed. */
-export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: string) {
+export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: string, schemaVersion: '2.0' | '3.0' = '2.0') {
+  if (schemaVersion === '3.0') {
+    try { return deriveShotDesignRequirementBasisV3(data.productionModel as unknown as Record<string,unknown>, sceneId); }
+    catch (error) {
+      if (error && typeof error === 'object' && 'reasonCode' in error && error.reasonCode === 'SHOT_DESIGN_REQUIREMENT_BASIS_INVALID') {
+        throw new HttpError(409, error instanceof Error ? error.message : '镜头设计需求基线已失效', {reasonCode:error.reasonCode,sceneId});
+      }
+      throw error;
+    }
+  }
+  if (schemaVersion !== '2.0') throw new HttpError(422, '不支持的镜头需求基线版本');
   const coverageRows = (data.productionModel.sceneCoveragePlanRevisions || []).filter(row =>
     row.scopeId === sceneId && row.scopeRole === 'CURRENT' && row.revisionState === 'CURRENT' && row.isCurrent === true);
   if (coverageRows.length !== 1) throw new HttpError(409, '本场必须有唯一当前已采用镜头意图');
@@ -1025,6 +1051,7 @@ export function deriveCurrentMaterialRequirementSet(data: ReviewData, sceneId: s
   };
   const graph = directory.graph || (model.domainGraph || {}) as NonNullable<typeof directory.graph>;
   const bindings = refs.map(requirementId => {
+    if(materialRequirementSelectionReasons(data.productionModel,requirementId,{use:'CURRENT_INPUT'}).length)throw new HttpError(409,'本场意图引用已拆分或异常需求，须显式采用新用途',{requirementId});
     const rows = (data.productionModel.materialRequirements || []).filter(row => row.id === requirementId);
     const requirement = rows[0] as Record<string, unknown> | undefined;
     if (rows.length !== 1 || requirement?.requirementClass !== 'REQUIRED'
@@ -1071,6 +1098,7 @@ export function assertShotPlanMaterialBasisCurrent(
   state: AdoptedMaterialStateProjection,
   sceneId: string,
   rawBasisBindings: unknown,
+  requirementSchemaVersion: '2.0' | '3.0' = '2.0',
 ) {
   const basisBindings = Array.isArray(rawBasisBindings)
     ? rawBasisBindings.filter((binding): binding is Record<string, unknown> => (
@@ -1083,7 +1111,7 @@ export function assertShotPlanMaterialBasisCurrent(
     throw new HttpError(409, '镜头设计需求依据与 V1 实际采用素材依据不能混合');
   }
   const adopted = basisBindings.filter((binding) => binding.bindingType === bindingType);
-  const current = requirementBasis ? deriveCurrentMaterialRequirementSet(data, sceneId) : deriveCurrentAdoptedMaterialSet(data, state, sceneId);
+  const current = requirementBasis ? deriveCurrentMaterialRequirementSet(data, sceneId, requirementSchemaVersion) : deriveCurrentAdoptedMaterialSet(data, state, sceneId);
   const binding = adopted[0];
   if (
     adopted.length !== 1
@@ -1281,8 +1309,10 @@ export function assertCreativeRevisionBasisCurrent(
     basisBindings: coverage.row.basisBindings,
     basisBindingsHash: coverage.row.basisBindingsHash,
   }, { requireCurrentPredecessor: false });
-  const materialSet = assertShotPlanMaterialBasisCurrent(data, state, sceneId, basisBindings);
   const v2 = bindingByType.has('MATERIAL_REQUIREMENT_SET');
+  const requirementSchemaVersion = v2 ? shotDesignRequirementBasisSchema(revision.materialRequirementSet) : '2.0';
+  if (requirementSchemaVersion === '3.0' && revision.planningContractVersion !== '3.0') throw new HttpError(409, '需求语义基线 V3 只能用于镜头设计 V3', {reasonCode:'SHOT_DESIGN_REQUIREMENT_SCHEMA_MISMATCH',sceneId});
+  const materialSet = assertShotPlanMaterialBasisCurrent(data, state, sceneId, basisBindings, requirementSchemaVersion);
   const frozenSet = v2 ? revision.materialRequirementSet : revision.adoptedMaterialSet;
   if (v2 !== (isRequirementDrivenPlanningVersion(revision.planningContractVersion)) || v2 && revision.adoptedMaterialSet != null || !v2 && revision.materialRequirementSet != null) {
     throw new HttpError(409, '镜头设计 V2 必须声明独立契约，不可冒充已采用实际素材');
@@ -2286,6 +2316,8 @@ type StatusProjection = {
 };
 
 type ProjectedVersion = AssetVersion & StatusProjection & {
+  imageTechnicalFacts?: unknown;
+  imageTechnicalSpecHash?: unknown;
   label?: string;
   mediaToken?: string | null;
   source?: 'BASE_SNAPSHOT' | 'ASSET_VERSION_EVENT';
@@ -2330,6 +2362,12 @@ type ReviewRollup = {
   source: 'APPLIED_REVIEW_EVENT_PROJECTION';
   targetWorkItemIds: string[];
 };
+
+function shotProductionUsageSlice(value: unknown) {
+  const row = value as Record<string, unknown>;
+  if (!['productionSchemaVersion','stagePolicy','allowedUse'].some(key => row[key] !== undefined)) return {};
+  return Object.fromEntries(['id','ownerRef','outputAssetRef','shotProductionPlanId','deliverableKey','productionSchemaVersion','stagePolicy','productionPurpose','allowedUse'].map(key => [key,row[key] ?? null]));
+}
 
 function statusSlice(record: StatusProjection) {
   return {
@@ -2601,6 +2639,7 @@ export function sourceSyncSucceeded(
             mediaStateProjection,
             String(review.scopeId || ''),
             review.basisBindings,
+            isRequirementDrivenPlanningVersion(deployedRevision.planningContractVersion) ? shotDesignRequirementBasisSchema(deployedRevision.materialRequirementSet) : '2.0',
           );
           assertDeployedShotPlanMaterialSet(
             data,
@@ -4249,6 +4288,8 @@ export function projectOperationalState(
         expectedOutputId: candidate.expectedOutputId,
       } : null,
       executionDefinitionRef,
+      ...(Object.hasOwn(candidate,'imageTechnicalFacts')?{imageTechnicalFacts:structuredClone(candidate.imageTechnicalFacts)}:{}),
+      ...(Object.hasOwn(candidate,'imageTechnicalSpecHash')?{imageTechnicalSpecHash:candidate.imageTechnicalSpecHash}:{}),
       inputVersionBindings: Array.isArray(candidate.inputBindings)
           ? (candidate.inputBindings as Array<Record<string, unknown>>).map((binding) => ({
             assetFamilyRef: String(binding.assetFamilyRef || ''),
@@ -4424,6 +4465,7 @@ export function projectOperationalState(
     reviewedDomainBindings.set(versionId,{familyId,sha256,domainContextHash,reviewEventId:String(review.eventId||''),reviewEventSequence:Number(review.eventSequence)||0,
       ...(!exactCurrent ? {compatibilityOnly:true} : {})});
   }
+  for(const [id,binding] of assetContextReviewedBindings(data.productionModel,versions,{contextHashForVersion:(source:{familyId:string;versionId:string;sha256:string})=>assetReviewContextHash(data,source.familyId,source.versionId,source.sha256)}))reviewedDomainBindings.set(id,binding);
   const freshProductionProofs=domainInvalidations.length?domainProductionProofs({candidates:currentCandidates,requests:executionRequests,runs:currentRuns,versions}):new Map();
   applyDomainInvalidations(domainInvalidations,versions,{reviewedDomainBindings,currentDomainHashes,freshProductionProofs,compatibilityExceptions:domainCompatibilityExceptions(compatibilityIndex)});
 
@@ -4818,9 +4860,15 @@ export function projectOperationalState(
     materialWorkItems.set(item.id, item);
   }
 
+  const materialUsageBindings=projectMaterialUsages(data.productionModel,{
+    assetFamiliesById:Object.fromEntries(families),assetVersionsById:Object.fromEntries(versions),
+    materialUsageSourceReviewHeads:Object.fromEntries(effectiveMediaReviews.filter(r=>r.subjectType==='ASSET').map(r=>[String(r.versionId),String(r.eventId)])),
+  });
+  const usageState={materialUsageBindings};
   const materialRequirements = new Map<string, Record<string, unknown>>();
   for (const source of data.productionModel.materialRequirements || []) {
-    const currentVersions = source.assetFamilyRefs
+    const familyIds=effectiveRequirementFamilyIds(usageState,source),usageBindings=materialUsageBindingsFor(usageState,source),usageRecords=materialUsageBindings.filter(b=>b.requirementId===source.id);
+    const currentVersions = familyIds
       .map((familyId) => families.get(familyId))
       .map((family) => family?.currentVersionId ? versions.get(family.currentVersionId) : null)
       .filter(Boolean) as ProjectedVersion[];
@@ -4828,23 +4876,25 @@ export function projectOperationalState(
       && (binding.requirementHash === source.requirementHash
         || (Boolean(compatibilityIndex.byVersion.get(version.id)?.length)
           && hasMaterialRequirementCompatibility(data, source.id, String(binding.requirementHash || ''), source.requirementHash)))));
-    const bindingStale = currentVersions.length > 0 && !matchingVersions.length;
+    const bindingStale = currentVersions.length > 0 && !matchingVersions.length
+      && !usageBindings.some(binding => binding.requirementHash === source.requirementHash);
     const coveredVersions = currentVersions.filter((version) => (
       version.outputState === 'PRESENT'
       && version.lifecycleState === 'RELEASED'
       && version.canFlowDownstream === true
     ));
     const coverageSatisfied = source.requirementClass === 'EVIDENCE_ONLY'
-      || (!bindingStale && coveredVersions.length === source.assetFamilyRefs.length);
+      || (familyIds.length > 0 && !bindingStale && coveredVersions.length === familyIds.length);
     const coverageReasons: string[] = [];
     if (source.requirementClass === 'EVIDENCE_ONLY') coverageReasons.push('EVIDENCE_ONLY_REQUIREMENT');
     if (source.isNewRequirement === true) coverageReasons.push('NEW_REQUIRED');
     if (!currentVersions.length && source.isNewRequirement !== true) coverageReasons.push('CURRENT_ASSET_VERSION_UNRESOLVED');
     if (bindingStale) coverageReasons.push('REQUIREMENT_HASH_VERSION_BINDING_STALE');
     const coveredFamilyIds = new Set(coveredVersions.map((version) => version.familyId));
-    coverageReasons.push(...source.assetFamilyRefs.filter((familyId) => !coveredFamilyIds.has(familyId)).map((familyId) => `UNCOVERED_ASSET_FAMILY:${familyId}`));
+    coverageReasons.push(...familyIds.filter((familyId) => !coveredFamilyIds.has(familyId)).map((familyId) => `UNCOVERED_ASSET_FAMILY:${familyId}`));
     materialRequirements.set(source.id, {
       ...source,
+      ...(usageRecords.length||Object.hasOwn(source,'materialUsageBindings')?{materialUsageBindings:usageRecords}:{}),
       coverageSatisfied,
       bindingStale,
       coverageReasons: [...new Set(coverageReasons)],
@@ -4855,6 +4905,13 @@ export function projectOperationalState(
         : 'NOT_APPLICABLE',
     });
   }
+
+  // Resolve explicit requirement aggregates after every leaf has its actual
+  // adopted-version projection. Definition order cannot decide readiness.
+  for (const row of applyRequirementCompositionCoverage(
+    [...materialRequirements.values()] as Array<RequirementCoverageRow & Record<string, unknown>>,
+    {usageBindings:materialUsageBindings},
+  )) materialRequirements.set(row.id, row);
 
   const workPackages = new Map<string, WorkPackage & StatusProjection>();
   for (const source of data.productionModel.workPackages) {
@@ -4933,6 +4990,8 @@ export function projectOperationalState(
       sha256: version.sha256,
       label: version.label,
       mediaToken: version.mediaToken,
+      ...(Object.hasOwn(version,'imageTechnicalFacts')?{imageTechnicalFacts:version.imageTechnicalFacts}:{}),
+      ...(Object.hasOwn(version,'imageTechnicalSpecHash')?{imageTechnicalSpecHash:version.imageTechnicalSpecHash}:{}),
       inputVersionBindings: version.inputVersionBindings || [],
       expectedOutputId: version.expectedOutputId || null,
       realizes: version.realizes || null,
@@ -4942,6 +5001,7 @@ export function projectOperationalState(
     }])),
     assetFamiliesById: Object.fromEntries([...families].map(([id, family]) => [id, {
       id,
+      ...shotProductionUsageSlice(family),
       domainContextHash: (family as unknown as Record<string,{hash?:string}>).domainContext?.hash || null,
       currentVersionId: family.currentVersionId || null,
       adoptedVersionId: family.currentVersionId || null,
@@ -4961,11 +5021,13 @@ export function projectOperationalState(
     }])),
     expectedOutputsById: Object.fromEntries(expectedOutputRealizations),
     workItemsById: Object.fromEntries([...workItems].map(([id, item]) => [id, {
+      ...shotProductionUsageSlice(item),
       ...statusSlice(item),
       additionalOutputAssetRefs: item.additionalOutputAssetRefs || [],
     }])),
     materialWorkItemsById: Object.fromEntries([...materialWorkItems].map(([id, item]) => [id, statusSlice(item)])),
     materialRequirementsById: Object.fromEntries(materialRequirements),
+    ...(materialUsageBindings.length?{materialUsageBindings}:{}),
     materialStoryRelations: data.productionModel.materialStoryRelations
       ? { ...data.productionModel.materialStoryRelations }
       : undefined,
@@ -5216,6 +5278,8 @@ async function buildOperationalSnapshot(productionAuxRevision?:string|null) {
   stateProjection.configuredGatesByWorkItem=configuredGates(data.productionModel as unknown as Record<string,unknown>,stateProjection,shotProductionExecutionEntries(data.productionModel,stateProjection,gateCatalog));
   for(const work of [...data.productionModel.workItems,...(data.productionModel.materialWorkItems||[])]){
     const definition=gateCatalog.executionDefinitions.find(d=>d.id===work.executionDefinitionRef);
+    const nativeReasons=materialProductionCurrentBasisReasons(data.productionModel as unknown as Record<string,unknown>,work as unknown as Record<string,unknown>,definition as unknown as Record<string,unknown>|undefined);
+    if(nativeReasons.length)stateProjection.configuredGatesByWorkItem[work.id].entryReasons.push(...nativeReasons);
     const upload=(definition?.upload||{}) as {items?:Array<Record<string,unknown>>};const uploads=upload.items||[];
     stateProjection.executionGatesByWorkItem[work.id]=definition?executionEligibilityReasons({stateProjection,p07Released},definition,{workItemId:work.id,familyId:work.outputAssetRef,inputBindings:uploads.map(b=>({...b,sha256:stateProjection.assetVersionsById[String(b.assetVersionRef)]?.sha256}))}):['EXECUTION_DEFINITION_NOT_READY'];
   }

@@ -1,3 +1,5 @@
+import {historicalEventContextReader} from './instance-historical-event-context.mjs';
+import {preserveAssetContextRevalidations} from './instance-runtime/asset-context-revalidation-preservation.mjs';
 import { nativeMaterialCandidateProof, assertNativeCandidatePreservation } from './instance-native-candidate-proof.mjs';
 import {legacyAudioCandidateProof,assertLegacyAudioCandidatePreservation} from './instance-legacy-audio-candidate-proof.mjs';
 import { registeredMaterialCandidateProof } from './instance-registered-material-candidates.mjs';
@@ -8,6 +10,7 @@ import {preserveScopedProductionProjection} from './instance-runtime/scoped-prod
 import {preserveShotProductionProjection,preserveShotRecipeProjection} from './instance-runtime/shot-production-preservation.mjs';
 import {preserveMaterialProductionProjection,preserveMaterialProductionRequirementProvenance} from './instance-runtime/material-production-preservation.mjs';
 import {preserveProductionSpatialProjection} from './instance-runtime/spatial-production.mjs';
+import {preserveMaterialUsageProjection} from './instance-runtime/material-usage-preservation.mjs';
 import path from 'node:path';
 import { constants } from 'node:fs';
 import { mkdir, mkdtemp, realpath, lstat, readFile, writeFile, rm, open, utimes } from 'node:fs/promises';
@@ -81,7 +84,7 @@ else: w.validate_prospective_creative_revision_binding(json.loads((root/sys.argv
 /** Materialize only release-pinned records. Never consult a legacy project directory. */
 export async function compileInstanceSource(input) { return compilePinnedInstance(input, 'SOURCE_SYNC'); }
 export async function compileInstanceExtension(input) { return compilePinnedInstance(input, 'EXTENSION_COMPATIBILITY'); }
-async function compilePinnedInstance({ instanceRoot, documents, activeMedia, retiredMedia, retiredContactMedia, mediaReadScope, events, manifest, profile, baseRelease }, mode) {
+async function compilePinnedInstance({ instanceRoot, documents, activeMedia, retiredMedia, retiredContactMedia, mediaReadScope, events, historicalContexts, manifest, profile, baseRelease }, mode) {
   await assertSourceMediaReadScope(mediaReadScope);
   validateCompiler(manifest.compiler, documents);
   const scratchParent = path.join(await realpath(instanceRoot), 'scratch');
@@ -134,7 +137,7 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const nativeCandidateProof = nativeMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
     const legacyAudioProof = legacyAudioCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
     const registeredCandidateProof = registeredMaterialCandidateProof({documents,events,activeMedia,pinnedMediaHashes,baseRelease,compiler:manifest.compiler});
-    const modernEventProof = await validateModernEventsInChild({ events, baseRelease, eventDirectory: manifest.compiler.eventDirectory });
+    const modernEventProof = await validateModernEventsInChild({ events, baseRelease, documents, historicalContexts, eventDirectory: manifest.compiler.eventDirectory });
     const retiredAliases = new Set((retiredMedia || []).flatMap(row => row.registration.aliases));
     const retiredVersions = (publishedSnapshot.productionModel?.assetVersions || []).filter(row => retiredAliases.has(row.path));
     const retiredFamilyIds = new Set(retiredVersions.map(row => row.familyId));
@@ -227,7 +230,11 @@ async function compilePinnedInstance({ instanceRoot, documents, activeMedia, ret
     const materialProduction=preserveMaterialProductionProjection({snapshot:productionRecipes.snapshot,recipes:productionRecipes.recipes,baseSnapshot:publishedSnapshot,baseRecipes:JSON.parse(baseRelease.recipesBytes),documents});
     const domain=preserveDomainProjection({snapshot:materialProduction.snapshot,baseSnapshot:publishedSnapshot,events});
     const materialProvenance=preserveMaterialProductionRequirementProvenance({snapshot:domain,baseSnapshot:publishedSnapshot});
-    snapshotBytes=Buffer.from(canonicalJson(await preserveProductionSpatialProjection({snapshot:materialProvenance,baseSnapshot:publishedSnapshot,documents})));recipesBytes=Buffer.from(canonicalJson(materialProduction.recipes));
+    const spatial=await preserveProductionSpatialProjection({snapshot:materialProvenance,baseSnapshot:publishedSnapshot,documents});
+    const usage=preserveMaterialUsageProjection({snapshot:spatial,recipes:materialProduction.recipes,baseSnapshot:publishedSnapshot,documents,events});
+    const contextReader=historicalEventContextReader(historicalContexts,{events,expectedHash:historicalContexts?.contextsHash,instanceId:profile.instanceId});
+    const revalidated=preserveAssetContextRevalidations({snapshot:usage.snapshot,recipes:usage.recipes,baseSnapshot:publishedSnapshot,documents,events,releaseContext:event=>contextReader.releaseContext(event)});
+    snapshotBytes=Buffer.from(canonicalJson(revalidated.snapshot));recipesBytes=Buffer.from(canonicalJson(revalidated.recipes));
     const nativeCandidatePreservation = assertNativeCandidatePreservation({proof:nativeCandidateProof,snapshot:JSON.parse(snapshotBytes),recipes:JSON.parse(recipesBytes),events});
     const legacyAudioCandidatePreservation = assertLegacyAudioCandidatePreservation({proof:legacyAudioProof,snapshot:JSON.parse(snapshotBytes),recipes:JSON.parse(recipesBytes),events});
     return { snapshotBytes, recipesBytes, derived, qa: { mapProxyAdapter, semanticQaAdapter, ...(nativeCandidatePreservation ? { nativeCandidatePreservation } : {}), ...(legacyAudioCandidatePreservation ? {legacyAudioCandidatePreservation} : {}), ...(sourceProxyBindings ? { sourceProxyBindings } : {}), status: 'PASS', mode: mode === 'SOURCE_SYNC' ? 'INSTANCE_PINNED_EXTENSION_SOURCE_MASK_COMPILER_SEMANTIC_QA' : 'INSTANCE_EXTENSION_READ_ONLY_COMPILER_SEMANTIC_QA', commands } };

@@ -1,3 +1,4 @@
+import {currentMaterialRequirementRows} from '../../../../../host/instance-runtime/material-requirement-disposition.mjs';
 import { resolveEpisodePlan } from '../../_episode-plan';
 import {domainOwnership} from '../../../../../host/instance-runtime/domain-ownership.mjs';
 import {emptyDomainGraph} from '../../../../../host/instance-runtime/domain-model.mjs';
@@ -249,7 +250,7 @@ export async function GET(request: Request) {
     for (const impact of narrative ? [] : data.adaptationAudit?.productionImpacts ?? []) {
       if (includes(impact, needle)) results.push({ kind: '制作影响', id: impact.impact_id, title: `${impact.impact_id} · ${impact.change_type || '原文改编下游影响'}`, view: 'story', storyView: 'audit', auditBeatId: impact.trigger_beat_ids?.[0], sceneId: impact.scene_ids?.[0] });
     }
-    for (const item of data.productionModel.materialRequirements ?? []) {
+    for (const item of currentMaterialRequirementRows(data.productionModel)) {
       if (item.requirementClass !== 'REQUIRED') continue;
       const families = data.productionModel.assetFamilies.filter((family) => item.assetFamilyRefs.includes(family.id));
       const familyIds = new Set(families.map((family) => family.id));

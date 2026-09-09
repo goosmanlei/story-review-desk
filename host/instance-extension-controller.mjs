@@ -5,6 +5,7 @@ import { HOST_NAMESPACE, objectHash, requireSource } from './instance-source-pro
 import { assertHistoricalDatabaseProofs } from './instance-source-controller.mjs';
 import { assertMapProxyAdapterParity } from './instance-map-proxy-adapter.mjs';
 import { assertSemanticQaAdapterParity } from './instance-semantic-qa-adapter.mjs';
+import { captureHistoricalEventContexts } from './instance-historical-event-context.mjs';
 
 export const EXTENSION_NAMESPACE = 'instance-extension-maintenance';
 const strict = (value, keys, code) => requireSource(value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).every(key => keys.includes(key)), code, 'Unexpected manifest fields are forbidden');
@@ -100,9 +101,11 @@ async function capture(tx, manifest, softwareCommit) {
   const derived = view.profile.sourceBindings?.derivedRegistryPaths;
   requireSource(Array.isArray(derived) && derived.length === 9 && new Set(derived).size === 9 && derived.every(alias => documents.some(row => row.aliases.includes(alias))), 'EXTENSION_DERIVED_SET', 'The exact current nine-registry set must remain release bound');
   const { media, activeMedia, retiredMedia, retiredContactMedia, mediaFingerprint, activeMediaFingerprint, retiredMediaFingerprint, retiredContactMediaFingerprint } = await captureSourceMedia(tx); const events = (await tx.listEvents());
+  const historicalContexts = await captureHistoricalEventContexts(tx, { events, instanceId: view.instanceId });
   const context = { instanceId: view.instanceId, runtimeEpoch: view.runtimeEpoch, baseReleaseId: baseRelease.releaseId, profileRevisionId: baseRelease.profileRevisionId, sourceRevisionIds: baseRelease.sourceRevisionIds, documentFingerprint: objectHash(documents.map(({ documentId, revisionId, sha256, aliases, metadata }) => ({ documentId, revisionId, sha256, aliases, metadata }))), eventFingerprint: objectHash(events), mediaFingerprint, activeMediaFingerprint, retiredContactMediaFingerprint, sourceLeaseRevisionId: sourceLease?.revisionId || null, compilerRevisions, softwareCommit, adapterVersion: 'INSTANCE_EXTENSION_COMPATIBILITY_1.2' };
   context.retiredMediaFingerprint = retiredMediaFingerprint;
-  return { view, baseRelease, documents, changes, media, activeMedia, retiredMedia, retiredContactMedia, events, context };
+  context.historicalContextsHash = historicalContexts.contextsHash;
+  return { view, baseRelease, documents, changes, media, activeMedia, retiredMedia, retiredContactMedia, events, historicalContexts, context };
 }
 async function assertContext(tx, manifest, context, softwareCommit) {
   requireSource(objectHash((await capture(tx, manifest, softwareCommit)).context) === objectHash(context), 'EXTENSION_CAS_CONFLICT', 'Release, source heads, events, media, profile or source lease changed; create a new plan');

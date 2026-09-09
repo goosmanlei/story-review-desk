@@ -1,3 +1,4 @@
+import {imageTechnicalBinding} from './image-technical-spec.mjs';
 import {selectShotRecipeInputFamilies,shotRecipeProductionBasis} from './shot-production-recipe-basis.mjs';
 export {selectShotRecipeInputFamilies,shotRecipeProductionBasis,shotRecipeDefinitionBindingReasons} from './shot-production-recipe-basis.mjs';
 import {randomUUID} from 'node:crypto';
@@ -6,12 +7,13 @@ import {executionDefinitionHash,SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA} from './
 import {productionHash,productionId,productionBindingReasons,shotProductionEntryGates} from './shot-production-model.mjs';
 import {readCurrentShotProductionModel} from './shot-production-service.mjs';
 import {selectAnimaticLockForShot} from './animatic-model.mjs';
+import {shotProductionConsumerRole,shotProductionInputConsumptionReasons} from './shot-production-stage-policy.mjs';
 
 export const SHOT_RECIPE_NS={drafts:'shot-production-recipe-drafts',jobs:'shot-production-recipe-jobs',requests:'shot-production-recipe-requests'};
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
 const fail=(message,code='DOMAIN_CONFLICT')=>{throw Object.assign(new Error(message),{code});};
 const put=(tx,namespace,key,value,expectedRevisionId=null)=>tx.putAux({namespace,key,bytes:canonicalJson(value),mediaType:'application/json',expectedRevisionId});
-const kinds=new Set(['STORYBOARD','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO']);
+const kinds=new Set(['STORYBOARD','DIALOGUE_TEMP','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO']);
 export function validateShotRecipeContent(value){
  if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!=='model,negativePrompt,parameters,prompt')fail('调用包作者内容须为模型、提示词、负面提示和参数','DOMAIN_INVALID');
  productionId(value.model,'模型');if(value.model==='UNKNOWN')fail('调用包需明确模型','DOMAIN_INVALID');
@@ -34,7 +36,7 @@ async function context(tx,workItemId,api){
  for(const familyId of inputFamilies){
   const f=state.assetFamiliesById[familyId],v=state.assetVersionsById[f?.currentVersionId];
   if(family.kind==='IMAGE'&&f?.kind==='AUDIO')continue;
-  const binding={familyId,versionId:v?.id,sha256:v?.sha256};const reasons=productionBindingReasons(model,state,binding);if(reasons.length){blockers.push(...reasons.map(r=>r+':'+familyId));continue;}
+  const binding={familyId,versionId:v?.id,sha256:v?.sha256};const reasons=[...productionBindingReasons(model,state,binding,{consumerRole:shotProductionConsumerRole(work,plan)}),...shotProductionInputConsumptionReasons(model,work,binding)];if(reasons.length){blockers.push(...reasons.map(r=>r+':'+familyId));continue;}
   const registered=await tx.getMedia(familyId,v.id);if(!registered||registered.sha256!==v.sha256||registered.availability!=='PRESENT')blockers.push('INPUT_REGISTRATION_NOT_CURRENT:'+familyId);
   inputs.push({order:inputs.length+1,path:v.path,assetFamilyRef:familyId,assetVersionRef:v.id,sha256:v.sha256,label:f.label||v.id});
  }
@@ -50,7 +52,7 @@ export async function getShotRecipeWorkspace(tx,{workItemId,api}){
  const c=await context(tx,workItemId,api),record=await tx.getAux(SHOT_RECIPE_NS.drafts,workItemId),draft=read(record),definition=c.view.recipes.executionDefinitions.find(d=>d.id===c.work.executionDefinitionRef);
  const defaults={model:'',prompt:[c.spec.visualIntent,c.spec.actionIntent,c.spec.soundIntent,c.work.dialogue?.text,c.work.dialogue?.performance].filter(Boolean).join('\n'),negativePrompt:'',parameters:{}};
  const current=definition?{definitionId:definition.id,content:definition.authoringContent||{model:definition.model?.branch||'',prompt:definition.prompt?.main||'',negativePrompt:definition.prompt?.negative||'',parameters:definition.parameters||{}}}:null;
- return {workItemId,releaseId:c.view.releaseId,draftHeadRevisionId:record?.revisionId||null,draft:draft?{...draft,revisionId:record.revisionId}:null,current,defaults,inputs:c.inputs,output:c.output,blockers:c.blockers,basis:c.basis,basisHash:c.basisHash,readOnly:false,jobs:(await tx.listAux(SHOT_RECIPE_NS.jobs)).map(read).filter(j=>j?.workItemId===workItemId).map(({jobId,status,error})=>({jobId,status,error}))};
+ return {workItemId,deliverableKey:c.work.deliverableKey,productionPurpose:c.work.productionPurpose||null,allowedUse:c.work.allowedUse||null,releaseId:c.view.releaseId,draftHeadRevisionId:record?.revisionId||null,draft:draft?{...draft,revisionId:record.revisionId}:null,current,defaults,inputs:c.inputs,output:c.output,blockers:c.blockers,basis:c.basis,basisHash:c.basisHash,readOnly:false,jobs:(await tx.listAux(SHOT_RECIPE_NS.jobs)).map(read).filter(j=>j?.workItemId===workItemId).map(({jobId,status,error})=>({jobId,status,error}))};
 }
 export async function saveShotRecipeDraft(tx,input,{api}){
  const c=await context(tx,input.workItemId,api);if(c.view.releaseId!==input.expectedReleaseId)fail('发布版本已变化');const content=validateShotRecipeContent(input.content);
@@ -75,6 +77,8 @@ export function compileShotRecipePreview(c,content,{draftRevisionId}){
  const output=needsNewOutput?{...c.output,id:'SP-EO-'+productionHash({workItemId:c.work.id,draftRevisionId:draftRevisionId}).slice(0,24),targetPath:'media/_review_pending/shot-production/'+c.family.id+'/'+versionLabel+extension,plannedVersionLabel:versionLabel,expectationState:'PLANNED',realizedVersionId:null}:c.output;
  const id='SP-CALL-'+productionHash({workItemId:c.work.id,draftRevisionId:draftRevisionId}).slice(0,24),revisionId=id+':r1';
  const definition={id,title:c.work.label,pipelineStageCode:c.work.pipelineStageCode,executorKind:'MODEL_CALL',definitionStatus:'DEFINED',workItemRef:c.work.id,currentRevisionId:revisionId,upload:{rawText:c.inputs.map(i=>i.label).join('\n'),items:c.inputs.map(({label,...b})=>b)},model:{branch:content.model,rawRule:content.model,resolution:String(content.parameters.resolution||'EXPLICIT_PARAMETERS')},parameters:content.parameters,parametersRaw:canonicalJson(content.parameters),prompt:{main:content.prompt,negative:content.negativePrompt,negativeApplication:content.negativePrompt?'APPLY_WITH_MAIN_PROMPT':'NONE'},output:{path:output.targetPath,mediaType:c.family.kind,assetFamilyRef:c.family.id,expectedOutputRef:output.id},declaredGate:'READY_TO_START',rawSourceBlock:canonicalJson(content),authoringContent:content,productionBasis:c.basis,productionBasisHash:c.basisHash,parentVersionId:currentVersion?.id||null};
+ if(c.work.productionSchemaVersion==='2.0')Object.assign(definition,{productionSchemaVersion:'2.0',stagePolicy:c.work.stagePolicy,productionPurpose:c.work.productionPurpose,allowedUse:c.work.allowedUse});
+ const imageSpec=imageTechnicalBinding(c.work.configurationBinding);if(imageSpec){if(productionHash(imageTechnicalBinding(c.output))!==productionHash(imageSpec)||productionHash(imageTechnicalBinding(c.family))!==productionHash(imageSpec))fail('图像调用包冻结规格不一致');Object.assign(definition,structuredClone(imageSpec));}
  definition.definitionHashSchemaVersion=SHOT_PRODUCTION_DEFINITION_HASH_SCHEMA;
  definition.definitionHash=executionDefinitionHash(definition);
  const body={workItemId:c.work.id,draftRevisionId:draftRevisionId,expectedReleaseId:c.view.releaseId,basisHash:c.basisHash,definition,expectedOutput:output,previousDefinitionId:c.work.executionDefinitionRef||null};return {...body,previewHash:productionHash(body),modelCalls:0};

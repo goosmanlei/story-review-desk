@@ -1,3 +1,9 @@
+import {decodeAssetContextDocuments,assetContextDocumentsHash} from './instance-asset-context-proof.mjs';
+import {validateAssetContextLedger} from './instance-runtime/asset-context-revalidation-model.mjs';
+import {validateUnstartedCancellationEvents} from './instance-runtime/execution-cancellation.mjs';
+import {historicalEventContextReader} from './instance-historical-event-context.mjs';
+import {decodeMaterialUsageDocuments,materialUsageDocumentsHash} from './instance-material-usage-proof.mjs';
+import {validateMaterialUsageLedger} from './instance-runtime/material-usage-model.mjs';
 import {planningReviewVersion} from './instance-runtime/shot-design-contract.mjs';
 // Pure validation of a frozen event set. No repository, network or mutation API is invoked.
 // Invoke in an isolated Node process: TypeScript loading must not alter a web process.
@@ -35,7 +41,9 @@ export function loadModernEventRuntime(softwareRoot) {
       const absolute = fs.realpathSync(filename);
       requireThat(absolute.startsWith(path.join(root,'app')+path.sep), 'runtime TypeScript must come from this installed application');
       const bytes = fs.readFileSync(absolute); loaded.set(path.relative(root,absolute),digest(bytes));
-      module._compile(ts.transpileModule(bytes.toString('utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,absolute);
+      // Node16 retains native import(fileURL), used by controlled media/repository
+      // readers. CommonJS rewrites it to require(fileURL), which Node cannot load.
+      module._compile(ts.transpileModule(bytes.toString('utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.Node16,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText,absolute);
     };
   }
   try {
@@ -67,18 +75,22 @@ export function frozenEventManifest(events) {
   return {count:rows.length,eventSequenceHighWater:Math.max(0,...rows.map(row=>Number(row.eventSequence)||0)),events:rows,eventsHash:digest(rows)};
 }
 
-export function validateModernEventClosure({events,snapshot,binding},runtime) {
+export function validateModernEventClosure({events,snapshot,binding,historicalContexts,materialUsageSources=[],assetContextSources=[]},runtime) {
   const {api}=runtime, before=canonical(events), manifest=frozenEventManifest(events);
   requireThat(binding && text(binding.releaseId) && sha(binding.snapshotSha256) && text(binding.snapshotId),'exact base release binding required');
   requireThat(snapshot?.snapshotId===binding.snapshotId && digest(snapshot)===binding.snapshotCanonicalSha256,'frozen snapshot bytes/canonical binding mismatch');
   requireThat(equal(manifest,binding.eventManifest),'complete frozen event set differs from capture');
+  const usageDocuments=decodeMaterialUsageDocuments(materialUsageSources);
+  const usageRows=validateMaterialUsageLedger({snapshot,documents:usageDocuments,events});
+  if(usageRows.length||materialUsageSources.length||binding.materialUsageSourcesHash!==undefined)requireThat(materialUsageDocumentsHash(materialUsageSources)===binding.materialUsageSourcesHash,'material usage fixed source capture differs');
+  const usageIds=new Set(usageRows.map(row=>row.event.eventId));
   assertScopedShotProjections(snapshot.productionModel||{});
   // Imported pre-sequence evidence keeps its original absence; never backfill it.
   // This is the runtime projection order, with original date/id as the legacy tie breaker.
   const ordered=[...events].sort((a,b)=>(Number(a.eventSequence)||0)-(Number(b.eventSequence)||0)||String(a.recordedAt).localeCompare(String(b.recordedAt))||a.eventId.localeCompare(b.eventId));
   const sequences=new Set();
   for(const e of ordered){
-    requireThat(text(e.eventId)&&text(e.eventKind)&&text(e.snapshotId)&&text(e.schemaVersion),'event envelope identity is incomplete');
+    requireThat(text(e.eventId)&&text(e.eventKind)&&(usageIds.has(e.eventId)||text(e.snapshotId))&&text(e.schemaVersion),'event envelope identity is incomplete');
     requireThat(sha(e.requestHash)&&sha(e.idempotencyKeyHash)&&(!('rawRequestHash'in e)||sha(e.rawRequestHash)),'event request digest is invalid: '+e.eventId);
     requireThat(text(e.recordedAt)&&Number.isFinite(Date.parse(e.recordedAt)),'event recordedAt invalid');
     if(e.eventSequence!=null){requireThat(Number.isSafeInteger(e.eventSequence)&&e.eventSequence>0&&!sequences.has(e.eventSequence),'duplicate/invalid event sequence: '+e.eventId+' / '+e.eventSequence);sequences.add(e.eventSequence);}
@@ -91,25 +103,19 @@ export function validateModernEventClosure({events,snapshot,binding},runtime) {
   const modernIds=new Set(modernCandidates.map(e=>e.creativeRevisionId));
   const modernCommentIds=new Set(ordered.filter(e=>e.eventKind==='script-comment'&&e.schemaVersion==='1.2').map(e=>e.commentId));
   const recordIds=new Set(),relationIds=new Set(), candidateReports=[],commentReports=[],submissionReports=[],resolutionReports=[];
+  for(const id of usageIds){recordIds.add(id);relationIds.add(id);}
   const latestCandidate=(event,subjectId)=>candidates.filter(c=>c.eventSequence<event.eventSequence&&(!subjectId||c.subjectId===subjectId)).at(-1);
+  const historicalSnapshot=historicalEventContextReader(historicalContexts,{events,expectedHash:binding.historicalContextsHash,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,directory:runtime.historicalContextDirectory});
+  const cancellationRows=validateUnstartedCancellationEvents({events,instanceId:snapshot.instance?.instanceId||snapshot.productionModel?.instance?.instanceId,releaseContext:event=>historicalSnapshot.releaseContext(event).release});
+  for(const row of cancellationRows){recordIds.add(row.eventId);relationIds.add(row.eventId);}
+  const contextDocuments=decodeAssetContextDocuments(assetContextSources);
+  const contextRows=validateAssetContextLedger({snapshot,documents:contextDocuments,events,releaseContext:event=>historicalSnapshot.releaseContext(event)});
+  if(contextRows.length||assetContextSources.length||binding.assetContextSourcesHash!==undefined)requireThat(assetContextDocumentsHash(assetContextSources)===binding.assetContextSourcesHash,'asset context fixed source capture differs');
+  for(const row of contextRows){recordIds.add(row.event.eventId);relationIds.add(row.event.eventId);}
   function scopedViewBefore(event){
-    const before=ordered.filter(e=>e.eventSequence<event.eventSequence),historic=structuredClone(snapshot);
-    const ops=before.filter(e=>e.eventKind==='source-operation'&&['EPISODE_DATABASE_COMPILER_V1','SCOPED_SCENE_DATABASE_COMPILER_V1'].includes(e.protocol)&&e.operationState==='SUCCEEDED');
-    const byOp=new Map(ops.map(e=>[e.sourceOperationId,e]));
-    const latest=new Map();for(const op of ops)latest.set(op.subjectKind+':'+(before.find(e=>e.eventId===op.reviewEventId)?.scopeId||''),op.sourceOperationId);
-    historic.productionModel.episodeNarrativeReleases=(historic.productionModel.episodeNarrativeReleases||[]).filter(r=>byOp.has(r.sourceOperationId)).map(r=>({...r,scopeRole:latest.get('EPISODE_NARRATIVE:'+r.episodeUid)===r.sourceOperationId?'CURRENT':'EVIDENCE_ONLY'}));
-    const releaseIds=new Set(historic.productionModel.episodeNarrativeReleases.map(r=>r.id));
-    for(const key of ['sceneCoveragePlanRevisions','shotPlanSetRevisions']){
-      historic.productionModel[key]=(historic.productionModel[key]||[]).filter(r=>!r.episodeNarrativeReleaseId||(r.sourceOperationId?byOp.has(r.sourceOperationId):releaseIds.has(r.episodeNarrativeReleaseId))).map(r=>{
-        if(!r.episodeNarrativeReleaseId)return r;
-        const current=latest.get(r.subjectKind+':'+r.scopeId)===r.sourceOperationId&&Boolean(r.sourceOperationId);
-        return {...r,scopeRole:current?'CURRENT':r.sourceOperationId?'EVIDENCE_ONLY':'PROPOSAL',isCurrent:current};
-      }).sort((a,b)=>Number(byOp.get(b.sourceOperationId)?.eventSequence||0)-Number(byOp.get(a.sourceOperationId)?.eventSequence||0));
-    }
-    const priorIds=new Set(before.filter(e=>e.eventKind==='creative-revision').map(e=>e.creativeRevisionId));
-    historic.productionModel.shots=(historic.productionModel.shots||[]).filter(s=>!s.shotPlanSetRevisionId||priorIds.has(s.shotPlanSetRevisionId));
+    const before=ordered.filter(e=>e.eventSequence<event.eventSequence);
     const eventsByKind={};for(const e of [...before].reverse())(eventsByKind[e.eventKind]||=[]).push(e);
-    return {snapshot:historic,eventsByKind};
+    return {snapshot:historicalSnapshot(event),eventsByKind};
   }
   for(const c of modernCandidates){
     requireThat(c.schemaVersion==='2.0'&&c.criteriaVersion==='2.0'&&c.revisionId===c.creativeRevisionId,'modern candidate envelope unsupported');
@@ -160,8 +166,7 @@ export function validateModernEventClosure({events,snapshot,binding},runtime) {
     }
     if(event.eventKind==='source-operation'&&event.protocol==='SCOPED_SCENE_DATABASE_COMPILER_V1'){
       const review=ordered.find(e=>e.eventId===event.reviewEventId&&e.eventKind==='review');
-      const historical=structuredClone(snapshot),key=event.subjectKind==='SCENE_COVERAGE'?'sceneCoveragePlanRevisions':'shotPlanSetRevisions';
-      historical.productionModel[key]=(historical.productionModel[key]||[]).map(r=>r.id===event.creativeRevisionId?{...r,scopeRole:'CURRENT',isCurrent:true}:r);
+      const historical=historicalSnapshot(event);
       requireThat(review&&review.eventSequence<event.eventSequence&&planningCandidate&&planningCandidate.eventSequence<review.eventSequence,'scoped source operation lacks prior review/candidate');
       api.assertScopedSceneSyncBinding(historical,event,review);
       recordIds.add(event.eventId);relationIds.add(event.eventId);continue;

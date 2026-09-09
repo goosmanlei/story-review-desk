@@ -6,7 +6,7 @@ export function reuseShotProductionObjects(model,previousPlan,compiled){
  const previous=(model.workItems||[]).filter(w=>oldIds.has(w.id)&&w.scopeRole==='CURRENT'&&w.activeInCurrentProduction!==false),reuse=new Map(),families=new Map();
  for(const item of compiled.workItems){
   if(!item.outputBasisHash)continue;
-  const matches=previous.filter(w=>w.scopeType===item.scopeType&&w.scopeId===item.scopeId&&w.deliverableKey===item.deliverableKey&&w.outputSlot===item.outputSlot&&w.outputBasisHash===item.outputBasisHash);
+  const matches=previous.filter(w=>w.scopeType===item.scopeType&&w.scopeId===item.scopeId&&w.deliverableKey===item.deliverableKey&&w.outputSlot===item.outputSlot&&w.outputBasisHash===item.outputBasisHash&&['productionSchemaVersion','stagePolicy','productionPurpose','allowedUse'].every(key=>w[key]===item[key]));
   if(matches.length!==1)continue;const old=matches[0];
   const packages=(model.workPackages||[]).filter(p=>p.workItemRefs?.includes(old.id)&&p.scopeRole==='CURRENT');
   if(packages.length!==1||packages[0].workItemRefs.length!==1)continue;

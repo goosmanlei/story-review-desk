@@ -1,3 +1,4 @@
+import {createImageTechnicalSpec,imageTechnicalBinding,defaultImagePurposeProfiles} from './image-technical-spec.mjs';
 import { reviewCatalog, standardLabel } from "./review-standard-catalog.mjs";
 import {
   CONFIG_ID,
@@ -185,6 +186,8 @@ export async function getConfiguration(tx) {
       profileId: b.reviewSpec.profileId,
       reviewSpecHash: b.reviewSpec.hash,
       configurationHash: b.configurationHash,
+      ...(imageTechnicalBinding(b)||{}),
+      imageTechnicalUpgradeEligible: imageUpgradeEligible(view,key,bindings,configuration),
     })),
     history,
     initialized: Boolean(record),
@@ -243,6 +246,13 @@ function assertUpgrades(view, keys, bindings) {
           );
       }
   }
+}
+function imageUpgradeEligible(view,key,bindings,configuration){
+ const target=configurationObjects(view.snapshot).find(o=>o.key===key),r=target?.object,m=view.snapshot.productionModel;
+ if(!r||target.kind!=='ASSET'||imageTechnicalBinding(bindings[key])||(r.assetFamilyRefs||[]).length||r.plannedAssetFamilyId||r.materialWorkItemRef||(m.materialWorkItems||[]).some(w=>w.requirementRef===r.id))return false;
+ const config={...configuration,schemaVersion:'2.1',technical:{...configuration.technical,imagePurposeProfiles:defaultImagePurposeProfiles()}};
+ if(!createImageTechnicalSpec(config,target.kind,r))return false;
+ try{assertUpgrades(view,[key],bindings);return true;}catch{return false;}
 }
 export async function previewConfiguration(
   tx,
@@ -306,6 +316,16 @@ export async function previewConfiguration(
     record?.value.bindings ||
     bindConfiguration(view.snapshot, config, {}, [], true);
   assertUpgrades(view, upgradeKeys, baseBindings);
+  // Typed image standards never rewrite a provisioned producer's immutable
+  // source/EO/definition. This first version upgrades only unprovisioned leaves.
+  for(const key of upgradeKeys){
+    const target=configurationObjects(view.snapshot).find(o=>o.key===key);
+    const before=imageTechnicalBinding(baseBindings[key]);
+    const next=createImageTechnicalSpec(configuration,target.kind,target.object);
+    if(configHash(before)===configHash(next))continue;
+    const r=target.object,m=view.snapshot.productionModel;
+    assert(!before && target.kind==='ASSET' && next && !(r.assetFamilyRefs||[]).length && !r.plannedAssetFamilyId && !r.materialWorkItemRef && !(m.materialWorkItems||[]).some(w=>w.requirementRef===r.id), '图像用途升级仅支持尚未首次建族的需求；已建档对象须保留原冻结规格');
+  }
   for (const rule of config.workflow.materialPrerequisites || []) {
     assert(
       rule.requirementIds.every((id) =>

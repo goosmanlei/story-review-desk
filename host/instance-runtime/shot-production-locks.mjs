@@ -1,6 +1,8 @@
+import {loadMaterialUsageEvidence} from './material-usage-preservation.mjs';
 import {canonicalJson} from './bytes.mjs';
 import {createHash} from 'node:crypto';
-import {productionHash,productionBindingReasons,resolveShotProductionScope,compileShotProductionPlan} from './shot-production-model.mjs';
+import {productionHash,productionBindingReasons,resolveShotProductionScope,compileShotProductionPlan,shotProductionVisualInputs,shotProductionVisualInputHash} from './shot-production-model.mjs';
+import {PREVIS_FIRST_POLICY,shotProductionPolicy} from './shot-production-stage-policy.mjs';
 import {applyAnimaticProjection,lockAnimaticTimeline,assertAnimaticInputs,reconcileAnimaticLocks} from './animatic-service.mjs';
 import {mediaRetirementOverlay} from './media-retirement.mjs';
 import {productionSpaceReasons} from './shot-production-space.mjs';
@@ -19,6 +21,14 @@ const latest=(rows,predicate)=>rows.filter(predicate).sort((a,b)=>Number(b.event
 const current=row=>row?.scopeRole==='CURRENT'&&row.activeInCurrentProduction===true;
 const inputHash=plan=>productionHash(plan.content.shots.map(({shotId,inputs,space})=>({shotId,inputs,space})));
 const revision=plan=>plan.sourceRevisionId||plan.revisionId;
+const visualLock=plan=>shotProductionPolicy(plan)===PREVIS_FIRST_POLICY;
+const localInputBinding=(model,settings)=>({shotId:settings.shotId,inputs:shotProductionVisualInputs(model,settings),space:settings.space,visualRequirementIds:settings.visualRequirementIds});
+const localInputHash=(model,plan,settings)=>visualLock(plan)?shotProductionVisualInputHash(model,settings):productionHash({shotId:settings.shotId,inputs:settings.inputs,space:settings.space});
+function inputLockEvidence(c){
+ if(!visualLock(c.plan))return{...baseEvidence(c,'INPUT_LOCK'),inputHash:inputHash(c.plan)};
+ if(c.work.scopeType!=='SHOT'||c.work.scopeId!==c.work.shotId||!c.settings)fail('视觉输入锁必须归属本镜');
+ return{...baseEvidence(c,'INPUT_LOCK'),shotId:c.work.shotId,inputHash:localInputHash(c.model,c.plan,c.settings)};
+}
 
 const inPlan=(plan,work)=>Array.isArray(plan.workItemIds)?plan.workItemIds.includes(work.id):work.shotProductionPlanId===plan.id;
 function context(model,workItemId,{historical=false}={}){
@@ -56,6 +66,15 @@ function animaticFor(c){
  const {lock,slice}=selected;
  if(!slice||hashes.some(key=>!/^[a-f0-9]{64}$/.test(slice[key]||'')))fail('本镜 Animatic 时间／画面／叠加／邻接绑定不完整');return{lock,slice};
 }
+async function assertAnimaticReviewMedia(tx,c,state){
+ const {lock}=animaticFor(c),render=(c.model.animaticRenderJobs||[]).find(j=>j.jobId===lock.renderJobId);
+ const version=state.assetVersionsById?.[render?.result?.versionId],family=state.assetFamiliesById?.[version?.familyId];
+ const work=(c.model.workItems||[]).find(w=>w.id===family?.ownerRef);
+ if(render?.status!=='SUCCEEDED'||!work||work.deliverableKey!=='ANIMATIC'||work.scopeType!=='SCENE'||work.scopeId!==c.plan.sceneId||work.shotPlanSetRevisionId!==c.scope.plan.id)fail('单镜审阅缺少本场精确预演产物');
+ const binding=bindingFor(state,work,version.id);
+ if(!binding||productionBindingReasons(c.model,state,binding,{consumerRole:'PREVIS_TIMING'}).length)fail('单镜审阅预演版本尚未实际放行');
+ await assertRegistered(tx,binding);return binding;
+}
 function frameWorks(c){
  const works=(c.model.workItems||[]).filter(w=>current(w)&&inPlan(c.plan,w)&&w.shotId===c.work.shotId&&frameKinds.has(w.deliverableKey));
  const strategy=c.settings?.keyframeStrategy,count=strategy?.mode==='START_ONLY'?1:strategy?.mode==='START_END'?2:strategy?.mode==='MULTI_KEYFRAME'?2+strategy.intermediateFrameCount:0;
@@ -64,7 +83,7 @@ function frameWorks(c){
 }
 function baseEvidence(c,kind){return{schemaVersion:'1.0',kind,productionPlanId:c.plan.id,productionRevisionId:revision(c.plan)};}
 function frameEvidence(c){const{slice}=animaticFor(c);return{...baseEvidence(c,'KEYFRAME'),shotId:c.work.shotId,...Object.fromEntries(hashes.map(key=>[key,slice[key]])),strategyHash:productionHash(c.settings.keyframeStrategy)};}
-function localEvidence(c){const{productionPlanId,productionRevisionId,kind,...local}=frameEvidence(c);return local;}
+function localEvidence(c){const evidence=frameEvidence(c);return Object.fromEntries(['schemaVersion','shotId',...hashes,'strategyHash'].map(key=>[key,evidence[key]]));}
 function assertFields(evidence,expected){if(!evidence||Object.entries(expected).some(([key,value])=>!same(evidence[key],value)))fail('审阅证据与当前制作计划、策略或本镜 Animatic 输入不一致');}
 function assertObserved(actual,required){if(!Array.isArray(actual)||new Set(actual).size!==actual.length||required.some(id=>!actual.includes(id)))fail('尚未记录全部精确媒体的实际观察');}
 function assertFindings(findings,keys){if(!findings||keys.some(key=>findings[key]?.outcome!=='PASS'||typeof findings[key]?.note!=='string'||!findings[key].note.trim()||findings[key].note.length>4000))fail('缺少逐项实际验收结论及证据说明');}
@@ -80,6 +99,7 @@ async function readContext(tx,options={}){
  const view=await tx.readView();let model=options.model||await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}});
  if(!options.model){const{applyShotProductionManifestProjection}=await import('./shot-production-manifest.mjs');model=await applyShotProductionManifestProjection(tx,model);}
  model=await applyProductionSpatialProjection(tx,model,{view});
+ if(['materialUsageLedger','materialUsageEvidence','assetContextRevalidationLedger','assetContextRevalidationEvidence'].some(key=>Object.hasOwn(model,key)))model=await loadMaterialUsageEvidence(tx,model,{view});
  const state=options.state||(options.api?.projectEpisodeNarrativeReleases?episodeSourceCompiler(options.api).stateFor({...view,snapshot:{...view.snapshot,productionModel:model}}):options.api?.projectOperationalState({...view.snapshot,productionModel:model},events(view),view.eventsByKind?.['asset-version']||[],view.eventsByKind?.run||[],view.eventsByKind?.['source-operation']||[],view.eventsByKind?.['execution-request']||[],{executionDefinitions:view.recipes?.executionDefinitions||[]}));
  if(!state)fail('缺少正式媒体运行态校验器');if(!options.model)model={...model,...(state.episodeNarrativeReleasesByUid?{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById}}:{}),animaticLocks:reconcileAnimaticLocks(model,state)};return{view,model,state};
 }
@@ -91,10 +111,18 @@ async function saveRecord(tx,payload){
  if(read(head)?.recordId!==id)await tx.putAux({namespace:SHOT_LOCK_NS.heads,key,bytes:canonicalJson({recordId:id}),mediaType:'application/json',expectedRevisionId:head?.revisionId||null});return record;
 }
 async function validateInputLock(tx,c,state,evidence){
+ if(visualLock(c.plan)){
+  assertFields(evidence,inputLockEvidence(c));const settings=c.settings,binding=localInputBinding(c.model,settings);
+  if(settings.visualRequirementIds.some(id=>!binding.inputs.some(b=>b.requirementId===id)))fail('本镜视觉输入锁尚缺实际素材');
+  const reasons=productionSpaceReasons(c.model,{...settings,inputs:binding.inputs},state);if(reasons.length)fail(reasons.join('、'));
+  const doc=await tx.getPublishedDocument(c.model.spatialEvidence.sourceRef);if(!doc||doc.sha256!==c.model.spatialEvidence.sourceSha256)fail('空间冻结源字节尚未核验');
+  for(const input of binding.inputs){if(productionBindingReasons(c.model,state,input,{consumerRole:'VISUAL_PRODUCTION'}).length)fail('输入绑定必须实际采用已放行的精确版本 SHA');await assertRegistered(tx,input);}
+  const hash=localInputHash(c.model,c.plan,settings);return{inputHash:hash,perShotHashes:[{shotId:settings.shotId,inputHash:hash}],inputBindings:[binding]};
+ }
  assertFields(evidence,{...baseEvidence(c,'INPUT_LOCK'),inputHash:inputHash(c.plan)});
  for(const settings of c.plan.content.shots){const shot=c.scope.shots.find(s=>(s.shotId||s.id)===settings.shotId);
   if((shot.materialRequirementRefs||[]).some(id=>!settings.inputs.some(b=>b.requirementId===id))||Object.values(settings.space||{}).some(v=>!v||v==='UNKNOWN'))fail('输入锁定尚缺需求、空间或机位绑定');
-  const spaceReasons=productionSpaceReasons(c.model,settings);if(spaceReasons.length)fail(spaceReasons.join('、'));
+  const spaceReasons=productionSpaceReasons(c.model,settings,state);if(spaceReasons.length)fail(spaceReasons.join('、'));
   const doc=await tx.getPublishedDocument(c.model.spatialEvidence.sourceRef);if(!doc||doc.sha256!==c.model.spatialEvidence.sourceSha256)fail('空间冻结源字节尚未核验');
   for(const binding of settings.inputs){if(productionBindingReasons(c.model,state,binding).length)fail('输入绑定必须实际采用已放行的精确版本 SHA');await assertRegistered(tx,binding);}
  }
@@ -128,7 +156,7 @@ export async function recordShotProductionReview(tx,{reviewEventId,...options}){
  const evidence=validateShotProductionEvidence(event.shotProductionEvidence);assertFields(evidence,baseEvidence(c,work.deliverableKey==='SHOT_INPUT_LOCK'?'INPUT_LOCK':work.deliverableKey==='LOCKED_SHOT'?'SHOT_LOCK':'KEYFRAME'));const base={schemaVersion:'1.0',sceneId:c.plan.sceneId,shotId:work.shotId||null,shotProductionPlanId:c.plan.id,shotProductionRevisionId:revision(c.plan),shotPlanRevisionId:c.scope.plan.id,reviewEventId,reviewContextRef:event.reviewContextRef,contextHash:event.contextHash,output,recordedAt:event.recordedAt};
  if(work.deliverableKey==='SHOT_INPUT_LOCK')return saveRecord(tx,{...base,kind:'INPUT_LOCK',...await validateInputLock(tx,c,state,evidence)});
  if(frameKinds.has(work.deliverableKey)){
-  const projections=await applyShotProductionLocksProjection(tx,model,{state,view}),hash=productionHash({shotId:c.settings.shotId,inputs:c.settings.inputs,space:c.settings.space});
+  const projections=await applyShotProductionLocksProjection(tx,model,{state,view}),hash=localInputHash(model,c.plan,c.settings);
   if(!projections.shotInputLocks.some(l=>l.scopeRole==='CURRENT'&&l.sceneId===c.plan.sceneId&&(l.perShotHashes||[]).some(s=>s.shotId===work.shotId&&s.inputHash===hash)))fail('本镜实际输入尚未正式锁定');
   assertObserved(evidence?.observedImageIds,[output.versionId]);
   const closure=await keyframeClosure(tx,c,state,view,evidence);if(!closure)return{pending:true,reason:'AWAITING_ALL_KEYFRAME_REVIEWS'};
@@ -141,6 +169,7 @@ export async function recordShotProductionReview(tx,{reviewEventId,...options}){
  const videoReview=latest(events(view),e=>e.subjectType==='WORK_PRODUCT'&&e.workItemId===videos[0].id&&e.applicationStatus==='APPLIED'&&e.effect==='APPLIED'),video=assertApproval(view,model,state,videoReview,videos[0]);await assertRegistered(tx,video);
  if(!same(evidence.members,[video]))fail('单镜验收未绑定当前正式视频 SHA');
  const {lock}=animaticFor(c),render=(model.animaticRenderJobs||[]).find(j=>j.jobId===lock.renderJobId),timeline=(model.animaticTimelines||[]).find(t=>t.timelineRevisionId===lock.timelineRevisionId);
+ if(visualLock(c.plan))await assertAnimaticReviewMedia(tx,c,state);
  const ordered=timeline?.content.shots.map(s=>s.shotId)||[],at=ordered.indexOf(work.shotId),adjacentShotIds=[ordered[at-1],ordered[at+1]].filter(Boolean);
  if(!render?.result?.versionId||!same(evidence.adjacentShotIds,adjacentShotIds))fail('单镜验收的邻接镜头已变化');
  assertObserved(evidence.observedVideoIds,[video.versionId,render.result.versionId]);assertFindings(evidence.videoFindings,['action','camera','consistency','timing','adjacency']);
@@ -159,9 +188,11 @@ export async function applyShotProductionLocksProjection(tx,model,{state,view}={
    const event=events(view).find(e=>e.eventId===record.reviewEventId);assertApproval(view,model,state,event,c.work,{historical:record.kind==='INPUT_LOCK',requireAdopted:record.kind!=='INPUT_LOCK'});await assertRegistered(tx,record.output);
    if(record.kind==='INPUT_LOCK'){
     const currentPlan=(model.shotProductionPlans||[]).find(p=>p.sceneId===record.sceneId&&p.scopeRole==='CURRENT');if(!currentPlan)fail('PRODUCTION_PLAN_CHANGED');
-    assertFields(event.shotProductionEvidence,{...baseEvidence(c,'INPUT_LOCK'),inputHash:inputHash(c.plan)});
-    for(const original of record.inputBindings||[]){const next=currentPlan.content.shots.find(s=>s.shotId===original.shotId);if(!next||!same(original,{shotId:next.shotId,inputs:next.inputs,space:next.space}))continue;
-     let valid=productionSpaceReasons(model,next).length===0;for(const binding of original.inputs){if(productionBindingReasons(model,state,binding).length){valid=false;break;}try{await assertRegistered(tx,binding);}catch{valid=false;break;}}
+    assertFields(event.shotProductionEvidence,inputLockEvidence(c));
+    const v2=visualLock(c.plan);if(v2!==visualLock(currentPlan))fail('INPUT_LOCK_POLICY_CHANGED');
+    if(v2&&(!same(record.inputBindings,[localInputBinding(model,c.settings)])||!same(record.perShotHashes,[{shotId:c.settings.shotId,inputHash:localInputHash(model,c.plan,c.settings)}])||record.inputHash!==localInputHash(model,c.plan,c.settings)||record.shotId!==c.settings.shotId))fail('VISUAL_INPUT_LOCK_CLOSURE_CHANGED');
+    for(const original of record.inputBindings||[]){const next=currentPlan.content.shots.find(s=>s.shotId===original.shotId);if(!next||!same(original,v2?localInputBinding(model,next):{shotId:next.shotId,inputs:next.inputs,space:next.space}))continue;
+     let valid=productionSpaceReasons(model,v2?{...next,inputs:original.inputs}:next,state).length===0;for(const binding of original.inputs){if(productionBindingReasons(model,state,binding,v2?{consumerRole:'VISUAL_PRODUCTION'}:{}).length){valid=false;break;}try{await assertRegistered(tx,binding);}catch{valid=false;break;}}
      if(valid)applicableShotIds.push(original.shotId);
     }
     if(!applicableShotIds.length)fail('ALL_SHOT_INPUTS_CHANGED');
@@ -169,13 +200,13 @@ export async function applyShotProductionLocksProjection(tx,model,{state,view}={
    else{
     assertFields(record,localEvidence(c));for(const member of record.members||[]){if(productionBindingReasons(model,state,member).length)fail('MEMBER_VERSION_CHANGED');await assertRegistered(tx,member);}
     if(record.kind==='KEYFRAME_SET'){const closure=await keyframeClosure(tx,c,state,view,event.shotProductionEvidence);if(!closure||!same(closure.memberReviewEventIds,record.memberReviewEventIds)||!same(closure.members,record.members))fail('KEYFRAME_REVIEW_CLOSURE_CHANGED');}
-    else{const videoWork=(model.workItems||[]).find(w=>w.id===record.members?.[0]?.workItemId);if(!videoWork)fail('VIDEO_WORK_CHANGED');assertApproval(view,model,state,events(view).find(e=>e.eventId===record.videoReviewEventId),videoWork);}
+    else{const videoWork=(model.workItems||[]).find(w=>w.id===record.members?.[0]?.workItemId);if(!videoWork)fail('VIDEO_WORK_CHANGED');assertApproval(view,model,state,events(view).find(e=>e.eventId===record.videoReviewEventId),videoWork);if(visualLock(c.plan)){const animatic=await assertAnimaticReviewMedia(tx,c,state);assertObserved(record.observedVideoIds,[record.members[0].versionId,animatic.versionId]);}}
    }
   }catch(e){reasons.push(e.message);}
   const key=record.kind==='INPUT_LOCK'?'shotInputLocks':record.kind==='KEYFRAME_SET'?'shotKeyframeSets':'shotLocks';result[key].push({...record,...(record.kind==='INPUT_LOCK'?{applicableShotIds,perShotHashes:(record.perShotHashes||[]).filter(s=>applicableShotIds.includes(s.shotId))}:{}),scopeRole:reasons.length?'EVIDENCE_ONLY':'CURRENT',lockState:reasons.length?'REOPENED':'LOCKED',staleReasons:reasons});
  }
  for(const set of result.shotKeyframeSets)if(set.scopeRole==='CURRENT'){
-  const plan=(model.shotProductionPlans||[]).find(p=>p.sceneId===set.sceneId&&p.scopeRole==='CURRENT'),settings=plan?.content.shots.find(s=>s.shotId===set.shotId),hash=settings&&productionHash({shotId:settings.shotId,inputs:settings.inputs,space:settings.space});
+  const plan=(model.shotProductionPlans||[]).find(p=>p.sceneId===set.sceneId&&p.scopeRole==='CURRENT'),settings=plan?.content.shots.find(s=>s.shotId===set.shotId),hash=settings&&localInputHash(model,plan,settings);
   if(!result.shotInputLocks.some(l=>l.scopeRole==='CURRENT'&&l.sceneId===set.sceneId&&(l.perShotHashes||[]).some(s=>s.shotId===set.shotId&&s.inputHash===hash))){set.scopeRole='EVIDENCE_ONLY';set.lockState='REOPENED';set.staleReasons.push('SHOT_INPUT_LOCK_CHANGED');}
  }
  for(const lock of result.shotLocks)if(lock.scopeRole==='CURRENT'&&!result.shotKeyframeSets.some(s=>s.id===lock.keyframeSetId&&s.scopeRole==='CURRENT')){lock.scopeRole='EVIDENCE_ONLY';lock.lockState='REOPENED';lock.staleReasons.push('KEYFRAME_SET_CHANGED');}
@@ -186,12 +217,13 @@ export async function applyShotProductionLocksProjection(tx,model,{state,view}={
 async function evidenceTemplate(tx,{workItemId,versionId,...options}){
  const {view,model,state}=await readContext(tx,options),c=context(model,workItemId),kind=c.work.deliverableKey;
  if(!['SHOT_INPUT_LOCK','LOCKED_SHOT',...frameKinds].includes(kind))return{required:false,evidence:null};
- if(kind==='SHOT_INPUT_LOCK')return{required:true,evidence:{...baseEvidence(c,'INPUT_LOCK'),inputHash:inputHash(c.plan)},requiredObservedImageIds:[],requiredObservedVideoIds:[],requiresJointReview:false};
+ if(kind==='SHOT_INPUT_LOCK')return{required:true,evidence:inputLockEvidence(c),requiredObservedImageIds:[],requiredObservedVideoIds:[],requiresJointReview:false};
  const evidence=frameEvidence(c),members=frameWorks(c).map(w=>bindingFor(state,w,w.id===workItemId?versionId:undefined)).filter(Boolean);
  if(kind!=='LOCKED_SHOT')return{required:true,evidence:{...evidence,members,observedImageIds:[],jointFindings:{}},requiredObservedImageIds:members.map(m=>m.versionId),requiredObservedVideoIds:[],requiresJointReview:members.length===frameWorks(c).length};
  const projected=await applyShotProductionLocksProjection(tx,model,{state,view}),set=projected.shotKeyframeSets.find(s=>s.scopeRole==='CURRENT'&&s.shotId===c.work.shotId&&s.sceneId===c.plan.sceneId);if(!set)fail('当前完整关键帧集合尚未锁定');
  const videoWork=(model.workItems||[]).find(w=>current(w)&&inPlan(c.plan,w)&&w.shotId===c.work.shotId&&w.deliverableKey==='SHOT_VIDEO'),video=videoWork&&bindingFor(state,videoWork),{lock}=animaticFor(c),render=(model.animaticRenderJobs||[]).find(j=>j.jobId===lock.renderJobId),timeline=(model.animaticTimelines||[]).find(t=>t.timelineRevisionId===lock.timelineRevisionId),ordered=timeline?.content.shots.map(s=>s.shotId)||[],at=ordered.indexOf(c.work.shotId);
  if(!video||!render?.result?.versionId)fail('单镜正式视频或预演尚未放行');
+ if(visualLock(c.plan))await assertAnimaticReviewMedia(tx,c,state);
  return{required:true,evidence:{...evidence,kind:'SHOT_LOCK',keyframeSetId:set.id,members:[video],adjacentShotIds:[ordered[at-1],ordered[at+1]].filter(Boolean),observedVideoIds:[],videoFindings:{}},requiredObservedImageIds:[],requiredObservedVideoIds:[video.versionId,render.result.versionId],requiresJointReview:false};
 }
 
@@ -205,9 +237,10 @@ export async function readShotProductionReviewEvidence(tx,input){
 export async function buildShotProductionManifest(tx,{workItemId,...options}){
  const {model,state}=await readContext(tx,options),c=context(model,workItemId);if(!['SHOT_INPUT_LOCK','LOCKED_SHOT'].includes(c.work.deliverableKey))fail('此工作项不使用制作清单生成器');
  const template=await evidenceTemplate(tx,{workItemId,...options}),closure=c.work.deliverableKey==='SHOT_INPUT_LOCK'?await validateInputLock(tx,c,state,template.evidence):{members:template.evidence.members,keyframeSetId:template.evidence.keyframeSetId};
- const inputBindings=c.work.deliverableKey==='SHOT_INPUT_LOCK'?c.plan.content.shots.flatMap(s=>s.inputs):[...template.evidence.members,...(template.requiredObservedVideoIds||[]).map(versionId=>{const version=state.assetVersionsById?.[versionId];if(!version)fail('单镜清单预演版本已变化');return{familyId:version.familyId,versionId,sha256:version.sha256};})];
- for(const input of inputBindings){if(productionBindingReasons(model,state,input).length)fail('制作清单输入尚未实际放行');await assertRegistered(tx,input);}
+ const inputBindings=c.work.deliverableKey==='SHOT_INPUT_LOCK'?(visualLock(c.plan)?closure.inputBindings.flatMap(s=>s.inputs):c.plan.content.shots.flatMap(s=>s.inputs)):[...template.evidence.members,...(template.requiredObservedVideoIds||[]).map(versionId=>{const version=state.assetVersionsById?.[versionId];if(!version)fail('单镜清单预演版本已变化');return{familyId:version.familyId,versionId,sha256:version.sha256};})];
+ const reviewEvidenceBindings=[];
+ for(const input of inputBindings){const timingEvidence=c.work.deliverableKey==='LOCKED_SHOT'&&!template.evidence.members.some(m=>m.versionId===input.versionId)&&(template.requiredObservedVideoIds||[]).includes(input.versionId);if(productionBindingReasons(model,state,input,timingEvidence?{consumerRole:'PREVIS_TIMING'}:{}).length)fail('制作清单输入尚未实际放行');await assertRegistered(tx,input);if(visualLock(c.plan)&&timingEvidence)reviewEvidenceBindings.push({familyId:input.familyId,versionId:input.versionId,sha256:input.sha256,consumerRole:'PREVIS_TIMING'});}
  const family=(model.assetFamilies||[]).find(f=>f.id===c.work.outputAssetRef),expected=(model.expectedOutputs||[]).filter(e=>(family?.expectedOutputRefs||[]).includes(e.id)&&e.familyId===family.id);
  if(!family||family.ownerRef!==workItemId||expected.length!==1)fail('制作清单缺少唯一计划输出');
- return{content:{schemaVersion:'1.0',protocol:'SHOT_PRODUCTION_MANIFEST_V1',workItemId,familyId:family.id,deliverableKey:c.work.deliverableKey,productionPlanId:c.plan.id,productionRevisionId:revision(c.plan),sceneId:c.plan.sceneId,shotId:c.work.shotId||null,shotPlanRevisionId:c.scope.plan.id,reviewBinding:template.evidence,...closure,formalReviewCreated:false,lockState:'REVIEW_REQUIRED'},workItemId,familyId:family.id,expectedOutputId:expected[0].id,inputBindings:[...new Map(inputBindings.map(b=>[b.versionId,b])).values()]};
+ return{content:{schemaVersion:visualLock(c.plan)?'2.0':'1.0',protocol:visualLock(c.plan)?'SHOT_PRODUCTION_MANIFEST_V2':'SHOT_PRODUCTION_MANIFEST_V1',...(visualLock(c.plan)?{stagePolicy:PREVIS_FIRST_POLICY,reviewEvidenceBindings}:{}),workItemId,familyId:family.id,deliverableKey:c.work.deliverableKey,productionPlanId:c.plan.id,productionRevisionId:revision(c.plan),sceneId:c.plan.sceneId,shotId:c.work.shotId||null,shotPlanRevisionId:c.scope.plan.id,reviewBinding:template.evidence,...closure,formalReviewCreated:false,lockState:'REVIEW_REQUIRED'},workItemId,familyId:family.id,expectedOutputId:expected[0].id,inputBindings:[...new Map(inputBindings.map(b=>[b.versionId,b])).values()]};
 }
