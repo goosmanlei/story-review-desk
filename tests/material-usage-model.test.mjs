@@ -17,6 +17,31 @@ function close(f){
 function projected(f){f.model.materialUsageEvidence=validateMaterialUsageLedger(f).map(r=>({...r,mediaCurrent:true}));return projectMaterialUsages(f.model,f.state);}
 function currentTx(f,override={}){const media={...f.media,availability:'PRESENT',metadata:{authorityDomain:'FORMAL',visibility:'PUBLIC'}};return {getMedia:async()=>media,resolveMedia:async()=>media,getAux:async()=>null,listAux:async()=>[],listEvents:async()=>f.events,listPublishedDocumentMetadata:async()=>f.documents,readDocumentRevision:async()=>f.documents[0],readView:async()=>({sourceRevisionIds:f.documents.map(d=>d.revisionId)}),...override};}
 
+test('usage evidence skips unrelated published bodies while preserving exact evidence',async()=>{
+ const f=materialUsageFixture(),baseline=await loadMaterialUsageEvidence(currentTx(f),f.model),reads=[];
+ const unrelated=Array.from({length:300},(_,i)=>({revisionId:'unrelated-'+i,metadata:{sourceRole:'SCRIPT'},aliases:['story/scripts/'+i+'.md']}));
+ const docs=[...unrelated,...f.documents],tx=currentTx(f,{
+  listPublishedDocumentMetadata:async()=>docs,
+  readView:async()=>({sourceRevisionIds:docs.map(d=>d.revisionId)}),
+  readDocumentRevision:async id=>{reads.push(id);assert(!id.startsWith('unrelated-'),'unrelated source body must not be transferred');return f.documents.find(d=>d.revisionId===id);},
+ });
+ assert.deepEqual(await loadMaterialUsageEvidence(tx,f.model),baseline);
+ assert.deepEqual(reads,[f.documents[0].revisionId]);
+});
+test('usage metadata filtering still fails closed for missing, deleted, mislabelled and orphan sources',async()=>{
+ for(const change of ['missing','deleted','mislabelled','orphan']){
+  const f=materialUsageFixture();
+  if(change==='deleted')f.documents[0].deleted=true;
+  if(change==='mislabelled')f.documents[0].metadata.sourceRole='SCRIPT';
+  if(change==='orphan')f.model.materialUsageLedger=[];
+  const tx=currentTx(f,{
+   listPublishedDocumentMetadata:async()=>change==='missing'||change==='deleted'?[]:f.documents,
+   readDocumentRevision:async()=>change==='missing'?null:f.documents[0],
+  });
+  await assert.rejects(loadMaterialUsageEvidence(tx,f.model),undefined,change);
+ }
+});
+
 test('usage integrity keeps complete original assets and separate review history unchanged',()=>{
  const f=materialUsageFixture(),before=canonicalJson({families:f.model.assetFamilies,versions:f.model.assetVersions,recipes:f.recipes,adoption:f.adoption});
  const rows=validateMaterialUsageLedger(f);assert.equal(rows.length,1);assert.equal(rows[0].event.subjectType,'MATERIAL_USAGE');

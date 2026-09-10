@@ -2,6 +2,7 @@ import {MATERIAL_USAGE_EVENT,MATERIAL_USAGE_SOURCE,validateMaterialUsageLedger,u
 import {mediaRetirementOverlay} from './media-retirement.mjs';
 const list=value=>Array.isArray(value)?value:[];
 const fail=message=>{throw Object.assign(new Error(message),{code:'DOMAIN_CONFLICT'});};
+const usageSource=doc=>doc.metadata?.sourceRole===MATERIAL_USAGE_SOURCE||(doc.aliases||[]).some(a=>a.startsWith('story/material-usages/'));
 
 export async function materialUsageMediaCurrent(tx,source){
  const media=await tx.getMedia(source.familyId,source.versionId);
@@ -13,15 +14,16 @@ export async function materialUsageMediaCurrent(tx,source){
 async function loadMaterialUsageOnly(tx,model,{view,events}={}){
  view ||= await tx.readView();
  if(Object.hasOwn(model,'materialUsageLedger')&&!Array.isArray(model.materialUsageLedger))fail('用途ledger必须为数组');
- events ||= await tx.listEvents();const refs=list(model.materialUsageLedger);
+ events ||= await tx.listEvents();const refs=list(model.materialUsageLedger),published=await tx.listPublishedDocumentMetadata();
  if(!refs.length&&!events.some(e=>e.eventKind===MATERIAL_USAGE_EVENT||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))){
-  const published=await tx.listPublishedDocumentMetadata();
-  if(!published.some(d=>d.metadata?.sourceRole===MATERIAL_USAGE_SOURCE||(d.aliases||[]).some(a=>a.startsWith('story/material-usages/')))){if(Object.hasOwn(model,'materialUsageEvidence')){const clean={...model};delete clean.materialUsageEvidence;return clean;}return model;}
+  if(!published.some(usageSource)){if(Object.hasOwn(model,'materialUsageEvidence')){const clean={...model};delete clean.materialUsageEvidence;return clean;}return model;}
  }
- const documents=[];
+ const documents=[],metadata=new Map(published.map(doc=>[doc.revisionId,doc]));
  // Read every published usage source, not only referenced ones: a lost ledger
  // reference or event must fail instead of silently disappearing from coverage.
- for(const id of view.sourceRevisionIds||[]){const doc=await tx.readDocumentRevision(id);if(doc&&(doc.metadata?.sourceRole===MATERIAL_USAGE_SOURCE||(doc.aliases||[]).some(a=>a.startsWith('story/material-usages/'))))documents.push(doc);}
+ // Metadata is from this same transaction. Unknown/deleted revisions still use
+ // the original read path; unrelated known documents need no body transfer.
+ for(const id of view.sourceRevisionIds||[]){const meta=metadata.get(id);if(meta&&!usageSource(meta))continue;const doc=await tx.readDocumentRevision(id);if(doc&&usageSource(doc))documents.push(doc);}
  const rows=validateMaterialUsageLedger({snapshot:{productionModel:model},documents,events});
  for(const row of rows)row.mediaCurrent=await materialUsageMediaCurrent(tx,row.body.basis.source);
  return {...model,materialUsageEvidence:rows};
