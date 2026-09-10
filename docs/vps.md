@@ -51,6 +51,8 @@ VPS 禁用 Git checkpoint，不写项目仓库。浏览器存储和写请求绑�
 
 Codex 复用 VPS 既有认证，不复制开发电脑凭据。显式传入 `REVIEW_CODEX_AUTH_HOME`、`REVIEW_EXECUTABLE_PATH`、Node／uv／Python／Codex 路径，受管进程精确停止，工作目录每个运行期独立。官方 [认证说明](https://developers.openai.com/codex/auth/) 将 auth.json 视为敏感凭据；[app-server account/read](https://developers.openai.com/codex/app-server/) 的缓存账户读取不证明真实模型请求成功。因此发布器就绪信息明确保留认证未核验状态，不自动发收费探针。
 
+宿主桥接器的私有 SDK home 通过独立空 tmpfs 在 Web／工作器容器中遮蔽；容器不读取其中的目标认证副本。任务收尾依据数据库 AUX 和公开运行记录，不扫描私有凭据目录。
+
 VPS 页面内“完整备份／导入／恢复”由发布器接管，防止网页上传再制造第四份完整副本；该基础设施入口禁用不影响业务编辑、审阅与受控工作器。
 
 ## 本机验收

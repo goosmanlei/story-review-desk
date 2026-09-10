@@ -21,7 +21,9 @@ try{
   return {metadata,projectId:profile.projectId,blockers};
  });
  const scan=async directory=>{for(const entry of await readdir(directory,{withFileTypes:true}).catch(e=>{if(e.code==='ENOENT')return [];throw e;})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink())throw Error('Runtime session symlink is forbidden');if(entry.isDirectory())await scan(file);else if(entry.isFile()&&entry.name.endsWith('.json')&&(await lstat(file)).size<=1024**2){let value;try{value=JSON.parse(await readFile(file,'utf8'));}catch{continue;}if(active(value)||value.activeTurnCount>0||value.queuedTurnCount>0||value.activeSlotCount>0)result.blockers.push({namespace:'runtime-sessions',key:entry.name,state:value.state||value.status||'ACTIVE'});}}};
- await scan('/instance/runtime/assistant');
+ // Private SDK homes can contain target credentials and are intentionally
+ // masked from application containers. Their task/health facts are in AUX.
+ await scan('/instance/runtime/assistant/public');
  const health=await fetch('http://127.0.0.1:3000/__review_health').then(r=>r.json());
  if(health.activeRequests>0)result.blockers.push({namespace:'http-requests',key:'gateway',state:'RUNNING',count:health.activeRequests});
  if(process.argv.includes('--verify-media')){

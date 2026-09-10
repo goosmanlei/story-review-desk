@@ -147,7 +147,7 @@ export class VpsDriver{
   try{await this.directory(runtime);await rm(runtime.root,{recursive:true});}catch(error){if(!absent(error))throw error;}
  }
  mounts(runtime,{mediaReadOnly=false}={}){
-  return ['--mount',`type=bind,source=${runtime.root}/instance.json,target=/instance/instance.json,readonly`,...['data','media','scratch','backups','runtime'].flatMap(name=>['--mount',`type=bind,source=${runtime.root}/${name},target=/instance/${name}${name==='media'&&mediaReadOnly?',readonly':''}`]),'--mount',`type=bind,source=${runtime.root}/runtime/private/postgres-password,target=/run/secrets/postgres-password,readonly`];
+  return ['--mount',`type=bind,source=${runtime.root}/instance.json,target=/instance/instance.json,readonly`,...['data','media','scratch','backups','runtime'].flatMap(name=>['--mount',`type=bind,source=${runtime.root}/${name},target=/instance/${name}${name==='media'&&mediaReadOnly?',readonly':''}`]),'--mount',`type=bind,source=${runtime.root}/runtime/private/postgres-password,target=/run/secrets/postgres-password,readonly`,'--tmpfs','/instance/runtime/assistant/private:rw,noexec,nosuid,nodev,size=1m,mode=000'];
  }
  environment(runtime){return Object.entries({REVIEW_INSTANCE_ROOT:'/instance',REVIEW_SQLITE_OWNER:'CONTAINER',REVIEW_DATABASE_BACKEND:'postgres',REVIEW_POSTGRES_HOST:'postgres',REVIEW_POSTGRES_PASSWORD_FILE:'/run/secrets/postgres-password',REVIEW_SOFTWARE_COMMIT:runtime.softwareCommit,REVIEW_DEPLOYMENT_MODE:'VPS',REVIEW_DEPLOYMENT_ID:runtime.id,REVIEW_BASE_PATH:this.target.basePath,REVIEW_PUBLIC_URL:this.target.publicUrl,REVIEW_ALLOWED_ORIGINS:new URL(this.target.publicUrl).origin,SITE_BASE_URL:this.target.publicUrl,REVIEW_GIT_CHECKPOINT_DISABLED:'1'}).flatMap(([key,value])=>['--env',key+'='+value]);}
  async restore(source,runtime){
@@ -157,7 +157,7 @@ export class VpsDriver{
    // A interrupted import is discardable, but only under this exact inventory.
    await this.removeRuntime(runtime);
    await mkdir(runtime.root,{recursive:true,mode:0o700});await writeJsonAtomic(path.join(runtime.root,'.vps-owner.json'),{id:runtime.id,targetId:this.target.targetId});
-   for(const folder of ['data','media','scratch','backups','runtime/locks','runtime/private','runtime/assistant/public'])await mkdir(path.join(runtime.root,folder),{recursive:true,mode:0o700});
+   for(const folder of ['data','media','scratch','backups','runtime/locks','runtime/private','runtime/assistant/public','runtime/assistant/private'])await mkdir(path.join(runtime.root,folder),{recursive:true,mode:0o700});
    await writeJsonAtomic(path.join(runtime.root,'instance.json'),{schemaVersion:'2.0',instanceId:runtime.instanceId,database:{kind:'postgres',database:'review',service:'postgres',volume:runtime.volume}});
    await writeFile(path.join(runtime.root,'runtime/private/postgres-password'),randomBytes(32).toString('hex'),{flag:'wx',mode:0o600});
    await writeJsonAtomic(path.join(runtime.root,'runtime/restore-manifest.json'),source.manifest.baseline);
