@@ -9,7 +9,7 @@ import {readFileSync} from 'node:fs';
 import {defaultConfiguration} from '../host/instance-runtime/configuration-model.mjs';
 
 const base=JSON.parse(readFileSync(new URL('./fixtures/generic-adopted-scene.json',import.meta.url),'utf8'));
-async function fixture(page:Page){
+async function fixture(page:Page, designOnly=false){
  const capture=structuredClone(base),snapshot=capture.responses.bootstrap.data,model=snapshot.productionModel,profile=snapshot.instance;
  profile.capabilities.landingView='pipeline';
  const configuration=defaultConfiguration(profile),scene=model.scenes[0],episodeUid=scene.episodeUid,sceneContext=capture.responses.sceneReviewContext.context;
@@ -17,10 +17,12 @@ async function fixture(page:Page){
  expect(model.episodes.find((episode:{episodeUid:string})=>episode.episodeUid===episodeUid)?.sceneIds).toContain(scene.id);
  expect(sceneContext.sceneId).toBe(scene.id);expect(sceneContext.episodeUid).toBe(episodeUid);expect(sceneContext.sceneDocument.scriptBlocks.length).toBeGreaterThan(0);expect(sceneContext.sceneDocument.contentHash).toBe(sceneContext.sceneContentHash);expect(sceneContext.sceneContentHash).toMatch(/^[a-f0-9]{64}$/);
  Object.assign(model,{systemConfiguration:{config:configuration},workItems:[],workPackages:[],assetFamilies:[],assetVersions:[],expectedOutputs:[],counts:{...model.counts,currentShotSpecCount:0,currentP07ShotPlans:0}});
+ const designShots=designOnly?[1,2].map(order=>({id:scene.id+'-SH00'+order,title:'当前设计镜头'+order,sceneId:scene.id,episodeUid,episodeId:scene.episodeId,scopeRole:'CURRENT',activeInCurrentProduction:true,shotPlanSetRevisionId:'formal-shot-plan',workPackageRefs:[],stageInstanceRefs:[],segmentIds:[],workItemRefs:[],issueRefs:[]})):[];
+ if(designOnly){scene.scopeRole='CURRENT';const episode=model.episodes.find((row:{episodeUid:string})=>row.episodeUid===episodeUid);episode.scopeRole='CURRENT';}
  const episodes=[{episodeUid,displayId:'E01',title:'有正文的准备上下文',sceneIds:[scene.id]}];
  const scenes=[{sceneId:scene.id,displayId:scene.displayId,episodeUid,sceneContentHash:sceneContext.sceneContentHash,sourceSummary:{title:'门外等待'},preparation:{sceneRole:'先核对当前场的制作意图',audienceTakeaway:'访客尚在门外',materialGaps:['门外状态素材尚未就绪'],nextPreparationAction:'明确门向与人物站位',generationAuthorized:false,formalShotIds:[]}}];
  const preparation={releaseId:'release-pipeline-entry',revisionId:'prep-pipeline-entry',stale:false,readOnly:true,comments:[],content:{basis:{candidateRevisionId:'candidate-pipeline-entry',candidateContentHash:'b'.repeat(64)},episodes,scenes},candidate:{revisionId:'candidate-pipeline-entry',contentHash:'b'.repeat(64),episodes,scenes:scenes.map(s=>({id:s.sceneId,displayId:s.displayId,title:s.sourceSummary.title}))}};
- const state={unexpected:[] as string[],writes:[] as string[],errors:[] as string[],productionRequests:[] as string[]};
+ const state={sceneId:scene.id,episodeUid,designShotIds:designShots.map(shot=>shot.id),unexpected:[] as string[],writes:[] as string[],errors:[] as string[],productionRequests:[] as string[]};
  page.on('pageerror',e=>state.errors.push(e.message));
  await page.route('**/api/**',async route=>{
   const request=route.request(),url=new URL(request.url()),json=(value:unknown)=>route.fulfill({json:value});
@@ -32,7 +34,7 @@ async function fixture(page:Page){
   if(url.pathname==='/api/instance/shot-production')return json({sceneId:url.searchParams.get('sceneId'),releaseId:'release-pipeline-entry',readOnly:true,basis:null,blockers:['尚未建立正式镜头设计'],defaultContent:null,currentPlan:null,draft:null,draftHeadRevisionId:null,availableInputs:[],jobs:[],readiness:{ready:false,readyCount:0,shotCount:null,shots:[]}});
   if(url.pathname==='/api/v8/ui/production'){
    state.productionRequests.push(url.search);
-   return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-pipeline-entry',page:{workItems:[],workPackages:[],shots:[],assetFamilies:[],assetVersions:[],expectedOutputs:[]},count:0,total:0,nextCursor:null,hasMore:false,appliedFilters:{}});
+   return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-pipeline-entry',page:{workItems:[],workPackages:[],shots:designShots,assetFamilies:[],assetVersions:[],expectedOutputs:[]},count:designShots.length,total:designShots.length,nextCursor:null,hasMore:false,appliedFilters:{}});
   }
   if(url.pathname==='/api/instance/production-preparation')return json(preparation);
   if(url.pathname==='/api/instance/configuration')return json({configuration,defaults:configuration,releaseId:'release-pipeline-entry',revisionId:'config-pipeline-entry',sha256:'c'.repeat(64),history:[],bindings:[],boundStandards:[],reviewCatalog:{},initialized:true,draft:null,readOnly:true});
@@ -80,4 +82,18 @@ for(const [key,value,extra]of [
  const f=await fixture(page);await page.goto(`/?view=pipeline&${key}=${value}${extra}`);
  await expect(navigationError(page)).toBeVisible();await expect.poll(()=>new URL(page.url()).searchParams.get(key)).toBe(value);
  await page.reload();await expect(navigationError(page)).toBeVisible();expect(new URL(page.url()).searchParams.get(key)).toBe(value);clean(f);
+});
+
+
+test('正式设计尚无制作工作包时，精确镜头深链可进入且刷新保留，不被重标为历史或锁定范围',async({page})=>{
+ const f=await fixture(page,true),shotId=f.designShotIds[1];
+ const params=new URLSearchParams({view:'pipeline',creatorStage:'shot-production',preparationEpisode:f.episodeUid,preparationScene:f.sceneId,shot:shotId,productionPhase:'previs',productionGate:'shot-plan-input-lock',productionScope:'SCENE',productionObject:'UNKNOWN'});
+ await page.goto('/?'+params);await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('shot')).toBe(shotId);
+ await expect(navigationError(page)).toHaveCount(0);expect(new URL(page.url()).searchParams.get('productionObject')).toBe('UNKNOWN');
+ await expect(page.locator('[data-historical-shot-id]')).toHaveCount(0);
+ await page.reload();await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('shot')).toBe(shotId);
+ expect(new URL(page.url()).searchParams.get('preparationScene')).toBe(f.sceneId);expect(new URL(page.url()).searchParams.get('productionObject')).toBe('UNKNOWN');
+ await expect(navigationError(page)).toHaveCount(0);await expect(page.locator('[data-historical-shot-id]')).toHaveCount(0);clean(f);
 });
