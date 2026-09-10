@@ -43,11 +43,16 @@ async function rebase(repo){
  const job=await repo.writeTransaction(tx=>enqueueMaterialProduction(tx,{requirementId:imageRequirementId,mode,draftRevisionId:saved.revisionId,previewHash:preview.previewHash,requestId:'archive-rebase-'+(++nextEvent)},{api}));
  return repo.writeTransaction(tx=>applyMaterialProductionJob(tx,{jobId:job.jobId,api}));
 }
-async function fixture(t){
+async function fixture(t,{eventDomains=false}={}){
  const f=await materialProductionFixture(t);api.safeGeneratedPath=async(relative,binding)=>{const file=path.resolve(f.root,relative);assert.ok(file.startsWith(f.root+path.sep));assert.equal(sha256(await readFile(file)),binding.sha256);return file;};api.hashStableFile=async file=>sha256(await readFile(file));await provision(f.repo,'Original fixed fixture state.','archive-initial');const first=await register(f);await event(f.repo,'review',{subjectType:'ASSET',familyId:first.plan.familyId,versionId:first.candidate.versionId,versionSha256:first.candidate.sha256,action:'REQUEST_REVISION',effect:'APPLIED',applicationStatus:'APPLIED',note:'A second exact formal head supersedes the earlier observation.'});
+ if(eventDomains)await f.repo.writeTransaction(async tx=>{
+  await tx.importEvent({authorityDomain:'LOCAL_TRIAL',bytes:JSON.stringify({eventId:'trial:legacy-before',eventType:'fixture-trial',createdAt:Date.now()})});
+  await tx.appendEvent({authorityDomain:'LOCAL_TRIAL',kind:'execution-request',idempotencyKey:'trial:request',requestHash:sha256('trial:request'),payload:{executionRequestId:'trial:unfinished',workItemId:first.work.id,familyId:first.plan.familyId,requestState:'CLAIMED',maxOutputs:1}});
+ });
  const view=await f.repo.readView(),rep=view.snapshot.productionModel.domainGraph.representations.find(r=>r.id===imageRepresentationId);
  await changeDomain(f.repo,'MATERIAL',[{collection:'representations',id:rep.id,beforeHash:domainHash(rep),value:{...rep,label:'Changed exact authored fixture state'}}]);
  const result=await rebase(f.repo);await register(f);await provision(f.repo,'Ordinary successor retains rebase.','archive-successor');
+ if(eventDomains)await f.repo.writeTransaction(tx=>tx.importEvent({authorityDomain:'LOCAL_TRIAL',bytes:JSON.stringify({eventId:'trial:legacy-after',eventType:'fixture-trial',createdAt:new Date().toISOString()})}));
  const archive=await f.repo.exportState();return {f,result,archive};
 }
 const decode=b=>Buffer.from(b.bytes,'base64');
@@ -66,6 +71,15 @@ function rejectBoth(archive,predicate){assert.throws(()=>validateMaterialProduct
 test('real SQLite initial -> rebase -> ordinary source chain survives both object and streaming archive validation',async t=>{
  const {f,archive}=await fixture(t);both(archive);assert.deepEqual(await f.repo.exportState(),archive);
  const restoredEpoch=structuredClone(archive);restoredEpoch.tables.repository_meta[0].runtime_epoch='fresh-restored-epoch';both(restoredEpoch);
+});
+
+test('rebase keeps all storage positions while formal heads exclude independent trials',async t=>{
+ const {f,archive}=await fixture(t,{eventDomains:true});both(archive);
+ assert.equal(archive.tables.domain_events.filter(r=>r.authority_domain==='LOCAL_TRIAL').length,3);
+ assert.deepEqual(await f.repo.exportState(),archive);
+ const wrongTime=structuredClone(archive);wrongTime.tables.domain_events.find(r=>r.event_id==='trial:legacy-before').recorded_at='2000-01-01T00:00:00.000Z';rejectBoth(wrongTime,/存储事件序列或时间无效/);
+ const moved=structuredClone(archive);moved.tables.domain_events.find(r=>r.authority_domain==='LOCAL_TRIAL'&&r.event_kind==='execution-request').authority_domain='FORMAL';rejectBoth(moved,/请求或Run头/);
+ const lost=structuredClone(archive),source=json(rbSource(lost).content_bytes),parent=source.parentCandidate.eventId;lost.tables.domain_events.find(r=>r.event_id===parent).authority_domain='LOCAL_TRIAL';rejectBoth(lost,/真实事件缺失|父候选|未登记的成功结果/);
 });
 
 test('real archive outer SHA recomputation cannot erase or rebind domain, baseline, producer or original-event history',async t=>{

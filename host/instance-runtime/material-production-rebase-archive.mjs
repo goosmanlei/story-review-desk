@@ -71,8 +71,13 @@ export function createMaterialProductionRebaseArchiveValidator(){
   }
   if(table==='domain_events'){
    const e=parse(row.event_bytes);
-   if(!(Number.isSafeInteger(row.storage_sequence)&&row.storage_sequence>0&&!positions.has(row.storage_sequence)&&typeof row.recorded_at==='string'&&row.recorded_at===e.recordedAt))positionInvalid=true;positions.set(row.storage_sequence,row.recorded_at);
-   if(['asset-version','execution-request','run','review'].includes(e.eventKind)){
+   // Storage watermarks cover every domain, including imported legacy trials.
+   // Resolve their time exactly as importEvent does; formal heads still come
+   // only from the FORMAL listEvents view used when the source was frozen.
+   const legacyDate=Number.isSafeInteger(e.createdAt)?new Date(e.createdAt):null;
+   const recordedAt=row.authority_domain==='FORMAL'?e.recordedAt:e.recordedAt||(legacyDate&&Number.isFinite(legacyDate.getTime())?legacyDate.toISOString():e.createdAt);
+   if(!(Number.isSafeInteger(row.storage_sequence)&&row.storage_sequence>0&&!positions.has(row.storage_sequence)&&typeof row.recorded_at==='string'&&Number.isFinite(Date.parse(row.recorded_at))&&row.recorded_at===recordedAt))positionInvalid=true;positions.set(row.storage_sequence,row.recorded_at);
+   if(row.authority_domain==='FORMAL'&&['asset-version','execution-request','run','review'].includes(e.eventKind)){
     check(sha256(row.event_bytes)===row.event_sha256,'重基线历史事件字节SHA错误');check(!events.has(e.eventId),'重基线历史事件身份重复');
     events.set(e.eventId,{...Object.fromEntries(['eventId','eventKind','recordedAt','executionRequestId','runId','executionDefinitionId','callPackageHash','workItemId','familyId','runState','state','requestState','status','maxOutputs','versionId','versionSha256','subjectType','applicationStatus','effect'].filter(k=>e[k]!==undefined).map(k=>[k,e[k]])),sha256:hash(e),eventSequence:e.eventSequence||null,storageSequence:row.storage_sequence});
    }

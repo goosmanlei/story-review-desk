@@ -20,7 +20,10 @@ export function createAssetContextArchiveValidator(){
    let bytes=buffers.get(row.content_sha256);if(!bytes){bytes=Buffer.from(row.content_bytes);total+=bytes.length;if(total>128*1024*1024){sourceLimitExceeded=true;bytes=null;}else buffers.set(row.content_sha256,bytes);}
    documents.push({documentId:row.record_key,revisionId:row.revision_id,sha256:row.content_sha256,bytes,metadata:JSON.parse(row.metadata_json),deleted:Boolean(row.deleted)});
   }
-  if(table==='domain_events'){const e=parse(row.event_bytes);manifest.push({eventId:e.eventId,eventSequence:e.eventSequence,sha256:contextHash(e)});if(marker(e)||e.eventKind==='review'&&e.subjectType==='ASSET'||['execution-request','run','asset-version'].includes(e.eventKind))events.push(e);}
+  // The frozen proof uses tx.listEvents() in the FORMAL domain. Trial event
+  // sequences are independent; the outer archive scanner still preserves and
+  // checks their original bytes without adding them to the formal proof.
+  if(table==='domain_events'&&row.authority_domain==='FORMAL'){const e=parse(row.event_bytes);manifest.push({eventId:e.eventId,eventSequence:e.eventSequence,sha256:contextHash(e)});if(marker(e)||e.eventKind==='review'&&e.subjectType==='ASSET'||['execution-request','run','asset-version'].includes(e.eventKind))events.push(e);}
   if(table==='releases'){
    const snapshot=parsedSnapshot||parse(row.snapshot_bytes),recipes=parse(row.recipes_bytes),refs=snapshot.productionModel?.assetContextRevalidationLedger;
    if(refs!==undefined)contextCheck(Array.isArray(refs),'归档复核ledger不是数组');
