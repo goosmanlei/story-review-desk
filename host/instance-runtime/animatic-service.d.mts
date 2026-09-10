@@ -5,7 +5,7 @@ export function readAnimaticState(tx:unknown,options:{sceneId:string;model?:unkn
 export function readPublicAnimaticState(model:unknown,sceneId:string):AnimaticState&{readOnly:true};
 export function saveAnimaticTimeline(tx:unknown,input:unknown,options?:{model?:unknown}):Promise<unknown>;
 export function enqueueAnimaticRender(tx:unknown,input:unknown,options?:{model?:unknown}):Promise<unknown>;
-export function applyAnimaticProjection<T>(tx:unknown,model:T):Promise<T>;
+export function applyAnimaticProjection<T>(tx:unknown,model:T,options?:{view?:unknown}):Promise<T>;
 export function animaticCandidateMatchesJob(candidate:Record<string,unknown>,jobs:unknown):boolean;
 export function lockAnimaticTimeline(tx:unknown,input:{sceneId:string;timelineRevisionId:string;renderJobId:string;reviewEventId:string}):Promise<unknown>;
 export function assertAnimaticInputs(tx:unknown,content:AnimaticTimeline,model:unknown,options?:{render?:boolean}):Promise<unknown>;

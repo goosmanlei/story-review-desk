@@ -30,7 +30,7 @@ class MemoryRepository {
  async readView(){return{...await this.getMetadata(),profile:this.snapshot.instance,snapshot:structuredClone(this.snapshot),recipes:structuredClone(this.recipes),eventsByKind:Object.groupBy([...this.events].reverse(),e=>e.eventKind),sourceRevisionIds:[],dataFingerprint:sha256(canonicalJson(this.snapshot)),recipeFingerprint:sha256(canonicalJson(this.recipes))};}
  async listPublishedDocumentMetadata(){return [];}
  async getPublishedDocument(){return null;}
- async listEvents(kind){return this.events.filter(e=>e.eventKind===kind).reverse();}
+ async listEvents(kind){return this.events.filter(e=>!kind||e.eventKind===kind).reverse();}
  async getAux(namespace,key){this.auxReads++;return this.aux.get('aux:'+namespace+'/'+key)||null;}
  async listAux(namespace,{prefix='',includeDeleted=false}={}){this.auxReads++;return[...this.aux.values()].filter(r=>r.namespace==='aux:'+namespace&&r.key.startsWith(prefix)&&(includeDeleted||!r.deleted));}
  async putAux({namespace,key,bytes,expectedRevisionId=null,deleted=false}){const old=await this.getAux(namespace,key);assert.equal(old?.revisionId||null,expectedRevisionId);const row={namespace:'aux:'+namespace,key,bytes:Buffer.from(bytes),revisionId:'head:'+ ++this.repositoryRevision,deleted};this.aux.set(row.namespace+'/'+key,row);return row;}
@@ -75,6 +75,32 @@ test('registered-media changes independently invalidate the projection and rejec
 });
 test('SQLite and PostgreSQL fingerprint contracts use the same bounded parameterized namespaces and metadata rows',async()=>{
  const f=fixture();await complete(f);const namespaces=['animatic-render-jobs','animatic-heads','animatic-render-jobs'],sqlite=()=>sqliteFingerprint.call({db:{prepare:sql=>({all:(...params)=>databaseRows(f.repo,sql,params)})}},namespaces),pg=()=>pgFingerprint.call({all:async(sql,params=[])=>databaseRows(f.repo,sql,params)},namespaces);assert.equal(await sqlite(),await pg());assert.equal(await sqlite(),await pgFingerprint.call({all:async(sql,params=[])=>databaseRows(f.repo,sql,params)},[...new Set(namespaces)].reverse()));const before=await sqlite();f.repo.media[0].aliases.push('media/alias.png');assert.notEqual(await sqlite(),before);assert.equal(await sqlite(),await pg());assert.throws(()=>sqliteFingerprint.call({},['']));assert.throws(()=>sqliteFingerprint.call({},Array(65).fill('x')));assert.throws(()=>sqliteFingerprint.call({},['nul\0']));assert.ok(f.repo.queries.some(q=>q.sql.includes('ANY($1::text[])')));assert.ok(f.repo.queries.some(q=>q.sql.includes('IN (?,?)')));assert.ok(f.repo.queries.every(q=>!q.sql.includes('assistant-public')));
+});
+test('page data and operations share one pinned event and AUX load across repeated reads',async()=>{
+ const f=fixture();await complete(f);api.__bindMemoryRepository(f.repo);
+ let views=0,eventReads=0;const readView=f.repo.readView.bind(f.repo),listEvents=f.repo.listEvents.bind(f.repo);
+ f.repo.readView=async()=>{views++;return readView();};f.repo.listEvents=async kind=>{eventReads++;return listEvents(kind);};
+ const data=await api.reviewData(),reads=f.repo.auxReads,first=await api.operationalSnapshot();
+ assert.equal(f.repo.auxReads,reads);assert.equal(views,1);assert.equal(eventReads,1);
+ assert.strictEqual(await api.reviewData(),data);assert.strictEqual(await api.operationalSnapshot(),first);
+ assert.equal(eventReads,1);assert.equal(f.repo.auxReads,reads);
+ await f.repo.appendEvent({kind:'verification',payload:{snapshotId:data.snapshotId,subjectId:'new evidence'}});
+ const fresh=await api.operationalSnapshot();assert.notEqual(fresh.operationRevision,first.operationRevision);
+ assert.equal(eventReads,2);assert.equal(views,1,'An event does not reload immutable release bytes');
+ assert.notStrictEqual(await api.reviewData(),data);
+});
+test('write projections bypass shared inputs and rolled-back changes cannot poison readers',async()=>{
+ const f=fixture();await complete(f);api.__bindMemoryRepository(f.repo);const before=await api.reviewData(),ops=await api.operationalSnapshot();
+ const original=f.repo.snapshot;f.repo.snapshot=structuredClone(original);f.repo.snapshot.testUncommitted='private';
+ f.repo.depth=1;f.repo.transactionMode='WRITE';
+ try {const inside=await api.reviewData();assert.equal(inside.testUncommitted,'private');assert.notStrictEqual(inside,before);}
+ finally{f.repo.snapshot=original;f.repo.depth=0;f.repo.transactionMode=null;}
+ assert.strictEqual(await api.reviewData(),before);assert.strictEqual(await api.operationalSnapshot(),ops);assert.equal(before.testUncommitted,undefined);
+});
+test('material-ledger-only reads invalidate on registered media changes without shot production',async()=>{
+ const bundle=blankSnapshot(blankProfile()),repo=new MemoryRepository(bundle.snapshot,bundle.recipes);bundle.snapshot.productionModel.materialUsageLedger=[];api.__bindMemoryRepository(repo);
+ const first=await api.reviewData();await repo.registerMedia({mediaId:'family',versionId:'v1',sha256:'a'.repeat(64),relativePath:'media/a.png',byteSize:10,metadata:{}});
+ const second=await api.reviewData();assert.notStrictEqual(second,first);assert.ok(repo.fingerprintReads>0);
 });
 test('new empty instance and ordinary/hosted frozen fixtures need no production AUX or repository',async()=>{
  const bundle=blankSnapshot(blankProfile()),repo=new MemoryRepository(bundle.snapshot,bundle.recipes);api.__bindMemoryRepository(repo);const a=await api.operationalSnapshot();assert.equal(a.counts.candidates,0);assert.equal(repo.fingerprintReads,0);assert.equal(repo.auxReads,0);for(const hosted of [false,true]){api.__bindFrozenFixture(bundle.snapshot,bundle.recipes,hosted);const result=await api.operationalSnapshot();assert.equal(result.counts.candidates,0);assert.deepEqual(result.stateProjection.assetVersionsById,{});}
