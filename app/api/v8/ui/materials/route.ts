@@ -1,7 +1,8 @@
+import {ReadTiming} from '../../../_read-timing';
 import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings, materialDirectoryProjection } from '../_material-query';
 import { projectIdFor } from '../../../../instance-profile';
 import { normalizeEmptyProductionFilters } from '../../../../../host/instance-runtime/snapshot-contract.mjs';
-import { assertStableId, errorResponse, HttpError, jsonResponse, operationalSnapshot, reviewData } from '../../_store';
+import { hostedReadOnlyMode, instanceRepository, assertStableId, errorResponse, HttpError, jsonResponse, operationalSnapshot, reviewData } from '../../_store';
 import {
   assertCursorOffset,
   encodeUiCursor,
@@ -131,11 +132,14 @@ function overlay(rows: Row[], projection: Record<string, Row | undefined>) {
 
 export async function GET(request: Request) {
   try {
-    const [data, operations] = await Promise.all([reviewData(), operationalSnapshot()]);
+    const timing=new ReadTiming();
+    const repo=hostedReadOnlyMode()?null:await instanceRepository();
+    const read=async()=>{const [data,operations]=await Promise.all([reviewData(),operationalSnapshot()]);return {data,operations,basis:repo?await repo.getMetadata():undefined};};
+    const {data,operations,basis}=await timing.measure('read',()=>repo?repo.readTransaction(read):read());
     if (operations.snapshotId !== data.snapshotId) throw new HttpError(409, 'material projection snapshot changed during read');
     if (!process.env.REVIEW_REMOTE_READ_ONLY) {
-      const response = await postgresMaterialPage(request,data,operations,validateFilters);
-      if(response)return response;
+      const response = await timing.measure('directory',()=>postgresMaterialPage(request,data,operations,validateFilters,basis));
+      if(response){for(const [key,value]of Object.entries(timing.headers()))response.headers.set(key,value);return response;}
     }
     const detailUrl=new URL(request.url);
     const requestedRequirementId=detailUrl.searchParams.get('requirementId');

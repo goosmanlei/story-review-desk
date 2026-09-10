@@ -257,7 +257,7 @@ class PgUnit {
  }
 }
 export class PostgresRepository {
- constructor(options){this.backend='postgres';this.instanceId=options.instanceId;this.options=options;this.readOnly=Boolean(options.readOnly||readOnlyProcess());this.pool=new pg.Pool({...options.connection,max:options.poolSize||8,idleTimeoutMillis:30000});this.pool.on('error',()=>{});}
+ constructor(options){this.backend='postgres';this.instanceId=options.instanceId;this.options=options;this.readOnly=Boolean(options.readOnly||readOnlyProcess());this.pool=new pg.Pool({...options.connection,max:options.poolSize||8,idleTimeoutMillis:30000});this.pool.on('error',()=>{});this.mediaPool=null;}
  get inTransaction(){return contexts.getStore()?.repository===this;}
  get transactionMode(){const c=contexts.getStore();return c?.repository===this?(c.unit.writable?'WRITE':'READ'):null;}
  async _transaction(writable,callback){
@@ -286,7 +286,10 @@ export class PostgresRepository {
   ensure(['SHARED','EXCLUSIVE'].includes(mode)&&typeof callback==='function','MEDIA_LEASE_INVALID','Explicit media lease mode and callback required');
   ensure(!this.inTransaction&&!mediaLeaseContexts.getStore(),'MEDIA_LEASE_NESTING','Acquire the media lease before any repository transaction');
   if(mode==='EXCLUSIVE')ensure(!this.readOnly&&!readOnlyProcess(),'READ_ONLY','Read-only repository cannot maintain media');
-  const client=await this.pool.connect(),keys=mediaLockKeys(this.instanceId),exclusive=mode==='EXCLUSIVE';
+  // Long-lived original streams must not occupy the metadata/query pool.
+  // Keep media concurrency bounded independently; leases still own one exact client.
+  if(!this.mediaPool){this.mediaPool=new pg.Pool({...this.options.connection,max:Math.min(4,this.options.poolSize||4),idleTimeoutMillis:30000});this.mediaPool.on('error',()=>{});}
+  const client=await this.mediaPool.connect(),keys=mediaLockKeys(this.instanceId),exclusive=mode==='EXCLUSIVE';
   let acquired=false,failed=false;
   const lease={repository:this,client,exclusive,instanceId:this.instanceId,keys,transactionActive:false,lost:false,closed:false,assertHeld:null};
   const onError=()=>{lease.lost=true;};client.on('error',onError);
@@ -317,7 +320,7 @@ export class PostgresRepository {
  async validateSchema(){const c=await this.pool.connect();try{const r=(await c.query('SELECT * FROM repository_schema WHERE singleton=1')).rows[0];ensure(r?.version===POSTGRES_SCHEMA_VERSION&&r?.application_id===APPLICATION_ID&&r.schema_sha256===sha256(POSTGRES_SCHEMA),'SCHEMA_MISMATCH','Unsupported PostgreSQL repository schema');const triggers=(await c.query("SELECT tgname,tgenabled FROM pg_trigger WHERE NOT tgisinternal AND tgrelid IN (SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace)")).rows;for(const name of [...['record_revisions','domain_events','releases','media_versions','document_aliases','media_aliases'].map(t=>`${t}_immutable`),'instance_identity_immutable'])ensure(triggers.some(t=>t.tgname===name&&t.tgenabled==='O'),'SCHEMA_DEFINITION_MISMATCH','Immutable guard missing');}finally{c.release();}}
  async integrityCheck(){await this.validateSchema();return this.readTransaction(async tx=>{await tx.scanValidatedArchive();await tx.readView();return {ok:true,instanceId:this.instanceId,schemaVersion:SCHEMA_VERSION,backend:'postgres'};});}
  async backupTo(target){ensure(!this.inTransaction,'ACTIVE_TRANSACTION','Backup must run outside transaction');const archive=await this.exportState();validateArchive(archive,this.instanceId);await mkdir(path.dirname(target),{recursive:true});const file=await writeArchiveFile(target,archive);return {path:target,...file,instanceId:this.instanceId,integrity:{ok:true,instanceId:this.instanceId,schemaVersion:SCHEMA_VERSION},mediaIncluded:false};}
- async close(){await this.pool.end();}
+ async close(){await Promise.all([this.pool.end(),this.mediaPool?.end()]);}
 }
 for(const method of ['getMetadata','getProjectionFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','readRelease','readPublishedReleaseAt','readPublishedReleaseTimeGroup','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
 export async function openPostgresRepository(options){const repo=new PostgresRepository({...options,connection:await postgresConnection(options)});try{await repo.validateSchema();await repo.repositoryState();return repo;}catch(error){await repo.close();throw error;}}

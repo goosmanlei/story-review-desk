@@ -106,6 +106,7 @@ test('embedded material detail restores its draft; drawer closing and history mo
  await page.evaluate(()=>{history.replaceState(history.state,'','/?view=materials&entity=a&materialDefinitionKind=representations&materialDefinitionId=rep-a');window.dispatchEvent(new PopStateEvent('popstate',{state:history.state}));});
  const drawer=page.locator('dialog.material-review-drawer[open]');await expect(drawer).toBeVisible();
  await drawer.getByRole('button',{name:'编辑此项',exact:true}).click();const name=drawer.getByLabel('素材形态名称',{exact:true});await name.fill('尚未保存的母版说明');
+ const refreshed=page.waitForResponse(response=>response.url().includes('/api/instance/material-directory'));await page.evaluate(()=>window.dispatchEvent(new Event('focus')));await refreshed;await expect(name).toBeVisible();await expect(name).toHaveValue('尚未保存的母版说明');
  await drawer.getByRole('button',{name:'关闭对象详情',exact:true}).click();await expect(name).toHaveCount(0);
  await page.goBack();await expect(page).toHaveURL(/materialDefinitionId=rep-a/);await drawer.getByRole('button',{name:'编辑此项',exact:true}).click();await expect(name).toHaveValue('尚未保存的母版说明');
  let dialogs=0;page.on('dialog',async d=>{dialogs+=1;await d.dismiss();});
@@ -124,8 +125,9 @@ test('explicit setting deep link retains unsaved edits when changing section or 
  let dialogs=0;page.on('dialog',async d=>{dialogs+=1;await d.dismiss();});
  await page.getByRole('tab',{name:'空间设定',exact:true}).click();await expect.poll(()=>dialogs).toBe(1);await expect(board).toBeVisible();expect(new URL(page.url()).searchParams.get('settingsSection')).not.toBe('space');
  await page.getByRole('navigation',{name:'主导航',exact:true}).getByRole('button',{name:'故事创作',exact:true}).click();await expect.poll(()=>dialogs).toBe(2);await expect(page).toHaveURL(/view=settings/);await expect(board.getByRole('button',{name:'尚未保存',exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'返回审阅台首页',exact:true}).click();await expect.poll(()=>dialogs).toBe(3);await expect(page).toHaveURL(/view=settings/);await expect(board.getByRole('button',{name:'尚未保存',exact:true})).toBeVisible();
  // Native Back restores the exact initial entity deep link, not a newly fabricated route.
- await page.goBack();await expect(page).toHaveURL(/settingsEntity=a/);await expect(detail).toBeVisible();await detail.getByRole('button',{name:'编辑此项',exact:true}).click();await expect(detail.getByLabel('实体名称',{exact:true})).toHaveValue('尚未保存');expect(dialogs).toBe(2);
+ await page.goBack();await expect(page).toHaveURL(/settingsEntity=a/);await expect(detail).toBeVisible();await detail.getByRole('button',{name:'编辑此项',exact:true}).click();await expect(detail.getByLabel('实体名称',{exact:true})).toHaveValue('尚未保存');expect(dialogs).toBe(3);
  expect(f.mutations).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
 });
 test('read-only settings expose facts and never render editing or confirmation controls',async({page})=>{
@@ -165,4 +167,18 @@ test('空间卡仅展示空间图片及关键信息，编辑在标题栏且键�
  await expect(detail.locator('header').getByRole('button',{name:'编辑此项',exact:true})).toBeVisible();
  await detail.getByRole('button',{name:'编辑此项',exact:true}).click();await expect(detail.getByLabel('实体名称',{exact:true})).toHaveValue('小店');
  expect(f.mutations).toEqual([]);expect(f.errors).toEqual([]);expect(f.unexpected).toEqual([]);
+});
+
+test('brand from populated and invalid deep links stays at the bare root after background reads settle',async({page})=>{
+ await fixture(page,{materials:true});
+ for(const route of ['/?view=settings&settingsEntity=a#old','/?view=materials&material=missing&family=missing#unknown','/?view=overview&workStage=invalid#old']){
+  await page.goto(route);
+  const dialog=page.getByRole('dialog',{name:'对象设定详情'});
+  if(route.includes('settingsEntity=')){await expect(dialog).toBeVisible();await dialog.getByRole('button',{name:'关闭对象详情',exact:true}).click();}
+  if(route.includes('material=missing')){const missing=page.getByRole('dialog',{name:'无法定位原对象',exact:true});await expect(missing).toBeVisible();await missing.press('Escape');await expect(missing).not.toBeVisible();}
+  await page.getByRole('button',{name:'返回审阅台首页',exact:true}).click();
+  await expect.poll(()=>new URL(page.url()).pathname+new URL(page.url()).search+new URL(page.url()).hash).toBe('/');
+  await page.waitForTimeout(600);
+  expect(new URL(page.url()).search+new URL(page.url()).hash).toBe('');
+ }
 });

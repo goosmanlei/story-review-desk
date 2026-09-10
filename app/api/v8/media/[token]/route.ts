@@ -49,7 +49,7 @@ function headers(size: number, projectPath: string, sha256: string) {
   const extension = projectPath.split('.').pop()?.toLowerCase() || '';
   return {
     'Accept-Ranges': 'bytes',
-    'Cache-Control': 'private, no-store',
+    'Cache-Control': 'private, no-cache',
     'Content-Type': contentTypes[extension] || 'application/octet-stream',
     'Content-Disposition': 'inline',
     'Content-Length': String(size),
@@ -103,6 +103,11 @@ async function GETWithoutLease(request: Request, { params }: { params: Promise<{
     const { token } = await params;
     const file = await mediaFile(token);
     if (!file) return new Response('Not found', { status: 404 });
+    // Retirement and registered-byte checks above run before conditional reuse.
+    if(request.headers.get('If-None-Match')===`"sha256-${file.sha256}"`) {
+      const cachedHeaders=new Headers(headers(file.size,file.projectPath,file.sha256));cachedHeaders.delete('Content-Length');
+      return new Response(null,{status:304,headers:cachedHeaders});
+    }
     const range = request.headers.get('range');
     if (!range) {
       const stream = Readable.toWeb(createReadStream(file.filePath));

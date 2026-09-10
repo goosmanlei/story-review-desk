@@ -3,7 +3,7 @@ import {fillUnansweredWithPass} from './review-shortcuts';
 
 import { projectIdFor } from './instance-profile';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {EntityMaterialCatalog,MaterialReviewPoints} from './entity-material-catalog';
 import {ProductionMaterialCatalog} from './production-material-catalog';
@@ -173,7 +173,7 @@ function creatorStageFor(
   item: MaterialWorkItem | null | undefined,
   projection: OperationalStateProjection | null,
 ) {
-  const projected = item ? projection?.materialWorkItemsById?.[item.id] : null;
+  const projected = item ? projection?.materialWorkItemsById?.[item.id] || item as unknown as Record<string,unknown> : null;
   const derived = projectMaterialCreatorStage({
     lifecycleState: !item && requirement.requirementClass === 'REQUIRED' && requirement.coverageSatisfied && !requirement.bindingStale
       ? 'SATISFIED_BY_EXISTING' : String(projected?.lifecycleState || item?.lifecycleState || 'UNKNOWN'),
@@ -947,7 +947,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
     || null;
   // A deep link may precede its summary page. Fetch that exact requirement,
   // rather than displaying or requesting the first catalog row while it loads.
-  const selectedDetailId = viewState.requirementId || selectedRequirement?.id || null;
+  const selectedDetailId = viewState.requirementId || ((viewState.familyId || viewState.versionId) ? selectedRequirement?.id : null) || null;
   const detailError=detailFailure?.id===selectedDetailId&&detailFailure?.snapshotId===snapshotId&&detailFailure?.attempt===detailAttempt?detailFailure.message:'';
   const detailReady = Boolean(selectedDetailId && selectedRequirement?.id === selectedDetailId && detail?.id === selectedDetailId && detail.snapshotId === snapshotId);
   useEffect(() => {
@@ -985,8 +985,8 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
     ? (viewState.versionId ? explicitSelectedVersion : latestVersion)
     : null;
   const isHistoricalVersion = Boolean(selectedVersion && latestVersion && selectedVersion.id !== latestVersion.id);
-  const { recipe, error: recipeError } = useExecutionRecipe(selectedItem?.executionDefinitionRef);
-  const operations = useReviewOperations(selectedFamily ? {
+  const { recipe, error: recipeError } = useExecutionRecipe(selectedDetailId ? selectedItem?.executionDefinitionRef : null);
+  const operations = useReviewOperations(selectedDetailId && selectedFamily ? {
     subjectType: 'ASSET',
 
     subjectId: selectedFamily.id,
@@ -1006,6 +1006,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
   const projectedItem = selectedItem
     ? { ...selectedItem, ...(operations.stateProjection?.materialWorkItemsById?.[selectedItem.id] || liveProjection?.materialWorkItemsById?.[selectedItem.id] || {}) } as MaterialWorkItem
     : null;
+  const catalogStageFor=useCallback((requirement:MaterialRequirement)=>creatorStageFor(requirement,materialItems.find(item=>item.id===requirement.materialWorkItemRef),liveProjection),[materialItems,liveProjection]);
   const selectedCreatorStage = selectedRequirement
     ? creatorStageFor(selectedRequirement, projectedItem, operations.stateProjection || liveProjection)
     : null;
@@ -1119,5 +1120,5 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
       </>}
     </article>;
 
-  return <div className="material-center"><section id="material-workspace-panel" className="material-workspace-panel" aria-label="素材分类管理"><h2>素材分类管理</h2><EntityMaterialCatalog model={model} requirements={requirements} catalogLoading={catalogLoading} selectedRequirement={selectedRequirement} mode={workspaceMode} onSelect={select} stageFor={requirement=>creatorStageFor(requirement,materialItems.find(item=>item.id===requirement.materialWorkItemRef),liveProjection)} inspector={materialInfoCard} inspectorReady={detailReady} episodeScope={episodeScope} sceneScope={sceneScope} mediaFilter={mediaType} stageFilter={creatorStage} search={viewState.search} onFiltersChange={next=>patch({...next,businessPrimary:'全部',category:'全部',coverage:'全部'})}/></section></div>;
+  return <div className="material-center"><section id="material-workspace-panel" className="material-workspace-panel" aria-label="素材分类管理"><h2>素材分类管理</h2><EntityMaterialCatalog model={model} requirements={requirements} catalogLoading={catalogLoading} selectedRequirement={selectedRequirement} mode={workspaceMode} onSelect={select} stageFor={catalogStageFor} inspector={materialInfoCard} inspectorReady={detailReady} episodeScope={episodeScope} sceneScope={sceneScope} mediaFilter={mediaType} stageFilter={creatorStage} search={viewState.search} onFiltersChange={next=>patch({...next,businessPrimary:'全部',category:'全部',coverage:'全部'})}/></section></div>;
 }

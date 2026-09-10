@@ -16,21 +16,21 @@ const requireOwner=owner=>{if(!domainOwners.includes(owner))fail('请选择故�
 const configOf=view=>view.snapshot.productionModel.systemConfiguration?.config?.domain||defaultDomainConfiguration();
 const requireRelease=(view,id)=>{if(id!==view.releaseId)fail('当前发布已变化；请保留修改，刷新并重新预览');};
 
-export function workspaceProjection(snapshot,graph,owner) {
+export function workspaceProjection(snapshot,graph,owner,stateProjection) {
   requireOwner(owner);
   const model=snapshot.productionModel||{},configuration=model.systemConfiguration?.config?.domain||defaultDomainConfiguration();
   const ownership=domainOwnership(graph,configuration,model.domainOwnership||{});
   const requirements=(model.materialRequirements||[]).filter(r=>r.requirementClass==='REQUIRED').map(r=>({id:r.id,title:r.title,mediaType:r.mediaType,category:r.businessCategoryPrimary||r.category,scopeBindings:r.scopeBindings||[],entityRef:r.entityRef,representationRef:r.representationRef,assetFamilyRefs:r.assetFamilyRefs||[]}));
   const candidate=(model.episodePlanRevisions||[]).find(r=>r.id===model.revisionPointers?.episodePlanProposalRevisionId)||(model.episodePlanRevisions||[]).find(r=>r.isCurrentProposal);
-  return {snapshotId:snapshot.snapshotId,graph,ownership,configuration,owner,requirements,...readingProjection(snapshot,graph,configuration),spatial:snapshot.creativeLineage?.spatialEvidence||null,context:{candidateRevisionId:candidate?.id||null,currentEpisodePlanRevisionId:model.revisionPointers?.currentEpisodePlanRevisionId||null},counts:Object.fromEntries(domainCollections.map(c=>[c,graph[c].filter(r=>ownership[objectKey(c,r.id)].owner===owner).length])),uncertainCount:Object.values(ownership).filter(r=>r.owner==='UNCERTAIN').length};
+  return {snapshotId:snapshot.snapshotId,graph,ownership,configuration,owner,requirements,...readingProjection(snapshot,graph,configuration,stateProjection),spatial:snapshot.creativeLineage?.spatialEvidence||null,context:{candidateRevisionId:candidate?.id||null,currentEpisodePlanRevisionId:model.revisionPointers?.currentEpisodePlanRevisionId||null},counts:Object.fromEntries(domainCollections.map(c=>[c,graph[c].filter(r=>ownership[objectKey(c,r.id)].owner===owner).length])),uncertainCount:Object.values(ownership).filter(r=>r.owner==='UNCERTAIN').length};
 }
 
-export async function getDomainWorkspace(tx,owner) {
-  const view=await tx.readView(),current=await currentGraph(tx,view),record=await tx.getAux('domain-workspace-drafts',owner),draft=read(record);
+export async function getDomainWorkspace(tx,owner,{view:providedView,stateProjection}={}) {
+  const view=providedView||await tx.readView(),current=await currentGraph(tx,view),record=await tx.getAux('domain-workspace-drafts',owner),draft=read(record);
   const receipt=draft&&await tx.getAux('domain-workspace-published',`${owner}:${record.revisionId}`);
   const legacy=await tx.getAux('domain-drafts','relations'),init=await tx.getAux('initialization-drafts','current');
   const suggestions=(await tx.listAux('setting-extraction-results')).map(r=>({kind:'EXTRACTION',revisionId:r.revisionId}));
-  return {...workspaceProjection(view.snapshot,current.graph,owner),releaseId:view.releaseId,revisionId:current.revisionId,readOnly:false,draft:record&&!receipt?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,legacyDrafts:[...suggestions,legacy&&{kind:'RELATIONS',revisionId:legacy.revisionId},!view.snapshot.productionModel.initialization&&init&&{kind:'INITIALIZATION',revisionId:init.revisionId}].filter(Boolean)};
+  return {...workspaceProjection(view.snapshot,current.graph,owner,stateProjection),releaseId:view.releaseId,revisionId:current.revisionId,readOnly:false,draft:record&&!receipt?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,legacyDrafts:[...suggestions,legacy&&{kind:'RELATIONS',revisionId:legacy.revisionId},!view.snapshot.productionModel.initialization&&init&&{kind:'INITIALIZATION',revisionId:init.revisionId}].filter(Boolean)};
 }
 
 async function validate(tx,view,graph) {

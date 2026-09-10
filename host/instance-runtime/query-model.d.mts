@@ -5,4 +5,6 @@ export function objectSummary(value:Record<string,OpaqueLegacyJson>):Record<stri
 export function installQueryModel(tx:InstanceUnit):Promise<void>;
 export function rebuildQueryModel(tx:InstanceUnit,input:{releaseId:string;snapshot:Record<string,OpaqueLegacyJson>;recipes:Record<string,OpaqueLegacyJson>}):Promise<void>;
 export function queryObjects(tx:InstanceReadUnit,input:{releaseId:string;collection:string;ids?:string[];scopeType?:string|null;scopeId?:string|null;familyIds?:string[];requirementIds?:string[];after?:string;offset?:number;limit?:number;summary?:boolean;required?:boolean;search?:string}):Promise<{items:Record<string,OpaqueLegacyJson>[];total:number;lastId:string|null}>;
-export function updateOperationalProjection(tx:InstanceUnit,input:{releaseId:string;eventSequence:number;stateProjection:Record<string,OpaqueLegacyJson>}):Promise<void>;
+export function updateOperationalProjection(tx:InstanceUnit,input:{releaseId:string;eventSequence:number;stateProjection:Record<string,OpaqueLegacyJson>;operationRevision?:string}):Promise<void>;
+
+export function operationalProjectionMatches(tx:InstanceReadUnit,input:{releaseId:string;eventSequence:number;operationRevision?:string}):Promise<boolean>;

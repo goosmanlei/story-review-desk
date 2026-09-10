@@ -1,3 +1,4 @@
+import {committedGet} from '../instance/_committed-get';
 import {withInstanceMediaRead} from '../v8/_media-read';
 import { assertAssistantLocal } from '../assistant/v1/_http';
 import { errorResponse, HttpError, instanceRepository, instanceRepositoryMode, instanceReadOnlyMode, safeGeneratedPath, validateBrowserDeployment } from '../v8/_store';
@@ -33,10 +34,13 @@ export async function trialProxy(request: Request, endpoint: string) {
       const scopeId = new URL(request.url).searchParams.get('scopeId') || undefined;
       const options = { scopeId };
       if (request.method === 'GET' && endpoint === '/api/trial/scopes') {
+        if(request.headers.get('X-Review-Workspace')==='1') return await committedGet(repository,'trial:scopes',()=>instanceTrialScopes(repository),request);
         return Response.json(await instanceTrialScopes(repository), { headers: { 'Cache-Control': 'no-store' } });
       }
       if (request.method === 'GET' && endpoint === '/api/trial/snapshot') {
-        const snapshot = await instanceTrialSnapshot(repository, { scopeId: scopeId || process.env.REVIEW_TRIAL_SCOPE_ID });
+        const explicitScope=scopeId || process.env.REVIEW_TRIAL_SCOPE_ID;
+        if(request.headers.get('X-Review-Workspace')==='1') return await committedGet(repository,`trial:snapshot:${explicitScope||''}`,()=>instanceTrialSnapshot(repository,{scopeId:explicitScope}),request);
+        const snapshot = await instanceTrialSnapshot(repository, { scopeId: explicitScope });
         return Response.json(snapshot, { headers: { 'Cache-Control': 'no-store', ETag: snapshot.mutationEtag } });
       }
       if (request.method === 'POST' && endpoint === '/api/trial/reviews') {

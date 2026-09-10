@@ -1,4 +1,5 @@
 import {imageTechnicalBinding} from './image-technical-spec.mjs';
+import {committedProjectionJson} from './committed-query-cache.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson} from './bytes.mjs';
 import {productionHash,productionId,resolveShotProductionScope,defaultShotProductionPlan,validateShotProductionPlan,compileShotProductionPlan,shotProductionReadiness,shotProductionEntryGates,productionBindingReasons} from './shot-production-model.mjs';
@@ -19,16 +20,19 @@ const fail=(message,code='DOMAIN_CONFLICT')=>{throw Object.assign(new Error(mess
 const put=(tx,namespace,key,value,expectedRevisionId=null)=>tx.putAux({namespace,key,bytes:canonicalJson(value),mediaType:'application/json',expectedRevisionId});
 
 /** Read from a single transaction. AUX render proofs must not be cached with a release. */
-export async function readCurrentShotProductionModel(tx,{api}={}) {
+export async function readCurrentShotProductionModel(tx,{api,readinessOnly=false}={}) {
   if(!api?.projectOperationalState)fail('缺少正式运行态验证器');
   const view=await tx.readView(),model=await loadMaterialUsageEvidence(tx,await applyProductionSpatialProjection(tx,await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}})),{view}),{view});
   const snapshot={...view.snapshot,productionModel:model};
   const state=episodeSourceCompiler(api).stateFor({...view,snapshot});
   model.animaticLocks=reconcileAnimaticLocks(model,state);
   Object.assign(model,await applyShotProductionLocksProjection(tx,model,{state,view}));
-  state.configuredGatesByWorkItem=api.configuredGates?api.configuredGates(model,state,shotProductionExecutionEntries(model,state,view.recipes)):{};
+  // Workspace readiness consumes execution eligibility only for SHOT_VIDEO.
+  // Mutations retain validation of every work item; a browse never authorizes work.
+  const executionWorks=(model.workItems||[]).filter(work=>!readinessOnly||work.deliverableKey==='SHOT_VIDEO');
+  state.configuredGatesByWorkItem=(!readinessOnly||executionWorks.length)&&api.configuredGates?api.configuredGates(model,state,shotProductionExecutionEntries(model,state,view.recipes)):{};
   state.executionGatesByWorkItem={};
-  for(const work of model.workItems||[]){
+  for(const work of executionWorks){
     try{
       if(!api.definitionForWorkItem||!api.assertExecutionEligibility)throw Error('调用包验证器尚未加载');
       const {definition}=api.definitionForWorkItem(snapshot,view.recipes,work.id);
@@ -47,19 +51,39 @@ function currentScope(model,state,sceneId){
   if(!lock||lock.lockState!=='LOCKED'||lock.shotPlanSetRevisionId!==scope.plan.id)fail('正式镜头设计结论已变化');
   return scope;
 }
-export async function getShotProductionWorkspace(tx,{sceneId,api}) {
-  productionId(sceneId);const {view,model,state}=await readCurrentShotProductionModel(tx,{api});
-  const record=await tx.getAux(SHOT_PRODUCTION_NS.drafts,sceneId),draft=read(record);
+function sharedShotProductionInputs(model,state) {
+  const availableInputs=(model.materialRequirements||[]).flatMap(r=>requirementInputFamilyIds(model,state,r).flatMap(familyId=>{const f=state.assetFamiliesById?.[familyId],v=state.assetVersionsById?.[f?.currentVersionId];return v?.sha256&&v.path?[{requirementId:r.id,familyId,versionId:v.id,sha256:v.sha256,label:r.title||f.label,canFlowDownstream:f.canFlowDownstream===true&&v.canFlowDownstream===true}]:[];}));
+  const graph=model.materialDirectory?.graph||model.domainGraph||{},availableSpace={sourceSha256:model.spatialEvidence?.sourceSha256||null,version:model.spatialEvidence?.version||null,locations:(model.spatialEvidence?.locationPackages||[]).map(p=>({id:p.id,label:p.name||p.id,zones:(p.zones||[]).map(z=>({id:z.id,label:z.name||z.id})),cameras:(p.cameras||[]).map(c=>({id:c.id,label:[c.from,c.looks,c.use].filter(Boolean).join(' · ')||c.id,zoneIds:c.zoneIds||[c.zoneId].filter(Boolean)}))})),states:(graph.states||[]).filter(s=>(graph.entities||[]).some(e=>e.id===s.entityId&&e.type==='LOCATION')).map(s=>({id:s.id,label:s.label||s.id})),localViews:[]};
+  return {availableInputs,availableSpace};
+}
+function projectShotProductionScene(sceneId,{model,state,entryGates}) {
   let basis=null,content=null,blockers=[];try{const scope=currentScope(model,state,sceneId);basis={sceneId,episodeUid:scope.episodeUid,shotPlanRevisionId:scope.plan.id,shotPlanHash:scope.plan.contentHash,shots:scope.shots};content=defaultShotProductionPlan(scope);}catch(e){blockers=[e.message];}
   const plan=(model.shotProductionPlans||[]).find(p=>p.sceneId===sceneId&&p.scopeRole==='CURRENT');
-  const jobs=(await tx.listAux(SHOT_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.sceneId===sceneId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20);
-  const availableInputs=(model.materialRequirements||[]).flatMap(r=>requirementInputFamilyIds(model,state,r).flatMap(familyId=>{const f=state.assetFamiliesById?.[familyId],v=state.assetVersionsById?.[f?.currentVersionId];return v?.sha256&&v.path?[{requirementId:r.id,familyId,versionId:v.id,sha256:v.sha256,label:r.title||f.label,canFlowDownstream:f.canFlowDownstream===true&&v.canFlowDownstream===true}]:[];}));
-  const graph=model.materialDirectory?.graph||model.domainGraph||{},availableSpace={sourceSha256:model.spatialEvidence?.sourceSha256||null,version:model.spatialEvidence?.version||null,locations:(model.spatialEvidence?.locationPackages||[]).map(p=>({id:p.id,label:p.name||p.id,zones:(p.zones||[]).map(z=>({id:z.id,label:z.name||z.id})),cameras:(p.cameras||[]).map(c=>({id:c.id,label:[c.from,c.looks,c.use].filter(Boolean).join(' · ')||c.id,zoneIds:c.zoneIds||[c.zoneId].filter(Boolean)}))})),states:(graph.states||[]).filter(s=>(graph.entities||[]).some(e=>e.id===s.entityId&&e.type==='LOCATION')).map(s=>({id:s.id,label:s.label||s.id})),localViews:(model.spatialShotViews||[]).filter(r=>r.scopeRole==='CURRENT'&&r.content?.sceneBinding?.sceneId===sceneId).map(r=>({id:r.id,viewId:r.viewId,label:r.content.camera.purpose,locationId:r.content.base.locationId,zoneId:r.content.base.zoneId,cameraId:r.content.camera.id,sourceRevisionId:r.sourceRevisionId,sourceSha256:r.sourceSha256}))};
   const manifestTargets=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)&&['SHOT_INPUT_LOCK','LOCKED_SHOT'].includes(w.deliverableKey)).map(w=>({workItemId:w.id,shotId:w.shotId,gateId:w.gateId,label:w.label}));
   const sceneWorkIds=new Set((model.workItems||[]).filter(w=>w.sceneId===sceneId).map(w=>w.id));
   const manifestJobs=(model.shotProductionManifestJobs||[]).filter(j=>sceneWorkIds.has(j.workItemId)).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20).map(({jobId,workItemId,status,error})=>({jobId,workItemId,status,error}));
-  const entryGates=shotProductionEntryGates(model,state),stageEntries=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)).map(w=>({id:w.id,shotId:w.shotId,deliverableKey:w.deliverableKey,gateId:w.gateId,label:w.label,blockers:entryGates[w.id]||['PRODUCTION_WORK_CLOSURE_CHANGED']}));
-  return {sceneId,releaseId:view.releaseId,basis,blockers,stageEntries,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),availableInputs,availableSpace,manifestTargets,manifestJobs,jobs};
+  const stageEntries=(model.workItems||[]).filter(w=>plan&&(plan.workItemIds||[]).includes(w.id)).map(w=>({id:w.id,shotId:w.shotId,deliverableKey:w.deliverableKey,gateId:w.gateId,label:w.label,blockers:entryGates[w.id]||['PRODUCTION_WORK_CLOSURE_CHANGED']}));
+  return {sceneId,basis,blockers,stageEntries,defaultContent:content,currentPlan:plan||null,readiness:shotProductionReadiness(model,state,sceneId),localViews:(model.spatialShotViews||[]).filter(r=>r.scopeRole==='CURRENT'&&r.content?.sceneBinding?.sceneId===sceneId).map(r=>({id:r.id,viewId:r.viewId,label:r.content.camera.purpose,locationId:r.content.base.locationId,zoneId:r.content.base.zoneId,cameraId:r.content.camera.id,sourceRevisionId:r.sourceRevisionId,sourceSha256:r.sourceSha256})),manifestTargets,manifestJobs};
+}
+export async function getShotProductionWorkspace(tx,{sceneId,api}) {
+  productionId(sceneId);
+  // Keep only compact per-scene results and one shared input directory. The full
+  // operational model is deliberately released after this committed projection.
+  const directory=JSON.parse(await committedProjectionJson(tx,'shot-production-directory',async()=>{
+    const {view,model,state}=await readCurrentShotProductionModel(tx,{api,readinessOnly:true});
+    const entryGates=shotProductionEntryGates(model,state),sceneIds=new Set([
+      ...(model.scenes||[]).map(row=>row.id),...(model.sceneScriptRevisions||[]).map(row=>row.sceneId),
+      ...(model.shotPlanSetRevisions||[]).map(row=>row.scopeId),...(model.shotProductionPlans||[]).map(row=>row.sceneId),
+      ...(model.workItems||[]).map(row=>row.sceneId),...(model.spatialShotViews||[]).map(row=>row.content?.sceneBinding?.sceneId),
+    ].filter(Boolean));
+    return {releaseId:view.releaseId,...sharedShotProductionInputs(model,state),scenes:Object.fromEntries([...sceneIds].map(id=>[id,projectShotProductionScene(id,{model,state,entryGates})]))};
+  }));
+  let scene=Object.hasOwn(directory.scenes,sceneId)?directory.scenes[sceneId]:null;
+  if(!scene){const {model,state}=await readCurrentShotProductionModel(tx,{api,readinessOnly:true});scene=projectShotProductionScene(sceneId,{model,state,entryGates:shotProductionEntryGates(model,state)});}
+  const record=await tx.getAux(SHOT_PRODUCTION_NS.drafts,sceneId),draft=read(record);
+  const jobs=(await tx.listAux(SHOT_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.sceneId===sceneId).sort((a,b)=>b.createdAt.localeCompare(a.createdAt)).slice(0,20);
+  const {localViews,...fields}=scene;
+  return {...fields,releaseId:directory.releaseId,draft:draft?{...draft,revisionId:record.revisionId}:null,draftHeadRevisionId:record?.revisionId||null,availableInputs:directory.availableInputs,availableSpace:{...directory.availableSpace,localViews},jobs};
 }
 export async function saveShotProductionDraft(tx,input,{api}){
   const {view,model,state}=await readCurrentShotProductionModel(tx,{api});if(view.releaseId!==input.expectedReleaseId)fail('发布版本已变化，请重新核对');

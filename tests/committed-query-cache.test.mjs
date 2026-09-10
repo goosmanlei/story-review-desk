@@ -4,7 +4,7 @@ import {mkdtemp,mkdir,rm} from 'node:fs/promises';
 import path from 'node:path';
 import {createInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {blankProfile,blankSnapshot} from '../host/instance-runtime/blank.mjs';
-import {committedQueryJson} from '../host/instance-runtime/committed-query-cache.mjs';
+import {committedQueryJson,committedProjectionJson} from '../host/instance-runtime/committed-query-cache.mjs';
 import {sharedStoryPostgres} from './fixtures/shared-story-postgres.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};};
@@ -73,4 +73,41 @@ test('factory or transaction completion errors reject followers and are never ca
   failCommit=false;assert.equal(JSON.parse(await committedQueryJson(wrapper,'failure',read)).value,'old');assert.equal(calls,2);
   let failFactory=true;const factory=async tx=>{if(failFactory)throw new Error('factory failed');return value(tx);};
   await assert.rejects(committedQueryJson(repo,'factory',factory),/factory failed/);failFactory=false;assert.equal(JSON.parse(await committedQueryJson(repo,'factory',factory)).value,'old');
+}));
+
+test('different scene reads reuse one committed common projection with private trees and exact revisions',()=>fixture(async repo=>{
+  let calls=0;
+  const shared=async tx=>{calls++;return value(tx);};
+  const scene=key=>committedQueryJson(repo,key,async tx=>{
+    const first=await committedProjectionJson(tx,'scene common',shared);
+    assert.equal(await committedProjectionJson(tx,'scene common',shared),first);
+    const own=JSON.parse(first);own.scene=key;return own;
+  });
+  const [one,two]=await Promise.all([scene('scene,one'),scene('scene,two')]);
+  assert.equal(calls,1);assert.equal(JSON.parse(one).scene,'scene,one');assert.equal(JSON.parse(two).scene,'scene,two');
+  await scene('third');assert.equal(calls,1);
+  // Returning to other modules can churn all ordinary query entries without
+  // dropping the compact common directory needed by a not-yet-opened scene.
+  for(let n=0;n<24;n++)await committedQueryJson(repo,'page:'+n,async()=>({page:n}));
+  await scene('unseen after module round trips');assert.equal(calls,1);
+  await writeValue(repo,'changed');assert.equal(JSON.parse(await scene('fourth')).value,'changed');assert.equal(calls,2);
+  await repo.writeTransaction(async tx=>{
+    assert.equal(JSON.parse(await committedProjectionJson(tx,'scene common',shared)).value,'changed');
+  });assert.equal(calls,3);
+}));
+
+test('a shared scene projection waits for COMMIT and is discarded on failed completion',()=>fixture(async repo=>{
+  const entered=deferred(),release=deferred(),joined=deferred();let fail=true,calls=0;
+  const wrapper={get inTransaction(){return repo.inTransaction;},readTransaction:callback=>repo.readTransaction(async tx=>{
+    const result=await callback(tx);if(fail){entered.resolve();await release.promise;throw Error('commit rejected');}return result;
+  })};
+  const read=key=>committedQueryJson(wrapper,key,tx=>{
+    const pending=committedProjectionJson(tx,'common',async current=>{calls++;return value(current);});
+    if(key==='follower')joined.resolve();return pending;
+  });
+  const owner=read('owner');await entered.promise;let settled=false;
+  const follower=read('follower').finally(()=>{settled=true;});
+  await joined.promise;assert.equal(settled,false);release.resolve();
+  const results=await Promise.allSettled([owner,follower]);assert(results.every(r=>r.status==='rejected'));assert.equal(calls,1);
+  fail=false;await read('retry');assert.equal(calls,2);await read('other');assert.equal(calls,2);
 }));

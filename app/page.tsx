@@ -7,6 +7,7 @@ import { StoryCommentsProvider } from './story-comments';
 import { NarrativeOverview } from './narrative-revision-reader';
 import {EpisodeSceneReading} from './episode-scene-reading';
 import {narrativeOverviewSection, type NarrativeOverviewSection} from './narrative-revision';
+import {readWorkspaceJson,readProductionWorkspace,workspaceCacheScope} from './workspace-read-cache';
 import { useEpisodePlanContext } from './use-episode-plan-context';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -593,6 +594,7 @@ type PagedProductionLoadRequest = {
   filters?: PagedProductionFilters;
   mode?: 'initial' | 'next' | 'all';
   force?: boolean;
+  signal?: AbortSignal;
 };
 type PagedProductionDataState = {
   windows: Record<string, PagedProductionWindow>;
@@ -727,7 +729,9 @@ export default function Home() {
   const [pagedProduction, setPagedProduction] = useState<PagedProductionDataState>({ windows: {} });
   const reviewDataRef = useRef<ReviewSnapshot | null>(null);
   const pagedProductionRef = useRef<PagedProductionDataState>({ windows: {} });
-  const productionRequestsRef = useRef(new Map<string, Promise<ProductionModel | null>>());
+  const productionRequestsRef = useRef(new Map<string, number>());
+  const baseReviewRef=useRef<ReviewSnapshot|null>(null);
+  const productionRevisionRef=useRef<string|number|undefined>(undefined);
 
   const commitPagedProduction = useCallback((next: PagedProductionDataState) => {
     pagedProductionRef.current = next;
@@ -751,6 +755,7 @@ export default function Home() {
       .then((payload) => {
         const next = { ...payload.data, productionModel: normalizeProductionModel(payload.data.productionModel) };
         reviewDataRef.current = next;
+        baseReviewRef.current=next;
         commitPagedProduction({ windows: {} });
         setReviewData(next);
       })
@@ -760,70 +765,46 @@ export default function Home() {
     return () => controller.abort();
   }, [attempt, commitPagedProduction]);
 
-  const loadProduction = useCallback<PagedProductionLoader>((request) => {
-    const filters = request.filters || {};
-    const key = pagedProductionWindowKey(request.resource, filters);
-    const fallback = emptyPagedProductionWindow(request.resource, filters);
-    const currentWindow = pagedProductionRef.current.windows[key] || fallback;
-    const currentModel = reviewDataRef.current?.productionModel || null;
-    if (!request.force) {
-      if (request.mode === 'next' && currentWindow.initialized && !currentWindow.hasMore) return Promise.resolve(currentModel);
-      if (request.mode !== 'next' && currentWindow.initialized && (request.mode !== 'all' || !currentWindow.hasMore)) return Promise.resolve(currentModel);
-    }
-    const existing = productionRequestsRef.current.get(key);
-    if (existing) return existing;
-
-    const task = (async () => {
-      updatePagedWindow(key, (windowState) => ({ ...windowState, loading: true, error: '' }), fallback);
-      let cursor = request.force || !currentWindow.initialized ? null : currentWindow.nextCursor;
-      let loaded = request.force || !currentWindow.initialized ? 0 : currentWindow.loaded;
-      const seenCursors = new Set<string>();
-      try {
-        do {
-          const response = await fetch(pagedProductionUrl(request.resource, filters, cursor));
-          if (!response.ok) {
-            const detail = await response.json().catch(() => null) as { error?: string; message?: string } | null;
-            throw new Error(detail?.error || detail?.message || `HTTP ${response.status}`);
-          }
-          const payload = await response.json() as PagedProductionPayload;
-          const currentData = reviewDataRef.current;
-          if (!currentData) throw new Error('基础快照尚未就绪');
-          if (payload.snapshotId !== currentData.snapshotId) {
-            throw new Error(`分页快照 ${payload.snapshotId} 与当前快照 ${currentData.snapshotId} 不一致`);
-          }
-          const nextModel = mergePagedProductionModel(currentData.productionModel, payload.page);
-          const nextData = { ...currentData, productionModel: nextModel };
-          reviewDataRef.current = nextData;
-          setReviewData(nextData);
-          loaded += payload.count;
-          cursor = payload.nextCursor;
-          updatePagedWindow(key, (windowState) => ({
-            ...windowState,
-            initialized: true,
-            loading: true,
-            error: '',
-            loaded,
-            total: payload.total,
-            hasMore: payload.hasMore,
-            nextCursor: payload.nextCursor,
-          }), fallback);
-          if (cursor) {
-            if (seenCursors.has(cursor)) throw new Error('分页游标重复，已停止读取以避免循环');
-            seenCursors.add(cursor);
-          }
-        } while (request.mode === 'all' && cursor);
-        return reviewDataRef.current?.productionModel || null;
-      } catch (reason) {
-        const message = reason instanceof Error ? reason.message : '分页制作数据读取失败';
-        updatePagedWindow(key, (windowState) => ({ ...windowState, loading: false, error: message }), fallback);
-        return null;
-      } finally {
-        updatePagedWindow(key, (windowState) => ({ ...windowState, loading: false }), fallback);
+  const loadProduction = useCallback<PagedProductionLoader>(async request => {
+    const filters=request.filters||{},key=pagedProductionWindowKey(request.resource,filters);
+    const fallback=emptyPagedProductionWindow(request.resource,filters);
+    const generation=(productionRequestsRef.current.get(key)||0)+1;
+    productionRequestsRef.current.set(key,generation);
+    const current=()=>!request.signal?.aborted&&productionRequestsRef.current.get(key)===generation;
+    updatePagedWindow(key,value=>({...value,initialized:false,loading:true,error:''}),fallback);
+    try {
+      const scope=workspaceCacheScope(instance);
+      const prerequisites=request.resource==='production'
+        ? ['/api/instance/production-preparation']
+        : ['/api/instance/domain-workspaces?owner=MATERIAL','/api/instance/material-directory','/api/instance/production-preparation'];
+      const {payload,contexts}=await readProductionWorkspace(request.resource,filters,scope,prerequisites,request.signal);
+      let data=reviewDataRef.current;
+      if(data&&payload.snapshotId!==data.snapshotId){
+        const fresh=await readWorkspaceJson<{data:ReviewSnapshot}>('/api/v8/ui/bootstrap',scope,request.signal);
+        if(request.signal?.aborted)return null;
+        data={...fresh.data,productionModel:normalizeProductionModel(fresh.data.productionModel)};
+        baseReviewRef.current=data;
+        commitPagedProduction({windows:{}});
       }
-    })().finally(() => productionRequestsRef.current.delete(key));
-    productionRequestsRef.current.set(key, task);
-    return task;
-  }, [updatePagedWindow]);
+      if(!data||payload.snapshotId!==data.snapshotId||contexts.some(context=>context.snapshotId&&context.snapshotId!==payload.snapshotId)||new Set(contexts.map(context=>context.releaseId).filter(Boolean)).size>1)throw new Error('工作区发布版本在读取中变化，请重新完整读取');
+      if(request.signal?.aborted)return null;
+      const base=productionRevisionRef.current!==undefined&&productionRevisionRef.current!==payload.operationRevision?baseReviewRef.current!:data;
+      const model={...base.productionModel};
+      // The complete requirement directory replaces its old membership, including removals.
+      if(request.resource==='materials'){model.materialRequirements=[];model.materialWorkItems=[];}
+      const next={...data,productionModel:mergePagedProductionModel(model,payload.page)};
+      if(!current())return next.productionModel;
+      productionRevisionRef.current=payload.operationRevision;
+      reviewDataRef.current=next;setReviewData(next);
+      updatePagedWindow(key,value=>({...value,initialized:true,loading:false,error:'',loaded:payload.count,total:payload.total,hasMore:false,nextCursor:null}),fallback);
+      return next.productionModel;
+    } catch(reason) {
+      if(current())updatePagedWindow(key,value=>({...value,initialized:false,loading:false,error:reason instanceof Error?reason.message:'工作区读取失败'}),fallback);
+      return null;
+    } finally {
+      if(productionRequestsRef.current.get(key)===generation)updatePagedWindow(key,value=>({...value,loading:false}),fallback);
+    }
+  },[instance,updatePagedWindow,commitPagedProduction]);
 
   if (!reviewData) return <main className="review-bootstrap-state"><section><span className="brand-mark">{instance.branding.mark}</span><small>LOCAL PRODUCTION DESK</small><h1>{loadError ? '审阅快照暂时无法读取' : '正在装入制作审阅台'}</h1><p>{loadError ? `本地只读接口返回异常：${loadError}` : '先装入结构与索引；依据正文会在打开时读取。'}</p>{loadError && <button type="button" onClick={() => { setLoadError(''); setAttempt((value) => value + 1); }}>重新读取</button>}</section></main>;
   if (!reviewData.creativeLineage.scenes.length && !reviewData.productionModel.materialRequirements?.length) return <EmptyInstanceDesk snapshotId={reviewData.snapshotId}/>;
@@ -904,7 +885,9 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
   const restoringHistoryRef = useRef(false);
   const pendingProductionIntentRef = useRef<PendingProductionLocation | null>(null);
   const productionModel = useMemo(() => {
-    const projected = applyOperationalProjection(reviewData.productionModel, operationalProjection);
+    // Paged workspaces already carry the verified operation revision. An older
+    // background projection must not overwrite those freshly read row states.
+    const projected = activeView==='materials'||activeView==='pipeline' ? reviewData.productionModel : applyOperationalProjection(reviewData.productionModel, operationalProjection);
     const existingRelations = (projected as ProductionModel & { materialStoryRelations?: unknown }).materialStoryRelations;
     const spatial = reviewData.creativeLineage.spatialEvidence;
     if (existingRelations || !spatial) return projected;
@@ -925,7 +908,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
         },
       },
     } as ProductionModel;
-  }, [operationalProjection, reviewData.creativeLineage.spatialEvidence, reviewData.productionModel]);
+  }, [activeView, operationalProjection, reviewData.creativeLineage.spatialEvidence, reviewData.productionModel]);
   const p07ReleasedCount = operationalProjection?.reviewRollups?.P07?.released ?? reviewData.p07.releasedCount;
   const reviewableStoryboardCount = Math.max(0, reviewData.p07.materializedCount - p07ReleasedCount);
   const storyStructure = reviewData.creativeLineage.storyStructure;
@@ -1026,9 +1009,9 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
   const materialWindow = pagedProduction.windows[materialWindowKey] || emptyPagedProductionWindow(materialResource, materialFilters);
   const activePagedWindow = activeView === 'pipeline' ? pipelineWindow : activeView === 'materials' ? materialWindow : null;
   const activeProductionReady = activeView === 'pipeline'
-    ? pipelineWindow.initialized
+    ? pipelineWindow.initialized && !pipelineWindow.loading && !pipelineWindow.error && !pipelineWindow.hasMore
     : activeView === 'materials'
-      ? materialWindow.initialized
+      ? materialWindow.initialized && !materialWindow.loading && !materialWindow.error && !materialWindow.hasMore
       : true;
   const storyInstruction: Record<StoryView, string> = genericAuthoring ? {
     source:'阅读本故事已登记的原始依据、派生整理与辅助资料。原件是否已观察、文字是否可读及资料待核事项分别记录。',
@@ -1043,15 +1026,11 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
   };
 
   useEffect(() => {
-    if (activeView !== 'pipeline' || pipelineWindow.initialized || pipelineWindow.loading || pipelineWindow.error) return;
-    void onNeedProduction({ resource: 'production', filters: pipelineFilters, mode: 'initial' });
-  }, [activeView, onNeedProduction, pipelineFilters, pipelineWindow.error, pipelineWindow.initialized, pipelineWindow.loading]);
-
-  useEffect(() => {
-    if (activeView !== 'materials' || materialWindow.loading || materialWindow.error) return;
-    if (materialWindow.initialized && !materialWindow.hasMore) return;
-    void onNeedProduction({ resource: materialResource, filters: materialFilters, mode: 'all' });
-  }, [activeView, materialFilters, materialResource, materialWindow.error, materialWindow.hasMore, materialWindow.initialized, materialWindow.loading, onNeedProduction]);
+    if(activeView!=='pipeline'&&activeView!=='materials')return;
+    const controller=new AbortController();
+    void onNeedProduction({resource:activeView==='pipeline'?'production':'materials',filters:activeView==='pipeline'?pipelineFilters:materialFilters,mode:'all',signal:controller.signal});
+    return()=>controller.abort();
+  },[activeView,onNeedProduction,pipelineFilters,materialFilters]);
 
   useEffect(() => {
     if (genericAuthoring || activeView !== 'story' || !['audit', 'source'].includes(storyView) || storySourcesReady || storySourcesError || storyView === 'audit' && (!resolvedEpisodePlan || narrativeCandidate)) return;
@@ -1195,6 +1174,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
   }, [genericAuthoring, activeView, resolvedEpisodePlan, narrativeCandidate, adaptationAudit, adaptationAuditAttempt, episodeRecordForRoute, reviewData.creativeLineage.episodes, reviewData.creativeLineage.scenes, reviewData.storySources.transcript.sections, storyView]);
 
   useEffect(() => {
+    if(['materials','pipeline','settings'].includes(activeView))return;
     const controller = new AbortController();
     const refresh = () => {
       fetch('/api/v8/operations/snapshot', { signal: controller.signal })
@@ -1202,7 +1182,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
           if (!response.ok) throw new Error(`HTTP ${response.status}`);
           return response.json() as Promise<{ stateProjection?: OperationalStateProjection }>;
         })
-        .then((payload) => setOperationalProjection(payload.stateProjection || null))
+        .then((payload) => {if(!controller.signal.aborted)setOperationalProjection(payload.stateProjection || null);})
         .catch(() => {
           if (!controller.signal.aborted) setOperationalProjection(null);
         });
@@ -1213,10 +1193,14 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       controller.abort();
       window.removeEventListener('review:operations-updated', refresh);
     };
-  }, []);
+  }, [activeView,reviewData.snapshotId]);
 
+  const restoreReadRef=useRef<AbortController|null>(null);
+  useEffect(()=>()=>restoreReadRef.current?.abort(),[]);
   const locationRestorerRef = useRef<(state?: ReviewHistoryState, initial?: boolean) => void>(() => undefined);
   locationRestorerRef.current = (historyState = (window.history.state || {}) as ReviewHistoryState, initial = false) => {
+    restoreReadRef.current?.abort();
+    const restoreController=new AbortController();restoreReadRef.current=restoreController;
     const browseUrl=new URL(window.location.href);
     if(restoreMaterialBrowseLocation(browseUrl))window.history.replaceState(window.history.state,'',browseUrl);
     const params = new URLSearchParams(window.location.search);
@@ -1249,7 +1233,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
           : legacyMapRoute
             ? 'materials'
             : requestedView;
-    const nextView = normalizedView && workspaceViews.some((item) => item.id === normalizedView) ? normalizedView as WorkspaceView : 'overview';
+    const nextView = normalizedView && workspaceViews.some((item) => item.id === normalizedView) ? normalizedView as WorkspaceView : (workspaceViews.some(item=>item.id===instance.capabilities.landingView)?instance.capabilities.landingView:'overview') as WorkspaceView;
     const nextStoryView = legacyMapRoute ? null : normalizedStoryView(
       requestedStoryView,
       legacyStructureRoute,
@@ -1724,6 +1708,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       || pending.phaseId || pending.gateId || pending.scopeType || pending.objectId || pending.legacyStage
     );
     const finishRestore = () => window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+      if(restoreController.signal.aborted)return;
       if (nextView === 'materials' && !initial) window.dispatchEvent(new Event('review:material-panel-location'));
       const restore = historyState.reviewRestore;
       if (restore) {
@@ -1787,9 +1772,10 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
         finishRestore();
         return;
       }
-      void Promise.all(requests.map((request) => onNeedProduction(request))).then(async (models) => {
-        const successfulRequest = requests.find((_request, index) => Boolean(models[index]));
-        const model = successfulRequest ? await onNeedProduction(successfulRequest) : null;
+      const restorationHref=window.location.href;
+      void Promise.all(requests.map((request) => onNeedProduction({...request,signal:restoreController.signal}))).then(async (models) => {
+        if(restoreController.signal.aborted||window.location.href!==restorationHref)return;
+        const model = models.filter((model):model is ProductionModel=>Boolean(model)).at(-1)||null;
         if (model) resolvePending(model);
         else setNavigationError('目标工作区的分页数据未能读取；已保留原链接，没有回退到旧全量兼容视图。');
         setUrlReady(true);
@@ -1809,7 +1795,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       ? 'settings' : requested === 'assets' || params.has('asset') ? 'materials'
         : ['targets', 'shots'].includes(requested || '') ? 'pipeline'
           : requested === 'work' ? 'overview' : params.get('materialMode') === 'structure' ? 'story'
-            : workspaceViews.some(item => item.id === requested) ? requested : 'overview';
+            : workspaceViews.some(item => item.id === requested) ? requested : (instance.capabilities.landingView||'overview');
     const nextStory = normalizedStoryView(params.get('storyMode'));
     const sameNarrativeModule = ['logic', 'audit'].includes(nextStory || '') && ['logic', 'audit'].includes(storyView);
     return next !== activeView || next === 'story' && !sameNarrativeModule && nextStory !== storyView;
@@ -1889,6 +1875,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     if (!urlReady || blockedPersistentRoute || pendingProductionIntentRef.current) return;
     if (activeView === 'story' && ((!resolvedEpisodePlan && !episodePlanError) || (narrativeCandidate && narrativeLocationRevision !== resolvedEpisodePlan?.revisionId))) return;
     const url = new URL(window.location.href);
+    if(url.pathname==='/'&&!url.search&&!url.hash)return;
     url.searchParams.set('view', activeView);
     if (activeView === 'story') {
       url.searchParams.set('storyMode', storyView === 'audit' ? 'logic' : storyView);
@@ -2152,10 +2139,22 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     window.setTimeout(() => searchToggleRef.current?.focus(), 0);
   }
 
+  function goHome() {
+    if(!canLeaveCurrentView())return;
+    saveMaterialBrowseLocation(new URL(window.location.href));
+    pendingProductionIntentRef.current=null;
+    window.history.pushState({},'', '/');
+    setLightbox(null);setSearchResultsOpen(false);setQuery('');setNavigationError('');
+    locationRestorerRef.current({},false);
+    window.dispatchEvent(new Event('review:root-location'));
+    mainScrollRef.current?.scrollTo({top:0});
+  }
+
   function goToView(view: WorkspaceView, pushHistory = true, origin?: NavigationOrigin) {
     if (blockedPersistentRoute) return;
     if (view !== activeView && !canLeaveCurrentView()) return;
-    if (view !== activeView && pushHistory && urlReady) {
+    if (view !== activeView && pushHistory) {
+      restoreReadRef.current?.abort();pendingProductionIntentRef.current=null;setUrlReady(true);restoringHistoryRef.current=false;
       const url = new URL(window.location.href);
       if(activeView==='materials')saveMaterialBrowseLocation(url);
       cleanDestinationUrl(url);
@@ -2756,7 +2755,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     <EvidenceReaderProvider onInternalNavigate={(href, label) => navigateToInternalHref(href, `判断依据 · ${label}`)}>
     <main className="review-shell">
       <aside className="workspace-sidebar" aria-label="审阅台主导航">
-        <button className="sidebar-brand" onClick={() => goToView('overview')} aria-label="返回审阅台首页">
+        <button className="sidebar-brand" onClick={goHome} aria-label="返回审阅台首页">
           <span className="brand-mark">{instance.branding.mark}</span>
           <span><b>{instance.branding.title}</b><small>LOCAL PRODUCTION DESK</small></span>
         </button>
@@ -2786,7 +2785,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
         <div className={`workspace-content ${navigationOrigin ? 'has-source-return' : ''}`}>
           {navigationOrigin && <nav className="source-return-bar" aria-label="返回来源"><button type="button" onClick={() => window.history.back()}>← 返回：{navigationOrigin.label}</button><span>浏览器后退会恢复来源页、筛选和滚动位置</span></nav>}
           {navigationError && <div className="navigation-error" role="alert"><b>没有跳到错误对象</b><span>{navigationError}</span><button type="button" onClick={blockedPersistentRoute ? recoverBlockedPersistentRoute : () => setNavigationError('')}>{blockedPersistentRoute === 'EPISODE' ? '打开当前分集目录' : blockedPersistentRoute ? '回到当前导航' : '关闭'}</button></div>}
-          {activePagedWindow && !activeProductionReady && <section className="production-view-loading" aria-live="polite"><small>COMPLETE WORKSPACE DATA</small><h2>{activePagedWindow.error ? '当前工作区数据未完整读取' : '正在装入完整工作区数据'}</h2><p>{activePagedWindow.error ? `本地只读接口返回异常：${activePagedWindow.error}。没有展示不完整结果，也没有回退到旧全量兼容视图。` : activePagedWindow.resource === 'production' ? `正在读取当前制作门禁；完整前不会把未读取对象显示为0。` : '正在读取素材目录摘要；每批到达后即可浏览，选择素材时读取完整生产资料。'}</p>{activePagedWindow.error && <button type="button" onClick={() => void onNeedProduction({ resource: activePagedWindow.resource, filters: activePagedWindow.filters, mode: activePagedWindow.resource === 'production' ? (activePagedWindow.initialized ? 'next' : 'initial') : 'all' })}>重新完整读取</button>}{activePagedWindow.loading && <span>读取中…</span>}</section>}
+          {activePagedWindow && !activeProductionReady && <section className="production-view-loading" aria-live="polite"><h2>{activePagedWindow.error ? '当前工作区数据未完整读取' : '正在装入完整工作区数据'}</h2><p>{activePagedWindow.error ? `读取未完成：${activePagedWindow.error}` : activePagedWindow.resource === 'production' ? `正在读取制作准备、集场上下文与制作对象…` : '正在读取完整素材目录；全部必要数据校验一致后展示，详情按需读取。'}</p>{activePagedWindow.error && <button type="button" onClick={() => void onNeedProduction({ resource: activePagedWindow.resource, filters: activePagedWindow.filters, mode:'all',force:true })}>重新完整读取</button>}{activePagedWindow.loading && <span>读取中…</span>}</section>}
           {activeView === 'overview' && <section className="workspace-view overview-view" aria-labelledby="overview-title">
             <CurrentWorkCenter
               reviewRemaining={reviewableStoryboardCount}
@@ -2923,7 +2922,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
           catalogTotal={materialWindow.total}
           model={productionModel}
           snapshotId={reviewData.snapshotId}
-          stateProjection={operationalProjection}
+          stateProjection={null}
           viewState={materialCenterState}
           onViewStateChange={setMaterialCenterState}
           onOpenStoryScene={(sceneId) => openStoryScene(sceneId, `素材管理 · ${sceneId}`)}

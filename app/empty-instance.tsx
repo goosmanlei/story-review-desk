@@ -110,6 +110,14 @@ export function EmptyInstanceDesk({ snapshotId }: { snapshotId: string }) {
     return()=>window.removeEventListener('review:sources-updated',refresh);
   }, []);
 
+  function goHome() {
+    if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;
+    saveMaterialBrowseLocation(new URL(location.href));
+    history.pushState({},'', '/');
+    selectView(defaultView);setStoryMode('source');setPhaseId('PREVIS');
+    window.dispatchEvent(new Event('review:root-location'));
+    document.querySelector('.workspace-main')?.scrollTo({top:0});window.scrollTo({top:0});
+  }
   function navigate(next: string) {
     if (next === view) return;
     if (!window.dispatchEvent(new Event("review:configuration-before-leave", {cancelable:true}))) return;
@@ -133,7 +141,7 @@ export function EmptyInstanceDesk({ snapshotId }: { snapshotId: string }) {
   const startStory=<button className="empty-desk-action" onClick={()=>{setView('system');const url=new URL(location.href);url.searchParams.set('view','system');url.searchParams.set('systemTab','start');if(url.href!==location.href)history.pushState({},'',url);window.document.querySelector('.workspace-main')?.scrollTo({top:0});window.scrollTo({top:0});}}>确认系统规则 →</button>;
   return <main className="review-shell empty-desk">
     <aside className="workspace-sidebar" aria-label="审阅台主导航">
-      <button className="sidebar-brand" onClick={()=>navigate('overview')} aria-label="返回审阅台首页"><span className="brand-mark">{instance.branding.mark}</span><span><b>{instance.branding.title}</b><small>LOCAL PRODUCTION DESK</small></span></button>
+      <button className="sidebar-brand" onClick={goHome} aria-label="返回审阅台首页"><span className="brand-mark">{instance.branding.mark}</span><span><b>{instance.branding.title}</b><small>LOCAL PRODUCTION DESK</small></span></button>
       <nav className="workspace-nav" aria-label="主导航">{views.map(([id,label,index,desc])=><button key={id} aria-label={label} className={view===id?'active':''} aria-current={view===id?'page':undefined} onClick={()=>navigate(id)}><span>{index}</span><div><b>{label}</b><small>{desc}</small></div></button>)}</nav>
       <div className="sidebar-snapshot"><i/><div><b>{instance.storyTitle}</b><span>故事、素材与审阅记录独立保存</span></div></div>
     </aside>

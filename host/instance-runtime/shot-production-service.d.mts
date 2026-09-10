@@ -20,7 +20,7 @@ export type ShotProductionWorkspace = {
   manifestTargets:Array<{workItemId:string;shotId:string|null;gateId:string;label:string}>;
   manifestJobs:Array<{jobId:string;workItemId:string;status:string;error?:string}>;jobs:Array<Record<string,unknown>>;
 };
-export function readCurrentShotProductionModel(tx:InstanceReadUnit,options?:ShotProductionApiOptions):Promise<{view:RepositoryView;model:Record<string,unknown>;state:Record<string,unknown>}>;
+export function readCurrentShotProductionModel(tx:InstanceReadUnit,options?:ShotProductionApiOptions&{readinessOnly?:boolean}):Promise<{view:RepositoryView;model:Record<string,unknown>;state:Record<string,unknown>}>;
 export function getShotProductionWorkspace(tx:InstanceReadUnit,input:{sceneId:string;api:unknown}):Promise<ShotProductionWorkspace>;
 export function saveShotProductionDraft(tx:InstanceUnit,input:ShotProductionDraftInput,options:ShotProductionApiOptions):Promise<{revisionId:string;contentHash:string;formalAdoptionPerformed:false}>;
 export function previewShotProduction(tx:InstanceReadUnit,input:ShotProductionPreviewInput,options:ShotProductionApiOptions):Promise<ShotProductionPreview>;

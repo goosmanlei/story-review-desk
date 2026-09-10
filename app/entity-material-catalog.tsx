@@ -1,4 +1,6 @@
 'use client';
+import {readWorkspaceJson,readWorkspaceBatch,workspaceCacheScope} from './workspace-read-cache';
+import {useInstanceProfile} from './instance-context';
 
 import {runtimePath} from './runtime-path';
 import {currentMaterialDirectoryRow,atomicMaterialDirectoryRow} from './material-requirement-presentation';
@@ -11,7 +13,7 @@ import {RelationshipCanvas,type CanvasNode,type CanvasEdge} from './relationship
 import {StorySettingsWorkspace} from './story-settings-workspace';
 import {readManagementResponse} from './system-management-client';
 import {publicRef,visibleText} from './review-semantics';
-import {AssetReview,loadTrialSnapshots,type TrialSnapshot,type TrialAsset} from './trial-asset-review';
+import {AssetReview,loadTrialWorkspace,type TrialSnapshot,type TrialAsset} from './trial-asset-review';
 import {useRuntimeMode} from './runtime-mode';
 import {classifiedMaterial,materialMediaTypeOptions,materialCreatorStageOptions,type MaterialCreatorStageProjection,type MaterialMediaType,type MaterialCreatorStage} from './material-taxonomy';
 import {allMaterialCatalogFilters,filterMaterialCatalogRows,isAllCatalogValue,materialCatalogEntityGroups,materialCatalogFacetCounts,materialCatalogUsage,uniqueMaterialCatalogRows,type MaterialCatalogFacet,type MaterialCatalogFilters,type MaterialCatalogPreparation,type MaterialCatalogRow} from './material-catalog-facets';
@@ -63,23 +65,24 @@ function CatalogChips({label,value,options,onChange,limit=10,defaultExpanded=fal
 
 export function EntityMaterialCatalog({model,requirements,selectedRequirement,onSelect,stageFor,inspector,inspectorReady=true,episodeScope,sceneScope,mediaFilter,stageFilter,search,catalogLoading=false,onFiltersChange}:Props){
  const {hostedReadOnly}=useRuntimeMode();
+ const instance=useInstanceProfile(),cacheScope=workspaceCacheScope(instance);
  const [workspace,setWorkspace]=useState<WorkspaceState|null>(null),[directory,setDirectory]=useState<Directory|null>(null),[preparation,setPreparation]=useState<MaterialCatalogPreparation|null>(null);
  const [canvasHighlight,setCanvasHighlight]=useState<{entityId:string;nodeId?:string}>({entityId:''});
+ const [reading,setReading]=useState(true);
  const [error,setError]=useState(''),[refresh,setRefresh]=useState(0),[selectedEntity,setSelectedEntity]=useState(''),[directoryQuery,setDirectoryQuery]=useState('');
  const [panel,setPanel]=useState<MaterialPanelIntent|null>(null),[panelError,setPanelError]=useState(''),[trialSnapshots,setTrialSnapshots]=useState<TrialSnapshot[]>([]),[trialVersion,setTrialVersion]=useState('');
  const [definitionOwner,setDefinitionOwner]=useState<'MATERIAL'|'SETTINGS'>('MATERIAL'),[edit,setEdit]=useState<{collection:'states'|'representations'|'requirements'|'relations';id:string}|null>(null);
  const [filters,setFilters]=useState<MaterialCatalogFilters>(()=>({...allMaterialCatalogFilters(),mediaType:normalize(mediaFilter),creatorStage:normalize(stageFilter),episodeUid:normalize(episodeScope),sceneId:normalize(sceneScope),search}));
  const [initialLocation]=useState(()=>typeof window==='undefined'?null:window.location.href);
  const [lastPanelLocation,setLastPanelLocation]=useState('');
- useEffect(()=>{const c=new AbortController();void Promise.all([fetch('/api/instance/domain-workspaces?owner=MATERIAL',{cache:'no-store',signal:c.signal}).then(readManagementResponse<WorkspaceState>),fetch('/api/instance/material-directory',{cache:'no-store',signal:c.signal}).then(readManagementResponse<Directory>),fetch('/api/instance/production-preparation',{cache:'no-store',signal:c.signal}).then(readManagementResponse<MaterialCatalogPreparation>)]).then(([w,d,p])=>{setWorkspace(w);setDirectory(d);setPreparation(p);setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[refresh]);
+ useEffect(()=>{const c=new AbortController();setReading(true);setError('');const urls=['/api/instance/domain-workspaces?owner=MATERIAL','/api/instance/material-directory','/api/instance/production-preparation'];void (hostedReadOnly?readWorkspaceBatch<unknown>(urls,cacheScope,c.signal).then(values=>({values,trials:[] as TrialSnapshot[]})):loadTrialWorkspace(c.signal,cacheScope,urls)).then(({values,trials})=>{if(c.signal.aborted)return;const [w,d,p]=values as [WorkspaceState,Directory,MaterialCatalogPreparation];setWorkspace(w);setDirectory(d);setPreparation(p);setTrialSnapshots(trials);setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);}).finally(()=>{if(!c.signal.aborted)setReading(false);});return()=>c.abort();},[refresh,cacheScope,hostedReadOnly]);
  useEffect(()=>{const f=()=>setRefresh(v=>v+1);for(const e of ['review:relations-updated','review:operations-updated','review:sources-updated','focus'])window.addEventListener(e,f);return()=>{for(const e of ['review:relations-updated','review:operations-updated','review:sources-updated','focus'])window.removeEventListener(e,f);};},[]);
- const readLocation=useCallback((href:string)=>{setLastPanelLocation(href);const u=new URL(href),intent=materialPanelIntent(u.searchParams);setPanelError(intent.error);setPanel(intent.kind==='closed'?null:intent);setSelectedEntity(intent.entityId);setTrialVersion(intent.trial?intent.versionId:'');setEdit(intent.definition||null);setFilters(current=>({...current,entityType:u.searchParams.get('materialEntityType')||'ALL',entityId:'ALL',stateId:'ALL'}));if(intent.kind==='closed'&&!intent.error&&!u.searchParams.has('materialPanel')){u.searchParams.set('materialPanel','closed');history.replaceState(history.state,'',u);saveMaterialBrowseLocation(u);}},[]);
+ const readLocation=useCallback((href:string)=>{setLastPanelLocation(href);const u=new URL(href),intent=materialPanelIntent(u.searchParams);setPanelError(intent.error);setPanel(intent.kind==='closed'?null:intent);setSelectedEntity(intent.entityId);setTrialVersion(intent.trial?intent.versionId:'');setEdit(intent.definition||null);setFilters(current=>({...current,entityType:u.searchParams.get('materialEntityType')||'ALL',entityId:'ALL',stateId:'ALL'}));if(intent.kind==='closed'&&!intent.error&&!u.searchParams.has('materialPanel')&&(u.search||u.hash)){u.searchParams.set('materialPanel','closed');history.replaceState(history.state,'',u);saveMaterialBrowseLocation(u);}},[]);
  // eslint-disable-next-line react-hooks/set-state-in-effect -- Hydrate the original URL once, then react only to explicit navigation events.
  useEffect(()=>{readLocation(initialLocation||location.href);},[initialLocation,readLocation]);
- useEffect(()=>{const restore=(event:Event)=>{const incoming=materialPanelIntent(new URL(location.href).searchParams),previous=lastPanelLocation?new URL(lastPanelLocation):null;const sameDefinition=Boolean(new URL(location.href).searchParams.get('view')==='materials'&&previous?.searchParams.get('view')==='materials'&&edit&&incoming.definition?.collection===edit.collection&&incoming.definition.id===edit.id&&incoming.entityId===(previous?.searchParams.get('entity')||''));if(edit&&!sameDefinition&&!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true}))){event.stopImmediatePropagation();if(lastPanelLocation)history.pushState(history.state,'',lastPanelLocation);return;}readLocation(location.href);};window.addEventListener('popstate',restore,true);window.addEventListener('review:material-panel-location',restore);return()=>{window.removeEventListener('popstate',restore,true);window.removeEventListener('review:material-panel-location',restore);};},[edit,lastPanelLocation,readLocation]);
+ useEffect(()=>{const restore=(event:Event)=>{const incoming=materialPanelIntent(new URL(location.href).searchParams),previous=lastPanelLocation?new URL(lastPanelLocation):null;const sameDefinition=Boolean(new URL(location.href).searchParams.get('view')==='materials'&&previous?.searchParams.get('view')==='materials'&&edit&&incoming.definition?.collection===edit.collection&&incoming.definition.id===edit.id&&incoming.entityId===(previous?.searchParams.get('entity')||''));if(edit&&!sameDefinition&&!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true}))){event.stopImmediatePropagation();if(lastPanelLocation)history.pushState(history.state,'',lastPanelLocation);return;}readLocation(location.href);};window.addEventListener('popstate',restore,true);window.addEventListener('review:material-panel-location',restore);const reset=()=>readLocation(location.href);window.addEventListener('review:root-location',reset);return()=>{window.removeEventListener('popstate',restore,true);window.removeEventListener('review:material-panel-location',restore);window.removeEventListener('review:root-location',reset);};},[edit,lastPanelLocation,readLocation]);
  // eslint-disable-next-line react-hooks/set-state-in-effect -- The parent owns these public filter axes, not drawer open intent.
  useEffect(()=>{setFilters(current=>({...current,mediaType:normalize(mediaFilter),creatorStage:normalize(stageFilter),episodeUid:normalize(episodeScope),sceneId:normalize(sceneScope),search}));},[mediaFilter,stageFilter,episodeScope,sceneScope,search]);
- useEffect(()=>{if(hostedReadOnly)return;const c=new AbortController();void loadTrialSnapshots(c.signal).then(setTrialSnapshots).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[hostedReadOnly,refresh]);
  const readOnly=hostedReadOnly||workspace?.readOnly===true;
  const graph=useMemo(()=>directory?.graph||workspace?.graph||{schemaVersion:'1.0',entities:[],states:[],representations:[],relations:[],requirements:[]} as DomainGraph,[directory,workspace]);
  const entityById=useMemo(()=>new Map(graph.entities.map(entity=>[entity.id,entity])),[graph]),stateById=useMemo(()=>new Map(graph.states.map(state=>[state.id,state])),[graph]);
@@ -192,8 +195,12 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
  const renderEvidence=(row:{authority?:string;evidence?:unknown[]})=><section className="material-panel-evidence"><h3>依据与维护边界</h3><p>依据级别：{row.authority||'UNKNOWN'}。定义及其关联不证明已生成、正式采用或实际观察。</p>{row.evidence?.length?<pre>{JSON.stringify(row.evidence,null,2)}</pre>:<p>未登记进一步来源证据。</p>}</section>;
  const activeFilterCount=Object.entries(filters).filter(([key,value])=>key==='search'?Boolean(value.trim()):!isAllCatalogValue(value)).length;
  const renderFacet=(facet:MaterialCatalogFacet,label:string,defaultExpanded=false)=><CatalogChips key={facet} label={label} value={filters[facet]} options={facetOptions[facet]||[]} defaultExpanded={defaultExpanded} onChange={value=>changeFilter(facet,value)}/>;
- return <div className="material-entity-review" data-material-view="classification" aria-busy={catalogLoading||!workspace}>
-  {catalogLoading&&<p role="status">完整需求目录正在载入，当前数字仅表示已载入记录。</p>}
+ const waiting=Boolean(catalogLoading||reading||error);
+ const loading=<div className="material-catalog-loading" aria-busy={!error}><p role={error?'alert':'status'}>{error||'正在读取完整素材目录、设定与集场用途…'}</p>{error&&<button onClick={()=>setRefresh(value=>value+1)}>重新完整读取</button>}</div>;
+ if(!workspace||!directory||!preparation)return loading;
+ // Keep mounted editors and their leave guards while revalidating; no partial
+ // directory is visible and a background read cannot discard a local draft.
+ return <>{waiting&&loading}<div className="material-entity-review" data-material-view="classification" aria-busy={waiting} hidden={waiting} style={waiting?{display:'none'}:undefined}>
   {(invalidEpisode||invalidScene)&&<p role="alert" className="material-invalid-scope">集、场筛选的永久身份不属于当前候选。已保留原筛选值，不会自动清空或换绑；请核对来源后重新点选当前集场。</p>}
   {panelError&&<p role="alert" className="material-invalid-panel">{panelError}</p>}
   {directory&&workspace&&explicitEntityId&&!activeEntityId&&<p role="alert">所选实体身份未匹配当前目录，已保留原值；请核对来源或重新选择实体。</p>}
@@ -217,5 +224,5 @@ export function EntityMaterialCatalog({model,requirements,selectedRequirement,on
     {panel?.kind==='material'&&panelEntry&&<section className="material-entity-selected-detail" aria-label="统一素材详情">{trial?<MaterialProgressBadge stage={panelEntry.creatorStage}/>:null}{trial?<article className="material-detail trial-integrated"><p className="material-stage-note">独立试制 · 原结论不重审、不提升为全剧正式采用</p>{asset?<><fieldset className="material-version-chips"><legend>查看版本</legend>{trialAssets.map(row=><button type="button" key={row.versionId} aria-pressed={row.versionId===asset.versionId} onClick={()=>chooseTrialVersion(row.versionId)}>版本 {row.version}</button>)}</fieldset><AssetReview readOnly={readOnly} key={asset.versionId} asset={asset} etag={trialSnapshot!.mutationEtag} currentVersion={asset===trialAssets.at(-1)} refresh={async()=>{setRefresh(value=>value+1);window.dispatchEvent(new Event('review:operations-updated'));}}/></>:<section className="material-output-zone"><h3>{trial.title}</h3><p>{hostedReadOnly?'试制原件只保存在本地，镜像不托管。':'正在读取已登记的试制版本…'}</p></section>}<section className="material-purpose-usage"><h3>为什么需要及用在哪里</h3><p>{trial.reason}</p><p>当前正式集场输入尚未绑定；原放行与返修意见完整保留。</p></section></article>:selectedRequirement?.id===panelEntry.id?inspector:<p role="status">正在精确读取这项素材，未以默认素材替代。</p>}{panelEntry.requirement&&!inspectorReady&&<small>实际版本与完整生产资料核对中。</small>}</section>}
    </>}
   </MaterialReviewDrawer>
- </div>;
+ </div></>;
 }

@@ -1,3 +1,4 @@
+import {committedGet} from '../_committed-get';
 import * as store from '../../v8/_store';
 import * as workflow from '../../v8/_workflow';
 import {configuredGates} from '../../../gate-evaluation';
@@ -10,7 +11,7 @@ const api={...store,...workflow,configuredGates,projectEpisodeNarrativeReleases}
 export async function GET(request:Request){try{
  const sceneId=new URL(request.url).searchParams.get('sceneId');if(!sceneId)throw new HttpError(422,'请选择永久场');
  if(store.hostedReadOnlyMode()){const data=await store.reviewData(),operations=await store.operationalSnapshot();return jsonResponse({sceneId,readOnly:true,basis:null,defaultContent:null,draft:null,draftHeadRevisionId:null,jobs:[],availableInputs:[],blockers:[],currentPlan:(data.productionModel as unknown as {shotProductionPlans?:Array<{sceneId:string;scopeRole:string}>}).shotProductionPlans?.find(p=>p.sceneId===sceneId&&p.scopeRole==='CURRENT')||null,readiness:shotProductionReadiness(data.productionModel,operations.stateProjection,sceneId)});}
- const repo=await domainRepository();return await repo.readTransaction(async tx=>jsonResponse({...await getShotProductionWorkspace(tx,{sceneId,api}),readOnly:store.instanceReadOnlyMode()}));
+ const repo=await domainRepository();return await committedGet(repo,`shot-production:${sceneId}:${store.instanceReadOnlyMode()}`,async tx=>({...await getShotProductionWorkspace(tx,{sceneId,api}),readOnly:store.instanceReadOnlyMode()}),request);
  }catch(error){return domainError(error);}}
 export async function POST(request:Request){try{
  const {idempotencyKey,ifMatch}=await domainMutation(request),body=domainBody(await request.json(),['action','sceneId','expectedReleaseId','expectedDraftRevisionId','content','draftRevisionId','previewHash','workItemId','manifestHash']);

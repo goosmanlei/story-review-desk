@@ -105,11 +105,18 @@ export async function queryObjects(tx,{releaseId,collection,ids,scopeType,scopeI
   return {items:result.rows.map(r=>summary?objectSummary(r.payload):r.payload),total:count,lastId:result.rows.at(-1)?.object_id||null};
 }
 const projectionCollections={materialRequirementsById:'materialRequirements',materialWorkItemsById:'materialWorkItems',workItemsById:'workItems',workPackagesById:'workPackages',assetFamiliesById:'assetFamilies',assetVersionsById:'assetVersions',expectedOutputsById:'expectedOutputs',scriptScenesById:'sceneScriptRevisions',scopeLocksById:'scopeLocks'};
-export async function updateOperationalProjection(tx,{releaseId,eventSequence,stateProjection}) {
+export async function operationalProjectionMatches(tx,{releaseId,eventSequence,operationRevision}) {
+  const result=await tx.query(`SELECT v.projection_version,v.event_sequence,s.payload
+    FROM read_projection_versions v LEFT JOIN read_sections s ON s.release_id=v.release_id AND s.section='operationalProjectionRevision'
+    WHERE v.release_id=$1`,[releaseId]);
+  const row=result.rows[0];
+  return Number(row?.projection_version)===QUERY_MODEL_VERSION && Number(row?.event_sequence)===eventSequence
+    && (operationRevision===undefined || row?.payload?.operationRevision===operationRevision);
+}
+export async function updateOperationalProjection(tx,{releaseId,eventSequence,stateProjection,operationRevision}) {
   if(tx.backend!=='postgres')return;
   await ensureQueryModel(tx,{releaseId});
-  const version=await tx.query('SELECT event_sequence FROM read_projection_versions WHERE release_id=$1',[releaseId]);
-  if(Number(version.rows[0]?.event_sequence)===eventSequence)return;
+  if(await operationalProjectionMatches(tx,{releaseId,eventSequence,operationRevision}))return;
   const entries=[];
   for(const [key,collection]of Object.entries(projectionCollections))for(const [id,payload]of Object.entries(stateProjection[key]||{}))entries.push({collection,object_id:id,payload});
   // Actual candidates appended after a release are complete read objects as well.
@@ -128,4 +135,5 @@ export async function updateOperationalProjection(tx,{releaseId,eventSequence,st
   await tx.query(`DELETE FROM read_operational_objects p WHERE release_id=$1 AND NOT EXISTS (
     SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS x(collection text,object_id text) WHERE x.collection=p.collection AND x.object_id=p.object_id)`,[releaseId,JSON.stringify(entries.map(({collection,object_id})=>({collection,object_id})))]);
   await tx.query('UPDATE read_projection_versions SET event_sequence=$2,projection_version=$3 WHERE release_id=$1',[releaseId,eventSequence,QUERY_MODEL_VERSION]);
+  await tx.query("INSERT INTO read_sections(release_id,section,payload) VALUES($1,'operationalProjectionRevision',$2::jsonb) ON CONFLICT(release_id,section) DO UPDATE SET payload=excluded.payload",[releaseId,JSON.stringify({operationRevision:operationRevision??null})]);
 }

@@ -17,6 +17,7 @@ const ids={a:'material-person-a',b:'material-person-b',place:'material-place',da
 const hash=(n:number)=>n.toString(16).padStart(64,'0');
 test('五轴素材筛选都可再次点击取消，其他筛选保持不变',async({page})=>{
  const f=await materialFixture(page);await open(page,'classification');
+ expect(f.materialRequests.every(query=>!new URLSearchParams(query).has('requirementId'))).toBe(true);
  for(const [axis,label] of [['媒介','图像'],['实体类别','人物'],['集','E01'],['场','S01'],['推进到哪一步','已定义']]){
   const selected=chip(page,axis,label);await selected.click();await expect(selected).toHaveAttribute('aria-pressed','true');
   await selected.click();await expect(selected).toHaveAttribute('aria-pressed','false');

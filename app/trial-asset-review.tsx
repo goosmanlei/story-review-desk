@@ -1,5 +1,6 @@
 'use client';
 
+import {readWorkspaceJson,readWorkspaceBatch} from './workspace-read-cache';
 import {runtimePath} from './runtime-path';
 /* eslint-disable @next/next/no-img-element -- Review displays the exact registered media bytes. */
 
@@ -57,6 +58,22 @@ export async function loadTrialSnapshots(signal: AbortSignal): Promise<TrialSnap
   const index = await loadTrialScopes(signal);
   const snapshots = await Promise.all(index.scopes.map((scope) => loadTrialSnapshot(signal, scope.id)));
   return snapshots.filter((snapshot): snapshot is TrialSnapshot => snapshot !== null);
+}
+/** All catalog prerequisites and trial scopes must describe one committed basis. */
+export async function loadTrialWorkspace(signal:AbortSignal,scope:string,prerequisites:string[]) {
+  for(let attempt=0;;attempt++) {
+    const index=await readWorkspaceJson<TrialScopeIndex>('/api/trial/scopes',scope,signal);
+    if(!Array.isArray(index.scopes))throw new Error('试制范围格式不匹配。');
+    const urls=index.scopes.map(item=>'/api/trial/snapshot?scopeId='+encodeURIComponent(item.id));
+    const [checked,...values]=await readWorkspaceBatch<unknown>(['/api/trial/scopes',...prerequisites,...urls],scope,signal);
+    if(JSON.stringify((checked as TrialScopeIndex).scopes.map(item=>item.id))!==JSON.stringify(index.scopes.map(item=>item.id))) {
+      if(attempt===0)continue;
+      throw new Error('试制范围在读取中变化，请重新完整读取。');
+    }
+    const trials=values.slice(prerequisites.length) as TrialSnapshot[];
+    for(const [i,data] of trials.entries())if(data.mode!=='LOCAL_TRIAL'||data.scope?.id!==index.scopes[i].id||!Array.isArray(data.assets)||!Array.isArray(data.recipes))throw new Error('试制资料范围或格式不匹配。');
+    return {values:values.slice(0,prerequisites.length),trials:trials.map(data=>data.assets.every(asset=>asset.scopeId===data.scope.id)?data:{...data,assets:data.assets.map(asset=>({...asset,scopeId:data.scope.id}))})};
+  }
 }
 export async function loadTrialSnapshot(signal: AbortSignal, scopeId?: string): Promise<TrialSnapshot | null> {
   const response = await fetch('/api/trial/snapshot' + (scopeId ? `?scopeId=${encodeURIComponent(scopeId)}` : ''), { cache: 'no-store', signal });

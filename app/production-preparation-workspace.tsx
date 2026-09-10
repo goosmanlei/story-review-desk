@@ -1,4 +1,7 @@
 'use client';
+import {WorkspaceReadBoundary} from './workspace-read-boundary';
+import {readWorkspaceJson,workspaceCacheScope} from './workspace-read-cache';
+import {useInstanceProfile} from './instance-context';
 
 import {runtimePath} from './runtime-path';
 import {useEffect,useState,useRef} from 'react';
@@ -79,24 +82,25 @@ type PreparationWorkflow={phases:Array<{id:string;label:string;order?:number;ent
 type Props={workflow?:PreparationWorkflow;initialPhaseId?:string|null;initialGateId?:string|null;initialCreatorStageId?:string|null;renderStage?:(context:PreparationStageContext)=>React.ReactNode;onStageChange?:(phaseId:string,gateId:string,creatorStageId?:CreatorProductionStageId,context?:PreparationStageContext)=>void};
 export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialGateId,initialCreatorStageId,renderStage,onStageChange}:Props={}){
  const {hostedReadOnly}=useRuntimeMode();
+ const instance=useInstanceProfile(),cacheScope=workspaceCacheScope(instance);
  const [state,setState]=useState<State|null>(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0),[selected,setSelected]=useState(''),[selectedEpisode,setSelectedEpisode]=useState(''),[stageSelection,setStageSelection]=useState(''),[gateSelection,setGateSelection]=useState(''),[comment,setComment]=useState(''),[busy,setBusy]=useState(false),[editing,setEditing]=useState(false),[draft,setDraft]=useState<Record<string,unknown>>({}),[section,setSection]=useState('INTENT');
  const [remoteWorkflow,setRemoteWorkflow]=useState<PreparationWorkflow|null>(null),[configurationError,setConfigurationError]=useState('');
  const dirty=useRef(false),latestState=useRef<State|null>(null),locationSelection=useRef({href:'',episodeUid:'',sceneId:'',stageId:'',gateId:''});
- useEffect(()=>{if(workflow)return;const c=new AbortController();void fetch('/api/instance/workflow',{cache:'no-store',signal:c.signal}).then(readManagementResponse<{definition?:PreparationWorkflow}>).then(value=>{if(c.signal.aborted)return;if(!value.definition||value.definition.phases.length!==5||value.definition.gates.length!==15)throw Error('共享制作检查配置尚未完整');setRemoteWorkflow(value.definition);setConfigurationError('');}).catch(e=>{if(!c.signal.aborted){setRemoteWorkflow(null);setConfigurationError(e.message||'共享流程配置读取失败');}});return()=>c.abort();},[workflow,attempt]);
+ useEffect(()=>{if(workflow)return;const c=new AbortController();void readWorkspaceJson<{definition?:PreparationWorkflow}>('/api/instance/workflow',cacheScope,c.signal).then(value=>{if(c.signal.aborted)return;if(!value.definition||value.definition.phases.length!==5||value.definition.gates.length!==15)throw Error('共享制作检查配置尚未完整');setRemoteWorkflow(value.definition);setConfigurationError('');}).catch(e=>{if(!c.signal.aborted){setRemoteWorkflow(null);setConfigurationError(e.message||'共享流程配置读取失败');}});return()=>c.abort();},[workflow,attempt]);
  useEffect(()=>{dirty.current=Boolean(comment.trim()||editing);},[comment,editing]);
  useEffect(()=>{latestState.current=state;},[state]);
  useManagementDraftGuard(Boolean(comment.trim()||editing),'制作准备稿与意见');
- useEffect(()=>{const c=new AbortController();void fetch('/api/instance/production-preparation',{cache:'no-store',signal:c.signal}).then(readManagementResponse<State>).then(v=>{if(c.signal.aborted)return;const old=latestState.current;if(dirty.current&&old&&(old.revisionId!==v.revisionId||old.releaseId!==v.releaseId||v.stale)){setError('背景资料已变化。当前编辑及原版本基线已保留；保存时重新核对，不覆盖新修订。');return;}latestState.current=v;setState(v);setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[attempt]);
+ useEffect(()=>{const c=new AbortController();void readWorkspaceJson<State>('/api/instance/production-preparation',cacheScope,c.signal).then(v=>{if(c.signal.aborted)return;const old=latestState.current;if(dirty.current&&old&&(old.revisionId!==v.revisionId||old.releaseId!==v.releaseId||v.stale)){setError('背景资料已变化。当前编辑及原版本基线已保留；保存时重新核对，不覆盖新修订。');return;}latestState.current=v;setState(v);setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[attempt,cacheScope]);
  useEffect(()=>{const events=['review:operations-updated','review:sources-updated','review:relations-updated','review:configuration-updated','focus'];const f=()=>setAttempt(a=>a+1),visible=()=>{if(document.visibilityState==='visible')f();};events.forEach(e=>window.addEventListener(e,f));document.addEventListener('visibilitychange',visible);const timer=window.setInterval(visible,20000);return()=>{events.forEach(e=>window.removeEventListener(e,f));document.removeEventListener('visibilitychange',visible);window.clearInterval(timer);};},[]);
  useEffect(()=>{
   const restore=(event?:PopStateEvent)=>{
    const params=new URLSearchParams(window.location.search);if(event&&params.get('view')!=='pipeline')return;
    const next={href:window.location.href,episodeUid:params.get('preparationEpisode')||'',sceneId:params.get('preparationScene')||'',stageId:params.get('creatorStage')||'',gateId:params.get('productionGate')||''},previous=locationSelection.current;
    if(event&&next.episodeUid===previous.episodeUid&&next.sceneId===previous.sceneId&&next.stageId===previous.stageId&&next.gateId===previous.gateId)return;
-   if(event&&dirty.current&&!window.confirm('放弃本页未保存的编辑与意见并切换？')){event.stopImmediatePropagation();window.history.pushState({...window.history.state},'',previous.href);return;}
+   if(event&&!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true}))){event.stopImmediatePropagation();window.history.pushState({...window.history.state},'',previous.href);return;}
    dirty.current=false;setComment('');setEditing(false);locationSelection.current=next;setSelected(next.sceneId);setSelectedEpisode(next.episodeUid);setStageSelection(next.stageId);setGateSelection(next.gateId);
   };
-  restore();window.addEventListener('popstate',restore,true);return()=>window.removeEventListener('popstate',restore,true);
+  const reset=()=>restore();restore();window.addEventListener('popstate',restore,true);window.addEventListener('review:root-location',reset);return()=>{window.removeEventListener('popstate',restore,true);window.removeEventListener('review:root-location',reset);};
  },[]);
  const definition=workflow||remoteWorkflow;
  const requestedStage=stageSelection||initialCreatorStageId||'',resolvedStage=resolveCreatorProductionStage(requestedStage);
@@ -128,7 +132,7 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  useEffect(()=>{if(!episodeMode)return;const url=new URL(window.location.href);if(url.searchParams.has('scene')||url.searchParams.has('preparationScene')){url.searchParams.delete('scene');url.searchParams.delete('preparationScene');window.history.replaceState(window.history.state,'',url);locationSelection.current={...locationSelection.current,href:url.href,sceneId:''};}},[episodeMode]);
  function leaveDraft(){if((comment.trim()||editing)&&!confirm('放弃本页未保存的编辑与意见并切换？'))return false;dirty.current=false;setComment('');setEditing(false);return true;}
  function rememberLocation(episodeUid:string,sceneId:string){const params=new URLSearchParams(window.location.search);locationSelection.current={href:window.location.href,episodeUid,sceneId,stageId:params.get('creatorStage')||'',gateId:params.get('productionGate')||''};}
- function chooseContext(episodeUid:string,sceneId:string){if(!leaveDraft())return;const url=preparationSelectionUrl(episodeUid,episodeMode?'':sceneId,stage.id);if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);rememberLocation(episodeUid,episodeMode?'':sceneId);setSelectedEpisode(episodeUid);setSelected(episodeMode?'':sceneId);}
+ function chooseContext(episodeUid:string,sceneId:string){if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;dirty.current=false;setComment('');setEditing(false);const url=preparationSelectionUrl(episodeUid,episodeMode?'':sceneId,stage.id);if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);rememberLocation(episodeUid,episodeMode?'':sceneId);setSelectedEpisode(episodeUid);setSelected(episodeMode?'':sceneId);}
  function chooseScene(id:string){const next=episodeScenes.find(s=>s.sceneId===id);if(next)chooseContext(next.episodeUid,next.sceneId);}
  function chooseEpisode(uid:string){const nextEpisode=episodes.find(e=>e.episodeUid===uid);if(!nextEpisode)return;const next=episodeMode?undefined:scenes.find(s=>s.episodeUid===uid&&nextEpisode.sceneIds.includes(s.sceneId));chooseContext(uid,next?.sceneId||'');}
  function chooseCheck(stageId:CreatorProductionStageId,gateId:string){
@@ -147,7 +151,8 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  const stageContext:PreparationStageContext|undefined=!selectionError&&!stageError&&gate&&canonicalScopeType&&episode&&(episodeMode||scene)?{creatorStageId:stage.id,navigationScopeType,scopeType:canonicalScopeType,episodeUid:episode.episodeUid,...(!episodeMode&&scene?{sceneId:scene.sceneId}:{}),phaseId:gate.phaseId,gateId:gate.id}:undefined;
  const exportChecks=stageGates.filter(g=>stage.exportGateIds.includes(g.id)),regularChecks=stageGates.filter(g=>!stage.exportGateIds.includes(g.id));
  const checkButtons=(checks:typeof stageGates)=><div className="preparation-check-list">{checks.map(g=><button type="button" key={g.id} data-production-check={g.id} disabled={Boolean(selectionError)} aria-pressed={g.id===gate?.id} onClick={()=>chooseCheck(stage.id,g.id)}><strong>{g.label}</strong>{g.purpose&&<span>{g.purpose}</span>}</button>)}</div>;
- return <section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
+ if(!state||!definition)return <section className="production-preparation-loading" aria-busy={!error&&!configurationError}><p role={error||configurationError?'alert':'status'}>{error||configurationError||'正在读取制作准备与集场上下文…'}</p>{(error||configurationError)&&<button onClick={()=>setAttempt(value=>value+1)}>重新完整读取</button>}</section>;
+ return <WorkspaceReadBoundary><section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
   <nav className="creator-production-stages" aria-label="全剧制作模块">{CREATOR_PRODUCTION_STAGES.map((s,i)=><button type="button" key={s.id} data-creator-stage={s.id} disabled={Boolean(selectionError)} aria-pressed={s.id===stage.id} onClick={()=>chooseCheck(s.id,s.defaultGateId)}><small>{String(i+1).padStart(2,'0')}</small><strong>{s.label}</strong></button>)}</nav>
   {shotProductionMode&&<nav className="shot-production-step-navigation" aria-label="镜头制作六步骤">{checkButtons(regularChecks)}</nav>}
   <nav className="preparation-episode-chips" aria-label="制作上下文分集">{episodes.map(ep=><button type="button" key={ep.episodeUid} data-preparation-episode={ep.episodeUid} aria-pressed={ep.episodeUid===episode?.episodeUid} onClick={()=>chooseEpisode(ep.episodeUid)}><b>{ep.displayId}</b><span>{ep.title}</span></button>)}{state&&!episodes.length&&<p>尚未建立候选分集。正式制作范围仍待确定。</p>}</nav>
@@ -173,5 +178,5 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
     {state&&!state.content&&breakdownMode&&<section className="workflow-empty"><h3>尚未登记制作准备稿</h3><p>先基于完整候选整理各场作用、画面动作、实体状态和素材缺项。准备稿不会创建正式镜头身份。</p></section>}
    </main>
   </div>
- </section>;
+ </section></WorkspaceReadBoundary>;
 }

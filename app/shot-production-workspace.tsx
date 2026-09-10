@@ -1,4 +1,7 @@
 'use client';
+import {useInstanceProfile} from './instance-context';
+import {readWorkspaceJson,workspaceCacheScope} from './workspace-read-cache';
+import {useWorkspaceReadiness} from './workspace-read-boundary';
 import {useEffect,useState} from 'react';
 import {SpatialShotViewEditor} from './spatial-shot-view-editor';
 import {readManagementResponse} from './system-management-client';
@@ -17,9 +20,8 @@ const record=(value:unknown):value is Record<string,unknown>=>Boolean(value&&typ
 const nonempty=(value:unknown):value is string=>typeof value==='string'&&value.trim().length>0;
 const hash=(value:unknown)=>typeof value==='string'&&/^[a-f0-9]{64}$/.test(value);
 const sourceContent=(value:Workspace)=>value.draft?.content||value.currentPlan?.content||value.defaultContent;
-async function readWorkspace(sceneId:string,signal?:AbortSignal):Promise<Workspace>{
- const response=await fetch('/api/instance/shot-production?sceneId='+encodeURIComponent(sceneId),{cache:'no-store',signal});if(!response.ok)await readManagementResponse(response);
- const value:unknown=await response.json();
+async function readWorkspace(sceneId:string,scope:string,signal?:AbortSignal):Promise<Workspace>{
+ const value:unknown=await readWorkspaceJson('/api/instance/shot-production?sceneId='+encodeURIComponent(sceneId),scope,signal);
  if(!record(value)||value.sceneId!==sceneId||typeof value.readOnly!=='boolean'||(!value.readOnly&&!nonempty(value.releaseId))||!Array.isArray(value.jobs)||!Array.isArray(value.blockers)||!Array.isArray(value.availableInputs)||!record(value.readiness)||!Array.isArray(value.readiness.shots)||!('draft' in value)||!('currentPlan' in value)||!('draftHeadRevisionId' in value))throw Error('当前制作计划、草稿或任务回执无效，请重新读取');
  if(value.draft&&(!record(value.draft)||!nonempty(value.draft.revisionId)||value.draft.revisionId!==value.draftHeadRevisionId||!record(value.draft.content)||value.draft.content.sceneId!==sceneId||!Array.isArray(value.draft.content.shots)))throw Error('当前制作草稿回执无效，请重新读取');
  return value as Workspace;
@@ -28,15 +30,17 @@ const reasons:Record<string,string>={PRODUCTION_PLAN_REQUIRED:'尚未建立制�
 type WorkspaceProps={sceneId:string;episodeUid?:string;gateId:string;shotId?:string};
 export function ShotProductionWorkspace(props:WorkspaceProps){return <ShotProductionWorkspaceBody key={[props.sceneId,props.gateId,props.shotId||''].join(':')} {...props}/>;}
 function ShotProductionWorkspaceBody({sceneId,gateId,shotId}:WorkspaceProps){
+ const cacheScope=workspaceCacheScope(useInstanceProfile());
  const [nestedDirty,setNestedDirty]=useState(false);
  const [manifest,setManifest]=useState<ManifestPreview|null>(null);
  const [state,setState]=useState<Workspace|null>(null),[draft,setDraft]=useState<Content|null>(null),[dirty,setDirty]=useState(false),[error,setError]=useState(''),[busy,setBusy]=useState(false),[uncertain,setUncertain]=useState<ProductionAction|null>(null),[refresh,setRefresh]=useState(0),[preview,setPreview]=useState<ProductionPreview|null>(null);
  useManagementDraftGuard(dirty||Boolean(uncertain),'镜头制作设置');
- useEffect(()=>{const c=new AbortController();void readWorkspace(sceneId,c.signal).then(v=>{if(c.signal.aborted)return;setState(v);setDraft(sourceContent(v));setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[sceneId,refresh]);
+ useEffect(()=>{const c=new AbortController();void readWorkspace(sceneId,cacheScope,c.signal).then(v=>{if(c.signal.aborted)return;setState(v);setDraft(sourceContent(v));setError('');}).catch(e=>{if(!c.signal.aborted)setError(e.message);});return()=>c.abort();},[sceneId,refresh,cacheScope]);
  const reload=()=>{setState(null);setDraft(null);setDirty(false);setPreview(null);setManifest(null);setError('');setRefresh(v=>v+1);};
+ useWorkspaceReadiness(!state&&!error,error&&!state?error:'',reload);
  const update=(id:string,patch:Partial<Shot>)=>{if(busy||uncertain||state?.readOnly)return;setDraft(d=>d?{...d,shots:d.shots.map(s=>s.shotId===id?{...s,...patch}:s)}:d);setDirty(true);setPreview(null);setManifest(null);};
  async function inspectUnconfirmed(){if(busy)return;setBusy(true);try{
-  const value=await readWorkspace(sceneId);if(uncertain==='manifest-render'&&!Array.isArray((value as Workspace&{manifestJobs?:Job[]}).manifestJobs))throw Error('清单任务尚未读取，当前提交结果仍待核查');
+  const value=await readWorkspace(sceneId,cacheScope);if(uncertain==='manifest-render'&&!Array.isArray((value as Workspace&{manifestJobs?:Job[]}).manifestJobs))throw Error('清单任务尚未读取，当前提交结果仍待核查');
   setState(value);setDirty(JSON.stringify(draft)!==JSON.stringify(sourceContent(value)));setUncertain(null);setPreview(null);setManifest(null);setError('已重读当前制作计划、草稿及任务，本次编辑仍保留。请核对是否已经登记。');
  }catch(e){setError(e instanceof Error?e.message:'当前结果仍无法核查');}finally{setBusy(false);}}
  async function submit(action:ProductionAction,body:Record<string,unknown>){

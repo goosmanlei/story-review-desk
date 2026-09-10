@@ -1,7 +1,9 @@
+import {committedGet} from '../../instance/_committed-get';
+import {instanceRepository,hostedReadOnlyMode} from '../_store';
 import {errorResponse,HttpError,jsonResponse,operationalSnapshot,reviewData,deriveCurrentAdoptedMaterialSet,deriveCurrentMaterialRequirementSet} from '../_store';
 import type {EpisodePlanContent} from '../../../episode-plan-context';
 
-export async function GET(request:Request) {
+async function readResponse(request:Request) {
   try {
     const url=new URL(request.url),episodeUid=url.searchParams.get('episodeUid')||'',sceneId=url.searchParams.get('sceneId')||'';
     const data=await reviewData(),ops=await operationalSnapshot();
@@ -38,4 +40,11 @@ export async function GET(request:Request) {
     });
     return jsonResponse({snapshotId:data.snapshotId,episode:{episodeUid,displayId:episode.displayId,title:episode.title},sceneId,release:release?{id:release.id,state:release.state,canFlowDownstream:release.canFlowDownstream,reason:release.reason,reviewEventId:release.reviewEventId,episodeScriptReleaseSnapshot:release.episodeScriptReleaseSnapshot}:null,plans,wholePlanAdopted:false,formalShotCount:plans[1].state?.canFlowDownstream?(data.productionModel.shotPlanSetRevisions?.find(r=>r.scopeId===sceneId&&r.scopeRole==='CURRENT')?.denominator??null):null});
   }catch(error){return errorResponse(error,'本集制作入口不可用');}
+}
+
+export async function GET(request:Request) {
+ try {
+  const repo=hostedReadOnlyMode()?null:await instanceRepository();if(!repo)return readResponse(request);
+  return await committedGet(repo,`episode-production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request),value=await response.json() as {error?:string};if(!response.ok)throw new HttpError(response.status,value.error||'本集制作入口不可用');return value;},request);
+ }catch(error){return errorResponse(error,'本集制作入口不可用');}
 }

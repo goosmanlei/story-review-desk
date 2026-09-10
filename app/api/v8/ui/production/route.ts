@@ -1,3 +1,5 @@
+import {committedGet} from '../../../instance/_committed-get';
+import {instanceRepository,hostedReadOnlyMode} from '../../_store';
 import { projectIdFor } from '../../../../instance-profile';
 import {productionDirectory} from '../../_production-directory';
 import { normalizeEmptyProductionFilters } from '../../../../../host/instance-runtime/snapshot-contract.mjs';
@@ -107,7 +109,7 @@ function overlay(rows: Row[], projection: Record<string, Row | undefined>) {
   return rows.map((row) => ({ ...row, ...(projection[row.id] || {}) }));
 }
 
-export async function GET(request: Request) {
+async function readResponse(request: Request) {
   try {
     const [data, operations] = await Promise.all([reviewData(), operationalSnapshot()]);
     if (operations.snapshotId !== data.snapshotId) throw new HttpError(409, 'production projection snapshot changed during read');
@@ -281,4 +283,12 @@ export async function GET(request: Request) {
   } catch (reason) {
     return errorResponse(reason, 'production page failed to load');
   }
+}
+
+export async function GET(request:Request) {
+ try {
+  const repo=hostedReadOnlyMode()?null:await instanceRepository();
+  if(!repo)return readResponse(request);
+  return await committedGet(repo,`production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request);const value=await response.json() as {error?:string;message?:string};if(!response.ok)throw new HttpError(response.status,value.error||value.message||"读取失败");return value;},request);
+ } catch(error){return errorResponse(error,"工作区读取失败");}
 }

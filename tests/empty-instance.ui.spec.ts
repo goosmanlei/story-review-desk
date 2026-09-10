@@ -316,3 +316,14 @@ test('trial counts and review state come from the selected instance and missing 
   await expect(page.getByRole('heading', { name: '从素材进入试制成片' })).toBeVisible();
   await expect(page.locator('.trial-production > section p span')).toHaveText(Array(15).fill('进度未登记'));
 });
+
+test('brand resets query and hash at the configured empty-instance entry and supports keyboard/back/forward',async({page})=>{
+ await mockDesk(page,'story');
+ await page.goto('/?view=materials&materialEpisode=invalid#old-anchor');
+ await page.getByRole('button',{name:'返回审阅台首页',exact:true}).press('Enter');
+ await expect.poll(()=>new URL(page.url()).pathname+new URL(page.url()).search+new URL(page.url()).hash).toBe('/');
+ await expect(page.getByRole('heading',{name:'从来源核对、结构理解到分集与逐场成稿',exact:true})).toBeVisible();
+ await page.waitForTimeout(500);expect(new URL(page.url()).search+new URL(page.url()).hash).toBe('');
+ await page.goBack();expect(new URL(page.url()).searchParams.get('view')).toBe('materials');
+ await page.goForward();await expect.poll(()=>new URL(page.url()).search+new URL(page.url()).hash).toBe('');
+});

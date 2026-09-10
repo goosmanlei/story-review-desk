@@ -56,7 +56,7 @@ async function scopeState(tx, explicitScopeId) {
     ensure(event.eventId === row.id && event.eventType === row.type && event.scopeId === scopeId && event.isFormalProjectEvent === false && event.previousHash === previous && row.previous_hash === previous && hashJson(event) === row.hash, 'TRIAL_EVENT_INTEGRITY', '试制事件原文或历史链不一致。');
     previous = row.hash;
   }
-  const epoch = (await tx.readView()).runtimeEpoch;
+  const epoch = (await tx.getMetadata()).runtimeEpoch;
   return { namespace, scopeId, config, events, eventHead: previous, etag: `"trial:${epoch}:${previous}"`, assets: (await tableRows(tx, namespace, 'assets')), executions: (await tableRows(tx, namespace, 'executions')) };
 }
 function blockingFacts(item) {

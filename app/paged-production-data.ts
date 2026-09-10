@@ -33,7 +33,8 @@ type MaterialsPage = Partial<Pick<ProductionModel,
 export type PagedProductionPayload = {
   schemaVersion: string;
   snapshotId: string;
-  operationRevision?: number;
+  operationRevision?: number | string;
+  readVersion?: string;
   page: ProductionPage & MaterialsPage;
   count: number;
   total: number;

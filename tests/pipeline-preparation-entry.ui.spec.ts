@@ -34,6 +34,7 @@ async function fixture(page:Page){
    state.productionRequests.push(url.search);
    return json({schemaVersion:'1.0',snapshotId:snapshot.snapshotId,operationRevision:'op-pipeline-entry',page:{workItems:[],workPackages:[],shots:[],assetFamilies:[],assetVersions:[],expectedOutputs:[]},count:0,total:0,nextCursor:null,hasMore:false,appliedFilters:{}});
   }
+  if(url.pathname==='/api/instance/workflow')return json({definition:configuration.workflow});
   if(url.pathname==='/api/instance/production-preparation')return json(preparation);
   if(url.pathname==='/api/instance/configuration')return json({configuration,defaults:configuration,releaseId:'release-pipeline-entry',revisionId:'config-pipeline-entry',sha256:'c'.repeat(64),history:[],bindings:[],boundStandards:[],reviewCatalog:{},initialized:true,draft:null,readOnly:true});
   if(url.pathname==='/api/assistant/v1/conversations')return json({conversations:[],bridge:{online:false},pagination:{}});
@@ -47,6 +48,41 @@ type Fixture=Awaited<ReturnType<typeof fixture>>;
 function clean(f:Fixture){expect(f.productionRequests.length,'Populated shell must actually read the paged production endpoint').toBeGreaterThan(0);expect(f.unexpected).toEqual([]);expect(f.writes).toEqual([]);expect(f.errors).toEqual([]);}
 const navigationError=(page:Page)=>page.getByRole('alert').filter({hasText:/无法.*定位|未回退|停止静默回退/});
 const phases=(page:Page)=>page.getByRole('navigation',{name:'全剧制作模块'});
+
+test('准备数据未齐时统一等待，返回根目录清除深链且不补回参数',async({page})=>{
+ const f=await fixture(page);let release!:()=>void;const hold=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/api/instance/production-preparation',async route=>{await hold;await route.fallback();});
+ await page.goto('/?view=pipeline&creatorStage=shot-generation#old');
+ await expect(page.getByRole('heading',{name:'正在装入完整工作区数据'})).toBeVisible();
+ await expect(page.locator('.production-v2-empty-state')).toHaveCount(0);
+ release();await expect(page.locator('.production-v2-full-workbench')).toBeVisible();
+ await page.getByRole('button',{name:'返回审阅台首页'}).click();
+ await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();
+ await expect(page).toHaveURL(new URL('/',page.url()).href);
+ await page.reload();await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();
+ await expect(page).toHaveURL(new URL('/',page.url()).href);clean(f);
+});
+
+test('集场计划与镜头制作均读完后统一展示工作区',async({page})=>{
+ const f=await fixture(page);let releaseEpisode!:()=>void,releaseShot!:()=>void;
+ const episode=new Promise<void>(done=>releaseEpisode=done),shot=new Promise<void>(done=>releaseShot=done);
+ await page.route('**/api/v8/episode-production?*',async route=>{await episode;await route.fallback();});
+ await page.route('**/api/instance/shot-production?*',async route=>{await shot;await route.fallback();});
+ await page.goto('/?view=pipeline');
+ await expect(page.getByText('正在读取完整集场计划与镜头制作资料…',{exact:true})).toBeVisible();
+ await expect(page.locator('.preparation-stage-layout')).not.toBeVisible();
+ releaseEpisode();await expect(page.locator('.preparation-stage-layout')).not.toBeVisible();
+ releaseShot();await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();clean(f);
+});
+
+test('必要读取失败不显示空对象，重试后完整进入',async({page})=>{
+ const f=await fixture(page);let failing=true;
+ await page.route('**/api/instance/production-preparation',route=>failing?route.fulfill({status:503,json:{error:'暂时无法读取准备稿'}}):route.fallback());
+ await page.goto('/?view=pipeline');await expect(page.getByRole('heading',{name:'当前工作区数据未完整读取'})).toBeVisible();
+ await expect(page.locator('.production-v2-empty-state')).toHaveCount(0);
+ failing=false;await page.getByRole('button',{name:'重新完整读取',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();clean(f);
+});
 
 test('已有故事正文但零正式镜头：初始入口展示筹备，刷新不产生虚构镜头或导航错误',async({page})=>{
  const f=await fixture(page);await page.goto('/?view=pipeline');
@@ -80,4 +116,16 @@ for(const [key,value,extra]of [
  const f=await fixture(page);await page.goto(`/?view=pipeline&${key}=${value}${extra}`);
  await expect(navigationError(page)).toBeVisible();await expect.poll(()=>new URL(page.url()).searchParams.get(key)).toBe(value);
  await page.reload();await expect(navigationError(page)).toBeVisible();expect(new URL(page.url()).searchParams.get(key)).toBe(value);clean(f);
+});
+
+test('加载中切换模块后，迟到读取不得恢复旧模块或旧深链',async({page})=>{
+ const f=await fixture(page);let release!:()=>void;const hold=new Promise<void>(resolve=>{release=resolve;});
+ await page.route('**/api/instance/production-preparation',async route=>{await hold;await route.fallback();});
+ await page.goto('/?view=pipeline&creatorStage=shot-generation');
+ await expect(page.getByRole('heading',{name:'正在装入完整工作区数据'})).toBeVisible();
+ await page.locator('.workspace-nav').getByRole('button',{name:/当前工作/}).click();
+ await expect.poll(()=>new URL(page.url()).searchParams.get('view')).toBe('overview');
+ release();await page.waitForTimeout(250);
+ await expect.poll(()=>new URL(page.url()).searchParams.get('view')).toBe('overview');
+ await expect(page.locator('.pipeline-view')).toHaveCount(0);clean(f);
 });

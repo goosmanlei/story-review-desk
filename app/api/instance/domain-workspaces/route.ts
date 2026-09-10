@@ -1,7 +1,7 @@
 import {getDomainWorkspace,workspaceProjection,saveDomainWorkspace,previewDomainWorkspace,publishDomainWorkspace,confirmDomainOwnership,transferLegacyDraft,rebaseDomainWorkspace} from '../../../../host/instance-runtime/domain-workspaces.mjs';
 import {emptyDomainGraph} from '../../../../host/instance-runtime/domain-defaults.mjs';
 import {hostedReadOnlyMode,reviewData,instanceReadOnlyMode,operationalSnapshot} from '../../v8/_store';
-import {readingProjection} from '../../../../host/instance-runtime/domain-reading.mjs';
+import {committedGet} from '../_committed-get';
 import {domainRepository,domainMutation,domainError,domainBody,requiredString,expectedRevision,jsonResponse,HttpError} from '../_domain';
 
 export async function GET(request:Request){try{
@@ -11,7 +11,7 @@ export async function GET(request:Request){try{
     const data=await reviewData(),model=data.productionModel as typeof data.productionModel & {domainGraphRef?:{revisionId:string}};
     return jsonResponse({...workspaceProjection(data,model.domainGraph||emptyDomainGraph(),owner),releaseId:'HOSTED_READ_ONLY',revisionId:model.domainGraphRef?.revisionId||null,draft:null,draftHeadRevisionId:null,legacyDrafts:[],readOnly:true});
   }
-  const repo=await domainRepository();return await repo.readTransaction(async tx=>{const workspace=await getDomainWorkspace(tx,owner),view=await tx.readView(),operations=await operationalSnapshot();return jsonResponse({...workspace,...readingProjection(view.snapshot,workspace.graph,workspace.configuration,operations.stateProjection),readOnly:instanceReadOnlyMode()});});
+  const repo=await domainRepository();return await committedGet(repo,`domain-workspaces:${owner}:${instanceReadOnlyMode()}`,async tx=>{const [view,operations]=await Promise.all([tx.readView(),operationalSnapshot()]);if(view.snapshot?.snapshotId!==operations.snapshotId)throw new HttpError(409,'设定读取依据已变化，请重试');return {...await getDomainWorkspace(tx,owner,{view,stateProjection:operations.stateProjection}),readOnly:instanceReadOnlyMode()};},request);
 }catch(error){return domainError(error);}}
 
 export async function POST(request:Request){try{

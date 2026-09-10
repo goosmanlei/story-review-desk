@@ -3,7 +3,7 @@ import {buildSync} from 'esbuild';
 import path from 'node:path';
 const site=path.resolve(import.meta.dirname,'..');
 async function mount(page:Page,code:string){
- const files=buildSync({stdin:{contents:code,resolveDir:site,sourcefile:'optimization-proof.tsx',loader:'tsx'},bundle:true,platform:'browser',format:'iife',jsx:'automatic',write:false,outdir:'test-bundle',logLevel:'silent',define:{'process.env.NODE_ENV':'"production"'}}).outputFiles;
+ const files=buildSync({stdin:{contents:code,resolveDir:site,sourcefile:'optimization-proof.tsx',loader:'tsx'},bundle:true,platform:'browser',format:'iife',jsx:'automatic',write:false,outdir:'test-bundle',logLevel:'silent',define:{'process.env.NODE_ENV':'"production"','process.env.NEXT_PUBLIC_REVIEW_BASE_PATH':'""'}}).outputFiles;
  const bundle=files.find(file=>file.path.endsWith('.js'))!.text,css=files.find(file=>file.path.endsWith('.css'))?.text||'';
  await page.route('**/__optimization-proof',route=>route.fulfill({contentType:'text/html',body:'<!doctype html><html><head><style>'+css+'</style></head><body><div id="root"></div><script>'+bundle.replaceAll('</script','<\\/script')+'</script></body></html>'}));
  await page.goto('/__optimization-proof');

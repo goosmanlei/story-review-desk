@@ -1,4 +1,7 @@
 'use client';
+import {useInstanceProfile} from './instance-context';
+import {readWorkspaceJson,workspaceCacheScope} from './workspace-read-cache';
+import {useWorkspaceReadiness} from './workspace-read-boundary';
 import {useEffect,useState} from 'react';
 import {useRuntimeMode} from './runtime-mode';
 import {visibleText} from './review-semantics';
@@ -12,10 +15,12 @@ const fieldLabels:Record<string,string>={title:'镜头标题',narrativeBeat:'叙
 
 export function EpisodeProductionEntry({episodeUid,sceneId}:{episodeUid:string;sceneId:string}) {
   const {hostedReadOnly}=useRuntimeMode();
+  const cacheScope=workspaceCacheScope(useInstanceProfile());
   const [attempt,setAttempt]=useState(0),[result,setResult]=useState<{key:string;entry:Entry|null;error:string}|null>(null);
   const requestKey=JSON.stringify([episodeUid,sceneId,attempt]);
   const entry=result?.key===requestKey?result.entry:null,error=result?.key===requestKey?result.error:'';
-  useEffect(()=>{const controller=new AbortController();let active=true;void fetch(`/api/v8/episode-production?episodeUid=${encodeURIComponent(episodeUid)}&sceneId=${encodeURIComponent(sceneId)}`,{cache:'no-store',signal:controller.signal}).then(async response=>{const body=await response.json() as Entry & {error?:string};if(!response.ok)throw new Error(body.error||'读取失败');if(active)setResult({key:requestKey,entry:body,error:''});}).catch(reason=>{if(active)setResult({key:requestKey,entry:null,error:reason.message});});const refresh=()=>setAttempt(v=>v+1);window.addEventListener('review:operations-updated',refresh);return()=>{active=false;controller.abort();window.removeEventListener('review:operations-updated',refresh);};},[episodeUid,sceneId,requestKey]);
+  useEffect(()=>{const controller=new AbortController();let active=true;void readWorkspaceJson<Entry>(`/api/v8/episode-production?episodeUid=${encodeURIComponent(episodeUid)}&sceneId=${encodeURIComponent(sceneId)}`,cacheScope,controller.signal).then(body=>{if(active)setResult({key:requestKey,entry:body,error:''});}).catch(reason=>{if(active)setResult({key:requestKey,entry:null,error:reason.message});});const refresh=()=>setAttempt(v=>v+1);window.addEventListener('review:operations-updated',refresh);return()=>{active=false;controller.abort();window.removeEventListener('review:operations-updated',refresh);};},[episodeUid,sceneId,requestKey,cacheScope]);
+  useWorkspaceReadiness(!entry&&!error,error,()=>setAttempt(v=>v+1));
   return <section className="episode-production-entry" aria-label="本集正式镜头设计">
     <header><h3>本场正式镜头设计</h3><p>本集正文生效后即可逐场推进；其他集未完成，不阻断本场。</p></header>
     {error&&<p role="alert">{visibleText(error)} <button onClick={()=>setAttempt(v=>v+1)}>重新读取</button></p>}
