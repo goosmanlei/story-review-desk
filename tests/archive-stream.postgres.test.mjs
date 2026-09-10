@@ -127,6 +127,13 @@ test('real PostgreSQL NDJSON import preserves rows and rejects casts before comm
   assert.deepEqual(archiveRowHashes(original),proof.rowHashes);
   for(const table of BUSINESS_TABLES)assert(original.tables[table].length>0,table+' must exercise a real row');
   const baselineView=await source.readView();
+  await t.test('repository integrity validates the real database in one read snapshot without changing rows',async()=>{
+   const before=sqlEvents.length,integrity=await source.integrityCheck();
+   assert.equal(integrity.ok,true);assert.equal(integrity.instanceId,instanceId);assert.equal(integrity.backend,'postgres');
+   assert.deepEqual(sqlEvents.slice(before).map(row=>row.kind),['BEGIN','COMMIT']);
+   assert.deepEqual(await source.exportState(),original);
+   receipt.scenarios.push({name:'streamed-repository-integrity',status:'PASS',readSnapshots:1,originalRowsPreserved:true});
+  });
   await t.test('scan/write and indexed reader produce one exact logical/physical source',async()=>{
    assert.equal(sha256(await readFile(file)),binding.sha256);
    assert.equal((await lstat(file)).size,binding.bytes);
@@ -201,7 +208,7 @@ test('real PostgreSQL NDJSON import preserves rows and rejects casts before comm
     transactionRollbackObserved:true,commitIssued:false,publicTablesAfterFailure:remaining,
     insertedTablesBeforeRejection:[...new Set(trace.filter(event=>event.kind==='INSERT').map(event=>event.table))]});
   });
-  assert.equal(receipt.scenarios.length,4,'Every required scenario must have completed its assertions');
+  assert.equal(receipt.scenarios.length,5,'Every required scenario must have completed its assertions');
   receipt.status='PASS';
  }finally{
   const closeFailures=[];

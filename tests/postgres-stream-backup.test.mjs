@@ -1,7 +1,7 @@
 import test from'node:test';import assert from'node:assert/strict';import fs from'node:fs';import path from'node:path';import{pathToFileURL}from'node:url';import{createHash}from'node:crypto';import{createRequire}from'node:module';import{execFileSync}from'node:child_process';
 const root=process.cwd(),require=createRequire(path.join(root,'package.json')),ts=require('typescript'),read=file=>fs.readFileSync(path.join(root,file),'utf8');
 const pgSource=read('host/instance-runtime/postgres.mjs'),fileSource=read('host/instance-runtime/archive-file.mjs'),transferSource=read('scripts/instance-transfer.mjs');
-const {validateArchive,createArchiveStreamValidator,encodeArchiveRow}=await import(pathToFileURL(path.join(root,'host/instance-runtime/postgres.mjs')));
+const {validateArchive,createArchiveStreamValidator,encodeArchiveRow,PostgresRepository}=await import(pathToFileURL(path.join(root,'host/instance-runtime/postgres.mjs')));
 const {hashArchiveRows,ARCHIVE_FILE_FORMAT}=await import(pathToFileURL(path.join(root,'host/instance-runtime/archive-file.mjs')));
 const {MAX_DECLARED_ARCHIVE_BYTES}=await import(pathToFileURL(path.join(root,'host/instance-runtime/archive-stream-validation.mjs')));
 const {DEFAULT_ARCHIVE_MAX_ROW_BYTES}=await import(pathToFileURL(path.join(root,'host/instance-runtime/archive-file-reader.mjs')));
@@ -38,6 +38,20 @@ test('stream validator equals original validateArchive rejection semantics, incl
  const incomplete=createArchiveStreamValidator(header(),BUSINESS_TABLES,'fixture');assert.throws(()=>incomplete.finish(),/incomplete/);incomplete.finishTable('releases');assert.throws(()=>incomplete.finishTable('releases'),/repeated/);assert.throws(()=>incomplete.accept('releases',{}),/closed/);
 });
 function cloneRow(row){return Object.fromEntries(Object.entries(row).map(([k,v])=>[k,Buffer.isBuffer(v)?Buffer.from(v):v]));}
+test('repository integrity preserves complete corruption rejection without materializing the archive',async()=>{
+ for(const [name,mutate]of [['valid',()=>{}],...Object.entries(mutations)]){
+  const tables=rawFixture();mutate(tables);let active=false,schemas=0,views=0,transactions=0;
+  const {unit,log}=fakeUnit(tables,{readActive:()=>active});
+  unit.exportState=async()=>assert.fail('Whole-archive export is forbidden');
+  unit.readView=async()=>{assert(active);views++;return{};};
+  const repo={instanceId:'fixture',async validateSchema(){schemas++;},async readTransaction(fn){transactions++;active=true;try{return await fn(unit);}finally{active=false;}}};
+  const result=PostgresRepository.prototype.integrityCheck.call(repo);
+  if(name==='valid'){assert.deepEqual(await result,{ok:true,instanceId:'fixture',schemaVersion:SCHEMA_VERSION,backend:'postgres'});assert.equal(views,1);}
+  else{await assert.rejects(result,undefined,name);assert.equal(views,0);}
+  assert.equal(schemas,1);assert.equal(transactions,1);assert.equal(active,false);
+  assert(log.every(sql=>!/^INSERT|^UPDATE|^DELETE/.test(sql)));
+ }
+});
 function fakeUnit(tables,{readActive=()=>true,failureSql=null,doubleFetch=false}={}){let cursor=null,index=0;const log=[];const client={async query(sql){assert(readActive(),'Iterator escaped read transaction');log.push(sql);if(sql===failureSql)throw Error('query failure '+sql);if(sql.startsWith('SELECT * FROM repository_meta'))return{rows:tables.repository_meta.map(cloneRow)};if(/^SELECT \* FROM [a-z_]+ ORDER BY/.test(sql))return{rows:tables[sql.match(/FROM ([a-z_]+)/)[1]].map(cloneRow)};if(sql.startsWith('SELECT COALESCE(max(storage_sequence)'))return{rows:[{n:1}]};if(sql.startsWith('DECLARE review_archive_rows')){assert.equal(cursor,null);cursor=sql.match(/FROM ([a-z_]+)/)[1];index=0;return{rows:[]};}if(sql==='FETCH FORWARD 1 FROM review_archive_rows'){const rows=tables[cursor],values=[];for(let n=0;n<(doubleFetch?2:1)&&index<rows.length;n++)values.push(cloneRow(rows[index++]));return{rows:values};}if(sql==='CLOSE review_archive_rows'){cursor=null;return{rows:[]};}throw Error('unexpected SQL '+sql);}};return{unit:new PgUnit(client,{instanceId:'fixture'},false),log};}
 function memoryFile({collect=true,writeFailure=false,closeFailure=false,partial=false}={}){let bytes=0,closed=false;const hash=createHash('sha256'),chunks=[];return{async write(content,offset,length){if(writeFailure)throw Error('write failure');const n=partial?Math.min(13,length):length,piece=content.subarray(offset,offset+n);hash.update(piece);bytes+=n;if(collect)chunks.push(Buffer.from(piece));return{bytesWritten:n};},async sync(){},async close(){closed=true;if(closeFailure)throw Error('file close failure');},proof(){return{bytes,sha256:hash.digest('hex'),closed,...(collect?{content:Buffer.concat(chunks)}:{})};}};}
 function fileFunctions(open){const bindings={open,canonicalJson,createHash,ARCHIVE_FILE_FORMAT};const code=['hashArchiveRows','writeArchiveRowsFile','writeArchiveFile'].map(name=>nodeText('archive-file.mjs',fileSource,name)).join('\n');return Function(...Object.keys(bindings),code+';return{writeArchiveRowsFile,writeArchiveFile};')(...Object.values(bindings));}
