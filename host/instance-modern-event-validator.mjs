@@ -224,7 +224,7 @@ export function validateModernEventClosure({events,snapshot,binding,historicalCo
         requireThat(Array.isArray(ref.sceneBindings)&&ref.sceneBindings.length>0&&new Set(ref.sceneBindings.map(s=>s.sceneId)).size===ref.sceneBindings.length,'historical closure scene evidence missing/duplicate');
         for(const s of ref.sceneBindings){
           const scene=c.content.narrativeRevision.scenes.find(v=>v.id===s.sceneId);
-          requireThat(scene&&scene.oldSceneIds.includes(first.sceneId)&&s.contentHash===scene.contentHash,'historical closure scene lineage/hash differs');
+          requireThat(scene&&(scene.id===first.sceneId||scene.oldSceneIds.includes(first.sceneId))&&s.contentHash===scene.contentHash,'historical closure scene lineage/hash differs');
           requireThat(Array.isArray(s.blockIds)&&s.blockIds.length>0&&new Set(s.blockIds).size===s.blockIds.length,'historical closure blocks missing/duplicate');
           const blocks=s.blockIds.map(id=>scene.scriptBlocks.find(b=>b.id===id));
           requireThat(blocks.every(Boolean)&&api.stableObjectHash(blocks)===s.blocksHash,'historical closure block evidence differs');

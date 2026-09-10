@@ -28,7 +28,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(body.sceneBindings) || !body.sceneBindings.length) throw new HttpError(422, '须提供解决意见的精确新稿正文块');
     const sceneBindings = body.sceneBindings.map((raw) => {
       const ref = raw as Record<string, unknown>;
-      const scene = narrative.scenes.find((scene) => scene.id === ref.sceneId && scene.oldSceneIds.includes(thread.sceneId));
+      const scene = narrative.scenes.find((scene) => scene.id === ref.sceneId && (scene.id === thread.sceneId || scene.oldSceneIds.includes(thread.sceneId)));
       if (!scene || scene.contentHash !== ref.contentHash || !Array.isArray(ref.blockIds) || !ref.blockIds.length || new Set(ref.blockIds).size !== ref.blockIds.length) throw new HttpError(409, '意见处理场次或哈希不匹配');
       const blocks = ref.blockIds.map((id) => scene.scriptBlocks.find((block) => block.id === id));
       if (blocks.some((block) => !block) || stableObjectHash(blocks) !== ref.blocksHash) throw new HttpError(409, '意见处理正文块哈希不匹配');
