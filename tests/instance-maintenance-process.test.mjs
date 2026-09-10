@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { runMaintenanceProcess } from '../scripts/instance-maintenance.mjs';
-import {validateMaintenanceTimeout,postgresDockerFailure} from '../scripts/instance-postgres.mjs';
+import {validateMaintenanceTimeout,validateBackupSoftware,postgresDockerFailure} from '../scripts/instance-postgres.mjs';
 import {vpsErrorResponse} from '../scripts/instance-vps.mjs';
 
 test('only an explicit read-only full backup may use the bounded one-hour maintenance deadline',()=>{
@@ -14,6 +14,15 @@ test('only an explicit read-only full backup may use the bounded one-hour mainte
 test('VPS failure reports bounded PostgreSQL classification without raw SQL or credentials',()=>{
  const result=vpsErrorResponse(postgresDockerFailure('password=private SQL payload',{timedOut:true,exitCode:143}));
  assert.equal(result.postgres.diagnostic,'TIMEOUT');assert.equal(result.postgres.timedOut,true);assert.doesNotMatch(JSON.stringify(result),/password|private|payload/);
+});
+test('independent immutable backup software cannot be used for writes or a different commit',()=>{
+ const args=['scripts/instance-pg-transfer.mjs','backup'],backupSoftware={imageId:'sha256:'+'a'.repeat(64),softwareCommit:'b'.repeat(40)},image={Id:backupSoftware.imageId,Config:{Labels:{'org.opencontainers.image.revision':backupSoftware.softwareCommit}}};
+ assert.equal(validateBackupSoftware(args,{readOnly:true,backupSoftware},image),image.Id);
+ assert.throws(()=>validateBackupSoftware(args,{readOnly:false,backupSoftware},image),/read-only/);
+ assert.throws(()=>validateBackupSoftware(['scripts/instance-pg-transfer.mjs','import'],{readOnly:true,backupSoftware},image),/read-only/);
+ assert.throws(()=>validateBackupSoftware(args,{readOnly:true,backupSoftware:{...backupSoftware,imageId:'mutable:latest'}},image),/identity/);
+ assert.throws(()=>validateBackupSoftware(args,{readOnly:true,backupSoftware},{...image,Id:'sha256:'+'c'.repeat(64)}),/differs/);
+ assert.throws(()=>validateBackupSoftware(args,{readOnly:true,backupSoftware},{...image,Config:{Labels:{}}}),/differs/);
 });
 
 const sha = (value) => createHash('sha256').update(value).digest('hex');

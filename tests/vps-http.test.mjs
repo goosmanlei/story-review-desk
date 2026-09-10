@@ -6,6 +6,7 @@ import {createHash} from 'node:crypto';
 import {once} from 'node:events';
 import {createDeploymentGateway} from '../host/instance-runtime/deployment-gateway.mjs';
 import {remoteBootstrap} from '../scripts/instance-vps.mjs';
+import {trustedRequestIdentity} from '../host/instance-runtime/deployment-http.mjs';
 
 test('controller bootstrap preserves non-UTF8 binary frames after JSON control',async()=>{
  const child=spawn(process.execPath,['-e',remoteBootstrap],{stdio:['pipe','pipe','pipe']});
@@ -15,6 +16,23 @@ test('controller bootstrap preserves non-UTF8 binary frames after JSON control',
  while(!output.includes('READ\n'))await once(child.stdout,'data');
  const bytes=Buffer.from(Array.from({length:4096},(_,i)=>i%256));child.stdin.end(bytes);
  const [status]=await done;assert.equal(status,0,errors);assert.equal(output,'READ\n'+createHash('sha256').update(bytes).digest('hex'));
+});
+
+test('explicit public demo permits anonymous writes but preserves controlled ingress, origin and epoch',async t=>{
+ const before={...process.env};Object.assign(process.env,{REVIEW_DEPLOYMENT_MODE:'VPS',REVIEW_VPS_ACCESS_MODE:'PUBLIC_DEMO',REVIEW_PUBLIC_URL:'https://203.0.113.10/',REVIEW_BASE_PATH:'',REVIEW_INTERNAL_GATEWAY_SECRET:'demo-fixture',REVIEW_DEPLOYMENT_ID:'fixture_demo_deployment'});
+ t.after(()=>{for(const key of Object.keys(process.env))if(!(key in before))delete process.env[key];Object.assign(process.env,before);});
+ const app=http.createServer((req,res)=>res.end(req.method+' '+req.url));app.listen(0,'127.0.0.1');await once(app,'listening');
+ const gateway=createDeploymentGateway({upstreamPort:app.address().port,proxyIp:'127.0.0.1',secret:'demo-fixture',basePath:'',runtimeEpoch:'demo_epoch'});gateway.listen(0,'127.0.0.1');await once(gateway,'listening');
+ t.after(()=>{gateway.closeAllConnections();gateway.close();app.closeAllConnections();app.close();});
+ const url='http://127.0.0.1:'+gateway.address().port,headers={'x-review-proxy':'controlled-nginx-v1','x-review-access-mode':'PUBLIC_DEMO','x-forwarded-host':'203.0.113.10','x-forwarded-proto':'https','x-forwarded-port':'443',origin:'https://203.0.113.10','x-review-deployment-id':'fixture_demo_deployment','x-review-runtime-epoch':'demo_epoch'};
+ assert.equal(await fetch(url+'/',{headers}).then(r=>r.text()),'GET /');
+ assert.equal(await fetch(url+'/api/write',{headers,method:'POST'}).then(r=>r.text()),'POST /api/write');
+ for(const forged of [{origin:'https://attacker.invalid'},{'x-review-authenticated-user':'admin'},{'x-review-access-mode':'BASIC_AUTH'},{'x-forwarded-proto':'http'}])assert.equal((await fetch(url+'/api/write',{headers:{...headers,...forged},method:'POST'})).status,403);
+ assert.equal((await fetch(url+'/api/write',{headers:{...headers,'x-review-runtime-epoch':'stale'},method:'POST'})).status,409);
+ assert.equal((await fetch(url+'/',{headers:{...headers,'x-review-proxy':'forged'}})).status,403);
+ const request=new Request('https://203.0.113.10/',{headers:{...headers,'x-review-internal-gateway':'demo-fixture'}});
+ assert.equal(trustedRequestIdentity(request).authenticatedUser,null);
+ process.env.REVIEW_VPS_ACCESS_MODE='BASIC_AUTH';assert.throws(()=>trustedRequestIdentity(request),/identity/);
 });
 
 test('gateway enforces socket, auth, origin, epoch and maintenance without buffering streams',async t=>{

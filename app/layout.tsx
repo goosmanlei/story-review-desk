@@ -38,7 +38,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="zh-CN" data-runtime-mode={hostedReadOnly ? 'hosted-read-only' : vpsWritable?'vps-write':'local-write'}>
-      <body><RuntimeRequestBoundary><RuntimeModeProvider hostedReadOnly={hostedReadOnly} vpsWritable={vpsWritable}><InstanceProfileProvider><AssistantContextProvider><div className="assistant-page">{children}</div><CodexConversationDock /></AssistantContextProvider></InstanceProfileProvider></RuntimeModeProvider></RuntimeRequestBoundary></body>
+      <body><RuntimeRequestBoundary><RuntimeModeProvider hostedReadOnly={hostedReadOnly} vpsWritable={vpsWritable} publicDemo={process.env.REVIEW_VPS_ACCESS_MODE==='PUBLIC_DEMO'}><InstanceProfileProvider><AssistantContextProvider><div className="assistant-page">{children}</div><CodexConversationDock /></AssistantContextProvider></InstanceProfileProvider></RuntimeModeProvider></RuntimeRequestBoundary></body>
     </html>
   );
 }

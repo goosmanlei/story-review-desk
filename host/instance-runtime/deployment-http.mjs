@@ -51,9 +51,13 @@ export function trustedRequestIdentity(request) {
   const forwardedProto = request.headers.get('x-forwarded-proto') || '';
   const forwardedPort = request.headers.get('x-forwarded-port') || '';
   if (marker !== 'controlled-nginx-v1') throw new Error('VPS request did not pass through the controlled Nginx entry');
-  if (!/^[^\u0000-\u001f\u007f]{1,200}$/.test(user)) throw new Error('VPS request lacks an authenticated Basic Auth identity');
+  const accessMode=process.env.REVIEW_VPS_ACCESS_MODE||'BASIC_AUTH';
+  const claimedMode=request.headers.get('x-review-access-mode');
+  if(accessMode==='PUBLIC_DEMO'){
+    if(claimedMode!=='PUBLIC_DEMO'||user)throw new Error('Public demo proxy identity differs');
+  }else if(accessMode!=='BASIC_AUTH'||claimedMode&&claimedMode!=='BASIC_AUTH'||!/^[^\u0000-\u001f\u007f]{1,200}$/.test(user))throw new Error('VPS request lacks an authenticated Basic Auth identity');
   if (forwardedProto !== 'https' || forwardedHost !== expected.host || forwardedPort !== (expected.port||'443')) throw new Error('VPS forwarded origin differs from the configured public URL');
-  return { mode: 'VPS', origin: expected.origin, authenticatedUser: user };
+  return { mode: 'VPS', origin: expected.origin, authenticatedUser: user||null };
 }
 
 export function sameDeploymentOrigin(request, allowedOrigins) {

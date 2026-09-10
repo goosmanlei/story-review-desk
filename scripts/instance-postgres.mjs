@@ -8,6 +8,12 @@ import {sha256} from '../host/instance-runtime/index.mjs';
 import {dockerHostPath} from '../host/instance-runtime/docker-path.mjs';
 const softwareRoot=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const POSTGRES_IMAGE='postgres:18.6';
+export function validateBackupSoftware(args,{readOnly,backupSoftware},image){
+ if(!readOnly||args[0]!=='scripts/instance-pg-transfer.mjs'||args[1]!=='backup')throw Error('Independent backup software is only allowed for explicit read-only backup');
+ if(!backupSoftware||Object.keys(backupSoftware).sort().join(',')!=='imageId,softwareCommit'||!/^sha256:[a-f0-9]{64}$/.test(backupSoftware.imageId)||!(/^[a-f0-9]{40,64}$/.test(backupSoftware.softwareCommit)||backupSoftware.softwareCommit==='UNVERSIONED'))throw Error('Invalid immutable backup software identity');
+ if(image&&(image.Id!==backupSoftware.imageId||image.Config?.Labels?.['org.opencontainers.image.revision']!==backupSoftware.softwareCommit))throw Error('Backup software image differs from its exact commit');
+ return backupSoftware.imageId;
+}
 export function validateMaintenanceTimeout(args,{readOnly=false,timeout=180000}={}){
  const backup=readOnly&&args[0]==='scripts/instance-pg-transfer.mjs'&&args[1]==='backup';
  const maximum=backup?3600000:900000;
@@ -50,9 +56,10 @@ export async function ensurePostgres(root,{create=false,start=true}={}){
  for(let i=0;i<60;i++){try{await docker(['exec',p.container,'pg_isready','-U','review','-d','review'],{timeout:3000});return p;}catch{await new Promise(r=>setTimeout(r,500));}}
  throw new Error('PostgreSQL did not become ready');
 }
-export async function runPostgresMaintenance(root,args,{input,readOnly=false,mounts=[],storageOwner,nodeHeapMiB,timeout=180000}={}){
+export async function runPostgresMaintenance(root,args,{input,readOnly=false,mounts=[],storageOwner,backupSoftware,nodeHeapMiB,timeout=180000}={}){
  if(nodeHeapMiB!==undefined&&(!Number.isInteger(nodeHeapMiB)||nodeHeapMiB<256||nodeHeapMiB>8192))throw new Error('Maintenance heap must be 256..8192 MiB');
  validateMaintenanceTimeout(args,{readOnly,timeout});
+ if(backupSoftware){validateBackupSoftware(args,{readOnly,backupSoftware});const images=JSON.parse(await docker(['image','inspect',backupSoftware.imageId]));if(images.length!==1)throw Error('Ambiguous backup image');validateBackupSoftware(args,{readOnly,backupSoftware},images[0]);}
  const p=await ensurePostgres(root,{start:false});
  // The transport CLI can call this while its own top-level module is evaluating.
  // Reusing its already validated owner avoids dynamically importing that module
@@ -67,5 +74,5 @@ export async function runPostgresMaintenance(root,args,{input,readOnly=false,mou
  }
  // Initial provisioning uses a bounded software checkout; an active instance uses
  // its immutable app image through instance-maintenance instead of this entry.
- const result=await docker(['run','--rm','-i','--init','--network',p.network,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp:rw,nosuid,nodev,size=128m',...(owner?[]:bind({source:softwareRoot,target:'/app',readOnly:true})),...instanceMounts.flatMap(bind),...mounts.flatMap(bind),'--workdir','/app','--env','REVIEW_INSTANCE_ROOT=/instance','--env','REVIEW_DATABASE_BACKEND=postgres','--env','REVIEW_POSTGRES_HOST=postgres','--env','REVIEW_POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password',...(readOnly?['--env','REVIEW_INSTANCE_READ_ONLY=1']:[]),owner?owner.imageId:'node:22-bookworm-slim','node',...(nodeHeapMiB===undefined?[]:[`--max-old-space-size=${nodeHeapMiB}`]),...args],{input,timeout});return result;
+ const result=await docker(['run','--rm','-i','--init',...(backupSoftware?['--pull','never','--user',`${process.getuid()}:${process.getgid()}`]:[]),'--network',p.network,'--read-only','--cap-drop','ALL','--security-opt','no-new-privileges:true','--tmpfs','/tmp:rw,nosuid,nodev,size=128m',...(owner||backupSoftware?[]:bind({source:softwareRoot,target:'/app',readOnly:true})),...instanceMounts.flatMap(bind),...mounts.flatMap(bind),'--workdir','/app','--env','REVIEW_INSTANCE_ROOT=/instance','--env','REVIEW_DATABASE_BACKEND=postgres','--env','REVIEW_POSTGRES_HOST=postgres','--env','REVIEW_POSTGRES_PASSWORD_FILE=/run/secrets/postgres-password',...(readOnly?['--env','REVIEW_INSTANCE_READ_ONLY=1']:[]),backupSoftware?.imageId||(owner?owner.imageId:'node:22-bookworm-slim'),'node',...(nodeHeapMiB===undefined?[]:[`--max-old-space-size=${nodeHeapMiB}`]),...args],{input,timeout});return result;
 }

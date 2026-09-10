@@ -5,13 +5,14 @@ export const nginxSha=value=>createHash('sha256').update(value).digest('hex');
 const marker=target=>'STORY_REVIEW_MANAGED '+target.targetId;
 export function nginxManagedBlock(target,{upstream,maintenance=false}={}){
  if(!maintenance&&!/^(?:[a-zA-Z0-9][a-zA-Z0-9.-]*|\[[a-fA-F0-9:]+\]):[1-9][0-9]{0,4}$/.test(upstream||''))throw Error('Exact inspected Nginx upstream required');
- const id=marker(target),base=target.basePath,auth=target.nginx,name='review_maintenance_'+target.targetId.replaceAll('-','_').replaceAll('.','_');
+ const id=marker(target),base=target.basePath,auth=target.nginx,name='review_maintenance_'+target.targetId.replaceAll('-','_').replaceAll('.','_'),publicDemo=target.accessMode==='PUBLIC_DEMO';
  const common=[
-  'auth_basic "'+auth.authBasicRealm+'";','auth_basic_user_file '+auth.authBasicUserFile+';','access_log off;',
+  ...(publicDemo?['auth_basic off;']:['auth_basic "'+auth.authBasicRealm+'";','auth_basic_user_file '+auth.authBasicUserFile+';']),'access_log off;',
   'proxy_http_version 1.1;','proxy_buffering off;','proxy_request_buffering on;','proxy_read_timeout 3600s;',
   'proxy_set_header Host '+new URL(target.publicUrl).host+';','proxy_set_header X-Forwarded-Host '+new URL(target.publicUrl).host+';','proxy_set_header X-Forwarded-Proto https;',
   'proxy_set_header X-Forwarded-Port '+(new URL(target.publicUrl).port||'443')+';','proxy_set_header X-Forwarded-For $remote_addr;',
-  'proxy_set_header X-Review-Proxy controlled-nginx-v1;','proxy_set_header X-Review-Authenticated-User $remote_user;',
+  'proxy_set_header X-Review-Proxy controlled-nginx-v1;','proxy_set_header X-Review-Access-Mode '+(publicDemo?'PUBLIC_DEMO':'BASIC_AUTH')+';',
+  'proxy_set_header X-Review-Authenticated-User '+(publicDemo?'""':'$remote_user')+';',
   'proxy_set_header X-Review-Internal-Gateway "";','proxy_set_header Authorization "";','proxy_set_header Forwarded "";',
   'proxy_set_header Range $http_range;','proxy_set_header If-Range $http_if_range;',
  ];
@@ -39,7 +40,7 @@ function serverBounds(source,serverName){
 export function patchNginxConfig(source,target,options={}){
  if(typeof source!=='string'||!source.endsWith('\n'))throw Error('Nginx configuration must be complete newline-terminated text');
  const bounds=serverBounds(source,target.nginx.serverName);
- if(target.nginx.authBasicRealm===EXISTING_NGINX_AUTH){
+ if(target.accessMode!=='PUBLIC_DEMO'&&target.nginx.authBasicRealm===EXISTING_NGINX_AUTH){
   // Only accept explicit unambiguous server directives. Complex includes or
   // inherited auth require the operator to inspect and specify exact values.
   let body=source.slice(source.indexOf('{',bounds.start)+1,bounds.close);

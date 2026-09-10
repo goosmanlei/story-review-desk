@@ -25,9 +25,14 @@ export async function packVps({target,instance,output,sourceRoot,development=fal
  await mkdir(root,{mode:0o700});
  const releaseId='release_'+randomUUID(),software=path.join(root,'software');
  await command(process.execPath,['scripts/instance-package.mjs','--output',software,'--software-commit',source.softwareCommit],{cwd:sourceRoot});
- // Full business archives can take longer than interactive maintenance. This
- // remains a bounded read-only, leased snapshot; never relax import/write limits.
- await backupPostgresInstance(instance,path.join(root,'baseline'),{maintenanceTimeoutMs:3600000});
+ // A native-architecture immutable reader uses this release's archive fixes,
+ // without replacing the live owner or requiring emulation for the large scan.
+ // This image is local-only; only the linux/amd64 runtime images enter the pack.
+ const backupTag='review-vps-backup:'+releaseId;
+ await command('docker',['build','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'-t',backupTag,software]);
+ const backupImage=JSON.parse(await command('docker',['image','inspect',backupTag]))[0];
+ await backupPostgresInstance(instance,path.join(root,'baseline'),{maintenanceTimeoutMs:3600000,backupSoftware:{imageId:backupImage.Id,softwareCommit:source.softwareCommit}});
+ await command('docker',['image','rm',backupTag]);
  const baseline=JSON.parse(await readFile(path.join(root,'baseline/backup-manifest.json'),'utf8'));
  await mkdir(path.join(root,'images'),{mode:0o700});
  const tag='review-vps-build:'+releaseId,build=['build','--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath,'-t',tag,software];

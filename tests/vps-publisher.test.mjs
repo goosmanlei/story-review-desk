@@ -58,6 +58,16 @@ test('target rejects broad paths, credentials, URL mismatch and injected binary/
  const p=planVps(target,emptyVpsState(target),source('A').manifest,{freeBytes:1e9});assert.equal(p.maximumFullCopies,3);assert(p.requiredFreeBytes>p.packageBytes+p.runtimeBudgetBytes+p.loadedImageBytes);
 });
 const original='server {\n    listen 80;\n    server_name review.example.invalid;\n    return 301 https://$host$request_uri;\n}\nserver {\n    listen 443 ssl;\n    server_name review.example.invalid;\n    location /other/ { return 200 "untouched"; }\n}\n';
+test('public demo requires explicit target policy and strips caller authentication claims',()=>{
+ assert.equal(target.accessMode,'BASIC_AUTH');
+ assert.throws(()=>validateVpsTarget({...target,accessMode:'OFF'}),/accessMode/);
+ const demo=validateVpsTarget({...target,accessMode:'PUBLIC_DEMO'}),block=nginxManagedBlock(demo,{upstream:'172.20.0.2:3000'});
+ assert.match(block,/auth_basic off;/);assert.doesNotMatch(block,/auth_basic_user_file|\$remote_user/);
+ assert.match(block,/X-Review-Access-Mode PUBLIC_DEMO;/);assert.match(block,/X-Review-Authenticated-User "";/);
+ assert.match(block,/X-Review-Internal-Gateway "";/);assert.match(block,/Authorization "";/);
+ assert.equal(patchNginxConfig(original,demo,{upstream:'172.20.0.2:3000'}).contents.replace(block,''),original);
+ assert.match(nginxManagedBlock(demo,{maintenance:true}),/auth_basic off;/);
+});
 test('Nginx patch preserves other bytes, targets HTTPS, authenticates maintenance and is idempotent',()=>{
  const a=patchNginxConfig(original,target,{upstream:'172.20.0.2:3000'});assert.equal(a.contents.replace(nginxManagedBlock(target,{upstream:'172.20.0.2:3000'}),''),original);
  assert.equal(patchNginxConfig(a.contents,target,{upstream:'172.20.0.2:3000'}).changed,false);assert.match(a.contents,/proxy_set_header X-Review-Authenticated-User \$remote_user/);
