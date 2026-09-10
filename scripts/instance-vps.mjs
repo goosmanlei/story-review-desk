@@ -18,7 +18,7 @@ export async function remoteVps(control,source){
  const built=await build({entryPoints:[path.join(sourceRoot,'scripts/instance-vps-host.mjs')],bundle:true,platform:'node',format:'esm',target:'node22',write:false,minify:true});
  const code=built.outputFiles[0].text;if(Buffer.byteLength(code)>16*1024**2)throw Error('Publisher control bundle exceeds temporary budget');
  const remote=[control.target.runtime.nodeBinary,'-e',remoteBootstrap].map(quote).join(' ');
- const child=spawn('ssh',['-T','-o','BatchMode=yes','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3',control.target.sshHost,remote],{stdio:['pipe','pipe','pipe']});
+ const child=spawn('ssh',['-T','-C','-o','BatchMode=yes','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3',control.target.sshHost,remote],{stdio:['pipe','pipe','pipe']});
  let errorText='';child.stderr.on('data',chunk=>{errorText=(errorText+chunk).slice(-4000);});
  const done=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>code===0?resolve():reject(Error('SSH publication interrupted or failed: '+errorText)));});done.catch(()=>{});
  try{
@@ -32,11 +32,11 @@ export async function remoteVps(control,source){
  }catch(error){child.stdin.destroy();child.kill('SIGTERM');await done.catch(()=>{});throw error;}
 }
 export async function main(argv=process.argv.slice(2)){
- const {values,positionals}=parseArgs({args:argv,allowPositionals:true,options:{target:{type:'string'},package:{type:'string'},baseline:{type:'string'},instance:{type:'string'},output:{type:'string'},inspection:{type:'string'},'expected-current':{type:'string'},'operation-id':{type:'string'},connect:{type:'boolean'},development:{type:'boolean'},'fixture-host':{type:'boolean'},'recover-current':{type:'boolean'},help:{type:'boolean'}}});
+ const {values,positionals}=parseArgs({args:argv,allowPositionals:true,options:{target:{type:'string'},package:{type:'string'},baseline:{type:'string'},'capacity-measurement':{type:'string'},instance:{type:'string'},output:{type:'string'},inspection:{type:'string'},'expected-current':{type:'string'},'operation-id':{type:'string'},connect:{type:'boolean'},development:{type:'boolean'},'fixture-host':{type:'boolean'},'recover-current':{type:'boolean'},help:{type:'boolean'}}});
  if(values.help||!positionals[0])return {commands:['inspect','plan','pack','verify','prepare-host','deploy','rollback','status'],usage:'instance-vps COMMAND --target CONFIG [--connect] [--package DIR] [--expected-current RELEASE|NONE --operation-id STABLE_ID]',boundary:'pack/verify/offline plan are local; remote commands require --connect; no credentials are copied'};
  const action=positionals[0];if(!['inspect','plan','pack','verify','prepare-host','deploy','rollback','status'].includes(action)||positionals.length!==1||!values.target)throw Error('Explicit supported command and --target are required');
  const target=await readVpsTarget(values.target);
- if(action==='pack'){if(Boolean(values.instance)===Boolean(values.baseline)||!values.output)throw Error('pack requires one of --instance or --baseline and a new --output directory');const {packVps}=await import('./instance-vps-pack.mjs');return packVps({target,instance:values.instance,baseline:values.baseline,output:values.output,sourceRoot,development:values.development});}
+ if(action==='pack'){if(Boolean(values.instance)===Boolean(values.baseline)||!values.output)throw Error('pack requires one of --instance or --baseline and a new --output directory');const {packVps}=await import('./instance-vps-pack.mjs');return packVps({target,instance:values.instance,baseline:values.baseline,capacityMeasurement:values['capacity-measurement'],output:values.output,sourceRoot,development:values.development});}
  if(action==='verify'){if(!values.package)throw Error('verify requires --package');return verifyPackage(values.package,{target,allowDevelopment:values.development});}
  let source;if(values.package)source=await readPackage(values.package,{target,allowDevelopment:values.development});
  if(['deploy','plan'].includes(action)&&!source)throw Error(action+' requires --package');

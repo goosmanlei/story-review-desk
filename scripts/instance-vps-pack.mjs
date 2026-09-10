@@ -8,6 +8,8 @@ import {backupPostgresInstance,verifyBackup} from './instance-transfer.mjs';
 import {inspectPackageSource,assertPackageSourceUnchanged} from './instance-package-source.mjs';
 import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {listPackageFiles,fileDescriptor,verifyPackage,immutablePackage,PACKAGE_MANIFEST} from '../host/instance-runtime/vps-package.mjs';
+import {restoreContractFromFiles,restoreMethodSha256,runtimeCapacity,validateRestoreMeasurement} from '../host/instance-runtime/vps-capacity.mjs';
+import {measureVpsRestore} from './instance-vps-capacity.mjs';
 
 export async function command(binary,args,{cwd,input,output,maxOutputBytes=4*1024**2,env=process.env}={}){
  const child=spawn(binary,args,{cwd,env,stdio:['pipe','pipe','pipe']});let out='',err='';
@@ -31,7 +33,7 @@ export async function copyFrozenBaseline(source,output){
  await writeFile(path.join(output,'backup-manifest.json'),bytes,{flag:'wx',mode:0o600});
  const copied=await verifyBackup(output);if(copied.manifestSha256!==proof.manifestSha256)throw Error('Baseline changed during copy');return copied;
 }
-export async function packVps({target,instance,baseline:baselineSource,output,sourceRoot,development=false}){
+export async function packVps({target,instance,baseline:baselineSource,capacityMeasurement,output,sourceRoot,development=false}){
  if(Boolean(instance)===Boolean(baselineSource))throw Error('Choose one live instance or verified local baseline');
  const source=await inspectPackageSource(sourceRoot,{requestedCommit:development?'UNVERSIONED':undefined,explicitDevelopment:development}),root=path.resolve(output);
  if(root===source.root||root.startsWith(source.root+'/'))throw Error('Release packages must be outside source checkout');
@@ -41,15 +43,26 @@ export async function packVps({target,instance,baseline:baselineSource,output,so
  // A native-architecture immutable reader uses this release's archive fixes,
  // without replacing the live owner or requiring emulation for the large scan.
  // This image is local-only; only the linux/amd64 runtime images enter the pack.
+ const backupTag='review-vps-backup:'+releaseId;
+ if(!baselineSource||!capacityMeasurement){
+  await command('docker',['build','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'-t',backupTag,software]);
+ }
  if(baselineSource)await copyFrozenBaseline(baselineSource,path.join(root,'baseline'));
  else{
- const backupTag='review-vps-backup:'+releaseId;
- await command('docker',['build','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'-t',backupTag,software]);
- const backupImage=JSON.parse(await command('docker',['image','inspect',backupTag]))[0];
- await backupPostgresInstance(instance,path.join(root,'baseline'),{maintenanceTimeoutMs:3600000,backupSoftware:{imageId:backupImage.Id,softwareCommit:source.softwareCommit}});
- await command('docker',['image','rm',backupTag]);
+  const backupImage=JSON.parse(await command('docker',['image','inspect',backupTag]))[0];
+  await backupPostgresInstance(instance,path.join(root,'baseline'),{maintenanceTimeoutMs:3600000,backupSoftware:{imageId:backupImage.Id,softwareCommit:source.softwareCommit}});
  }
  const baseline=JSON.parse(await readFile(path.join(root,'baseline/backup-manifest.json'),'utf8'));
+ const softwareManifest=JSON.parse(await readFile(path.join(software,'software-manifest.json'),'utf8'));
+ const restoreContractSha256=restoreContractFromFiles(softwareManifest.files,restoreMethodSha256(await readFile(path.join(software,'host/instance-runtime/vps-driver.mjs'),'utf8')));
+ let measurement;
+ if(capacityMeasurement)measurement=validateRestoreMeasurement(JSON.parse(await readFile(capacityMeasurement,'utf8')),baseline,{restoreContractSha256});
+ else{
+  const native=JSON.parse(await command('docker',['image','inspect',backupTag]))[0],architecture=native.Os+'/'+native.Architecture;
+  await command('docker',['pull','--platform',architecture,'postgres:18.6']);
+  measurement=await measureVpsRestore({target,baselineRoot:path.join(root,'baseline'),baseline,softwareCommit:source.softwareCommit,restoreContractSha256,appImage:backupTag,postgresImage:'postgres:18.6',architecture,auditPath:root+'.capacity.json'});
+ }
+ if(!baselineSource||!capacityMeasurement)await command('docker',['image','rm',backupTag]);
  await mkdir(path.join(root,'images'),{mode:0o700});
  const tag='review-vps-build:'+releaseId,build=['build','--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath,'-t',tag,software];
  await command('docker',build);await command('docker',['pull','--platform','linux/amd64','postgres:18.6']);
@@ -66,8 +79,8 @@ export async function packVps({target,instance,baseline:baselineSource,output,so
   images.push({role,path:relative,id:info.Id,reference,loadedBytes:info.Size,architecture:'linux/amd64'});
  }
  const files=[];for(const file of await listPackageFiles(root))files.push(await fileDescriptor(root,file));
- const databaseBytes=baseline.database.bytes,mediaBytes=baseline.files.reduce((n,f)=>n+f.bytes,0);
- const body={schemaVersion:'1.0',kind:'REVIEW_VPS_PACKAGE',releaseId,softwareCommit:source.softwareCommit,architecture:'linux/amd64',basePath:target.basePath,business:{instanceId:baseline.instanceId,sourceReleaseId:baseline.releaseId,repositoryRevision:baseline.repositoryRevision},baseline,images,files,totalFileBytes:files.reduce((n,f)=>n+f.bytes,0),runtimeBudgetBytes:Math.max(512*1024**2,databaseBytes*6)+mediaBytes+images.reduce((n,i)=>n+i.loadedBytes,0),credentialsIncluded:false,runtimeIncluded:false,createdAt:new Date().toISOString()};
+ const capacity=runtimeCapacity(measurement,baseline,files);
+ const body={schemaVersion:'1.0',kind:'REVIEW_VPS_PACKAGE',releaseId,softwareCommit:source.softwareCommit,architecture:'linux/amd64',basePath:target.basePath,business:{instanceId:baseline.instanceId,sourceReleaseId:baseline.releaseId,repositoryRevision:baseline.repositoryRevision},baseline,images,files,totalFileBytes:files.reduce((n,f)=>n+f.bytes,0),capacity,runtimeBudgetBytes:capacity.runtimeBudgetBytes,credentialsIncluded:false,runtimeIncluded:false,createdAt:new Date().toISOString()};
  await writeFile(path.join(root,PACKAGE_MANIFEST),JSON.stringify({...body,manifestSha256:sha256(canonicalJson(body))},null,2)+'\n',{flag:'wx',mode:0o600});
  await assertPackageSourceUnchanged(source);const verified=await verifyPackage(root,{target,allowDevelopment:development});await immutablePackage(root);return {...verified,output:root};
 }

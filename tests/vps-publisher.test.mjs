@@ -60,6 +60,12 @@ test('failed restore can recover only the clean current source, not writable edi
  driver.fail='restore';const request=args(state,driver,b,a.manifest.releaseId);await assert.rejects(executeVps(request));driver.fail=null;
  const receipt=await executeVps({...request,recover:true});assert.equal(receipt.status,'CLEAN_CURRENT_RECOVERED');assert.equal(state.current.runtime.bytes,'A');
 });
+test('capacity is measured again after semantic verification and before runtime removal',async()=>{
+ const state=emptyVpsState(target),driver=fixtureDriver(state),a=source('A'),b=source('B');await executeVps(args(state,driver,a,'NONE'));driver.events.length=0;
+ let inspections=0;driver.inspect=async()=>({freeBytes:++inspections===1?1e9:1});
+ await assert.rejects(executeVps(args(state,driver,b,a.manifest.releaseId)),/Capacity changed before/);
+ assert.equal(state.pending.phase,'DRAINED');assert.equal(driver.runtimes.size,1);assert(!driver.events.includes('remove-runtime'));
+});
 test('target rejects broad paths, credentials, URL mismatch and injected binary/config values',()=>{
  for(const mutate of [v=>v.hostRoot='/home/work',v=>v.hostRoot='/home/work/../fixture',v=>v.runtime.nodeBinary='/usr/bin/node;id',v=>v.credentials.apiKey='secret',v=>v.publicUrl='https://review.example.invalid/wrong',v=>v.nginx.authBasicRealm='x"; return 200;']){const value=structuredClone(target);mutate(value);assert.throws(()=>validateVpsTarget(value));}
  const p=planVps(target,emptyVpsState(target),source('A').manifest,{freeBytes:1e9});assert.equal(p.maximumFullCopies,3);assert(p.requiredFreeBytes>p.packageBytes+p.runtimeBudgetBytes+p.loadedImageBytes);

@@ -2,16 +2,31 @@ import {randomUUID} from 'node:crypto';
 import {canonicalJson,sha256} from './bytes.mjs';
 
 export function emptyVpsState(target){return {schemaVersion:'1.0',kind:'REVIEW_VPS_STATE',targetId:target.targetId,targetSha256:sha256(canonicalJson(target)),current:null,backup:null,pending:null,lastReceipt:null,samples:[]};}
-export function planVps(target,state,manifest,inspection){
+export function planVps(target,state,manifest,inspection,{action='deploy'}={}){
  if(state.targetId!==target.targetId||state.targetSha256!==sha256(canonicalJson(target)))throw Error('Target configuration differs from prepared host');
- const loadedImageBytes=manifest.images.reduce((n,i)=>n+i.loadedBytes,0);
+ if(!['deploy','rollback'].includes(action))throw Error('Unsupported capacity action');
+ const present=new Set((inspection.images||[]).map(i=>i.digest).filter(Boolean));
+ const missingImages=manifest.images.filter(i=>!present.has(i.id));
+ const loadedImageBytes=missingImages.reduce((n,i)=>n+i.loadedBytes,0);
+ // containerd may retain content blobs as well as unpacked layers. Image
+ // archives bound the blob allowance; images are not also in measured runtime.
+ const imageContentBytes=missingImages.reduce((n,i)=>n+(manifest.files?.find(f=>f.path===i.path)?.bytes||0),0);
  const packageBytes=manifest.totalFileBytes+Buffer.byteLength(JSON.stringify(manifest,null,2))+1;
- // Do not credit a running database or image for free space until removed.
- // This also leaves enough headroom to restore the clean fallback on failure.
  const fallback=inspection.fallbackRuntimeBudgetBytes||0;
- const requiredFreeBytes=Math.max(manifest.runtimeBudgetBytes,fallback)+packageBytes+loadedImageBytes+target.retention.maxTemporaryBytes+target.retention.reserveBytes;
  if(!Number.isSafeInteger(inspection.freeBytes)||inspection.freeBytes<0)throw Error('Missing actual filesystem free-space measurement');
- return {targetId:target.targetId,expectedCurrent:state.current?.releaseId||'NONE',releaseId:manifest.releaseId,allowed:inspection.freeBytes>=requiredFreeBytes,freeBytes:inspection.freeBytes,requiredFreeBytes,packageBytes,loadedImageBytes,runtimeBudgetBytes:manifest.runtimeBudgetBytes,temporaryBudgetBytes:target.retention.maxTemporaryBytes,reserveBytes:target.retention.reserveBytes,maximumFullCopies:3,steps:['VERIFY_SOURCE_AND_CLEAN_FALLBACK','MAINTENANCE_AND_DRAIN','REMOVE_OWNED_RUNTIME','STREAM_FRESH_RUNTIME','VERIFY_AND_OPEN','DELETE_OLDEST_BACKUP','ROTATE_CLEAN_CURRENT','SAVE_NEW_CLEAN_PACKAGE']};
+ // Credits only apply on the same filesystem, after the owned object is
+ // actually removed in that phase. Existing clean packages are already in df.
+ const credit=value=>{if(!Number.isSafeInteger(value)||value<0)throw Error('Invalid owned reclaim measurement');return value;};
+ const runtimeReclaimBytes=state.current&&inspection.hostDockerSameFilesystem?credit(inspection.reclaimableRuntimeBytes||0):0;
+ const oldestCleanReclaimBytes=state.backup&&inspection.hostDockerSameFilesystem&&action==='deploy'?credit(inspection.reclaimableOldestCleanBytes||0):0;
+ const fixedBytes=loadedImageBytes+imageContentBytes+target.retention.maxTemporaryBytes+target.retention.reserveBytes;
+ const phases=[
+  {phase:'VERIFY_SOURCE_AND_CLEAN_FALLBACK',requiredFreeBytes:fixedBytes},
+  {phase:'STREAM_FRESH_RUNTIME_OR_RECOVER_CURRENT',requiredFreeBytes:Math.max(0,fixedBytes+Math.max(manifest.runtimeBudgetBytes,fallback)-runtimeReclaimBytes)},
+  {phase:action==='rollback'?'SWAP_EXISTING_CLEAN_PACKAGES':'SAVE_NEW_CLEAN_PACKAGE',requiredFreeBytes:Math.max(0,fixedBytes+manifest.runtimeBudgetBytes+(action==='deploy'?packageBytes:0)-runtimeReclaimBytes-oldestCleanReclaimBytes)},
+ ];
+ const requiredFreeBytes=Math.max(...phases.map(p=>p.requiredFreeBytes));
+ return {targetId:target.targetId,expectedCurrent:state.current?.releaseId||'NONE',releaseId:manifest.releaseId,action,allowed:inspection.freeBytes>=requiredFreeBytes,freeBytes:inspection.freeBytes,requiredFreeBytes,packageBytes,loadedImageBytes,imageContentBytes,runtimeBudgetBytes:manifest.runtimeBudgetBytes,capacityBasis:manifest.capacity?.basis||'LEGACY_PACKAGE_BUDGET',runtimeComponents:manifest.capacity?.components||null,runtimeReclaimBytes,oldestCleanReclaimBytes,phases,temporaryBudgetBytes:target.retention.maxTemporaryBytes,reserveBytes:target.retention.reserveBytes,maximumFullCopies:3,steps:['VERIFY_SOURCE_AND_CLEAN_FALLBACK','MAINTENANCE_AND_DRAIN','REMOVE_OWNED_RUNTIME','STREAM_FRESH_RUNTIME','VERIFY_AND_OPEN','DELETE_OLDEST_BACKUP','ROTATE_CLEAN_CURRENT','SAVE_NEW_CLEAN_PACKAGE']};
 }
 
 /** Runs only under the host's OS flock. Driver methods reconcile actual owned
@@ -43,7 +58,7 @@ export async function executeVps({target,state,source,driver,expectedCurrent,ope
  }else if(pending.recovery){source=await driver.cleanSource(state.current);}
  try{
   if(pending.phase==='PREFLIGHT'){
-   const inspection=await driver.inspect(state),plan=planVps(target,state,source.manifest,inspection);
+   const inspection=await driver.inspect(state),plan=planVps(target,state,source.manifest,inspection,{action});
    if(!plan.allowed)throw Error('Insufficient capacity before runtime reclamation');
    await driver.validatePrepared(inspection);
    await driver.verifySource(source);
@@ -54,6 +69,9 @@ export async function executeVps({target,state,source,driver,expectedCurrent,ope
    await driver.maintenance(state.current?.runtime);await driver.drain(state.current?.runtime);await phase('DRAINED');
   }
   if(pending.phase==='DRAINED'){
+   // Long semantic scans/SSH transfers may outlive the first free-space check.
+   // Recheck actual storage immediately before discarding the writable runtime.
+   if(!planVps(target,state,source.manifest,await driver.inspect(state),{action}).allowed)throw Error('Capacity changed before runtime reclamation');
    if(state.current){await driver.assertQuiescent(state.current.runtime);await driver.removeRuntime(state.current.runtime);}
    await phase('RUNTIME_REMOVED');
   }

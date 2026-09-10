@@ -32,7 +32,7 @@
     "instance:restore": "node scripts/instance-restore.mjs",
     "instance:copy": "node scripts/instance-copy.mjs",
     "instance:vps": "node scripts/instance-vps.mjs",
-    "test:vps": "node --test tests/vps-publisher.test.mjs tests/vps-http.test.mjs tests/vps-provider.test.mjs tests/archive-stream-restore.test.mjs tests/restore-execution-gate.test.mjs tests/instance-bridge-service.test.mjs",
+    "test:vps": "node --test tests/vps-publisher.test.mjs tests/vps-capacity.test.mjs tests/vps-http.test.mjs tests/vps-provider.test.mjs tests/archive-stream-restore.test.mjs tests/restore-execution-gate.test.mjs tests/instance-bridge-service.test.mjs",
     "codex:bridge": "node scripts/instance-bridge.mjs",
     "codex:doctor": "node scripts/instance-bridge.mjs --command doctor",
     "deploy:local": "node scripts/deploy-local.mjs",

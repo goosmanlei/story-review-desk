@@ -4,6 +4,7 @@ import {lstat,readFile,realpath,readdir,mkdir,chmod,open,rename} from 'node:fs/p
 import {pipeline} from 'node:stream/promises';
 import path from 'node:path';
 import {canonicalJson,sha256} from './bytes.mjs';
+import {validateRuntimeCapacity,validateRestoreMeasurement,restoreContractFromFiles,restoreMethodSha256} from './vps-capacity.mjs';
 
 export const PACKAGE_MANIFEST='vps-package.json';
 export function relativePackagePath(value){
@@ -46,6 +47,7 @@ export function validatePackageManifest(value,{target,allowDevelopment=false}={}
  if(!Array.isArray(body.images)||body.images.length!==2||body.images.map(i=>i.role).sort().join(',')!=='app,postgres')throw Error('Package needs complete app and PostgreSQL images');
  for(const image of body.images){if(!files.has(image.path)||!/^sha256:[a-f0-9]{64}$/.test(image.id)||image.reference!=='review-vps-artifact:'+body.releaseId+'-'+image.role||!Number.isSafeInteger(image.loadedBytes)||image.loadedBytes<=0||image.architecture!=='linux/amd64')throw Error('Invalid immutable image descriptor');}
  if(body.totalFileBytes!==body.files.reduce((n,f)=>n+f.bytes,0)||!Number.isSafeInteger(body.runtimeBudgetBytes)||body.runtimeBudgetBytes<=0)throw Error('Package capacity inventory differs');
+ if(body.capacity)validateRuntimeCapacity(body.capacity,body.baseline,body.files,body.runtimeBudgetBytes);
  return Object.freeze(value);
 }
 export async function readPackage(directory,options={}){
@@ -69,6 +71,7 @@ export async function verifyPackage(directory,options={}){
  const {verifyBackup}=await import('../../scripts/instance-transfer.mjs');await verifyBackup(path.join(root,'baseline'));
  const {verifySoftwarePackage}=await import('../../scripts/instance-software-pin.mjs');
  await verifySoftwarePackage(path.join(root,'software'),{expectedCommit:manifest.softwareCommit,allowUnversioned:options.allowDevelopment});
+ if(manifest.capacity){const software=JSON.parse(await readFile(path.join(root,'software/software-manifest.json'),'utf8'));const implementation=restoreMethodSha256(await readFile(path.join(root,'software/host/instance-runtime/vps-driver.mjs'),'utf8'));validateRestoreMeasurement(manifest.capacity.measurement,baseline,{restoreContractSha256:restoreContractFromFiles(software.files,implementation)});}
  return {status:'VPS_PACKAGE_VERIFIED',releaseId:manifest.releaseId,softwareCommit:manifest.softwareCommit,instanceId:manifest.business.instanceId,manifestSha256:manifest.manifestSha256,files:manifest.files.length,bytes:manifest.totalFileBytes};
 }
 export async function immutablePackage(root){

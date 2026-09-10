@@ -10,5 +10,5 @@ export async function command(binary,args,{cwd,input,output,maxOutputBytes=8*102
  let reader;
  if(output){reader=pipeline(child.stdout,createWriteStream(output,{flags:'wx',mode:0o600}));reader.catch(()=>child.kill('SIGTERM'));}
  else child.stdout.on('data',chunk=>{if(!exceeded){total+=chunk.length;if(total>maxOutputBytes){exceeded=true;child.kill('SIGTERM');}else chunks.push(chunk);}});
- try{if(input)await pipeline(input,child.stdin);else child.stdin.end();await done;if(reader)await reader;const out=Buffer.concat(chunks);return raw?out:out.toString('utf8').trim();}catch(error){child.kill('SIGTERM');await done.catch(()=>{});await reader?.catch(()=>{});throw error;}
+ try{if(input)await pipeline(input,child.stdin);else child.stdin.end();await done;if(reader)await reader;const out=Buffer.concat(chunks);return raw?out:out.toString('utf8').trim();}catch(error){child.kill('SIGTERM');const childError=await done.then(()=>null,reason=>reason);await reader?.catch(()=>{});throw ['EPIPE','ERR_STREAM_PREMATURE_CLOSE'].includes(error.code)&&childError?childError:error;}
 }

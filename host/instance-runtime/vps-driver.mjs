@@ -21,21 +21,26 @@ export class VpsDriver{
   // On Desktop the daemon filesystem is observable through the existing Nginx;
   // on Linux inspect DockerRootDir directly. No diagnostic container is created.
   const dockerRoot=(await this.docker(['info','--format','{{.DockerRootDir}}'])).trim();
-  let dockerFreeBytes,dockerFilesystemUsedBytes;
+  let dockerFreeBytes,dockerFilesystemUsedBytes,hostDockerSameFilesystem=false;
   if(process.platform==='linux'){
    const dockerFs=await statfs(dockerRoot);dockerFreeBytes=Number(dockerFs.bavail*dockerFs.bsize);dockerFilesystemUsedBytes=Number((dockerFs.blocks-dockerFs.bfree)*dockerFs.bsize);
+   hostDockerSameFilesystem=(await lstat(dockerRoot)).dev===(await lstat(measured)).dev;
   }else if(this.allowDevelopment){
    const line=(await this.docker(['exec',this.target.nginx.container,'df','-Pk','/'])).split('\n').at(-1).trim().split(/\s+/);
    dockerFreeBytes=Number(line[3])*1024;dockerFilesystemUsedBytes=Number(line[2])*1024;
   }else throw Error('Cannot observe Docker storage filesystem');
   if(!Number.isSafeInteger(dockerFreeBytes)||dockerFreeBytes<0)throw Error('Invalid Docker filesystem capacity evidence');
-  const directoryBytes=async directory=>{let bytes=0;for(const entry of await readdir(directory,{withFileTypes:true}).catch(e=>{if(absent(e))return [];throw e;})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink())throw Error('Owned tree contains a symlink');bytes+=entry.isDirectory()?await directoryBytes(file):Number((await lstat(file)).blocks)*512;}return bytes;};
+  const directoryBytes=async(directory,{reclaimable=false}={})=>{let bytes=0;for(const entry of await readdir(directory,{withFileTypes:true}).catch(e=>{if(absent(e))return [];throw e;})){const file=path.join(directory,entry.name);if(entry.isSymbolicLink()){if(reclaimable)continue;throw Error('Owned tree contains a symlink');}if(entry.isDirectory())bytes+=await directoryBytes(file,{reclaimable});else{const info=await lstat(file);if(!reclaimable||info.nlink===1)bytes+=Number(info.blocks)*512;}}return bytes;};
   const rootBytes=await directoryBytes(root),volumes=[];
   for(const runtime of [this.state.current?.runtime,this.state.pending?.runtime].filter(Boolean)){
-   const pg=await this.object('container',runtime.pg);if(pg?.State.Running){const bytes=Number((await this.docker(['exec',runtime.pg,'du','-sk','/var/lib/postgresql'])).split(/\s+/)[0])*1024;volumes.push({name:runtime.volume,bytes});}
+   const pg=await this.owned('container',runtime.pg,runtime);if(pg?.State.Running){await this.owned('volume',runtime.volume,runtime);const bytes=Number((await this.docker(['exec',runtime.pg,'du','-sk','/var/lib/postgresql'])).split(/\s+/)[0])*1024;if(!Number.isSafeInteger(bytes)||bytes<0)throw Error('Invalid owned volume allocation');volumes.push({name:runtime.volume,bytes});}
   }
-  const images=[];for(const id of new Set([...(this.state.imageInventory||[]),...[this.state.current?.runtime,this.state.pending?.runtime].filter(Boolean).flatMap(r=>[r.appImage,r.pgImage])])){const found=await this.object('image',id);if(found)images.push({id,bytes:found.Size});}
-  return {freeBytes:Math.min(freeBytes,dockerFreeBytes),hostFreeBytes:freeBytes,dockerFreeBytes,dockerFilesystemUsedBytes,filesystemUsedBytes:diskUsed,rootAllocatedBytes:rootBytes,volumes:[...new Map(volumes.map(v=>[v.name,v])).values()],images,temporaryLimitBytes:this.target.retention.maxTemporaryBytes};
+  let reclaimableRuntimeBytes=0,reclaimableOldestCleanBytes=0;
+  const current=this.state.current?.runtime;
+  if(current){try{await this.directory(current);reclaimableRuntimeBytes=await directoryBytes(current.root,{reclaimable:true})+(volumes.find(v=>v.name===current.volume)?.bytes||0);}catch(error){if(!absent(error))throw error;}}
+  if(this.state.backup){const clean=await this.cleanSource(this.state.backup);for(const relative of [...clean.manifest.files.map(f=>f.path),PACKAGE_MANIFEST]){const info=await lstat(path.join(clean.root,relative));if(info.isFile()&&!info.isSymbolicLink()&&info.nlink===1)reclaimableOldestCleanBytes+=Number(info.blocks)*512;}}
+  const images=[];for(const id of new Set([...(this.state.imageInventory||[]),...[this.state.current?.runtime,this.state.pending?.runtime].filter(Boolean).flatMap(r=>[r.appImage,r.pgImage])])){const found=await this.object('image',id);if(found)images.push({id,digest:found.Id,bytes:found.Size});}
+  return {freeBytes:Math.min(freeBytes,dockerFreeBytes),hostFreeBytes:freeBytes,dockerFreeBytes,hostDockerSameFilesystem,dockerFilesystemUsedBytes,filesystemUsedBytes:diskUsed,rootAllocatedBytes:rootBytes,reclaimableRuntimeBytes,reclaimableOldestCleanBytes,volumes:[...new Map(volumes.map(v=>[v.name,v])).values()],images,temporaryLimitBytes:this.target.retention.maxTemporaryBytes};
  }
  async inspect(state=this.state){
   const usage=await this.measure(),nginx=await this.object('container',this.target.nginx.container);
