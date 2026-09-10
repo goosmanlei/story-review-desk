@@ -1,5 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
+
+import {runtimePath} from './runtime-path';
+/* eslint-disable @next/next/no-img-element */
+
 
 import { EvidenceTrigger } from './evidence-reader';
 import { visibleText } from './review-semantics';
@@ -60,7 +63,7 @@ export function StoryStructureWorkbench({ overview, selectedSection, onSelectSec
 
       {active.id === 'overview' && <div className="story-structure-overview">
         <button type="button" className="story-structure-map" onClick={(event) => onOpenImage(overview.overviewMap.imageUrl, event.currentTarget)}>
-          <img src={overview.overviewMap.imageUrl} alt={visibleText(overview.overviewMap.label)} />
+          <img src={runtimePath(overview.overviewMap.imageUrl)} alt={visibleText(overview.overviewMap.label)} />
           <span><b>{visibleText(overview.overviewMap.label)}</b><small>{visibleText(overview.overviewMap.note)} · 点击放大</small></span>
         </button>
         <section className="story-structure-guide"><h4>阅读顺序</h4><ol><li>先看六幕与十个SEQ如何把“受辱—误杀—藏首—查案—伏法”连成一线。</li><li>再核对三条犯罪线、九颗头与证物怎样跨人物和地点汇合。</li><li>最后区分观众已知、角色误判与调查者逐步所得，避免提前揭底。</li></ol></section>
@@ -93,7 +96,7 @@ export function StoryStructureWorkbench({ overview, selectedSection, onSelectSec
 
       {active.id === 'space' && <div className="story-space-view">
         <p className="story-space-orientation">统一方向：{visibleText(overview.spatialSummary.orientation)}。这里只呈现理解剧情所需的地点关系；机位、区域与冻结点仍留在制作空间圣经。</p>
-        <section className="story-space-maps">{overview.spatialSummary.mapCards.map((card) => <button type="button" key={card.id} onClick={(event) => onOpenImage(card.imageUrl, event.currentTarget)}><img src={card.imageUrl} alt={visibleText(card.label)} /><span><b>{visibleText(card.label)}</b><small>{visibleText(card.note)}</small></span></button>)}</section>
+        <section className="story-space-maps">{overview.spatialSummary.mapCards.map((card) => <button type="button" key={card.id} onClick={(event) => onOpenImage(card.imageUrl, event.currentTarget)}><img src={runtimePath(card.imageUrl)} alt={visibleText(card.label)} /><span><b>{visibleText(card.label)}</b><small>{visibleText(card.note)}</small></span></button>)}</section>
         <section className="story-location-list">{overview.spatialSummary.locations.map((location) => <article key={location.id}><small>{location.id} · {visibleText(location.zone)}</small><h4>{visibleText(location.name)}</h4><p>{visibleText(location.fact)}</p></article>)}</section>
       </div>}
     </div>

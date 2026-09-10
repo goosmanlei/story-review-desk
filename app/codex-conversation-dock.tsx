@@ -8,10 +8,11 @@ import { useAssistant } from './assistant/context-provider';
 import { canonicalJson, textHash, type AssistantContextRef, type ClientDraft, type WorkContextResult, type WorkFocus } from './assistant/types';
 import styles from './codex-conversation-dock.module.css';
 import { StoryCommentEntry } from './story-comments';
+import {runtimePath} from './runtime-path';
 
 function OriginalContextImage({ url, title }: { url: string; title: string }) {
   // eslint-disable-next-line @next/next/no-img-element -- Display the exact registered original without a derivative service.
-  return <img className={styles.contextImage} src={url} alt={`${title}，本轮所选原图`} />;
+  return <img className={styles.contextImage} src={runtimePath(url)} alt={`${title}，本轮所选原图`} />;
 }
 
 type Resource = { id: string; title: string; kind: string; href: string; versionId?: string; role: string; excerpt: string; media?: { kind: string; previewUrl?: string } };
@@ -32,12 +33,20 @@ async function jsonRequest(url: string, body?: unknown, key?: string, signal?: A
   if (!response.ok) throw new Error(typeof payload.error === 'string' ? payload.error : payload.error?.message || payload.message || `请求未完成（${response.status}）`);
   return payload;
 }
+async function streamConversation(url:string,signal:AbortSignal,onValue:(value:Envelope)=>void){
+  const response=await fetch(url,{signal,headers:{Accept:'text/event-stream'}});
+  if(!response.ok||!response.body)throw new Error('助手连接暂不可用，请稍后重试。');
+  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
+  try{for(;;){const next=await reader.read();if(next.done)break;buffer+=decoder.decode(next.value,{stream:true});if(buffer.length>2*1024**2)throw new Error('助手流超出大小限制');
+    let end;while((end=buffer.indexOf('\n\n'))>=0){const frame=buffer.slice(0,end);buffer=buffer.slice(end+2);const data=frame.split('\n').filter(line=>line.startsWith('data: ')).map(line=>line.slice(6)).join('\n');if(data){const value=JSON.parse(data) as Envelope;if(frame.startsWith('event: error'))throw new Error(typeof value.error==='string'?value.error:'助手连接已结束');onValue(value);}}
+  }}finally{await reader.cancel().catch(()=>{});reader.releaseLock();}
+}
 function sameSubject(a: WorkFocus | null, b: WorkFocus | null) {
   return Boolean(a && b && a.projectId === b.projectId && a.subjectType === b.subjectType && a.subjectId === b.subjectId && a.versionId === b.versionId);
 }
 function navigate(href: string) {
   if (!href.startsWith('/') || href.startsWith('//')) return;
-  window.history.pushState({}, '', href);
+  window.history.pushState({}, '', runtimePath(href));
   window.dispatchEvent(new PopStateEvent('popstate'));
 }
 function validUnicode(value: string) {
@@ -197,9 +206,10 @@ export function CodexConversationDock() {
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       try {
-        const payload = await jsonRequest(`${API}/conversations?conversationId=${encodeURIComponent(conversationId)}`, undefined, undefined, controller.signal);
-        if (current !== epoch.current) return;
-        setConversation(payload.conversation || null); setBridge(payload.bridge || null); setLoading(false);
+        await streamConversation(`${API}/events?conversationId=${encodeURIComponent(conversationId)}`,controller.signal,payload=>{
+          if (current !== epoch.current) return;
+          setConversation(payload.conversation || null); setBridge(payload.bridge || null); setLoading(false);
+        });
       } catch (reason) { if (current === epoch.current && !controller.signal.aborted) { setError((reason as Error).message); setLoading(false); } }
       if (!controller.signal.aborted && current === epoch.current) timer = setTimeout(poll, 1200);
     };
@@ -323,12 +333,12 @@ export function CodexConversationDock() {
       <button className={styles.backdrop} aria-label="关闭项目 Codex" onClick={() => setOpen(false)} />
       <aside ref={panel} className={styles.drawer} aria-label="项目 Codex 工作助手" onKeyDown={keyboard} style={{ width: `min(${width}px, 100vw)` }}>
         <header className={styles.header}><div><small>创作助手 · Codex</small><h2>一起看当前工作</h2></div><button className={styles.commentSwitch} onClick={()=>{const entry=document.querySelector<HTMLButtonElement>('#story-comment-entry button, .story-comment-entry-fallback');entry?.click();}}>查看评论</button><button aria-label="收起项目 Codex" onClick={() => setOpen(false)}>×</button></header>
-        {hostedReadOnly ? <div className={styles.hostedNotice}><p>远端镜像只读。请在本地审阅台使用工作助手。</p><a href="http://localhost:3000">打开本地审阅台</a></div> : <>
+        {hostedReadOnly ? <div className={styles.hostedNotice}><p>远端镜像只读。请在本地审阅台使用工作助手。</p><a href={runtimePath("http://localhost:3000")}>打开本地审阅台</a></div> : <>
           <nav className={styles.toolbar}><button onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen}>对话记录</button><button onClick={() => { epoch.current += 1; setConversationId(''); setConversation(null); setComposer(EMPTY); setError(''); }}>新建对话</button><span className={bridgeReady ? styles.online : styles.offline}>{bridgeReady ? '已连接' : bridge?.online ? '需要更新连接' : '未连接'}</span></nav>
           {historyOpen && <section className={styles.history} aria-label="Codex会话列表"><div className={styles.toolbar}><button aria-pressed={!archived} onClick={() => setArchived(false)}>当前对话</button><button aria-pressed={archived} onClick={() => setArchived(true)}>已归档</button></div>{summaries.map((item) => <button key={item.id} aria-pressed={conversationId === item.id} onClick={() => { epoch.current += 1; setConversation(null); setConversationId(item.id); setHistoryOpen(false); setError(''); }}><b>{item.preview || '未命名对话'}</b><small>{item.assistantProtocol ? readableStatus(item.state) : '旧版只读记录'} · {item.messageCount}条消息</small></button>)}{!summaries.length && <p>暂无对话。</p>}{nextCursor && <button onClick={() => void loadList(nextCursor).catch((reason) => setError(reason.message))}>加载更多</button>}</section>}
           <section className={styles.focusCard} aria-label="本轮工作上下文"><div><small>{composer.focus ? '本轮已固定' : '跟随当前页面'}</small><b>{preview?.focus.title || focus?.title || '请先打开一个工作对象'}</b>{focus?.versionId && <small>版本：{focus.versionId}</small>}</div>{composer.focus && <button onClick={() => setComposer((old) => ({ ...EMPTY, text: old.text }))}>改用当前页面</button>}</section>
           {differentPage && <p className={styles.notice}>页面已切换，本轮仍讨论上方对象。</p>}
-          <details className={styles.contextDetails}><summary>本轮依据{preview ? ` · ${preview.resources.length}项` : previewError ? '暂不可用' : '正在读取'}</summary>{preview?.resources.map((resource) => <div key={resource.id}><button onClick={() => navigate(resource.href)}>{resource.title}</button>{resource.media?.previewUrl && <a href={resource.media.previewUrl} target="_blank" rel="noreferrer"><OriginalContextImage url={resource.media.previewUrl} title={resource.title} /></a>}<small>{resource.role === 'HISTORICAL' ? '历史版本' : '本轮资料'}{resource.media ? resource.media.kind === 'image' ? ' · 原图将在发送时校验' : ' · 仅文字和技术资料' : ''}</small></div>)}{effectiveDraft && <label><input type="checkbox" checked={composer.includeDraft} onChange={(event) => setComposer((old) => ({ ...old, includeDraft: event.target.checked }))} />带入未提交意见：{effectiveDraft.label}</label>}{focus?.selection && <button onClick={() => { const next = { ...focus }; delete next.selection; setComposer((old) => ({ ...old, focus: next })); }}>移除圈选范围</button>}{preview?.missing.map((item) => <p key={item}>缺项：{item}</p>)}{composer.references.map((ref) => <button key={ref} onClick={() => setComposer((old) => ({ ...old, references: old.references.filter((item) => item !== ref) }))}>移除比较资料：{ref}</button>)}</details>
+          <details className={styles.contextDetails}><summary>本轮依据{preview ? ` · ${preview.resources.length}项` : previewError ? '暂不可用' : '正在读取'}</summary>{preview?.resources.map((resource) => <div key={resource.id}><button onClick={() => navigate(resource.href)}>{resource.title}</button>{resource.media?.previewUrl && <a href={runtimePath(resource.media.previewUrl)} target="_blank" rel="noreferrer"><OriginalContextImage url={resource.media.previewUrl} title={resource.title} /></a>}<small>{resource.role === 'HISTORICAL' ? '历史版本' : '本轮资料'}{resource.media ? resource.media.kind === 'image' ? ' · 原图将在发送时校验' : ' · 仅文字和技术资料' : ''}</small></div>)}{effectiveDraft && <label><input type="checkbox" checked={composer.includeDraft} onChange={(event) => setComposer((old) => ({ ...old, includeDraft: event.target.checked }))} />带入未提交意见：{effectiveDraft.label}</label>}{focus?.selection && <button onClick={() => { const next = { ...focus }; delete next.selection; setComposer((old) => ({ ...old, focus: next })); }}>移除圈选范围</button>}{preview?.missing.map((item) => <p key={item}>缺项：{item}</p>)}{composer.references.map((ref) => <button key={ref} onClick={() => setComposer((old) => ({ ...old, references: old.references.filter((item) => item !== ref) }))}>移除比较资料：{ref}</button>)}</details>
           {previewError && <p className={styles.error} role="alert">{previewError}</p>}
           <section className={styles.conversation} aria-label="Codex 对话记录" aria-busy={loading}>
             {!conversation?.messages.length && <div className={styles.empty}><b>从正在看的内容开始</b><p>直接提问，或圈选正文、聚焦一条意见后再讨论。</p>{suggestionQuestions(focus).map((question) => <button key={question} onClick={() => { freeze(question); input.current?.focus(); }}>{question}</button>)}</div>}

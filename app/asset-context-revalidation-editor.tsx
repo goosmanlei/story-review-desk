@@ -4,6 +4,8 @@ import type {AssetContextTarget,AssetContextContent,AssetContextWorkspace} from 
 import {validContextWorkspace,validContextReceipt,validContextLocalDraft,validContextPending,reconcileContextPending,type ContextEditableDraft,type ContextPending,type ContextLocalDraft} from './asset-context-revalidation-client.mjs';
 import {useRuntimeMode} from './runtime-mode';
 import './shot-production-recipe-editor.css';
+import {instanceSessionStorage} from './client-storage';
+import {runtimePath} from './runtime-path';
 
 const endpoint='/api/instance/asset-context-revalidation';
 const jobs:Record<string,string>={QUEUED:'等待登记',RUNNING:'正在登记',SUCCEEDED:'复核已登记',FAILED:'登记失败',RESULT_UNKNOWN:'结果待核查'};
@@ -19,14 +21,14 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
  const [open,setOpen]=useState(false),[state,setState]=useState<AssetContextWorkspace|null>(null),[draft,setDraft]=useState<ContextEditableDraft|null>(null),[busy,setBusy]=useState(false),[dirty,setDirty]=useState(false),[pending,setPending]=useState<ContextPending|null>(null),[storageError,setStorageError]=useState(false),[preview,setPreview]=useState<Record<string,unknown>|null>(null),[message,setMessage]=useState(''),[staleLocalDrafts,setStaleLocalDrafts]=useState<ContextLocalDraft[]>([]);
  const key='asset-context-revalidation:'+target.familyId+':'+target.versionId+':'+target.sha256;
  const draftKey=key+':draft',pendingKey=key+':pending',staleKey=key+':stale-drafts';
- function writeStorage(k:string,v:string){try{sessionStorage.setItem(k,v);}catch{setStorageError(true);throw Error('浏览器无法保全观察稿或请求记录，已停止提交；请保留当前内容。');}}
- function removeStorage(k:string){try{sessionStorage.removeItem(k);}catch{setStorageError(true);throw Error('浏览器无法更新观察稿或请求记录，已停止提交。');}}
+ function writeStorage(k:string,v:string){try{instanceSessionStorage.setItem(k,v);}catch{setStorageError(true);throw Error('浏览器无法保全观察稿或请求记录，已停止提交；请保留当前内容。');}}
+ function removeStorage(k:string){try{instanceSessionStorage.removeItem(k);}catch{setStorageError(true);throw Error('浏览器无法更新观察稿或请求记录，已停止提交。');}}
  function remember(value:ContextPending|null){if(value)writeStorage(pendingKey,JSON.stringify(value));else removeStorage(pendingKey);setPending(value);}
  function rememberDraft(content:ContextEditableDraft,w:AssetContextWorkspace){writeStorage(draftKey,JSON.stringify({target:targetOf(w),basisHash:w.basisHash,releaseId:w.releaseId,content}));}
  async function inspect(signal?:AbortSignal){try{
   const w=validContextWorkspace(await read(await fetch(endpoint+'?'+new URLSearchParams(target),{cache:'no-store',signal})),target);if(signal?.aborted)return;
   let local:ContextLocalDraft|null=null,stored:ContextPending|null=null,stale:ContextLocalDraft[]=[];
-  try{const l=sessionStorage.getItem(draftKey),p=sessionStorage.getItem(pendingKey),old=sessionStorage.getItem(staleKey);if(old){const values:unknown=JSON.parse(old);if(!Array.isArray(values))throw Error('Invalid stale draft list');stale=values.map(value=>validContextLocalDraft(value,target));}if(l)local=validContextLocalDraft(JSON.parse(l),target);if(p)stored=validContextPending(JSON.parse(p),target);}catch{setStorageError(true);throw Error('本地草稿或待核查请求无法读取，暂时停止提交以免丢稿或重复登记。');}
+  try{const l=instanceSessionStorage.getItem(draftKey),p=instanceSessionStorage.getItem(pendingKey),old=instanceSessionStorage.getItem(staleKey);if(old){const values:unknown=JSON.parse(old);if(!Array.isArray(values))throw Error('Invalid stale draft list');stale=values.map(value=>validContextLocalDraft(value,target));}if(l)local=validContextLocalDraft(JSON.parse(l),target);if(p)stored=validContextPending(JSON.parse(p),target);}catch{setStorageError(true);throw Error('本地草稿或待核查请求无法读取，暂时停止提交以免丢稿或重复登记。');}
   setState(w);setPreview(null);setPending(stored);setStaleLocalDrafts(stale);
   if(stored){const result=reconcileContextPending(stored,w);if(result.confirmed){remember(null);if(result.draft){removeStorage(draftKey);local=null;}setMessage(result.job?'已找到原登记任务，请核对下方结果。':'已找到原保存请求的草稿。');}else setMessage('原请求结果尚未核实；继续重读，暂不重复提交。');}
   if(local&&local.basisHash===w.basisHash&&local.releaseId===w.releaseId){setDraft(local.content);setDirty(true);}
@@ -50,14 +52,14 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
   else {setPreview(null);setState({...state,jobs:[{jobId:String(result.jobId),requestId,status:'QUEUED'},...state.jobs]});setMessage('复核已排队登记，请重读确认结果。');window.dispatchEvent(new Event('review:operations-updated'));}
  }catch(e){setMessage((e instanceof Error?e.message:'复核未完成')+(submitted&&action!=='preview'?'；结果待核查，请重读原请求，勿重复提交。':''));}finally{setBusy(false);}}
  const blocked=busy||!!pending||storageError||!!state&&(state.readOnly||state.blockers.length>0||state.jobs.some(j=>['QUEUED','RUNNING','RESULT_UNKNOWN'].includes(j.status)));
- const imageUrl=mediaToken&&/^[A-Za-z0-9_-]+$/.test(mediaToken)?'/api/v8/media/'+mediaToken:null;
+ const imageUrl=mediaToken&&/^[A-Za-z0-9_-]+$/.test(mediaToken)?runtimePath('/api/v8/media/'+mediaToken):null;
  return <section className="shot-production-recipe-editor" aria-label="旧采用图片的关系复核">
   {!open?<button type="button" onClick={()=>{setOpen(true);beginInspect();}}>复核原图在当前关系中的适用性</button>:<>
    <header><h4>复核原图在当前关系中的适用性</h4><button type="button" disabled={busy||storageError} onClick={beginInspect}>重读原图与复核记录</button></header>
    <p>重新核对实体关系变化后的适用性。复核会保留原采用记录，并单独登记当前结论。</p>
    {state&&draft&&<>
-    {imageUrl&&<figure><a href={imageUrl} target="_blank" rel="noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}
-     <img src={imageUrl} alt="本次关系复核的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/></a><figcaption>点击查看原图</figcaption></figure>}
+    {imageUrl&&<figure><a href={runtimePath(imageUrl)} target="_blank" rel="noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}
+     <img src={runtimePath(imageUrl)} alt="本次关系复核的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/></a><figcaption>点击查看原图</figcaption></figure>}
     <details><summary>当前关系与原采用依据</summary><pre>{JSON.stringify({versionId:state.versionId,sha256:state.sha256,domainContext:state.domainContext,legacyAdoptionProof:state.legacyAdoptionProof},null,2)}</pre></details>
     {state.head&&<p>已有关系复核记录。是否可用以重读后的素材状态为准。</p>}
     {state.blockers.map(b=><p key={b}>{b}</p>)}

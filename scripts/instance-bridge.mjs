@@ -93,6 +93,10 @@ export function bridgeEnvironment(environment = process.env) {
     "TZ",
     "REVIEW_UV_BINARY",
     "REVIEW_CODEX_BINARY",
+    "REVIEW_CODEX_AUTH_HOME",
+    "REVIEW_EXECUTABLE_PATH",
+    "REVIEW_PYTHON_BINARY",
+    "REVIEW_DEPLOYMENT_MODE",
   ];
   return Object.fromEntries(
     allowed
@@ -128,6 +132,7 @@ export function bridgePythonArguments(settings, command = "serve", codexBinary) 
     throw new Error("Bridge command must be serve or doctor");
   const args = [
     "run",
+    ...(process.env.REVIEW_PYTHON_BINARY ? ["--python", process.env.REVIEW_PYTHON_BINARY] : []),
     path.join(applicationRoot, "host/codex_conversation_bridge.py"),
     command,
     "--concurrency",
@@ -197,6 +202,12 @@ async function managerRecord(lock) {
     if (error.code === "ENOENT") return null;
     throw error;
   }
+}
+
+export async function stopManagedBridge(root) {
+  root = await realpath(root);
+  const lock = path.join(root, managerLockName), record = await managerRecord(lock);
+  return {status: record && await stopManager(lock, record, root) ? "STOPPED" : "NOT_RUNNING"};
 }
 
 export function decodeBridgeHealthRecord(record) {

@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from './execution-epoch.mjs';
 import {MATERIAL_REBASE_MODE,MATERIAL_REBASE_SCHEMA,MATERIAL_REBASE_SOURCE,materialProductionRebaseContext,compileMaterialProductionRebase,validateRebaseAcknowledgement} from './material-production-rebase.mjs';
 import {imageTechnicalBinding} from './image-technical-spec.mjs';
 import {materialRequirementSelectionReasons} from './material-requirement-disposition.mjs';
@@ -173,7 +174,7 @@ export async function applyMaterialProductionJob(tx,{jobId,api}){
 }
 export async function runMaterialProductionIteration({repository,api}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能发布素材建档');
- const job=await repository.readTransaction(async tx=>(await tx.listAux(MATERIAL_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
+ const job=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,MATERIAL_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
  try{return {processed:true,status:'SUCCEEDED',...await repository.writeTransaction(tx=>applyMaterialProductionJob(tx,{jobId:job.jobId,api}))};}catch(e){await repository.writeTransaction(async tx=>{const record=await tx.getAux(MATERIAL_PRODUCTION_NS.jobs,job.jobId),current=read(record);if(current?.status==='QUEUED')await put(tx,MATERIAL_PRODUCTION_NS.jobs,job.jobId,{...current,status:'FAILED',error:String(e.message||e).slice(0,1500)},record.revisionId);});return {processed:true,jobId:job.jobId,status:'FAILED'};}
 }
 

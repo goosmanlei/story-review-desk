@@ -12,6 +12,7 @@ import {MaterialProductionSetupEditor} from './material-production-setup-editor'
 import {MaterialUsageEditor} from './material-usage-editor';
 import {ImageTechnicalSpecPanel} from './image-technical-spec-panel';
 import {AssetContextRevalidationEditor} from './asset-context-revalidation-editor';
+import {runtimePath} from './runtime-path';
 import {currentMaterialDirectoryRow,materialRequirementLink} from './material-requirement-presentation';
 import {
   episodePlanIsCurrent,
@@ -497,10 +498,10 @@ function MaterialOutputViewer({
             : !version ? <div className="material-output-empty"><b>尚未产出候选</b><p>产物生成并登记实际文件与 SHA-256 后，会在同一区域直接进入详细 Review。</p></div>
               : kind === 'IMAGE' && mediaUrl ? <button ref={imageOrigin} type="button" className="material-output-image" onClick={() => { setZoom(100); setLightboxOpen(true); }}>
                 {/* eslint-disable-next-line @next/next/no-img-element -- review must display the exact SHA-bound original without image transformation */}
-                <img src={mediaUrl} alt={`${visibleText(family?.label || version.label)}产物，点击放大审查`} /><span>{originalMediaUrl ? '点击放大审查原图' : '点击放大预览'}</span></button>
-                : kind === 'AUDIO' && mediaUrl ? <audio data-review-audio controls preload="metadata" src={mediaUrl}>你的浏览器不支持音频播放。</audio>
-                  : kind === 'VIDEO' && mediaUrl ? <video controls preload="metadata" src={mediaUrl}>你的浏览器不支持视频播放。</video>
-                    : kind === 'UNKNOWN' && mediaUrl ? <a href={mediaUrl} target="_blank" rel="noreferrer">打开登记文件 →</a>
+                <img src={runtimePath(mediaUrl)} alt={`${visibleText(family?.label || version.label)}产物，点击放大审查`} /><span>{originalMediaUrl ? '点击放大审查原图' : '点击放大预览'}</span></button>
+                : kind === 'AUDIO' && mediaUrl ? <audio data-review-audio controls preload="metadata" src={runtimePath(mediaUrl)}>你的浏览器不支持音频播放。</audio>
+                  : kind === 'VIDEO' && mediaUrl ? <video controls preload="metadata" src={runtimePath(mediaUrl)}>你的浏览器不支持视频播放。</video>
+                    : kind === 'UNKNOWN' && mediaUrl ? <a href={runtimePath(mediaUrl)} target="_blank" rel="noreferrer">打开登记文件 →</a>
                       : <div className="material-output-empty"><b>当前文件没有可用审阅代理</b><p>{originalMediaError || '文件事实仍会保留；预览不可用不等于产物不存在。'}</p></div>}
       </div>
 
@@ -509,7 +510,7 @@ function MaterialOutputViewer({
       <header><b>{visibleText(family?.label || version?.label || '素材图片')}</b><div><button type="button" aria-label="缩小素材图片" onClick={() => setZoom((value) => Math.max(40, value - 20))}>−</button><span>{zoom}%</span><button type="button" aria-label="放大素材图片" onClick={() => setZoom((value) => Math.min(300, value + 20))}>＋</button><button type="button" onClick={() => setLightboxOpen(false)}>关闭</button></div></header>
       <div>
         {/* eslint-disable-next-line @next/next/no-img-element -- lightbox must preserve the exact review source */}
-        <img src={mediaUrl} alt={`${visibleText(family?.label || version?.label || '素材图片')}放大审查`} style={{ width: `${zoom}%` }} />
+        <img src={runtimePath(mediaUrl)} alt={`${visibleText(family?.label || version?.label || '素材图片')}放大审查`} style={{ width: `${zoom}%` }} />
       </div>
     </dialog>, document.body)}
   </section>;
@@ -1062,7 +1063,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
     : !selectedRequirement ? <section className="material-info-card is-empty"><p className="v6-empty-note">选择一项素材，查看固定产物区、Review、生产资料、用途与版本血缘。</p></section>
     : <article className="material-info-card" data-material-info-id={publicRef(selectedRequirement.id)} data-family-id={selectedFamily?.id || ''}>
       <header className="material-info-header"><span>{selectedMediaLabel} · {selectedClassification?.businessCategoryPrimary} / {selectedClassification?.businessCategorySecondary}</span>{currentProductionTarget?<MaterialProgressBadge stage={selectedCreatorStage?.creatorStage||'INITIAL'}/>:<span>历史需求</span>}</header>
-      {!currentProductionTarget&&<section className="material-production-materials" aria-label="素材需求替代关系" role={selectedRequirement.currentDisposition==='INVALID_REPLACEMENT'?'alert':'status'}><h3>{selectedRequirement.currentDisposition==='REPLACED'?'原综合需求，已拆分':'素材替代关系暂不可用'}</h3><p>保留这项原需求、原版本和审阅历史；不计当前需求完成度，不在这里建立新候选或编辑新用途。</p>{replacement?.replacedByRequirementId&&<a href={materialRequirementLink(replacement.replacedByRequirementId)}>查看新的整套需求</a>}{replacement?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>}
+      {!currentProductionTarget&&<section className="material-production-materials" aria-label="素材需求替代关系" role={selectedRequirement.currentDisposition==='INVALID_REPLACEMENT'?'alert':'status'}><h3>{selectedRequirement.currentDisposition==='REPLACED'?'原综合需求，已拆分':'素材替代关系暂不可用'}</h3><p>保留这项原需求、原版本和审阅历史；不计当前需求完成度，不在这里建立新候选或编辑新用途。</p>{replacement?.replacedByRequirementId&&<a href={runtimePath(materialRequirementLink(replacement.replacedByRequirementId))}>查看新的整套需求</a>}{replacement?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>}
       {currentProductionTarget&&!!selectedCreatorStage?.creatorStageReasons.length && <section className="material-blocking-explanation" aria-label="当前素材阻断说明">
         <header><div><small>BLOCKING REASON</small><h3>为什么现在被阻断</h3></div><span>{selectedCreatorStage.creatorStageShortReason || '原因待补齐'}</span></header>
         <div>
@@ -1079,8 +1080,8 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           : `版本 ${publicRef(viewState.versionId)} 不属于资产族 ${publicRef(selectedFamily.id)}，已拒绝静默显示最新版本。`}</p></section>}
       {deletedVersionSelection&&<section className="material-selection-error" role="alert" data-deleted-material-version={explicitSelectedVersion?.id}><b>该版本已登记为删除审计</b><p>不在日常素材工作区展示。原历史记录未改写，未切换到其他版本；这次界面整理没有执行物理删除。</p></section>}
       {!familySelectionMismatch && !versionSelectionMismatch && !deletedVersionSelection && <>
-        {composition&&<section className="material-production-materials" aria-label="素材组成与就绪情况"><header><h3>需要全部就绪的素材</h3><span>{selectedRequirement.compositionCoverage?.coveredCount||0} / {composition.requiredComponents.length} 项已就绪</span></header>{composition.requiredComponents.map(component=>{const requirement=model.materialRequirements?.find(r=>r.id===component.requirementId),coverage=selectedRequirement.compositionCoverage?.components.find(c=>c.id===component.id);return <section key={component.id}><p><b>{requirement?.title||component.id}</b> · {coverage?.coverageSatisfied?'已就绪':'待完成'}</p><a href={materialRequirementLink(component.requirementId)}>查看这项素材</a>{coverage?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}</section>}
-        {hasUsageBindings&&<section className="material-production-materials" aria-label="已登记的图片用途"><header><h3>已登记的图片用途</h3><span>{selectedRequirement.coverageSatisfied?'本需求已覆盖':'本需求待完成'}</span></header>{selectedRequirement.materialUsageBindings!.map(binding=>{const version=model.assetVersions.find(v=>v.id===binding.versionId&&v.sha256===binding.sha256),url=version?.mediaToken?'/api/v8/media/'+version.mediaToken:null;return <section key={binding.usageId}><p>{binding.eligible?'当前用途可用':'当前用途不可用'} · {binding.versionId}</p>{url&&<a href={url} target="_blank" rel="noreferrer">查看绑定原图</a>}{!binding.eligible&&binding.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}{usageOnlyLeaf&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>}</section>}
+        {composition&&<section className="material-production-materials" aria-label="素材组成与就绪情况"><header><h3>需要全部就绪的素材</h3><span>{selectedRequirement.compositionCoverage?.coveredCount||0} / {composition.requiredComponents.length} 项已就绪</span></header>{composition.requiredComponents.map(component=>{const requirement=model.materialRequirements?.find(r=>r.id===component.requirementId),coverage=selectedRequirement.compositionCoverage?.components.find(c=>c.id===component.id);return <section key={component.id}><p><b>{requirement?.title||component.id}</b> · {coverage?.coverageSatisfied?'已就绪':'待完成'}</p><a href={runtimePath(materialRequirementLink(component.requirementId))}>查看这项素材</a>{coverage?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}</section>}
+        {hasUsageBindings&&<section className="material-production-materials" aria-label="已登记的图片用途"><header><h3>已登记的图片用途</h3><span>{selectedRequirement.coverageSatisfied?'本需求已覆盖':'本需求待完成'}</span></header>{selectedRequirement.materialUsageBindings!.map(binding=>{const version=model.assetVersions.find(v=>v.id===binding.versionId&&v.sha256===binding.sha256),url=version?.mediaToken?runtimePath('/api/v8/media/'+version.mediaToken):null;return <section key={binding.usageId}><p>{binding.eligible?'当前用途可用':'当前用途不可用'} · {binding.versionId}</p>{url&&<a href={runtimePath(url)} target="_blank" rel="noreferrer">查看绑定原图</a>}{!binding.eligible&&binding.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}{usageOnlyLeaf&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>}</section>}
         {!composition&&!usageOnlyLeaf&&<div className="material-review-focus">
           <div className="material-output-zone">
             <MaterialOutputViewer outputPath={recipe?.output?.path} category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={selectedVersion?.id || explicitSelectedExpected?.id || viewState.versionId || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />

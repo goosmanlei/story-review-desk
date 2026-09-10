@@ -10,8 +10,12 @@ RUN node -e "require('node:fs').writeFileSync('/tmp/node-root-ca.pem', require('
     && rm -rf /var/lib/apt/lists/*
 
 ARG REVIEW_SOFTWARE_COMMIT=UNVERSIONED
+ARG REVIEW_BASE_PATH=
+ARG REVIEW_DEPLOYMENT_MODE=LOCAL
 LABEL org.opencontainers.image.revision=$REVIEW_SOFTWARE_COMMIT
 ENV REVIEW_SOFTWARE_COMMIT=$REVIEW_SOFTWARE_COMMIT
+ENV REVIEW_BASE_PATH=$REVIEW_BASE_PATH
+ENV REVIEW_DEPLOYMENT_MODE=$REVIEW_DEPLOYMENT_MODE
 
 WORKDIR /app
 
@@ -24,7 +28,7 @@ COPY workers/ ./workers/
 COPY scripts/ ./scripts/
 COPY tsconfig.json next.config.ts vite.config.ts ./
 COPY public/favicon.svg ./public/favicon.svg
-RUN REVIEW_NODE_RUNTIME=1 npm run build
+RUN REVIEW_NODE_RUNTIME=1 npm run build && node scripts/write-runtime-build-contract.mjs
 
 ENV NODE_ENV=production
 ENV REVIEW_SQLITE_OWNER=CONTAINER
@@ -34,4 +38,4 @@ EXPOSE 3000
 
 USER node
 
-CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+CMD ["node", "scripts/runtime-entrypoint.mjs"]

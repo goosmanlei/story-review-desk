@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from '../host/instance-runtime/execution-epoch.mjs';
 import {parseArgs} from 'node:util';
 import {randomUUID} from 'node:crypto';
 import path from 'node:path';
@@ -14,7 +15,7 @@ const read=r=>r&&!r.deleted?JSON.parse(Buffer.from(r.bytes).toString('utf8')):nu
 export async function runAnimaticWorkerIteration({repository,instanceRoot,workerId,render=renderAnimatic,modelProvider}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能执行预演任务');
  const reconciled=await runAnimaticReconciliationIteration({repository,instanceRoot,workerId});if(reconciled.processed)return reconciled;
- const jobs=await repository.readTransaction(async tx=>(await tx.listAux(ANIMATIC_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));if(!jobs.length)return{processed:false};
+ const jobs=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,ANIMATIC_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));if(!jobs.length)return{processed:false};
  // Claim and the entire render are fenced by one live shared media session.
  // An explicit recovery cannot declare absence while a renderer can still write.
  return repository.withMediaReadLease(async lease=>{

@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from './execution-epoch.mjs';
 import {randomUUID,createHash} from 'node:crypto';
 import {lstat,mkdir,realpath,writeFile,readFile} from 'node:fs/promises';
 import path from 'node:path';
@@ -57,7 +58,7 @@ export async function applyShotProductionManifestProjection(tx,model){
 }
 export async function runShotProductionManifestIteration({repository,instanceRoot,workerId,api,write=writeShotProductionManifest}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')fail('只读实例不能生成制作清单');
- const pending=await repository.readTransaction(async tx=>(await tx.listAux(SHOT_MANIFEST_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));if(!pending.length)return{processed:false};
+ const pending=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,SHOT_MANIFEST_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));if(!pending.length)return{processed:false};
  const jobId=pending[0].jobId;let claimed,result;try{
   claimed=await repository.writeTransaction(tx=>claimShotProductionManifest(tx,{jobId,workerId},{api}));if(!claimed)return{processed:false};
   await repository.withMediaReadLease(async lease=>{result=await write({repository,instanceRoot,job:claimed.job,assertHeld:()=>lease.assertHeld()});await repository.writeTransaction(tx=>finishShotProductionManifest(tx,{jobId,workerId,jobRevisionId:claimed.jobRevisionId,result},{api}));});return{processed:true,jobId,status:'SUCCEEDED'};

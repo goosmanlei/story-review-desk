@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 import {useCallback, useEffect, useRef, useState} from 'react';
 import {useRuntimeMode} from './runtime-mode';
 import {useInstanceProfile} from './instance-context';
@@ -89,7 +91,7 @@ export function OrchestrationDashboard() {
           <dl>{[['配置并发',pool.configured],['运行',pool.running],['等待',pool.waiting],['可用名额',pool.available]].map(([label,number]) => <div key={label}><dt>{label}</dt><dd>{number}</dd></div>)}</dl>
           <p>{pool.held > 0 && `${pool.held} 个名额等待执行核查 · `}{pool.dispatching ? '可调度' : '当前不派发新任务'}</p>
           <ul>{value.workers.filter(worker => worker.kind === pool.kind).map((worker,index) => <li key={worker.id || index}>
-            <a href={`#orchestration-task-${worker.taskId}`}>{worker.title}</a>
+            <a href={runtimePath(`#orchestration-task-${worker.taskId}`)}>{worker.title}</a>
             <p>{worker.phase === 'QA' ? '独立质检' : worker.phase === 'FINALIZE' ? '交付' : '生产'} · {worker.status === 'RUNNING' ? '运行中' : '执行结果待核查'} · {worker.observed ? '后台已观测' : '后台尚未确认'}</p>
             <p>实际模型：{worker.model || '未记录'} · 推理强度：{worker.effort || '未记录'}</p>
             <p>开始 <Time value={worker.startedAt}/></p>

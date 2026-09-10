@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from './execution-epoch.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {productionId} from './shot-production-model.mjs';
@@ -72,7 +73,7 @@ export async function applyAssetContextRevalidationJob(tx,{jobId,api}){
 }
 export async function runAssetContextRevalidationIteration({repository,api}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能提交关系复核');
- const job=await repository.readTransaction(async tx=>(await tx.listAux(ASSET_CONTEXT_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
+ const job=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,ASSET_CONTEXT_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
  try{return {processed:true,status:'SUCCEEDED',...await withRepositoryMediaRead(repository,()=>repository.writeTransaction(tx=>applyAssetContextRevalidationJob(tx,{jobId:job.jobId,api})))};}catch(error){
   const recovery=await repository.writeTransaction(async tx=>{const record=await tx.getAux(ASSET_CONTEXT_NS.jobs,job.jobId),current=read(record);if(current?.status==='SUCCEEDED')return {status:'SUCCEEDED',...current.result};if(current?.status==='QUEUED'){await put(tx,ASSET_CONTEXT_NS.jobs,job.jobId,{...current,status:'FAILED',error:String(error.message||error).slice(0,1500)},record.revisionId);return {status:'FAILED'};}return {status:current?.status||'RESULT_UNKNOWN'};});return {processed:true,jobId:job.jobId,...recovery};
  }

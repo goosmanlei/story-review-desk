@@ -37,6 +37,7 @@ export function validateCheckpointBinding(value,{instanceRoot,softwareRoot=SOFTW
  return value;
 }
 export async function loadCheckpointBinding(instanceRoot,{softwareRoot=SOFTWARE_ROOT}={}){
+ if(process.env.REVIEW_DEPLOYMENT_MODE==='VPS'||process.env.REVIEW_GIT_CHECKPOINT_DISABLED==='1')return null;
  instanceRoot=await realpath(instanceRoot);let value;try{value=JSON.parse(await regular(path.join(instanceRoot,'runtime','git-checkpoint.json')));}catch(error){if(error.code==='ENOENT')return null;throw error;}
  if(value.enabled===false)return null;
  const binding=validateCheckpointBinding(value,{instanceRoot,softwareRoot});

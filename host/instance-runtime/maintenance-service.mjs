@@ -20,6 +20,7 @@ export function validateMaintenanceRequest(input){
  return structuredClone(input);
 }
 export async function maintenanceState(tx,{worker=null}={}){
+  if(process.env.REVIEW_DEPLOYMENT_MODE==='VPS')return {runtime:{...(await tx.getMetadata()),status:'VPS 完整发布、备份与回滚由 instance-vps 管理'},storage:{provider:'PostgreSQL',authority:'本实例数据库与受管媒体'},backups:[],capabilities:{backup:false,verify:false,export:false,restore:false,import:false,workerOnline:false},operations:[],readOnly:true};
  const metadata=await tx.getMetadata(),profile=await tx.getProfile(),records=await tx.listAux(MAINTENANCE_NAMESPACE);
  const operations=records.filter(r=>!r.deleted).map(r=>({...read(r),revisionId:r.revisionId})).sort((a,b)=>b.createdAt.localeCompare(a.createdAt));
  const age=worker?Date.now()-Date.parse(worker.heartbeatAt):NaN;
@@ -27,6 +28,7 @@ export async function maintenanceState(tx,{worker=null}={}){
  return{runtime:{instanceId:metadata.instanceId,projectId:profile.projectId,releaseId:metadata.releaseId,runtimeEpoch:metadata.runtimeEpoch,status:workerOnline?'维护工作器在线':'维护工作器离线，任务将保留排队'},storage:{provider:tx.backend==='postgres'?'PostgreSQL':'SQLite',authority:'本实例数据库与受管媒体'},backups:operations.filter(o=>['backup','import'].includes(o.action)&&o.status==='SUCCEEDED').map(o=>({id:o.operationId,title:`${o.completedAt} · ${o.result.mediaFiles??0}份媒体`,createdAt:o.completedAt,manifestSha256:o.result.manifestSha256,output:o.result.output,downloadUrl:o.result.archivePath?'/api/instance/maintenance/download?id='+encodeURIComponent(o.operationId):null})),capabilities:{backup:true,verify:true,export:true,restore:true,import:true,workerOnline},operations:operations.slice(0,100),readOnly:false};
 }
 export async function enqueueMaintenance(tx,input,{requestId,expectedEtag}={}){
+ if(process.env.REVIEW_DEPLOYMENT_MODE==='VPS')fail('VPS 完整实例传输由 instance-vps 管理，避免额外完整副本','MAINTENANCE_CONFLICT');
  input=validateMaintenanceRequest(input);if(typeof requestId!=='string'||requestId.length<8)fail('维护请求缺少幂等身份');
  const requestHash=sha256(canonicalJson(input)),previous=await tx.getAux('instance-maintenance-requests',requestId);
  if(previous){const saved=read(previous);if(saved.requestHash!==requestHash)fail('请求编号已经用于其他维护任务','MAINTENANCE_CONFLICT');const record=await tx.getAux(MAINTENANCE_NAMESPACE,saved.operationId);if(!record)fail('已登记维护任务缺失','MAINTENANCE_CONFLICT');return read(record);}

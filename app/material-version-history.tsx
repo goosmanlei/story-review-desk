@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 import {
   resolveAdoptedVersionId,
   VersionPanel,
@@ -72,7 +74,7 @@ export function MaterialVersionHistory({
       <p><b>历史版本：</b>{Math.max(0, versionRefs.length - (latestVersionId ? 1 : 0))} 个；旧版始终保留，不原位覆盖。</p>
       {latestVersionId && selectedVersionId !== latestVersionId && <button onClick={() => onSelectVersion(latestVersionId)}>查看最新尝试 →</button>}
       {adoptedVersionId && selectedVersionId !== adoptedVersionId && <button onClick={() => onSelectVersion(adoptedVersionId)}>查看当前采用 →</button>}
-      {isText && textToken && <a href={`/api/v8/media/${encodeURIComponent(textToken)}`} target="_blank" rel="noreferrer">打开最新文本版本 →</a>}
+      {isText && textToken && <a href={runtimePath(`/api/v8/media/${encodeURIComponent(textToken)}`)} target="_blank" rel="noreferrer">打开最新文本版本 →</a>}
     </section>
     <VersionPanel
       model={model}

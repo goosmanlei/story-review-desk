@@ -67,9 +67,10 @@ for (const name of await readdir(path.join(applicationRoot, 'host'))) if (/^(?:i
 await tree('workers', (filename) => filename.endsWith('.mjs'));
 await copy('docs/instance-isolation.md');
 await copy('docs/system-configuration.md');
+await copy('docs/vps.md');
 for(const name of ['system-management.md','story-settings.md','material-relationship-architecture.md','git-checkpoint.md','domain-production-compatibility.md'])await copy('docs/'+name);
 for (const name of await readdir(path.join(applicationRoot, 'scripts'))) {
-  if ((/^instance-.*\.mjs$/.test(name) && !name.includes('-test')) || ['build-runtime.mjs', 'prepare-hosted-runtime.mjs', 'deploy-local.mjs', 'export-hosted-material-events.mjs'].includes(name)) await copy('scripts/' + name);
+  if ((/^instance-.*\.mjs$/.test(name) && !name.includes('-test')) || ['runtime-entrypoint.mjs','write-runtime-build-contract.mjs','build-runtime.mjs', 'prepare-hosted-runtime.mjs', 'deploy-local.mjs', 'export-hosted-material-events.mjs'].includes(name)) await copy('scripts/' + name);
 }
 for (const filename of ['Dockerfile', 'Dockerfile.comment-polish-worker', 'Dockerfile.material-review-worker', 'compose.yaml', '.dockerignore', 'tsconfig.json', 'next.config.ts', 'eslint.config.mjs']) {
   await copy(filename);
@@ -84,6 +85,7 @@ packageJson.scripts = { dev: 'REVIEW_NODE_DEV=1 vinext dev', build: 'node script
   'instance:domain-compatibility': 'node scripts/instance-domain-production-compatibility.mjs',
   'instance:migrate': 'node scripts/instance-migrate.mjs', 'instance:sources': 'node scripts/instance-sources.mjs', 'instance:initialize': 'node scripts/instance-initialize.mjs', 'instance:relations': 'node scripts/instance-relations.mjs', 'instance:authoring': 'node scripts/instance-authoring.mjs',
   'instance:backup': 'node scripts/instance-backup.mjs', 'instance:restore': 'node scripts/instance-restore.mjs', 'instance:copy': 'node scripts/instance-copy.mjs',
+  'instance:vps': 'node scripts/instance-vps.mjs',
   'instance:trial': 'node scripts/instance-trial-worker.mjs',
   'instance:skills': 'node scripts/instance-skills.mjs', 'orchestrate': 'node scripts/instance-orchestration.mjs',
   'codex:bridge': 'node scripts/instance-bridge.mjs', 'codex:doctor': 'node scripts/instance-bridge.mjs --command doctor', 'deploy:local': 'node scripts/deploy-local.mjs' };

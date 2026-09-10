@@ -6,6 +6,18 @@ export function restoredRuntimeEpoch(uuid){
  return RESTORED_EPOCH_PREFIX+uuid;
 }
 export function isRestoredRuntime(epoch){return typeof epoch==='string'&&epoch.startsWith(RESTORED_EPOCH_PREFIX);}
+/** Queue discovery never claims or marks old restored jobs failed merely
+ * because a worker started. Historical rows remain byte-identical. */
+export async function listWorkerRuntimeJobs(tx,namespace){
+ const records=await tx.listAux(namespace);
+ if(typeof tx.getMetadata!=='function')return records; // existing pure fixtures
+ const metadata=await tx.getMetadata();
+ if(!isRestoredRuntime(metadata.runtimeEpoch))return records;
+ return records.filter(record=>{
+  if(record.deleted)return true;let job;try{job=JSON.parse(record.bytes);}catch{return true;}
+  return job?.status!=='QUEUED'||job.instanceId===metadata.instanceId&&job.runtimeEpoch===metadata.runtimeEpoch;
+ });
+}
 export function executionRuntimeReason(runtime,request){
  if(!request?.executionRequestId)return null; // Prospective readiness is not authorization.
  const binding=request.authorizationRuntime;

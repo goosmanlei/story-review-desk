@@ -3,6 +3,7 @@
 import {useEffect,useState} from 'react';
 import type {ShotProductionEvidence,ShotProductionEvidenceTemplate,ShotProductionFinding} from '../host/instance-runtime/shot-production-locks.mjs';
 import './shot-production-review-evidence.css';
+import {runtimePath} from './runtime-path';
 
 type ObservationMedia={versionId:string;familyId:string;sha256:string;kind:string;mediaUrl?:string};
 export type ProductionEvidenceTemplate=ShotProductionEvidenceTemplate&{snapshotId?:string;observationMedia?:ObservationMedia[]};
@@ -35,11 +36,11 @@ function Observation({media,kind,checked,disabled,onChange}:{media:ObservationMe
  const [resolved,setResolved]=useState<{key:string;url:string|null;error:string}>({key:'',url:null,error:''}),[loadedKey,setLoadedKey]=useState(''),[playedKey,setPlayedKey]=useState('');
  const url=valid?(media.mediaUrl||(resolved.key===key?resolved.url:null)):null,error=!valid?'缺少此版本的精确SHA':resolved.key===key?resolved.error:'';
  useEffect(()=>{let active=true;if(!valid||media.mediaUrl)return;
-  crypto.subtle.digest('SHA-256',new TextEncoder().encode(media.versionId)).then(hash=>{const base64=btoa(String.fromCharCode(...new Uint8Array(hash))).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');if(active)setResolved({key,url:'/api/v8/media/m_'+base64.slice(0,28),error:''});}).catch(()=>{if(active)setResolved({key,url:null,error:'无法解析原件'});});return()=>{active=false;};
+   crypto.subtle.digest('SHA-256',new TextEncoder().encode(media.versionId)).then(hash=>{const base64=btoa(String.fromCharCode(...new Uint8Array(hash))).replaceAll('+','-').replaceAll('/','_').replace(/=+$/,'');if(active)setResolved({key,url:runtimePath('/api/v8/media/m_'+base64.slice(0,28)),error:''});}).catch(()=>{if(active)setResolved({key,url:null,error:'无法解析原件'});});return()=>{active=false;};
  },[key,valid,media.versionId,media.mediaUrl]);
  function failed(message:string){setLoadedKey('');setResolved({key,url,error:message});}
  return <figure><figcaption>{media.versionId}<small>SHA {media.sha256||'UNKNOWN'}</small></figcaption>
-  {url&&(kind==='IMAGE'?<img src={url} alt={'联合验收原图 '+media.versionId} onLoad={()=>setLoadedKey(key)} onError={()=>failed('原件无法加载')}/>:<video src={url} controls preload="metadata" onCanPlay={()=>setLoadedKey(key)} onPlay={()=>setPlayedKey(key)} onError={()=>failed('原件无法播放')}/>)}
+  {url&&(kind==='IMAGE'?<img src={runtimePath(url)} alt={'联合验收原图 '+media.versionId} onLoad={()=>setLoadedKey(key)} onError={()=>failed('原件无法加载')}/>:<video src={runtimePath(url)} controls preload="metadata" onCanPlay={()=>setLoadedKey(key)} onPlay={()=>setPlayedKey(key)} onError={()=>failed('原件无法播放')}/>)}
   {error&&<p role="alert">{error}</p>}
   <label><input type="checkbox" checked={checked} disabled={disabled||loadedKey!==key||(kind==='VIDEO'&&playedKey!==key)} onChange={e=>onChange(e.target.checked)}/>{kind==='IMAGE'?'我已观察这张精确版本原图':'我已播放并检查这份精确版本视频'}</label>
  </figure>;

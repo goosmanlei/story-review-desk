@@ -1,6 +1,6 @@
 import {withInstanceMediaRead} from '../v8/_media-read';
 import { assertAssistantLocal } from '../assistant/v1/_http';
-import { errorResponse, HttpError, instanceRepository, instanceRepositoryMode, instanceReadOnlyMode, safeGeneratedPath } from '../v8/_store';
+import { errorResponse, HttpError, instanceRepository, instanceRepositoryMode, instanceReadOnlyMode, safeGeneratedPath, validateBrowserDeployment } from '../v8/_store';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { instanceTrialAsset, instanceTrialReview, instanceTrialSnapshot, instanceTrialScopes, TrialRepositoryError } from './_instance.mjs';
@@ -21,6 +21,7 @@ export async function trialProxy(request: Request, endpoint: string) {
     assertAssistantLocal(request);
     let body: string | undefined;
     if (request.method === 'POST') {
+      await validateBrowserDeployment(request);
       if(instanceReadOnlyMode())throw new HttpError(405,'只读实例不接受试制审阅写入。');
       if (!request.headers.get('content-type')?.startsWith('application/json')) throw new HttpError(415, '请提交 JSON 审阅记录。');
       if (Number(request.headers.get('content-length') || 0) > 100_000) throw new HttpError(413, '审阅意见过长。');

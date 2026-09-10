@@ -1,5 +1,8 @@
-/* eslint-disable @next/next/no-img-element */
 'use client';
+
+import {runtimePath} from './runtime-path';
+/* eslint-disable @next/next/no-img-element */
+
 import { StoryCommentsProvider } from './story-comments';
 import { NarrativeOverview } from './narrative-revision-reader';
 import {EpisodeSceneReading} from './episode-scene-reading';
@@ -2850,7 +2853,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
             <div className="text-reader-scroll" ref={readerScrollRef}>
               <div className="text-reader-body">
                 {storySourceMode === 'transcript' ? <>
-                  <section className="source-audio-panel"><div><span>原始录音 · 第一核对源</span><b>{storySources.audio.title}</b><p>{storySources.audio.duration} · {formatBytes(storySources.audio.byteSize)} · 点击任一时间码可从该处回听</p></div><audio ref={storyAudioRef} data-review-audio controls preload="metadata" src={storySources.audio.audioUrl} onPointerDown={stopSeamAudition} onPlay={(event) => handleReviewAudioPlay(event.currentTarget)}>你的浏览器不支持音频播放。</audio><small>{storySources.audio.reviewUse}</small></section>
+                  <section className="source-audio-panel"><div><span>原始录音 · 第一核对源</span><b>{storySources.audio.title}</b><p>{storySources.audio.duration} · {formatBytes(storySources.audio.byteSize)} · 点击任一时间码可从该处回听</p></div><audio ref={storyAudioRef} data-review-audio controls preload="metadata" src={runtimePath(storySources.audio.audioUrl)} onPointerDown={stopSeamAudition} onPlay={(event) => handleReviewAudioPlay(event.currentTarget)}>你的浏览器不支持音频播放。</audio><small>{storySources.audio.reviewUse}</small></section>
                   {transcriptSection?.id === storySources.transcript.sections[0]?.id && <section className="source-intro"><DocumentBlocks blocks={storySources.transcript.introBlocks} highlightedAnchor={readerAnchor} /></section>}
                   <div className="transcript-segments">{transcriptSegments.map((segment) => <article id={segment.id} className={readerAnchor === segment.id ? 'reader-search-hit' : ''} key={segment.id}><button onClick={() => seekStoryAudio(segment.seconds)} title={`从 ${segment.timecode} 回听原始录音`}><time>{segment.timecode}</time><span>从此回听</span></button><p>{segment.text}</p><small>源行 {segment.sourceLine} · {segment.characterCount}字</small></article>)}</div>
                 </> : <>
@@ -2937,7 +2940,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
 
       <nav className="mobile-nav is-six-entries" aria-label="移动端导航">{workspaceViews.map((item) => <button key={item.id} aria-label={item.title} className={activeView === item.id ? 'active' : ''} aria-current={activeView === item.id ? 'page' : undefined} onClick={() => goToView(item.id)}>{item.short}</button>)}</nav>
 
-      {lightbox && <div ref={lightboxRef} className="lightbox" role="dialog" aria-modal="true" aria-label="证据图放大查看" onKeyDown={trapLightboxFocus}><header><b>证据图 · 制作示意</b><div><button onClick={() => setZoom((value) => Math.max(60, value - 20))} aria-label="缩小证据图">−</button><span>{zoom}%</span><button onClick={() => setZoom((value) => Math.min(220, value + 20))} aria-label="放大证据图">＋</button><button ref={lightboxCloseRef} onClick={closeLightbox}>关闭</button></div></header><div className="lightbox-canvas"><img src={lightbox} alt="放大的项目证据图" style={{ width: `${zoom}%` }} /></div></div>}
+      {lightbox && <div ref={lightboxRef} className="lightbox" role="dialog" aria-modal="true" aria-label="证据图放大查看" onKeyDown={trapLightboxFocus}><header><b>证据图 · 制作示意</b><div><button onClick={() => setZoom((value) => Math.max(60, value - 20))} aria-label="缩小证据图">−</button><span>{zoom}%</span><button onClick={() => setZoom((value) => Math.min(220, value + 20))} aria-label="放大证据图">＋</button><button ref={lightboxCloseRef} onClick={closeLightbox}>关闭</button></div></header><div className="lightbox-canvas"><img src={runtimePath(lightbox)} alt="放大的项目证据图" style={{ width: `${zoom}%` }} /></div></div>}
     </main>
     </EvidenceReaderProvider>
   );

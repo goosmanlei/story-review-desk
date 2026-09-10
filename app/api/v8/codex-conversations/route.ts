@@ -5,7 +5,9 @@ import {
   jsonResponse,
   reviewData,
   sameOrigin,
+  validateBrowserDeployment,
 } from '../_store';
+import {deploymentMode,trustedRequestIdentity} from '../../../../host/instance-runtime/deployment-http.mjs';
 import {
   appendCodexTurn,
   codexBridgeProjection,
@@ -37,6 +39,9 @@ function assertSnapshotId(value: unknown) {
 }
 
 function assertLocalRequestTarget(request: Request) {
+  if(deploymentMode()==='VPS'){
+    try{trustedRequestIdentity(request);return;}catch(error){throw new HttpError(403,error instanceof Error?error.message:'project Codex request is not from the controlled proxy');}
+  }
   const target = new URL(request.url);
   const hostname = target.hostname.toLowerCase();
   if (!['localhost', '127.0.0.1', '[::1]'].includes(hostname)) {
@@ -146,6 +151,7 @@ export async function POST(request: Request) {
     }
     assertLocalRequestTarget(request);
     if (!sameOrigin(request)) throw new HttpError(403, 'mutation origin is not allowed');
+    await validateBrowserDeployment(request);
     const fetchSite = request.headers.get('sec-fetch-site');
     if (fetchSite && fetchSite !== 'same-origin') throw new HttpError(403, 'cross-site Codex requests are not allowed');
     if (!request.headers.get('content-type')?.toLowerCase().startsWith('application/json')) {

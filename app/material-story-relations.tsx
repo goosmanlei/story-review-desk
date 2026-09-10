@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { episodePlanIsCurrent, type MaterialRequirement, type ProductionModel } from './production-workbench';
 import { classifiedMaterial, materialBusinessPrimaryOrder, materialBusinessSecondaryOrder, materialCategoryPresentation, type ClassifiedMaterial } from './material-taxonomy';
@@ -251,7 +253,7 @@ export function MaterialStoryRelations({
         <section className="material-world-overview material-story-basis">
           <h3>共用空间设定</h3>
           <p>地点、平面、区域、机位和状态路线在故事设定统一查阅；此处只管理需要制作的素材及实际版本。</p>
-          <a href="?view=settings&settingsSection=space">查看故事设定中的空间依据 →</a>
+          <a href={runtimePath("?view=settings&settingsSection=space")}>查看故事设定中的空间依据 →</a>
         </section>
       </aside>
     </div>

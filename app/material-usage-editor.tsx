@@ -5,6 +5,8 @@ import type {MaterialUsageSelection,MaterialUsageWorkspace} from '../host/instan
 import {reconcileUsagePending,validUsagePending,validUsageLocalDraft,validUsageReceipt,validUsageSelection,validUsageWorkspace,type UsagePending,type UsageLocalDraft,type UsageEditableDraft} from './material-usage-client.mjs';
 import {useRuntimeMode} from './runtime-mode';
 import './shot-production-recipe-editor.css';
+import {instanceSessionStorage} from './client-storage';
+import {runtimePath} from './runtime-path';
 
 type Draft=UsageEditableDraft;
 const endpoint='/api/instance/material-usage';
@@ -22,11 +24,11 @@ function Editor({requirementId}:{requirementId:string}){
  const [open,setOpen]=useState(false),[selection,setSelection]=useState<MaterialUsageSelection|null>(null),[state,setState]=useState<MaterialUsageWorkspace|null>(null),[draft,setDraft]=useState<Draft|null>(null),[dirty,setDirty]=useState(false),[busy,setBusy]=useState(false),[pending,setPending]=useState<UsagePending|null>(null),[storageError,setStorageError]=useState(false),[preview,setPreview]=useState<Record<string,unknown>|null>(null),[message,setMessage]=useState('');
  const pendingKey='material-usage-pending:'+requirementId;
  const draftKey='material-usage-draft:'+requirementId;
- function remember(value:UsagePending|null){if(value)sessionStorage.setItem(pendingKey,JSON.stringify(value));else sessionStorage.removeItem(pendingKey);setPending(value);}
- function rememberDraft(content:Draft,next:MaterialUsageWorkspace){sessionStorage.setItem(draftKey,JSON.stringify({target:targetOf(next),basisHash:next.basisHash,releaseId:next.releaseId,content}));}
+ function remember(value:UsagePending|null){if(value)instanceSessionStorage.setItem(pendingKey,JSON.stringify(value));else instanceSessionStorage.removeItem(pendingKey);setPending(value);}
+ function rememberDraft(content:Draft,next:MaterialUsageWorkspace){instanceSessionStorage.setItem(draftKey,JSON.stringify({target:targetOf(next),basisHash:next.basisHash,releaseId:next.releaseId,content}));}
  function loadDraft(next:MaterialUsageWorkspace){setState(next);setDraft(next.draft?.content||blank(next));setDirty(false);setPreview(null);}
  useEffect(()=>{if(!open)return;const controller=new AbortController();void (async()=>{
-  let stored:UsagePending|null=null,local:UsageLocalDraft|null=null;try{const raw=sessionStorage.getItem(pendingKey),localRaw=sessionStorage.getItem(draftKey);if(raw)stored=validUsagePending(JSON.parse(raw),requirementId);if(localRaw)local=validUsageLocalDraft(JSON.parse(localRaw),requirementId);}catch{setStorageError(true);throw Error('本地草稿或待核查请求无法读取；为避免丢稿或重复登记，暂时停止提交。');}
+  let stored:UsagePending|null=null,local:UsageLocalDraft|null=null;try{const raw=instanceSessionStorage.getItem(pendingKey),localRaw=instanceSessionStorage.getItem(draftKey);if(raw)stored=validUsagePending(JSON.parse(raw),requirementId);if(localRaw)local=validUsageLocalDraft(JSON.parse(localRaw),requirementId);}catch{setStorageError(true);throw Error('本地草稿或待核查请求无法读取；为避免丢稿或重复登记，暂时停止提交。');}
   const selected=validUsageSelection(await read(await fetch(endpoint+'?requirementId='+encodeURIComponent(requirementId),{cache:'no-store',signal:controller.signal})),requirementId);if(controller.signal.aborted)return;setSelection(selected);
   if(stored){setPending(stored);const next=validUsageWorkspace(await read(await fetch(query(stored.target),{cache:'no-store',signal:controller.signal})),stored.target);if(controller.signal.aborted)return;loadDraft(next);setDraft(stored.content);setMessage('上次提交结果待核查，请重读并核对原请求。');}
   else if(local){const next=validUsageWorkspace(await read(await fetch(query(local.target),{cache:'no-store',signal:controller.signal})),local.target);if(controller.signal.aborted)return;loadDraft(next);const current=local.basisHash===next.basisHash&&local.releaseId===next.releaseId,restored=current?local.content:rebaseStaleContent(local.content,next);setDraft(restored);setDirty(true);rememberDraft(restored,next);setMessage(current?'已恢复本地未保存草稿。':'已恢复草稿说明；依据已变化，请重新逐项判断后保存。');}
@@ -36,7 +38,7 @@ function Editor({requirementId}:{requirementId:string}){
  async function inspect(){if(busy)return;setBusy(true);try{
   if(!state&&!pending){setSelection(validUsageSelection(await read(await fetch(endpoint+'?requirementId='+encodeURIComponent(requirementId),{cache:'no-store'})),requirementId));setMessage('已重读可复用的图片。');return;}
   const target=pending?.target||targetOf(state!);const next=validUsageWorkspace(await read(await fetch(query(target),{cache:'no-store'})),target);setState(next);setPreview(null);
-  if(pending){const result=reconcileUsagePending(pending,next);if(!result.confirmed){setMessage('尚未找到与上次提交完全一致的草稿或任务；保持待核查，未重复提交。');return;}const restored=result.stale?rebaseStaleContent(result.draft!.content,next):result.draft?.content||pending.content;if(result.stale)rememberDraft(restored,next);else sessionStorage.removeItem(draftKey);remember(null);setDirty(!!result.stale);setDraft(restored);setMessage(result.stale?'已核回保存成功；依据已变化，已保留说明，请重新逐项判断并保存。':result.job?'已核回原请求：'+jobLabels[result.job.status]+'。':'已核回保存的同一份草稿。');}
+  if(pending){const result=reconcileUsagePending(pending,next);if(!result.confirmed){setMessage('尚未找到与上次提交完全一致的草稿或任务；保持待核查，未重复提交。');return;}const restored=result.stale?rebaseStaleContent(result.draft!.content,next):result.draft?.content||pending.content;if(result.stale)rememberDraft(restored,next);else instanceSessionStorage.removeItem(draftKey);remember(null);setDirty(!!result.stale);setDraft(restored);setMessage(result.stale?'已核回保存成功；依据已变化，已保留说明，请重新逐项判断并保存。':result.job?'已核回原请求：'+jobLabels[result.job.status]+'。':'已核回保存的同一份草稿。');}
   else if(dirty&&draft&&state&&(state.basisHash!==next.basisHash||state.releaseId!==next.releaseId)){const restored=rebaseStaleContent(draft,next);rememberDraft(restored,next);setDraft(restored);setMessage('已保留草稿说明；依据已变化，请重新逐项判断后保存。');}
   else{if(!dirty)setDraft(next.draft?.content||blank(next));setMessage('已重读用途审阅与登记任务。');}
   window.dispatchEvent(new Event('review:operations-updated'));
@@ -50,12 +52,12 @@ function Editor({requirementId}:{requirementId:string}){
    const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json','If-Match':operations.mutationEtag,'Idempotency-Key':requestId},body:JSON.stringify(body)});
    if(!response.ok&&response.status<500){submitted=false;if(action!=='preview')remember(null);}
    const result=validUsageReceipt(await read(response),action,state);submitted=false;if(action!=='preview')remember(null);
-   if(action==='save'){sessionStorage.removeItem(draftKey);const revisionId=String(result.revisionId);setState({...state,draftHeadRevisionId:revisionId,staleDraft:null,draft:{...target,usageId:state.usageId,baseReleaseId:state.releaseId,basisHash:state.basisHash,revisionId,content}});setDirty(false);setPreview(null);setMessage('用途审阅草稿已保存，请预览后登记。');}
+   if(action==='save'){instanceSessionStorage.removeItem(draftKey);const revisionId=String(result.revisionId);setState({...state,draftHeadRevisionId:revisionId,staleDraft:null,draft:{...target,usageId:state.usageId,baseReleaseId:state.releaseId,basisHash:state.basisHash,revisionId,content}});setDirty(false);setPreview(null);setMessage('用途审阅草稿已保存，请预览后登记。');}
    else if(action==='preview'){setPreview(result);setMessage('请核对这张图片在当前需求中的用途与审阅结论。');}
    else{setPreview(null);setState({...state,jobs:[{jobId:String(result.jobId),requestId,status:'QUEUED'},...state.jobs]});setMessage('用途审阅已排队登记；请重读任务确认结果。');window.dispatchEvent(new Event('review:operations-updated'));}
   }catch(e){setMessage((e instanceof Error?e.message:'操作失败')+(submitted&&action!=='preview'?'；结果待核查，请重读原请求，勿重复提交。':''));}finally{setBusy(false);}
  }
- const source=selection?.eligibleSources.find(s=>state&&s.familyId===state.familyId&&s.versionId===state.versionId&&s.sha256===state.sha256),imageUrl=source?.mediaToken?'/api/v8/media/'+source.mediaToken:source?.mediaUrl;
+ const source=selection?.eligibleSources.find(s=>state&&s.familyId===state.familyId&&s.versionId===state.versionId&&s.sha256===state.sha256),imageUrl=source?.mediaToken?runtimePath('/api/v8/media/'+source.mediaToken):source?.mediaUrl;
  const blocked=!!state&&(state.readOnly||state.blockers.length>0||state.jobs.some(j=>['QUEUED','RUNNING','RESULT_UNKNOWN'].includes(j.status)))||busy||!!pending||storageError;
  return <section className="shot-production-recipe-editor" aria-label="复用图片用途审阅">
   {!open?<button type="button" onClick={()=>{setBusy(true);setOpen(true);}}>复用已通过图片</button>:<>
@@ -63,10 +65,10 @@ function Editor({requirementId}:{requirementId:string}){
    <p>选择一张已通过的图片，判断它是否满足这项需求。原图的版本和采用记录将保留。</p>
    {selection&&<><label>选择图片<select value={state?.familyId||''} disabled={busy||!!pending||dirty||storageError||selection.readOnly} onChange={e=>void selectSource(e.target.value)}><option value="">请选择</option>{selection.eligibleSources.map(s=><option key={s.familyId} value={s.familyId}>{s.sameEntity?'同一实体 · ':''}{s.title} · {s.versionId}</option>)}</select></label>{selection.blockers.map(b=><p key={b}>{b}</p>)}</>}
    {state&&draft&&<>
-    {imageUrl&&<figure><a href={imageUrl} target="_blank" rel="noreferrer">
+    {imageUrl&&<figure><a href={runtimePath(imageUrl)} target="_blank" rel="noreferrer">
      {/* Display exact registered bytes rather than a re-encoded image derivative. */}
      {/* eslint-disable-next-line @next/next/no-img-element */}
-     <img src={imageUrl} alt="本次用途审阅的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/>
+     <img src={runtimePath(imageUrl)} alt="本次用途审阅的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/>
     </a><figcaption>点击查看原图</figcaption></figure>}
     <details><summary>查看绑定版本与文件校验值</summary><p>{state.versionId}</p><code>{state.sha256}</code></details>
     {state.head&&<p>最近登记：{actionLabels[state.head.action as keyof typeof actionLabels]||'已记录用途判断'}。是否可用以当前素材覆盖状态为准。</p>}

@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from '../runtime-path';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
@@ -97,9 +99,9 @@ export default function TrialPage() {
   const [versionId, setVersionId] = useState('');
   const asset = versions.find((item) => item.versionId === versionId) || versions.at(-1);
   return <main className="review-shell trial-shell">
-    <aside className="workspace-sidebar" aria-label="审阅台主导航"><Link className="sidebar-brand" href="/"><span className="brand-mark">阅</span><span><b>{snapshot?.scope.projectTitle || '制作审阅台'}</b><small>本剧试制范围</small></span></Link><nav className="workspace-nav">{[['overview', '当前工作'], ['story', '故事创作'], ['materials', '素材管理'], ['pipeline', '全剧制作'], ['system', '系统管理']].map(([id, label], index) => <a key={id} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined} href={['overview', 'system'].includes(id) ? `/?view=${id}` : `/trial?view=${id}${scopeQuery}`}><span>0{index + 1}</span><b>{label}</b></a>)}</nav><Link className="trial-return" href="/">← 返回全剧当前工作</Link></aside>
+    <aside className="workspace-sidebar" aria-label="审阅台主导航"><Link className="sidebar-brand" href="/"><span className="brand-mark">阅</span><span><b>{snapshot?.scope.projectTitle || '制作审阅台'}</b><small>本剧试制范围</small></span></Link><nav className="workspace-nav">{[['overview', '当前工作'], ['story', '故事创作'], ['materials', '素材管理'], ['pipeline', '全剧制作'], ['system', '系统管理']].map(([id, label], index) => <a key={id} className={view === id ? 'active' : ''} aria-current={view === id ? 'page' : undefined} href={runtimePath(['overview', 'system'].includes(id) ? `/?view=${id}` : `/trial?view=${id}${scopeQuery}`)}><span>0{index + 1}</span><b>{label}</b></a>)}</nav><Link className="trial-return" href="/">← 返回全剧当前工作</Link></aside>
     <div className="workspace-main"><header className="workspace-topbar"><div><small>独立试制范围</small><h1>{snapshot?.scope.title || '试制审阅'}</h1></div><button onClick={() => void refresh().catch(() => {})} disabled={hostedReadOnly || loading}>刷新状态</button></header><div className="workspace-content">
-      {hostedReadOnly ? <section className="trial-empty"><h2>试制素材保存在本机</h2><p>请在本地审阅图片、试听声音并保存正式判断。</p><a href="http://localhost:3000/trial?view=materials">打开本地试制</a></section> : <>
+      {hostedReadOnly ? <section className="trial-empty"><h2>试制素材保存在本机</h2><p>请在本地审阅图片、试听声音并保存正式判断。</p><a href={runtimePath("http://localhost:3000/trial?view=materials")}>打开本地试制</a></section> : <>
         {error && <div className="trial-feedback"><p role="alert">{error}</p><button onClick={() => void refresh().catch(() => {})} disabled={loading}>重新读取试制资料</button></div>}
         {loading && <p role="status">正在读取试制内容…</p>}
         {!snapshot && !loading && !error && <section className="trial-empty"><h2>尚未设置试制范围</h2><p>这个实例还没有试制内容、素材或审阅记录。</p><Link href="/">返回审阅台</Link></section>}

@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from './execution-epoch.mjs';
 import {randomUUID} from 'node:crypto';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {productionId} from './shot-production-model.mjs';
@@ -75,7 +76,7 @@ export async function applySpatialShotViewJob(tx,{jobId}){
 }
 export async function runSpatialShotViewIteration({repository}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能发布空间视图');
- const job=await repository.readTransaction(async tx=>(await tx.listAux(SPATIAL_SHOT_VIEW_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
+ const job=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,SPATIAL_SHOT_VIEW_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt))[0]);if(!job)return {processed:false};
  try{return {processed:true,status:'SUCCEEDED',...await repository.writeTransaction(tx=>applySpatialShotViewJob(tx,{jobId:job.jobId}))};}catch(error){
   const recovered=await repository.writeTransaction(async tx=>{
    const record=await tx.getAux(SPATIAL_SHOT_VIEW_NS.jobs,job.jobId),current=read(record);

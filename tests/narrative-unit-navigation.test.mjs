@@ -13,6 +13,7 @@ function harness(){
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL('app/'+name+'.tsx',site),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX}}).outputText,{
    module,exports:module.exports,console,structuredClone,require(id){
     if(id==='react')return react;if(id==='react/jsx-runtime')return{jsx,jsxs:jsx};
+    if(id==='./runtime-path')return{runtimePath:value=>value};
     if(id==='./instance-profile')return{projectIdFor:model=>model.instance.projectId,episodePlanIdFor:model=>model.instance.episodePlanId};
     if(id==='./client-storage')return{instanceLocalStorage:{getItem:()=>null,setItem(){},removeItem(){}}};
     if(id==='./runtime-mode')return{useRuntimeMode:()=>({hostedReadOnly:false})};

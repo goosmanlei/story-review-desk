@@ -1,3 +1,4 @@
+import {listWorkerRuntimeJobs} from '../host/instance-runtime/execution-epoch.mjs';
 import {randomUUID} from 'node:crypto';
 import {parseArgs} from 'node:util';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -16,7 +17,7 @@ import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mj
 const read=r=>r&&!r.deleted?JSON.parse(r.bytes):null;
 export async function runShotProductionWorkerIteration({repository,api}){
  if(repository.readOnly||process.env.REVIEW_INSTANCE_READ_ONLY==='1'||process.env.REVIEW_REMOTE_READ_ONLY==='1')throw Error('只读实例不能执行镜头制作任务');
- const queued=await repository.readTransaction(async tx=>(await tx.listAux(SHOT_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
+ const queued=await repository.readTransaction(async tx=>(await listWorkerRuntimeJobs(tx,SHOT_PRODUCTION_NS.jobs)).map(read).filter(j=>j?.status==='QUEUED').sort((a,b)=>a.createdAt.localeCompare(b.createdAt)));
  if(!queued.length)return {processed:false};const job=queued[0];
  try{const result=await repository.writeTransaction(tx=>applyShotProductionJob(tx,{jobId:job.jobId,api}));return {processed:true,jobId:job.jobId,status:'SUCCEEDED',result};}
  catch(e){

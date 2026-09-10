@@ -24,6 +24,7 @@ import { createReadStream, existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, open, readFile, readdir, realpath, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import {assertBrowserRuntimeBinding,configuredBasePath,deploymentMode,sameDeploymentOrigin} from '../../../host/instance-runtime/deployment-http.mjs';
 import { pathToFileURL } from 'node:url';
 import { deriveLifecycleState, type StatusRecord } from '../../status-contract';
 import { projectMaterialCreatorStage } from '../../material-taxonomy';
@@ -859,12 +860,13 @@ export function eventStorePath() {
 }
 
 function configuredOrigins() {
-  const raw = process.env.REVIEW_ALLOWED_ORIGINS || process.env.SITE_BASE_URL || 'http://localhost:3000,http://127.0.0.1:3000';
+  const raw = process.env.REVIEW_ALLOWED_ORIGINS || process.env.REVIEW_PUBLIC_URL || process.env.SITE_BASE_URL || 'http://localhost:3000,http://127.0.0.1:3000';
   const origins = new Set<string>();
   for (const item of raw.split(',').map((value) => value.trim()).filter(Boolean)) {
     try {
       const parsed = new URL(item);
-      if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) continue;
+      const pathname=parsed.pathname.replace(/\/$/,'');
+      if (parsed.username || parsed.password || !['',configuredBasePath()].includes(pathname) || parsed.search || parsed.hash) continue;
       origins.add(parsed.origin);
     } catch {
       // Invalid configured entries fail closed instead of widening the origin set.
@@ -874,18 +876,15 @@ function configuredOrigins() {
 }
 
 export function sameOrigin(request: Request) {
-  const origin = request.headers.get('origin');
-  if (!origin || origin === 'null') return false;
-  try {
-    const allowed = configuredOrigins();
-    const browserOrigin = new URL(origin).origin;
-    const requestOrigin = new URL(request.url).origin;
-    return browserOrigin === requestOrigin
-      && allowed.has(browserOrigin)
-      && allowed.has(requestOrigin);
-  } catch {
-    return false;
-  }
+  return sameDeploymentOrigin(request,configuredOrigins());
+}
+
+export async function validateBrowserDeployment(request:Request){
+  if(deploymentMode()!=='VPS')return null;
+  const repo=await instanceRepository();if(!repo)throw new HttpError(503,'Current instance runtime is unavailable');
+  const metadata=await repo.getMetadata();
+  try{assertBrowserRuntimeBinding(request,metadata.runtimeEpoch);}catch(error){throw new HttpError(409,error instanceof Error?error.message:'Browser deployment changed');}
+  return metadata;
 }
 
 function unquoteStrongEtag(value: string | null) {
@@ -905,6 +904,7 @@ export async function validateMutationRequest(request: Request) {
     throw new HttpError(405, 'chatgpt.site is a read-only mirror; use http://localhost:3000 for formal review and production writes');
   }
   if (!sameOrigin(request)) throw new HttpError(403, 'mutation origin is not allowed');
+  await validateBrowserDeployment(request);
   const ifMatchHeader = request.headers.get('if-match');
   if (!ifMatchHeader) {
     const operations = await operationalSnapshot();

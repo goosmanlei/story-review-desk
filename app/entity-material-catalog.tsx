@@ -1,4 +1,6 @@
 'use client';
+
+import {runtimePath} from './runtime-path';
 import {currentMaterialDirectoryRow,atomicMaterialDirectoryRow} from './material-requirement-presentation';
 import { materialExtraReviewPoints } from './material-review-display';
 import {useCallback,useEffect,useMemo,useState,type CSSProperties,type ReactNode} from 'react';
@@ -41,7 +43,7 @@ const normalize=(value:string)=>isAllCatalogValue(value)?'ALL':value;
 
 function EntityThumbnail({version,trial,mediaType}:{version?:V7AssetVersion;trial?:TrialAsset;mediaType:string}){
  const {url}=useOriginalMediaUrl(version);const src=version?(url||version.preview):trial?.mediaUrl;const [failed,setFailed]=useState('');
- return <span className="material-entity-thumbnail" data-thumbnail-version={version?.id||trial?.versionId||undefined} data-thumbnail-sha={version?.sha256||trial?.sha256||undefined}>{src&&failed!==src?<img src={src} alt="" loading="lazy" decoding="async" onError={()=>setFailed(src)}/>:<MaterialAppearanceIcon kind="media" value={mediaType}/>}</span>;
+ return <span className="material-entity-thumbnail" data-thumbnail-version={version?.id||trial?.versionId||undefined} data-thumbnail-sha={version?.sha256||trial?.sha256||undefined}>{src&&failed!==src?<img src={runtimePath(src)} alt="" loading="lazy" decoding="async" onError={()=>setFailed(src)}/>:<MaterialAppearanceIcon kind="media" value={mediaType}/>}</span>;
 }
 
 function EntityProgressSummary({rows,trialCount}:{rows:MaterialCatalogRow[];trialCount:number}){

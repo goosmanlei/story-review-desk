@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 /* eslint-disable @next/next/no-html-link-for-pages -- full reload keeps the desk's URL state restorer and visible workspace in sync. */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -58,10 +60,10 @@ export function ActionQueueSurface({ mode }: { mode: Mode }) {
     <header><div><small>{copy.eyebrow}</small><h2>{copy.title}</h2></div><p>{copy.description}</p></header>
     {error && <p className="action-surface-error"><b>当前投影 UNKNOWN</b>{error}。不能把接口异常解释为零待办。</p>}
     <div className="action-surface-metrics" aria-label="统一行动统计">{metrics.map(([label, value]) => <article key={label}><span>{label}</span><b>{typeof value === 'number' ? value : 'UNKNOWN'}</b></article>)}</div>
-    <div className="action-surface-list">{visibleItems.map((item) => <article key={item.actionKey}><header><b>{item.title}</b><span>{actorLabel(item.actor)}</span></header><p>{item.reasonText}</p><footer><small>{item.nextActionText}</small><a href={item.navigationIntent.href}>{item.navigationIntent.label}</a></footer></article>)}
+    <div className="action-surface-list">{visibleItems.map((item) => <article key={item.actionKey}><header><b>{item.title}</b><span>{actorLabel(item.actor)}</span></header><p>{item.reasonText}</p><footer><small>{item.nextActionText}</small><a href={runtimePath(item.navigationIntent.href)}>{item.navigationIntent.label}</a></footer></article>)}
       {queue && !items.length && <p className="action-surface-empty">当前没有这一类行动；库存、普通待审或已完成对象不会填充此处。</p>}
       {!queue && !error && <p className="action-surface-empty">正在读取统一行动投影…</p>}
     </div>
-    {queue && <footer><div className="action-surface-count"><span>{`显示 ${visibleItems.length} / 共 ${items.length} 项`}</span><code>{queue.snapshotId} · {queue.operationRevision}</code></div><div>{items.length > collapsedLimit && <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? '收起列表' : `展开全部 ${items.length} 项`}</button>}<a href="/?view=overview">查看完整行动中心</a></div></footer>}
+    {queue && <footer><div className="action-surface-count"><span>{`显示 ${visibleItems.length} / 共 ${items.length} 项`}</span><code>{queue.snapshotId} · {queue.operationRevision}</code></div><div>{items.length > collapsedLimit && <button type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>{expanded ? '收起列表' : `展开全部 ${items.length} 项`}</button>}<a href={runtimePath("/?view=overview")}>查看完整行动中心</a></div></footer>}
   </section>;
 }

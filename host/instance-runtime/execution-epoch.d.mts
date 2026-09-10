@@ -2,6 +2,7 @@ export type ExecutionRuntime={instanceId:string;runtimeEpoch:string};
 export const RESTORED_EPOCH_PREFIX:'restore_v1_';
 export function restoredRuntimeEpoch(uuid:string):string;
 export function isRestoredRuntime(epoch:unknown):boolean;
+export function listWorkerRuntimeJobs<T>(tx:{listAux(namespace:string):Promise<T[]>;getMetadata?():Promise<ExecutionRuntime>},namespace:string):Promise<T[]>;
 export function executionRuntimeReason(runtime:ExecutionRuntime|null|undefined,request:Record<string,unknown>):string|null;
 export function restoredRunUpdateAllowed(runtime:ExecutionRuntime|null|undefined,request:Record<string,unknown>,previousState:string,nextState:string,hasReconciliationEvidence?:boolean):boolean;
 export function restoredUnresolvedRunsForWorkItem(runtime:ExecutionRuntime|null|undefined,requestEvents:Record<string,unknown>[],runEvents:Record<string,unknown>[],workItemId:string):Record<string,unknown>[];

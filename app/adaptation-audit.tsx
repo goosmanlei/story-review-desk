@@ -1,6 +1,7 @@
 'use client';
 
 import { instanceLocalStorage } from './client-storage';
+import {runtimePath} from './runtime-path';
 import { useInstanceProfile } from './instance-context';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -1115,7 +1116,7 @@ export function AdaptationAuditWorkbench({
 
     <section className="adaptation-global-audio" aria-label="全局原音播放器">
       <div><small>GLOBAL SOURCE AUDIO</small><b>全局原音播放器</b><span>{activeAudioBeat ? `${activeAudioBeat.beat_id} · ${activeAudioBeat.source.timecode_start}–${activeAudioBeat.source.timecode_end} · ${visibleText(activeAudioBeat.summary)}` : '点击任一原文依据的播放按钮，从对应时间码开始。'}</span></div>
-      <audio ref={audioRef} data-review-audio controls preload="metadata" src="/review-audio/story-source.mp3" onPointerDown={stopSeamAudition} onPlay={(event) => handleReviewAudioPlay(event.currentTarget)}>浏览器不支持音频播放。</audio>
+      <audio ref={audioRef} data-review-audio controls preload="metadata" src={runtimePath('/review-audio/story-source.mp3')} onPointerDown={stopSeamAudition} onPlay={(event) => handleReviewAudioPlay(event.currentTarget)}>浏览器不支持音频播放。</audio>
     </section>
 
     <section className="adaptation-scene-directory" aria-labelledby="adaptation-scene-directory-title">

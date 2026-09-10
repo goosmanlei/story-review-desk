@@ -1,4 +1,6 @@
 'use client';
+
+import {runtimePath} from './runtime-path';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useInstanceProfile } from './instance-context';
 import { useAssistantFocus } from './assistant/context-provider';
@@ -146,7 +148,7 @@ export function EmptyInstanceDesk({ snapshotId }: { snapshotId: string }) {
       {storyMode==='source'?<GenericSourceReader onDocumentChange={setGenericSourceFocus}/>:<section className="empty-desk-panel"><header><small>下一步</small><h2>{storyMode==='story-structure'?'从作者草稿继续推进':storyMode==='logic'?'完整分集候选进入审阅':'场正文逐场进入审阅'}</h2></header><p>{storyMode==='story-structure'?'来源资料整理后，在这里查看故事骨架、人物关系、案件因果与观众线索。':storyMode==='logic'?'形成完整分集候选后，在这里判断各集剧情设计。集数和时长仍未锁定。':'形成当前场正文后，在这里对照来源、填写意见并逐场审阅。当前场次分母未锁定。'}</p><footer>{startStory}</footer></section>}
       </div>
     </>}
-    {view==='materials'&&<div className="material-center"><h2>素材分类管理</h2><EntityMaterialCatalog requirements={[]} selectedRequirement={null} mode="classification" onSelect={()=>{}} stageFor={()=>projectMaterialCreatorStage({lifecycleState:'WAITING_UPSTREAM'})} inspector={<p>先选择实体，登记状态与素材需求；存在定义不代表已有产物。<a href="?view=settings">登记主体与空间 →</a></p>} episodeScope="全部" sceneScope="全部" mediaFilter="全部" stageFilter="全部" search=""/></div>}
+    {view==='materials'&&<div className="material-center"><h2>素材分类管理</h2><EntityMaterialCatalog requirements={[]} selectedRequirement={null} mode="classification" onSelect={()=>{}} stageFor={()=>projectMaterialCreatorStage({lifecycleState:'WAITING_UPSTREAM'})} inspector={<p>先选择实体，登记状态与素材需求；存在定义不代表已有产物。<a href={runtimePath("?view=settings")}>登记主体与空间 →</a></p>} episodeScope="全部" sceneScope="全部" mediaFilter="全部" stageFilter="全部" search=""/></div>}
     {view==='pipeline'&&<ProductionPreparationWorkspace initialPhaseId={phaseId}/>}
     {view==='settings'&&<StorySettingsWorkspace />}
     {routeReady&&view==='system'&&<SystemManagement />}

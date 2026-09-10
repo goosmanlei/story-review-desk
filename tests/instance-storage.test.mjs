@@ -25,3 +25,11 @@ test('browser drafts migrate only into the configured original instance and neve
  configureClientStorage(b);
  assert.equal(instanceLocalStorage.getItem('review.reviewDraft'),'second story');
 });
+test('VPS drafts and pending requests are fenced by deployment and epoch without migrating local drafts',()=>{
+ globalThis.window={localStorage:memoryStorage(),sessionStorage:memoryStorage()};
+ const profile={instanceId:'story',capabilities:{browserStorageMigration:{unprefixedKeys:true}},deployment:{mode:'VPS',deploymentId:'release-a',runtimeEpoch:'epoch-a'}};
+ window.localStorage.setItem('assistant-input','legacy');window.localStorage.setItem('unrelated-app','keep');
+ configureClientStorage(profile);assert.equal(instanceLocalStorage.getItem('assistant-input'),null);instanceLocalStorage.setItem('assistant-input','remote draft');instanceSessionStorage.setItem('assistant-requests','old request');
+ configureClientStorage({...profile,deployment:{...profile.deployment,runtimeEpoch:'epoch-b'}});assert.equal(instanceLocalStorage.getItem('assistant-input'),null);assert.equal(instanceSessionStorage.getItem('assistant-requests'),null);
+ assert.equal(window.localStorage.getItem('unrelated-app'),'keep');
+});

@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { evidenceText, visibleText } from './review-semantics';
 
@@ -756,7 +758,7 @@ export function EvidenceReaderProvider({ children, onInternalNavigate }: { child
                 <pre>{evidenceText(selected.readingContext.excerpt)}</pre>
               </section>}
               <footer>
-                <div><span>{evidenceScope(selected)}</span>{selected.internalHref && (onInternalNavigate ? <button type="button" onClick={() => { finishClose(false); onInternalNavigate(selected.internalHref as string, selected.internalLabel ?? '在正文中定位'); }}>{selected.internalLabel ?? '在正文中定位'}</button> : <a href={selected.internalHref}>{selected.internalLabel ?? '在正文中定位'}</a>)}</div>
+                <div><span>{evidenceScope(selected)}</span>{selected.internalHref && (onInternalNavigate ? <button type="button" onClick={() => { finishClose(false); onInternalNavigate(selected.internalHref as string, selected.internalLabel ?? '在正文中定位'); }}>{selected.internalLabel ?? '在正文中定位'}</button> : <a href={runtimePath(selected.internalHref)}>{selected.internalLabel ?? '在正文中定位'}</a>)}</div>
               </footer>
             </article>}
           </section>

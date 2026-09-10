@@ -1,4 +1,5 @@
 /** Consume server disposition; a browser page is not the full replacement graph. */
+import {runtimePath} from './runtime-path';
 type MaterialDispositionRow = {
   requirementClass?: string;
   currentDisposition?: string;
@@ -22,5 +23,5 @@ export function atomicMaterialDirectoryRow(row: MaterialDispositionRow): boolean
 }
 
 export function materialRequirementLink(requirementId: string): string {
-  return '/?' + new URLSearchParams({view:'materials', material:requirementId, materialPanel:'material'}).toString();
+  return runtimePath('/?' + new URLSearchParams({view:'materials', material:requirementId, materialPanel:'material'}).toString());
 }

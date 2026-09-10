@@ -1,4 +1,6 @@
 'use client';
+
+import {runtimePath} from './runtime-path';
 import {useEffect,useState} from 'react';
 
 type Segment={id:string;sectionId:string;text:string};
@@ -42,7 +44,7 @@ export function HistoricalVerificationSource({issueId,snapshotId,segments,sectio
   return <aside className="authority-note" role="note" aria-label="历史原音核验说明">
     <b>历史原音核验 · {issueId}</b>
     <p>此核验仅作历史证据；尚无到当前新版场次的永久身份映射，不进入新版首场或恢复旧场正式审阅。</p>
-    {!current?<p role="status">正在核对历史核验的精确来源引用…</p>:current.status==='LOCATED'?<p>已找到可读来源引用：<a href={exactHref!}>{current.beatId} · 打开原文段落</a>。这不代表原音已听辨或核验结论已更新。</p>:<p role={current.status==='ERROR'?'alert':undefined}>{current.status==='ERROR'?current.message:'UNKNOWN：未找到唯一可读的原引用，仅保留来源资料入口，不补猜场次或段落。'}</p>}
+    {!current?<p role="status">正在核对历史核验的精确来源引用…</p>:current.status==='LOCATED'?<p>已找到可读来源引用：<a href={runtimePath(exactHref!)}>{current.beatId} · 打开原文段落</a>。这不代表原音已听辨或核验结论已更新。</p>:<p role={current.status==='ERROR'?'alert':undefined}>{current.status==='ERROR'?current.message:'UNKNOWN：未找到唯一可读的原引用，仅保留来源资料入口，不补猜场次或段落。'}</p>}
     {current?.status==='ERROR'&&<button type="button" onClick={()=>setAttempt(value=>value+1)}>重新读取历史核验</button>}
   </aside>;
 }

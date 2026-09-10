@@ -9,6 +9,7 @@ import {validateMutationRequest,errorResponse,jsonResponse,HttpError} from '../.
 export const runtime='nodejs';
 export async function POST(request:Request){
  try{
+  if(process.env.REVIEW_DEPLOYMENT_MODE==='VPS')throw new HttpError(405,'VPS 完整实例传输由 instance-vps 管理，避免创建额外完整副本。');
   await validateMutationRequest(request);
   if(!process.env.REVIEW_INSTANCE_ROOT||!request.body)throw new HttpError(422,'请选择完整备份文件');
   const uploadId='upload_'+randomUUID(),file=path.join(await maintenanceUploadDirectory(process.env.REVIEW_INSTANCE_ROOT),uploadId+'.review-backup.gz');

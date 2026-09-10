@@ -4,7 +4,8 @@ let profile: InstanceProfile | null = null;
 export function configureClientStorage(value: InstanceProfile) { profile = value; }
 function scoped(key: string) {
   if (!profile || profile.instanceId === 'UNKNOWN') throw new Error('Instance identity is not loaded');
-  return `review-instance:${profile.instanceId}:${key}`;
+  if (profile.deployment?.mode !== 'VPS') return `review-instance:${profile.instanceId}:${key}`;
+  return `review-instance:${profile.instanceId}:${profile.deployment.deploymentId}:${profile.deployment.runtimeEpoch}:${key}`;
 }
 function storage(session: boolean) {
   return {
@@ -12,6 +13,7 @@ function storage(session: boolean) {
       const target = session ? window.sessionStorage : window.localStorage;
       const current = target.getItem(scoped(key));
       if (current !== null) return current;
+      if (profile?.deployment?.mode === 'VPS') return null;
       const migration = profile?.capabilities.browserStorageMigration as { prefix?: string; unprefixedKeys?: boolean } | undefined;
       const legacyKey = key.startsWith('review.') && migration?.prefix ? migration.prefix + key.slice(7) : migration?.unprefixedKeys ? key : null;
       if (!legacyKey) return null;

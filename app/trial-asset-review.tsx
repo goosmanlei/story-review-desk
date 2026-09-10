@@ -1,5 +1,8 @@
-/* eslint-disable @next/next/no-img-element -- Review displays the exact registered media bytes. */
 'use client';
+
+import {runtimePath} from './runtime-path';
+/* eslint-disable @next/next/no-img-element -- Review displays the exact registered media bytes. */
+
 
 import { useEffect, useRef, useState } from 'react';
 import { materialCriterionDescription } from './material-review-display';
@@ -113,13 +116,13 @@ export function AssetReview({ asset, etag, refresh, currentVersion, readOnly=fal
   return <>
     <section className="trial-product" aria-label="产物展示与版本状态">
       <div className="trial-media">
-        {asset.mediaKind === 'IMAGE' ? <button className="trial-image-button" onClick={() => setEnlarged(true)} aria-label="放大原图"><img src={asset.mediaUrl} alt={asset.title || asset.label || '当前母版候选'} /></button>
-          : asset.mediaKind === 'AUDIO' ? <div className="trial-audio"><span aria-hidden="true">♫</span><audio controls preload="metadata" src={asset.mediaUrl}>浏览器无法播放此声音。</audio><p>请完整试听，再判断声音、口音与干净程度。</p></div>
-            : <video controls preload="metadata" src={asset.mediaUrl} />}
+        {asset.mediaKind === 'IMAGE' ? <button className="trial-image-button" onClick={() => setEnlarged(true)} aria-label="放大原图"><img src={runtimePath(asset.mediaUrl)} alt={asset.title || asset.label || '当前母版候选'} /></button>
+          : asset.mediaKind === 'AUDIO' ? <div className="trial-audio"><span aria-hidden="true">♫</span><audio controls preload="metadata" src={runtimePath(asset.mediaUrl)}>浏览器无法播放此声音。</audio><p>请完整试听，再判断声音、口音与干净程度。</p></div>
+            : <video controls preload="metadata" src={runtimePath(asset.mediaUrl)} />}
       </div>
       <div className="trial-version"><span className="trial-status">{labels[asset.lifecycle] || asset.lifecycle}</span><h2>{asset.title || asset.label || '母版候选'}</h2><p>版本 {asset.version}</p><p>本次判断只应用于当前版本。通过后可在本试制范围继续制作。</p>{asset.latestReview && <p><b>最近意见</b><br />{asset.latestReview.payload.comment || '已记录逐项判断。'}</p>}</div>
     </section>
-    <dialog ref={imageDialog} className="trial-lightbox" aria-label="图片原件" onCancel={() => setEnlarged(false)}><button autoFocus onClick={() => setEnlarged(false)}>关闭原图</button><img src={asset.mediaUrl} alt={asset.title || asset.label || '母版原图'} /></dialog>
+    <dialog ref={imageDialog} className="trial-lightbox" aria-label="图片原件" onCancel={() => setEnlarged(false)}><button autoFocus onClick={() => setEnlarged(false)}>关闭原图</button><img src={runtimePath(asset.mediaUrl)} alt={asset.title || asset.label || '母版原图'} /></dialog>
     <section className="trial-review material-review-zone" aria-label="正式审阅">
       {asset.qualityBlocked && <aside className="trial-feedback"><b>技术预检发现需要返修</b><p>{asset.qualityBlockReason || '这版尚未符合固定制作要求，不能放行进入下游。'}</p></aside>}
       {asset.mediaKind === 'AUDIO' && <aside className="trial-feedback"><b>{asset.lifecycle === 'RELEASED' ? '声音已通过并放行' : '声音表现待完整试听'}</b><p>{asset.lifecycle === 'RELEASED' ? '本版本的审阅结论已保存。仍可随时试听；需要改变结论时，请先进入纠错。' : '请完整试听并检查口音、语气、可懂度和起止静音；循环环境底声还需比较结尾与开头是否自然衔接。技术记录不代表听觉验收通过。'}</p></aside>}

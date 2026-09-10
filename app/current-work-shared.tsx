@@ -1,5 +1,7 @@
 'use client';
 
+
+import {runtimePath} from './runtime-path';
 import {
   impactLabel,
   type ActionItem,
@@ -169,6 +171,6 @@ export function WorkCard({ item, isMainline = false }: { item: ActionItem; isMai
       <div><dt>工作坐标</dt><dd>{coordinates || item.subjectId}</dd></div>
       <div><dt>证据行动</dt><dd>{item.sourceActionKeys.length}条当前行动投影</dd></div>
     </dl></details>
-    <footer><small>{coordinates || item.subjectId}</small><a href={item.navigationIntent.href}>{item.navigationIntent.label}</a></footer>
+    <footer><small>{coordinates || item.subjectId}</small><a href={runtimePath(item.navigationIntent.href)}>{item.navigationIntent.label}</a></footer>
   </article>;
 }

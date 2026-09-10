@@ -50,6 +50,12 @@ DEFAULT_PROJECT_ROOT = INSTANCE.root if INSTANCE else None
 DEFAULT_STORE = INSTANCE.public_root if INSTANCE else None
 DEFAULT_PRIVATE_STATE = INSTANCE.private_root if INSTANCE else None
 DEFAULT_CODEX_BIN = shutil.which("codex")
+# Capture explicit, platform-neutral paths before the SDK isolates os.environ.
+RUNTIME_PATH = os.environ.get("REVIEW_EXECUTABLE_PATH") or os.pathsep.join(dict.fromkeys([
+    str(Path(sys.executable).parent), "/usr/local/bin", "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+]))
+AUTH_SOURCE_HOME = os.environ.get("REVIEW_CODEX_AUTH_HOME")
+DEPLOYMENT_MODE = os.environ.get("REVIEW_DEPLOYMENT_MODE", "LOCAL")
 DEFAULT_MODEL = "gpt-5.6-sol"
 TRUSTED_PROJECT_ID = INSTANCE.profile["projectId"] if INSTANCE else "REVIEW_FIXTURE"
 REQUIRED_CONTEXT_FILES = ("README.md", "AGENTS.md", "STATE.md")
@@ -217,7 +223,7 @@ CONFIG_OVERRIDES = (
     "mcp_servers={}",
     "plugins={}",
     'shell_environment_policy.inherit="none"',
-    'shell_environment_policy.set={PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", LANG="zh_CN.UTF-8"}',
+    'shell_environment_policy.set={PATH=' + json.dumps(RUNTIME_PATH) + ', LANG="zh_CN.UTF-8"}',
     "show_raw_agent_reasoning=false",
 )
 
@@ -699,7 +705,7 @@ def policy_hash(
 def sanitized_child_environment(isolated_home: Path) -> Dict[str, str]:
     allowed = ("USER", "LOGNAME", "SHELL", "TMPDIR", "LANG", "LC_ALL", "TERM")
     environment = {key: os.environ[key] for key in allowed if os.environ.get(key)}
-    environment["PATH"] = "/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+    environment["PATH"] = RUNTIME_PATH
     environment["NO_COLOR"] = "1"
     environment["CODEX_HOME"] = str(isolated_home)
     environment["HOME"] = str(isolated_home)
@@ -719,7 +725,9 @@ def lock_down_process_environment(isolated_home: Path) -> Dict[str, str]:
 
 
 def resolve_auth_file() -> Path:
-    configured_home = os.environ.get("CODEX_HOME")
+    configured_home = AUTH_SOURCE_HOME or os.environ.get("CODEX_HOME")
+    if DEPLOYMENT_MODE == "VPS" and not AUTH_SOURCE_HOME:
+        raise BridgeError("CODEX_AUTH_UNAVAILABLE", "远端 Codex 未配置 VPS 私有认证来源")
     source_home = Path(configured_home).expanduser() if configured_home else Path.home() / ".codex"
     try:
         auth_path = (source_home / "auth.json").resolve(strict=True)

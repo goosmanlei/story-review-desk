@@ -25,6 +25,7 @@ import { publicRef, publicRefMatches, stageDisplay, visibleText, workflowDisplay
 import { useRuntimeMode } from './runtime-mode';
 import { useAssistantFocus } from './assistant/context-provider';
 import { useProjectAssistantDraftTargets } from './assistant/project-draft-adapters';
+import {runtimePath} from './runtime-path';
 import type { EpisodeReviewDossier } from './story-review-types';
 
 type ReviewClaim = { class: 'A' | 'F' | 'L' | 'U'; text: string; evidenceRefs: string[] };
@@ -1700,12 +1701,12 @@ export function useOriginalMediaUrl(version?: V7AssetVersion | null) {
   const [resolved, setResolved] = useState<{ versionId: string; url: string | null; error: string }>({ versionId: '', url: null, error: '' });
   const publicOriginal=typeof version?.mediaUrl==='string'&&/^\/media\/animatic\/[A-Za-z0-9_-]+\.(?:png|jpe?g|webp|gif|avif|wav|mp3|m4a|flac|ogg|aac|mp4|webm|mov|json|txt)$/.test(version.mediaUrl)?version.mediaUrl:null;
   const eligible = Boolean((!hostedReadOnly||publicOriginal) && version && version.outputState === 'PRESENT' && version.path && version.sha256);
-  const directUrl = hostedReadOnly?publicOriginal:version?.mediaUrl || (version?.mediaToken ? '/api/v8/media/' + version.mediaToken : null);
+  const directUrl = hostedReadOnly?publicOriginal:version?.mediaUrl || (version?.mediaToken ? runtimePath('/api/v8/media/' + version.mediaToken) : null);
   useEffect(() => {
     let alive = true;
     if (!version || !eligible || directUrl) return;
     mediaToken(version.id)
-      .then((token) => { if (alive) setResolved({ versionId: version.id, url: '/api/v8/media/' + token, error: '' }); })
+      .then((token) => { if (alive) setResolved({ versionId: version.id, url: runtimePath('/api/v8/media/' + token), error: '' }); })
       .catch((reason: unknown) => { if (alive) setResolved({ versionId: version.id, url: null, error: reason instanceof Error ? reason.message : '无法解析原件地址' }); });
     return () => { alive = false; };
   }, [directUrl, eligible, version]);
@@ -1808,7 +1809,7 @@ function CreatorShotStrip({ model, shot, onNavigate }: { model: ProductionModel;
     const target = storyboardReviewTarget(model, item);
     const preview = target.version?.preview || item.storyboardPreview;
     const state = target.version?.lifecycleState || target.item?.lifecycleState || item.lifecycleState;
-    return <button type="button" key={item.id} className={item.id === shot.id ? 'active' : ''} aria-current={item.id === shot.id ? 'location' : undefined} onClick={() => onNavigate({ shotId: item.id, workPackageId: target.workPackage?.id || item.defaultWorkPackageId, workItemId: target.item?.id || null, familyId: target.family?.id || null, versionId: target.version?.id || null })}><span>{preview ? <img src={preview} alt="" /> : <i>{String(index + 1).padStart(2, '0')}</i>}</span><b>{item.id}</b><small>{visibleText(item.title)}</small><em className={'tone-' + statusTone(state)}>{directorStatus(state)}</em></button>;
+    return <button type="button" key={item.id} className={item.id === shot.id ? 'active' : ''} aria-current={item.id === shot.id ? 'location' : undefined} onClick={() => onNavigate({ shotId: item.id, workPackageId: target.workPackage?.id || item.defaultWorkPackageId, workItemId: target.item?.id || null, familyId: target.family?.id || null, versionId: target.version?.id || null })}><span>{preview ? <img src={runtimePath(preview)} alt="" /> : <i>{String(index + 1).padStart(2, '0')}</i>}</span><b>{item.id}</b><small>{visibleText(item.title)}</small><em className={'tone-' + statusTone(state)}>{directorStatus(state)}</em></button>;
   })}</div><details><summary>展开全业务树</summary><ShotNavigator model={model} shot={shot} onNavigate={onNavigate} /></details></nav>;
 }
 
@@ -1852,8 +1853,8 @@ export function VersionPanel({ model, family, selectedVersionId, onSelectVersion
   const expected = selectedExpected || (!version ? expectedOutputForFamily(model, family) : null);
   return <section className="v6-version-panel">
     <header><span><small>{heading}</small><b>{visibleText(family.label)}</b></span><i>{`${familyVersions.length}个文件版本 · ${expectedOutputs.length}个计划产出`}</i></header>
-    {version && version.preview && <img src={version.preview} alt={visibleText(family.label) + '审阅代理'} />}
-    {version && version.audioProxy && <audio controls preload="metadata" src={version.audioProxy}>你的浏览器不支持音频播放。</audio>}
+    {version && version.preview && <img src={runtimePath(version.preview)} alt={visibleText(family.label) + '审阅代理'} />}
+    {version && version.audioProxy && <audio controls preload="metadata" src={runtimePath(version.audioProxy)}>你的浏览器不支持音频播放。</audio>}
     <div className="v6-version-list">{familyVersions.map((item) => <button className={(item.id === version?.id ? 'active ' : '') + 'tone-' + statusToneFromRecord(item)} key={item.id} onClick={() => onSelectVersion(item.id)}><b>{visibleText(item.label)}</b><StatusHeadline record={item} compact /><small>{visibleText(deriveHeadlineState(item).meaning)}</small></button>)}{expectedOutputs.map((item) => <button className={(item.id === expected?.id ? 'active ' : '') + 'tone-waiting is-expected-output'} key={item.id} onClick={() => onSelectVersion(item.id)}><b>{visibleText(item.plannedVersionLabel)}</b><span>计划产出 · 尚无文件</span><small>不可预览、不可审阅、不可采用</small></button>)}{!familyVersions.length && !expectedOutputs.length && <p className="v6-empty-note">当前资产尚无文件版本或计划产出记录。</p>}</div>
     {expected && <article className="creator-expected-output" role="status"><small>EXPECTED OUTPUT · 不是资产版本</small><b>{visibleText(expected.label || expected.plannedVersionLabel)}</b><p>这里只登记应当产出的固定目标。当前没有候选文件与SHA-256，因此不能预览、提交审阅或作为下游输入。</p><dl><div><dt>计划文件</dt><dd><code>{compactPath(expected.targetPath)}</code></dd></div><div><dt>兼容旧深链</dt><dd><code>{publicRef(expected.legacyVersionId)}</code></dd></div><div><dt>执行定义</dt><dd>{publicRef(expected.executionDefinitionRef) || '尚未登记'}</dd></div></dl></article>}
     {version && <details className="v7-technical-details v7-version-tech"><summary>统一状态、路径与哈希</summary><UnifiedStatusPanel record={version} showGateReason={false} /><div className="v6-version-facts"><p><b>资产／版本</b><code>{publicRef(family.id) + ' / ' + publicRef(version.id)}</code></p><p><b>路径</b><code>{compactPath(version.path)}</code></p><p><b>SHA-256</b><code>{version.sha256 || '无文件，不生成哈希'}</code></p>{(version.historyId || version.resourceId) && <p><b>历史凭据</b><code>{(version.historyId || '—') + ' / ' + (version.resourceId || '—')}</code></p>}{version.reason && <p><b>历史处置</b><span>{visibleText(version.reason)}</span></p>}</div></details>}
@@ -2497,22 +2498,22 @@ function ReviewTargetPanel({
     <div className="creator-compare-toolbar"><div><b>A · 正式裁决对象</b><span>{publicRef(version?.id) || '尚无版本'}</span></div>{comparisonVersion ? <><div><b>B · 比较证据</b><span>{publicRef(comparisonVersion.id)} · {visibleText(comparisonFamily?.label || '')}</span></div><button type="button" aria-pressed={showComparison} onClick={onToggleComparison}>{showComparison ? '隐藏 B' : '显示 B'} <kbd>C</kbd></button></> : <p>从下方制作信息选择依赖或历史版本，即可建立A/B比较。</p>}</div>
     <div className={'creator-media-comparison ' + (showComparison && comparisonVersion ? 'is-comparing' : '')}>
       <figure><figcaption><b>A · 当前正式对象</b><span>{visibleText(version?.label || '尚无版本')}</span></figcaption><div className="v8-review-media">
-        {originalMediaUrl && kind === 'IMAGE' && <img src={originalMediaUrl} alt={visibleText(family?.label || item.id) + '与登记SHA一致的原件'} onLoad={onMediaReady} onError={onMediaError} />}
-        {originalMediaUrl && kind === 'AUDIO' && <audio controls preload="metadata" src={originalMediaUrl} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持音频播放。</audio>}
-        {originalMediaUrl && kind === 'VIDEO' && <video controls preload="metadata" src={originalMediaUrl} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持视频播放。</video>}
+        {originalMediaUrl && kind === 'IMAGE' && <img src={runtimePath(originalMediaUrl)} alt={visibleText(family?.label || item.id) + '与登记SHA一致的原件'} onLoad={onMediaReady} onError={onMediaError} />}
+        {originalMediaUrl && kind === 'AUDIO' && <audio controls preload="metadata" src={runtimePath(originalMediaUrl)} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持音频播放。</audio>}
+        {originalMediaUrl && kind === 'VIDEO' && <video controls preload="metadata" src={runtimePath(originalMediaUrl)} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持视频播放。</video>}
         {!originalMediaUrl && version?.outputState === 'PRESENT' && version.path && version.sha256 && !originalMediaError && <div><b>正在解析与登记SHA一致的原件…</b><p>{visibleText(version.path)}</p></div>}
         {(!version || version.outputState !== 'PRESENT' || !version.path || !version.sha256) && <div><b>当前没有可正式裁决的原件</b><p>{visibleText(version?.path || recipe?.output.path || '固定输出路径未登记')}</p><small>仍可核对执行配方和依赖，但不能提交结果裁决。</small></div>}
         {originalMediaUrl && kind === 'UNKNOWN' && /\.(json|txt|md)$/i.test(version?.path||'') && version?.sha256 && <TextReviewOriginal url={originalMediaUrl} sha256={version.sha256} onReady={onMediaReady} onError={onMediaError}/> }
         {originalMediaUrl && kind === 'UNKNOWN' && !/\.(json|txt|md)$/i.test(version?.path||'') && <div><b>该文件需在原件窗口核对</b><p>{visibleText(version?.path)}</p><small>当前类型不支持内嵌预览。</small></div>}
       </div></figure>
       {showComparison && comparisonVersion && <figure><figcaption><b>B · 只作比较证据</b><span>{visibleText(comparisonVersion.label)}</span></figcaption><div className="v8-review-media is-evidence">
-        {comparisonMediaUrl && comparisonKind === 'IMAGE' && <img src={comparisonMediaUrl} alt={visibleText(comparisonFamily?.label || comparisonVersion.id) + '比较证据'} />}
-        {comparisonMediaUrl && comparisonKind === 'AUDIO' && <audio controls preload="metadata" src={comparisonMediaUrl}>你的浏览器不支持音频播放。</audio>}
-        {comparisonMediaUrl && comparisonKind === 'VIDEO' && <video controls preload="metadata" src={comparisonMediaUrl}>你的浏览器不支持视频播放。</video>}
+        {comparisonMediaUrl && comparisonKind === 'IMAGE' && <img src={runtimePath(comparisonMediaUrl)} alt={visibleText(comparisonFamily?.label || comparisonVersion.id) + '比较证据'} />}
+        {comparisonMediaUrl && comparisonKind === 'AUDIO' && <audio controls preload="metadata" src={runtimePath(comparisonMediaUrl)}>你的浏览器不支持音频播放。</audio>}
+        {comparisonMediaUrl && comparisonKind === 'VIDEO' && <video controls preload="metadata" src={runtimePath(comparisonMediaUrl)}>你的浏览器不支持视频播放。</video>}
         {!comparisonMediaUrl && <div><b>比较原件暂不可预览</b><p>{visibleText(comparisonVersion.path || comparisonMediaError || '没有登记媒体路径')}</p></div>}
       </div></figure>}
     </div>
-    <div className="v8-original-proof"><div><b>与裁决绑定的原件</b><code>{publicRef(version?.id) || '无版本'}<br />{version?.sha256 || '无SHA-256'}</code></div>{originalMediaUrl ? <a href={originalMediaUrl} target="_blank" rel="noreferrer">在新窗口打开SHA绑定原件</a> : <span>原件地址不可用</span>}</div>
+    <div className="v8-original-proof"><div><b>与裁决绑定的原件</b><code>{publicRef(version?.id) || '无版本'}<br />{version?.sha256 || '无SHA-256'}</code></div>{originalMediaUrl ? <a href={runtimePath(originalMediaUrl)} target="_blank" rel="noreferrer">在新窗口打开SHA绑定原件</a> : <span>原件地址不可用</span>}</div>
     <div className="v8-review-brief creator-review-brief"><article><span>{scopeNoun}为什么存在</span><h4>{visibleText(scopePurpose)}</h4><p>{visibleText(scopeAudience)}</p></article><article><span>{scopeNoun}核心判断</span><h4>{visibleText(scopeQuestion)}</h4><p>逐项判断始终绑定A与当前范围哈希；B只用于发现版本退化或依赖偏差。</p></article></div>
     <div className="v8-review-effects"><p><b>通过后</b>{item.deliverableKey === 'STORYBOARD' ? '与本镜适用对白共同进入场级Animatic；校准子集全部通过后才允许锁时。' : '按直接依赖关系重新计算下游资格。'}</p><p><b>退回后</b>当前版本保持可追溯，记录具体问题并创建新版本；不得原位覆盖。</p></div>
     {originalMediaError && <p className="v8-inline-error">原件无法核验：{visibleText(originalMediaError)}</p>}

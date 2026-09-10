@@ -7,6 +7,7 @@ export type InstanceProfile = {
   sourceBindings: { creativeRevisionPaths: Record<string, string>; derivedRegistryPaths: string[] };
   capabilities: Record<string, unknown>;
   configurationRef?: {revisionId:string;sha256:string};
+  deployment: {mode:'LOCAL'|'VPS'|'SITES_READ_ONLY';deploymentId:string;runtimeEpoch:string;basePath:string};
 };
 
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
@@ -45,6 +46,7 @@ export function instanceProfile(value: unknown): InstanceProfile {
     },
     capabilities: record(profile.capabilities),
     configurationRef: profile.configurationRef as InstanceProfile["configurationRef"],
+    deployment: (()=>{const value=record(data.deployment||profile.deployment);return {mode:['VPS','SITES_READ_ONLY'].includes(text(value.mode))?text(value.mode) as 'VPS'|'SITES_READ_ONLY':'LOCAL',deploymentId:text(value.deploymentId)||'local:UNKNOWN',runtimeEpoch:text(value.runtimeEpoch)||'UNKNOWN',basePath:text(value.basePath)};})(),
   };
 }
 

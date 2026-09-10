@@ -10,6 +10,8 @@ import { useInstanceProfile } from './instance-context';
 import { sceneRequirements } from './scene-narrative-context';
 import { requirementCommentField } from './story-comment-model';
 import { PaginatedClosedCommentHistory } from './closed-comment-history';
+import {instanceLocalStorage} from './client-storage';
+import {runtimePath} from './runtime-path';
 
 type Draft = { targetKey: string; anchor: SceneCommentAnchor; text: string; commentId?: string; commentRevisionId?: string; latestEventId?: string };
 type SelectionPosition = { left: number; top: number };
@@ -18,8 +20,8 @@ type Context = {
   capture: () => void; locate: (thread: StoryCommentThread) => void; activate: (thread:StoryCommentThread)=>void;
 };
 const Comments = createContext<Context|null>(null);
-const readStored = (key: string) => { try { return JSON.parse(localStorage.getItem(key)||'null'); } catch { return null; } };
-const storeDraft = (key: string, value: unknown) => { try { if(value===null)localStorage.removeItem(key);else localStorage.setItem(key,JSON.stringify(value)); } catch { /* in-memory editor remains usable */ } };
+const readStored = (key: string) => { try { return JSON.parse(instanceLocalStorage.getItem(key)||'null'); } catch { return null; } };
+const storeDraft = (key: string, value: unknown) => { try { if(value===null)instanceLocalStorage.removeItem(key);else instanceLocalStorage.setItem(key,JSON.stringify(value)); } catch { /* in-memory editor remains usable */ } };
 function selectionPosition(range: Range): SelectionPosition|null {
   const rects=Array.from(range.getClientRects()).filter(r=>r.width&&r.height&&r.bottom>60&&r.top<innerHeight-8&&r.right>0&&r.left<innerWidth);
   const rect=rects.at(-1);if(!rect)return null;
@@ -29,7 +31,7 @@ function selectionPosition(range: Range): SelectionPosition|null {
 /** The slot keeps the current view's comments beside the project assistant. */
 export function StoryCommentEntry() {
   // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- The launcher also runs outside the manually routed story page.
-  return <><span id="story-comment-entry"/><button type="button" className="story-comment-entry-fallback story-comment-trigger" onClick={()=>window.location.assign('/?view=story&storyMode=logic&comments=open')}>查看评论</button></>;
+  return <><span id="story-comment-entry"/><button type="button" className="story-comment-entry-fallback story-comment-trigger" onClick={()=>window.location.assign(runtimePath('/?view=story&storyMode=logic&comments=open'))}>查看评论</button></>;
 }
 
 export function StoryCommentsProvider({plan,episodeUid,sceneId,onReveal,children}: {

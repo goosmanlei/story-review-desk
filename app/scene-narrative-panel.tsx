@@ -1,4 +1,6 @@
 'use client';
+
+import {runtimePath} from './runtime-path';
 import {useEffect,useState} from 'react';
 import {DesignText} from './story-comments';
 import {requirementCommentField} from './story-comment-model';
@@ -29,7 +31,7 @@ export function SceneNarrativeRequirements({context,onOpenScene,onLocate}: {cont
   const logicHref=`/?view=story&storyMode=logic&episodePlanRevision=${encodeURIComponent(context.revisionId)}&episode=${encodeURIComponent(context.episodeUid)}&logicGroup=episode-task`;
   return <section className="scene-inheritance" aria-label="本集要求与本场承接">
     <header><div><small>从分集要求到本场正文</small><h3>本集要求与本场承接</h3></div><span className={`inheritance-state is-${context.upstreamState.toLowerCase()}`}>{stateLabels[context.upstreamState]}</span></header>
-    <p className="scene-inheritance-position">{context.episode.displayId} {context.episode.title} · 本集第 {context.episode.scenePosition} / {context.episode.sceneCount} 场 <a href={logicHref}>返回本集叙事判断 →</a></p>
+    <p className="scene-inheritance-position">{context.episode.displayId} {context.episode.title} · 本集第 {context.episode.scenePosition} / {context.episode.sceneCount} 场 <a href={runtimePath(logicHref)}>返回本集叙事判断 →</a></p>
     <div className="scene-inheritance-groups">{(['EPISODE','SCENE'] as const).map(scope=><section key={scope}><h4>{scope==='EPISODE'?'本集要求与相关推进段':'本场具体责任'}</h4>{context.requirements.filter(r=>r.scope===scope).map(row=><article key={row.id}><b>{row.label}</b><p>{requirementCommentField(row.id,context.sceneId)?<DesignText episodeUid={context.episodeUid} fieldId={requirementCommentField(row.id,context.sceneId)!} text={row.claim.text}/>:row.claim.text}</p><footer><span>{row.blockIds.length?'精确正文块依据':`场级依据：${row.sceneIds.map(id=>context.sceneLabels[id]?.split(' ')[0]||id).join('、')}`}</span><button type="button" onClick={()=>locate(row)}>{row.sceneIds.includes(context.sceneId)?'定位正文依据':'打开承担场次'} →</button></footer></article>)}</section>)}</div>
     {context.chains.length>0&&<section className="scene-inheritance-chains"><h4>铺垫与回收</h4>{context.chains.map(chain=><article key={chain.id}><b>{chain.title} · {chain.role}</b><p><DesignText episodeUid={context.episodeUid} fieldId={`chain:${chain.id}`} text={chain.requirement}/></p><div>{(['setup','payoff'] as const).map(part=><p key={part}><span>{part==='setup'?'铺垫':'回收'}：</span>{chain[part].map(id=><button key={id} type="button" aria-current={id===context.sceneId?'true':undefined} onClick={()=>onOpenScene(id)}>{context.sceneLabels[id]||id}</button>)}</p>)}</div></article>)}</section>}
     {context.neighbours.length>0&&<div className="scene-inheritance-neighbours">{context.neighbours.map(scene=><article key={scene.direction}><b>{scene.direction==='previous'?'前场交接':'后场承接'}</b><button type="button" onClick={()=>onOpenScene(scene.id)}>{scene.label} →</button><p>{scene.transition}</p></article>)}</div>}

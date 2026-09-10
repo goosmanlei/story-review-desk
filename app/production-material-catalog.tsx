@@ -6,6 +6,7 @@ import {mergePagedProductionModel} from './paged-production-data';
 import {ProductionWorkItemInformationCard,type ProductionModel,type ProductionNavigationIntent} from './production-workbench';
 import {MaterialReviewDrawer} from './material-review-drawer';
 import {visibleText} from './review-semantics';
+import {runtimePath} from './runtime-path';
 import './production-material-catalog.css';
 
 type Page=ProductionMaterialPage&{snapshotId:string;operationRevision:number|string};
@@ -91,7 +92,7 @@ export function ProductionMaterialCatalog({model:baseModel,snapshotId}:{model:Pr
   const patchFilter=(patch:Partial<ProductionMaterialFilters>)=>move({...location,filters:{...location.filters,...patch}});
   const select=(row:ProductionMaterialRow,versionId:string|null=null)=>move({...location,familyId:row.familyId,versionId},true);
   const close=()=>move({...location,familyId:null,versionId:null});
-  const openBasic=useCallback((requirementId:string)=>{if(!mayLeave())return;const query=new URLSearchParams({view:'materials',materialCatalog:'basic',material:requirementId});window.location.assign('/?'+query);},[]);
+  const openBasic=useCallback((requirementId:string)=>{if(!mayLeave())return;const query=new URLSearchParams({view:'materials',materialCatalog:'basic',material:requirementId});window.location.assign(runtimePath('/?'+query));},[]);
   const navigate=(intent:ProductionNavigationIntent)=>{
     const item=model.workItems.find(row=>row.id===intent.workItemId),family=model.assetFamilies.find(row=>row.id===(intent.familyId||item?.outputAssetRef));
     if(!item||!family){setDetailFailure({requestKey:detailRequestKey,error:'所选工作项或素材族不存在，已停止默认回退'});return;}
@@ -103,7 +104,7 @@ export function ProductionMaterialCatalog({model:baseModel,snapshotId}:{model:Pr
     }
     move({...location,familyId:family.id,versionId:intent.versionId||null},true);
   };
-  const productionLink=selected?'/?'+new URLSearchParams({view:'pipeline',item:selected.workItemId,work:selected.workPackageId,...(selected.scopeOwner.type==='SHOT'?{shot:selected.scopeOwner.id}:{}),...(selected.gateId?{productionGate:selected.gateId}:{}),...(selected.phaseId?{productionPhase:selected.phaseId}:{})}):'';
+  const productionLink=selected?runtimePath('/?'+new URLSearchParams({view:'pipeline',item:selected.workItemId,work:selected.workPackageId,...(selected.scopeOwner.type==='SHOT'?{shot:selected.scopeOwner.id}:{}),...(selected.gateId?{productionGate:selected.gateId}:{}),...(selected.phaseId?{productionPhase:selected.phaseId}:{})})):'';
   const scopeLabel=(row:ProductionMaterialRow)=>{
     if(row.scopeOwner.type==='SHOT'){const shot=baseModel.shots.find(item=>item.id===row.scopeOwner.id);return shot?.title||row.scopeOwner.id;}
     if(row.scopeOwner.type==='SCENE'){const scene=baseModel.scenes.find(item=>item.id===row.scopeOwner.id);return scene?.title||row.scopeOwner.id;}
@@ -130,10 +131,10 @@ export function ProductionMaterialCatalog({model:baseModel,snapshotId}:{model:Pr
     {loading&&<p role="status">正在读取制作素材…</p>}{page?.hasMore&&!loading&&<button type="button" className="production-material-more" onClick={()=>{if(page.nextCursor)setRequestMore({filterKey,cursor:page.nextCursor});}}>继续读取</button>}
     <MaterialReviewDrawer open={Boolean(location.familyId)} title={selected?.title||'制作素材详情'} kind="material" onClose={close}>
       {detailError?<section role="alert"><p>{detailError}</p><code>{location.familyId}{location.versionId?' / '+location.versionId:''}</code><button type="button" onClick={()=>setRevision(value=>value+1)}>重新读取详情</button></section>:!selected?<p role="status">正在核对精确制作素材与版本…</p>:<>
-        <div className="production-material-detail-links"><a href={productionLink}>返回镜头制作的对应步骤 →</a><a href={productionMaterialLocation(selected,location.versionId)}>此版本的素材深链</a></div>
+        <div className="production-material-detail-links"><a href={runtimePath(productionLink)}>返回镜头制作的对应步骤 →</a><a href={runtimePath(productionMaterialLocation(selected,location.versionId))}>此版本的素材深链</a></div>
         <dl className="production-material-owner"><div><dt>所属{({SHOT:'镜头',SCENE:'场景',EPISODE:'分集',PROJECT:'全剧'})[selected.scopeOwner.type]}</dt><dd>{scopeLabel(selected)}</dd></div><div><dt>素材种类</dt><dd>{selected.kindLabel}</dd></div><div><dt>范围修订</dt><dd>{selected.scopeOwner.revisionId||'尚未登记'}</dd></div></dl>
         <ProductionWorkItemInformationCard model={model} workItemId={selected.workItemId} familyId={selected.familyId} versionId={location.versionId} onNavigate={navigate} onOpenMaterial={openBasic}/>
-        <section className="production-material-usage"><h3>引用与使用</h3><p>已声明 {selected.declaredConsumerWorkItemIds.length} 个后续工作项，实际版本输入 {selected.actualConsumers.length} 项。</p>{selected.actualConsumers.map((consumer,index)=><p key={consumer.versionId+':'+index}><a href={productionMaterialLocation({familyId:consumer.familyId},consumer.versionId)}>{consumer.versionId}</a> 使用 {consumer.inputVersionId} · <code>{consumer.sha256}</code></p>)}{selected.materialRequirementIds.map(id=><button type="button" key={id} onClick={()=>openBasic(id)}>查看关联基础素材 →</button>)}</section>
+        <section className="production-material-usage"><h3>引用与使用</h3><p>已声明 {selected.declaredConsumerWorkItemIds.length} 个后续工作项，实际版本输入 {selected.actualConsumers.length} 项。</p>{selected.actualConsumers.map((consumer,index)=><p key={consumer.versionId+':'+index}><a href={runtimePath(productionMaterialLocation({familyId:consumer.familyId},consumer.versionId))}>{consumer.versionId}</a> 使用 {consumer.inputVersionId} · <code>{consumer.sha256}</code></p>)}{selected.materialRequirementIds.map(id=><button type="button" key={id} onClick={()=>openBasic(id)}>查看关联基础素材 →</button>)}</section>
       </>}
     </MaterialReviewDrawer>
   </section>;
