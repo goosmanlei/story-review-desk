@@ -47,4 +47,10 @@ export async function main(argv=process.argv.slice(2)){
  if(values.development)throw Error('UNVERSIONED packages cannot be sent to a VPS');
  return remoteVps(control,source);
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{console.error(JSON.stringify({status:'BLOCKED',error:String(error.message||error)}));process.exitCode=1;});
+export function vpsErrorResponse(error){
+ const result={status:'BLOCKED',error:String(error.message||error)};
+ // The PostgreSQL transport deliberately strips stderr, SQL and credentials.
+ if(error.code==='POSTGRES_DOCKER_FAILED'&&error.diagnostics)result.postgres=error.diagnostics;
+ return result;
+}
+if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href)main().then(result=>console.log(JSON.stringify(result,null,2))).catch(error=>{console.error(JSON.stringify(vpsErrorResponse(error)));process.exitCode=1;});

@@ -8,6 +8,12 @@ import {sha256} from '../host/instance-runtime/index.mjs';
 import {dockerHostPath} from '../host/instance-runtime/docker-path.mjs';
 const softwareRoot=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 export const POSTGRES_IMAGE='postgres:18.6';
+export function validateMaintenanceTimeout(args,{readOnly=false,timeout=180000}={}){
+ const backup=readOnly&&args[0]==='scripts/instance-pg-transfer.mjs'&&args[1]==='backup';
+ const maximum=backup?3600000:900000;
+ if(!Number.isInteger(timeout)||timeout<1000||timeout>maximum)throw new Error(`Maintenance timeout must be 1000..${maximum} ms`);
+ return timeout;
+}
 export function postgresNames(instanceId,volume){if(volume&&!/^review_pg_[a-f0-9]{20}$/.test(volume))throw new Error('Invalid PostgreSQL volume identity');const key=volume?volume.slice('review_pg_'.length):sha256(instanceId).slice(0,20);return {container:`review-pg-${key}`,network:`review-net-${key}`,volume:`review_pg_${key}`};}
 export function postgresDockerFailure(stderr,{exitCode=null,signal=null,timedOut=false,outputLimitExceeded=false}={}){
  // Public diagnostics are an allowlisted classification, never raw stderr:
@@ -46,7 +52,7 @@ export async function ensurePostgres(root,{create=false,start=true}={}){
 }
 export async function runPostgresMaintenance(root,args,{input,readOnly=false,mounts=[],storageOwner,nodeHeapMiB,timeout=180000}={}){
  if(nodeHeapMiB!==undefined&&(!Number.isInteger(nodeHeapMiB)||nodeHeapMiB<256||nodeHeapMiB>8192))throw new Error('Maintenance heap must be 256..8192 MiB');
- if(!Number.isInteger(timeout)||timeout<1000||timeout>900000)throw new Error('Maintenance timeout must be 1000..900000 ms');
+ validateMaintenanceTimeout(args,{readOnly,timeout});
  const p=await ensurePostgres(root,{start:false});
  // The transport CLI can call this while its own top-level module is evaluating.
  // Reusing its already validated owner avoids dynamically importing that module

@@ -21,6 +21,8 @@
 
 `pack` 默认要求干净精确 HEAD，排除凭据、缓存、构建历史、私有运行态和活跃锁。`--development` 仅用于明确标为 UNVERSIONED 的本机演练，禁止发送 VPS。完整包可能包含私有业务历史，须按业务敏感数据保管；只读权限与哈希用于意外修改检测，不是对宿主管理员的防篡改保证。
 
+VPS 全量备份为只读一致性扫描，维护进程最长一小时；普通维护和导入仍使用原有更短上限。到期或退出会失败关闭，不能将不完整目录继续作为发布包。CLI 只显示 PostgreSQL 受控错误分类和退出原因，不输出原始 SQL、stderr 或凭据；再次尝试须使用新输出目录。
+
 ## 目标准备
 
 非敏感 JSON 字段以 `vps-target.mjs` 为严格 schema。配置包括 SSH 别名、HTTPS URL、basePath（根路径使用空字符串）、独立深层 hostRoot、已有 Nginx 容器与单文件挂载源、专用网络、显式 Node／Docker／Bash／Python／uv／Codex 路径、凭据路径引用和容量保留值。推荐 4 vCPU、8 GiB 内存、120 GiB SSD；实际剩余空间必须重新读取。公网 IP 可作为 HTTPS 主机名，但须有可信 IP 证书并自动续期；HTTP 仅承载 ACME challenge 和到固定 HTTPS 主机的跳转，不承载应用或认证。

@@ -2,6 +2,19 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { runMaintenanceProcess } from '../scripts/instance-maintenance.mjs';
+import {validateMaintenanceTimeout,postgresDockerFailure} from '../scripts/instance-postgres.mjs';
+import {vpsErrorResponse} from '../scripts/instance-vps.mjs';
+
+test('only an explicit read-only full backup may use the bounded one-hour maintenance deadline',()=>{
+ const args=['scripts/instance-pg-transfer.mjs','backup'];
+ assert.equal(validateMaintenanceTimeout(args,{readOnly:true,timeout:3600000}),3600000);
+ for(const options of [{readOnly:false,timeout:3600000},{readOnly:true,timeout:3600001},{readOnly:true,timeout:NaN},{readOnly:true,timeout:999}])assert.throws(()=>validateMaintenanceTimeout(args,options),/timeout/);
+ assert.throws(()=>validateMaintenanceTimeout(['scripts/instance-pg-transfer.mjs','import'],{readOnly:true,timeout:3600000}),/timeout/);
+});
+test('VPS failure reports bounded PostgreSQL classification without raw SQL or credentials',()=>{
+ const result=vpsErrorResponse(postgresDockerFailure('password=private SQL payload',{timedOut:true,exitCode:143}));
+ assert.equal(result.postgres.diagnostic,'TIMEOUT');assert.equal(result.postgres.timedOut,true);assert.doesNotMatch(JSON.stringify(result),/password|private|payload/);
+});
 
 const sha = (value) => createHash('sha256').update(value).digest('hex');
 const fragmentedWriter = `

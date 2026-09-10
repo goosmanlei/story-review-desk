@@ -103,12 +103,12 @@ export async function restoreInstance(backupPath, output) {
 }
 
 
-export async function backupPostgresInstance(instancePath,output){
+export async function backupPostgresInstance(instancePath,output,{maintenanceTimeoutMs=600000}={}){
  const instance=resolveInstance(instancePath);
  if(instance.backend!=='postgres')throw new Error('PostgreSQL instance required');
  if(process.env.REVIEW_DATABASE_BACKEND!=='postgres'){
   const absolute=path.resolve(output),parent=await realpath(path.dirname(absolute));if(parent!==path.dirname(absolute))throw new Error('Backup parent must be canonical');
-  const result=await runPostgresMaintenance(instance.root,['scripts/instance-pg-transfer.mjs','backup','--instance','/instance','--output','/export/'+path.basename(absolute)],{readOnly:true,nodeHeapMiB:4096,timeout:600000,mounts:[{source:parent,target:'/export',readOnly:false}]});
+  const result=await runPostgresMaintenance(instance.root,['scripts/instance-pg-transfer.mjs','backup','--instance','/instance','--output','/export/'+path.basename(absolute)],{readOnly:true,nodeHeapMiB:4096,timeout:maintenanceTimeoutMs,mounts:[{source:parent,target:'/export',readOnly:false}]});
   return {...JSON.parse(result),output:absolute};
  }
  const repo=await openInstanceRepository(instance);
