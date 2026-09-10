@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canonicalJson} from '../host/instance-runtime/bytes.mjs';
-import {assetContextRuntimeHash,validateAssetContextLedger,assetContextPublicationFacts,assertAssetContextPublicationFacts} from '../host/instance-runtime/asset-context-revalidation-model.mjs';
+import {assetContextCurrentBasis,assetContextRuntimeHash,validateAssetContextLedger,assetContextPublicationFacts,assertAssetContextPublicationFacts} from '../host/instance-runtime/asset-context-revalidation-model.mjs';
 import {preserveAssetContextRevalidations,assetContextReviewedBindings} from '../host/instance-runtime/asset-context-revalidation-preservation.mjs';
 import {encodeAssetContextDocuments,decodeAssetContextDocuments,validateHostedAssetContexts} from '../host/instance-asset-context-proof.mjs';
 import {assetContextPureFixture as fixture} from './fixtures/asset-context-revalidation-pure.mjs';
@@ -38,3 +38,11 @@ test('hosted retains original envelopes but cannot restore eligibility without f
  assert.equal(validateHostedAssetContexts(f.snapshot,bundle).length,1);model.assetContextRevalidationEvidence[0].mediaCurrent=true;assert.throws(()=>validateHostedAssetContexts(f.snapshot,bundle));
 });
 test('archive fact extraction does not retain full historical snapshots',()=>{const f=fixture(),facts=assetContextPublicationFacts(f.releaseContext());assert.equal(facts.versions.length,1);assert.equal('snapshot'in facts,false);assert.equal(assertAssetContextPublicationFacts(f.body,f.release,facts,f.documents),true);facts.versions[0].versionHash='f'.repeat(64);assert.throws(()=>assertAssetContextPublicationFacts(f.body,f.release,facts,f.documents));});
+test('legacy VISUAL image kind remains eligible for exact current-domain revalidation',()=>{
+ const f=fixture(),model=f.baseSnapshot.productionModel,family=model.assetFamilies.find(item=>item.id===f.target.familyId);family.kind='VISUAL';
+ assert.equal(assetContextCurrentBasis(model,f.target).requirementId,model.materialRequirements[0].id);
+ assert.equal(assetContextPublicationFacts({snapshot:f.baseSnapshot,recipes:f.recipes}).versions.length,1);
+ model.materialRequirements[0].mediaType='VIDEO';assert.throws(()=>assetContextCurrentBasis(model,f.target));
+ model.materialRequirements[0].mediaType='IMAGE';
+ family.kind='AUDIO';assert.throws(()=>assetContextCurrentBasis(model,f.target));
+});

@@ -8,6 +8,7 @@ export const contextHash=value=>sha256(canonicalJson(value));
 const list=value=>Array.isArray(value)?value:[];
 const same=(a,b)=>canonicalJson(a)===canonicalJson(b);
 const hash=value=>/^[a-f0-9]{64}$/.test(value||'');
+const imageKind=(family,requirement)=>family.kind==='IMAGE'||family.kind==='VISUAL'&&requirement?.mediaType==='IMAGE';
 export function contextCheck(condition,message){if(!condition)throw Object.assign(Error(message),{code:'DOMAIN_CONFLICT'});}
 function object(value,keys,label){contextCheck(value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===[...keys].sort().join(','),label+'字段不完整或未知');return value;}
 function text(value,label,max=4000){contextCheck(typeof value==='string'&&value.trim()&&value.length<=max,label+'无效');}
@@ -15,8 +16,9 @@ export const assetContextId=({familyId,versionId,sha256})=>'ACTX-'+contextHash({
 export function assetContextTarget(input){for(const k of ['familyId','versionId'])contextCheck(typeof input?.[k]==='string'&&/^[A-Za-z0-9][A-Za-z0-9@._:-]{0,299}$/.test(input[k]),'复核对象身份无效');contextCheck(hash(input.sha256),'复核对象SHA无效');return Object.fromEntries(['familyId','versionId','sha256'].map(k=>[k,input[k]]));}
 export function assetContextCurrentBasis(model,target){
  const families=list(model.assetFamilies).filter(f=>f.id===target.familyId),versions=list(model.assetVersions).filter(v=>v.id===target.versionId),family=families[0],version=versions[0];
- contextCheck(families.length===1&&versions.length===1&&family.kind==='IMAGE'&&version.familyId===family.id&&version.sha256===target.sha256&&family.currentVersionId===version.id,'复核必须是同一当前采用IMAGE版本/SHA');
+ contextCheck(families.length===1&&versions.length===1&&version.familyId===family.id&&version.sha256===target.sha256&&family.currentVersionId===version.id,'复核必须是同一当前采用IMAGE版本/SHA');
  const requirements=list(model.materialRequirements).filter(r=>list(r.assetFamilyRefs).includes(family.id));contextCheck(requirements.length===1,'原制作需求归属必须唯一可核');const requirement=requirements[0];
+ contextCheck(imageKind(family,requirement),'复核必须是同一当前采用IMAGE版本/SHA');
  contextCheck(!materialRequirementSelectionReasons(model,requirement.id,{use:'CURRENT_INPUT'}).length,'原需求已被替代、撤销或当前归属不可核');
  const invalidations=list(model.domainInvalidations).filter(r=>r.familyId===family.id&&list(r.versionIds).includes(version.id));
  contextCheck(invalidations.length>0&&hash(family.domainContext?.hash)&&invalidations.at(-1).currentHash===family.domainContext.hash,'必须有本版本真实当前DOMAIN变化记录');
@@ -62,7 +64,7 @@ export function assetContextRuntimeHash(model,target){
 export function assetContextPublicationFacts({snapshot,recipes}){
  const model=snapshot.productionModel||{},facts=[];
  for(const f of list(model.assetFamilies)){
-  if(f.kind!=='IMAGE'||!f.currentVersionId)continue;
+  if(!['IMAGE','VISUAL'].includes(f.kind)||!f.currentVersionId)continue;
   const matches=list(model.assetVersions).filter(v=>v.id===f.currentVersionId),v=matches[0];if(matches.length!==1||!v||v.familyId!==f.id||!hash(v.sha256))continue;
   if(!(f.reviewDecision==='RELEASED'&&v.reviewDecision==='RELEASED'&&f.lifecycleState==='RELEASED'&&v.lifecycleState==='RELEASED'&&f.canFlowDownstream===true&&v.canFlowDownstream===true&&v.outputState==='PRESENT'&&v.legacyState?.approvalStatus==='APPROVED'&&v.legacyState?.qaStatus==='PASS'&&v.legacyState?.materializationState==='GENERATED'))continue;
   const defs=list(recipes.executionDefinitions).filter(d=>d.id===v.executionDefinitionRef),def=defs[0];if(defs.length!==1||f.executionDefinitionRef!==def.id||def.output?.assetFamilyRef!==f.id||def.output?.assetVersionRef!==v.id||def.output?.path!==v.path||def.materialProductionPlanId||def.shotProductionPlanId)continue;
