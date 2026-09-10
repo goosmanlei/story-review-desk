@@ -11,6 +11,7 @@ import {openRepeatableArchive,ExactStreamInput} from '../host/instance-runtime/a
 import {WireInput} from '../host/instance-runtime/vps-wire.mjs';
 import {hashArchiveRows,ARCHIVE_FILE_FORMAT} from '../host/instance-runtime/archive-file.mjs';
 import {main} from '../scripts/instance-vps.mjs';
+import {VpsDriver} from '../host/instance-runtime/vps-driver.mjs';
 const target=validateVpsTarget({schemaVersion:'1.0',kind:'REVIEW_VPS_TARGET',targetId:'fixture',sshHost:'fixture-only',publicUrl:'https://review.example.invalid/story/',basePath:'/story',hostRoot:'/home/work/review/fixture',nginx:{container:'fixture-nginx',configPath:'/home/work/nginx/default.conf',network:'fixture-ingress',serverName:'review.example.invalid',authBasicRealm:'private',authBasicUserFile:'/etc/nginx/users'},runtime:{architecture:'linux/amd64',dockerBinary:'/usr/bin/docker',bashBinary:'/bin/bash',nodeBinary:'/usr/local/bin/node',codexBinary:'/usr/local/bin/codex',pythonBinary:'/usr/bin/python3',uvBinary:'/usr/local/bin/uv'},credentials:{codexHome:'/home/work/private/codex',providerKeyFile:'/home/work/private/provider-key'},retention:{cleanPackages:2,maxTemporaryBytes:1024,reserveBytes:8192},capacity:{recommendedVcpu:4,recommendedMemoryBytes:8*1024**3,recommendedDiskBytes:120*1024**3}});
 function source(letter){return {manifest:{releaseId:'release_'+letter,manifestSha256:letter.repeat(64),softwareCommit:'a'.repeat(40),images:[{loadedBytes:100}],totalFileBytes:200,runtimeBudgetBytes:400},baseline:letter};}
 function fixtureDriver(state){
@@ -24,6 +25,12 @@ function fixtureDriver(state){
  };
 }
 const args=(state,driver,s,expected,action='deploy')=>({target,state,driver,source:s,expectedCurrent:expected,operationId:action+'_'+s.manifest.releaseId+'_'+expected,action});
+test('verified VPS storage owner can be consumed by the Codex instance loader',async t=>{
+ await mkdir('tests/.test-tmp',{recursive:true});const root=await mkdtemp(path.resolve('tests/.test-tmp/vps-owner-'));t.after(()=>rm(root,{recursive:true,force:true}));await mkdir(path.join(root,'runtime'));await writeFile(path.join(root,'instance.json'),JSON.stringify({database:{kind:'postgres'}}));
+ const runtime={root,runtimeEpoch:'epoch',instanceId:'fixture',appImage:'app',softwareCommit:'a'.repeat(40)},manifest={business:{sourceReleaseId:'release'},images:[{role:'app',reference:'app',id:'digest'}]},web={Id:'container',Image:'digest',Config:{Image:'app'},HostConfig:{PortBindings:{}},NetworkSettings:{Networks:{[target.nginx.network]:{}}}};
+ const driver=new VpsDriver(target,emptyVpsState(target));driver.runtimeCheck=async()=>({metadata:{runtimeEpoch:'epoch',instanceId:'fixture',releaseId:'release'},integrity:{ok:true}});driver.owned=async()=>web;driver.object=async()=>({Id:'digest'});driver.docker=async()=>JSON.stringify({runtimeEpoch:'epoch',basePath:target.basePath});
+ await driver.verifyRuntime(runtime,manifest);const owner=JSON.parse(await readFile(path.join(root,'runtime/storage-owner.json')));assert.equal(owner.composeProject,'review-vps-'+target.targetId);assert.match(owner.composeProject,/^review-[a-z0-9_-]+$/);
+});
 test('A -> B -> C discards writable edits, retains only B/C; rollback restores clean B under a new epoch',async()=>{
  const state=emptyVpsState(target),driver=fixtureDriver(state),a=source('A'),b=source('B'),c=source('C');
  await executeVps(args(state,driver,a,'NONE'));state.current.runtime.bytes='remote edit A';

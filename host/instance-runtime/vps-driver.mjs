@@ -202,7 +202,7 @@ export class VpsDriver{
   // separately verified through authenticated isolated Nginx during rehearsal.
   await this.docker(['exec',runtime.web,'node','-e',`fetch('http://127.0.0.1:3001${this.target.basePath}/api/instance/profile').then(r=>{if(!r.ok)process.exit(1)})`]);
   const bootstrap=await readJson(path.join(runtime.root,'instance.json'));
-  await writeJsonAtomic(path.join(runtime.root,'runtime/storage-owner.json'),{schemaVersion:'2.0',backend:'postgres',database:bootstrap.database,instanceId:runtime.instanceId,mode:'DOCKER',containerId:container.Id,containerRoot:'/instance',imageId:container.Image,softwareCommit:runtime.softwareCommit,hostRoot:runtime.root,composeProject:'vps-'+this.target.targetId});
+  await writeJsonAtomic(path.join(runtime.root,'runtime/storage-owner.json'),{schemaVersion:'2.0',backend:'postgres',database:bootstrap.database,instanceId:runtime.instanceId,mode:'DOCKER',containerId:container.Id,containerRoot:'/instance',imageId:container.Image,softwareCommit:runtime.softwareCommit,hostRoot:runtime.root,composeProject:'review-vps-'+this.target.targetId});
  }
  async startWorkers(runtime){
   for(const [role,name,script] of [['shot',runtime.shot,'scripts/instance-shot-production-worker.mjs'],['comment',runtime.comment,'workers/comment-polish-server.mjs'],['material',runtime.material,'workers/material-review-server.mjs']]){
