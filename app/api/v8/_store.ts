@@ -560,11 +560,12 @@ async function publishedView(repository: NonNullable<Awaited<ReturnType<typeof i
       const view = await repository.readView();
       const documents = await repository.listPublishedDocumentMetadata();
       publishedPromptAliases = new Set(documents.filter(row=>row.metadata.sourceRole === 'DIRECT_PROMPT').flatMap(row=>row.aliases));
-      return view;
+      // Events change independently of a release and belong to the pinned input cache.
+      return {...view,eventsByKind:{}};
     })();
     publishedViews.set(key, pending);
     pending.catch(()=>publishedViews.delete(key));
-    if(publishedViews.size>3) publishedViews.delete(publishedViews.keys().next().value!);
+    if(publishedViews.size>1) publishedViews.delete(publishedViews.keys().next().value!);
   }
   return pending;
 }
@@ -577,40 +578,64 @@ function hasProductionAux(data:ReviewData){
   const production=data.productionModel as unknown as {shotProductionPlans?:unknown[];spatialShotViews?:unknown[]};
   return Boolean((production.shotProductionPlans||[]).length||(production.spatialShotViews||[]).length||data.sourceHashes?.productionMapSha256);
 }
-async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData){
+function needsProductionInputFingerprint(data:ReviewData){
+  return hasProductionAux(data)||['materialUsageLedger','materialUsageEvidence','assetContextRevalidationLedger','assetContextRevalidationEvidence'].some(key=>Object.hasOwn(data.productionModel,key));
+}
+async function currentProductionAux(repository:InstanceReadUnit,data:ReviewData,view:Awaited<ReturnType<InstanceReadUnit['readView']>>,events:EventRecord[]){
   if(Object.hasOwn(data.productionModel,'materialUsageLedger')||Object.hasOwn(data.productionModel,'materialUsageEvidence')||Object.hasOwn(data.productionModel,'assetContextRevalidationLedger')||Object.hasOwn(data.productionModel,'assetContextRevalidationEvidence')){
     const {loadMaterialUsageEvidence}=await import('../../../host/instance-runtime/material-usage-preservation.mjs');
-    data={...data,productionModel:await loadMaterialUsageEvidence(repository,data.productionModel)};
+    data={...data,productionModel:await loadMaterialUsageEvidence(repository,data.productionModel,{view,events})};
   }
   const production=data.productionModel as unknown as {shotProductionPlans?:unknown[]};
   if(!hasProductionAux(data))return data;
   const {applyProductionSpatialProjection}=await import('../../../host/instance-runtime/spatial-production.mjs');
-  const view=await repository.readView();
   const spatialModel=await applyProductionSpatialProjection(repository,{...data.productionModel,spatialEvidence:(data as unknown as {creativeLineage?:{spatialEvidence?:unknown}}).creativeLineage?.spatialEvidence||null,sourceHashes:data.sourceHashes||{}},{view});
   if(!(production.shotProductionPlans||[]).length)return {...data,productionModel:spatialModel} as ReviewData;
   const {applyAnimaticProjection,reconcileAnimaticLocks}=await import('../../../host/instance-runtime/animatic-service.mjs');
   const {applyShotProductionLocksProjection}=await import('../../../host/instance-runtime/shot-production-locks.mjs');
   const {applyShotProductionManifestProjection}=await import('../../../host/instance-runtime/shot-production-manifest.mjs');
   const {episodeSourceCompiler}=await import('../../../host/instance-runtime/episode-source-sync.mjs');
-  const model=await applyShotProductionManifestProjection(repository,await applyAnimaticProjection(repository,spatialModel));
+  const model=await applyShotProductionManifestProjection(repository,await applyAnimaticProjection(repository,spatialModel,{view}));
   const state=episodeSourceCompiler({projectOperationalState,projectEpisodeNarrativeReleases,projectedReviewIndexes,projectedStructureReviewIndexes,projectedScopeLocks}).stateFor({...view,snapshot:{...data,productionModel:model}});
   Object.assign(model,{operationalScopeState:{episodeNarrativeReleasesByUid:state.episodeNarrativeReleasesByUid,scopeLocksById:state.scopeLocksById},animaticLocks:reconcileAnimaticLocks(model,state)});
   return {...data,productionModel:await applyShotProductionLocksProjection(repository,model,{state,view})} as ReviewData;
 }
 
-export async function reviewData() {
+// A page often asks for both reviewData and operations. Share one exact READ
+// input closure, including live events/AUX, instead of cloning the entire release
+// and parsing its history for every layer. Writers always build private inputs.
+const productionInputsCache = new WeakMap<object, Map<string, Promise<{data:ReviewData;events:EventRecord[]}>>>();
+async function productionInputs(repository:NonNullable<Awaited<ReturnType<typeof instanceRepository>>>,base:Awaited<ReturnType<InstanceReadUnit['readView']>>,productionAuxRevision?:string|null){
+  const meta=await repository.getMetadata();
+  productionAuxRevision ??= needsProductionInputFingerprint(base.snapshot as ReviewData)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
+  const key=`${meta.instanceId}:${meta.runtimeEpoch}:${meta.releaseId}:${meta.eventSequence}:${productionAuxRevision||''}`;
+  const build=async()=>{
+    if (!base.snapshot?.snapshotId || !base.snapshot.productionModel || !base.recipes || base.snapshot.snapshotId !== base.recipes.snapshotId) throw new HttpError(503, 'Instance has no coherent active business release');
+    const parsed=repository.transactionMode!=='WRITE'&&dataCache&&dataCacheFingerprint===base.dataFingerprint?dataCache:normalizeReviewSnapshot(base.snapshot as ReviewData);
+    if (!parsed.instance || parsed.instance.instanceId !== base.instanceId) throw new HttpError(503, 'Instance release profile is missing or mismatched');
+    bindInstanceSourceRoles(instanceProfile(parsed));
+    if(repository.transactionMode!=='WRITE'){dataCache=parsed;dataCacheFingerprint=base.dataFingerprint;}
+    const events=await repository.listEvents() as EventRecord[];
+    const eventsByKind:Record<string,EventRecord[]>={};
+    for(const event of events)(eventsByKind[String(event.eventKind)]||=[]).push(event);
+    const view={...base,eventsByKind};
+    return {data:await currentProductionAux(repository,parsed,view,events),events};
+  };
+  if(repository.transactionMode==='WRITE')return build();
+  let cache=productionInputsCache.get(repository);if(!cache){cache=new Map();productionInputsCache.set(repository,cache);}
+  let pending=cache.get(key);
+  if(!pending){
+    pending=build();cache.clear();cache.set(key,pending);
+    pending.catch(()=>{if(cache.get(key)===pending)cache.delete(key);});
+  }
+  return pending;
+}
+
+export async function reviewData():Promise<ReviewData> {
   if (!hostedReadOnlyMode() && instanceRepositoryMode()) {
     const repository = (await instanceRepository())!;
-    const view = await publishedView(repository);
-    if (dataCache && dataCacheFingerprint === view.dataFingerprint) {
-      return currentProductionAux(repository,dataCache);
-    }
-    if (!view.snapshot?.snapshotId || !view.snapshot.productionModel || !view.recipes || view.snapshot.snapshotId !== view.recipes.snapshotId) throw new HttpError(503, 'Instance has no coherent active business release');
-    const parsed = normalizeReviewSnapshot(view.snapshot as ReviewData);
-    if (!parsed.instance || parsed.instance.instanceId !== view.instanceId) throw new HttpError(503, 'Instance release profile is missing or mismatched');
-    bindInstanceSourceRoles(instanceProfile(parsed));
-    dataCache = parsed; dataCacheFingerprint = view.dataFingerprint;
-    return currentProductionAux(repository,parsed);
+    if(!repository.inTransaction)return repository.readTransaction(()=>reviewData());
+    return (await productionInputs(repository,await publishedView(repository))).data;
   }
   if (hostedReadOnlyMode()) {
     if (dataCache && dataCacheFingerprint.startsWith('hosted:')) return dataCache;
@@ -5047,28 +5072,24 @@ export async function currentExecutionRuntime():Promise<ExecutionRuntime|null>{
 async function buildOperationalSnapshot(productionAuxRevision?:string|null) {
   const repository = !hostedReadOnlyMode() && instanceRepositoryMode() ? (await instanceRepository())! : null;
   const base = repository ? await publishedView(repository) : null;
-  let data = base ? (dataCache&&dataCacheFingerprint===base.dataFingerprint?dataCache:normalizeReviewSnapshot(base.snapshot as ReviewData)) : await reviewData();
-  if(base){bindInstanceSourceRoles(instanceProfile(data));dataCache=data;dataCacheFingerprint=base.dataFingerprint;}
-  if(repository){
-    productionAuxRevision ??= hasProductionAux(data)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
-    // The caller owns the same repository transaction for the watermark, AUX, media and events.
-    // Keep the immutable release cache raw; only this returned projection gains current AUX.
-    data=await currentProductionAux(repository,data);
-  }
+  const inputs=repository&&base?await productionInputs(repository,base,productionAuxRevision):null;
+  const data=inputs?inputs.data:await reviewData();
+  if(repository&&base)productionAuxRevision ??= needsProductionInputFingerprint(base.snapshot as ReviewData)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
   const executionRuntime=base?{instanceId:base.instanceId,runtimeEpoch:base.runtimeEpoch}:null;
   const verifiedDataFingerprint = base?.dataFingerprint || dataCacheFingerprint;
   const gateCatalog = base ? base.recipes as RecipeCatalog : await recipeCatalog();
   const verifiedRecipeFingerprint = base?.recipeFingerprint || recipeCacheFingerprint;
+  const readEvents=(kind:EventKind)=>inputs?Promise.resolve(inputs.events.filter(event=>event.eventKind===kind)):listAllEvents(kind);
   const [reviews, episodePlanSubmissions, candidates, runs, creativeRevisions, executionRequests, sourceOperations, verifications, scriptCommentEvents] = await Promise.all([
-    listAllEvents('review'),
-    listAllEvents('episode-plan-submission'),
-    listAllEvents('asset-version'),
-    listAllEvents('run'),
-    listAllEvents('creative-revision'),
-    listAllEvents('execution-request'),
-    listAllEvents('source-operation'),
-    listAllEvents('verification'),
-    listAllEvents('script-comment'),
+    readEvents('review'),
+    readEvents('episode-plan-submission'),
+    readEvents('asset-version'),
+    readEvents('run'),
+    readEvents('creative-revision'),
+    readEvents('execution-request'),
+    readEvents('source-operation'),
+    readEvents('verification'),
+    readEvents('script-comment'),
   ]);
   const orderedForHash = [
     ...reviews,
@@ -5367,10 +5388,10 @@ export async function operationalSnapshot(): Promise<Awaited<ReturnType<typeof b
     return repository.readTransaction(async () => {
       const meta = await repository.getMetadata();
       const base=await publishedView(repository);
-      const productionAuxRevision=hasProductionAux(base.snapshot as ReviewData)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
+      const productionAuxRevision=needsProductionInputFingerprint(base.snapshot as ReviewData)?await repository.getProjectionFingerprint(OPERATIONAL_PRODUCTION_AUX_NAMESPACES):null;
       const key = `${meta.instanceId}:${meta.runtimeEpoch}:${meta.releaseId}:${meta.eventSequence}:${productionAuxRevision||''}`;
       let pending = operationsCache.get(key);
-      if(!pending){pending=buildOperationalSnapshot(productionAuxRevision);operationsCache.set(key,pending);pending.catch(()=>operationsCache.delete(key));if(operationsCache.size>3)operationsCache.delete(operationsCache.keys().next().value!);}
+      if(!pending){pending=buildOperationalSnapshot(productionAuxRevision);operationsCache.set(key,pending);pending.catch(()=>operationsCache.delete(key));if(operationsCache.size>1)operationsCache.delete(operationsCache.keys().next().value!);}
       return pending;
     });
   }

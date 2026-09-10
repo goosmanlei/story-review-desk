@@ -10,10 +10,10 @@ export async function materialUsageMediaCurrent(tx,source){
  if(!resolved||resolved.mediaId!==source.familyId||resolved.versionId!==source.versionId||resolved.sha256!==source.sha256||resolved.relativePath!==media.relativePath||resolved.byteSize!==media.byteSize)return false;
  return !source.media||usageHash({mediaId:media.mediaId,versionId:media.versionId,sha256:media.sha256,relativePath:media.relativePath,byteSize:media.byteSize})===usageHash(source.media);
 }
-async function loadMaterialUsageOnly(tx,model,{view}={}){
+async function loadMaterialUsageOnly(tx,model,{view,events}={}){
  view ||= await tx.readView();
  if(Object.hasOwn(model,'materialUsageLedger')&&!Array.isArray(model.materialUsageLedger))fail('用途ledger必须为数组');
- const events=await tx.listEvents(),refs=list(model.materialUsageLedger);
+ events ||= await tx.listEvents();const refs=list(model.materialUsageLedger);
  if(!refs.length&&!events.some(e=>e.eventKind===MATERIAL_USAGE_EVENT||e.subjectType==='MATERIAL_USAGE'||Object.hasOwn(e,'usageRevisionId'))){
   const published=await tx.listPublishedDocumentMetadata();
   if(!published.some(d=>d.metadata?.sourceRole===MATERIAL_USAGE_SOURCE||(d.aliases||[]).some(a=>a.startsWith('story/material-usages/')))){if(Object.hasOwn(model,'materialUsageEvidence')){const clean={...model};delete clean.materialUsageEvidence;return clean;}return model;}
@@ -40,6 +40,8 @@ export function preserveMaterialUsageProjection({snapshot,recipes,baseSnapshot,d
 }
 
 export async function loadMaterialUsageEvidence(tx,model,options={}){
+ // One caller-owned view/event set pins both ledgers to the same transaction.
+ options={...options,view:options.view||await tx.readView(),events:options.events||await tx.listEvents()};
  const result=await loadMaterialUsageOnly(tx,model,options);
  const {loadAssetContextRevalidationEvidence}=await import('./asset-context-revalidation-preservation.mjs');
  return loadAssetContextRevalidationEvidence(tx,result,options);
