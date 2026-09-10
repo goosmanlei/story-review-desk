@@ -767,8 +767,8 @@ export type ProductionModel = {
   screenplayReleaseSnapshots?: Array<Record<string, unknown>>;
   scopeLocks?: Array<{ id: string; scopeType: string; scopeId: string; lockState: string; denominatorState: string; denominator?: number | null; discoveredCount?: number | null; sourceRef?: string }>;
   shotPlanSetRevisions?: Array<Record<string, unknown>>;
-  episodes: Array<{ id: string; episodeUid: string; displayId: string; canonicalScopeId?: string; sceneIds: string[]; segmentIds: string[]; shotIds: string[]; calibrationShotCount: number; sourceRef: string; scopeRole?: 'CURRENT' | 'PROPOSAL' | 'HISTORICAL' | 'UNKNOWN'; storyHandoff?: Record<string, unknown> }>;
-  scenes: Array<{ id: string; episodeId: string; episodeUid: string; title: string; segmentIds: string[]; shotIds: string[]; stageInstanceRefs: string[]; stageSummary: Record<string, { planned: number; generated: number }>; isCalibrationSubset: boolean; workflowEligible: boolean; lifecycleState?: string; issueRefs: string[]; sourceRef: string; scopeRole?: 'CURRENT' | 'PROPOSAL' | 'HISTORICAL' | 'UNKNOWN'; storyHandoff?: Record<string, unknown> }>;
+  episodes: Array<{ id: string; episodeUid: string; displayId: string; canonicalScopeId?: string; sceneIds: string[]; segmentIds: string[]; shotIds: string[]; calibrationShotCount: number; sourceRef: string; scopeRole?: 'CURRENT' | 'DISCOVERED' | 'PROPOSAL' | 'HISTORICAL' | 'UNKNOWN'; storyHandoff?: Record<string, unknown> }>;
+  scenes: Array<{ id: string; episodeId: string; episodeUid: string; title: string; segmentIds: string[]; shotIds: string[]; stageInstanceRefs: string[]; stageSummary: Record<string, { planned: number; generated: number }>; isCalibrationSubset: boolean; workflowEligible: boolean; lifecycleState?: string; issueRefs: string[]; sourceRef: string; scopeRole?: 'CURRENT' | 'DISCOVERED' | 'PROPOSAL' | 'HISTORICAL' | 'UNKNOWN'; storyHandoff?: Record<string, unknown> }>;
   segments: Array<{ id: string; episodeId: string; sceneId: string; order: number; title: string; shotIds: string[]; beatIds: string[]; locs: string[]; zones: string[]; cameras: string[]; stateFrom: string; stateTo: string; freezeFrom: string; freezeTo: string; sourceRef: string }>;
   beats: Array<{ id: string; episodeId: string; sceneId: string; segmentId: string; shotIds: string[]; action: string; stateBefore: string; stateAfter: string; sourceRef: string }>;
   shots: V7Shot[];
@@ -949,8 +949,11 @@ export function currentShotDesignNavigation(model: ProductionModel, intent: Prod
   const shot = matches[0];
   if (shot.scopeRole !== 'CURRENT' || shot.activeInCurrentProduction !== true || !shot.shotPlanSetRevisionId
     || shot.workPackageRefs.some(id => model.workPackages.some(work => work.id === id))) return null;
-  const scene = model.scenes.find(row => row.id === shot.sceneId && row.scopeRole === 'CURRENT');
-  const episode = model.episodes.find(row => row.episodeUid === shot.episodeUid && row.scopeRole === 'CURRENT');
+  // Paged production parents remain DISCOVERED until a production work product
+  // exists. The exact adopted shot supplies current design authority; browsing
+  // must not promote those parents into formal production scope.
+  const scene = model.scenes.find(row => row.id === shot.sceneId && (row.scopeRole === 'CURRENT' || row.scopeRole === 'DISCOVERED'));
+  const episode = model.episodes.find(row => row.episodeUid === shot.episodeUid && (row.scopeRole === 'CURRENT' || row.scopeRole === 'DISCOVERED'));
   if (!scene || !episode || scene.episodeUid !== episode.episodeUid || !episode.sceneIds.includes(scene.id)) return null;
   const gate = productionGates(model).find(row => row.id === (intent.gateId || 'SHOT_PLAN_INPUT_LOCK'));
   const phase = gate && productionPhases(model).find(row => row.id === gate.phaseId);
