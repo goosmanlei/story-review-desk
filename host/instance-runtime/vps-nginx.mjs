@@ -18,7 +18,7 @@ export function nginxManagedBlock(target,{upstream,maintenance=false}={}){
  // Authentication precedes the proxy content handler, unlike rewrite return.
  const proxy=maintenance?['proxy_connect_timeout 1s;','proxy_intercept_errors on;','error_page 502 504 =503 @'+name+';','proxy_pass http://127.0.0.1:9;']:['proxy_pass http://'+upstream+';'];
  let block='    # BEGIN '+id+'\n';
- for(const location of ['= '+base,'^~ '+base+'/'])block+='    location '+location+' {\n'+[...common,...proxy].map(line=>'        '+line+'\n').join('')+'    }\n';
+ for(const location of base?['= '+base,'^~ '+base+'/']:['^~ /'])block+='    location '+location+' {\n'+[...common,...proxy].map(line=>'        '+line+'\n').join('')+'    }\n';
  if(maintenance)block+='    location @'+name+' {\n        access_log off;\n        default_type text/html;\n        add_header Cache-Control "no-store" always;\n        return 503 \'<h1>Review desk maintenance</h1>\';\n    }\n';
  return block+'    # END '+id+'\n';
 }
@@ -56,7 +56,11 @@ export function patchNginxConfig(source,target,options={}){
  let output;
  if(first>=0){const lineStart=source.lastIndexOf('\n',first)+1,lineEnd=source.indexOf('\n',last)+1;output=source.slice(0,lineStart)+block+source.slice(lineEnd);}
  else{
-  if(source.includes('location '+target.basePath)||source.includes('location ^~ '+target.basePath)||source.includes('location = '+target.basePath))throw Error('Unmanaged target location already exists');
+  // Other servers (including the HTTP ACME/redirect server) do not own this
+  // HTTPS route. Match the exact path, not a sibling such as /story-assets/.
+  const route=(target.basePath||'/').replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+  const conflicting=new RegExp('\\blocation\\s+(?:=\\s+|\\^~\\s+)?'+route+(target.basePath?'/?':'')+'\\s*\\{');
+  if(conflicting.test(source.slice(bounds.start,bounds.end)))throw Error('Unmanaged target location already exists');
   output=source.slice(0,bounds.close)+block+source.slice(bounds.close);
  }
  return {contents:output,sha256:nginxSha(output),changed:output!==source,blockSha256:nginxSha(block)};

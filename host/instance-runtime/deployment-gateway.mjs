@@ -8,8 +8,8 @@ export function createDeploymentGateway({upstreamPort,proxyIp,secret,basePath,ru
  let activeRequests=0;
  const server=http.createServer((request,response)=>{
   const fail=(code,message,changed=false)=>{response.writeHead(code,{'Content-Type':'application/json','Cache-Control':'no-store',...(changed?{'X-Review-Runtime-Changed':'1'}:{})});response.end(JSON.stringify({error:message}));};
-  // Health is container-loopback only and contains no business data. Nginx
-  // preserves the prefix, so it cannot route this private path from the site.
+  // Health is container-loopback only and contains no business data. Even in
+  // root-path mode, the Nginx network socket cannot enter this private handler.
   if(request.url==='/__review_health'&&['127.0.0.1','::1'].includes(normalize(request.socket.remoteAddress))){response.writeHead(200,{'Content-Type':'application/json'});response.end(JSON.stringify({status:'GATEWAY_READY',runtimeEpoch,basePath,maintenance:maintenance(),activeRequests}));return;}
   if(normalize(request.socket.remoteAddress)!==normalize(proxyIp))return fail(403,'Untrusted ingress connection');
   if(!request.url?.startsWith(basePath+'/')&&request.url!==basePath)return fail(404,'Outside configured base path');

@@ -69,6 +69,17 @@ test('Nginx validation failure restores original bytes, mounted inode and reload
  await assert.rejects(applyNginxConfigInPlace(filename,target,{maintenance:true,expectedSha256:nginxSha(original),readBack:()=>readFile(filename),validate:async()=>{if(++calls===1)throw Error('nginx -t failed');},reload:async()=>{reloads++;}}),/nginx -t/);
  assert.equal(await readFile(filename,'utf8'),original);assert.equal((await stat(filename)).ino,inode);assert.equal(reloads,1);
 });
+test('HTTPS IP root target keeps ACME and redirect server separate and authenticates every app route',()=>{
+ const root=validateVpsTarget({...target,basePath:'',publicUrl:'https://203.0.113.10/',nginx:{...target.nginx,serverName:'203.0.113.10'}});
+ const config='server {\n listen 80;\n server_name 203.0.113.10;\n location ^~ /.well-known/acme-challenge/ { root /acme; }\n location / { return 308 https://203.0.113.10$request_uri; }\n}\nserver {\n listen 443 ssl;\n server_name 203.0.113.10;\n}\n';
+ const applied=patchNginxConfig(config,root,{upstream:'172.20.0.2:3000'});
+ const block=nginxManagedBlock(root,{upstream:'172.20.0.2:3000'});
+ assert.equal(applied.contents.replace(block,''),config);assert.match(block,/location \^~ \/ \{/);assert.doesNotMatch(block,/location =/);
+ assert.match(block,/auth_basic "private"/);assert.match(block,/proxy_set_header X-Forwarded-Host 203\.0\.113\.10/);
+ assert.equal(patchNginxConfig(applied.contents,root,{upstream:'172.20.0.2:3000'}).changed,false);
+ assert.throws(()=>patchNginxConfig(config.replace('listen 443 ssl;','listen 443 ssl;\n location / { return 200; }'),root,{maintenance:true}),/Unmanaged/);
+ assert.throws(()=>validateVpsTarget({...root,publicUrl:'http://203.0.113.10/'}),/HTTPS/);
+});
 async function archive(){const header={instanceId:'fixture',schemaVersion:1},tableNames=['a','empty','z'],tables={a:[{id:'中文',bytes:'frozen'}],empty:[],z:[{id:'last'}]};const hash=await hashArchiveRows(header,tableNames,async function*(t){yield*tables[t];});const lines=[{format:ARCHIVE_FILE_FORMAT,header:{...header,exportSha256:hash.exportSha256},tableNames},...tableNames.flatMap(table=>tables[table].map(row=>({table,row}))),{end:true,rows:2}];const bytes=Buffer.from(lines.map(JSON.stringify).join('\n')+'\n');return {bytes,binding:{bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')},hash};}
 test('repeatable stream checks every pass without a scratch file and survives arbitrary framing',async()=>{
  const f=await archive();let opens=0;const reader=await openRepeatableArchive(async function*(){opens++;for(let i=0;i<f.bytes.length;i+=7)yield f.bytes.subarray(i,i+7);},f.binding);

@@ -23,7 +23,7 @@
 
 ## 目标准备
 
-非敏感 JSON 字段以 `vps-target.mjs` 为严格 schema。配置包括 SSH 别名、HTTPS URL、非根 basePath、独立深层 hostRoot、已有 Nginx 容器与单文件挂载源、专用网络、显式 Node／Docker／Bash／Python／uv／Codex 路径、凭据路径引用和容量保留值。推荐 4 vCPU、8 GiB 内存、120 GiB SSD；实际剩余空间必须重新读取。
+非敏感 JSON 字段以 `vps-target.mjs` 为严格 schema。配置包括 SSH 别名、HTTPS URL、basePath（根路径使用空字符串）、独立深层 hostRoot、已有 Nginx 容器与单文件挂载源、专用网络、显式 Node／Docker／Bash／Python／uv／Codex 路径、凭据路径引用和容量保留值。推荐 4 vCPU、8 GiB 内存、120 GiB SSD；实际剩余空间必须重新读取。公网 IP 可作为 HTTPS 主机名，但须有可信 IP 证书并自动续期；HTTP 仅承载 ACME challenge 和到固定 HTTPS 主机的跳转，不承载应用或认证。
 
 发布控制器要求 Linux x86_64、Node 22.13+、Docker 29+（包括按平台 inspect/save/load）、Compose v2+、Python。镜像包含应用、PostgreSQL 18.6、Python 3.11 和确定性媒体工具。宿主 Codex 桥接器另外要求兼容 Node、uv、Python 以及既有 VPS 认证来源；缺项时业务可用，对应 AI 能力未就绪。Python 历史 AST 兼容验证使用 3.11，不改写历史哈希适应新解释器。
 

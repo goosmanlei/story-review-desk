@@ -14,7 +14,7 @@ const absolute=(value,name)=>{
 export function validateVpsTarget(input){
  const value=exact(input,['schemaVersion','kind','targetId','sshHost','publicUrl','basePath','hostRoot','nginx','runtime','credentials','retention','capacity'],'root');
  if(value.schemaVersion!=='1.0'||value.kind!=='REVIEW_VPS_TARGET')throw Error('Unsupported VPS target schema');
- const basePath=normalizeBasePath(value.basePath);if(!basePath)throw Error('VPS target requires a non-root basePath');
+ const basePath=normalizeBasePath(value.basePath);
  let publicUrl;try{publicUrl=new URL(value.publicUrl);}catch{throw Error('Invalid VPS target publicUrl');}
  if(publicUrl.protocol!=='https:'||publicUrl.username||publicUrl.password||publicUrl.search||publicUrl.hash||publicUrl.pathname.replace(/\/$/,'')!==basePath)throw Error('VPS publicUrl must be HTTPS and match basePath');
  const nginx=exact(value.nginx,['container','configPath','network','serverName','authBasicRealm','authBasicUserFile'],'nginx');

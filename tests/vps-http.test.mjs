@@ -37,3 +37,16 @@ test('gateway enforces socket, auth, origin, epoch and maintenance without buffe
  assert.equal((await fetch(origin+'/__review_health').then(r=>r.json())).activeRequests,1);complete();while(!(await reader.read()).done){};
  const health=await fetch(origin+'/__review_health').then(r=>r.json());assert.equal(health.activeRequests,0);
 });
+test('IP HTTPS root gateway serves root/API paths while retaining origin and epoch fencing',async t=>{
+ const before={...process.env};Object.assign(process.env,{REVIEW_DEPLOYMENT_MODE:'VPS',REVIEW_PUBLIC_URL:'https://203.0.113.10/',REVIEW_BASE_PATH:'',REVIEW_INTERNAL_GATEWAY_SECRET:'root-fixture',REVIEW_DEPLOYMENT_ID:'fixture_root_deployment'});
+ t.after(()=>{for(const key of Object.keys(process.env))if(!(key in before))delete process.env[key];Object.assign(process.env,before);});
+ const app=http.createServer((req,res)=>res.end(req.url));app.listen(0,'127.0.0.1');await once(app,'listening');
+ const gateway=createDeploymentGateway({upstreamPort:app.address().port,proxyIp:'127.0.0.1',secret:'root-fixture',basePath:'',runtimeEpoch:'root_epoch'});gateway.listen(0,'127.0.0.1');await once(gateway,'listening');
+ t.after(()=>{gateway.closeAllConnections();gateway.close();app.closeAllConnections();app.close();});
+ const url='http://127.0.0.1:'+gateway.address().port,headers={'x-review-proxy':'controlled-nginx-v1','x-review-authenticated-user':'fixture','x-forwarded-host':'203.0.113.10','x-forwarded-proto':'https','x-forwarded-port':'443','origin':'https://203.0.113.10','x-review-deployment-id':'fixture_root_deployment','x-review-runtime-epoch':'root_epoch'};
+ assert.equal(await fetch(url+'/',{headers}).then(r=>r.text()),'/');
+ assert.equal(await fetch(url+'/api/write',{headers,method:'POST'}).then(r=>r.text()),'/api/write');
+ assert.equal((await fetch(url+'/api/write',{headers:{...headers,origin:'http://203.0.113.10'},method:'POST'})).status,403);
+ assert.equal((await fetch(url+'/api/write',{headers:{...headers,'x-review-runtime-epoch':'stale'},method:'POST'})).status,409);
+ assert.equal((await fetch(url+'/api/profile',{headers:{...headers,'x-forwarded-proto':'http'}})).status,403);
+});
