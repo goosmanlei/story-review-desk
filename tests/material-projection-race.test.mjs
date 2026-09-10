@@ -1,5 +1,5 @@
 import test from 'node:test';
-import {readBasis} from '../host/instance-runtime/read-basis.mjs';
+import {readBasis,workspaceReadMetadata} from '../host/instance-runtime/read-basis.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
@@ -8,10 +8,10 @@ const source=readFileSync(new URL('../app/api/v8/ui/_material-query.ts',import.m
 const transformed=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ESNext,target:ts.ScriptTarget.ES2022}}).outputText.replace(/^import .*;$/gm,'');
 let locked=false,writes=[],currentOperations,marker=null,lockCount=0;
 const metadata={releaseId:'release-current',eventSequence:2};
-const repo={backend:'postgres',getMetadata:async()=>metadata,writeTransaction:async fn=>{locked=true;lockCount++;try{return await fn(repo);}finally{locked=false;}},readTransaction:async fn=>fn(repo)};
-const bridge={readBasis,currentMaterialRequirementRows,projectMaterialRequirementDispositions,instanceRepository:async()=>repo,operationalSnapshot:async()=>{assert.equal(locked,true);return currentOperations;},operationalProjectionMatches:async(_tx,input)=>marker?.eventSequence===input.eventSequence&&marker?.operationRevision===input.operationRevision,updateOperationalProjection:async(_tx,input)=>{writes.push(input);marker=input;},queryObjects:async()=>({items:[],total:0,lastId:null}),objectSummary:x=>x,parseUiPageRequest:()=>({filters:{},filterHash:'filters',limit:10}),stableObjectHash:()=> 'hash',jsonResponse:(x,init)=>new Response(JSON.stringify(x),init),HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}}};
+const repo={backend:'postgres',getMetadata:async()=>metadata,getWorkspaceFingerprint:async()=>String(metadata.workspaceRevision||'workspace-1'),writeTransaction:async fn=>{locked=true;lockCount++;try{return await fn(repo);}finally{locked=false;}},readTransaction:async fn=>fn(repo)};
+const bridge={readBasis,workspaceReadMetadata,currentMaterialRequirementRows,projectMaterialRequirementDispositions,instanceRepository:async()=>repo,operationalSnapshot:async()=>{assert.equal(locked,true);return currentOperations;},operationalProjectionMatches:async(_tx,input)=>marker?.eventSequence===input.eventSequence&&marker?.operationRevision===input.operationRevision,updateOperationalProjection:async(_tx,input)=>{writes.push(input);marker=input;},queryObjects:async()=>({items:[],total:0,lastId:null}),objectSummary:x=>x,parseUiPageRequest:()=>({filters:{},filterHash:'filters',limit:10}),stableObjectHash:()=> 'hash',jsonResponse:(x,init)=>new Response(JSON.stringify(x),init),HttpError:class extends Error{constructor(status,message){super(message);this.status=status;}}};
 globalThis.__materialProjectionRace=bridge;
-const declarations='const {readBasis,currentMaterialRequirementRows,projectMaterialRequirementDispositions,instanceRepository,operationalSnapshot,operationalProjectionMatches,updateOperationalProjection,queryObjects,objectSummary,parseUiPageRequest,stableObjectHash,jsonResponse,HttpError}=globalThis.__materialProjectionRace;';
+const declarations='const {readBasis,workspaceReadMetadata,currentMaterialRequirementRows,projectMaterialRequirementDispositions,instanceRepository,operationalSnapshot,operationalProjectionMatches,updateOperationalProjection,queryObjects,objectSummary,parseUiPageRequest,stableObjectHash,jsonResponse,HttpError}=globalThis.__materialProjectionRace;';
 const {postgresMaterialPage}=await import('data:text/javascript;base64,'+Buffer.from(declarations+transformed).toString('base64'));
 delete globalThis.__materialProjectionRace;
 const data={snapshotId:'same-snapshot',productionModel:{workItems:[]}};

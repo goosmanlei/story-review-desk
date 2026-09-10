@@ -1,4 +1,4 @@
-import {committedGet} from '../../instance/_committed-get';
+import {committedWorkspaceGet} from '../../instance/_committed-get';
 import {instanceRepository,hostedReadOnlyMode} from '../_store';
 import {errorResponse,HttpError,jsonResponse,operationalSnapshot,reviewData,deriveCurrentAdoptedMaterialSet,deriveCurrentMaterialRequirementSet} from '../_store';
 import type {EpisodePlanContent} from '../../../episode-plan-context';
@@ -45,6 +45,6 @@ async function readResponse(request:Request) {
 export async function GET(request:Request) {
  try {
   const repo=hostedReadOnlyMode()?null:await instanceRepository();if(!repo)return readResponse(request);
-  return await committedGet(repo,`episode-production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request),value=await response.json() as {error?:string};if(!response.ok)throw new HttpError(response.status,value.error||'本集制作入口不可用');return value;},request);
+  return await committedWorkspaceGet(repo,`episode-production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request),value=await response.json() as {error?:string};if(!response.ok)throw new HttpError(response.status,value.error||'本集制作入口不可用');return value;},request);
  }catch(error){return errorResponse(error,'本集制作入口不可用');}
 }

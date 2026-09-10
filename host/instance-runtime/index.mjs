@@ -180,6 +180,16 @@ class ReadUnit {
     const aliases=this.db.prepare('SELECT alias,media_id,version_id FROM media_aliases').all();
     return projectionFingerprintRows(selected,heads,mediaRows,aliases);
   }
+  // Workspaces do not consume the assistant bridge heartbeat. Include every
+  // other head (even tombstones), aliases and media metadata; never infer a
+  // business version by subtracting heartbeat counts from repository_revision.
+  getWorkspaceFingerprint() {
+    const heads=this.db.prepare("SELECT namespace,record_key,revision_id FROM record_heads WHERE NOT (namespace='aux:assistant-public' AND record_key='health.json')").all();
+    const mediaRows=this.db.prepare('SELECT media_id,version_id,relative_path,sha256,byte_size,availability,metadata_json FROM media_versions').all();
+    const aliases=this.db.prepare('SELECT alias,media_id,version_id FROM media_aliases').all();
+    const documents=this.db.prepare('SELECT alias,document_id FROM document_aliases ORDER BY alias').all();
+    return sha256(canonicalJson([projectionFingerprintRows(['workspace-v1'],heads,mediaRows,aliases),documents]));
+  }
   listRecordRevisions(namespace,key) { return this.db.prepare('SELECT * FROM record_revisions WHERE namespace=? AND record_key=? ORDER BY revision_number').all(namespace,key).map(record); }
   listPublishedDocumentMetadata() {
     const release=this.db.prepare('SELECT source_revision_ids_json FROM releases WHERE release_id=(SELECT current_release_id FROM repository_meta WHERE singleton=1)').get();
@@ -404,6 +414,7 @@ export class InstanceRepository {
   getRecord(...args) { return this._read('getRecord',args); }
   getMetadata() { return this._read('getMetadata', []); }
   getProjectionFingerprint(...args) { return this._read('getProjectionFingerprint', args); }
+  getWorkspaceFingerprint() { return this._read('getWorkspaceFingerprint', []); }
   listRecordRevisions(...args) { return this._read('listRecordRevisions', args); }
   listPublishedDocumentMetadata() { return this._read('listPublishedDocumentMetadata', []); }
   getPublishedDocument(...args) { return this._read('getPublishedDocument', args); }

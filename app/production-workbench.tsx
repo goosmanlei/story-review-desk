@@ -941,6 +941,27 @@ export type ProductionNavigationIntent = {
 
 export type ProductionNavigate = (intent: ProductionNavigationIntent) => void;
 
+/** A formally adopted design is browseable before its production work exists. */
+export function currentShotDesignNavigation(model: ProductionModel, intent: ProductionNavigationIntent) {
+  if (intent.workPackageId || intent.workItemId || intent.familyId || intent.versionId || intent.legacyStage) return null;
+  const matches = model.shots.filter(shot => shot.id === intent.shotId);
+  if (matches.length !== 1) return null;
+  const shot = matches[0];
+  if (shot.scopeRole !== 'CURRENT' || shot.activeInCurrentProduction !== true || !shot.shotPlanSetRevisionId
+    || shot.workPackageRefs.some(id => model.workPackages.some(work => work.id === id))) return null;
+  const scene = model.scenes.find(row => row.id === shot.sceneId && row.scopeRole === 'CURRENT');
+  const episode = model.episodes.find(row => row.episodeUid === shot.episodeUid && row.scopeRole === 'CURRENT');
+  if (!scene || !episode || scene.episodeUid !== episode.episodeUid || !episode.sceneIds.includes(scene.id)) return null;
+  const gate = productionGates(model).find(row => row.id === (intent.gateId || 'SHOT_PLAN_INPUT_LOCK'));
+  const phase = gate && productionPhases(model).find(row => row.id === gate.phaseId);
+  if (!gate || !phase || intent.phaseId && intent.phaseId !== phase.id) return null;
+  return {
+    sceneId: scene.id,
+    episodeUid: episode.episodeUid,
+    context: {shotId: shot.id, workPackageId: '', workItemId: null, familyId: null, versionId: null, phaseId: phase.id, gateId: gate.id} satisfies ProductionContext,
+  };
+}
+
 type ContextProps = ProductionContext & {
   model: ProductionModel;
   onNavigate: ProductionNavigate;

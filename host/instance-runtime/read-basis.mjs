@@ -4,6 +4,11 @@ export function readBasis(metadata) {
   return createHash('sha256').update(JSON.stringify([
     metadata.instanceId, metadata.runtimeEpoch, metadata.releaseId,
     metadata.profileRevisionId, metadata.snapshotId,
-    metadata.repositoryRevision, metadata.eventSequence,
+    metadata.workspaceRevision ?? metadata.repositoryRevision, metadata.eventSequence,
   ])).digest('hex');
+}
+/** Opt-in for business workspace reads, never runtime/health or mutation CAS. */
+export async function workspaceReadMetadata(tx) {
+  const [metadata,workspaceRevision]=await Promise.all([tx.getMetadata(),tx.getWorkspaceFingerprint()]);
+  return {...metadata,workspaceRevision};
 }

@@ -1,4 +1,4 @@
-import {committedGet} from '../../../instance/_committed-get';
+import {committedWorkspaceGet} from '../../../instance/_committed-get';
 import {instanceRepository,hostedReadOnlyMode} from '../../_store';
 import { projectIdFor } from '../../../../instance-profile';
 import {productionDirectory} from '../../_production-directory';
@@ -289,6 +289,6 @@ export async function GET(request:Request) {
  try {
   const repo=hostedReadOnlyMode()?null:await instanceRepository();
   if(!repo)return readResponse(request);
-  return await committedGet(repo,`production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request);const value=await response.json() as {error?:string;message?:string};if(!response.ok)throw new HttpError(response.status,value.error||value.message||"读取失败");return value;},request);
+  return await committedWorkspaceGet(repo,`production:${new URL(request.url).search}`,async()=>{const response=await readResponse(request);const value=await response.json() as {error?:string;message?:string};if(!response.ok)throw new HttpError(response.status,value.error||value.message||"读取失败");return value;},request);
  } catch(error){return errorResponse(error,"工作区读取失败");}
 }

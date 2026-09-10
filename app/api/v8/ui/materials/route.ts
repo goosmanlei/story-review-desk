@@ -1,3 +1,4 @@
+import {workspaceReadMetadata} from '../../../../../host/instance-runtime/read-basis.mjs';
 import {ReadTiming} from '../../../_read-timing';
 import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings, materialDirectoryProjection } from '../_material-query';
 import { projectIdFor } from '../../../../instance-profile';
@@ -134,7 +135,7 @@ export async function GET(request: Request) {
   try {
     const timing=new ReadTiming();
     const repo=hostedReadOnlyMode()?null:await instanceRepository();
-    const read=async()=>{const [data,operations]=await Promise.all([reviewData(),operationalSnapshot()]);return {data,operations,basis:repo?await repo.getMetadata():undefined};};
+    const read=async()=>{const [data,operations]=await Promise.all([reviewData(),operationalSnapshot()]);return {data,operations,basis:repo?await workspaceReadMetadata(repo):undefined};};
     const {data,operations,basis}=await timing.measure('read',()=>repo?repo.readTransaction(read):read());
     if (operations.snapshotId !== data.snapshotId) throw new HttpError(409, 'material projection snapshot changed during read');
     if (!process.env.REVIEW_REMOTE_READ_ONLY) {

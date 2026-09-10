@@ -2,7 +2,7 @@ import {currentMaterialRequirementRows,projectMaterialRequirementDispositions} f
 import {queryObjects,updateOperationalProjection,operationalProjectionMatches,objectSummary} from '../../../../host/instance-runtime/query-model.mjs';
 import {instanceRepository,operationalSnapshot,reviewData,HttpError,stableObjectHash,jsonResponse} from '../_store';
 import {parseUiPageRequest} from './_pagination';
-import {readBasis} from '../../../../host/instance-runtime/read-basis.mjs';
+import {readBasis,workspaceReadMetadata} from '../../../../host/instance-runtime/read-basis.mjs';
 const projectionWrites=new Map<string,Promise<void>>();
 const directories=new WeakMap<object,Map<string,{rows:Row[];currentRows:Row[];atomicRows:Row[]}>>();
 
@@ -28,21 +28,21 @@ export function materialUsagePageBindings(rows:Row[]) {
   return rows.flatMap(row=>Array.isArray(row.materialUsageBindings)?row.materialUsageBindings:[])
     .filter((value):value is {familyId:string;versionId:string;sha256:string}=>Boolean(value&&typeof value==='object'&&typeof value.familyId==='string'&&typeof value.versionId==='string'&&/^[a-f0-9]{64}$/.test(value.sha256)));
 }
-export async function postgresMaterialPage(request:Request,data:Awaited<ReturnType<typeof reviewData>>,operations:Awaited<ReturnType<typeof operationalSnapshot>>,validateFilters:(data:Awaited<ReturnType<typeof reviewData>>,filters:ReturnType<typeof parseUiPageRequest>['filters'])=>void,basis?:Awaited<ReturnType<NonNullable<Awaited<ReturnType<typeof instanceRepository>>>['getMetadata']>>) {
+export async function postgresMaterialPage(request:Request,data:Awaited<ReturnType<typeof reviewData>>,operations:Awaited<ReturnType<typeof operationalSnapshot>>,validateFilters:(data:Awaited<ReturnType<typeof reviewData>>,filters:ReturnType<typeof parseUiPageRequest>['filters'])=>void,basis?:Awaited<ReturnType<typeof workspaceReadMetadata>>) {
   const repo=await instanceRepository();if(repo?.backend!=='postgres')return null;
   const url=new URL(request.url),summary=url.searchParams.get('detail')==='summary',requirementId=url.searchParams.get('requirementId');
   const mode=url.searchParams.get('mode')||'requirements';
   if(mode!=='requirements')throw new HttpError(mode==='ledger'?410:400,'素材目录仅提供当前素材需求');
   if(url.searchParams.has('familyId'))throw new HttpError(400,'请通过素材需求打开详情');
-  const metadata=basis||await repo.getMetadata();if(!metadata.releaseId)throw new HttpError(503,'当前实例尚无发布');
+  const metadata=basis||await workspaceReadMetadata(repo);if(!metadata.releaseId)throw new HttpError(503,'当前实例尚无发布');
   const releaseId=metadata.releaseId,version=`${metadata.instanceId}:${metadata.runtimeEpoch}:${releaseId}:${metadata.eventSequence}:${operations.operationRevision}`;
   const stamp={releaseId,eventSequence:metadata.eventSequence,operationRevision:operations.operationRevision};
   const matches=await repo.readTransaction(tx=>operationalProjectionMatches(tx,stamp));
   let projection=projectionWrites.get(version);
   if(!matches&&!projection){
     projection=repo.writeTransaction(async tx=>{
-      const current=await tx.getMetadata();
-      if(current.releaseId!==releaseId||current.eventSequence!==metadata.eventSequence||(basis&&current.repositoryRevision!==metadata.repositoryRevision))throw new HttpError(409,'素材状态已更新，请重新读取');
+      const current=await workspaceReadMetadata(tx);
+      if(current.releaseId!==releaseId||current.eventSequence!==metadata.eventSequence||(basis&&readBasis(current)!==readBasis(metadata)))throw new HttpError(409,'素材状态已更新，请重新读取');
       // The caller may have read operations before metadata advanced. Rebuild
       // under the repository write lock; never label stale state with a new sequence.
       if(await operationalProjectionMatches(tx,stamp))return;
@@ -63,7 +63,7 @@ export async function postgresMaterialPage(request:Request,data:Awaited<ReturnTy
     after=cursor.after;
   }
   return repo.readTransaction(async tx=>{
-    const current=await tx.getMetadata();if(current.releaseId!==releaseId||current.eventSequence!==metadata.eventSequence||(basis&&current.repositoryRevision!==metadata.repositoryRevision)||!await operationalProjectionMatches(tx,stamp))throw new HttpError(409,'素材状态已更新，请重新读取');
+    const current=await workspaceReadMetadata(tx);if(current.releaseId!==releaseId||current.eventSequence!==metadata.eventSequence||(basis&&readBasis(current)!==readBasis(metadata))||!await operationalProjectionMatches(tx,stamp))throw new HttpError(409,'素材状态已更新，请重新读取');
     const etag='\"materials:'+stableObjectHash([version,parsed.filters,parsed.limit,after,requirementId,summary])+'\"';
     const headers={ETag:etag,'Cache-Control':'private, no-cache','X-Review-Version':version,'X-Review-Basis':readBasis(current)};
     if(request.headers.get('If-None-Match')===etag)return new Response(null,{status:304,headers});

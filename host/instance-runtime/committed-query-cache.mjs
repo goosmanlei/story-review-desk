@@ -1,5 +1,6 @@
 // Only immutable JSON responses from completed, top-level read transactions are
 // shared. Writers and already pinned readers always execute their own query.
+import {readBasis} from './read-basis.mjs';
 const repositories = new WeakMap();
 const projectionRepositories = new WeakMap();
 const readUnits = new WeakMap();
@@ -42,9 +43,9 @@ export async function committedProjectionJson(tx, projectionKey, read) {
   return pending;
 }
 
-export async function committedQueryJson(repository, queryKey, read, observe = () => {}, describe = () => {}) {
+export async function committedQueryJson(repository, queryKey, read, observe = () => {}, describe = () => {}, metadataFor = tx => tx.getMetadata()) {
   if (repository.inTransaction) {
-    return repository.readTransaction(async tx => { describe(await tx.getMetadata()); return JSON.stringify(await read(tx)); });
+    return repository.readTransaction(async tx => { describe(await metadataFor(tx)); return JSON.stringify(await read(tx)); });
   }
   let cache = repositories.get(repository);
   if (!cache) { cache = new Map(); repositories.set(repository, cache); }
@@ -61,12 +62,10 @@ export async function committedQueryJson(repository, queryKey, read, observe = (
       // The descriptor and factory share one repeatable-read snapshot. A commit
       // between requests can never put a new response under an older key.
       const descriptorStart = performance.now();
-      const m = await tx.getMetadata();
+      const m = await metadataFor(tx);
       describe(m);
       observe('version', performance.now() - descriptorStart);
-      const key = JSON.stringify([queryKey, m.instanceId, m.runtimeEpoch,
-        m.releaseId, m.profileRevisionId, m.snapshotId,
-        m.repositoryRevision, m.eventSequence]);
+      const basis=readBasis(m),key=JSON.stringify([queryKey,basis]);
       const hit = cache.get(key);
       if (hit) { cache.delete(key); cache.set(key, hit); return hit.promise; }
       let resolve, reject;
@@ -78,8 +77,7 @@ export async function committedQueryJson(repository, queryKey, read, observe = (
       owned = {key, entry};
       cache.set(key, entry);
       trim(cache);
-      projections = {cache: projectionCache, basis: JSON.stringify([m.instanceId, m.runtimeEpoch, m.releaseId,
-        m.profileRevisionId, m.snapshotId, m.repositoryRevision, m.eventSequence]), local: new Map(), owned: []};
+      projections = {cache: projectionCache, basis, local: new Map(), owned: []};
       readUnits.set(tx, projections);
       const projectionStart = performance.now();
       let result;

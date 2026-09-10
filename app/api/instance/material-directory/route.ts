@@ -1,6 +1,6 @@
-import {committedGet} from '../_committed-get';
+import {committedWorkspaceGet} from '../_committed-get';
 import {readMaterialDirectory,stageDirectoryDefinition} from '../../../../host/instance-runtime/material-directory.mjs';
 import {hostedReadOnlyMode,reviewData} from '../../v8/_store';
 import {domainRepository,domainMutation,domainBody,domainError,jsonResponse} from '../_domain';
 export async function POST(request:Request){try{await domainMutation(request);const body=domainBody(await request.json(),['expectedReleaseId','expectedRevisionId','stateId']);const repo=await domainRepository();return repo.writeTransaction(async tx=>jsonResponse(await stageDirectoryDefinition(tx,body)));}catch(e){return domainError(e);}}
-export async function GET(request?:Request){try{if(hostedReadOnlyMode()){const data=await reviewData();return jsonResponse({...((data.productionModel as unknown as Record<string,unknown>).materialDirectory as object||{graph:data.productionModel.domainGraph,bindings:[],trials:[],staleIds:[]}),readOnly:true});}const repo=await domainRepository();return await committedGet(repo,'material-directory',tx=>readMaterialDirectory(tx),request);}catch(e){return domainError(e);}}
+export async function GET(request?:Request){try{if(hostedReadOnlyMode()){const data=await reviewData();return jsonResponse({...((data.productionModel as unknown as Record<string,unknown>).materialDirectory as object||{graph:data.productionModel.domainGraph,bindings:[],trials:[],staleIds:[]}),readOnly:true});}const repo=await domainRepository();return await committedWorkspaceGet(repo,'material-directory',tx=>readMaterialDirectory(tx),request);}catch(e){return domainError(e);}}

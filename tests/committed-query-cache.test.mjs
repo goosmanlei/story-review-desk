@@ -5,6 +5,7 @@ import path from 'node:path';
 import {createInstanceRepository} from '../host/instance-runtime/index.mjs';
 import {blankProfile,blankSnapshot} from '../host/instance-runtime/blank.mjs';
 import {committedQueryJson,committedProjectionJson} from '../host/instance-runtime/committed-query-cache.mjs';
+import {workspaceReadMetadata,readBasis} from '../host/instance-runtime/read-basis.mjs';
 import {sharedStoryPostgres} from './fixtures/shared-story-postgres.mjs';
 
 const deferred=()=>{let resolve;const promise=new Promise(yes=>{resolve=yes;});return {promise,resolve};};
@@ -110,4 +111,26 @@ test('a shared scene projection waits for COMMIT and is discarded on failed comp
   await joined.promise;assert.equal(settled,false);release.resolve();
   const results=await Promise.allSettled([owner,follower]);assert(results.every(r=>r.status==='rejected'));assert.equal(calls,1);
   fail=false;await read('retry');assert.equal(calls,2);await read('other');assert.equal(calls,2);
+}));
+
+test('workspace reads survive health heartbeats but invalidate on drafts, media, events, releases and epochs',()=>fixture(async(repo,profile)=>{
+  let calls=0;
+  const read=key=>committedQueryJson(repo,key,async tx=>JSON.parse(await committedProjectionJson(tx,'workspace common',async()=>{
+    calls++;return {value:(await tx.getAux('qa','value')).bytes.toString(),basis:readBasis(await workspaceReadMetadata(tx))};
+  })),undefined,undefined,workspaceReadMetadata);
+  const first=await read('scene:first'),metadata=await repo.getMetadata();
+  await repo.writeTransaction(tx=>tx.putAux({namespace:'assistant-public',key:'health.json',bytes:'{"online":true}',expectedRevisionId:null}));
+  assert((await repo.getMetadata()).repositoryRevision>metadata.repositoryRevision);
+  assert.equal(await read('scene:second'),first);assert.equal(calls,1);
+  await writeValue(repo,'new draft');assert.equal(JSON.parse(await read('scene:first')).value,'new draft');assert.equal(calls,2);
+  let before=await read('scene:first');
+  const invalidates=async mutation=>{await mutation();const after=await read('scene:first');assert.notEqual(after,before);before=after;};
+  await invalidates(()=>repo.writeTransaction(tx=>tx.registerMedia({mediaId:'test-family',versionId:'test-v1',relativePath:'media/test.png',sha256:'a'.repeat(64),byteSize:4,aliases:['test-alias'],metadata:{authorityDomain:'FORMAL'}})));
+  await invalidates(()=>repo.writeTransaction(tx=>tx.putAux({namespace:'media-retirement-tombstones',key:'test-v1',bytes:'{}',expectedRevisionId:null})));
+  await invalidates(()=>repo.writeTransaction(tx=>tx.appendEvent({kind:'qa',idempotencyKey:'workspace-event',requestHash:'a'.repeat(64),payload:{purpose:'workspace watermark'}})));
+  await invalidates(()=>repo.writeTransaction(async tx=>tx.publishRelease({...blankSnapshot(profile),expectedReleaseId:(await tx.getMetadata()).releaseId})));
+  await invalidates(()=>repo.writeTransaction(tx=>tx.resetRuntimeEpoch()));
+  // Only health.json is excluded: future assistant data remains conservative.
+  await invalidates(()=>repo.writeTransaction(tx=>tx.putAux({namespace:'assistant-public',key:'other.json',bytes:'{}',expectedRevisionId:null})));
+  assert.equal(calls,8);
 }));

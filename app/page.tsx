@@ -17,7 +17,7 @@ import { EvidenceReaderProvider } from './evidence-reader';
 import { useAssistantFocus } from './assistant/context-provider';
 import { useInstanceProfile } from './instance-context';
 import type { WorkFocus } from './assistant/types';
-import { applyOperationalProjection, FullProductionWorkbench, fullProductionCurrentShotIds, resolveFamilyVersionSelection, resolveProductionContext, type OperationalStateProjection, type ProductionContext, type ProductionGateId, type ProductionModel, type ProductionNavigationIntent, type ProductionPhaseId } from './production-workbench';
+import { applyOperationalProjection, currentShotDesignNavigation, FullProductionWorkbench, fullProductionCurrentShotIds, resolveFamilyVersionSelection, resolveProductionContext, type OperationalStateProjection, type ProductionContext, type ProductionGateId, type ProductionModel, type ProductionNavigationIntent, type ProductionPhaseId } from './production-workbench';
 import { SystemDocumentation } from './system-documentation';
 import { SystemManagement, SourceImport } from './system-management';
 import { StorySettingsWorkspace } from './story-settings-workspace';
@@ -1669,6 +1669,15 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       }
       setNavigationError('');
       pendingProductionIntentRef.current = null;
+      const currentDesign = currentShotDesignNavigation(model, {
+        shotId: requestedShot.id, workPackageId: pending.workPackageId, workItemId: pending.workItemId,
+        familyId: pending.familyId, versionId: pending.versionId, legacyStage: pending.legacyStage,
+        phaseId: pending.phaseId, gateId: pending.gateId,
+      });
+      if (nextView === 'pipeline' && !retiredStoryboardDeepLink && currentDesign) {
+        setProductionContext(currentDesign.context);
+        return true;
+      }
       const exactHistoricalShotDeepLink = nextView === 'pipeline'
         && Boolean(pending.shotId || legacyTargetShot)
         && !fullProductionCurrentShotIds(model).has(requestedShot.id);
@@ -1810,7 +1819,9 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       locationRestorerRef.current((event.state || {}) as ReviewHistoryState, false);
     };
     window.addEventListener('popstate', restoreFromHistory);
-    return () => { window.clearTimeout(timer); window.removeEventListener('popstate', restoreFromHistory); };
+    const restoreProductionLocation=()=>locationRestorerRef.current((window.history.state||{}) as ReviewHistoryState,false);
+    window.addEventListener('review:production-location',restoreProductionLocation);
+    return () => { window.clearTimeout(timer); window.removeEventListener('popstate', restoreFromHistory); window.removeEventListener('review:production-location',restoreProductionLocation); };
   }, []);
 
   useEffect(() => {
@@ -1945,6 +1956,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       const historicalShotId = selectedWorkPackageId.startsWith('HISTORICAL_ONLY:')
         ? focusShotId
         : null;
+      const currentDesign = currentShotDesignNavigation(productionModel, {shotId: focusShotId, workPackageId: selectedWorkPackageId, phaseId: selectedProductionPhaseId, gateId: selectedProductionGateId});
       const currentPackage = selectedPackage?.activeInCurrentProduction === true
         && (!selectedProductionPhaseId || selectedPackage.phaseId === selectedProductionPhaseId)
         && (!selectedProductionGateId || selectedPackage.gateId === selectedProductionGateId)
@@ -1964,6 +1976,11 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       url.searchParams.set('productionObject', currentPackage ? publicRef(currentPackage.scopeId) : 'UNKNOWN');
       ['scene', 'shot', 'work'].forEach((key) => url.searchParams.delete(key));
       if (historicalShotId) url.searchParams.set('shot', publicRef(historicalShotId));
+      if (currentDesign) {
+        url.searchParams.set('shot', currentDesign.context.shotId);
+        url.searchParams.set('preparationEpisode', currentDesign.episodeUid);
+        url.searchParams.set('preparationScene', currentDesign.sceneId);
+      }
       if (currentItem) url.searchParams.set('item', publicRef(currentItem.id));
       else url.searchParams.delete('item');
     } else if (activeView !== 'story') {
@@ -2312,7 +2329,14 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
       setNavigationError(`无法定位 ${intent.shotId}；已留在原位置，没有回退到默认镜头。`);
       return;
     }
-    const next = resolveProductionContext(model, { ...intent, shotId: requestedShot.id });
+    const currentDesign = currentShotDesignNavigation(model, {...intent, shotId: requestedShot.id});
+    let next: ProductionContext;
+    try {
+      next = currentDesign?.context || resolveProductionContext(model, { ...intent, shotId: requestedShot.id });
+    } catch {
+      setNavigationError(`无法解析 ${requestedShot.id} 的制作入口；已留在原位置，没有回退到其他对象。`);
+      return;
+    }
     const nextPackage = model.workPackages.find((item) => item.id === next.workPackageId) || null;
     if (nextPackage?.stepId === 'W01') {
       const itemIds = new Set(nextPackage.workItemRefs);
@@ -2338,6 +2362,11 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     cleanDestinationUrl(url);
     url.searchParams.set('view', 'pipeline');
     ['scene', 'shot', 'work', 'stage'].forEach((key) => url.searchParams.delete(key));
+    if (currentDesign) {
+      url.searchParams.set('shot', currentDesign.context.shotId);
+      url.searchParams.set('preparationEpisode', currentDesign.episodeUid);
+      url.searchParams.set('preparationScene', currentDesign.sceneId);
+    }
     if (next.phaseId) url.searchParams.set('productionPhase', productionSlug(next.phaseId));
     if (next.gateId) url.searchParams.set('productionGate', productionSlug(next.gateId));
     const creator = creatorProductionStageForGate(next.gateId);

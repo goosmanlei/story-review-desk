@@ -132,7 +132,19 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  useEffect(()=>{if(!episodeMode)return;const url=new URL(window.location.href);if(url.searchParams.has('scene')||url.searchParams.has('preparationScene')){url.searchParams.delete('scene');url.searchParams.delete('preparationScene');window.history.replaceState(window.history.state,'',url);locationSelection.current={...locationSelection.current,href:url.href,sceneId:''};}},[episodeMode]);
  function leaveDraft(){if((comment.trim()||editing)&&!confirm('放弃本页未保存的编辑与意见并切换？'))return false;dirty.current=false;setComment('');setEditing(false);return true;}
  function rememberLocation(episodeUid:string,sceneId:string){const params=new URLSearchParams(window.location.search);locationSelection.current={href:window.location.href,episodeUid,sceneId,stageId:params.get('creatorStage')||'',gateId:params.get('productionGate')||''};}
- function chooseContext(episodeUid:string,sceneId:string){if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;dirty.current=false;setComment('');setEditing(false);const url=preparationSelectionUrl(episodeUid,episodeMode?'':sceneId,stage.id);if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);rememberLocation(episodeUid,episodeMode?'':sceneId);setSelectedEpisode(episodeUid);setSelected(episodeMode?'':sceneId);}
+ function chooseContext(episodeUid:string,sceneId:string){
+  if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;
+  dirty.current=false;setComment('');setEditing(false);
+  const url=preparationSelectionUrl(episodeUid,episodeMode?'':sceneId,stage.id);
+  // Changing the navigation scope leaves any previous exact shot/work focus.
+  for(const key of ['scene','shot','work','item','family','version','target','asset'])url.searchParams.delete(key);
+  url.searchParams.set('productionObject','UNKNOWN');url.searchParams.set('productionScope',gate?.scopeType||'UNKNOWN');
+  if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);
+  rememberLocation(episodeUid,episodeMode?'':sceneId);setSelectedEpisode(episodeUid);setSelected(episodeMode?'':sceneId);
+  // The leave guard has already run once. Restore the parent's exact focus and
+  // cancel late deep-link resolution without creating another history entry.
+  window.dispatchEvent(new Event('review:production-location'));
+ }
  function chooseScene(id:string){const next=episodeScenes.find(s=>s.sceneId===id);if(next)chooseContext(next.episodeUid,next.sceneId);}
  function chooseEpisode(uid:string){const nextEpisode=episodes.find(e=>e.episodeUid===uid);if(!nextEpisode)return;const next=episodeMode?undefined:scenes.find(s=>s.episodeUid===uid&&nextEpisode.sceneIds.includes(s.sceneId));chooseContext(uid,next?.sceneId||'');}
  function chooseCheck(stageId:CreatorProductionStageId,gateId:string){
