@@ -73,3 +73,18 @@ function changedResolution(){
 }
 test('historical resolution may change original selected prose, with exact old and replacement bindings',()=>{const {f}=changedResolution(),r=validateModernEventClosure(f,runtime);assert.equal(r.historicalResolutions[0].selectionState,'ORIGINAL_SELECTION_CHANGED_AT_RESOLUTION');assert.equal(r.historicalResolutions[0].candidateRevisionId,'cr:replacement');assert.deepEqual(f.resolved.anchor,f.create.anchor);});
 test('resolution cannot borrow a future candidate even if its aligned hash matches',()=>{const {f,next}=changedResolution();next.eventSequence=6;f.rebind();assert.throws(()=>validateModernEventClosure(f,runtime),/resolution alignment differs/);});
+function permanentSceneClosure(){
+ const {f,next}=changedResolution(),scene=next.content.narrativeRevision.scenes[0];
+ const close={...f.archive,commentAction:'RESOLVE_WITH_HISTORY',visibility:'CLOSED_HISTORY',commentId:f.create.commentId,commentRevisionId:f.create.eventId,expectedLatestEventId:f.create.eventId,sceneId:f.create.sceneId,resolutionTarget:{candidateRevisionId:next.creativeRevisionId,candidateContentHash:next.contentHash,sceneBindings:[{sceneId:scene.id,contentHash:scene.contentHash,blockIds:scene.scriptBlocks.map(b=>b.id),blocksHash:hash(scene.scriptBlocks)}]}};
+ f.events.splice(f.events.indexOf(f.resolved),1,close);f.rebind();return {f,next,close};
+}
+test('changed prose can close against the same permanent scene while keeping its original comment binding',()=>{
+ const {f,close}=permanentSceneClosure(),before=canonical(f.events),r=validateModernEventClosure(f,runtime);
+ assert.equal(r.modernCommentHistories.find(c=>c.commentId===close.commentId).archived,true);
+ assert.equal(canonical(f.events),before);assert.equal(f.create.target.revisionId,f.candidate.creativeRevisionId);
+});
+test('permanent-scene closure cannot borrow another scene even with valid replacement hashes',()=>{
+ const {f,next,close}=permanentSceneClosure(),other=next.content.narrativeRevision.scenes[1];
+ close.resolutionTarget.sceneBindings=[{sceneId:other.id,contentHash:other.contentHash,blockIds:other.scriptBlocks.map(b=>b.id),blocksHash:hash(other.scriptBlocks)}];f.rebind();
+ assert.throws(()=>validateModernEventClosure(f,runtime),/historical closure scene lineage/);
+});
