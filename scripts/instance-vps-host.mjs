@@ -7,6 +7,7 @@ import {validateVpsTarget} from '../host/instance-runtime/vps-target.mjs';
 import {emptyVpsState,executeVps,planVps} from '../host/instance-runtime/vps-journal.mjs';
 import {validatePackageManifest} from '../host/instance-runtime/vps-package.mjs';
 import {WireInput,rpcSource,writeWire} from '../host/instance-runtime/vps-wire.mjs';
+import {installProcessTimer} from '../host/instance-runtime/vps-process-service.mjs';
 
 async function withLock(root,pythonBinary,run){
  const child=spawn(pythonBinary,['-u','-c',"import fcntl,sys; f=open(sys.argv[1],'a'); fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB); print('LOCKED',flush=True); sys.stdin.read()",path.join(root,'.publisher.lock')],{stdio:['pipe','pipe','pipe']});
@@ -23,6 +24,10 @@ export async function runHost(control,sourceOverride){
  if(control.action==='inspect')return {...await driver.inspect(),state:publicState()};
  if(control.action==='status')return {state:publicState(),actual:await driver.inspect()};
  if(control.action==='plan')return planVps(target,state,validatePackageManifest(control.manifest,{target,allowDevelopment}),await driver.inspect());
+ if(control.action==='cleanup'){
+  if(!state.prepared)throw Error('Unprepared host cannot be cleaned');
+  return withLock(root,target.runtime.pythonBinary,async()=>{state=JSON.parse(await readFile(path.join(root,'state.json'),'utf8'));if(state.targetSha256!==emptyVpsState(target).targetSha256)throw Error('Cleanup target changed');driver.state=state;return driver.cleanupProcesses();});
+ }
  if(!control.expectedCurrent||!control.operationId)throw Error('Mutations require expectedCurrent and operationId');
  if(control.action==='prepare-host'){
   if(control.expectedCurrent!==(state.current?.releaseId||'NONE'))throw Error('Host preparation release CAS mismatch');
@@ -48,13 +53,22 @@ export async function runHost(control,sourceOverride){
  return withLock(root,target.runtime.pythonBinary,async()=>{
   // Re-read inside the exclusive lock; pre-lock state is diagnostic only.
   state=JSON.parse(await readFile(path.join(root,'state.json'),'utf8'));driver.state=state;
+  if(control.action==='install-cleanup'){
+   if(control.expectedCurrent!==(state.current?.releaseId||'NONE')||state.pending)throw Error('Cleanup installation release changed or publication is unfinished');
+   return installProcessTimer(target,control.cleanupBundle,{fixture:allowDevelopment});
+  }
   let source=sourceOverride;
   if(control.action==='rollback'){
    const wanted=state.pending?.manifest?.releaseId;
    const clean=wanted?[state.current,state.backup].find(r=>r?.releaseId===wanted):state.backup;
    if(!clean)throw Error('Previous clean release is not available');source=await driver.cleanSource(clean);
   }else if(!source){const manifest=validatePackageManifest(control.manifest,{target,allowDevelopment});source=rpcSource(manifest,new WireInput(process.stdin),process.stdout);}
-  return executeVps({target,state,source,driver,expectedCurrent:control.expectedCurrent,operationId:control.operationId,action:control.action,recover:control.recover===true});
+  let result,failure;
+  try{result=await executeVps({target,state,source,driver,expectedCurrent:control.expectedCurrent,operationId:control.operationId,action:control.action,recover:control.recover===true});}catch(e){failure=e;}
+  const cleanup=await driver.cleanupProcesses();
+  if(failure)throw failure;
+  if(cleanup.status!=='CLEANED')throw Error('CLEANUP_REQUIRED: publisher process resources remain');
+  return {...result,processCleanup:cleanup};
  });
 }
 if(globalThis.REVIEW_VPS_CONTROL){

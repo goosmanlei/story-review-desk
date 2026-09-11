@@ -87,7 +87,8 @@ export class VpsDriver{
   for(const image of source.manifest.images){
    let existing=await this.object('image',image.reference);
    if(!existing){
-    this.state.imageInventory=[...new Set([...(this.state.imageInventory||[]),image.reference])];await this.save(this.state);
+   this.state.imageInventory=[...new Set([...(this.state.imageInventory||[]),image.reference])];await this.save(this.state);
+    this.state.imageOwners||={};this.state.imageOwners[image.reference]={id:image.id,manifestSha256:source.manifest.manifestSha256};await this.save(this.state);
     await this.docker(['image','load','--platform','linux/amd64'],{input:source.open(image.path)});existing=await this.object('image',image.reference);
    }
    if(!existing||existing.Id!==image.id||existing.Architecture!=='amd64'||existing.Os!=='linux'||image.role==='app'&&existing.Config?.Labels?.['org.opencontainers.image.revision']!==source.manifest.softwareCommit)throw Error('Loaded image differs from manifest');
@@ -100,6 +101,7 @@ export class VpsDriver{
   const app=source.manifest.images.find(i=>i.role==='app');
   const verifier='review-vps-verify-'+sha256(this.target.targetId+source.manifest.manifestSha256).slice(0,20);
   this.state.verifiers=[...new Set([...(this.state.verifiers||[]),verifier])];await this.save(this.state);
+  this.state.verifierOwners||={};this.state.verifierOwners[verifier]=source.manifest.manifestSha256;await this.save(this.state);
   const previous=await this.object('container',verifier);
   if(previous){
    if(previous.Config.Labels?.['review.vps.target']!==this.target.targetId||previous.Config.Labels?.['review.vps.manifest']!==source.manifest.manifestSha256||previous.Config.Labels?.['review.vps.role']!=='verifier')throw Error('Unowned verification container');
@@ -256,9 +258,44 @@ export class VpsDriver{
   await this.reclaimUnusedImages();
  }
  async reclaimUnusedImages(){
-  const current=this.state.current?.runtime,retained=new Set([current?.appImage,current?.pgImage]);
+  const retained=new Set([this.state.current?.runtime,this.state.pending?.runtime].filter(Boolean).flatMap(r=>[r.appImage,r.pgImage]));
+  for(const image of this.state.pending?.manifest?.images||[])retained.add(image.reference);
   const containers=JSON.parse(await this.docker(['container','ls','-a','--no-trunc','--format','json']).then(text=>'['+text.split('\n').filter(Boolean).join(',')+']'));
   const inUse=new Set();for(const item of containers){const c=await this.object('container',item.ID);if(c){inUse.add(c.Image);inUse.add(c.Config.Image);}}
-  for(const id of this.state.imageInventory||[]){if(retained.has(id)||inUse.has(id))continue;const image=await this.object('image',id);if(image&&!inUse.has(image.Id))await this.docker(['image','rm',id]);}
+  // Upgrade old name-only journals only through their still-verified immutable
+  // clean manifests; an arbitrary old tag is not a digest ownership proof.
+  for(const release of [this.state.current,this.state.backup].filter(r=>r?.cleanReady)){
+   const source=await this.cleanSource(release);this.state.imageOwners||={};
+   for(const image of source.manifest.images)if((this.state.imageInventory||[]).includes(image.reference)&&!this.state.imageOwners[image.reference])this.state.imageOwners[image.reference]={id:image.id,manifestSha256:source.manifest.manifestSha256};
+  }
+  const remaining=[];
+  for(const id of this.state.imageInventory||[]){const image=await this.object('image',id);if(!image)continue;
+   if(retained.has(id)||inUse.has(id)||inUse.has(image.Id)){remaining.push(id);continue;}
+   if(this.state.imageOwners?.[id]?.id!==image.Id)throw Error('Image ownership or digest is unknown: '+id);
+   await this.docker(['image','rm',id]);if(await this.object('image',id))throw Error('Unused image survived cleanup');delete this.state.imageOwners[id];
+  }
+  this.state.imageInventory=remaining;await this.save(this.state);
+ }
+ // Called only while holding the publisher's kernel lock. No runtime, database,
+ // recovery slot or partial SAVING file is a disposable process resource.
+ async cleanupProcesses(){
+  const failures=[],removed=[];
+  for(const name of [...(this.state.verifiers||[])]){
+   try{const c=await this.object('container',name),manifest=this.state.verifierOwners?.[name];
+    if(c){if(!manifest||name!=='review-vps-verify-'+sha256(this.target.targetId+manifest).slice(0,20)||c.Config?.Labels?.['review.vps.target']!==this.target.targetId||c.Config.Labels['review.vps.manifest']!==manifest||c.Config.Labels['review.vps.role']!=='verifier')throw Error('Unknown verifier ownership');
+     if(c.State.Running)await this.docker(['stop','--time','3',name]);await this.docker(['container','rm',name]);if(await this.object('container',name))throw Error('Verifier survived cleanup');}
+    this.state.verifiers=this.state.verifiers.filter(n=>n!==name);delete this.state.verifierOwners?.[name];removed.push(name);
+   }catch(e){failures.push({resource:name,error:String(e.message).slice(0,400)});}
+  }
+  // An importer can survive a dropped SSH stream. Stopping it is safe after
+  // the exclusive publisher lock has been released; its pending database and
+  // restore journal remain untouched for the same-operation recovery path.
+  for(const runtime of [this.state.current?.runtime,this.state.pending?.runtime].filter(Boolean)){
+   try{const c=runtime.importer&&await this.owned('container',runtime.importer,runtime);if(c){if(c.Config.Labels['review.vps.role']!=='importer')throw Error('Importer role changed');if(c.State.Running)await this.docker(['stop','--time','10',runtime.importer]);await this.docker(['container','rm',runtime.importer]);if(await this.object('container',runtime.importer))throw Error('Importer survived cleanup');removed.push(runtime.importer);}}
+   catch(e){failures.push({resource:runtime.importer,error:String(e.message).slice(0,400)});}
+  }
+  try{await this.reclaimUnusedImages();}catch(e){failures.push({resource:'imageInventory',error:String(e.message).slice(0,400)});}
+  this.state.processCleanup={status:failures.length?'CLEANUP_REQUIRED':'CLEANED',at:new Date().toISOString(),removed,failures,recoveryPhase:this.state.pending?.phase||null};
+  await this.save(this.state);return this.state.processCleanup;
  }
 }

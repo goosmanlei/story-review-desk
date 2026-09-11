@@ -1,6 +1,11 @@
 import { parseArgs } from 'node:util';
 import { backupInstance } from './instance-transfer.mjs';
 import { delegateInstanceMaintenance } from './instance-maintenance.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
+const task=await requiredPhase(process.cwd());
 if (await delegateInstanceMaintenance('instance-backup.mjs', process.argv.slice(2))) process.exit(0);
-const { values } = parseArgs({ options: { instance: { type: 'string' }, output: { type: 'string' } } });
+const { values } = parseArgs({ options: { instance: { type: 'string' }, output: { type: 'string' },consumer:{type:'string'},'retain-reason':{type:'string'},temporary:{type:'boolean'} } });
+if(task&&[values.consumer,values['retain-reason'],values.temporary].filter(Boolean).length!==1)throw Error('Backup needs one --consumer, --retain-reason, or --temporary disposition');
 console.log(JSON.stringify(await backupInstance(values.instance, values.output), null, 2));
+if(task&&values.consumer)await task.transfer('path',values.output,values.consumer);
+if(task&&values['retain-reason'])await task.retain('path',values.output,values['retain-reason']);

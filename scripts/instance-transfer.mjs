@@ -8,6 +8,7 @@ import { openInstanceRepository, resolveInstance, restoreInstanceRepository, can
 import { freezeRetirementBackup, validateRetirementBackupManifest,retirementManifestFromFrozenRows,validateRetirementBackupManifestFromFrozenRows } from '../host/instance-runtime/media-retirement-transfer.mjs';
 import {writeArchiveFile,readArchiveFile,writeArchiveRowsFile,ARCHIVE_FILE_FORMAT} from '../host/instance-runtime/archive-file.mjs';
 import {openArchiveRowsWithBinding,validateArchiveRows,assertArchiveFileBinding} from '../host/instance-runtime/archive-stream-validation.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
 
 const relativePath = (value) => {
   if (typeof value !== 'string' || path.isAbsolute(value) || value.includes('\\') || value.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('Unsafe package relative path');
@@ -44,7 +45,8 @@ async function newTarget(destination, source) {
   if (!destination) throw new Error('An explicit --output new directory is required');
   const target = path.resolve(destination);
   if (target === source || target.startsWith(source + path.sep)) throw new Error('Output must be outside the source instance/backup');
-  await mkdir(target, { mode: 0o700 });
+  const phase=await requiredPhase(target);
+  if(!phase||!await phase.ownOutput(target))await mkdir(target, { mode: 0o700 });
   return await realpath(target);
 }
 export async function backupInstance(instancePath, output) {

@@ -10,6 +10,7 @@ import {canonicalJson,sha256} from '../host/instance-runtime/bytes.mjs';
 import {listPackageFiles,fileDescriptor,verifyPackage,immutablePackage,PACKAGE_MANIFEST} from '../host/instance-runtime/vps-package.mjs';
 import {restoreContractFromFiles,restoreMethodSha256,runtimeCapacity,validateRestoreMeasurement} from '../host/instance-runtime/vps-capacity.mjs';
 import {measureVpsRestore} from './instance-vps-capacity.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
 
 export async function command(binary,args,{cwd,input,output,maxOutputBytes=4*1024**2,env=process.env}={}){
  const child=spawn(binary,args,{cwd,env,stdio:['pipe','pipe','pipe']});let out='',err='';
@@ -33,11 +34,18 @@ export async function copyFrozenBaseline(source,output){
  await writeFile(path.join(output,'backup-manifest.json'),bytes,{flag:'wx',mode:0o600});
  const copied=await verifyBackup(output);if(copied.manifestSha256!==proof.manifestSha256)throw Error('Baseline changed during copy');return copied;
 }
-export async function packVps({target,instance,baseline:baselineSource,capacityMeasurement,output,sourceRoot,development=false}){
+export async function packVps({target,instance,baseline:baselineSource,capacityMeasurement,output,sourceRoot,development=false,consumer,retainReason}){
  if(Boolean(instance)===Boolean(baselineSource))throw Error('Choose one live instance or verified local baseline');
  const source=await inspectPackageSource(sourceRoot,{requestedCommit:development?'UNVERSIONED':undefined,explicitDevelopment:development}),root=path.resolve(output);
  if(root===source.root||root.startsWith(source.root+'/'))throw Error('Release packages must be outside source checkout');
- await mkdir(root,{mode:0o700});
+ const phase=await requiredPhase(root);
+ if(phase){if(Boolean(consumer)===Boolean(retainReason))throw Error('Managed package needs one explicit --consumer stage or --retain-reason');await phase.directory(root);}else await mkdir(root,{mode:0o700});
+ const builder=phase?await phase.builder():null;
+ const buildImage=async(tag,args)=>{
+  const labels=phase?await phase.expect('image',tag):[];
+  await command('docker',[...(builder?['buildx','build','--builder',builder,'--load']:['build']),...labels,...args,'-t',tag,software]);
+  if(phase)await phase.capture('image',tag);
+ };
  const releaseId='release_'+randomUUID(),software=path.join(root,'software');
  await command(process.execPath,['scripts/instance-package.mjs','--output',software,'--software-commit',source.softwareCommit],{cwd:sourceRoot});
  // A native-architecture immutable reader uses this release's archive fixes,
@@ -45,7 +53,7 @@ export async function packVps({target,instance,baseline:baselineSource,capacityM
  // This image is local-only; only the linux/amd64 runtime images enter the pack.
  const backupTag='review-vps-backup:'+releaseId;
  if(!baselineSource||!capacityMeasurement){
-  await command('docker',['build','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'-t',backupTag,software]);
+  await buildImage(backupTag,['--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit]);
  }
  if(baselineSource)await copyFrozenBaseline(baselineSource,path.join(root,'baseline'));
  else{
@@ -60,12 +68,12 @@ export async function packVps({target,instance,baseline:baselineSource,capacityM
  else{
   const native=JSON.parse(await command('docker',['image','inspect',backupTag]))[0],architecture=native.Os+'/'+native.Architecture;
   await command('docker',['pull','--platform',architecture,'postgres:18.6']);
-  measurement=await measureVpsRestore({target,baselineRoot:path.join(root,'baseline'),baseline,softwareCommit:source.softwareCommit,restoreContractSha256,appImage:backupTag,postgresImage:'postgres:18.6',architecture,auditPath:root+'.capacity.json'});
+  measurement=await measureVpsRestore({target,baselineRoot:path.join(root,'baseline'),baseline,softwareCommit:source.softwareCommit,restoreContractSha256,appImage:backupTag,postgresImage:'postgres:18.6',architecture,auditPath:path.join(root,'capacity.json')});
  }
  if(!baselineSource||!capacityMeasurement)await command('docker',['image','rm',backupTag]);
  await mkdir(path.join(root,'images'),{mode:0o700});
- const tag='review-vps-build:'+releaseId,build=['build','--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath,'-t',tag,software];
- await command('docker',build);await command('docker',['pull','--platform','linux/amd64','postgres:18.6']);
+ const tag='review-vps-build:'+releaseId;
+ await buildImage(tag,['--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath]);await command('docker',['pull','--platform','linux/amd64','postgres:18.6']);
  const images=[];
  for(const [role,image] of [['app',tag],['postgres','postgres:18.6']]){
   const info=JSON.parse(await command('docker',['image','inspect','--platform','linux/amd64',image]))[0];
@@ -74,7 +82,9 @@ export async function packVps({target,instance,baseline:baselineSource,capacityM
   // necessarily directly addressable. A package-owned tag transports that
   // platform; its config digest is checked before every use with --pull never.
   const reference='review-vps-artifact:'+releaseId+'-'+role;
+  if(phase)await phase.expect('image',reference,{expectedId:JSON.parse(await command('docker',['image','inspect',image]))[0].Id});
   await command('docker',['image','tag',image,reference]);
+  if(phase)await phase.capture('image',reference);
   const relative='images/'+role+'.tar';await command('docker',['image','save','--platform','linux/amd64',reference],{output:path.join(root,relative)});
   images.push({role,path:relative,id:info.Id,reference,loadedBytes:info.Size,architecture:'linux/amd64'});
  }
@@ -82,5 +92,7 @@ export async function packVps({target,instance,baseline:baselineSource,capacityM
  const capacity=runtimeCapacity(measurement,baseline,files);
  const body={schemaVersion:'1.0',kind:'REVIEW_VPS_PACKAGE',releaseId,softwareCommit:source.softwareCommit,architecture:'linux/amd64',basePath:target.basePath,business:{instanceId:baseline.instanceId,sourceReleaseId:baseline.releaseId,repositoryRevision:baseline.repositoryRevision},baseline,images,files,totalFileBytes:files.reduce((n,f)=>n+f.bytes,0),capacity,runtimeBudgetBytes:capacity.runtimeBudgetBytes,credentialsIncluded:false,runtimeIncluded:false,createdAt:new Date().toISOString()};
  await writeFile(path.join(root,PACKAGE_MANIFEST),JSON.stringify({...body,manifestSha256:sha256(canonicalJson(body))},null,2)+'\n',{flag:'wx',mode:0o600});
- await assertPackageSourceUnchanged(source);const verified=await verifyPackage(root,{target,allowDevelopment:development});await immutablePackage(root);return {...verified,output:root};
+ await assertPackageSourceUnchanged(source);const verified=await verifyPackage(root,{target,allowDevelopment:development});await immutablePackage(root);
+ if(phase){if(consumer)await phase.transfer('path',root,consumer);else await phase.retain('path',root,retainReason);}
+ return {...verified,output:root};
 }

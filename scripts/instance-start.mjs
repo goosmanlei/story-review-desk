@@ -10,6 +10,7 @@ import { assertFrozenStart } from './instance-freeze-proof.mjs';
 import { dockerHostPath } from '../host/instance-runtime/docker-path.mjs';
 import {providerKeyEnvironment} from '../host/instance-runtime/provider-environment.mjs';
 import {bridgeServiceConfiguration,startManagedBridge} from './instance-bridge.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
 
 export async function publishStorageOwner(runtime, inspection, endpoint) {
   if (!inspection?.State?.Running || inspection.State.Paused || inspection.State.Restarting || !/^[a-f0-9]{64}$/.test(inspection.Id || '') || !/^sha256:[a-f0-9]{64}$/.test(inspection.Image || '')) throw new Error('New storage owner must be one running Docker container');
@@ -44,6 +45,7 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
   // An explicit start also starts this instance's existing database owner before
   // loading its profile. PLAN_ONLY never starts a stopped database.
   const instancePath = values.instance || process.env.REVIEW_INSTANCE_ROOT;
+  const processPhase=values.check?null:await requiredPhase(instancePath);
   if (instancePath) await assertFrozenStart(instancePath,{freezeSha:values.freeze,port:values.port,softwareCommit:process.env.REVIEW_SOFTWARE_COMMIT});
   if (!values.check && instancePath) {
     const bootstrap = JSON.parse(await readFile(path.join(path.resolve(instancePath), 'instance.json'), 'utf8'));
@@ -75,9 +77,18 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
     catch (error) { if (error.code !== 'ENOENT') throw error; await mkdir(destination, { mode: 0o700 }); }
     if (!(await realpath(destination)).startsWith(runtime.root + path.sep)) throw new Error('Runtime path escapes instance');
   }
-  const secretDirectory = await mkdtemp(path.join(runtime.root, 'runtime', '.compose-secret-'));
+  const secretRoot=processPhase?(await processPhase.environment()).REVIEW_TASK_DIR:path.join(runtime.root,'runtime');
+  const secretDirectory = await mkdtemp(path.join(secretRoot,'.compose-secret-'));
   await chmod(secretDirectory, 0o700);
   try {
+    const processImages=[];let builder;
+    if(processPhase&&!values['no-build']){
+      builder=await processPhase.builder();const record=await processPhase.read(),override={services:{}};
+      for(const service of services){const image='review-process:'+record.token+'-'+service,labels=await processPhase.expect('image',image);
+        const mapping={};for(let i=1;i<labels.length;i+=2){const at=labels[i].indexOf('=');mapping[labels[i].slice(0,at)]=labels[i].slice(at+1);}
+        override.services[service]={image,build:{labels:mapping}};processImages.push(image);}
+      const filename=path.join(secretDirectory,'process.override.json');await writeFile(filename,JSON.stringify(override),{flag:'wx',mode:0o600});baseArgs.push('--file',filename);
+    }
     if(isPostgres){const pg=await ensurePostgres(runtime.root);const envPatch={REVIEW_DATABASE_BACKEND:'postgres',REVIEW_POSTGRES_HOST:'postgres',REVIEW_POSTGRES_PASSWORD_FILE:'/run/secrets/postgres-password'};const service={environment:envPatch,networks:['default','story-database'],volumes:[{type:'bind',source:path.join(runtime.root,'runtime/private/postgres-password'),target:'/run/secrets/postgres-password',read_only:true}]};const override=path.join(secretDirectory,'postgres.override.json');await writeFile(override,JSON.stringify({services:{'review-site':service,'shot-production-worker':service,'comment-polish-worker':service,'material-review-worker':service},networks:{'story-database':{external:true,name:pg.network}}}),{flag:'wx',mode:0o600});baseArgs.push('--file',override);}
     if (key) {
       // Local credentials are outside the business repository and excluded from backups.
@@ -99,13 +110,13 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
     }
     await assertFrozenStart(runtime.root,{freezeSha:values.freeze,port:env.REVIEW_PORT,softwareCommit:runtime.softwareCommit});
     if (!aiEnabled && !values['build-only']) await run('docker', [...baseArgs, '--profile', 'assistant-ai', 'stop', 'comment-polish-worker', 'material-review-worker'], env);
-    if (!values['no-build']) await run('docker', [...baseArgs, 'build', ...(noCache ? ['--no-cache'] : []), ...services], env);
+    if (!values['no-build']) {await run('docker', [...baseArgs, 'build', ...(builder?['--builder',builder]:[]), ...(noCache ? ['--no-cache'] : []), ...services], env);for(const image of processImages)await processPhase.capture('image',image);}
     if (values['build-only']) {
       process.stdout.write(JSON.stringify({ status: 'BUILT_NOT_STARTED', instanceId: runtime.instanceId, composeProject: runtime.composeProject, softwareCommit: runtime.softwareCommit, services, containersStarted: false, containersStopped: false, modelCalls: 0 }, null, 2) + '\n');
       return;
     }
     await assertFrozenStart(runtime.root,{freezeSha:values.freeze,port:env.REVIEW_PORT,softwareCommit:runtime.softwareCommit});
-    await run('docker', [...baseArgs, 'up', '-d', ...(forceRecreate || aiEnabled ? ['--force-recreate'] : []), '--wait', '--wait-timeout', '120', ...services], env);
+    await run('docker', [...baseArgs, 'up', '-d', '--no-build', ...(forceRecreate || aiEnabled ? ['--force-recreate'] : []), '--wait', '--wait-timeout', '120', ...services], env);
     const response = await fetch('http://127.0.0.1:' + env.REVIEW_PORT + '/api/v8/snapshot');
     if (!response.ok) throw new Error('Deployed instance snapshot did not become healthy');
     const snapshot = await response.json();
@@ -118,6 +129,7 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
     const database = JSON.parse((await runMaintenanceProcess('docker', ['exec', '-i', '-e', 'REVIEW_SQLITE_OWNER=CONTAINER', inspection.Id, 'node', '/app/host/instance-runtime/cli.mjs', 'host-profile', '--instance', '/instance'], { env })).stdout);
     for (const field of ['instanceId', 'releaseId', 'runtimeEpoch']) if (database[field] !== endpoint[field]) throw new Error('New owner endpoint differs from its database: ' + field);
     const owner = await publishStorageOwner(runtime, inspection, endpoint);
+    for(const image of processImages)await processPhase.retain('image',image,'Verified current instance runtime '+runtime.instanceId+' release '+endpoint.releaseId);
     const {startMaintenanceWorker}=await import('./instance-maintenance-worker.mjs');
     await startMaintenanceWorker(runtime.root,'http://127.0.0.1:'+env.REVIEW_PORT);
     const {startGitCheckpointWorker}=await import('./instance-git-checkpoint.mjs');

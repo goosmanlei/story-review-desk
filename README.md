@@ -28,3 +28,5 @@
 按任务阅读：[实例隔离](docs/instance-isolation.md)、[系统配置](docs/system-configuration.md)、[故事设定](docs/story-settings.md)、[素材关系](docs/material-relationship-architecture.md)。
 
 私有可写 VPS 的完整发布、覆盖与干净回滚工具见 [VPS 发布器](docs/vps.md)。源码提供能力不代表任何 VPS 已部署。
+
+Build, QA and publication process ownership and immediate cleanup: [process lifecycle](docs/process-cleanup.md).

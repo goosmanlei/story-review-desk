@@ -6,14 +6,23 @@ import {command} from '../host/instance-runtime/vps-process.mjs';
 import {emptyVpsState} from '../host/instance-runtime/vps-journal.mjs';
 import {verifiedFileStream,writeJsonAtomic} from '../host/instance-runtime/vps-package.mjs';
 import {validateRestoreMeasurement} from '../host/instance-runtime/vps-capacity.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
 
 /** Local-only, no ingress/web/workers/auth. Every volume and directory has an
  * exact random owner inventory; no full archive is staged in scratch. */
 export async function measureVpsRestore({target,baselineRoot,baseline,softwareCommit,restoreContractSha256,appImage,postgresImage,architecture,auditPath}){
- const hostRoot=await mkdtemp(path.join(path.dirname(auditPath),'.vps-capacity-'));
+ const phase=await requiredPhase(auditPath);
+ const hostRoot=phase?await phase.directory(path.join((await phase.environment()).REVIEW_TASK_DIR,'capacity-'+randomUUID())):await mkdtemp(path.join(path.dirname(auditPath),'.vps-capacity-'));
  const local={...target,targetId:'capacity-'+randomUUID(),hostRoot};
  const driver=new VpsDriver(local,emptyVpsState(local));
- driver.docker=(args,options)=>command('docker',['run','create'].includes(args[0])?[args[0],'--platform',architecture,'--pull','never',...args.slice(1)]:args,options);
+ driver.docker=async(args,options)=>{
+  const container=['run','create'].includes(args[0]),kind=container?'container':['volume','network'].includes(args[0])&&args[1]==='create'?args[0]:null;
+  const name=container?args[args.indexOf('--name')+1]:kind?args.at(-1):null;
+  const labels=phase&&kind?await phase.expect(kind,name):[];
+  const actual=container?[args[0],'--platform',architecture,'--pull','never',...labels,...args.slice(1)]:kind?[...args.slice(0,2),...labels,...args.slice(2)]:args;
+  const result=await command('docker',actual,options);
+  if(phase&&kind&&phase.object(kind,name))await phase.capture(kind,name);return result;
+ };
  driver.startWeb=async()=>{};
  const manifest={releaseId:'measurement_'+randomUUID(),softwareCommit,business:{instanceId:baseline.instanceId,sourceReleaseId:baseline.releaseId},baseline,images:[{role:'app',reference:appImage},{role:'postgres',reference:postgresImage}],files:[]};
  const source={manifest,open:relative=>{
@@ -28,6 +37,7 @@ export async function measureVpsRestore({target,baselineRoot,baseline,softwareCo
    const [total,wal]=output.split('\n').map(line=>Number(line.split(/\s+/)[0])*1024);
    if(!Number.isSafeInteger(total)||!Number.isSafeInteger(wal)||wal>total)throw Error('Invalid PostgreSQL allocation sample');
    samples.push({at:new Date().toISOString(),postgresBytes:total,dataBytes:total-wal,walBytes:wal});
+   if(samples.length>120){const old=samples.splice(0,samples.length-119);samples.unshift({at:old.at(-1).at,postgresBytes:Math.max(...old.map(s=>s.postgresBytes)),dataBytes:Math.max(...old.map(s=>s.dataBytes)),walBytes:Math.max(...old.map(s=>s.walBytes))});}
    await writeJsonAtomic(auditPath,{...evidence,runtime,samples});
   }catch(error){if(!/No such|is not running/.test(error.message))measurementError=error;}
  })().finally(()=>{measuring=null;});
@@ -40,7 +50,7 @@ export async function measureVpsRestore({target,baselineRoot,baseline,softwareCo
   const maxWalSizeBytes=Number(await driver.docker(['exec',runtime.pg,'psql','-U','review','-d','review','-Atc',"SELECT pg_size_bytes(current_setting('max_wal_size'))"]));
   Object.assign(evidence,{status:proof.status,instanceId:proof.instanceId,sourceReleaseId:proof.releaseId,runtimeEpoch:proof.runtimeEpoch,originalBytesPreserved:proof.originalBytesPreserved,businessIdsPreserved:proof.businessIdsPreserved,streamPasses:proof.streamPasses,scratchArchiveBytes:proof.scratchArchiveBytes,sampleCount:samples.length,peakDataBytes:Math.max(...samples.map(s=>s.dataBytes)),peakWalBytes:Math.max(...samples.map(s=>s.walBytes)),peakPostgresBytes:Math.max(...samples.map(s=>s.postgresBytes)),maxWalSizeBytes,finishedAt:new Date().toISOString()});
   validateRestoreMeasurement(evidence,baseline,{restoreContractSha256});
-  await writeJsonAtomic(auditPath,{...evidence,runtime,samples});return evidence;
- }catch(error){await writeJsonAtomic(auditPath,{...evidence,status:'FAILED',error:String(error.message),runtime,samples});throw error;}
+  await writeJsonAtomic(auditPath,evidence);return evidence;
+ }catch(error){await writeJsonAtomic(auditPath,{...evidence,status:'FAILED',error:String(error.message).slice(0,400)});throw error;}
  finally{clearInterval(timer);await measuring;await driver.removeRuntime(runtime);await rm(hostRoot,{recursive:true});}
 }

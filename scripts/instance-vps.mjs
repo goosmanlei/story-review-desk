@@ -7,6 +7,7 @@ import {readVpsTarget} from '../host/instance-runtime/vps-target.mjs';
 import {readPackage,verifyPackage} from '../host/instance-runtime/vps-package.mjs';
 import {emptyVpsState,planVps} from '../host/instance-runtime/vps-journal.mjs';
 import {WireInput,writeWire} from '../host/instance-runtime/vps-wire.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
 const sourceRoot=fileURLToPath(new URL('..',import.meta.url));
 const quote=value=>"'"+String(value).replaceAll("'","'\\''")+"'";
 // Never set a string decoder on stdin: subsequent file frames contain arbitrary
@@ -17,8 +18,9 @@ export async function remoteVps(control,source){
  const {build}=await import('esbuild');
  const built=await build({entryPoints:[path.join(sourceRoot,'scripts/instance-vps-host.mjs')],bundle:true,platform:'node',format:'esm',target:'node22',write:false,minify:true});
  const code=built.outputFiles[0].text;if(Buffer.byteLength(code)>16*1024**2)throw Error('Publisher control bundle exceeds temporary budget');
+ if(control.action==='install-cleanup')control={...control,cleanupBundle:code};
  const remote=[control.target.runtime.nodeBinary,'-e',remoteBootstrap].map(quote).join(' ');
- const child=spawn('ssh',['-T','-C','-o','BatchMode=yes','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3',control.target.sshHost,remote],{stdio:['pipe','pipe','pipe']});
+ const child=spawn('ssh',['-T','-C','-o','BatchMode=yes','-o','ConnectTimeout=10','-o','ConnectionAttempts=1','-o','ServerAliveInterval=15','-o','ServerAliveCountMax=3',control.target.sshHost,remote],{stdio:['pipe','pipe','pipe']});
  let errorText='';child.stderr.on('data',chunk=>{errorText=(errorText+chunk).slice(-4000);});
  const done=new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',code=>code===0?resolve():reject(Error('SSH publication interrupted or failed: '+errorText)));});done.catch(()=>{});
  try{
@@ -32,11 +34,12 @@ export async function remoteVps(control,source){
  }catch(error){child.stdin.destroy();child.kill('SIGTERM');await done.catch(()=>{});throw error;}
 }
 export async function main(argv=process.argv.slice(2)){
- const {values,positionals}=parseArgs({args:argv,allowPositionals:true,options:{target:{type:'string'},package:{type:'string'},baseline:{type:'string'},'capacity-measurement':{type:'string'},instance:{type:'string'},output:{type:'string'},inspection:{type:'string'},'expected-current':{type:'string'},'operation-id':{type:'string'},connect:{type:'boolean'},development:{type:'boolean'},'fixture-host':{type:'boolean'},'recover-current':{type:'boolean'},help:{type:'boolean'}}});
- if(values.help||!positionals[0])return {commands:['inspect','plan','pack','verify','prepare-host','deploy','rollback','status'],usage:'instance-vps COMMAND --target CONFIG [--connect] [--package DIR] [--expected-current RELEASE|NONE --operation-id STABLE_ID]',boundary:'pack/verify/offline plan are local; remote commands require --connect; no credentials are copied'};
- const action=positionals[0];if(!['inspect','plan','pack','verify','prepare-host','deploy','rollback','status'].includes(action)||positionals.length!==1||!values.target)throw Error('Explicit supported command and --target are required');
+ const {values,positionals}=parseArgs({args:argv,allowPositionals:true,options:{target:{type:'string'},package:{type:'string'},baseline:{type:'string'},'capacity-measurement':{type:'string'},instance:{type:'string'},output:{type:'string'},inspection:{type:'string'},'expected-current':{type:'string'},'operation-id':{type:'string'},connect:{type:'boolean'},development:{type:'boolean'},'fixture-host':{type:'boolean'},'recover-current':{type:'boolean'},consumer:{type:'string'},'retain-reason':{type:'string'},help:{type:'boolean'}}});
+ if(values.help||!positionals[0])return {commands:['inspect','plan','pack','verify','prepare-host','deploy','rollback','status','cleanup','install-cleanup'],usage:'instance-vps COMMAND --target CONFIG [--connect] [--package DIR] [--expected-current RELEASE|NONE --operation-id STABLE_ID]',boundary:'pack/verify/offline plan are local; remote commands require --connect; no credentials are copied'};
+ const action=positionals[0];if(!['inspect','plan','pack','verify','prepare-host','deploy','rollback','status','cleanup','install-cleanup'].includes(action)||positionals.length!==1||!values.target)throw Error('Explicit supported command and --target are required');
  const target=await readVpsTarget(values.target);
- if(action==='pack'){if(Boolean(values.instance)===Boolean(values.baseline)||!values.output)throw Error('pack requires one of --instance or --baseline and a new --output directory');const {packVps}=await import('./instance-vps-pack.mjs');return packVps({target,instance:values.instance,baseline:values.baseline,capacityMeasurement:values['capacity-measurement'],output:values.output,sourceRoot,development:values.development});}
+ const phase=['pack','prepare-host','deploy','rollback','install-cleanup'].includes(action)?await requiredPhase(values.target):null;
+ if(action==='pack'){if(Boolean(values.instance)===Boolean(values.baseline)||!values.output)throw Error('pack requires one of --instance or --baseline and a new --output directory');const {packVps}=await import('./instance-vps-pack.mjs');return packVps({target,instance:values.instance,baseline:values.baseline,capacityMeasurement:values['capacity-measurement'],output:values.output,sourceRoot,development:values.development,consumer:values.consumer,retainReason:values['retain-reason']});}
  if(action==='verify'){if(!values.package)throw Error('verify requires --package');return verifyPackage(values.package,{target,allowDevelopment:values.development});}
  let source;if(values.package)source=await readPackage(values.package,{target,allowDevelopment:values.development});
  if(['deploy','plan'].includes(action)&&!source)throw Error(action+' requires --package');
@@ -45,7 +48,10 @@ export async function main(argv=process.argv.slice(2)){
  if(values['fixture-host']){if(values.connect)throw Error('Fixture mode cannot connect over SSH');const {runHost}=await import('./instance-vps-host.mjs');return runHost(control,source);}
  if(!values.connect)throw Error('Remote access requires explicit --connect; use pack/verify or plan --inspection for offline work');
  if(values.development)throw Error('UNVERSIONED packages cannot be sent to a VPS');
- return remoteVps(control,source);
+ if(phase)await phase.hostReceipt('vps-bj',{status:'UNKNOWN',targetId:target.targetId,operationId:control.operationId});
+ try{const result=await remoteVps(control,source);
+  if(phase)await phase.hostReceipt('vps-bj',{status:result.processCleanup?.status||(['HOST_PREPARED','TIMER_INSTALLED'].includes(result.status)?'CLEANED':result.status),targetId:target.targetId,operationId:control.operationId});return result;
+ }catch(error){if(phase)await phase.hostReceipt('vps-bj',{status:'CLEANUP_REQUIRED',targetId:target.targetId,operationId:control.operationId,error:String(error.message).slice(0,400)});throw error;}
 }
 export function vpsErrorResponse(error){
  const result={status:'BLOCKED',error:String(error.message||error)};

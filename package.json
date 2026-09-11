@@ -46,7 +46,9 @@
     "test:ui:material-usage": "playwright test --config tests/material-usage.ui.config.ts",
     "test:ui:material-replacement": "playwright test --config tests/material-replacement.ui.config.ts",
     "test:ui:asset-context": "playwright test --config tests/asset-context-revalidation.ui.config.ts",
-    "test:ui:material-rebase": "playwright test --config tests/material-production-rebase.ui.config.ts"
+    "test:ui:material-rebase": "playwright test --config tests/material-production-rebase.ui.config.ts",
+    "instance:process": "node scripts/instance-process.mjs",
+    "test:process": "node --test tests/process-resources.test.mjs tests/vps-process-cleanup.test.mjs"
   },
   "dependencies": {
     "next": "16.3.3",
