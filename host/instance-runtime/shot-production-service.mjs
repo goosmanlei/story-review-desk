@@ -22,7 +22,9 @@ const put=(tx,namespace,key,value,expectedRevisionId=null)=>tx.putAux({namespace
 /** Read from a single transaction. AUX render proofs must not be cached with a release. */
 export async function readCurrentShotProductionModel(tx,{api,readinessOnly=false}={}) {
   if(!api?.projectOperationalState)fail('缺少正式运行态验证器');
-  const view=await tx.readView(),model=await loadMaterialUsageEvidence(tx,await applyProductionSpatialProjection(tx,await applyShotProductionManifestProjection(tx,await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}})),{view}),{view});
+  const view=await tx.readView();
+  const projected=await applyAnimaticProjection(tx,{...view.snapshot.productionModel,spatialEvidence:view.snapshot.creativeLineage?.spatialEvidence||null,sourceHashes:view.snapshot.sourceHashes||{}},{view});
+  const model=await loadMaterialUsageEvidence(tx,await applyProductionSpatialProjection(tx,await applyShotProductionManifestProjection(tx,projected),{view}),{view,events:Object.values(view.eventsByKind||{}).flat()});
   const snapshot={...view.snapshot,productionModel:model};
   const state=episodeSourceCompiler(api).stateFor({...view,snapshot});
   model.animaticLocks=reconcileAnimaticLocks(model,state);

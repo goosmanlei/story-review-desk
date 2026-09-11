@@ -50,6 +50,7 @@ export type PagedProductionPayload = {
   };
 };
 
+export type MaterialCatalogRead = {scope:string;values:unknown[];trials:unknown[]};
 export type PagedProductionWindow = {
   key: string;
   resource: PagedProductionResource;
@@ -61,6 +62,7 @@ export type PagedProductionWindow = {
   total: number | null;
   hasMore: boolean;
   nextCursor: string | null;
+  materialCatalog?: MaterialCatalogRead;
 };
 
 const productionArrayKeys = [

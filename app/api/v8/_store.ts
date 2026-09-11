@@ -2,7 +2,7 @@ import {materialProductionCurrentBasisReasons} from '../../../host/instance-runt
 import {assetContextReviewedBindings} from '../../../host/instance-runtime/asset-context-revalidation-preservation.mjs';
 import {materialRequirementSelectionReasons} from '../../../host/instance-runtime/material-requirement-disposition.mjs';
 import {requirementInputFamilyIds} from '../../../host/instance-runtime/material-requirement-composition.mjs';
-import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
+import {deriveShotDesignRequirementBasisV3,shotDesignRequirementBasisSchema,withShotDesignRequirementBasisRead} from '../../../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {applyRequirementCompositionCoverage,type RequirementCoverageRow} from '../../../host/instance-runtime/material-requirement-composition.mjs';
 import {projectMaterialUsages,effectiveRequirementFamilyIds,materialUsageBindingsFor} from '../../../host/instance-runtime/material-usage-model.mjs';
 import {isRequirementDrivenPlanningVersion} from '../../../host/instance-runtime/shot-design-contract.mjs';
@@ -3585,43 +3585,45 @@ export function projectedStructureReviewIndexes(
   sourceOperations: EventRecord[],
   mediaStateProjection: CreativeBasisStateProjection,
 ) {
-  const canonicalSubjectKinds = new Set(['EPISODE_PLAN', 'SCENE_COVERAGE', 'SHOT_PLAN_SET']);
-  const newestFirst = applicableStructureReviewEvents(
-    data,
-    reviews,
-    creativeRevisions,
-    sourceOperations,
-    mediaStateProjection,
-  )
-    .filter((event) => (
-      event.subjectType === 'CREATIVE_REVISION'
-      && canonicalSubjectKinds.has(String(event.subjectKind || ''))
-    ))
-    .reverse();
-  const decorate = (aggregateId: string, event: EventRecord) => {
-    const syncApplied = sourceSyncSucceeded(data, sourceOperations, event, mediaStateProjection);
-    return {
-    aggregateId,
-    event,
-    projection: {
-      subjectKind: String(event.subjectKind || ''),
-      subjectRevisionId: String(event.subjectRevisionId || event.creativeRevisionId || ''),
-      subjectRevisionHash: String(event.subjectRevisionHash || ''),
-      action: String(event.action || ''),
-      reviewDecision: String(event.reviewDecision || ''),
-      lifecycleState: String(event.lifecycleState || ''),
-      canFlowDownstream: event.action === 'APPROVE_AND_RELEASE' ? syncApplied : false,
-      sourceSyncRequired: event.sourceSyncRequired === true,
-      sourceSyncState: event.sourceSyncRequired === true ? (syncApplied ? 'SUCCEEDED' : 'PENDING') : 'NOT_REQUIRED',
-    },
-  };
-  };
-  const byRevision = latestBy(newestFirst, (event) => String(event.subjectRevisionId || event.creativeRevisionId || ''))
-    .map(({ aggregateId, event }) => decorate(aggregateId, event));
-  const bySubject = latestBy(newestFirst, (event) => (
-    event.subjectKind && event.subjectId ? `${event.subjectKind}::${event.subjectId}` : ''
-  )).map(({ aggregateId, event }) => decorate(aggregateId, event));
-  return { byRevision, bySubject };
+  return withShotDesignRequirementBasisRead(data.productionModel, () => {
+    const canonicalSubjectKinds = new Set(['EPISODE_PLAN', 'SCENE_COVERAGE', 'SHOT_PLAN_SET']);
+    const newestFirst = applicableStructureReviewEvents(
+      data,
+      reviews,
+      creativeRevisions,
+      sourceOperations,
+      mediaStateProjection,
+    )
+      .filter((event) => (
+        event.subjectType === 'CREATIVE_REVISION'
+        && canonicalSubjectKinds.has(String(event.subjectKind || ''))
+      ))
+      .reverse();
+    const decorate = (aggregateId: string, event: EventRecord) => {
+      const syncApplied = sourceSyncSucceeded(data, sourceOperations, event, mediaStateProjection);
+      return {
+      aggregateId,
+      event,
+      projection: {
+        subjectKind: String(event.subjectKind || ''),
+        subjectRevisionId: String(event.subjectRevisionId || event.creativeRevisionId || ''),
+        subjectRevisionHash: String(event.subjectRevisionHash || ''),
+        action: String(event.action || ''),
+        reviewDecision: String(event.reviewDecision || ''),
+        lifecycleState: String(event.lifecycleState || ''),
+        canFlowDownstream: event.action === 'APPROVE_AND_RELEASE' ? syncApplied : false,
+        sourceSyncRequired: event.sourceSyncRequired === true,
+        sourceSyncState: event.sourceSyncRequired === true ? (syncApplied ? 'SUCCEEDED' : 'PENDING') : 'NOT_REQUIRED',
+      },
+    };
+    };
+    const byRevision = latestBy(newestFirst, (event) => String(event.subjectRevisionId || event.creativeRevisionId || ''))
+      .map(({ aggregateId, event }) => decorate(aggregateId, event));
+    const bySubject = latestBy(newestFirst, (event) => (
+      event.subjectKind && event.subjectId ? `${event.subjectKind}::${event.subjectId}` : ''
+    )).map(({ aggregateId, event }) => decorate(aggregateId, event));
+    return { byRevision, bySubject };
+  });
 }
 
 export function projectedScopeLocks(

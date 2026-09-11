@@ -15,6 +15,15 @@ import type {ExpectedOutput,MaterialRequirement} from '../app/production-workben
 const base=JSON.parse(readFileSync(new URL('./fixtures/generic-adopted-scene.json',import.meta.url),'utf8'));
 const ids={a:'material-person-a',b:'material-person-b',place:'material-place',day:'material-state-day',night:'material-state-night',bday:'material-state-b',empty:'material-state-empty',ep1:'material-episode-uid-1',ep2:'material-episode-uid-2',s1:'material-scene-uid-1',s2:'material-scene-uid-2'};
 const hash=(n:number)=>n.toString(16).padStart(64,'0');
+test('主页面一次读取完整素材依赖，试制目录未齐前不展示，子页面不重复读取',async({page})=>{
+ const f=await materialFixture(page),counts=new Map<string,number>();let release!:()=>void;
+ const pending=new Promise<void>(resolve=>{release=resolve;});
+ page.on('request',request=>{const url=new URL(request.url());if(['/api/instance/domain-workspaces','/api/instance/material-directory','/api/instance/production-preparation'].includes(url.pathname))counts.set(url.pathname,(counts.get(url.pathname)||0)+1);});
+ await page.route('**/api/trial/scopes',async route=>{await pending;await route.fallback();});
+ await page.goto('/?view=materials');await expect.poll(()=>f.materialRequests.length).toBeGreaterThan(0);await expect(root(page)).not.toBeVisible();
+ release();await expect(root(page)).toBeVisible();await page.waitForTimeout(100);
+ expect([...counts.values()]).toEqual([1,1,1]);clean(f);
+});
 test('五轴素材筛选都可再次点击取消，其他筛选保持不变',async({page})=>{
  const f=await materialFixture(page);await open(page,'classification');
  expect(f.materialRequests.every(query=>!new URLSearchParams(query).has('requirementId'))).toBe(true);

@@ -6,6 +6,7 @@ import { projectIdFor } from './instance-profile';
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {EntityMaterialCatalog,MaterialReviewPoints} from './entity-material-catalog';
+import type {MaterialCatalogRead} from './paged-production-data';
 import {ProductionMaterialCatalog} from './production-material-catalog';
 import {MaterialProgressBadge} from './material-appearance';
 import {MaterialProductionSetupEditor} from './material-production-setup-editor';
@@ -86,6 +87,7 @@ type Props = {
   model: ProductionModel;
   snapshotId?: string;
   catalogLoading?: boolean;
+  catalogRead?:MaterialCatalogRead;
   catalogTotal?: number | null;
   stateProjection: OperationalStateProjection | null;
   viewState: MaterialCenterViewState;
@@ -914,7 +916,7 @@ export function MaterialProductionCenter(props:Props) {
   return <><div className="material-catalog-tabs" role="tablist" aria-label="素材目录视图"><button type="button" role="tab" aria-selected={catalog==='basic'} onClick={()=>selectCatalog('basic')}>基础素材</button><button type="button" role="tab" aria-selected={catalog==='production'} onClick={()=>selectCatalog('production')}>制作过程素材</button></div>{catalog==='production'?<ProductionMaterialCatalog model={props.model} snapshotId={props.snapshotId}/>:<BasicMaterialProductionCenter {...props}/>}</>;
 }
 
-function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalogLoading=false, stateProjection: liveProjection, viewState, onViewStateChange, onOpenStoryScene, onOpenConsumer }: Props) {
+function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalogLoading=false, catalogRead, stateProjection: liveProjection, viewState, onViewStateChange, onOpenStoryScene, onOpenConsumer }: Props) {
   const [detail, setDetail] = useState<{id:string;snapshotId:string;page:PagedProductionPayload['page']} | null>(null);
   const [detailFailure,setDetailFailure]=useState<{id:string;snapshotId?:string;attempt:number;message:string}|null>(null);
   const [detailAttempt, setDetailAttempt] = useState(0);
@@ -1120,5 +1122,5 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
       </>}
     </article>;
 
-  return <div className="material-center"><section id="material-workspace-panel" className="material-workspace-panel" aria-label="素材分类管理"><h2>素材分类管理</h2><EntityMaterialCatalog model={model} requirements={requirements} catalogLoading={catalogLoading} selectedRequirement={selectedRequirement} mode={workspaceMode} onSelect={select} stageFor={catalogStageFor} inspector={materialInfoCard} inspectorReady={detailReady} episodeScope={episodeScope} sceneScope={sceneScope} mediaFilter={mediaType} stageFilter={creatorStage} search={viewState.search} onFiltersChange={next=>patch({...next,businessPrimary:'全部',category:'全部',coverage:'全部'})}/></section></div>;
+  return <div className="material-center"><section id="material-workspace-panel" className="material-workspace-panel" aria-label="素材分类管理"><h2>素材分类管理</h2><EntityMaterialCatalog initialRead={catalogRead} model={model} requirements={requirements} catalogLoading={catalogLoading} selectedRequirement={selectedRequirement} mode={workspaceMode} onSelect={select} stageFor={catalogStageFor} inspector={materialInfoCard} inspectorReady={detailReady} episodeScope={episodeScope} sceneScope={sceneScope} mediaFilter={mediaType} stageFilter={creatorStage} search={viewState.search} onFiltersChange={next=>patch({...next,businessPrimary:'全部',category:'全部',coverage:'全部'})}/></section></div>;
 }

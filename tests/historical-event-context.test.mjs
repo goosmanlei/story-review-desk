@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {gzipSync} from 'node:zlib';
 import {mkdtempSync,mkdirSync,writeFileSync,rmSync,realpathSync,symlinkSync,unlinkSync,linkSync,chmodSync} from 'node:fs';
 import path from 'node:path';
-import {captureHistoricalEventContexts,historicalEventContextReader,historicalEventContextsHash} from '../host/instance-historical-event-context.mjs';
+import {captureHistoricalEventContexts,verifyHistoricalEventContexts,historicalEventContextReader,historicalEventContextsHash} from '../host/instance-historical-event-context.mjs';
 import {canonicalJson,sha256,selectPublishedReleaseAt} from '../host/instance-runtime/index.mjs';
 import {exerciseEpisodeScope} from './episode-scope-progress.test.mjs';
 import {validateModernEventClosure,digest,frozenEventManifest} from '../host/instance-modern-event-validator.mjs';
@@ -24,6 +24,7 @@ function fixture(){
   return {instanceId,profile,graph,snapshot,release,event,events:[event],records,tx,calls};
 }
 const capture=f=>captureHistoricalEventContexts(f.tx,{events:f.events,instanceId:f.instanceId});
+const verify=f=>verifyHistoricalEventContexts(f.tx,{events:f.events,instanceId:f.instanceId});
 const reader=(f,bundle)=>historicalEventContextReader(bundle,{events:f.events,expectedHash:bundle.contextsHash,instanceId:f.instanceId});
 function rehash(bundle){bundle.contextsHash=historicalEventContextsHash(bundle);return bundle;}
 function descriptor(overrides={}){return {release_id:'release:one',snapshot_id:'snapshot:one',snapshot_sha256:hash('snapshot'),recipes_sha256:hash('recipes'),profile_revision_id:'profile',source_revision_ids_json:'["source"]',created_at:'2026-01-01T00:00:01.000Z',...overrides};}
@@ -51,6 +52,11 @@ test('candidate frozen requirement values never reconstruct the old source state
   const f=fixture();f.event.materialRequirementSet={contentHash:hash('invented future')};const bundle=await capture(f);
   assert.equal(reader(f,bundle)(f.event).productionModel.materialRequirements[0].requirementHash,hash('before'));
 });
+test('verification-only reads the complete closure without returning a transport envelope',async()=>{
+ const f=fixture(),reads=[],read=f.tx.readDocumentRevision;
+ f.tx.readDocumentRevision=async id=>{reads.push(id);return read(id);};
+ assert.equal(await verify(f),undefined);assert.deepEqual(reads,['old-source','script']);
+});
 for(const [name,mutate] of Object.entries({
   'missing published document':f=>f.records.delete('script'),
   'missing historical evidence document':f=>f.records.delete('old-source'),
@@ -64,7 +70,7 @@ for(const [name,mutate] of Object.entries({
   'wrong directory AUX bytes':f=>f.records.get('directory').bytes=Buffer.from('{}'),
   'future publication':f=>f.release.createdAt='2026-01-01T00:00:03.000Z',
   'missing creation snapshot':f=>delete f.event.creationSnapshotId,
-}))test(name+' rejects host capture',async()=>{const f=fixture();mutate(f);await assert.rejects(capture(f));});
+}))test(name+' rejects capture and verification-only reads',async()=>{const f=fixture();mutate(f);await assert.rejects(capture(f));await assert.rejects(verify(f));});
 test('a self-consistent graph replacement still cannot contradict the raw published graph',async()=>{
   const f=fixture(),changed=record('graph',{...f.graph,entities:[]});f.records.set('graph',changed);f.snapshot.productionModel.domainGraphRef.sha256=changed.sha256;
   f.release.snapshotBytes=Buffer.from(canonicalJson(f.snapshot));f.release.snapshotSha256=sha256(f.release.snapshotBytes);

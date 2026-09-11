@@ -1,4 +1,4 @@
-import {captureHistoricalEventContexts} from '../instance-historical-event-context.mjs';
+import {verifyHistoricalEventContexts} from '../instance-historical-event-context.mjs';
 import {sha256} from './bytes.mjs';
 import {ASSET_CONTEXT_SOURCE,contextCheck,contextHash,validateAssetContextLedger,assetContextCurrentBasis} from './asset-context-revalidation-model.mjs';
 import {materialUsageMediaCurrent} from './material-usage-preservation.mjs';
@@ -11,7 +11,7 @@ export async function readAssetContextEvidence(tx,model,{view,events}={}){
  const producerIds=new Set();for(const doc of documents){const body=JSON.parse(doc.bytes);producerIds.add(body.basis?.legacyAdoptionProof?.producerSource?.sourceRevisionId);const id=body.baseReleaseId;if(!releaseMap.has(id)){const release=await tx.readRelease(id);contextCheck(release&&sha256(release.snapshotBytes)===release.snapshotSha256&&sha256(release.recipesBytes)===release.recipesSha256,'复核原发布字节校验失败');const snapshot=JSON.parse(release.snapshotBytes),recipes=JSON.parse(release.recipesBytes),profile=await tx.getRecord('settings','instance-profile',release.profileRevisionId);contextCheck(profile&&sha256(profile.bytes)===profile.sha256&&JSON.parse(profile.bytes).instanceId===body.basis.instanceId,'复核原发布profile不可核');releaseMap.set(id,{release,snapshot,recipes});}}
  for(const id of producerIds){contextCheck(typeof id==='string','原producer固定源缺失');if(!documents.some(d=>d.revisionId===id)){const doc=await tx.readDocumentRevision(id);contextCheck(doc,'原producer来源丢失');documents.push(doc);}}
  const contextEvents=events.filter(e=>e.eventKind==='asset-context-revalidation');
- if(contextEvents.length)await captureHistoricalEventContexts(tx,{events:contextEvents,instanceId:(await tx.getMetadata()).instanceId});
+ if(contextEvents.length)await verifyHistoricalEventContexts(tx,{events:contextEvents,instanceId:(await tx.getMetadata()).instanceId});
  const rows=validateAssetContextLedger({snapshot:{instance:view.snapshot?.instance,productionModel:model},documents,events,releaseContext:(_event,body)=>releaseMap.get(body.baseReleaseId)});
  for(const row of rows)row.mediaCurrent=await materialUsageMediaCurrent(tx,row.body.basis.source);
  return {documents,rows,releaseMap};

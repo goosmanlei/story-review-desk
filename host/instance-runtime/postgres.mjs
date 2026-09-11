@@ -114,22 +114,34 @@ export async function postgresConnection(options={}){
  return {host:process.env.REVIEW_POSTGRES_HOST||locator.service||'postgres',port:Number(process.env.REVIEW_POSTGRES_PORT||5432),database:locator.database||'review',user:process.env.REVIEW_POSTGRES_USER||'review',password,connectionTimeoutMillis:5000,statement_timeout:30000,application_name:'story-review'};
 }
 class PgUnit {
- constructor(client,repository,writable=false){this.client=client;this.repository=repository;this.writable=writable;this.backend='postgres';this.localReleases=new Map();}
+ constructor(client,repository,writable=false){this.client=client;this.repository=repository;this.writable=writable;this.backend='postgres';this.localReleases=new Map();this.metadataReads=new Map();}
  async query(sql,params=[]){return this.client.query(sql,params);}
- async getMetadata(){const state=await this.repositoryState(),e=await this.one('SELECT COALESCE(max(storage_sequence),0) AS seq FROM domain_events');return {...state,eventSequence:number(e.seq)};}
+ // REPEATABLE READ metadata is constant within this one read-only unit. Share
+ // in-flight descriptor reads, never rows/bodies or mutable write-transaction state.
+ async readMetadataOnce(key,read){
+  if(this.writable)return read();
+  let pending=this.metadataReads.get(key);
+  if(!pending){pending=Promise.resolve().then(read);this.metadataReads.set(key,pending);pending.catch(()=>{if(this.metadataReads.get(key)===pending)this.metadataReads.delete(key);});}
+  return pending;
+ }
+ async getMetadata(){return {...await this.readMetadataOnce('metadata',async()=>{const state=await this.repositoryState(),e=await this.one('SELECT COALESCE(max(storage_sequence),0) AS seq FROM domain_events');return {...state,eventSequence:number(e.seq)};})};}
  async getProjectionFingerprint(namespaces){
+  return this.readMetadataOnce('projection:'+canonicalJson(projectionFingerprintNamespaces(namespaces)),async()=>{
   const selected=projectionFingerprintNamespaces(namespaces),parameters=selected.map(value=>'aux:'+value);
   const heads=parameters.length?await this.all('SELECT namespace,record_key,revision_id FROM record_heads WHERE namespace = ANY($1::text[])',[parameters]):[];
   const mediaRows=await this.all('SELECT media_id,version_id,relative_path,sha256,byte_size,availability,metadata_json FROM media_versions');
   const aliases=await this.all('SELECT alias,media_id,version_id FROM media_aliases');
   return projectionFingerprintRows(selected,heads,mediaRows,aliases);
+  });
  }
  async getWorkspaceFingerprint(){
+  return this.readMetadataOnce('workspace',async()=>{
   const heads=await this.all("SELECT namespace,record_key,revision_id FROM record_heads WHERE NOT (namespace='aux:assistant-public' AND record_key='health.json')");
   const mediaRows=await this.all('SELECT media_id,version_id,relative_path,sha256,byte_size,availability,metadata_json FROM media_versions');
   const aliases=await this.all('SELECT alias,media_id,version_id FROM media_aliases');
   const documents=await this.all('SELECT alias,document_id FROM document_aliases ORDER BY alias');
   return sha256(canonicalJson([projectionFingerprintRows(['workspace-v1'],heads,mediaRows,aliases),documents]));
+  });
  }
  async listRecordRevisions(namespace,key){return (await this.all('SELECT * FROM record_revisions WHERE namespace=$1 AND record_key=$2 ORDER BY revision_number',[namespace,key])).map(rowRecord);}
  async listPublishedDocumentMetadata(){const r=await this.one('SELECT source_revision_ids_json FROM releases WHERE release_id=(SELECT current_release_id FROM repository_meta WHERE singleton=1)');if(!r)return [];return (await this.all("SELECT r.revision_id,r.record_key,r.content_sha256,octet_length(r.content_bytes) AS byte_size,r.metadata_json,r.media_type,COALESCE(array_agg(a.alias ORDER BY a.alias) FILTER(WHERE a.alias IS NOT NULL),'{}') AS aliases FROM record_revisions r LEFT JOIN document_aliases a ON a.document_id=r.record_key WHERE r.namespace='documents' AND r.revision_id=ANY($1::text[]) AND r.deleted=0 GROUP BY r.revision_id",[JSON.parse(r.source_revision_ids_json)])).map(r=>({documentId:r.record_key,revisionId:r.revision_id,sha256:r.content_sha256,byteSize:number(r.byte_size),aliases:r.aliases,metadata:JSON.parse(r.metadata_json),mediaType:r.media_type}));}
@@ -144,7 +156,32 @@ class PgUnit {
  async getRecord(namespace,key,revisionId){return rowRecord(revisionId?await this.one('SELECT * FROM record_revisions WHERE revision_id=$1 AND namespace=$2 AND record_key=$3',[revisionId,namespace,key]):await this.one('SELECT r.* FROM record_heads h JOIN record_revisions r ON r.revision_id=h.revision_id WHERE h.namespace=$1 AND h.record_key=$2',[namespace,key]));}
  async readDocument(idOrAlias,{revisionId}={}){const id=(await this.one('SELECT document_id FROM document_aliases WHERE alias=$1',[idOrAlias]))?.document_id||idOrAlias,item=await this.getRecord('documents',id,revisionId);return item?{...item,documentId:id,aliases:(await this.all('SELECT alias FROM document_aliases WHERE document_id=$1 ORDER BY alias',[id])).map(r=>r.alias)}:null;}
  async listDocuments(){return Promise.all((await this.all("SELECT record_key FROM record_heads WHERE namespace='documents' ORDER BY record_key")).map(r=>this.readDocument(r.record_key)));}
- async readDocumentRevision(id){const r=await this.one("SELECT record_key FROM record_revisions WHERE revision_id=$1 AND namespace='documents'",[text(id,'revisionId')]);return r?this.readDocument(r.record_key,{revisionId:id}):null;}
+ async readDocumentRevision(id){
+  // The revision already fixes its document identity; do not resolve that ID as
+  // an alias and repeat the record/alias round trips for each historical source.
+  const r=await this.one("SELECT r.*, ARRAY(SELECT alias FROM document_aliases WHERE document_id=r.record_key ORDER BY alias) AS aliases FROM record_revisions r WHERE r.revision_id=$1 AND r.namespace='documents'",[text(id,'revisionId')]);
+  return r?{...rowRecord(r),documentId:r.record_key,aliases:r.aliases}:null;
+ }
+ async verifyDocumentRevisions(revisionIds){
+  const ids=[...new Set(revisionIds.map(id=>text(id,'revisionId')))];if(!ids.length)return [];
+  const descriptors=await this.all("SELECT revision_id,octet_length(content_bytes) AS byte_size FROM record_revisions WHERE namespace='documents' AND revision_id=ANY($1::text[])",[ids]);
+  ensure(descriptors.length===ids.length,'INTEGRITY_FAILED','Historical source revision missing');
+  const proofs=[];let batch=[],size=0;
+  const flush=async()=>{
+   if(!batch.length)return;
+   const rows=await this.all("SELECT revision_id,record_key,content_bytes,content_sha256,deleted FROM record_revisions WHERE namespace='documents' AND revision_id=ANY($1::text[])",[batch]);
+   ensure(rows.length===batch.length,'INTEGRITY_FAILED','Historical source revision missing');
+   for(const row of rows){
+    ensure(!row.deleted&&sha256(row.content_bytes)===row.content_sha256,'INTEGRITY_FAILED','Historical source original bytes unavailable or changed');
+    proofs.push({revisionId:row.revision_id,documentId:row.record_key,sha256:row.content_sha256,byteSize:row.content_bytes.length});
+   }
+   batch=[];size=0;
+  };
+  // Only one bounded batch of original bodies is live. A single oversized
+  // document is read alone, as in readDocumentRevision; no bodies are retained.
+  for(const row of descriptors){const bytes=number(row.byte_size);if(batch.length&&(batch.length>=32||size+bytes>4*1024*1024))await flush();batch.push(row.revision_id);size+=bytes;}
+  await flush();return proofs;
+ }
  async cachedRelease(id){
   if(id===undefined)id=(await this.meta()).current_release_id;if(!id)return null;
   // Read a small descriptor in this transaction before consulting the cache. The
@@ -329,7 +366,7 @@ export class PostgresRepository {
  async backupTo(target){ensure(!this.inTransaction,'ACTIVE_TRANSACTION','Backup must run outside transaction');const archive=await this.exportState();validateArchive(archive,this.instanceId);await mkdir(path.dirname(target),{recursive:true});const file=await writeArchiveFile(target,archive);return {path:target,...file,instanceId:this.instanceId,integrity:{ok:true,instanceId:this.instanceId,schemaVersion:SCHEMA_VERSION},mediaIncluded:false};}
  async close(){await Promise.all([this.pool.end(),this.mediaPool?.end()]);}
 }
-for(const method of ['getMetadata','getProjectionFingerprint','getWorkspaceFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','readRelease','readPublishedReleaseAt','readPublishedReleaseTimeGroup','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
+for(const method of ['getMetadata','getProjectionFingerprint','getWorkspaceFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','verifyDocumentRevisions','readRelease','readPublishedReleaseAt','readPublishedReleaseTimeGroup','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
 export async function openPostgresRepository(options){const repo=new PostgresRepository({...options,connection:await postgresConnection(options)});try{await repo.validateSchema();await repo.repositoryState();return repo;}catch(error){await repo.close();throw error;}}
 async function emptySchema(connection,callback){const pool=new pg.Pool({...connection,max:1});const c=await pool.connect();try{await c.query('BEGIN');ensure(!(await c.query("SELECT 1 FROM pg_tables WHERE schemaname='public' LIMIT 1")).rowCount,'RESTORE_TARGET_EXISTS','Target PostgreSQL database must be empty');await c.query(POSTGRES_SCHEMA);await c.query('INSERT INTO repository_schema VALUES(1,$1,$2,$3)',[POSTGRES_SCHEMA_VERSION,APPLICATION_ID,sha256(POSTGRES_SCHEMA)]);await installQueryModel(new PgUnit(c,null,true));await callback(c);await c.query('COMMIT');}catch(error){await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();await pool.end();}}
 export async function createPostgresRepository(options){ensure(!readOnlyProcess(),'READ_ONLY','Cannot create read-only repository');const connection=await postgresConnection(options);await emptySchema(connection,async c=>{await c.query('INSERT INTO repository_meta VALUES(1,$1,$2,0,NULL,$3)',[text(options.instanceId,'instanceId'),randomUUID(),now()]);const unit=new PgUnit(c,null,true);await unit.putConfig({configId:'instance-profile',value:options.profile,bytes:options.profileBytes,expectedRevisionId:null});});return openPostgresRepository({...options,connection});}

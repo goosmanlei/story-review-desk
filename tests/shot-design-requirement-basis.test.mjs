@@ -8,7 +8,7 @@ import {loadModernEventRuntime} from '../host/instance-modern-event-validator.mj
 import {fileURLToPath} from 'node:url';
 import {readFileSync} from 'node:fs';
 import ts from 'typescript';
-import {deriveShotDesignRequirementBasisV3,assertShotDesignRequirementBasisV3Current,shotDesignRequirementBasisSchema} from '../host/instance-runtime/shot-design-requirement-basis.mjs';
+import {deriveShotDesignRequirementBasisV3,assertShotDesignRequirementBasisV3Current,shotDesignRequirementBasisSchema,withShotDesignRequirementBasisRead} from '../host/instance-runtime/shot-design-requirement-basis.mjs';
 import {applyRequirementCompositionCoverage} from '../host/instance-runtime/material-requirement-composition.mjs';
 import {directoryProjection} from '../host/instance-runtime/directory-projection.mjs';
 
@@ -30,6 +30,23 @@ function firstFamily(f,{directory=false}={}){
  r.sourceRef='story/material-production/plans/plan:room.json#requirement';r.materialWorkItemRef='work:room';r.plannedAssetFamilyId='family:room';return after;
 }
 const derive=snapshot=>deriveShotDesignRequirementBasisV3(snapshot.productionModel,sceneId);
+test('one pure read shares graph verification across scenes, preserves exact bases and releases its proof afterwards',()=>{
+ const f=fixture(),snapshot=withDirectoryMetadata(f),model=snapshot.productionModel;
+ const second=clone(model.sceneCoveragePlanRevisions[0]);second.id='coverage:2';second.scopeId='scene:outside';second.content.sceneId=second.scopeId;second.contentHash=domainHash(second.content);model.sceneCoveragePlanRevisions.push(second);
+ const expected=[derive(snapshot),deriveShotDesignRequirementBasisV3(model,second.scopeId)],before=JSON.stringify(model);
+ let graphClones=0;const original=globalThis.structuredClone;
+ try{
+  globalThis.structuredClone=(value,...args)=>{if(value===model.domainGraph)graphClones++;return original(value,...args);};
+  const actual=withShotDesignRequirementBasisRead(model,()=>[derive(snapshot),deriveShotDesignRequirementBasisV3(model,second.scopeId),derive(snapshot)]);
+  assert.deepEqual(actual,[...expected,expected[0]]);assert.equal(graphClones,1);assert.equal(JSON.stringify(model),before);
+ }finally{globalThis.structuredClone=original;}
+ assert.equal(expected[0].bindings[0].graphClosure.relations.length,1);assert.equal(expected[1].bindings[0].graphClosure.relations.length,0);
+ model.domainGraph.relations[0].purpose='Changed after the pure read';model.domainGraphRef.sha256=domainHash(model.domainGraph);
+ assert.notEqual(withShotDesignRequirementBasisRead(model,()=>derive(snapshot)).contentHash,expected[0].contentHash);
+ assert.throws(()=>withShotDesignRequirementBasisRead(model,()=>{derive(snapshot);throw Error('projection failed');}),/projection failed/);
+ delete model.domainGraph.relations[0].scope;model.domainGraphRef.sha256=domainHash(model.domainGraph);
+ assert.throws(()=>derive(snapshot),/关系适用范围必须为完整列表/);
+});
 function withDirectoryMetadata(f,change=()=>{}){
  const edge={id:'directory:room-state',type:'HAS_STATE',from:{kind:'ENTITY',id:'entity:room'},to:{kind:'STATE',id:'state:room-night'},label:'Categorized by state',authority:'L',appliesTo:'DIRECTORY_METADATA_ONLY',semanticEffect:'NONE',evidence:clone(evidence)};
  change(edge);const snapshot=clone(f.snapshot);

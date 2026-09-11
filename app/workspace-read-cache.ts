@@ -111,11 +111,30 @@ async function consistent<T extends Entry<unknown>[]>(read:()=>Promise<T>,signal
     if(attempt>=1)throw new Error('工作区版本在读取中变化，请重新完整读取');
   }
 }
+async function readTrialCatalogRecords(scope:string,signal?:AbortSignal):Promise<Entry<unknown>[]> {
+  const index=await readWorkspaceRecord<{scopes:Array<{id:string}>}>('/api/trial/scopes',scope,signal);
+  if(!Array.isArray(index.value.scopes)||index.value.scopes.some(item=>typeof item.id!=='string')||new Set(index.value.scopes.map(item=>item.id)).size!==index.value.scopes.length)throw new Error('试制范围格式不匹配。');
+  const snapshots=await Promise.all(index.value.scopes.map(async item=>{
+    const record=await readWorkspaceRecord<{mode:string;scope:{id:string};assets:Array<{scopeId?:string}>;recipes:unknown[]}>('/api/trial/snapshot?scopeId='+encodeURIComponent(item.id),scope,signal);
+    const data=record.value;
+    if(data.mode!=='LOCAL_TRIAL'||data.scope?.id!==item.id||!Array.isArray(data.assets)||!Array.isArray(data.recipes))throw new Error('试制资料范围或格式不匹配。');
+    return {...record,value:data.assets.every(asset=>asset.scopeId===item.id)?data:{...data,assets:data.assets.map(asset=>({...asset,scopeId:item.id}))}};
+  }));
+  return [index,...snapshots];
+}
 export async function readProductionWorkspace(resource:PagedProductionResource,filters:PagedProductionFilters,
-  scope:string,prerequisites:string[],signal?:AbortSignal) {
-  const [page,...contexts]=await consistent(()=>Promise.all([readCompleteProductionRecord(resource,filters,scope,signal),
-    ...prerequisites.map(url=>readWorkspaceRecord<{releaseId?:string;snapshotId?:string}>(url,scope,signal))]),signal);
-  return {payload:page.value,contexts:contexts.map(entry=>entry.value)};
+  scope:string,prerequisites:string[],signal?:AbortSignal,{trialCatalog=false}={}) {
+  // Start every independent prerequisite together; discovered trial scopes join
+  // the same version barrier before any catalog is exposed to its child editor.
+  const entries=await consistent(async()=>{
+    const [base,trials]=await Promise.all([
+      Promise.all([readCompleteProductionRecord(resource,filters,scope,signal),...prerequisites.map(url=>readWorkspaceRecord<{releaseId?:string;snapshotId?:string}>(url,scope,signal))]),
+      trialCatalog?readTrialCatalogRecords(scope,signal):Promise.resolve([] as Entry<unknown>[]),
+    ]);
+    return [...base,...trials];
+  },signal);
+  const page=entries[0] as Entry<PagedProductionPayload>,contexts=entries.slice(1,prerequisites.length+1) as Entry<{releaseId?:string;snapshotId?:string}>[];
+  return {payload:page.value,contexts:contexts.map(entry=>entry.value),materialCatalog:resource==='materials'?{scope,values:contexts.map(entry=>entry.value),trials:trialCatalog?entries.slice(prerequisites.length+2).map(entry=>entry.value):[]}:undefined};
 }
 export async function readWorkspaceBatch<T>(urls:string[],scope:string,signal?:AbortSignal):Promise<T[]> {
   return (await consistent(()=>Promise.all(urls.map(url=>readWorkspaceRecord<T>(url,scope,signal))),signal)).map(entry=>entry.value);

@@ -78,7 +78,11 @@ export async function assetContextBaseRelease(tx,event){
  }
  return tx.readPublishedReleaseAt({recordedBefore:event.recordedAt,snapshotId:event.creationSnapshotId});
 }
-export async function captureHistoricalEventContexts(tx,{events,instanceId}){
+export function captureHistoricalEventContexts(tx,options){return readHistoricalEventContexts(tx,options,true);}
+/** Validate the same original-byte closure when no child-process transport is
+ * needed. Never create/compress a capture envelope that the caller discards. */
+export async function verifyHistoricalEventContexts(tx,options){await readHistoricalEventContexts(tx,options,false);}
+async function readHistoricalEventContexts(tx,{events,instanceId},capture){
   const metadata=await tx.getMetadata();requireThat(metadata.instanceId===instanceId,'repository instance differs');
   const contexts=[],releases=new Map(),documents=new Map();
   async function document(id,expectedHash){
@@ -90,6 +94,7 @@ export async function captureHistoricalEventContexts(tx,{events,instanceId}){
   }
   async function captureRelease(release){
     requireThat(release&&sha(release.snapshotSha256)&&sha(release.recipesSha256)&&sha256(release.snapshotBytes)===release.snapshotSha256&&sha256(release.recipesBytes)===release.recipesSha256,'published snapshot/recipes original hash differs');
+    for(const bytes of [release.snapshotBytes,release.recipesBytes])requireThat(bytes.length>0&&bytes.length<=maxReleaseBytes,'published release exceeds the byte limit');
     const prior=releases.get(release.releaseId);if(prior){requireThat(same(prior.release,descriptor(release)),'release identity changed within capture');return;}
     const snapshot=JSON.parse(release.snapshotBytes),recipes=JSON.parse(release.recipesBytes);
     requireThat(snapshot.snapshotId===release.snapshotId&&recipes.snapshotId===release.snapshotId,'published snapshot/recipes identity differs');
@@ -99,6 +104,11 @@ export async function captureHistoricalEventContexts(tx,{events,instanceId}){
     requireThat(Array.isArray(release.sourceRevisionIds)&&new Set(release.sourceRevisionIds).size===release.sourceRevisionIds.length,'published source revision closure differs');
     const refs=fixedSourceReferences(snapshot.productionModel),sourceProof=[];
     for(const id of release.sourceRevisionIds)refs.set(id,refs.get(id)||null);
+    if(tx.verifyDocumentRevisions){
+      const missing=[...refs.keys()].filter(id=>!documents.has(id));
+      for(const proof of await tx.verifyDocumentRevisions(missing))documents.set(proof.revisionId,proof);
+      requireThat(missing.every(id=>documents.has(id)),'published source revision closure differs');
+    }
     for(const [id,expectedHash] of [...refs].sort(([a],[b])=>a.localeCompare(b)))sourceProof.push(await document(id,expectedHash));
     const model=snapshot.productionModel||{},auxProof=[];
     for(const [namespace,revisionId,expectedHash] of [['domain-graph',model.domainGraphRef?.revisionId,model.domainGraphRef?.sha256],['material-directory',model.materialDirectory?.revisionId,model.materialDirectory?.sourceSha256]]){
@@ -112,7 +122,7 @@ export async function captureHistoricalEventContexts(tx,{events,instanceId}){
       auxProof.push({namespace:'settings',key:'system-configuration',...verifiedRecord(config,ref.revisionId,ref.sha256,'Configuration')});
       requireThat(same(model.systemConfiguration?.reference,ref)&&same(recipes.configurationRef,ref)&&same(model.systemConfiguration.config,JSON.parse(config.bytes).configuration),'historical configuration projection differs');
     }
-    releases.set(release.releaseId,{release:descriptor(release),snapshotBytes:compressed(release.snapshotBytes),recipesBytes:compressed(release.recipesBytes),publicProfile,profileProof,sourceProof,auxProof});
+    releases.set(release.releaseId,{release:descriptor(release),...(capture?{snapshotBytes:compressed(release.snapshotBytes),recipesBytes:compressed(release.recipesBytes),publicProfile,profileProof,sourceProof,auxProof}:{})});
   }
   for(const {event,role} of selected(events)){
     requireThat(Number.isSafeInteger(event.eventSequence)&&event.eventSequence>0&&Number.isFinite(Date.parse(event.recordedAt)),'historical event lacks a real sequence/timestamp');
@@ -139,6 +149,7 @@ export async function captureHistoricalEventContexts(tx,{events,instanceId}){
     }
     contexts.push({eventId:event.eventId,eventSha256:hash(event),role,releaseId:release.releaseId});
   }
+  if(!capture)return;
   const body={schemaVersion,instanceId,contexts:contexts.sort((a,b)=>a.eventId.localeCompare(b.eventId)),releases:[...releases.values()].sort((a,b)=>a.release.releaseId.localeCompare(b.release.releaseId))};
   return {...body,contextsHash:historicalEventContextsHash(body)};
 }

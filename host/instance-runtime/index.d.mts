@@ -26,6 +26,8 @@ export interface InstanceReadUnit {
   readView(): Promise<RepositoryView>;
   readDocument(idOrAlias: string, options?: { revisionId?: string }): Promise<RepositoryDocument | null>;
   readDocumentRevision(revisionId: string): Promise<RepositoryDocument | null>;
+  /** Optional bounded original-byte verification; legacy adapters use individual reads. */
+  verifyDocumentRevisions?(revisionIds:string[]):Promise<Array<{revisionId:string;documentId:string;sha256:string;byteSize:number}>>;
   readRelease(releaseId?: string): Promise<RepositoryRelease | null>;
   /** Latest real publication strictly before an immutable event, across all snapshot IDs. */
   readPublishedReleaseTimeGroup(input:{recordedBefore:string;inclusive?:boolean}):Promise<Array<Omit<RepositoryRelease,'snapshotBytes'|'recipesBytes'>>>;
@@ -62,6 +64,7 @@ export class InstanceRepository implements InstanceReadUnit {
   dbPath?: string; instanceId: string; backend?: 'sqlite'|'postgres'; readonly inTransaction: boolean; readonly transactionMode: 'READ'|'WRITE'|null;
   getRecord: InstanceReadUnit['getRecord']; getMetadata: InstanceReadUnit['getMetadata']; listRecordRevisions: InstanceReadUnit['listRecordRevisions']; listPublishedDocumentMetadata: InstanceReadUnit['listPublishedDocumentMetadata']; getPublishedDocument: InstanceReadUnit['getPublishedDocument'];
   readView: InstanceReadUnit['readView']; readDocument: InstanceReadUnit['readDocument']; listDocuments: InstanceReadUnit['listDocuments'];
+  verifyDocumentRevisions?:InstanceReadUnit['verifyDocumentRevisions'];
   readDocumentRevision: InstanceReadUnit['readDocumentRevision']; readRelease: InstanceReadUnit['readRelease']; readPublishedReleaseAt: InstanceReadUnit['readPublishedReleaseAt']; readPublishedReleaseTimeGroup:InstanceReadUnit['readPublishedReleaseTimeGroup']; listMedia: InstanceReadUnit['listMedia'];
   getConfig: InstanceReadUnit['getConfig']; getProfile: InstanceReadUnit['getProfile']; getAux: InstanceReadUnit['getAux']; listAux: InstanceReadUnit['listAux'];
   listEvents: InstanceReadUnit['listEvents']; findIdempotentEvent: InstanceReadUnit['findIdempotentEvent']; getMedia: InstanceReadUnit['getMedia']; resolveMedia: InstanceReadUnit['resolveMedia'];

@@ -39,9 +39,9 @@ function graphShape(graph){
  for(const name of ['entities','states','representations','relations','requirements']){const ids=new Set();for(const row of rows(graph[name],name)){record(row,name);identifier(row.id,name);if(ids.has(row.id))fail('域图身份不唯一',{bindingId:row.id});ids.add(row.id);}}
  for(const rep of graph.representations){if(!Array.isArray(rep.assetFamilyIds)||rep.assetFamilyIds.some(id=>typeof id!=='string'))fail('表现的实现族必须为身份列表');}
 }
-function validateDomainRequirement(model,requirement,graph){
+function validateDomainRequirement(model,requirement,graph,graphHash){
  const demand=exact(graph.requirements,requirement.id,'正式需求'),rep=exact(graph.representations,demand.representationId,'正式表现');
- if(!model.domainGraphRef?.revisionId||model.domainGraphRef.sha256!==hash(graph))fail('当前域图缺少精确修订和 SHA 证明');
+ if(!model.domainGraphRef?.revisionId||model.domainGraphRef.sha256!==graphHash)fail('当前域图缺少精确修订和 SHA 证明');
  if(requirement.requirementHash!==hash({demand,representation:rep}))fail('当前需求投影与域图原始哈希不一致',{requirementId:requirement.id});
  const fields={title:demand.title,representationRef:rep.id,entityRef:rep.entityId,stateRef:rep.stateId,mediaType:demand.mediaType,category:demand.category,assetFamilyRefs:rep.assetFamilyIds,scopeBindings:demand.scope,reuseScope:demand.reuseScope,acceptanceCriteria:demand.acceptanceCriteria,sourceBindings:demand.evidence};
  for(const [key,value] of Object.entries(fields))if(!same(requirement[key],value))fail('当前需求语义投影与正式域图不一致',{requirementId:requirement.id,field:key});
@@ -122,6 +122,23 @@ function semanticGraphClosure(model,graph,seeds,sceneId,coverage){
   definitions:{entityTypes:pick('entityTypes',entities.map(r=>r.type)),representationTypes:pick('representationTypes',representations.map(r=>r.type)),relationTypes:pick('relationTypes',relations.map(r=>r.type)),stateDimensions:pick('stateDimensions',dimensions)}};
 }
 
+const graphReads=new WeakMap();
+/** Only a synchronous, pure projection may reuse this graph proof. The scope
+ * ends before any caller can write or await another transaction; nothing is
+ * retained between reads, even when the same model object is later modified. */
+export function withShotDesignRequirementBasisRead(model,read){
+ const previous=graphReads.get(model);graphReads.set(model,{});
+ try{return read();}finally{if(previous)graphReads.set(model,previous);else graphReads.delete(model);}
+}
+function requirementGraph(model){
+ const context=graphReads.get(model);
+ if(context?.value)return context.value;
+ const rawGraph=model.domainGraph||{schemaVersion:'1.0',entities:[],states:[],representations:[],relations:[],requirements:[]};assertJson(rawGraph);graphShape(rawGraph);
+ const directory=refreshDirectoryProjection(model),graph=directory?.graph||rawGraph;assertJson(graph);graphShape(graph);
+ const value={rawGraph,directory,graph,rawGraphHash:null};
+ if(context)context.value=value;
+ return value;
+}
 /** Explicit V3 authoring only. Never call this to reinterpret a frozen V1/V2 set.
  * Exact implementation hashes are checked but are not copied into the returned
  * immutable semantic object. Actual media/rights/space locks remain independent.
@@ -133,8 +150,7 @@ export function deriveShotDesignRequirementBasisV3(model,sceneId){
  const coverage=coverages[0];assertJson(coverage.content);
  if(!coverage.id||!Array.isArray(coverage.content?.beats)||!coverage.content.beats.length||hash(coverage.content)!==coverage.contentHash)fail('已采用镜头意图内容或哈希不完整');
  const refs=[...new Set(coverage.content.beats.flatMap(beat=>{if(!Array.isArray(beat.materialRequirementRefs)||beat.materialRequirementRefs.some(id=>typeof id!=='string'||!id.trim()))fail('已采用镜头意图需求引用不完整');return beat.materialRequirementRefs;}))].sort();
- const rawGraph=model.domainGraph||{schemaVersion:'1.0',entities:[],states:[],representations:[],relations:[],requirements:[]};assertJson(rawGraph);graphShape(rawGraph);
- const directory=refreshDirectoryProjection(model),graph=directory?.graph||rawGraph;assertJson(graph);graphShape(graph);
+ const prepared=requirementGraph(model),{rawGraph,directory,graph}=prepared;
  const active=new Set(),resolved=new Map();
  function bindingFor(requirementId){
   if(active.has(requirementId))fail('镜头设计需求组合存在循环',{requirementId});
@@ -146,7 +162,7 @@ export function deriveShotDesignRequirementBasisV3(model,sceneId){
   const owners=(directory?.bindings||[]).filter(row=>row.requirementId===requirementId);if(owners.length>1)fail('需求目录归属不唯一',{requirementId});
   const owner=owners[0];if(owner)assertJson(owner);
   const domainManaged=requirement.sourceKind==='DOMAIN_GRAPH';
-  const domain=domainManaged?validateDomainRequirement(model,requirement,rawGraph):null;
+  const domain=domainManaged?validateDomainRequirement(model,requirement,rawGraph,prepared.rawGraphHash??=hash(rawGraph)):null;
   const representationId=owner?.representationId||requirement.representationRef||null,entityId=owner?.entityId||requirement.entityRef||null,stateId=owner?.stateId||requirement.stateRef||null;
   if(owner&&owner.requirementHash!==requirement.requirementHash)fail('目录与当前需求哈希不一致',{requirementId});
   const conditions={entityId,entity:condition(graph,'entities',entityId),state:condition(graph,'states',stateId),representation:condition(graph,'representations',representationId)};

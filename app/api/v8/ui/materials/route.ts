@@ -1,4 +1,5 @@
 import {workspaceReadMetadata} from '../../../../../host/instance-runtime/read-basis.mjs';
+import {conditionalWorkspaceRead,retainReadValidator} from '../../../../../host/instance-runtime/conditional-read-cache.mjs';
 import {ReadTiming} from '../../../_read-timing';
 import { postgresMaterialPage, summarizeMaterialPage, materialUsagePageBindings, materialDirectoryProjection } from '../_material-query';
 import { projectIdFor } from '../../../../instance-profile';
@@ -135,12 +136,13 @@ export async function GET(request: Request) {
   try {
     const timing=new ReadTiming();
     const repo=hostedReadOnlyMode()?null:await instanceRepository();
+    if(repo){const cached=await timing.measure('version',()=>conditionalWorkspaceRead(repo,request));if(cached){for(const [key,value]of Object.entries(timing.headers()))cached.headers.set(key,value);return cached;}}
     const read=async()=>{const [data,operations]=await Promise.all([reviewData(),operationalSnapshot()]);return {data,operations,basis:repo?await workspaceReadMetadata(repo):undefined};};
     const {data,operations,basis}=await timing.measure('read',()=>repo?repo.readTransaction(read):read());
     if (operations.snapshotId !== data.snapshotId) throw new HttpError(409, 'material projection snapshot changed during read');
     if (!process.env.REVIEW_REMOTE_READ_ONLY) {
       const response = await timing.measure('directory',()=>postgresMaterialPage(request,data,operations,validateFilters,basis));
-      if(response){for(const [key,value]of Object.entries(timing.headers()))response.headers.set(key,value);return response;}
+      if(response){if(repo)retainReadValidator(repo,request,response);for(const [key,value]of Object.entries(timing.headers()))response.headers.set(key,value);return response;}
     }
     const detailUrl=new URL(request.url);
     const requestedRequirementId=detailUrl.searchParams.get('requirementId');

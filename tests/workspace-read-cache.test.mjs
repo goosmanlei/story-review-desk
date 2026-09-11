@@ -47,3 +47,30 @@ test('same content conditional responses carry the new repository basis',async()
  let calls=0;globalThis.fetch=async()=>++calls===1?new Response('{"ok":true}',{headers:{ETag:'"same"','X-Review-Basis':'old'}}):new Response(null,{status:304,headers:{ETag:'"same"','X-Review-Basis':'new'}});
  const before=await cache.readWorkspaceJson('/stable','basis');const after=await cache.readWorkspaceBatch(['/stable'],'basis');assert.equal(after[0],before);
 });
+test('complete material catalog starts prerequisites together and waits for exact trial snapshots once',async()=>{
+ const calls=[],held=delay();let done=false;
+ globalThis.fetch=async url=>{
+  calls.push(url);let value;
+  if(url.includes('/ui/materials'))value=page(['a']);
+  else if(url==='/api/trial/scopes')value={scopes:[{id:'trial-one'}]};
+  else if(url.includes('/trial/snapshot')){await held.promise;value={mode:'LOCAL_TRIAL',scope:{id:'trial-one'},assets:[{versionId:'v'}],recipes:[]};}
+  else value={releaseId:'release'};
+  return new Response(JSON.stringify(value),{headers:{ETag:'"same"','X-Review-Basis':'same'}});
+ };
+ const pending=cache.readProductionWorkspace('materials',{},'bundle',['/directory','/preparation'],undefined,{trialCatalog:true}).then(value=>{done=true;return value;});
+ await new Promise(yes=>setImmediate(yes));assert(calls.includes('/directory'));assert(calls.includes('/preparation'));assert.equal(done,false);
+ held.resolve();const result=await pending;assert.equal(result.materialCatalog.trials[0].assets[0].scopeId,'trial-one');assert.equal(result.materialCatalog.values.length,2);
+ assert.equal(calls.filter(url=>url==='/directory').length,1);assert.equal(calls.filter(url=>url==='/api/trial/scopes').length,1);
+});
+test('trial scope changes restart the whole material bundle and a failed scope cannot appear empty',async()=>{
+ let indexes=0;
+ globalThis.fetch=async url=>{
+  const isIndex=url==='/api/trial/scopes';if(isIndex)indexes++;
+  const old=isIndex&&indexes===1;
+  const value=url.includes('/ui/materials')?page(['a']):isIndex?{scopes:[{id:old?'old':'new'}]}:url.includes('/trial/snapshot')?{mode:'LOCAL_TRIAL',scope:{id:url.endsWith('old')?'old':'new'},assets:[],recipes:[]}:{releaseId:'release'};
+  return new Response(JSON.stringify(value),{headers:{ETag:'"'+(old?'old':'new')+'"','X-Review-Basis':old?'old':'new'}});
+ };
+ const result=await cache.readProductionWorkspace('materials',{},'scope-race',['/directory'],undefined,{trialCatalog:true});assert.equal(indexes,2);assert.equal(result.materialCatalog.trials[0].scope.id,'new');
+ globalThis.fetch=async url=>url.includes('/trial/scopes')?new Response('{"error":"scope unavailable"}',{status:503}):response(page(['a']));
+ await assert.rejects(cache.readProductionWorkspace('materials',{},'scope-failure',[],undefined,{trialCatalog:true}),/scope unavailable/);
+});

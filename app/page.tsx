@@ -16,6 +16,7 @@ import { handleReviewAudioPlay, stopSeamAudition, type Asset, type Coverage, typ
 import { EvidenceReaderProvider } from './evidence-reader';
 import { useAssistantFocus } from './assistant/context-provider';
 import { useInstanceProfile } from './instance-context';
+import {useRuntimeMode} from './runtime-mode';
 import type { WorkFocus } from './assistant/types';
 import { applyOperationalProjection, currentShotDesignNavigation, FullProductionWorkbench, fullProductionCurrentShotIds, resolveFamilyVersionSelection, resolveProductionContext, type OperationalStateProjection, type ProductionContext, type ProductionGateId, type ProductionModel, type ProductionNavigationIntent, type ProductionPhaseId } from './production-workbench';
 import { SystemDocumentation } from './system-documentation';
@@ -722,6 +723,7 @@ function formatBytes(value: number) {
 }
 
 export default function Home() {
+  const {hostedReadOnly}=useRuntimeMode();
   const instance = useInstanceProfile();
   const [reviewData, setReviewData] = useState<ReviewSnapshot | null>(null);
   const [loadError, setLoadError] = useState('');
@@ -777,7 +779,7 @@ export default function Home() {
       const prerequisites=request.resource==='production'
         ? ['/api/instance/production-preparation']
         : ['/api/instance/domain-workspaces?owner=MATERIAL','/api/instance/material-directory','/api/instance/production-preparation'];
-      const {payload,contexts}=await readProductionWorkspace(request.resource,filters,scope,prerequisites,request.signal);
+      const {payload,contexts,materialCatalog}=await readProductionWorkspace(request.resource,filters,scope,prerequisites,request.signal,{trialCatalog:request.resource==='materials'&&!hostedReadOnly});
       let data=reviewDataRef.current;
       if(data&&payload.snapshotId!==data.snapshotId){
         const fresh=await readWorkspaceJson<{data:ReviewSnapshot}>('/api/v8/ui/bootstrap',scope,request.signal);
@@ -796,7 +798,7 @@ export default function Home() {
       if(!current())return next.productionModel;
       productionRevisionRef.current=payload.operationRevision;
       reviewDataRef.current=next;setReviewData(next);
-      updatePagedWindow(key,value=>({...value,initialized:true,loading:false,error:'',loaded:payload.count,total:payload.total,hasMore:false,nextCursor:null}),fallback);
+      updatePagedWindow(key,value=>({...value,initialized:true,loading:false,error:'',loaded:payload.count,total:payload.total,hasMore:false,nextCursor:null,materialCatalog}),fallback);
       return next.productionModel;
     } catch(reason) {
       if(current())updatePagedWindow(key,value=>({...value,initialized:false,loading:false,error:reason instanceof Error?reason.message:'工作区读取失败'}),fallback);
@@ -804,7 +806,7 @@ export default function Home() {
     } finally {
       if(productionRequestsRef.current.get(key)===generation)updatePagedWindow(key,value=>({...value,loading:false}),fallback);
     }
-  },[instance,updatePagedWindow,commitPagedProduction]);
+  },[instance,hostedReadOnly,updatePagedWindow,commitPagedProduction]);
 
   if (!reviewData) return <main className="review-bootstrap-state"><section><span className="brand-mark">{instance.branding.mark}</span><small>LOCAL PRODUCTION DESK</small><h1>{loadError ? '审阅快照暂时无法读取' : '正在装入制作审阅台'}</h1><p>{loadError ? `本地只读接口返回异常：${loadError}` : '先装入结构与索引；依据正文会在打开时读取。'}</p>{loadError && <button type="button" onClick={() => { setLoadError(''); setAttempt((value) => value + 1); }}>重新读取</button>}</section></main>;
   if (!reviewData.creativeLineage.scenes.length && !reviewData.productionModel.materialRequirements?.length) return <EmptyInstanceDesk snapshotId={reviewData.snapshotId}/>;
@@ -2947,6 +2949,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
         <div className="section-heading"><div><p>MATERIALS</p><h2>基础素材与制作过程素材</h2></div><p className="section-intro">人物、场景与道具按实体管理；粗分镜、对白、预演和关键帧按制作步骤查找。两个视图使用同一素材版本、审阅记录和制作信息卡。</p></div>
         {materialWindow.error&&<p role="alert">后续素材摘要读取未完成：{materialWindow.error}<button onClick={()=>void onNeedProduction({resource:materialResource,filters:materialFilters,mode:'all'})}>继续读取素材目录</button></p>}
         <MaterialProductionCenter
+          catalogRead={materialWindow.materialCatalog}
           catalogLoading={materialWindow.loading||materialWindow.hasMore}
           catalogTotal={materialWindow.total}
           model={productionModel}
