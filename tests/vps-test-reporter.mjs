@@ -1,2 +1,0 @@
-// Compact local verification evidence; does not change pass/fail semantics.
-export default async function*(events){for await(const event of events){if(event.type==='test:fail')yield JSON.stringify({type:event.type,name:event.data.name,file:event.data.file,error:String(event.data.details?.error?.cause||event.data.details?.error||'').slice(0,1500)})+'\n';else if(event.type==='test:summary'&&!event.data.file)yield JSON.stringify(event)+'\n';}}

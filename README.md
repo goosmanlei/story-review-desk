@@ -1,32 +1,25 @@
 # 故事审阅台
 
-独立的本地创作工作台：每个项目绑定一部故事，通过故事创作、故事设定、素材管理与全剧制作连接创作者和 AI 工具。“当前工作”与“系统管理”读取同一套业务进展，不另存第二份完成状态。
+一个项目绑定一个故事。六个工作区提供资料与集场、故事设定、素材版本、制作、协作审阅和项目管理；网页、项目 CLI 与助手共用对象服务。
 
-本仓库只维护通用软件，不含示例故事、媒体、数据库或凭证。新任务读取 [AGENTS](AGENTS.md) 和 [STATE](STATE.md)，再按需查看文档。
+本公开仓库只维护通用软件、Schema、测试和部署工具，不包含故事数据、媒体或凭据。
 
-## 创建与运行
+需要 Node.js 22.13+、npm、Python 3 和 Docker（PostgreSQL 18.6）。macOS 使用 LaunchAgent，Linux 使用 systemd。数据库、Web 和一个后台工作器独立运行。
 
-需要 Node.js 22.13+ 和 Docker。项目必须显式选择独立实例；不读取父目录故事作为后备。
+```bash
+npm ci
+npm run project:create -- ../my-story --title 我的故事
+cd ../my-story
+npm run deploy                         # 当前核心分支已提交的 HEAD，本地部署
+npm run deploy -- --target all --dry-run
+```
 
-    npm ci
-    node scripts/instance-project-create.mjs --project ../my-story --title 我的故事
-    cd ../my-story
-    node review-software/scripts/instance-start.mjs --instance ./instance --offline --port 3000
+创建命令使用当前核心仓库创建并部署空白项目；不导入故事、不调用模型。创建后访问项目配置的本地端口。
 
-首次创建使用独立 PostgreSQL 数据卷和私有网络。访问 http://localhost:3000，确认系统规则并导入资料。故事设定可由绑定本项目的 Codex 根据资料抽取；实体和素材先保存草稿，再预览、确认发布。初始化不采用剧本、放行素材或调用模型。
+- [软件工作规则](AGENTS.md)、[发行状态](STATE.md)
+- [数据与业务接口](docs/architecture.md)
+- [部署、状态与恢复](docs/deployment.md)
+- [导入导出与配置](docs/project-data.md)
+- [过程资源管理](docs/process-cleanup.md)
 
-本地 Codex 使用既有登录与项目绑定，讨论和受控执行分开；其他 AI API 在系统配置中填写 API_KEY 的环境变量名，密钥值只放宿主环境。未配置密钥不妨碍非模型功能。
-
-可选的 [多 Agent 协作 Skill](.agents/skills/story-review-orchestrator/SKILL.md) 随软件包维护并安装到故事项目；明确启用后，由当前会话桥接后台调度、四类并行 Worker 与独立质检。安装不会自动启动任务。开发验证使用 `npm run test:orchestration`；真实隔离 PostgreSQL 验证增加 `REVIEW_TEST_POSTGRES=1`。
-
-## 数据与交付
-
-数据库是业务权威。复制项目目录不等于数据库备份；完整备份、便携导入与独立恢复见 [系统管理](docs/system-management.md)。恢复不覆盖原实例，不恢复凭证或活跃执行资格。
-
-软件默认构建空实例 Node 运行壳；Sites 必须显式提供核验过的只读导出，仅供功能 review。软件源码提交与项目内容提交分开，项目用精确 core-lock 固定软件版本。
-
-按任务阅读：[实例隔离](docs/instance-isolation.md)、[系统配置](docs/system-configuration.md)、[故事设定](docs/story-settings.md)、[素材关系](docs/material-relationship-architecture.md)。
-
-私有可写 VPS 的完整发布、覆盖与干净回滚工具见 [VPS 发布器](docs/vps.md)。源码提供能力不代表任何 VPS 已部署。
-
-Build, QA and publication process ownership and immediate cleanup: [process lifecycle](docs/process-cleanup.md).
+独立开发时经受管执行器运行检查：`npm run process -- run --task development --phase contracts -- npm test`。业务测试使用隔离 PostgreSQL 与模拟模型，不产生实际创作或付费调用。

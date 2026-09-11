@@ -1,8 +1,0 @@
-import {getRelations} from '../../../../host/instance-runtime/domain-service.mjs';
-import {emptyDomainGraph,defaultDomainConfiguration} from '../../../../host/instance-runtime/domain-defaults.mjs';
-import {relationProjection} from '../../../../host/instance-runtime/domain-projection.mjs';
-import type {DomainGraph} from '../../../../host/instance-runtime/domain-model.mjs';
-import {hostedReadOnlyMode,reviewData} from '../../v8/_store';
-import {domainRepository,domainMutation,domainError,jsonResponse,HttpError} from '../_domain';
-export async function GET(request:Request){try{const url=new URL(request.url),filters={requirementId:url.searchParams.get('requirementId')||undefined,familyId:url.searchParams.get('familyId')||undefined,entityId:url.searchParams.get('entityId')||undefined};if(hostedReadOnlyMode()){const data=await reviewData();const model=data.productionModel as typeof data.productionModel & {domainGraph?:DomainGraph;domainGraphRef?:{revisionId:string}};const graph=model.domainGraph||emptyDomainGraph();return jsonResponse({releaseId:'HOSTED_READ_ONLY',revisionId:model.domainGraphRef?.revisionId||null,graph,projection:relationProjection(graph,filters),draft:null,defaults:defaultDomainConfiguration(),configuration:model.systemConfiguration?.config?.domain||defaultDomainConfiguration(),readOnly:true});}const repo=await domainRepository();return await repo.readTransaction(async tx=>jsonResponse(await getRelations(tx,filters)));}catch(e){return domainError(e);}}
-export async function POST(request:Request){try{await domainMutation(request);throw new HttpError(409,'整图写入口已停用。请在故事设定或素材管理分别保存和确认；旧草稿可显式转交。');}catch(e){return domainError(e);}}

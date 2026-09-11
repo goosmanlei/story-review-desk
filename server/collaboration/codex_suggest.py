@@ -22,7 +22,7 @@ OVERRIDES=(
 
 async def main():
     value=json.load(sys.stdin)
-    private=pathlib.Path(value['cwd'])/'instance/runtime/private/codex-sqlite'
+    private=pathlib.Path(value['privateDirectory'])
     private.mkdir(parents=True,exist_ok=True,mode=0o700)
     # Keep the host's existing authentication and environment. Only this project's
     # private run database is isolated; no account or key is exported or replaced.
@@ -30,6 +30,7 @@ async def main():
         config_overrides=OVERRIDES+('sqlite_home='+json.dumps(str(private)),),
         client_name='review_worker',client_title='故事审阅台')
     base=value['apiUrl'].rstrip('/')+'/api/v1/'
+    reads=[]
     async def tool(params):
         args=params.get('arguments',{})
         if isinstance(args,str):args=json.loads(args)
@@ -40,8 +41,14 @@ async def main():
         elif name=='read_source':endpoint='source/'+urllib.parse.quote(args['revisionId'],safe='')+'?offset='+str(max(0,int(args.get('offset',0))))+'&limit=16000'
         else:raise RuntimeError('Unknown business read')
         def fetch():
-            with urllib.request.urlopen(base+endpoint,timeout=15) as response:return response.read(1024*1024).decode()
+            with urllib.request.urlopen(base+endpoint,timeout=15) as response:
+                raw=response.read(1024*1024+1)
+                if len(raw)>1024*1024:raise RuntimeError('Object exceeds read limit; use exact source chunks')
+                return raw.decode()
         text=await asyncio.to_thread(fetch)
+        parsed=json.loads(text)
+        if name=='read_object':reads.append({'objectId':parsed['id'],'revisionId':parsed['revision']['id'],'sha256':parsed['revision']['sha256'],**({} if args.get('revisionId') else {'objectVersion':parsed['version']})})
+        else:reads.append({'sourceRevisionId':args['revisionId'],'originalSha256':parsed['original_sha256'],'offset':parsed['offset'],'length':len(parsed['text'])})
         return {'contentItems':[{'type':'inputText','text':text}],'success':True}
     tools=[{'name':'read_object','description':'按永久身份读取本项目对象，可指定原修订。','inputSchema':{'type':'object','properties':{'id':{'type':'string'},'revisionId':{'type':'string'}},'required':['id'],'additionalProperties':False}},
            {'name':'read_source','description':'按精确来源修订和字符偏移分块读取原文，返回 SHA 和已读范围。','inputSchema':{'type':'object','properties':{'revisionId':{'type':'string'},'offset':{'type':'integer'}},'required':['revisionId'],'additionalProperties':False}}]
@@ -55,6 +62,8 @@ async def main():
         print(json.dumps({'type':'request','id':thread.id+'/'+turn.id}),flush=True)
         result=await turn.run()
         if result.status!='completed':raise RuntimeError('Codex turn was interrupted')
-        print(json.dumps({'type':'answer','value':result.final_response},ensure_ascii=False),flush=True)
+        answer=json.loads(result.final_response)
+        answer['sourceVersions']=reads
+        print(json.dumps({'type':'answer','value':answer},ensure_ascii=False),flush=True)
 
 if __name__=='__main__':asyncio.run(main())
