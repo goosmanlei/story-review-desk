@@ -1,5 +1,5 @@
 import {restoredRuntimeEpoch} from './execution-epoch.mjs';
-import pg from 'pg';
+import {createRequire} from 'node:module';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { readFile, mkdir, lstat } from 'node:fs/promises';
@@ -15,6 +15,11 @@ import {validateArchiveRows,assertArchiveRowsUnchanged,decodeArchiveRow,MAX_DECL
 import {DEFAULT_ARCHIVE_MAX_ROW_BYTES} from './archive-file-reader.mjs';
 import {createMaterialUsageArchiveValidator,validateMaterialUsageArchive} from './material-usage-archive.mjs';
 const contexts = new AsyncLocalStorage();
+const require=createRequire(import.meta.url);
+let Pool;
+// Archive validation and host-to-container maintenance do not open a database.
+// Keep those entry points usable after disposable host dependencies are cleaned.
+function createPool(options){Pool||=require('pg').Pool;return new Pool(options);}
 const mediaLeaseContexts = new AsyncLocalStorage();
 const MEDIA_GATE_NAMESPACE = 'media-maintenance-gates';
 function mediaLockKeys(instanceId) {
@@ -301,7 +306,7 @@ class PgUnit {
  }
 }
 export class PostgresRepository {
- constructor(options){this.backend='postgres';this.instanceId=options.instanceId;this.options=options;this.readOnly=Boolean(options.readOnly||readOnlyProcess());this.pool=new pg.Pool({...options.connection,max:options.poolSize||8,idleTimeoutMillis:30000});this.pool.on('error',()=>{});this.mediaPool=null;}
+ constructor(options){this.backend='postgres';this.instanceId=options.instanceId;this.options=options;this.readOnly=Boolean(options.readOnly||readOnlyProcess());this.pool=createPool({...options.connection,max:options.poolSize||8,idleTimeoutMillis:30000});this.pool.on('error',()=>{});this.mediaPool=null;}
  get inTransaction(){return contexts.getStore()?.repository===this;}
  get transactionMode(){const c=contexts.getStore();return c?.repository===this?(c.unit.writable?'WRITE':'READ'):null;}
  async _transaction(writable,callback){
@@ -332,7 +337,7 @@ export class PostgresRepository {
   if(mode==='EXCLUSIVE')ensure(!this.readOnly&&!readOnlyProcess(),'READ_ONLY','Read-only repository cannot maintain media');
   // Long-lived original streams must not occupy the metadata/query pool.
   // Keep media concurrency bounded independently; leases still own one exact client.
-  if(!this.mediaPool){this.mediaPool=new pg.Pool({...this.options.connection,max:Math.min(4,this.options.poolSize||4),idleTimeoutMillis:30000});this.mediaPool.on('error',()=>{});}
+  if(!this.mediaPool){this.mediaPool=createPool({...this.options.connection,max:Math.min(4,this.options.poolSize||4),idleTimeoutMillis:30000});this.mediaPool.on('error',()=>{});}
   const client=await this.mediaPool.connect(),keys=mediaLockKeys(this.instanceId),exclusive=mode==='EXCLUSIVE';
   let acquired=false,failed=false;
   const lease={repository:this,client,exclusive,instanceId:this.instanceId,keys,transactionActive:false,lost:false,closed:false,assertHeld:null};
@@ -368,7 +373,7 @@ export class PostgresRepository {
 }
 for(const method of ['getMetadata','getProjectionFingerprint','getWorkspaceFingerprint','listRecordRevisions','getPublishedDocument','listPublishedDocumentMetadata','repositoryState','readView','getRecord','readDocument','readDocumentRevision','verifyDocumentRevisions','readRelease','readPublishedReleaseAt','readPublishedReleaseTimeGroup','listDocuments','getConfig','getProfile','getAux','listAux','listEvents','findIdempotentEvent','getMedia','listMedia','resolveMedia','exportState'])PostgresRepository.prototype[method]=async function(...args){return this.readTransaction(tx=>tx[method](...args));};
 export async function openPostgresRepository(options){const repo=new PostgresRepository({...options,connection:await postgresConnection(options)});try{await repo.validateSchema();await repo.repositoryState();return repo;}catch(error){await repo.close();throw error;}}
-async function emptySchema(connection,callback){const pool=new pg.Pool({...connection,max:1});const c=await pool.connect();try{await c.query('BEGIN');ensure(!(await c.query("SELECT 1 FROM pg_tables WHERE schemaname='public' LIMIT 1")).rowCount,'RESTORE_TARGET_EXISTS','Target PostgreSQL database must be empty');await c.query(POSTGRES_SCHEMA);await c.query('INSERT INTO repository_schema VALUES(1,$1,$2,$3)',[POSTGRES_SCHEMA_VERSION,APPLICATION_ID,sha256(POSTGRES_SCHEMA)]);await installQueryModel(new PgUnit(c,null,true));await callback(c);await c.query('COMMIT');}catch(error){await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();await pool.end();}}
+async function emptySchema(connection,callback){const pool=createPool({...connection,max:1});const c=await pool.connect();try{await c.query('BEGIN');ensure(!(await c.query("SELECT 1 FROM pg_tables WHERE schemaname='public' LIMIT 1")).rowCount,'RESTORE_TARGET_EXISTS','Target PostgreSQL database must be empty');await c.query(POSTGRES_SCHEMA);await c.query('INSERT INTO repository_schema VALUES(1,$1,$2,$3)',[POSTGRES_SCHEMA_VERSION,APPLICATION_ID,sha256(POSTGRES_SCHEMA)]);await installQueryModel(new PgUnit(c,null,true));await callback(c);await c.query('COMMIT');}catch(error){await c.query('ROLLBACK').catch(()=>{});throw error;}finally{c.release();await pool.end();}}
 export async function createPostgresRepository(options){ensure(!readOnlyProcess(),'READ_ONLY','Cannot create read-only repository');const connection=await postgresConnection(options);await emptySchema(connection,async c=>{await c.query('INSERT INTO repository_meta VALUES(1,$1,$2,0,NULL,$3)',[text(options.instanceId,'instanceId'),randomUUID(),now()]);const unit=new PgUnit(c,null,true);await unit.putConfig({configId:'instance-profile',value:options.profile,bytes:options.profileBytes,expectedRevisionId:null});});return openPostgresRepository({...options,connection});}
 export function validateArchive(archive,instanceId){
  const {exportSha256,...body}=archive;ensure(digest(exportSha256)===canonicalSha256(body),'EXPORT_HASH_MISMATCH','Business archive changed');ensure(body.schemaVersion===SCHEMA_VERSION&&body.applicationId===APPLICATION_ID&&body.instanceId===instanceId,'INSTANCE_MISMATCH','Archive identity/schema mismatch');ensure(Object.keys(body.tables).sort().join(',')===[...BUSINESS_TABLES].sort().join(','),'EXPORT_TABLES_MISMATCH','Archive business table set differs');

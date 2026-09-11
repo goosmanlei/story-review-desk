@@ -5,6 +5,7 @@ import {createGzip,createGunzip} from 'node:zlib';
 import {Transform} from 'node:stream';
 import {pipeline} from 'node:stream/promises';
 import path from 'node:path';
+import os from 'node:os';
 import {parseArgs} from 'node:util';
 import {pathToFileURL} from 'node:url';
 import {resolveInstance,openInstanceRepository} from '../host/instance-runtime/index.mjs';
@@ -18,6 +19,8 @@ import {GIT_BUSINESS_PROTOCOL,gitBusinessState,projectGitBusinessArchive,project
 import {validateArchive} from '../host/instance-runtime/postgres.mjs';
 import {runPostgresMaintenance} from './instance-postgres.mjs';
 import {restoreArchiveWithMedia,restoreArchiveRowsWithMedia} from './instance-transfer.mjs';
+import {requiredPhase} from '../host/instance-runtime/process-resources.mjs';
+async function verificationDirectory(repository){const phase=await requiredPhase(repository);const base=phase?(await phase.environment()).REVIEW_TASK_DIR:os.tmpdir();return mkdtemp(path.join(base,'git-verify-'));}
 const RESTORE_TEXT='# 可恢复业务快照\n\n这不是完整实例备份，也不是只读网站导出。保留正式业务历史、文档原始字节和有效媒体；不保留助手会话、运行任务、凭证和心跳。完整备份应另外保存。\n\n先取得清单 core 指定的干净软件精确提交及发行包，核验 packageManifestSha256；执行 git lfs pull 取得归档和有效媒体。不要把 LFS 指针当作媒体文件。\n\n归档验证与恢复使用有界逐行通路，无需手动提高 Node 堆内存。在该软件包中执行：\n\n    node scripts/instance-git-export.mjs verify --snapshot /仓库/业务快照目录 --repository /仓库\n    node scripts/instance-git-export.mjs restore --snapshot /仓库/业务快照目录 --repository /仓库 --output /全新实例目录\n\n恢复会创建独立 PostgreSQL 实例和新运行期，不覆盖当前实例，私人助手任务不恢复，旧生产授权在新运行期不可执行；已提交／运行中／结果不明请求须先核查真实终态，新执行须明确重新授权。API 密钥和 Git/Codex 本机认证须独立配置。正式行 SHA 与表行摘要以 manifest.json 为准；只归一化运行 epoch 和仓库计数。\n';
 const relative=value=>{if(typeof value!=='string'||path.isAbsolute(value)||/[\\\0]/.test(value)||value.split('/').some(part=>!part||part==='.'||part==='..'))throw Error('Explicit safe project-relative path required');return value;};
 const digest=async filename=>{const hash=createHash('sha256');for await(const chunk of createReadStream(filename))hash.update(chunk);return hash.digest('hex');};
@@ -72,7 +75,7 @@ async function readGitSnapshot(snapshot,repository){
  const mediaRoot=path.dirname(mediaDirectory),gzip=await regular(snapshot,body.database.path);
  if((await lstat(gzip)).size!==body.database.bytes||await digest(gzip)!==body.database.sha256)throw Error('Git archive bytes or LFS materialization differ');
  if(!Number.isSafeInteger(body.database.uncompressedBytes)||body.database.uncompressedBytes<=0||body.database.uncompressedBytes>4*1024**3)throw Error('Git archive exceeds supported complete restore capacity');
- const temp=await mkdtemp(path.join(snapshot,'.verify-')),raw=path.join(temp,'repository.jsonl');let bytes=0;
+ const temp=await verificationDirectory(repository),raw=path.join(temp,'repository.jsonl');let bytes=0;
  try{
   await pipeline(createReadStream(gzip),createGunzip(),new Transform({transform(chunk,_encoding,callback){bytes+=chunk.length;callback(bytes>body.database.uncompressedBytes?Error('Decompressed size exceeds manifest'):null,chunk);}}),createWriteStream(raw,{flags:'wx',mode:0o600}));
   if(bytes!==body.database.uncompressedBytes)throw Error('Decompressed size differs');
@@ -98,7 +101,7 @@ export async function withVerifiedGitSnapshot(snapshot,repository,callback){
  const mediaRoot=path.dirname(mediaDirectory),gzip=await regular(snapshot,body.database.path);
  if((await lstat(gzip)).size!==body.database.bytes||await digest(gzip)!==body.database.sha256)throw Error('Git archive bytes or LFS materialization differ');
  if(body.database.format!==ARCHIVE_FILE_FORMAT||!Number.isSafeInteger(body.database.uncompressedBytes)||body.database.uncompressedBytes<=0||body.database.uncompressedBytes>GIT_STREAM_MAX_ARCHIVE_BYTES)throw Error('Git archive exceeds supported streamed restore capacity');
- const temp=await mkdtemp(path.join(snapshot,'.verify-')),raw=path.join(temp,'repository.jsonl');let bytes=0,compressedBytes=0,reader;const compressedHash=createHash('sha256');
+ const temp=await verificationDirectory(repository),raw=path.join(temp,'repository.jsonl');let bytes=0,compressedBytes=0,reader;const compressedHash=createHash('sha256');
  try{
   await pipeline(createReadStream(gzip),new Transform({transform(chunk,_encoding,done){compressedBytes+=chunk.length;compressedHash.update(chunk);done(compressedBytes>body.database.bytes?Error('Compressed size exceeds manifest'):null,chunk);}}),createGunzip(),new Transform({transform(chunk,_encoding,done){bytes+=chunk.length;done(bytes>body.database.uncompressedBytes?Error('Decompressed size exceeds manifest'):null,chunk);}}),createWriteStream(raw,{flags:'wx',mode:0o600}));
   if(compressedBytes!==body.database.bytes||compressedHash.digest('hex')!==body.database.sha256)throw Error('Compressed archive changed during complete reading');
