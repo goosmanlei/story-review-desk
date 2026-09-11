@@ -23,13 +23,13 @@ async function fixture(page:Page, designOnly=false, withNextScene=false){
  const scenes=[{sceneId:scene.id,displayId:scene.displayId,episodeUid,sceneContentHash:sceneContext.sceneContentHash,sourceSummary:{title:'门外等待'},preparation:{sceneRole:'先核对当前场的制作意图',audienceTakeaway:'访客尚在门外',materialGaps:['门外状态素材尚未就绪'],nextPreparationAction:'明确门向与人物站位',generationAuthorized:false,formalShotIds:[]}}];
  const nextSceneId=scene.id+'-next';if(withNextScene){episodes[0].sceneIds.push(nextSceneId);scenes.push({...scenes[0],sceneId:nextSceneId,displayId:'S02',sourceSummary:{title:'下一场上下文'}});model.scenes.push({...scene,id:nextSceneId,displayId:'S02'});}
  const preparation={releaseId:'release-pipeline-entry',revisionId:'prep-pipeline-entry',stale:false,readOnly:true,comments:[],content:{basis:{candidateRevisionId:'candidate-pipeline-entry',candidateContentHash:'b'.repeat(64)},episodes,scenes},candidate:{revisionId:'candidate-pipeline-entry',contentHash:'b'.repeat(64),episodes,scenes:scenes.map(s=>({id:s.sceneId,displayId:s.displayId,title:s.sourceSummary.title}))}};
- const state={sceneId:scene.id,nextSceneId,episodeUid,designShotIds:designShots.map(shot=>shot.id),unexpected:[] as string[],writes:[] as string[],errors:[] as string[],productionRequests:[] as string[]};
+ const state={sceneId:scene.id,nextSceneId,episodeUid,designShotIds:designShots.map(shot=>shot.id),unexpected:[] as string[],writes:[] as string[],errors:[] as string[],profileRequests:0,profileFailure:false,productionRequests:[] as string[]};
  page.on('pageerror',e=>state.errors.push(e.message));
  await page.route('**/api/**',async route=>{
   const request=route.request(),url=new URL(request.url()),json=(value:unknown)=>route.fulfill({json:value});
   if(url.pathname==='/api/assistant/v1/context'&&request.method()==='POST')return json({context:{focus:request.postDataJSON().focus,resources:[],missing:[],draftTargets:[]}});
   if(!['GET','HEAD'].includes(request.method())){state.writes.push(request.method()+' '+url.pathname);return route.fulfill({status:418,json:{error:'FIXTURE_MUTATION_BLOCKED'}});}
-  if(url.pathname==='/api/instance/profile')return json(profile);
+  if(url.pathname==='/api/instance/profile'){state.profileRequests++;return state.profileFailure?route.fulfill({status:503,json:{error:'FIXTURE_PROFILE_UNAVAILABLE'}}):json(profile);}
   if(url.pathname==='/api/v8/ui/bootstrap')return json({data:snapshot,snapshotId:snapshot.snapshotId});
   if(url.pathname==='/api/v8/episode-production')return json({snapshotId:snapshot.snapshotId,episode:{episodeUid:url.searchParams.get('episodeUid'),displayId:'E01'},sceneId:url.searchParams.get('sceneId'),release:null,plans:[],wholePlanAdopted:false,formalShotCount:null});
   if(url.pathname==='/api/instance/shot-production')return json({sceneId:url.searchParams.get('sceneId'),releaseId:'release-pipeline-entry',readOnly:true,basis:null,blockers:['尚未建立正式镜头设计'],defaultContent:null,currentPlan:null,draft:null,draftHeadRevisionId:null,availableInputs:[],jobs:[],readiness:{ready:false,readyCount:0,shotCount:null,shots:[]}});
@@ -64,6 +64,33 @@ test('准备数据未齐时统一等待，返回根目录清除深链且不补�
  await expect(page).toHaveURL(new URL('/',page.url()).href);
  await page.reload();await expect(page.getByRole('heading',{name:'门外等待',exact:true})).toBeVisible();
  await expect(page).toHaveURL(new URL('/',page.url()).href);clean(f);
+});
+
+test('后台实例校验返回相同配置时不卸载已选工作区',async({page})=>{
+ const f=await fixture(page);await page.goto('/?view=pipeline');
+ const workbench=page.locator('.production-v2-full-workbench');
+ await expect(workbench).toBeVisible();
+ const profileRequests=f.profileRequests,productionRequests=f.productionRequests.length;
+ await page.evaluate(()=>window.dispatchEvent(new Event('review:configuration-updated')));
+ await expect.poll(()=>f.profileRequests).toBe(profileRequests+1);
+ await expect(workbench).toBeVisible();
+ await expect(page.locator('.production-view-loading')).toHaveCount(0);
+ expect(f.productionRequests).toHaveLength(productionRequests);
+ clean(f);
+});
+
+test('后台实例校验短暂失败时保留已验证工作区',async({page})=>{
+ const f=await fixture(page);await page.goto('/?view=pipeline');
+ const workbench=page.locator('.production-v2-full-workbench');
+ await expect(workbench).toBeVisible();
+ const profileRequests=f.profileRequests,productionRequests=f.productionRequests.length;
+ f.profileFailure=true;
+ await page.evaluate(()=>window.dispatchEvent(new Event('review:configuration-updated')));
+ await expect.poll(()=>f.profileRequests).toBe(profileRequests+1);
+ await expect(workbench).toBeVisible();
+ await expect(page.getByRole('alert').filter({hasText:'无法读取当前实例配置'})).toHaveCount(0);
+ expect(f.productionRequests).toHaveLength(productionRequests);
+ clean(f);
 });
 
 test('集场计划与镜头制作均读完后统一展示工作区',async({page})=>{
