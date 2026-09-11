@@ -17,7 +17,7 @@ import {
   reconcileSoftware,
 } from "../tools/deployment.mjs";
 import { parseDeploymentArgs, deploymentExit } from "../tools/deploy.mjs";
-import { checkRemoteConnection } from "../tools/remote.mjs";
+import { bootstrap, checkRemoteConnection } from "../tools/remote.mjs";
 import { json, atomic } from "../tools/io.mjs";
 
 test("deployment targets and outcomes are explicit", () => {
@@ -124,4 +124,31 @@ test("clean Git snapshot stays fixed; owned software swaps recover and protect u
   // This Git repository was created by this fixture and has no external work.
   assert.equal(git("remote"), "");
   await rm(path.join(source, ".git"), { recursive: true });
+});
+
+
+test("remote transport verifies stream order, partial recovery, and edited-input refusal", async () => {
+  const outer = await requiredPhase(process.cwd());
+  const scratch = (await outer.read()).resources[0].path;
+  const input = path.join(scratch, "transport-input"), target = path.join(scratch, "transport-target");
+  await mkdir(path.join(input, "software/tools"), { recursive: true });
+  await writeFile(path.join(input, "software/tools/remote-target.mjs"), "process.exit(37);\n");
+  // Directory order differs from archive order, exercising sequential gzip validation.
+  await mkdir(path.join(input, "z")); await mkdir(path.join(input, "a"));
+  await writeFile(path.join(input, "z/first"), "first".repeat(100000));
+  await writeFile(path.join(input, "a/last"), "last".repeat(100000));
+  const bundle = path.join(scratch, "transport.tar.gz");
+  execFileSync("tar", ["-czf", bundle, "-C", input, "software", "z", "a"]);
+  const bytes = await readFile(bundle), { createHash } = await import("node:crypto");
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const args = ["-c", bootstrap, target, "transport-fixture", sha];
+  execFileSync("python3", [...args, "upload"], { input: bytes, stdio: ["pipe", "pipe", "pipe"] });
+  const base = path.join(target, ".process/transport/transport-fixture");
+  await mkdir(path.join(base, "extracting/z"), { recursive: true });
+  await writeFile(path.join(base, "extracting/z/first"), "firstfirst");
+  const execute = () => execFileSync("python3", [...args, "run", process.execPath], { stdio: "pipe" });
+  assert.throws(execute, error => error.status === 37);
+  assert.throws(execute, error => error.status === 37);
+  await writeFile(path.join(base, "unpacked/z/first"), "X".repeat(500000));
+  assert.throws(execute, error => error.status === 1 && String(error.stderr).includes("modified transport file"));
 });

@@ -79,19 +79,32 @@ else:
  assert h.hexdigest()==sha
  unpack=base/'unpacked';partial=base/'extracting'
  def verify_input(directory,allow_partial=False):
-  with tarfile.open(final,'r:gz') as archive:
-   members=archive.getmembers();expected={str(pathlib.PurePosixPath(m.name)):m for m in members if m.isfile()}
-   for current in directory.rglob('*'):
-    assert not current.is_symlink(),'unexpected symbolic link'
-    if current.is_dir():continue
-    rel=str(current.relative_to(directory));m=expected.get(rel);assert m is not None,'unexpected transport file'
+  present={}
+  for current in directory.rglob('*'):
+   assert not current.is_symlink(),'unexpected symbolic link'
+   if current.is_dir():continue
+   assert current.is_file(),'unexpected transport entry'
+   present[str(current.relative_to(directory))]=current
+  expected=set()
+  # Visit gzip members once in archive order; per-file random seeks are quadratic.
+  with tarfile.open(final,'r|gz') as archive:
+   for m in archive:
+    p=pathlib.PurePosixPath(m.name)
+    assert not p.is_absolute() and '..' not in p.parts and (m.isfile() or m.isdir())
+    if not m.isfile():continue
+    rel=str(p);assert rel not in expected,'duplicate transport entry';expected.add(rel)
+    current=present.get(rel)
+    if current is None:
+     assert allow_partial,'missing transport file'
+     continue
     assert current.stat().st_size<=m.size if allow_partial else current.stat().st_size==m.size
     with open(current,'rb') as actual, archive.extractfile(m) as original:
      while True:
       block=actual.read(1024*1024)
       if not block:break
       assert block==original.read(len(block)),'modified transport file'
-   if not allow_partial:assert set(str(p.relative_to(directory)) for p in directory.rglob('*') if p.is_file())==set(expected)
+  assert set(present)<=expected,'unexpected transport file'
+  if not allow_partial:assert set(present)==expected
  if partial.exists():verify_input(partial,True);shutil.rmtree(partial)
  if not unpack.exists():
   partial.mkdir(mode=0o700)

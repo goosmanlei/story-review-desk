@@ -320,6 +320,7 @@ export function Editor({
         </fieldset>
       )}
       {[
+        "SPACE",
         "INPUT_LOCK",
         "SHOT_DESIGN",
         "SHOT",
@@ -333,6 +334,8 @@ export function Editor({
       )}
       {[
         "camera",
+        "dressing",
+        "segments",
         "composition",
         "motion",
         "lighting",
