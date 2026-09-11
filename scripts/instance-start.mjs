@@ -89,6 +89,17 @@ export async function startInstance(argv, { forceRecreate = false, noCache = fal
         override.services[service]={image,build:{labels:mapping}};processImages.push(image);}
       const filename=path.join(secretDirectory,'process.override.json');await writeFile(filename,JSON.stringify(override),{flag:'wx',mode:0o600});baseArgs.push('--file',filename);
     }
+    if(processPhase&&values['no-build']){
+      // A build + isolated QA + publish transaction can share one phase. Only
+      // its captured images can cross this boundary; never trust a mutable tag.
+      const record=await processPhase.read(),staged=services.map(service=>({service,image:record.resources.find(r=>r.kind==='image'&&r.name==='review-process:'+record.token+'-'+service&&r.state==='TEMPORARY')}));
+      if(staged.some(row=>row.image)){
+        if(staged.some(row=>!row.image))throw Error('Incomplete staged service images');
+        const override={services:{}};
+        for(const {service,image} of staged){const actual=processPhase.object('image',image.name);processPhase.assertObject(record,image,actual);if(actual.Config?.Labels?.['org.opencontainers.image.revision']!==runtime.softwareCommit)throw Error('Staged image revision changed');override.services[service]={image:image.name};processImages.push(image.name);}
+        const filename=path.join(secretDirectory,'process.override.json');await writeFile(filename,JSON.stringify(override),{flag:'wx',mode:0o600});baseArgs.push('--file',filename);
+      }
+    }
     if(isPostgres){const pg=await ensurePostgres(runtime.root);const envPatch={REVIEW_DATABASE_BACKEND:'postgres',REVIEW_POSTGRES_HOST:'postgres',REVIEW_POSTGRES_PASSWORD_FILE:'/run/secrets/postgres-password'};const service={environment:envPatch,networks:['default','story-database'],volumes:[{type:'bind',source:path.join(runtime.root,'runtime/private/postgres-password'),target:'/run/secrets/postgres-password',read_only:true}]};const override=path.join(secretDirectory,'postgres.override.json');await writeFile(override,JSON.stringify({services:{'review-site':service,'shot-production-worker':service,'comment-polish-worker':service,'material-review-worker':service},networks:{'story-database':{external:true,name:pg.network}}}),{flag:'wx',mode:0o600});baseArgs.push('--file',override);}
     if (key) {
       // Local credentials are outside the business repository and excluded from backups.
