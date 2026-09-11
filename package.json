@@ -1,15 +1,15 @@
 {
   "name": "story-review-desk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "engines": {
     "node": ">=22.13.0"
   },
   "scripts": {
-    "dev": "REVIEW_NODE_DEV=1 vinext dev",
-    "build": "node scripts/build-runtime.mjs",
-    "start": "vinext start",
-    "project:create": "node scripts/instance-project-create.mjs",
+    "dev": "next dev web",
+    "build": "next build web --webpack",
+    "start": "node web/.next/standalone/web/server.js",
+    "project:create": "node tools/project.mjs create",
     "instance:create": "node scripts/instance-create.mjs",
     "instance:start": "node scripts/instance-start.mjs",
     "instance:guidance": "node scripts/instance-guidance.mjs",
@@ -48,7 +48,10 @@
     "test:ui:asset-context": "playwright test --config tests/asset-context-revalidation.ui.config.ts",
     "test:ui:material-rebase": "playwright test --config tests/material-production-rebase.ui.config.ts",
     "instance:process": "node scripts/instance-process.mjs",
-    "test:process": "node --test tests/process-resources.test.mjs tests/vps-process-cleanup.test.mjs"
+    "test:process": "node --test tests/process-resources.test.mjs tests/vps-process-cleanup.test.mjs",
+    "review": "node scripts/review.mjs",
+    "deploy": "node tools/deploy.mjs",
+    "test:objects": "node --test tests/object-store.test.mjs"
   },
   "dependencies": {
     "next": "16.3.3",
@@ -57,24 +60,19 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.54.2",
-    "@cloudflare/workers-types": "5.20260831.1",
-    "@openai/sites-vite-plugin": "0.2.0",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.34",
     "eslint": "9.39.4",
     "eslint-config-next": "16.3.3",
     "react-server-dom-webpack": "19.2.8",
     "tailwindcss": "4.2.1",
-    "typescript": "5.9.3",
-    "vinext": "1.0.0-beta.8",
-    "vite": "8.2.2",
-    "wrangler": "4.127.1"
+    "typescript": "5.9.3"
   },
-  "type": "module"
+  "type": "module",
+  "bin": {
+    "review": "scripts/review.mjs"
+  }
 }

@@ -21,3 +21,7 @@ __pycache__/
 !.agents/skills/
 .agents/skills/*
 !.agents/skills/story-review-orchestrator/
+
+.process/
+web/.next/
+web/next-env.d.ts
