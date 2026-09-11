@@ -5,6 +5,7 @@ import {command} from './vps-process.mjs';
 import {canonicalJson,sha256} from './bytes.mjs';
 import {readPackage,validatePackageManifest,PACKAGE_MANIFEST,receiveFile,immutablePackage,fileDescriptor,listPackageFiles,writeJsonAtomic} from './vps-package.mjs';
 import {applyNginxConfigInPlace,nginxSha,patchNginxConfig} from './vps-nginx.mjs';
+import {inspectAuxiliaryHistoryScript,readRestoredAuxiliaryHistory,classifyRestoredAuxiliaryHistory} from './vps-quiescence.mjs';
 
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const absent=error=>error.code==='ENOENT';
@@ -136,7 +137,19 @@ export class VpsDriver{
  }
  async runtimeCheck(runtime,verifyMedia=false){
   const found=await this.owned('container',runtime.web,runtime);if(!found?.State.Running)throw Error('Runtime web process is not available for quiescence verification');
-  return JSON.parse(await this.docker(['exec',runtime.web,'node','scripts/instance-vps-runtime-check.mjs',...(verifyMedia?['--verify-media']:[])]));
+  const inspect=async()=>JSON.parse(await this.docker(['exec',runtime.web,'node','scripts/instance-vps-runtime-check.mjs',...(verifyMedia?['--verify-media']:[])]));
+  let check=await inspect();
+  if(this.state.current?.runtime?.id!==runtime.id||!this.state.current.cleanReady||!check.blockers.some(b=>b.namespace.startsWith('aux:')&&['UNKNOWN','RESULT_UNKNOWN'].includes(b.state)))return check;
+  const cacheKey=canonicalJson([runtime.id,runtime.runtimeEpoch,this.state.current.manifestSha256]);
+  if(this.restoredAuxiliaryHistory?.key!==cacheKey){
+   const source=await this.cleanSource(this.state.current);
+   this.restoredAuxiliaryHistory={key:cacheKey,value:await readRestoredAuxiliaryHistory(source)};
+   // A large archive can take minutes to verify. Refresh formal executions,
+   // sessions, transactions and HTTP activity as well as the AUX heads.
+   check=await inspect();
+  }
+  const inspection=JSON.parse(await this.docker(['exec',runtime.web,'node','--input-type=module','-e',inspectAuxiliaryHistoryScript]));
+  return classifyRestoredAuxiliaryHistory(check,inspection,this.restoredAuxiliaryHistory.value,runtime);
  }
  async assertQuiescent(runtime){if(!runtime)return;const check=await this.runtimeCheck(runtime);if(check.blockers.length)throw Error('Unfinished or unknown execution; retain the runtime: '+JSON.stringify(check.blockers.slice(0,20)));}
  async drain(runtime){

@@ -64,7 +64,7 @@ export async function packVps({target,instance,baseline:baselineSource,capacityM
  }
  if(!baselineSource||!capacityMeasurement)await command('docker',['image','rm',backupTag]);
  await mkdir(path.join(root,'images'),{mode:0o700});
- const tag='review-vps-build:'+releaseId,build=['build','--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath,'-t',tag,software];
+ const tag='review-vps-build:'+releaseId,build=['build','--no-cache','--platform','linux/amd64','--build-arg','REVIEW_SOFTWARE_COMMIT='+source.softwareCommit,'--build-arg','REVIEW_DEPLOYMENT_MODE=VPS','--build-arg','REVIEW_BASE_PATH='+target.basePath,'-t',tag,software];
  await command('docker',build);await command('docker',['pull','--platform','linux/amd64','postgres:18.6']);
  const images=[];
  for(const [role,image] of [['app',tag],['postgres','postgres:18.6']]){
