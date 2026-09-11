@@ -29,6 +29,15 @@ export async function installProcessTimer(target,bundle,{fixture=false}={}){
   try{const st=await lstat(file),before=await readFile(file,'utf8');if(!st.isFile()||st.isSymbolicLink()||!before.startsWith('# review-process-target='+target.targetId+'\n'))throw Error('Existing unit belongs to another owner');}catch(e){if(!absent(e))throw e;}
   await writeFile(file,contents,{mode:0o644});
  }
- if(!fixture){await command('systemctl',[...prefix,'daemon-reload']);await command('systemctl',[...prefix,'enable','--now',name+'.timer']);await command('systemctl',[...prefix,'is-active',name+'.timer']);}
+ if(!fixture){
+  const uid=String(process.getuid()),environment=system?process.env:{...process.env,XDG_RUNTIME_DIR:'/run/user/'+uid,DBUS_SESSION_BUS_ADDRESS:'unix:path=/run/user/'+uid+'/bus'};
+  if(!system){
+   const linger=await command('loginctl',['show-user',uid,'--property=Linger','--value']);
+   if(linger.trim()!=='yes')await command('loginctl',['enable-linger',uid]);
+   if((await command('loginctl',['show-user',uid,'--property=Linger','--value'])).trim()!=='yes')throw Error('User cleanup timer needs verified lingering across logout and reboot');
+  }
+  const ctl=args=>command('systemctl',[...prefix,...args],{env:environment});
+  await ctl(['daemon-reload']);await ctl(['enable','--now',name+'.timer']);await ctl(['is-active',name+'.timer']);
+ }
  return {status:fixture?'TIMER_FIXTURE_WRITTEN':'TIMER_INSTALLED',name,intervalSeconds:300,startup:true,sha256:sha256(Buffer.from(source)),unitRoot};
 }
