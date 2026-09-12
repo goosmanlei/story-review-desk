@@ -6,6 +6,7 @@ import {
   mkdir,
   readFile,
   writeFile,
+  rename,
 } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -59,6 +60,26 @@ async function tar(phase, directory) {
       }
     });
   });
+}
+async function importPackage(phase,root,request,directory){
+  const target=path.join(directory,'package');
+  if(request.filename){
+    check(path.dirname(request.filename)===path.join(root,'runtime/spool')&&(await fileSha(request.filename))===request.sha256,'PACKAGE_UPLOAD_HASH','上传文件与登记 SHA 不符',409);
+    const unpacked=path.join(directory,'unpacked');
+    await new Promise((resolve,reject)=>{
+      const child=spawn('python3',['-I',path.join(path.dirname(fileURLToPath(import.meta.url)),'unpack_package.py'),request.filename,unpacked],{stdio:'ignore'});
+      const registered=child.pid?phase.childStarted(child.pid):Promise.resolve();child.once('error',reject);child.once('close',async code=>{try{await registered;await phase.childEnded();check(code===0,'PACKAGE_ARCHIVE','项目包归档无效、路径不安全或超过临时预算');resolve();}catch(e){reject(e);}});
+    });
+    await rename(path.join(unpacked,'package'),target);
+  }else{
+    const allowed=path.join(path.dirname(root),'project-data'),source=path.resolve(request.sourcePath),relative=path.relative(allowed,source);
+    check(relative&&!relative.startsWith('..')&&!path.isAbsolute(relative),'PACKAGE_SCOPE','目录导入仅接受本项目 project-data 内的完整项目包；其他备份不在读取范围',409);
+    let current=allowed;for(const part of ['',...relative.split(path.sep)]){if(part)current=path.join(current,part);const info=await lstat(current);check(info.isDirectory()&&!info.isSymbolicLink(),'PACKAGE_DIRECTORY','项目包路径不能使用符号链接');}
+    const manifest=await verifyPackage(source);await mkdir(target,{mode:0o700});
+    const names=['manifest.json',...manifest.chunks.map(c=>c.path),...manifest.media.map(m=>'media/'+m.sha256),...manifest.originals.map(s=>'originals/'+s)];
+    for(const name of names){await mkdir(path.dirname(path.join(target,name)),{recursive:true});await copyFile(path.join(source,name),path.join(target,name),1);}
+  }
+  return verifyPackage(target);
 }
 export async function runMaintenance(pool, root, request) {
   validateMaintenance(request);
@@ -182,7 +203,7 @@ export async function runMaintenance(pool, root, request) {
       };
     }
     const destination = path.join(directory, "package");
-    const manifest = await writePackageRecords(
+    const manifest = request.kind==="MAINTENANCE_IMPORT"?await importPackage(phase,root,request,directory):await writePackageRecords(
       Readable.from(exportRecords(pool)),
       destination,
       {
@@ -212,7 +233,7 @@ export async function runMaintenance(pool, root, request) {
       mediaFiles: manifest.media.length,
       passed: true,
     };
-    if (request.kind === "MAINTENANCE_BACKUP") {
+    if (['MAINTENANCE_BACKUP','MAINTENANCE_EXPORT','MAINTENANCE_IMPORT'].includes(request.kind)) {
       await tar(phase, directory);
       await phase.budget();
       Object.assign(result, {

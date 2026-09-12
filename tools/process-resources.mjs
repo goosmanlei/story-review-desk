@@ -116,11 +116,18 @@ export async function processLock(
   try {
     await new Promise((resolve, reject) => {
       child.once("error", reject);
-      child.stdout.once("data", (v) =>
-        v.toString() === "LOCKED\n"
-          ? resolve()
-          : reject(Error("Invalid process lock response")),
-      );
+      let response = '';
+      const receive = chunk => {
+        response += chunk.toString();
+        if (response === 'LOCKED\n') {
+          child.stdout.removeListener('data', receive);
+          resolve();
+        } else if (!'LOCKED\n'.startsWith(response)) {
+          child.stdout.removeListener('data', receive);
+          reject(Error('Invalid process lock response'));
+        }
+      };
+      child.stdout.on('data', receive);
       child.once("exit", () =>
         reject(Error("Process resource lock is busy or unavailable")),
       );

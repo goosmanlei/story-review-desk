@@ -1,10 +1,10 @@
 # 故事审阅台
 
-一个项目绑定一个故事。六个工作区提供资料与集场、故事设定、素材版本、制作、协作审阅和项目管理；网页、项目 CLI 与助手共用对象服务。
+一个项目绑定一个故事。当前工作、故事创作、故事设定、素材管理、全剧制作、系统管理沿用已有界面与交互；网页、项目 CLI 与助手共用对象服务。
 
 本公开仓库只维护通用软件、Schema、测试和部署工具，不包含故事数据、媒体或凭据。
 
-需要 Node.js 22.13+、npm、Python 3 和 Docker（PostgreSQL 18.6）。macOS 使用 LaunchAgent，Linux 使用 systemd。数据库、Web 和一个后台工作器独立运行。
+需要 Node.js 22.13+、npm、Python 3、FFmpeg（含 ffprobe）和 Docker（PostgreSQL 18.6）。macOS 使用 LaunchAgent，Linux 使用 systemd。数据库、Web 和一个后台工作器独立运行；Web 与工作器为原生 Node 进程。
 
 ```bash
 npm ci

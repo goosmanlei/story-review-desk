@@ -24,6 +24,6 @@ VPS 从同一提交按目标平台构建，导入本次冻结的本地业务包�
 }
 ```
 
-SSH 使用已有主机密钥与 BatchMode；目标需预装 Node.js 22.13+、npm、Python 3、Docker 和 systemd。部署不会修改 SSH 信任、安装系统依赖或接管旧版非标准项目。反向代理及 TLS 由目标本机配置管理。候选数据库切换前固定恢复点；中断后先核查实际指针，已生效只补核验，未生效按同一业务包恢复演练，不重放模型任务。
+SSH 使用已有主机密钥与 BatchMode；目标需预装 Node.js 22.13+、npm、Python 3、FFmpeg（含 ffprobe）、Docker 和 systemd。部署检查这些依赖，不修改 SSH 信任、安装系统依赖或接管旧版非标准项目。反向代理及 TLS 由目标本机配置管理。候选数据库切换前固定恢复点；中断后先核查实际指针，已生效只补核验，未生效按同一业务包恢复演练，不重放模型任务。
 
-机器路径仅服务于部署和进程启动，业务导出不携带它们。Codex 助手可在本机 machine.json 配置 `assistant: {provider:"codex",codexBinary:"/absolute/path/codex",pythonBinary:"/usr/bin/python3"}`，沿用当前宿主登录。production.command 为明确配置的外部受控适配器命令数组；工作器通过 JSON 标准输入传入精确实际输入，输出媒体须位于分配的阶段目录。未配置适配器时不执行模型或媒体任务。
+机器路径仅服务于部署和进程启动，业务导出不携带它们。Codex 助手可在本机 machine.json 配置 `assistant: {provider:"codex",codexBinary:"/absolute/path/codex",pythonBinary:"/usr/bin/python3"}`，沿用当前宿主登录。production.command 为明确配置的外部受控适配器命令数组；工作器通过 JSON 标准输入传入精确实际输入，输出媒体须位于分配的阶段目录。未配置适配器时不执行模型生成；预演与制作清单使用内置确定性程序，仍需用户在网页明确发起。

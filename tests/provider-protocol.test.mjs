@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import test from "node:test";
 import assert from "node:assert/strict";
 import http from "node:http";
@@ -29,7 +30,11 @@ test("host Codex protocol uses only versioned business reads and rejects other t
       content: { text: "原稿" },
     },
   };
+  const imageBytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=','base64');
+  const imageSha=createHash('sha256').update(imageBytes).digest('hex');
   const server = http.createServer((req, res) => {
+    if(req.url.includes('/media/')){res.setHeader('Content-Type','image/png');res.end(imageBytes);return;}
+    if(req.url.includes('/objects/image-fixture')){res.setHeader('Content-Type','application/json');res.end(JSON.stringify({...object,id:'image-fixture',kind:'ASSET',media:[{role:'OUTPUT',availability:'PRESENT',sha256:imageSha,mime_type:'image/png'}]}));return;}
     res.setHeader("Content-Type", "application/json");
     res.end(
       JSON.stringify(
@@ -101,6 +106,11 @@ test("host Codex protocol uses only versioned business reads and rejects other t
   assert.equal(result.value.sourceVersions[3].objectVersion, undefined);
   assert.equal(result.value.sourceVersions[4].objectVersion, 1);
   assert.equal((await result.phase.finish()).status, "CLEANED");
+  process.env.MOCK_IMAGE_SHA=imageSha;
+  try{
+    const observed=await processProvider({root:path.join(project,'instance'),command:['python3',path.resolve('server/collaboration/codex_suggest.py')],payload:{...payload,request:{...payload.request,operationId:'mock-image'}},onRequestId:async()=>{}});
+    assert.deepEqual(observed.value.observedImageIds,['image-fixture']);assert.equal(observed.value.sourceVersions.at(-1).mediaSha256,imageSha);assert.equal((await observed.phase.finish()).status,'CLEANED');
+  }finally{delete process.env.MOCK_IMAGE_SHA;}
   process.env.MOCK_ILLEGAL_TOOL = "1";
   try {
     await assert.rejects(

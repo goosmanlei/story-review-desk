@@ -17,6 +17,7 @@ export const SYSTEM_FIELDS = new Set([
   "assistant",
   "limits",
   "technicalStandards",
+  "template",
 ]);
 export const PROJECT_FIELDS = new Set([
   "title",
@@ -26,6 +27,8 @@ export const PROJECT_FIELDS = new Set([
   "pictureBaseline",
   "defaultWorkspace",
   "sourcePriority",
+  "candidateOptions",
+  "preferredCollaborator",
 ]);
 export function validateConfiguration(scope, content) {
   objectValue(content);

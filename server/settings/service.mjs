@@ -16,11 +16,12 @@ export function validate(kind, content) {
 }
 export async function projectLinks(tx, object, revisionId, links) {
   if (object.kind !== "RELATION") return;
-  const endpoints = links.filter((x) => x.role === "ENTITY");
+  const declared=[object.content.from,object.content.to];
+  const endpoints=declared.every(e=>e?.id&&e?.kind)?declared.map(e=>({id:e.id,role:e.kind==='MATERIAL'?'FAMILY':e.kind})):links.filter(x=>x.role==='ENTITY');
   check(
     endpoints.length === 2 && endpoints[0].id !== endpoints[1].id,
     "RELATION_ENDPOINTS",
-    "关系必须连接两个不同的永久主体",
+    "关系必须连接两个不同的永久对象",
   );
   const actual = (
     await tx.query("SELECT id,kind FROM objects WHERE id=ANY($1::text[])", [
@@ -29,9 +30,9 @@ export async function projectLinks(tx, object, revisionId, links) {
   ).rows;
   check(
     actual.length === 2 &&
-      actual.every((x) => ["ENTITY", "SPACE"].includes(x.kind)),
+      actual.every(x=>['ENTITY','SPACE','STATE','REPRESENTATION','REQUIREMENT','MATERIAL'].includes(x.kind)&&endpoints.some(e=>e.id===x.id&&(e.role==='FAMILY'?'MATERIAL':e.role)===x.kind))&&endpoints.every(e=>links.some(l=>l.id===e.id&&l.role===e.role)),
     "RELATION_ENDPOINTS",
-    "关系端点必须是主体或空间",
+    "关系端点类型与永久对象不符",
   );
   await tx.query(
     "INSERT INTO entity_relations(object_id,from_id,to_id,relation_type) VALUES($1,$2,$3,$4) ON CONFLICT(object_id) DO UPDATE SET from_id=EXCLUDED.from_id,to_id=EXCLUDED.to_id,relation_type=EXCLUDED.relation_type",

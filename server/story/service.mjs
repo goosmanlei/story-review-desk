@@ -25,6 +25,10 @@ export function validate(kind, content) {
     );
 }
 export async function validateTarget(tx, kind, content, oldContent) {
+  if(kind==='SCENE'&&oldContent) {
+    const authored=value=>{const result={...value};delete result.contentHash;return result;};
+    if(hash(authored(content))!==hash(authored(oldContent)))content.contentHash=hash(authored(content));
+  }
   if (kind === "SOURCE" && oldContent)
     check(
       hash(content) === hash(oldContent),

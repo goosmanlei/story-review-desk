@@ -12,6 +12,8 @@ import {
 } from "./shared/contracts.mjs";
 import { objectDetail } from "./repository.mjs";
 import { validateConfiguration } from "./project/service.mjs";
+import { planWorkspaceChange } from './workspace-actions.mjs';
+import {planStoryEdit} from './story/editing.mjs';
 
 async function invalidate(
   tx,
@@ -117,6 +119,7 @@ async function save(tx, command, context) {
         configurationVersion: configuration.version,
       };
   }
+  if(old&&kind==='REQUIREMENT')delete content.requirementHash;
   module.validate?.(kind, content);
   const title = command.title ?? old?.title;
   check(
@@ -358,6 +361,15 @@ async function submit(tx, command) {
     state: "SUBMITTED",
   };
 }
+async function archive(tx, command, context) {
+  const object=await current(tx,command);
+  check(object&&['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT','NOTE'].includes(object.kind),'ARCHIVE_KIND','此对象不能通过登记删除操作退出目录',409);
+  check(context.actor.kind!=='ASSISTANT','EXPLICIT_ARCHIVE_REQUIRED','AI 不能退出正式对象',403);
+  const consumers=await tx.query('SELECT m.owner_id FROM memberships m JOIN objects o ON o.id=m.owner_id WHERE m.member_id=$1 AND NOT o.historical AND o.id<>$1 LIMIT 1',[object.id]);
+  check(!consumers.rowCount,'OBJECT_REFERENCED','此对象仍被使用，请先处理精确引用',409);
+  await tx.query("UPDATE objects SET state='ARCHIVED',historical=true,version=version+1,updated_at=now() WHERE id=$1",[object.id]);
+  return {id:object.id,version:object.version+1,state:'ARCHIVED'};
+}
 async function review(tx, command, context) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
@@ -381,9 +393,12 @@ async function review(tx, command, context) {
     "所审版本已改变",
     409,
   );
-  if (command.decision !== "DISABLE")
+  if(command.supersedesReviewId) {
+    const head=(await tx.query('SELECT id,revision_id FROM reviews WHERE object_id=$1 ORDER BY created_at DESC,id DESC LIMIT 1',[object.id])).rows[0];
+    check(head?.id===command.supersedesReviewId&&head.revision_id===revisionId,'REVIEW_HEAD_CONFLICT','被修正的判断已改变',409);
+  } else if (command.decision !== "DISABLE")
     check(
-      object.state === "SUBMITTED",
+      object.state === "SUBMITTED" || object.state === 'ADOPTED' && command.reassess === true && !(await tx.query('SELECT 1 FROM reviews WHERE object_id=$1 LIMIT 1',[object.id])).rowCount,
       "STATE_CONFLICT",
       "请先提交待审版本",
       409,
@@ -402,12 +417,34 @@ async function review(tx, command, context) {
     revision = (
       await tx.query("SELECT content FROM revisions WHERE id=$1", [revisionId])
     ).rows[0];
-  const criteria =
+  let criteria =
     revision.content.reviewSpec?.criteria ||
     revision.content.configurationBinding?.reviewSpec?.criteria ||
     [];
+  if(command.reviewBasis) {
+    check(object.kind==='ASSET','REVIEW_BASIS_KIND','素材标准只能用于素材版本');
+    const basis=command.reviewBasis, requirement=await current(tx,{id:basis.id,expectedVersion:basis.expectedVersion});
+    check(['REQUIREMENT','EXPECTED_OUTPUT'].includes(requirement?.kind)&&basis.revisionId===(requirement.draft_revision_id||requirement.adopted_revision_id),'VERSION_CONFLICT','素材验收依据已改变',409);
+    const member=await tx.query("SELECT 1 FROM revision_memberships m JOIN asset_versions a ON a.family_id=m.member_id WHERE m.revision_id=$1 AND m.role='FAMILY' AND a.object_id=$2",[basis.revisionId,object.id]);
+    check(member.rowCount,'REVIEW_REQUIREMENT_BINDING','验收需求未绑定此素材族',409);
+    const value=(await tx.query('SELECT content FROM revisions WHERE id=$1',[basis.revisionId])).rows[0].content;
+    const spec=value.reviewSpec;
+    check(spec&&(spec.hash||hash(spec))===basis.reviewSpecHash,'REVIEW_SPEC_CONFLICT','素材冻结标准不一致',409);
+    criteria=spec.criteria;
+    for(const finding of findings){const criterion=criteria.find(c=>c.id===finding.criterionId);if(criterion)finding.criterion={...criterion,requirementId:basis.id,requirementRevisionId:basis.revisionId,reviewSpecHash:basis.reviewSpecHash};}
+  }
+  check(new Set(findings.map(f=>f.criterionId)).size===findings.length,'REVIEW_FINDINGS','判断条目不能重复');
+  if(criteria.length)check(findings.every(f=>criteria.some(c=>c.id===f.criterionId)),'REVIEW_FINDINGS','判断含有不属于所选标准的条目');
+  if(!criteria.length&&command.reviewStandard) {
+    const configuration=(await tx.query("SELECT version,content FROM configurations WHERE scope='system' FOR UPDATE")).rows[0];
+    check(configuration?.version===command.reviewStandard.expectedVersion,'VERSION_CONFLICT','审阅标准已改变',409);
+    const standard=configuration.content.reviewStandards?.find(s=>s.id===command.reviewStandard.id);
+    check(standard&&({SCRIPT_SCENE:'SCENE'}[standard.subjectKind]||standard.subjectKind)===object.kind,'REVIEW_STANDARD_KIND','审阅标准不适用于此对象');
+    criteria=standard.criteria;
+    for(const finding of findings){const criterion=criteria.find(c=>c.id===finding.criterionId);if(criterion)finding.criterion={...criterion,standardId:standard.id,configurationVersion:configuration.version};}
+  }
   if (criteria.length)
-    for (const criterion of criteria.filter((c) => c.required)) {
+    for (const criterion of criteria.filter((c) => c.required !== false)) {
       const f = findings.find((x) => x.criterionId === criterion.id);
       check(
         f && ["PASS", "FAIL", "NA"].includes(f.verdict),
@@ -453,6 +490,11 @@ async function review(tx, command, context) {
       context.operationId,
     ],
   );
+  const reviewEvidence={...Object.fromEntries(Object.entries(command.reviewMetadata||{}).filter(([key])=>['subjectType','subjectId','workItemId','workPackageId','productionPhaseId','productionGateId','scopeType','scopeId','contextHash','reviewContextRef','reviewSpecHash','subjectRevisionId','versionId','versionSha256'].includes(key))),
+    ...(command.productionEvidence?{shotProductionEvidence:command.productionEvidence}:{}),
+    ...(command.reviewBasis?{reviewBasis:command.reviewBasis}:{}),eventId:reviewId,objectRevisionId:revisionId};
+  check(JSON.stringify(reviewEvidence).length<=80000,'REVIEW_EVIDENCE_LIMIT','审阅依据超过保存范围');
+  await tx.query("INSERT INTO provenance(id,object_id,revision_id,kind,original_id,original_sha256,content) VALUES($1,$2,$3,'review',$4,$5,$6)",[identifier('review-proof'),object.id,revisionId,reviewId,hash(reviewEvidence),reviewEvidence]);
   const state = {
     ADOPT: "ADOPTED",
     REQUEST_CHANGES: "CHANGES_REQUESTED",
@@ -591,6 +633,9 @@ async function applySuggestion(tx, command, context) {
       [command.suggestionId],
     )
   ).rows[0];
+  check(value?.content.purpose!=='MATERIAL_REVIEW','MATERIAL_DRAFT_ONLY','素材审阅建议只能预览并填入判断草稿，不能覆盖需求或原件',409);
+  check(value?.content.purpose!=='COMMENT_POLISH','COMMENT_DRAFT_ONLY','评论建议只能预览并填入评论草稿，不能覆盖所评正文',409);
+  check(value?.content.purpose!=='ASSISTANT_DISCUSSION','DISCUSSION_READ_ONLY','讨论只提供建议；修改须先生成修改预览',409);
   check(
     value &&
       new Date(value.expires_at) > new Date() &&
@@ -644,6 +689,22 @@ async function applySuggestion(tx, command, context) {
       );
     }
   }
+  for(const [scope,version]of Object.entries(value.content.configurationVersions||{})){
+    const row=(await tx.query('SELECT version FROM configurations WHERE scope=$1 FOR SHARE',[scope])).rows[0];
+    check(row?.version===version,'SUGGESTION_SOURCE_CHANGED','AI 建议所用配置已变化，请重新核对',409);
+  }
+  let edited;
+  if(value.content.purpose==='ASSISTANT_DRAFT_CHANGE'&&['SCENE','EPISODE'].includes(object.kind)){
+    const patch=value.content.patch;
+    const plan=await planStoryEdit(tx,{objectId:object.id,expectedVersion:command.expectedVersion,revisionId:value.based_on_revision_id,title:object.title,content:{...(object.kind==='SCENE'?{blocks:revision.content.blocks}:{}),...patch}});
+    edited=plan.commands.at(-1);
+  }
+  if(value.content.purpose==='ASSISTANT_DRAFT_CHANGE'&&object.kind==='PREPARATION'){
+    const scene=(await tx.query("SELECT member_id FROM revision_memberships WHERE revision_id=$1 AND role='SCENE'",[value.based_on_revision_id])).rows;
+    check(scene.length===1,'PREPARATION_SCENE','准备稿必须绑定唯一当前场次',409);
+    const plan=await planWorkspaceChange(tx,{workspace:'production-preparation',input:{action:'save',objectId:object.id,sceneId:scene[0].member_id,expectedVersion:command.expectedVersion,expectedRevisionId:value.based_on_revision_id,preparation:{...revision.content,...value.content.patch}}},context);
+    edited=plan.commands.at(-1);
+  }
   const result = await save(
     tx,
     {
@@ -661,6 +722,7 @@ async function applySuggestion(tx, command, context) {
           ? { configurationBinding: revision.content.configurationBinding }
           : {}),
       },
+      ...edited,
     },
     { ...context, actor: { kind: "ASSISTANT", label: "用户应用 AI 建议" } },
   );
@@ -718,14 +780,20 @@ export async function execute(pool, request) {
     );
     await tx.query("SAVEPOINT commands");
     try {
-      const requested = request.commands
+      let commands=request.commands, presentation;
+      if(commands.some(c=>c.type==='workspace.change')) {
+        check(commands.length===1,'WORKSPACE_TRANSACTION','工作区动作必须独立提交');
+        const planned=await planWorkspaceChange(tx,commands[0],request);
+        commands=planned.commands;presentation=planned.response;
+      }
+      const requested = commands
         .flatMap((c) => [
           c.id,
           c.content?.target?.objectId,
           ...(c.links || []).map((x) => x.id),
         ])
         .filter(Boolean);
-      const suggestionIds = request.commands
+      const suggestionIds = commands
         .filter((c) => c.type === "suggestion.apply")
         .map((c) => c.suggestionId);
       if (suggestionIds.length) {
@@ -739,9 +807,10 @@ export async function execute(pool, request) {
           for (const source of suggestion.content.sourceVersions || [])
             if (source.objectId) requested.push(source.objectId);
       }
-      const dependencyIds = request.commands.flatMap((c) =>
+      const dependencyIds = commands.flatMap((c) =>
         (c.dependencies || []).map((d) => d.revisionId),
-      );
+      ).filter(Boolean);
+      requested.push(...commands.filter(c=>c.reviewBasis).map(c=>c.reviewBasis.id));
       const related = (
         await tx.query(
           `WITH RECURSIVE inputs(id) AS (
@@ -757,9 +826,10 @@ export async function execute(pool, request) {
         ...new Set([
           ...requested,
           ...related.map((r) => r.id),
-          ...request.commands
-            .filter((c) => c.type === "configuration.save")
+          ...commands
+            .filter((c) => ['configuration.save','configuration.assert'].includes(c.type))
             .map((c) => "configuration:" + c.scope),
+          ...commands.filter(c=>c.reviewStandard).map(()=> 'configuration:system'),
         ]),
       ].sort();
       // Object locks serialize versions; the operation lock serializes duplicate requests.
@@ -772,7 +842,17 @@ export async function execute(pool, request) {
         [ids],
       );
       const results = [];
-      for (const command of request.commands) {
+      for (let command of commands) {
+        if(command.revisionIdFrom!==undefined) {
+          const source=results[command.revisionIdFrom];
+          check(Number.isInteger(command.revisionIdFrom)&&source?.id===command.id&&source.revisionId,'REVISION_RESULT','修订引用必须来自同一事务内已完成的对象操作');
+          command={...command,revisionId:source.revisionId};
+        }
+        if(command.dependencies?.some(d=>d.revisionIdFrom!==undefined))command={...command,dependencies:command.dependencies.map(d=>{
+          if(d.revisionIdFrom===undefined)return d;
+          const source=results[d.revisionIdFrom];check(Number.isInteger(d.revisionIdFrom)&&source?.id===d.objectId&&source.revisionId,'REVISION_RESULT','输入修订须来自本事务内已保存的精确对象');
+          return {revisionId:source.revisionId,purpose:d.purpose};
+        })};
         if (actor.kind === "ASSISTANT")
           check(
             command.type === "save",
@@ -789,6 +869,12 @@ export async function execute(pool, request) {
           );
         else if (command.type === "submit")
           results.push(await submit(tx, command));
+        else if(command.type==='archive')results.push(await archive(tx,command,{actor,operationId:request.operationId}));
+        else if(command.type==='assert'){await current(tx,command);results.push({id:command.id,version:command.expectedVersion});}
+        else if(command.type==='configuration.assert') {
+          const value=(await tx.query('SELECT version FROM configurations WHERE scope=$1 FOR UPDATE',[command.scope])).rows[0];
+          check((value?.version||0)===command.expectedVersion,'VERSION_CONFLICT','配置已改变',409);results.push({scope:command.scope,version:command.expectedVersion});
+        }
         else if (command.type === "review")
           results.push(
             await review(tx, command, {
@@ -819,6 +905,7 @@ export async function execute(pool, request) {
         operationId: request.operationId,
         status: "SUCCEEDED",
         results,
+        ...(presentation ? {workspace:await presentation(results)} : {}),
       };
       await tx.query(
         "UPDATE operations SET status='SUCCEEDED',result=$2,updated_at=now() WHERE id=$1",
@@ -827,6 +914,7 @@ export async function execute(pool, request) {
       return result;
     } catch (error) {
       await tx.query("ROLLBACK TO SAVEPOINT commands");
+      if(!(error instanceof ReviewError)) console.error(JSON.stringify({event:'transaction-rejected',operationId:request.operationId,name:error.name,code:error.code,constraint:error.constraint,frames:error.stack?.split('\n').slice(1,4)}));
       const failed = {
         code:
           error instanceof ReviewError ? error.code : "TRANSACTION_REJECTED",

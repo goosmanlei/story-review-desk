@@ -1,0 +1,33 @@
+import assert from 'node:assert/strict';
+import {chromium} from '@playwright/test';
+import {requiredPhase} from '../tools/process-resources.mjs';
+assert.ok(await requiredPhase(process.cwd()),'Use managed runner');
+const base=process.env.REVIEW_UI_BASE||'http://127.0.0.1:3913';
+const profile=await fetch(base+'/api/v1/workspaces/profile').then(r=>r.json());assert.match(profile.instanceId,/^ui-fixture-/);
+const plan=(await fetch(base+'/api/v1/workspaces/views/episode-plan').then(r=>r.json())).plan;
+const episode=plan.content.episodes.find(e=>e.objectState==='DRAFT');assert.ok(episode);
+const browser=await chromium.launch({channel:'chrome'});
+try{
+ const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
+ page.on('pageerror',error=>errors.push(error.message));
+ await page.goto(base+'/?view=story&storyMode=logic&episode='+encodeURIComponent(episode.episodeUid),{waitUntil:'networkidle'});
+ const form=page.getByRole('form',{name:episode.displayId+'本集审阅提交'});
+ await form.waitFor();assert.deepEqual((await page.getByRole('alert').allTextContents()).filter(t=>t.trim()),[]);
+ const pass=page.getByRole('radio',{name:'通过',exact:true});assert.equal(await pass.count(),6);
+ for(const control of await pass.all())await control.click();
+ await form.locator('input[value=APPROVE_AND_RELEASE]').check();
+ await form.getByRole('textbox',{name:episode.displayId+'本集审阅意见'}).fill('仅隔离浏览器验收：保留原版六项判断和提交交互。');
+ const submit=form.locator('button[type=submit]');assert.equal(await submit.isEnabled(),true);
+ let response=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/workspaces/episode-plan-reviews'));
+ await submit.click();let saved=await response;assert.equal(saved.status(),200,await saved.text());
+ await page.getByRole('button',{name:'修改本集提交',exact:true}).click();
+ await form.getByRole('textbox',{name:episode.displayId+'本集审阅意见'}).fill('仅隔离浏览器验收：修正意见保留原判断，精确版本回读后再次提交。');
+ response=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/workspaces/episode-plan-reviews'));
+ await form.locator('button[type=submit]').click();saved=await response;assert.equal(saved.status(),200,await saved.text());
+ const detail=await fetch(base+'/api/v1/objects/'+encodeURIComponent(episode.episodeUid)).then(r=>r.json());
+ assert.equal(detail.state,'ADOPTED');
+ await page.reload({waitUntil:'networkidle'});await page.getByRole('button',{name:'修改本集提交',exact:true}).waitFor();
+ assert.ok((await page.getByRole('region',{name:'本集独立推进'}).textContent()).includes('本集已采用'));
+ assert.deepEqual(errors,[]);
+ console.log('PASS original six criteria, episode submit, correction, exact adoption and reload');
+}finally{await browser.close();}

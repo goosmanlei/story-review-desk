@@ -18,6 +18,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   beginPhase,
+  processLock,
   phaseRecords,
   processAlive,
   processIdentity,
@@ -303,4 +304,11 @@ test("registered project entrypoints require a task and old diagnostic logs expi
   await trimProcessLogs(config);
   assert.equal(await exists(path.join(logs, "old.log")), false);
   assert(await exists(path.join(logs, "new.log")));
+});
+
+
+test('process lock accepts an acknowledgement split across stdout chunks',async()=>{
+ const outer=await requiredPhase(process.cwd());assert(outer);const root=(await outer.read()).resources[0].path,wrapper=path.join(root,'chunked-lock.py');
+ await writeFile(wrapper,"#!/usr/bin/env python3\nimport sys,time\nsys.stdout.write('LOC');sys.stdout.flush();time.sleep(.05);sys.stdout.write('KED\\n');sys.stdout.flush();sys.stdin.read()\n");await chmod(wrapper,0o700);
+ let called=0;assert.equal(await processLock(path.join(root,'chunked-lock'),async()=>{called++;return 'locked';},wrapper),'locked');assert.equal(called,1);
 });

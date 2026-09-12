@@ -8,13 +8,21 @@ export const maintenanceKinds = [
   "MAINTENANCE_VERIFY",
   "MAINTENANCE_BACKUP",
   "MAINTENANCE_RESTORE",
+  "MAINTENANCE_EXPORT",
+  "MAINTENANCE_IMPORT",
 ];
+export function workspaceMaintenanceRequest(input,{operationId,runtimeEpoch}) {
+  const kind={import:'MAINTENANCE_IMPORT',verify:'MAINTENANCE_VERIFY',backup:'MAINTENANCE_BACKUP',restore:'MAINTENANCE_RESTORE',export:'MAINTENANCE_EXPORT'}[input.action];
+  check(kind,'MAINTENANCE_ACTION','维护动作无效');
+  const request={kind,operationId,runtimeEpoch,...(kind==='MAINTENANCE_IMPORT'?{sourcePath:input.sourcePath}:{}),...(kind==='MAINTENANCE_RESTORE'?{backupId:input.backupId,targetName:input.target,explicit:true}:{})};
+  validateMaintenance(request);return request;
+}
 const taskId = (id) => "maintenance-" + hash(id).slice(0, 24);
 export async function ownedBackup(pool, root, id) {
   identity(id);
   const row = (
     await pool.query(
-      "SELECT result FROM operations WHERE id=$1 AND kind='MAINTENANCE_BACKUP' AND status='SUCCEEDED'",
+      "SELECT result FROM operations WHERE id=$1 AND kind IN ('MAINTENANCE_BACKUP','MAINTENANCE_EXPORT','MAINTENANCE_IMPORT') AND status='SUCCEEDED'",
       [id],
     )
   ).rows[0];
@@ -51,6 +59,7 @@ export function validateMaintenance(request) {
     "MAINTENANCE_KIND",
     "维护任务类型无效",
   );
+  if(request.kind==="MAINTENANCE_IMPORT")check((typeof request.filename==="string"&&/^[a-f0-9]{64}$/.test(request.sha256))||(typeof request.sourcePath==="string"&&path.isAbsolute(request.sourcePath)),"PACKAGE_INPUT","请选择完整项目包文件或项目内的业务包目录");
   if (request.kind === "MAINTENANCE_RESTORE") {
     identity(request.backupId);
     check(
@@ -74,10 +83,10 @@ export async function maintenanceState(pool) {
     )
   ).rows;
   return {
-    operations: rows,
+    operations: rows.map(r=>({...r,operationId:r.id,action:{MAINTENANCE_VERIFY:'verify',MAINTENANCE_BACKUP:'backup',MAINTENANCE_RESTORE:'restore',MAINTENANCE_EXPORT:'export',MAINTENANCE_IMPORT:'import'}[r.kind],error:r.error?.message||r.error||null})),
     backups: rows
       .filter(
-        (r) => r.kind === "MAINTENANCE_BACKUP" && r.status === "SUCCEEDED",
+        (r) => ['MAINTENANCE_BACKUP','MAINTENANCE_EXPORT','MAINTENANCE_IMPORT'].includes(r.kind) && r.status === "SUCCEEDED",
       )
       .map((r) => ({
         id: r.id,

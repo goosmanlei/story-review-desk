@@ -1,0 +1,5 @@
+import {chromium} from '@playwright/test';
+import {requiredPhase} from '../tools/process-resources.mjs';
+import {originalModules,originalReady,timedInteraction} from './original-readiness.mjs';
+if(!await requiredPhase(process.cwd()))throw Error('Use managed runner');
+const b=await chromium.launch({channel:'chrome'});try{const p=await b.newPage();await p.goto(process.env.REVIEW_UI_BASE||'http://127.0.0.1:3917');await originalReady(p,'overview');for(let i=0;i<12;i++){const [v,l]=originalModules[(i+1)%6];await p.evaluate(()=>performance.clearResourceTimings());const ms=await timedInteraction(p,p.locator('.workspace-nav').getByRole('button',{name:new RegExp(l)}),()=>originalReady(p,v));console.log(JSON.stringify({v,ms:Math.round(ms),reads:await p.evaluate(()=>performance.getEntriesByType('resource').filter(r=>r.name.includes('/api/')).map(r=>({url:new URL(r.name).pathname+new URL(r.name).search,ms:Math.round(r.duration),bytes:r.decodedBodySize,network:r.transferSize})))}));}}finally{await b.close();}

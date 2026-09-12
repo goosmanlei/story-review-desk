@@ -35,6 +35,12 @@ import {
   ProcessPhase,
 } from "./process-resources.mjs";
 
+export function runtimeDependencies(){
+  const [major,minor]=process.versions.node.split('.').map(Number);
+  requireValue(major>22||major===22&&minor>=13,'需要 Node.js 22.13 或更新版本');
+  return {node:process.version,npm:run('npm',['--version']),docker:run('docker',['version','--format','{{.Server.Version}}']),python:run('python3',['--version']),ffmpeg:run('ffmpeg',['-version']).split('\n')[0],ffprobe:run('ffprobe',['-version']).split('\n')[0]};
+}
+
 export async function resolveSource(directory, commit) {
   const source = await realpath(directory),
     top = await realpath(

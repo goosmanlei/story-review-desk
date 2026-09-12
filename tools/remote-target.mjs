@@ -35,6 +35,7 @@ import {
   retireDatabases,
   reconcileSoftware,
   maintenance,
+  runtimeDependencies,
 } from "./deployment.mjs";
 import { importPackage, verifyPackage } from "../server/project/package.mjs";
 import { fileSha } from "../server/transport-contract.mjs";
@@ -73,6 +74,7 @@ export async function remoteTarget(root, operationId, transportDirectory) {
     "VPS 输入身份不符",
   );
   await verifyTree(path.join(input, "software"), manifest.files);
+  const dependencies=runtimeDependencies();
   const business = await verifyPackage(path.join(input, "business"));
   requireValue(
     business.transfer.sha256 === request.baselineSha256,
@@ -108,6 +110,7 @@ export async function remoteTarget(root, operationId, transportDirectory) {
       commit: request.commit,
       instanceId: instance.id,
       baselineSha256: request.baselineSha256,
+      dependencies,
       owner: processIdentity(),
       cleanup: "PENDING",
     };

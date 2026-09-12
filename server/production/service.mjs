@@ -1,4 +1,9 @@
+import {productionRecipeInputs} from './review-evidence.mjs';
+import {PresentationRead} from '../presentation/read-unit.mjs';
+import {hash} from '../shared/contracts.mjs';
 import { check } from "../shared/contracts.mjs";
+import {validateAnimaticTimeline} from './animatic-model.mjs';
+import {canonicalShotDesign} from '../../web/presentation/shot-design-contract.mjs';
 export const kinds = [
   "PREPARATION",
   "COVERAGE",
@@ -9,6 +14,8 @@ export const kinds = [
   "DELIVERABLE",
 ];
 export function validate(kind, content) {
+  if(kind==='ASSEMBLY'&&content.role==='ANIMATIC')validateAnimaticTimeline(content.timeline);
+  if(kind==='SHOT'&&content.design)canonicalShotDesign(content.design);
   if (kind === "SHOT")
     check(
       typeof content.description === "string" ||
@@ -38,6 +45,7 @@ export async function verifyAdoption(tx, object, revisionId) {
     409,
   );
   for (const input of inputs) {
+    if(input.kind==='CALL'){const c=(await tx.query('SELECT content FROM revisions WHERE id=$1',[input.dependency_revision_id])).rows[0]?.content;if(c?.basis?.productionBasis){const needed=await productionRecipeInputs(new PresentationRead(tx),c.workItemRef);check(hash(needed.basis)===hash(c.basis.productionBasis),'PRODUCTION_CALL_STALE','调用包的本镜锁时、关键帧或声音输入已改变',409);}}
     check(
       ["ASSET", "CALL", "PROMPT"].includes(input.kind),
       "INPUT_KIND",

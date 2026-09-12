@@ -1,0 +1,60 @@
+import assert from 'node:assert/strict';
+import {requiredPhase} from '../tools/process-resources.mjs';
+assert.ok(await requiredPhase(process.cwd()),'Use the managed process runner');
+const base=(process.env.REVIEW_UI_BASE||'http://127.0.0.1:3913')+'/api/v1/';
+async function get(path){const response=await fetch(base+path),body=await response.json();assert.equal(response.status,200,JSON.stringify(body));return body;}
+const profile=await get('workspaces/profile');assert.match(profile.instanceId,/^ui-fixture-/);
+async function post(path,body,key=crypto.randomUUID()){const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json','X-Review-Runtime':profile.deployment.runtimeEpoch,'Idempotency-Key':key},body:JSON.stringify(body)});return {status:response.status,value:await response.json()};}
+async function ok(result){const r=await result;assert.equal(r.status,200,JSON.stringify(r.value));return r.value;}
+const plan=(await get('workspaces/views/episode-plan')).plan,sceneId=plan.content.episodes[0].sceneIds[0];
+const route='workspaces/shot-production',read=()=>get(route+'?sceneId='+sceneId);
+let workspace=await read();assert.ok(workspace.defaultContent.shots.length>=2);
+const content=structuredClone(workspace.draft?.content||workspace.currentPlan?.content||workspace.defaultContent);
+content.shots[0].keyframeStrategy.reason+=' · 隔离制作验收';
+let body={action:'save',sceneId,content,expectedReleaseId:workspace.releaseId,expectedDraftRevisionId:workspace.draftHeadRevisionId};
+const key=crypto.randomUUID(),saved=await ok(post(route,body,key));
+assert.deepEqual(await ok(post(route,body,key)),saved);assert.equal(saved.formalAdoptionPerformed,false);
+assert.equal((await post(route,body)).status,409);
+workspace=await read();assert.deepEqual(workspace.draft.content,content);
+const preview=await ok(post(route,{action:'preview',sceneId,draftRevisionId:workspace.draft.revisionId}));
+assert.ok(preview.outputCount>0);assert.equal(preview.expectedReleaseId,workspace.releaseId);
+assert.equal((await post(route,{action:'publish',sceneId,draftRevisionId:workspace.draft.revisionId,previewHash:'0'.repeat(64)})).status,409);
+const published=await ok(post(route,{action:'publish',sceneId,draftRevisionId:workspace.draft.revisionId,previewHash:preview.previewHash}));
+assert.equal(published.status,'SUCCEEDED');assert.equal(published.generationAuthorized,false);assert.equal(published.formalAdoptionPerformed,false);
+workspace=await read();assert.equal(workspace.draft,null);assert.deepEqual(workspace.currentPlan.content,content);
+const catalogue=await get('workspaces/views/production-materials?sceneId='+sceneId+'&limit=100');
+assert.equal(catalogue.total,preview.outputCount);assert.equal(catalogue.issues.length,0);
+assert.ok(catalogue.entries.every(e=>e.currentVersionId===null&&e.currentExpectedOutputId&&e.outputState==='NOT_PRODUCED'));
+const familyId=catalogue.entries[0].familyId,detail=await get('workspaces/views/production-materials?familyId='+familyId);
+assert.equal(detail.entries.length,1);assert.ok(detail.page.workItems.length);assert.ok(detail.page.workPackages.length);
+console.log('PASS production settings save/replay/CAS, preview, synchronous demand creation and exact catalogue detail');
+
+const unchanged=catalogue.page.expectedOutputs.filter(o=>o.shotId===content.shots[1].shotId),before=new Map(unchanged.map(o=>[o.id,o.revisionId]));
+content.shots[0].handles.headFrames=content.shots[0].handles.headFrames===1?2:1;
+await ok(post(route,{action:'save',sceneId,content,expectedReleaseId:workspace.releaseId,expectedDraftRevisionId:workspace.draftHeadRevisionId}));
+workspace=await read();const preview2=await ok(post(route,{action:'preview',sceneId,draftRevisionId:workspace.draft.revisionId}));
+await ok(post(route,{action:'publish',sceneId,draftRevisionId:workspace.draft.revisionId,previewHash:preview2.previewHash}));
+const after=await get('workspaces/views/production-materials?sceneId='+sceneId+'&limit=100');
+for(const output of after.page.expectedOutputs.filter(o=>before.has(o.id)))assert.equal(output.revisionId,before.get(output.id),'Another shot must retain its exact output-definition revision');
+assert.ok(before.size>0);
+console.log('PASS changing one shot setting preserves unrelated shot output revisions; no generation was authorized');
+
+const spatialRoute='workspaces/spatial-shot-view',viewId='spatial-fixture-'+crypto.randomUUID();
+let space=await get(spatialRoute+'?sceneId='+sceneId+'&viewId='+viewId);
+const location=space.availableLocations.find(l=>l.zones.length>0),zone=location.zones[0];
+const author={...space.defaults,locationId:location.id,zoneId:zone.id,camera:{origin:'SOUTH_INTERIOR',looks:'NORTH',height:'EYE_LEVEL',purpose:'隔离机位表单验证'},dressing:[],note:'仅隔离实例核对局部空间修订'};
+const spatialBody={action:'save',sceneId,viewId,expectedReleaseId:space.releaseId,expectedBasisHash:space.basisHash,expectedDraftRevisionId:space.draftHeadRevisionId,content:author};
+const spatialKey=crypto.randomUUID(),spatialSaved=await ok(post(spatialRoute,spatialBody,spatialKey));
+assert.deepEqual(await ok(post(spatialRoute,spatialBody,spatialKey)),spatialSaved);
+assert.equal((await post(spatialRoute,spatialBody)).status,409);
+space=await get(spatialRoute+'?sceneId='+sceneId+'&viewId='+viewId);
+const spatialPreview=await ok(post(spatialRoute,{action:'preview',sceneId,viewId,draftRevisionId:space.draft.revisionId}));
+assert.equal(spatialPreview.view.base.zoneId,zone.id);assert.equal(spatialPreview.modelCalls,0);
+const spatialPublished=await ok(post(spatialRoute,{action:'publish',sceneId,viewId,draftRevisionId:space.draft.revisionId,previewHash:spatialPreview.previewHash}));
+assert.equal(spatialPublished.status,'SUCCEEDED');assert.equal(spatialPublished.formalAdoptionPerformed,false);
+space=await get(spatialRoute+'?sceneId='+sceneId+'&viewId='+viewId);
+assert.equal(space.currentView.id,spatialPreview.view.id);assert.equal(space.draft,null);
+assert.ok((await read()).availableSpace.localViews.some(v=>v.id===spatialPreview.view.id));
+const wrongScene=plan.content.episodes[0].sceneIds[1];
+const wrong=await fetch(base+spatialRoute+'?sceneId='+wrongScene+'&viewId='+viewId);assert.equal(wrong.status,409);
+console.log('PASS spatial draft, preview, immediate registration, input readback and immutable scene ownership');

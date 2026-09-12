@@ -59,6 +59,14 @@ if (Array.isArray(machine.production?.command))
       outputDirectory: path.join(result.directory, "outputs"),
     };
   };
+providers.renderAnimatic=async ({request,object,inputs,onRequestId})=>{
+ const result=await invoke([process.execPath,fileURLToPath(new URL('./render-animatic.mjs',import.meta.url))],{request,object,inputs},onRequestId);
+ return {...result.value,outputDirectory:path.join(result.directory,'outputs')};
+};
+providers.renderManifest=async ({request,object,inputs,onRequestId})=>{
+ const result=await invoke([process.execPath,fileURLToPath(new URL('./render-manifest.mjs',import.meta.url))],{request,object,inputs},onRequestId);
+ return {...result.value,outputDirectory:path.join(result.directory,'outputs')};
+};
 providers.finalize = async ({ operationId, status }) => {
   const result = runningPhases.get(operationId);
   if (!result) return;
@@ -79,9 +87,13 @@ const heartbeat = async () =>
         workerId,
         softwareCommit: process.env.REVIEW_SOFTWARE_COMMIT || "DEVELOPMENT",
         concurrency: 1,
+        assistantModel: machine.assistant?.model || null,
         capabilities: [
           "IMPORT",
           "MEDIA_REGISTER",
+          "SOURCE_IMPORT",
+          "ANIMATIC_RENDER",
+          "PRODUCTION_MANIFEST_RENDER",
           "MAINTENANCE_VERIFY",
           "MAINTENANCE_BACKUP",
           "MAINTENANCE_RESTORE",

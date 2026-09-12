@@ -1,3 +1,7 @@
+import {validateManifestRender} from './production/manifests.mjs';
+import {validateAnimaticRender} from './production/animatic-jobs.mjs';
+import {executionRecord} from './production/execution.mjs';
+import {sourceObjectCommand} from './story/sources.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
 import {
   maintenanceKinds,
@@ -20,6 +24,11 @@ import { importRecords, fileSha } from "./transfer.mjs";
 import { readObject } from "./repository.mjs";
 import { execute } from "./commands.mjs";
 import { verifyAdoption as verifyInputs } from "./production/service.mjs";
+import {reserveConversation} from './collaboration/conversations.mjs';
+import {assertSourceVersions} from './collaboration/assistant-context.mjs';
+import {validateCommentPolish} from './collaboration/comment-polish.mjs';
+import {validateMaterialReview,normalizeMaterialReview} from './collaboration/material-review.mjs';
+import {normalizeChangePreview} from './collaboration/change-preview.mjs';
 
 export async function enqueue(pool, request) {
   identity(request.operationId);
@@ -28,8 +37,11 @@ export async function enqueue(pool, request) {
       "AI_SUGGEST",
       "IMPORT",
       "MEDIA_REGISTER",
+      "SOURCE_IMPORT",
       "GENERATE",
       "MEDIA_PROCESS",
+      "ANIMATIC_RENDER",
+      "PRODUCTION_MANIFEST_RENDER",
       ...maintenanceKinds,
     ].includes(request.kind),
     "JOB_KIND",
@@ -76,6 +88,12 @@ export async function enqueue(pool, request) {
       429,
     );
     if (["AI_SUGGEST", "GENERATE", "MEDIA_PROCESS"].includes(request.kind)) {
+      if(request.assistant||request.commentPolish||request.materialReview){
+        const context=(request.assistant||request.commentPolish||request.materialReview).context;
+        const ids=[...new Set([request.objectId,...context.sourceVersions.map(s=>s.objectId)])].sort();
+        for(const id of ids)await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,1))',[id]);
+        await tx.query('SELECT id FROM objects WHERE id=ANY($1::text[]) ORDER BY id FOR SHARE',[ids]);
+      }
       const object = (
         await tx.query("SELECT * FROM objects WHERE id=$1 FOR UPDATE", [
           request.objectId,
@@ -159,6 +177,18 @@ export async function enqueue(pool, request) {
         );
       }
     }
+    if(request.kind==='PRODUCTION_MANIFEST_RENDER')await validateManifestRender(tx,request);
+    if(request.kind==='ANIMATIC_RENDER')await validateAnimaticRender(tx,request);
+    if(request.executionRequestId){
+      await tx.query('SELECT pg_advisory_xact_lock(hashtextextended($1,3))',[request.executionRequestId]);
+      const grant=await executionRecord(tx,request.executionRequestId),expected=grant.result.workspace.generationRequest;
+      check(expected&&grant.request.runtimeEpoch===request.runtimeEpoch&&hash({...request,operationId:expected.operationId})===hash(expected),'EXECUTION_GRANT','任务不符合本轮精确授权',409);
+      const used=(await tx.query("SELECT id FROM operations WHERE request->>'executionRequestId'=$1 LIMIT 1",[request.executionRequestId])).rows[0];
+      check(!used,'EXECUTION_ALREADY_STARTED','本授权已提交，请查询原操作：'+(used?.id||''),409);
+    }
+    if(request.assistant)await reserveConversation(tx,request);
+    if(request.commentPolish)await validateCommentPolish(tx,request);
+    if(request.materialReview)await validateMaterialReview(tx,request);
     await tx.query(
       "INSERT INTO operations(id,request_hash,kind,status,request) VALUES($1,$2,$3,'QUEUED',$4)",
       [request.operationId, requestHash, request.kind, request],
@@ -382,6 +412,17 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
       });
     else if (job.kind === "MEDIA_REGISTER")
       result = await registerMedia(pool, request, root);
+    else if(job.kind==='SOURCE_IMPORT'){
+      let text=null;
+      if((request.mimeType.startsWith('text/')||request.mimeType==='application/json'||/\.(txt|md|json|srt|vtt)$/i.test(request.originalFilename))&&request.bytes<=8*1024*1024){
+        const bytes=await readFile(request.filename);check(hash(bytes)===request.sha256,'SOURCE_SHA','来源字节 SHA 不符',409);
+        try{text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{/* Keep the exact original when text cannot be decoded. */}
+      }
+      await registerMedia(pool,request,root,{recordOperation:false});
+      const command=sourceObjectCommand(request,text),receipt=await execute(pool,{operationId:job.id+':register-source',runtimeEpoch:request.runtimeEpoch,actor:{kind:'HUMAN',label:'用户导入来源'},commands:[command]});
+      check(receipt.status==='SUCCEEDED','SOURCE_REGISTRATION','来源登记未完成，请查询原操作',409,{receipt});
+      result={sourceId:command.id,revisionId:receipt.results[0].revisionId,sha256:request.sha256,textAvailable:text!==null,observation:text===null?'ORIGINAL_UNOBSERVED':'TEXT_AVAILABLE',formalAdoptionPerformed:false};
+    }
     else if (job.kind === "AI_SUGGEST") {
       const configuration = (
         await pool.query(
@@ -408,6 +449,9 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         "排队期间对象已改变",
         409,
       );
+      if(request.assistant)await transaction(pool,tx=>assertSourceVersions(tx,request.assistant.context.sourceVersions),{readOnly:true});
+      if(request.commentPolish)await transaction(pool,tx=>validateCommentPolish(tx,request),{readOnly:true});
+      if(request.materialReview)await transaction(pool,tx=>validateMaterialReview(tx,request),{readOnly:true});
       externalStarted = true;
       const value = await providers.suggest({
         request,
@@ -429,6 +473,21 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         "SUGGESTION_FORMAT",
         "助手输出未通过格式校验",
       );
+      if(request.assistant){
+        normalizeChangePreview(request,object,value);
+        const drafts=value.draftSuggestions||[];
+        check(Array.isArray(drafts)&&drafts.length<=8&&new Set(drafts.map(d=>d.targetId)).size===drafts.length&&drafts.every(d=>request.assistant.context.draftTargets.some(t=>t.id===d.targetId)&&typeof d.text==='string'&&d.text.length<=16000),'SUGGESTION_TARGET','助手建议未绑定本轮草稿字段');
+        value.draftSuggestions=drafts;
+        value.sourceVersions=[...request.assistant.context.sourceVersions,...value.sourceVersions||[]];
+        const observed=value.observedImageIds||[];
+        check(Array.isArray(observed)&&observed.length<=4&&observed.every(id=>value.sourceVersions.some(s=>s.objectId===id&&s.mediaSha256)),'IMAGE_OBSERVATION','原图观察声明缺少实际读取依据');
+        value.observedImageIds=observed;
+      }
+      if(request.commentPolish){
+        check(value.summary.trim()&&value.summary.length<=16000,'COMMENT_SUGGESTION','评论建议为空或过长');
+        value.patch={};value.draftSuggestions=[];value.purpose='COMMENT_POLISH';value.sourceVersions=[...request.commentPolish.context.sourceVersions,...value.sourceVersions||[]];
+      }
+      if(request.materialReview)normalizeMaterialReview(request,value);
       await transaction(pool, async (tx) => {
         await tx.query(
           "INSERT INTO suggestions(operation_id,object_id,based_on_revision_id,content) VALUES($1,$2,$3,$4)",
@@ -446,7 +505,7 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
       });
     } else {
       check(
-        typeof providers.generate === "function",
+        typeof (job.kind==='ANIMATIC_RENDER'?providers.renderAnimatic:job.kind==='PRODUCTION_MANIFEST_RENDER'?providers.renderManifest:providers.generate) === "function",
         "PRODUCTION_NOT_CONFIGURED",
         "本机尚未配置相应制作执行器",
         503,
@@ -459,7 +518,9 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         409,
       );
       const inputs = await transaction(pool, async (tx) => {
-        await verifyInputs(tx, object, request.revisionId);
+        if(job.kind==='PRODUCTION_MANIFEST_RENDER')await validateManifestRender(tx,request);
+        else if(job.kind==='ANIMATIC_RENDER')await validateAnimaticRender(tx,request,{running:true});
+        else await verifyInputs(tx, object, request.revisionId);
         check(
           !(
             await tx.query(
@@ -471,6 +532,7 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
           "排队期间实际输入依据已改变",
           409,
         );
+        if(job.kind==='PRODUCTION_MANIFEST_RENDER')return (await tx.query('SELECT o.id,o.kind,r.id AS revision_id,r.sha256,r.content FROM revisions r JOIN objects o ON o.id=r.object_id WHERE r.id=ANY($1::text[])',[request.dependencies.filter(d=>d.purpose==='ACTUAL_INPUT').map(d=>d.revisionId)])).rows;
         return (
           await tx.query(
             "SELECT o.id,o.kind,r.id AS revision_id,r.sha256,r.content FROM dependencies d JOIN revisions r ON r.id=d.dependency_revision_id JOIN objects o ON o.id=r.object_id WHERE d.consumer_revision_id=$1 AND d.purpose='ACTUAL_INPUT'",
@@ -500,7 +562,7 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         }
       }
       externalStarted = true;
-      const generated = await providers.generate({
+      const generated = await (job.kind==='ANIMATIC_RENDER'?providers.renderAnimatic:job.kind==='PRODUCTION_MANIFEST_RENDER'?providers.renderManifest:providers.generate)({
         request,
         object,
         inputs,
@@ -574,7 +636,7 @@ async function registerGenerated(pool, root, job, object, value) {
     value &&
       Array.isArray(value.outputs) &&
       value.outputs.length > 0 &&
-      value.outputs.length <= 16,
+      value.outputs.length <= (job.request.executionRequestId ? 1 : 16),
     "OUTPUT_FORMAT",
     "制作执行器须返回 1 至 16 个实际产物",
   );
@@ -636,10 +698,12 @@ async function registerGenerated(pool, root, job, object, value) {
       content: {
         description: output.description || "",
         executionOperationId: job.id,
+        ...(job.request.manifest?{productionManifest:job.request.manifest.content}:{}),
+        basis:{expectedOutputId:object.revision.content.basis?.outputId||object.revision.content.expectedOutputId||job.request.manifest?.expectedOutputId||null,executionRevisionId:job.request.revisionId},
         mediaType: output.mimeType?.split("/")[0] || "UNKNOWN",
       },
       links: [{ id: family[0].id, role: "FAMILY" }],
-      dependencies: [{ revisionId: job.request.revisionId, purpose: "DESIGN" }],
+      dependencies: [{ revisionId: job.request.revisionId, purpose: "ACTUAL_INPUT" },...(job.request.manifest?job.request.dependencies:[])],
       media: [
         {
           id: media.mediaId,
@@ -653,6 +717,7 @@ async function registerGenerated(pool, root, job, object, value) {
   const saved = await execute(pool, {
     operationId: job.id + ":register",
     actor: { kind: "PROJECT_CODEX", label: "受控制作工作器" },
+    runtimeEpoch:job.request.runtimeEpoch,
     commands,
   });
   check(
@@ -661,5 +726,5 @@ async function registerGenerated(pool, root, job, object, value) {
     "实际产物登记未完成；保留原执行目录，禁止重新调用",
     409,
   );
-  return { operationId: job.id, status: "SUCCEEDED", outputs: saved.results };
+  return { operationId: job.id, status: 'SUCCEEDED', outputs: saved.results, ...(job.kind==='ANIMATIC_RENDER'?{mediaUrl:'/api/v1/media/'+commands[0].media[0].sha256,observed:false,frameCount:value.frameCount}: {}) };
 }

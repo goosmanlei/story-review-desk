@@ -37,6 +37,7 @@ import {
   retireReleases,
   reconcileSoftware,
   maintenance,
+  runtimeDependencies,
 } from "./deployment.mjs";
 
 const help = `审阅台自助部署
@@ -130,12 +131,7 @@ export async function inspectDeployment(root, values) {
         "SSH 目标无效",
       );
     }
-  const dependencies = {
-    node: process.version,
-    npm: run("npm", ["--version"]),
-    docker: run("docker", ["version", "--format", "{{.Server.Version}}"]),
-    python: run("python3", ["--version"]),
-  };
+  const dependencies = runtimeDependencies();
   if (!active && chosen.includes("local"))
     await assertFreePort(machine.port, machine.listenHost || "127.0.0.1");
   if (active) {

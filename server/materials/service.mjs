@@ -1,3 +1,4 @@
+import {verifyProductionReview} from '../production/review-evidence.mjs';
 import { check, identifier } from "../shared/contracts.mjs";
 export const kinds = [
   "REQUIREMENT",
@@ -46,9 +47,11 @@ export async function projectLinks(tx, object, revisionId, links) {
       "ASSET_FAMILY_IMMUTABLE",
       "素材版本不能换绑素材族",
     );
+    const parent=(await tx.query("SELECT content->>'parentVersionId' AS id FROM revisions WHERE id=$1",[revisionId])).rows[0]?.id||null;
+    if(parent)check((await tx.query('SELECT 1 FROM asset_versions WHERE object_id=$1 AND family_id=$2',[parent,family[0].id])).rowCount,'PARENT_FAMILY','父版本必须是本素材族的实际版本',409);
     await tx.query(
-      "INSERT INTO asset_versions(object_id,family_id) VALUES($1,$2) ON CONFLICT DO NOTHING",
-      [object.id, family[0].id],
+      "INSERT INTO asset_versions(object_id,family_id,parent_asset_id) VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+      [object.id, family[0].id,parent],
     );
   }
 }
@@ -78,6 +81,7 @@ export async function verifyAdoption(tx, object, revisionId, review) {
     "权利未知；项目内部使用须由用户在本次判断中明确确认",
     409,
   );
+  await verifyProductionReview(tx,object,revisionId,review);
   if (review.internalAttestation === true) {
     await tx.query(
       "INSERT INTO rights_events(id,revision_id,fact,internal_attestation,evidence,author,operation_id) VALUES($1,$2,$3,true,$4,$5,$6)",

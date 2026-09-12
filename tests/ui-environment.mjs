@@ -32,6 +32,8 @@ const { values } = parseArgs({
     "media-root": { type: "string" },
     port: { type: "string", default: "3911" },
     standalone: { type: "boolean" },
+    blank: { type: "boolean" },
+    supplement: { type: "string" },
     committed: { type: "boolean" },
   },
 });
@@ -163,7 +165,7 @@ if (values.mirror) {
       media: imported.verifiedMedia,
     }),
   );
-} else {
+} else if(!values.blank) {
   const save = async (id, kind, content, links = []) => {
     const r = await execute(pool, {
       operationId: randomUUID(),
@@ -300,6 +302,14 @@ const tick = setInterval(async () => {
     ticking = false;
   }
 }, 500);
+if(values.supplement){
+  const value=JSON.parse(await readFile(values.supplement,'utf8'));
+  if(value.schemaVersion!=='UI_RESTORATION_SOURCES_V1'||!Array.isArray(value.commands)||value.commands.some(c=>c.type!=='save'||c.kind!=='SOURCE'||c.expectedVersion!==0||!['NARRATIVE_SUPPORT','SPATIAL_CATALOG','ARCHIVED_EPISODE_PLAN'].includes(c.content?.role)))throw Error('Invalid restoration supplement');
+  const runtimeEpoch=(await pool.query('SELECT runtime_epoch FROM project')).rows[0].runtime_epoch;
+  const receipt=await execute(pool,{operationId:'ui-original-restored-sources',runtimeEpoch,commands:value.commands});
+  if(receipt.status!=='SUCCEEDED')throw Error(JSON.stringify(receipt));
+  console.log(JSON.stringify({restoredSources:value.commands.length,sourceOperationId:receipt.operationId}));
+}
 if (values.standalone) {
   const build = spawn(
     process.execPath,

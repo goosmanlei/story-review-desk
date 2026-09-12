@@ -1,3 +1,7 @@
+import {prepareManifestRender} from './production/manifests.mjs';
+import {cachedWorkspace} from './presentation/cache.mjs';
+import {prepareAnimaticRender} from './production/animatic-jobs.mjs';
+import {sourceUploadRequest} from './story/sources.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
 import { database, machineConfiguration, transaction } from "./db.mjs";
 import { catalog, objectDetail, workSummary } from "./repository.mjs";
@@ -8,15 +12,22 @@ import {
   spatialBaseline,
 } from "./workspaces.mjs";
 import { execute, operation } from "./commands.mjs";
+import { workspaceRead } from "./presentation/workspaces.mjs";
 import { check, ReviewError, errorBody } from "./shared/contracts.mjs";
 import { exportRecords } from "./transfer.mjs";
 import { mediaResponse, receiveFile } from "./files.mjs";
 import { enqueue, cancelJob, suggestion, applySuggestion } from "./jobs.mjs";
+import {assistantContext,publicContext} from './collaboration/assistant-context.mjs';
+import {conversationList,prepareConversation,archiveConversation,checkDraftSuggestion,readConversation,turnId} from './collaboration/conversations.mjs';
+import {conversationEvents} from './collaboration/events.mjs';
+import {prepareCommentPolish,commentPolishResult} from './collaboration/comment-polish.mjs';
+import {prepareMaterialReview,materialReviewResult} from './collaboration/material-review.mjs';
 import { rm } from "node:fs/promises";
 import {
   maintenanceState,
   backupDownload,
   maintenanceKinds,
+  workspaceMaintenanceRequest,
 } from "./project/maintenance-contract.mjs";
 
 const json = (body, status = 200) =>
@@ -65,7 +76,7 @@ export async function dispatch(request) {
         "请求来源与当前审阅台不一致",
         403,
       );
-      if (!["import", "upload"].includes(route[0])) {
+      if (!["import", "upload"].includes(route[0]) && !['workspaces/sources/file','workspaces/maintenance/upload'].includes(route.join('/'))) {
         check(
           request.headers.get("content-type")?.split(";")[0] ===
             "application/json",
@@ -84,6 +95,21 @@ export async function dispatch(request) {
     }
     const pool = await database();
     const runtimeEpoch = request.headers.get("x-review-runtime");
+    if(method==='GET'&&route[0]==='assistant'){
+      if(route[1]==='events')return conversationEvents(pool,request,url.searchParams);
+      if(route[1]==='conversations')return json(await transaction(pool,tx=>conversationList(tx,url.searchParams),{readOnly:true}));
+    }
+    if (method === 'GET' && route[0] === 'workspaces') {
+      if(route.slice(1).join('/')==='material-review-drafts')return json(await transaction(pool,tx=>materialReviewResult(tx,url.searchParams.get('operationId')),{readOnly:true}));
+      if(route.slice(1).join('/')==='script-comments/polish')return json(await transaction(pool,tx=>commentPolishResult(tx,url.searchParams.get('operationId')),{readOnly:true}));
+      if (route[1] === 'media' && route[2]) return mediaResponse(request, pool, (await machineConfiguration()).root, route[2]);
+      if (route[1] === 'maintenance') {
+        const state=await maintenanceState(pool),project=(await pool.query('SELECT instance_id AS "instanceId",runtime_epoch AS "runtimeEpoch" FROM project')).rows[0];
+        return json({...state,runtime:{...project,status:'运行中'},storage:{provider:'PostgreSQL',authority:'对象与不可变修订'},capabilities:{verify:true,backup:true,export:true,restore:true}});
+      }
+      const value=await transaction(pool,tx=>cachedWorkspace(tx,route.slice(1),url.searchParams,request.headers.get('if-none-match')),{readOnly:true});
+      return value.value?json(value.value):new Response(value.unchanged?null:value.body,{status:value.unchanged?304:200,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff',ETag:value.etag}});
+    }
     if (method === "GET" && route[0] === "maintenance") {
       if (route[1] && route[2] === "download")
         return backupDownload(
@@ -101,6 +127,47 @@ export async function dispatch(request) {
         409,
       );
       await transaction(pool, (tx) => mutationGate(tx, runtimeEpoch));
+    }
+    if(method==='POST'&&route.join('/')==='workspaces/maintenance/upload'){
+      const operationId=request.headers.get('idempotency-key'),{root}=await machineConfiguration(),file=await receiveFile(request,root,{});
+      try{const receipt=await enqueue(pool,{kind:'MAINTENANCE_IMPORT',operationId,runtimeEpoch,...file});if(receipt.replayed)await rm(file.filename,{force:true});return json(receipt,202);}catch(error){await rm(file.filename,{force:true});throw error;}
+    }
+    if(method==='POST'&&route.join('/')==='workspaces/sources/file'){
+      const operationId=request.headers.get('idempotency-key'),{root}=await machineConfiguration();
+      check(Number(request.headers.get('content-length'))<=128*1024*1024,'SOURCE_SIZE','单份来源文件至多 128 MiB',413);
+      const file=await receiveFile(request,root,{});
+      try{const value=sourceUploadRequest(file,Object.fromEntries(url.searchParams),{operationId,runtimeEpoch});const receipt=await enqueue(pool,value);if(receipt.replayed)await rm(file.filename,{force:true});return json(receipt,202);}
+      catch(error){await rm(file.filename,{force:true});throw error;}
+    }
+    if(method!=='GET'&&route[0]==='workspaces') {
+      const input=await requestJson(request),operationId=request.headers.get('idempotency-key')||input.operationId;
+      if(route.slice(1).join('/')==='shot-production'&&input.action==='manifest-render'){const receipt=await enqueue(pool,await prepareManifestRender(pool,input,{operationId,runtimeEpoch}));return json({...receipt,jobId:receipt.operationId},202);}
+      if(route.slice(1).join('/')==='shot-production/animatics'&&input.action==='render'){const receipt=await enqueue(pool,await prepareAnimaticRender(pool,input,{operationId,runtimeEpoch}));return json({...receipt,jobId:receipt.operationId},202);}
+      if(route.slice(1).join('/')==='material-review-drafts')return json(await enqueue(pool,await prepareMaterialReview(pool,input,{operationId,runtimeEpoch})),202);
+      if(route.slice(1).join('/')==='script-comments/polish')return json(await enqueue(pool,await prepareCommentPolish(pool,input,{operationId,runtimeEpoch})),202);
+      if(route.length===2&&route[1]==='maintenance')return json(await enqueue(pool,workspaceMaintenanceRequest(input,{operationId,runtimeEpoch})),202);
+      const result=await execute(pool,{operationId,runtimeEpoch,actor:{kind:'HUMAN',label:'网页用户'},commands:[{type:'workspace.change',workspace:route.slice(1).join('/'),input}]});
+      if(result.status==='FAILED')return json({operationId:result.operationId,error:result.error.message,code:result.error.code,details:result.error.details},result.error.status||409);
+      return json({...result.workspace,operationId:result.operationId,status:result.status,results:result.results});
+    }
+    if(method==='POST'&&route[0]==='assistant'){
+      const body=await requestJson(request),operationId=request.headers.get('idempotency-key');
+      if(route[1]==='context')return json({context:publicContext(await transaction(pool,tx=>assistantContext(tx,body),{readOnly:true}))});
+      if(route[1]==='suggestions'&&route[2]==='check')return json(await transaction(pool,tx=>checkDraftSuggestion(tx,body),{readOnly:true}));
+      if(route[1]==='conversations'){
+        let id=body.conversationId,receipt;
+        if(['START','SEND'].includes(body.action)){
+          const prepared=await prepareConversation(pool,body,{operationId,runtimeEpoch});id=prepared.conversationId;
+          receipt=prepared.replayed?{operationId,replayed:true}:await enqueue(pool,prepared.request);
+        }else if(body.action==='CANCEL'){
+          const job=await transaction(pool,async tx=>{
+            const current=await readConversation(tx,id);check(current.headHash===body.expectedTurnHeadHash&&current.activeTurnId===body.turnId,'CONVERSATION_HEAD','对话请求已改变，请核查原状态',409);
+            const rows=(await tx.query("SELECT id FROM operations WHERE request #>> '{assistant,conversationId}'=$1 AND status IN('QUEUED','RUNNING','RESULT_UNKNOWN')",[id])).rows;
+            const row=rows.find(r=>turnId(r.id)===body.turnId);check(row,'CONVERSATION_TURN','原请求不存在',409);return row;
+          },{readOnly:true});receipt=await cancelJob(pool,job.id,{operationId,runtimeEpoch});
+        }else receipt=await archiveConversation(pool,body,{operationId,runtimeEpoch});
+        return json({...receipt,...await transaction(pool,tx=>conversationList(tx,new URLSearchParams({conversationId:id})),{readOnly:true})});
+      }
     }
     if (method === "GET" && route[0] === "media" && route[1])
       return mediaResponse(
@@ -197,13 +264,12 @@ export async function dispatch(request) {
       );
     if (route[0] === "suggestions" && route[1]) {
       if (method === "GET") return json(await suggestion(pool, route[1]));
-      if (method === "POST" && route[2] === "apply")
-        return json(
-          await applySuggestion(pool, route[1], {
-            ...(await requestJson(request)),
-            runtimeEpoch,
-          }),
-        );
+      if (method === "POST" && route[2] === "apply") {
+        const body=await requestJson(request),operationId=request.headers.get('idempotency-key')||body.operationId;
+        check(!body.operationId||body.operationId===operationId,'OPERATION_ID_CONFLICT','请求编号不一致',409);
+        const result=await applySuggestion(pool,route[1],{...body,operationId,runtimeEpoch});
+        return json(result,result.status==='FAILED'?result.error.status||409:200);
+      }
     }
     if (method === "GET" && route[0] === "health") {
       const [project, schema, worker] = await Promise.all([

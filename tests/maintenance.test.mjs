@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -214,6 +214,13 @@ test("maintenance backup, download, verification and independent restore share t
   );
   assert.equal(download.status, 200);
   assert((await download.arrayBuffer()).byteLength > 1000);
+  const spool=path.join(root,'instance/runtime/spool');await mkdir(spool,{recursive:true});
+  const uploaded=path.join(spool,randomUUID());
+  await copyFile(path.join(backup.result.directory,'project-package.tar'),uploaded);
+  const imported=await run('MAINTENANCE_IMPORT',{filename:uploaded,sha256:backup.result.archiveSha256});
+  assert.equal(imported.result.sha256,backup.result.sha256);
+  assert((await maintenanceState(pool)).backups.some(b=>b.id===imported.operationId));
+  await assert.rejects(runMaintenance(pool,path.join(root,'instance'),{operationId:randomUUID(),kind:'MAINTENANCE_IMPORT',sourcePath:path.resolve(root,'../outside-project')}),/project-data/);
   await run("MAINTENANCE_VERIFY");
   const restore = await run("MAINTENANCE_RESTORE", {
     backupId: backup.operationId,
@@ -241,6 +248,7 @@ test("maintenance backup, download, verification and independent restore share t
       ).rows,
       before,
     );
+    assert.deepEqual((await restored.query("SELECT object_id,revision_id,original_id,original_sha256,content FROM provenance WHERE kind='review' ORDER BY id")).rows,(await pool.query("SELECT object_id,revision_id,original_id,original_sha256,content FROM provenance WHERE kind='review' ORDER BY id")).rows);
     assert.equal(
       (await restored.query("SELECT count(*)::integer n FROM operations"))
         .rows[0].n,
