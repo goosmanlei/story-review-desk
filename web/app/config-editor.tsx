@@ -34,6 +34,16 @@ const labels: Record<string, string> = {
   duration: "时长",
   value: "值",
   order: "顺序",
+  design: "详细镜头设计",
+  shotSize: "景别",
+  cameraAngle: "机位角度",
+  cameraMovement: "机位运动",
+  estimatedDurationSeconds: "估计时长（秒）",
+  keyframeStrategy: "关键帧策略",
+  negative: "负向提示词",
+  main: "主提示词",
+  dressing: "场景陈设",
+  segments: "制作段落",
   camera: "机位与摄影",
   composition: "构图",
   motion: "运动",
@@ -54,13 +64,16 @@ export function ConfigEditor({
   onChange,
   name = "",
   depth = 0,
+  readOnly = false,
 }: {
   value: any;
   onChange: (v: any) => void;
   name?: string;
   depth?: number;
+  readOnly?: boolean;
 }) {
   const title = labels[name] || name;
+  const locked = readOnly || name === "id" || /(?:Id|Ids|Ref|Refs|Hash|Sha256)$/.test(name);
   if (name === "limits")
     return <p>资源上限：缓存 24 MiB，空闲 5 分钟淘汰；后台队列最多 100 项。</p>;
   if (typeof value === "boolean")
@@ -69,6 +82,7 @@ export function ConfigEditor({
         <input
           type="checkbox"
           checked={value}
+          disabled={locked}
           onChange={(e) => onChange(e.target.checked)}
         />
         {title}
@@ -80,6 +94,7 @@ export function ConfigEditor({
         {title}
         <input
           type="number"
+          readOnly={locked}
           value={value}
           onChange={(e) => {
             const n = Number(e.target.value);
@@ -94,7 +109,7 @@ export function ConfigEditor({
         {title}
         <textarea
           value={value}
-          readOnly={name === "id"}
+          readOnly={locked}
           rows={value.length > 120 ? 4 : 2}
           onChange={(e) => onChange(e.target.value)}
         />
@@ -113,6 +128,7 @@ export function ConfigEditor({
               name={item?.label || item?.title || String(index + 1)}
               value={item}
               depth={depth + 1}
+              readOnly={locked}
               onChange={(v) =>
                 onChange(value.map((x, i) => (i === index ? v : x)))
               }
@@ -131,6 +147,7 @@ export function ConfigEditor({
             name={key}
             value={item}
             depth={depth + 1}
+            readOnly={locked}
             onChange={(v) => onChange({ ...value, [key]: v })}
           />
         ))}

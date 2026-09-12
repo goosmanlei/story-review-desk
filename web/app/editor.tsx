@@ -26,7 +26,7 @@ const fields: Record<string, Array<[string, string]>> = {
   REPRESENTATION: [["description", "表现定义"]],
   RELATION: [
     ["description", "关系说明"],
-    ["relationType", "关系类型"],
+    ["type", "关系类型"],
   ],
   SPACE: [["description", "空间设定"]],
   REQUIREMENT: [["description", "素材需求"]],
@@ -109,7 +109,9 @@ export function Editor({
         />
       </label>
       {(fields[detail.kind] || [["description", "说明"]]).map(
-        ([key, label]) => (
+        ([key, label]) => draft.content[key] && typeof draft.content[key] === "object" ? (
+          <fieldset key={key}><legend>{label}</legend><ConfigEditor value={draft.content[key]} onChange={(v) => set(key, v)} /></fieldset>
+        ) : (
           <label key={key}>
             {label}
             <textarea
@@ -333,6 +335,7 @@ export function Editor({
         <DependencyPicker detail={detail} draft={draft} onChange={onChange} />
       )}
       {[
+        "design",
         "camera",
         "dressing",
         "segments",

@@ -39,7 +39,7 @@ export async function projectLinks(tx, object, revisionId, links) {
       object.id,
       endpoints[0].id,
       endpoints[1].id,
-      object.content.relationType || "RELATED",
+      object.content.type || "RELATED",
     ],
   );
 }

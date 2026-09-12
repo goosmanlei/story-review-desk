@@ -138,6 +138,15 @@ test("object transactions, concurrency, adoption and exact dependency invalidati
     assert.equal(r.status, "SUCCEEDED", JSON.stringify(r));
     return r.results[0];
   };
+  await t.test("editing a relation preserves its declared type and endpoints", async () => {
+    await create("relation-left", "ENTITY", {description:"左主体"});
+    await create("relation-right", "ENTITY", {description:"右主体"});
+    await create("relation-proof", "RELATION", {type:"PART_OF",description:"原关系"}, {links:[{id:"relation-left",role:"ENTITY"},{id:"relation-right",role:"ENTITY"}]});
+    const detail = await readObject(pool,"relation-proof");
+    const updated = await run([save(detail.id,"RELATION",detail.version,{...detail.revision.content,description:"补充说明"})]);
+    assert.equal(updated.status,"SUCCEEDED");
+    assert.deepEqual((await pool.query("SELECT from_id,to_id,relation_type FROM entity_relations WHERE object_id='relation-proof'")).rows[0],{from_id:"relation-left",to_id:"relation-right",relation_type:"PART_OF"});
+  });
   await t.test(
     "unrelated saves and retries do not depend on a global revision",
     async () => {
