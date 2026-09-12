@@ -410,13 +410,20 @@ export async function buildRelease(
   await cp(path.join(frozen, "server"), path.join(release, "server"), {
     recursive: true,
   });
-  await mkdir(path.join(release, "scripts"), { recursive: true });
-  await cp(
-    path.join(frozen, "scripts/worker.mjs"),
-    path.join(release, "scripts/worker.mjs"),
-  );
+  // Next traces the Web entry only. The worker and its subprocesses also
+  // import shared presentation contracts and must carry their own entry files.
+  await cp(path.join(frozen, "scripts"), path.join(release, "scripts"), {
+    recursive: true,
+  });
+  await cp(path.join(frozen, "web/presentation"), path.join(release, "web/presentation"), {
+    recursive: true,
+  });
   await cp(path.join(frozen, "tools"), path.join(release, "tools"), {
     recursive: true,
+  });
+  await command(process.execPath, ["--input-type=module", "-e", "await import('./server/jobs.mjs'); await import('./server/production/animatic-render.mjs'); await import('./server/production/manifests.mjs');"], {
+    cwd: release,
+    env: environment,
   });
   const metadata = {
     schemaVersion: "1.0",
