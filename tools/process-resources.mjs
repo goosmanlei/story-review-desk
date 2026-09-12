@@ -1018,7 +1018,13 @@ export async function measureProcessUsage(root) {
     }
     if (st.isSymbolicLink()) return;
     if (st.isDirectory()) {
-      for (const n of await readdir(p)) await walk(path.join(p, n));
+      // Another registered phase may finish between lstat and readdir.
+      // Only disappearance is harmless; permission and ownership errors fail.
+      const names = await readdir(p).catch((error) => {
+        if (missing(error)) return [];
+        throw error;
+      });
+      for (const n of names) await walk(path.join(p, n));
     } else if (!seen.has(st.dev + ":" + st.ino)) {
       seen.add(st.dev + ":" + st.ino);
       temporaryBytes += st.blocks * 512;
