@@ -60,6 +60,7 @@ async function fixture(t) {
       projectId: "fixture",
       host: "fixture",
       registry: "receipts",
+      parentTasks: "tasks",
       workspace: "scratch",
       temporaryRoots: ["output"],
       protectedPaths: ["formal"],
@@ -108,6 +109,24 @@ test("consumer handoff survives producer cleanup and is released by the named co
   assert(await exists(output));
   await releaseConsumer(root, "handoff", "deploy");
   assert.equal(await exists(output), false);
+});
+test("CLI parent task preserves a dead producer handoff through sweeps, then closes explicitly", async (t) => {
+  const root = await fixture(t),
+    output = path.join(root, "output/cli-package"),
+    resourceModule = new URL("../tools/process-resources.mjs", import.meta.url).href;
+  const invoke = (...args) => JSON.parse(execFileSync(process.execPath,
+    [cli, ...args, "--root", root, "--task", "cli-handoff"], { encoding: "utf8" }));
+  execFileSync(process.execPath, [cli, "run", "--root", root, "--task", "cli-handoff", "--phase", "build", "--", process.execPath, "--input-type=module", "-e",
+    `import{requiredPhase}from ${JSON.stringify(resourceModule)};const p=await requiredPhase(process.cwd());const output=await p.directory(${JSON.stringify(output)});await p.transfer('path',output,'consume');`], { encoding: "utf8" });
+  assert(await exists(output));
+  assert.equal(JSON.parse(await readFile(path.join(root, "tasks/cli-handoff/task.json"))).status, "OPEN");
+  await sweepProcessTasks(root);
+  assert(await exists(output), "The producer process has exited, but its parent still owns the handoff");
+  execFileSync(process.execPath, [cli, "run", "--root", root, "--task", "cli-handoff", "--phase", "consume", "--", process.execPath, "-e", ""], { encoding: "utf8" });
+  assert.equal(await exists(output), false);
+  assert.equal(invoke("finish").status, "CLEANED");
+  assert.equal(JSON.parse(await readFile(path.join(root, "tasks/cli-handoff/task.json"))).status, "COMPLETED");
+  assert.throws(() => execFileSync(process.execPath, [cli, "run", "--root", root, "--task", "cli-handoff", "--phase", "late", "--", process.execPath, "-e", ""], { stdio: "pipe" }), /Command failed/);
 });
 test("identity drift, unregistered paths, Git work and retained children fail closed", async (t) => {
   const root = await fixture(t),

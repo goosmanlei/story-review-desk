@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile, lstat } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -13,7 +13,37 @@ import {
   finishProcessTask,
   checkProcessTask,
   trimProcessLogs,
+  processLock,
 } from "./process-resources.mjs";
+import { atomic, plainDirectory } from "./io.mjs";
+
+async function parentTask(root, task, callback) {
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(task || ""))
+    throw Error("Invalid process task identity");
+  const config = await readProcessConfig(root);
+  if (!config.parentTasks) return callback(null, null);
+  let directory = config.root;
+  for (const part of [...config.parentTasks.split(path.sep), task]) {
+    directory = path.join(directory, part);
+    await mkdir(directory, { mode: 0o700 }).catch((error) => {
+      if (error.code !== "EEXIST") throw error;
+    });
+    await plainDirectory(directory);
+  }
+  const file = path.join(directory, "task.json");
+  return processLock(file + ".lock", async () => {
+    const info = await lstat(file).catch((error) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    });
+    if (info && (!info.isFile() || info.isSymbolicLink()))
+      throw Error("Parent task metadata is not an owned regular file");
+    const previous = info ? JSON.parse(await readFile(file, "utf8")) : null;
+    if (previous?.taskId && previous.taskId !== task)
+      throw Error("Parent task identity changed");
+    return callback(file, previous);
+  });
+}
 
 export async function runPhase({
   root,
@@ -159,10 +189,34 @@ export async function main(argv = process.argv.slice(2)) {
   });
   const action = positionals[0],
     root = path.resolve(values.root || process.cwd());
-  if (action === "run")
-    return runPhase({ root, task: values.task, phase: values.phase, command });
+  if (action === "run") {
+    if (!command.length) throw Error("A process command is required");
+    const owned = await parentTask(root, values.task, async (file, previous) => {
+      if (previous && previous.status !== "OPEN")
+        throw Error("Parent task is closed; use a new task identity");
+      if (file && !previous)
+        await atomic(file, {
+          schemaVersion: "1.0",
+          taskId: values.task,
+          status: "OPEN",
+          startedAt: new Date().toISOString(),
+        });
+      return beginPhase(root, values.task, values.phase);
+    });
+    return runPhase({ root, task: values.task, phase: values.phase, command, owned });
+  }
   if (action === "sweep") return sweepProcessTasks(root);
-  if (action === "finish") return finishProcessTask(root, values.task);
+  if (action === "finish")
+    return parentTask(root, values.task, async (file, previous) => {
+      const result = await finishProcessTask(root, values.task);
+      if (file && previous && result.status === "CLEANED")
+        await atomic(file, {
+          ...previous,
+          status: "COMPLETED",
+          finishedAt: new Date().toISOString(),
+        });
+      return result;
+    });
   if (action === "check") return checkProcessTask(root, values.task);
   const phase = await openPhase(
     JSON.parse(process.env.REVIEW_PROCESS_CONTEXT || "null"),
