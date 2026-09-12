@@ -6,7 +6,13 @@ import path from "node:path";
 import pg from "pg";
 import { requiredPhase } from "../tools/process-resources.mjs";
 import { execute } from "../server/commands.mjs";
-import { readObject } from "../server/repository.mjs";
+import { readObject, catalog } from "../server/repository.mjs";
+import {
+  objectContext,
+  facets,
+  relationshipGraph,
+} from "../server/workspaces.mjs";
+import { transaction } from "../server/db.mjs";
 import { BoundedCache } from "../server/shared/cache.mjs";
 import {
   enqueue,
@@ -138,15 +144,234 @@ test("object transactions, concurrency, adoption and exact dependency invalidati
     assert.equal(r.status, "SUCCEEDED", JSON.stringify(r));
     return r.results[0];
   };
-  await t.test("editing a relation preserves its declared type and endpoints", async () => {
-    await create("relation-left", "ENTITY", {description:"左主体"});
-    await create("relation-right", "ENTITY", {description:"右主体"});
-    await create("relation-proof", "RELATION", {type:"PART_OF",description:"原关系"}, {links:[{id:"relation-left",role:"ENTITY"},{id:"relation-right",role:"ENTITY"}]});
-    const detail = await readObject(pool,"relation-proof");
-    const updated = await run([save(detail.id,"RELATION",detail.version,{...detail.revision.content,description:"补充说明"})]);
-    assert.equal(updated.status,"SUCCEEDED");
-    assert.deepEqual((await pool.query("SELECT from_id,to_id,relation_type FROM entity_relations WHERE object_id='relation-proof'")).rows[0],{from_id:"relation-left",to_id:"relation-right",relation_type:"PART_OF"});
-  });
+  await t.test(
+    "editing a relation preserves its declared type and endpoints",
+    async () => {
+      await create("relation-left", "ENTITY", { description: "左主体" });
+      await create("relation-right", "ENTITY", { description: "右主体" });
+      await create(
+        "relation-proof",
+        "RELATION",
+        { type: "PART_OF", description: "原关系" },
+        {
+          links: [
+            { id: "relation-left", role: "ENTITY" },
+            { id: "relation-right", role: "ENTITY" },
+          ],
+        },
+      );
+      const detail = await readObject(pool, "relation-proof");
+      const updated = await run([
+        save(detail.id, "RELATION", detail.version, {
+          ...detail.revision.content,
+          description: "补充说明",
+        }),
+      ]);
+      assert.equal(updated.status, "SUCCEEDED");
+      assert.deepEqual(
+        (
+          await pool.query(
+            "SELECT from_id,to_id,relation_type FROM entity_relations WHERE object_id='relation-proof'",
+          )
+        ).rows[0],
+        {
+          from_id: "relation-left",
+          to_id: "relation-right",
+          relation_type: "PART_OF",
+        },
+      );
+    },
+  );
+  await t.test(
+    "domain contexts and anchored comments preserve exact source versions across edits",
+    async () => {
+      await create("context-scene", "SCENE", {
+        blocks: [
+          {
+            id: "context-block",
+            type: "action",
+            text: "先看见信封，再看清名字。",
+          },
+        ],
+        purpose: "交代线索",
+      });
+      await create(
+        "context-episode",
+        "EPISODE",
+        {
+          coreAdvance: "交代线索",
+          reviewDossier: {
+            purpose: { episodeTask: { text: "建立寻找目标", class: "A" } },
+          },
+        },
+        { links: [{ id: "context-scene", role: "SCENE" }] },
+      );
+      const scene = await readObject(pool, "context-scene");
+      const content = {
+        text: "建议给看清名字的动作留下停顿",
+        status: "OPEN",
+        target: {
+          objectId: scene.id,
+          revisionId: scene.revision.id,
+          expectedVersion: scene.version,
+          sha256: scene.revision.sha256,
+        },
+        anchor: { blockId: "context-block", quote: "再看清名字" },
+      };
+      const request = {
+        operationId: "anchored-comment-retry",
+        commands: [
+          save("anchored-comment", "COMMENT", 0, content, {
+            links: [
+              { id: scene.id, role: "SOURCE", expectedVersion: scene.version },
+            ],
+            dependencies: [
+              { revisionId: scene.revision.id, purpose: "CONTENT" },
+            ],
+          }),
+        ],
+      };
+      const receipt = await execute(pool, request);
+      assert.equal(receipt.status, "SUCCEEDED", JSON.stringify(receipt));
+      assert.deepEqual(await execute(pool, request), receipt);
+      const context = await transaction(
+        pool,
+        (tx) => objectContext(tx, scene.id),
+        { readOnly: true },
+      );
+      assert.equal(context.object.revision.id, scene.revision.id);
+      assert.equal(context.revisionId, scene.revision.id);
+      assert.equal(context.primary[0].id, "context-episode");
+      assert.equal(context.comments[0].id, "anchored-comment");
+      assert(
+        context.basis.some(
+          (b) => b.objectId === "anchored-comment" && b.objectVersion === 1,
+        ),
+      );
+      assert(
+        context.basis.some(
+          (b) => b.objectId === "context-episode" && b.objectVersion === 1,
+        ),
+      );
+      const ep = await readObject(pool, "context-episode");
+      const nested = await run([
+        save("nested-comment", "COMMENT", 0, {
+          text: "明确本集任务",
+          status: "OPEN",
+          target: {
+            objectId: ep.id,
+            revisionId: ep.revision.id,
+            expectedVersion: ep.version,
+          },
+          anchor: {
+            path: ["reviewDossier", "purpose", "episodeTask", "text"],
+            quote: "寻找目标",
+          },
+        }),
+      ]);
+      assert.equal(nested.status, "SUCCEEDED");
+      assert.equal(
+        (
+          await catalog(pool, {
+            chain: "story",
+            workStage: "NARRATIVE",
+            workState: "NOW",
+          })
+        ).items[0].workState,
+        "READY",
+      );
+      const source = await create("immutable-source", "SOURCE", {
+        text: "原始资料保留",
+      });
+      const altered = await run([
+        save("immutable-source", "SOURCE", source.version, {
+          text: "不能覆盖原始资料",
+        }),
+      ]);
+      assert.equal(altered.error.code, "SOURCE_IMMUTABLE");
+      const wrong = await run([
+        save("wrong-anchor", "COMMENT", 0, {
+          ...content,
+          anchor: { quote: "不存在的文字", blockId: "context-block" },
+        }),
+      ]);
+      assert.equal(wrong.error.code, "COMMENT_ANCHOR_CONFLICT");
+      await run([
+        save(scene.id, "SCENE", scene.version, {
+          blocks: [
+            { id: "context-block", type: "action", text: "信封已经寄出。" },
+          ],
+        }),
+      ]);
+      const stale = await run([save("stale-comment", "COMMENT", 0, content)]);
+      assert.equal(stale.error.code, "VERSION_CONFLICT");
+      const comment = await readObject(pool, "anchored-comment");
+      const rebind = await run([
+        save(comment.id, "COMMENT", comment.version, {
+          ...content,
+          target: {
+            ...content.target,
+            revisionId: (await readObject(pool, scene.id)).revision.id,
+          },
+        }),
+      ]);
+      assert.equal(rebind.error.code, "COMMENT_TARGET_IMMUTABLE");
+      assert.equal(
+        (
+          await run([
+            save(comment.id, "COMMENT", comment.version, {
+              ...content,
+              status: "RESOLVED",
+            }),
+          ])
+        ).status,
+        "SUCCEEDED",
+      );
+      const after = await transaction(
+        pool,
+        (tx) => objectContext(tx, scene.id),
+        { readOnly: true },
+      );
+      assert.equal(
+        after.comments[0].content.target.revisionId,
+        scene.revision.id,
+      );
+      assert.notEqual(after.revisionId, scene.revision.id);
+      const original = await transaction(
+        pool,
+        (tx) => objectContext(tx, scene.id, { revisionId: scene.revision.id }),
+        { readOnly: true },
+      );
+      assert.equal(
+        original.object.revision.content.blocks[0].text,
+        "先看见信封，再看清名字。",
+      );
+      const search = await catalog(pool, { kind: "SCENE", query: "信封" });
+      assert.equal(search.total, 1);
+      await create("category-person", "ENTITY", {
+        type: "CHARACTER",
+        description: "人物",
+      });
+      await create("category-place", "ENTITY", {
+        type: "LOCATION",
+        description: "地点",
+      });
+      assert.equal(
+        (await catalog(pool, { kind: "ENTITY", category: "CHARACTER" }))
+          .items[0].id,
+        "category-person",
+      );
+      assert.equal(
+        (await facets(pool, "ENTITY")).items.find(
+          (r) => r.category === "CHARACTER",
+        ).count,
+        1,
+      );
+      const graph = await relationshipGraph(pool, { owner: "relation-left" });
+      assert.equal(graph.items[0].fromId, "relation-left");
+      assert.equal(graph.items[0].toId, "relation-right");
+    },
+  );
   await t.test(
     "unrelated saves and retries do not depend on a global revision",
     async () => {

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./style.css";
+import "./restored.css";
 export const metadata: Metadata = {
   title: "故事审阅台",
   description: "故事创作、素材审阅与全剧制作",

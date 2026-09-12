@@ -1,4 +1,4 @@
-import { check } from "../shared/contracts.mjs";
+import { check, hash } from "../shared/contracts.mjs";
 export const kinds = ["SOURCE", "STORY", "EPISODE", "SCENE"];
 export function validate(kind, content) {
   if (kind === "SCENE") {
@@ -22,6 +22,15 @@ export function validate(kind, content) {
       ["F", "A", "L", "U", "UNKNOWN"].includes(content.authority),
       "AUTHORITY_INVALID",
       "依据属性必须为 F、A、L 或 UNKNOWN",
+    );
+}
+export async function validateTarget(tx, kind, content, oldContent) {
+  if (kind === "SOURCE" && oldContent)
+    check(
+      hash(content) === hash(oldContent),
+      "SOURCE_IMMUTABLE",
+      "原始资料不可原位改写；请登记新资料并保留原修订",
+      409,
     );
 }
 export async function projectLinks(tx, object, revisionId, links) {

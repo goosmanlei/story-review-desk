@@ -35,9 +35,10 @@ async def main():
         args=params.get('arguments',{})
         if isinstance(args,str):args=json.loads(args)
         name=params.get('tool')
-        if name=='read_object':
-            endpoint='objects/'+urllib.parse.quote(args['id'],safe='')
+        if name in ('read_object','read_context'):
+            endpoint=('objects/' if name=='read_object' else 'contexts/')+urllib.parse.quote(args['id'],safe='')
             if args.get('revisionId'):endpoint+='?revisionId='+urllib.parse.quote(args['revisionId'],safe='')
+        elif name=='list_objects':endpoint='objects?'+urllib.parse.urlencode({k:args[k] for k in ('kind','query','owner','offset') if k in args})+'&limit=30'
         elif name=='read_source':endpoint='source/'+urllib.parse.quote(args['revisionId'],safe='')+'?offset='+str(max(0,int(args.get('offset',0))))+'&limit=16000'
         else:raise RuntimeError('Unknown business read')
         def fetch():
@@ -47,10 +48,21 @@ async def main():
                 return raw.decode()
         text=await asyncio.to_thread(fetch)
         parsed=json.loads(text)
-        if name=='read_object':reads.append({'objectId':parsed['id'],'revisionId':parsed['revision']['id'],'sha256':parsed['revision']['sha256'],**({} if args.get('revisionId') else {'objectVersion':parsed['version']})})
-        else:reads.append({'sourceRevisionId':args['revisionId'],'originalSha256':parsed['original_sha256'],'offset':parsed['offset'],'length':len(parsed['text'])})
+        if name=='read_context' and parsed.get('basis') is not None:
+            reads.extend(parsed['basis'])
+        elif name=='list_objects':
+            for obj in parsed['items']:
+                if obj.get('revisionSha256'):reads.append({'objectId':obj['id'],'revisionId':obj.get('draftRevisionId') or obj.get('adoptedRevisionId'),'sha256':obj['revisionSha256'],'objectVersion':obj['version']})
+        elif name in ('read_object','read_context'):
+            objects=[parsed] if name=='read_object' else [parsed['object']]+parsed['primary']
+            for obj in objects:
+                exact=args.get('revisionId') if obj['id']==args['id'] else obj.get('contextBinding')=='EXACT_INPUT'
+                reads.append({'objectId':obj['id'],'revisionId':obj['revision']['id'],'sha256':obj['revision']['sha256'],**({} if exact else {'objectVersion':obj['version']})})
+        elif name=='read_source':reads.append({'sourceRevisionId':args['revisionId'],'originalSha256':parsed['original_sha256'],'offset':parsed['offset'],'length':len(parsed['text'])})
         return {'contentItems':[{'type':'inputText','text':text}],'success':True}
     tools=[{'name':'read_object','description':'按永久身份读取本项目对象，可指定原修订。','inputSchema':{'type':'object','properties':{'id':{'type':'string'},'revisionId':{'type':'string'}},'required':['id'],'additionalProperties':False}},
+           {'name':'read_context','description':'读取与网页相同的对象正文、集场卷宗、精确输入、关联素材与原版本评论。','inputSchema':{'type':'object','properties':{'id':{'type':'string'},'revisionId':{'type':'string'}},'required':['id'],'additionalProperties':False}},
+           {'name':'list_objects','description':'按类型、标题或正文关键词检索本项目对象，返回有界目录；进一步读取正文须使用 read_object 或 read_context。','inputSchema':{'type':'object','properties':{'kind':{'type':'string'},'query':{'type':'string'},'owner':{'type':'string'},'offset':{'type':'integer'}},'additionalProperties':False}},
            {'name':'read_source','description':'按精确来源修订和字符偏移分块读取原文，返回 SHA 和已读范围。','inputSchema':{'type':'object','properties':{'revisionId':{'type':'string'},'offset':{'type':'integer'}},'required':['revisionId'],'additionalProperties':False}}]
     schema={'type':'object','properties':{'summary':{'type':'string'},'patch':{'type':'object','additionalProperties':True}},'required':['summary','patch'],'additionalProperties':False}
     async with CodexRuntimeAdapter(config) as runtime:

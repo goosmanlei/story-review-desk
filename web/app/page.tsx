@@ -1,8 +1,24 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { read, commands, cache, uploadMedia } from "./client";
+import { read, commands, cache, invalidateReads, uploadMedia } from "./client";
 import { Assistant } from "./assistant";
 import { Content } from "./content";
+import {
+  WorkspaceTabs,
+  FacetFilters,
+  EpisodeNavigator,
+  CatalogItem,
+  type View,
+} from "./workspace-navigation";
+import { DomainReading, RelationshipCanvas } from "./domain-reading";
+import { ReviewContext, Comments } from "./review-context";
+import { CurrentWork, GlobalSearch } from "./current-work";
+import { configureLayoutStorage } from "./layout-storage";
+import { StorySpaceSettings } from "./spatial-baseline";
+import { ConfigurationWorkspace } from "./configuration-workspace";
+import { SourceText } from "./source-text";
+import { RuntimeOperations } from "./runtime-operations";
+import { MaintenancePanel } from "./maintenance-panel";
 import { ProductionPanel, RightsPanel } from "./production-panel";
 import { ConfigEditor } from "./config-editor";
 import { Editor } from "./editor";
@@ -17,19 +33,49 @@ import {
 } from "./types";
 
 const workspaces = [
-  { id: "overview", label: "当前工作", mark: "01", note: "进展与待审" },
-  { id: "story", label: "故事创作", mark: "02", note: "资料、结构与集场" },
-  { id: "settings", label: "故事设定", mark: "03", note: "主体、空间与关系" },
-  { id: "materials", label: "素材管理", mark: "04", note: "需求、版本与依据" },
-  { id: "production", label: "全剧制作", mark: "05", note: "准备、镜头与成片" },
-  { id: "project", label: "系统管理", mark: "06", note: "配置、数据与运行" },
+  {
+    id: "overview",
+    label: "当前工作",
+    mark: "当前",
+    note: "全剧状态与当下可开展工作",
+  },
+  {
+    id: "story",
+    label: "故事创作",
+    mark: "故事",
+    note: "来源资料、故事结构与叙事拆解",
+  },
+  {
+    id: "settings",
+    label: "故事设定",
+    mark: "设定",
+    note: "主体分类、空间设定与实体关系",
+  },
+  {
+    id: "materials",
+    label: "素材管理",
+    mark: "素材",
+    note: "实体素材目录、集场筛选与素材信息卡",
+  },
+  {
+    id: "production",
+    label: "全剧制作",
+    mark: "制作",
+    note: "镜头制作、场景剪辑与分集成片",
+  },
+  {
+    id: "project",
+    label: "系统管理",
+    mark: "管理",
+    note: "使用与初始化、系统配置、数据与运行",
+  },
 ];
 const tabs: Record<string, string[]> = {
   story: ["SOURCE", "STORY", "EPISODE", "SCENE"],
   settings: ["ENTITY", "RELATION", "SPACE", "STATE", "REPRESENTATION"],
   materials: [
-    "REQUIREMENT",
     "MATERIAL",
+    "REQUIREMENT",
     "ASSET",
     "PROMPT",
     "CALL",
@@ -46,15 +92,6 @@ const tabs: Record<string, string[]> = {
   ],
   project: ["GUIDANCE", "NOTE", "COMMENT"],
 };
-type View = {
-  kind: string;
-  id: string;
-  query: string;
-  offset: number;
-  owner: string;
-  historical: boolean;
-  revisionId?: string;
-};
 const fresh = (module: string): View => ({
   kind: tabs[module]?.[0] || "",
   id: "",
@@ -62,6 +99,7 @@ const fresh = (module: string): View => ({
   offset: 0,
   owner: "",
   historical: false,
+  ...(module === "materials" ? { lane: "BASE" } : {}),
 });
 const blankContent = (kind: string) =>
   kind === "SCENE"
@@ -86,8 +124,37 @@ export default function Desk() {
     [summary, setSummary] = useState<any>(null),
     [error, setError] = useState<any>(null),
     [drafts, setDrafts] = useState<Record<string, Draft>>({}),
-    [systemTab, setSystemTab] = useState("config");
+    [systemTab, setSystemTab] = useSession("system-tab", "start");
+  const viewsRef = useRef<Record<string, View>>({});
+  const navigationSequence = useRef(0);
+  const [returnTo, setReturnTo] = useState<{
+    workspace: string;
+    view: View;
+    systemTab: string;
+  } | null>(null);
+  function rememberViews(next: Record<string, View>) {
+    viewsRef.current = next;
+    setViews(next);
+    try {
+      sessionStorage.setItem("review-workspace-views", JSON.stringify(next));
+    } catch {}
+  }
+  function locate(w: string, v: View, push = false) {
+    const u = new URL(location.href);
+    u.search = "";
+    if (w !== "overview") u.searchParams.set("view", w);
+    for (const [key, value] of Object.entries(v))
+      if (value !== undefined && value !== "" && value !== false && value !== 0)
+        u.searchParams.set(key, String(value));
+    if (push) history.pushState({}, "", u);
+    else history.replaceState({}, "", u);
+  }
   useEffect(() => {
+    try {
+      rememberViews(
+        JSON.parse(sessionStorage.getItem("review-workspace-views") || "{}"),
+      );
+    } catch {}
     const url = new URL(location.href);
     const view = url.searchParams.get("view");
     if (view && workspaces.some((x) => x.id === view)) setWorkspace(view);
@@ -100,28 +167,53 @@ export default function Desk() {
     read("work")
       .then((value) => {
         setTitle(value.project?.title || "故事审阅台");
+        configureLayoutStorage(value.project.instanceId);
         setSummary(value);
         setReady(true);
       })
       .catch(setError);
     const back = () => {
       const u = new URL(location.href),
-        w = u.searchParams.get("view") || "overview";
+        requested = u.searchParams.get("view") || "overview";
+      const w = workspaces.some((x) => x.id === requested)
+        ? requested
+        : "overview";
+      navigationSequence.current++;
       setWorkspace(w);
-      if (u.searchParams.has("id") || u.searchParams.has("kind"))
-        setViews((old) => ({
-          ...old,
-          [w]: {
-            ...(old[w] || fresh(w)),
-            kind: u.searchParams.get("kind") || old[w]?.kind || fresh(w).kind,
-            id: u.searchParams.get("id") || "",
-            revisionId: u.searchParams.get("revisionId") || undefined,
-          },
-        }));
+      const next: View = { ...fresh(w) };
+      for (const key of [
+        "kind",
+        "id",
+        "query",
+        "owner",
+        "revisionId",
+        "category",
+        "mediaType",
+        "entity",
+        "lane",
+        "phase",
+        "gate",
+      ])
+        if (u.searchParams.has(key))
+          (next as any)[key] = u.searchParams.get(key) || "";
+      next.offset = Math.max(0, Number(u.searchParams.get("offset") || 0)) || 0;
+      next.historical = u.searchParams.get("historical") === "true";
+      rememberViews({ ...viewsRef.current, [w]: next });
     };
     back();
+    const changed = () =>
+      void read("work", { refresh: true })
+        .then((value) => {
+          setTitle(value.project.title);
+          setSummary(value);
+        })
+        .catch(setError);
+    window.addEventListener("review:changed", changed);
     window.addEventListener("popstate", back);
-    return () => window.removeEventListener("popstate", back);
+    return () => {
+      window.removeEventListener("popstate", back);
+      window.removeEventListener("review:changed", changed);
+    };
   }, []);
   useEffect(() => {
     const unload = (e: BeforeUnloadEvent) => {
@@ -146,46 +238,57 @@ export default function Desk() {
       return next;
     });
   }
-  function navigate(w: string) {
+  function navigate(w: string, kind?: string) {
+    navigationSequence.current++;
+    if (kind)
+      rememberViews({ ...viewsRef.current, [w]: { ...fresh(w), kind } });
     setWorkspace(w);
-    const u = new URL(location.href);
-    u.search = "";
-    if (w !== "overview") u.searchParams.set("view", w);
-    history.pushState({}, "", u);
+    locate(w, viewsRef.current[w] || fresh(w), true);
   }
   function updateView(value: Partial<View>) {
-    setViews((old) => {
-      const next = { ...(old[workspace] || fresh(workspace)), ...value };
-      const u = new URL(location.href);
-      u.searchParams.set("view", workspace);
-      u.searchParams.set("kind", next.kind);
-      if (next.id) u.searchParams.set("id", next.id);
-      else u.searchParams.delete("id");
-      if (value.id && value.revisionId === undefined) {
-        next.revisionId = undefined;
-        u.searchParams.delete("revisionId");
-      }
-      history.replaceState({}, "", u);
-      return { ...old, [workspace]: next };
-    });
+    navigationSequence.current++;
+    const before = viewsRef.current[workspace] || fresh(workspace);
+    const next = { ...before, ...value };
+    if (
+      value.id !== undefined &&
+      value.id !== before.id &&
+      value.revisionId === undefined
+    )
+      next.revisionId = undefined;
+    rememberViews({ ...viewsRef.current, [workspace]: next });
+    locate(workspace, next);
   }
   async function open(id: string, revisionId?: string) {
+    const seq = ++navigationSequence.current;
     try {
       const object: Detail = await read("objects/" + encodeURIComponent(id));
+      if (seq !== navigationSequence.current) return;
+      setReturnTo({
+        workspace,
+        view: viewsRef.current[workspace] || fresh(workspace),
+        systemTab,
+      });
       const module =
         object.module === "collaboration" ? "project" : object.module;
-      setViews((old) => ({
-        ...old,
+      rememberViews({
+        ...viewsRef.current,
         [module]: {
-          ...(old[module] || fresh(module)),
+          ...(viewsRef.current[module] || fresh(module)),
           kind: object.kind,
           id,
           offset: 0,
           historical: object.historical,
           revisionId,
+          owner: "",
+          query: "",
+          category: "",
+          mediaType: "",
+          lane: "",
+          gate: "",
         },
-      }));
+      });
       setWorkspace(module);
+      if (module === "project") setSystemTab("records");
       const u = new URL(location.href);
       u.search = new URLSearchParams({
         view: module,
@@ -212,7 +315,7 @@ export default function Desk() {
           <span>阅</span>
           <div>
             <b>{title}</b>
-            <small>故事审阅台</small>
+            <small>LOCAL PRODUCTION DESK</small>
           </div>
         </a>
         <nav className="workspace-nav" aria-label="工作区">
@@ -242,24 +345,45 @@ export default function Desk() {
       <main className="main">
         <header className="page-heading">
           <div>
-            <p>创作工作空间</p>
+            <p>{title} · 创作工作空间</p>
             <h1>{workspaces.find((w) => w.id === workspace)?.label}</h1>
           </div>
-          <span className="project-label">{title}</span>
+          <GlobalSearch onOpen={open} />
         </header>
+        {returnTo && (
+          <div className="source-return">
+            <button
+              onClick={() => {
+                navigationSequence.current++;
+                rememberViews({
+                  ...viewsRef.current,
+                  [returnTo.workspace]: returnTo.view,
+                });
+                setWorkspace(returnTo.workspace);
+                setSystemTab(returnTo.systemTab);
+                locate(returnTo.workspace, returnTo.view, true);
+                setReturnTo(null);
+              }}
+            >
+              ← 返回{workspaces.find((w) => w.id === returnTo.workspace)?.label}
+            </button>
+            <span>恢复来源处的筛选与阅读位置</span>
+          </div>
+        )}
         <OperationError error={error} />
         {!ready && !error ? (
           <div className="loading" role="status">
             正在读取项目…
           </div>
         ) : workspace === "overview" ? (
-          <Overview summary={summary} onOpen={open} onNavigate={navigate} />
+          <CurrentWork summary={summary} onOpen={open} onNavigate={navigate} />
         ) : (
           <>
             {workspace === "project" && (
               <div className="tabs">
                 {[
-                  ["config", "系统与项目配置"],
+                  ["start", "使用与初始化"],
+                  ["config", "系统配置"],
                   ["records", "项目指引与候选"],
                   ["runtime", "数据与运行"],
                 ].map(([id, label]) => (
@@ -274,7 +398,11 @@ export default function Desk() {
               </div>
             )}
             {workspace === "project" && systemTab !== "records" ? (
-              <SystemPanel tab={systemTab} />
+              <SystemPanel
+                tab={systemTab}
+                onNavigate={(m) => navigate(m, "SOURCE")}
+                onConfigure={() => setSystemTab("config")}
+              />
             ) : (
               <Workbench
                 module={workspace}
@@ -289,69 +417,6 @@ export default function Desk() {
         )}
       </main>
     </div>
-  );
-}
-function Overview({
-  summary,
-  onOpen,
-  onNavigate,
-}: {
-  summary: any;
-  onOpen: (id: string, revisionId?: string) => void;
-  onNavigate: (module: string) => void;
-}) {
-  if (!summary) return null;
-  return (
-    <section data-ready="overview" className="overview">
-      <div className="intro">
-        <p className="eyebrow">从当前版本继续</p>
-        <h2>故事、设定与制作，在这里衔接。</h2>
-        <p>保存草稿，交给审阅；确认采用时，系统同步更新相关对象。</p>
-      </div>
-      <div className="workspace-cards">
-        {workspaces.slice(1, 5).map((w) => (
-          <button key={w.id} onClick={() => onNavigate(w.id)}>
-            <small>{w.mark}</small>
-            <h3>{w.label}</h3>
-            <p>{w.note}</p>
-            <b>
-              {summary.counts
-                .filter((c: any) => c.module === w.id)
-                .reduce((n: number, c: any) => n + c.count, 0)}{" "}
-              <span>个对象</span>
-            </b>
-          </button>
-        ))}
-      </div>
-      <section className="attention">
-        <h2>等待判断</h2>
-        {summary.attention.length ? (
-          summary.attention.map((o: Summary) => (
-            <button key={o.id} onClick={() => onOpen(o.id)}>
-              <span>
-                <small>{kindLabels[o.kind]}</small>
-                <b>{o.title}</b>
-              </span>
-              <span className={"pill state-" + o.state}>
-                {stateLabels[o.state]}
-              </span>
-            </button>
-          ))
-        ) : (
-          <p className="empty">当前没有待审或要求修改的对象。</p>
-        )}
-      </section>
-      {summary.operations.length > 0 && (
-        <section>
-          <h2>后台操作</h2>
-          {summary.operations.map((o: any) => (
-            <p key={o.id}>
-              {o.kind} · {o.status} · {o.id}
-            </p>
-          ))}
-        </section>
-      )}
-    </section>
   );
 }
 function Workbench({
@@ -376,10 +441,15 @@ function Workbench({
       nextOffset: number | null;
     } | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
+    [context, setContext] = useState<any>(null),
     [error, setError] = useState<any>(null),
     [attempt, setAttempt] = useState(0),
-    [creating, setCreating] = useState<{ module: string; kind: string } | null>(null),
+    [creating, setCreating] = useState<{ module: string; kind: string } | null>(
+      null,
+    ),
     [newTitle, setNewTitle] = useState(""),
+    [newSourceText, setNewSourceText] = useState(""),
+    [sourceRole, setSourceRole] = useState("PRIMARY"),
     [busy, setBusy] = useState(false),
     [newLinks, setNewLinks] = useState<any[]>([]),
     [file, setFile] = useState<File | null>(null),
@@ -393,6 +463,11 @@ function Workbench({
     limit: "50",
     historical: String(value.historical),
     ...(value.owner ? { owner: value.owner } : {}),
+    ...Object.fromEntries(
+      ["category", "mediaType", "entity", "lane", "gate"]
+        .filter((k) => !!(value as any)[k])
+        .map((k) => [k, (value as any)[k]]),
+    ),
   }).toString();
   // Effects from a render that changed the query still see its previous state.
   // Only the catalog for this exact query may choose or display an object.
@@ -400,15 +475,14 @@ function Workbench({
   useEffect(() => {
     let active = true;
     const position = readingPositions.get("catalog:" + catalogKey) || 0;
-    setCatalog(null);
+    setCatalog((old) => (old?.key === catalogKey ? old : null));
     setError(null);
     read("objects?" + catalogKey)
       .then((rows) => {
         if (active) {
           setCatalog({ ...rows, key: catalogKey });
           requestAnimationFrame(() => {
-            if (listRef.current)
-              listRef.current.scrollTop = position;
+            if (listRef.current) listRef.current.scrollTop = position;
           });
         }
       })
@@ -425,15 +499,15 @@ function Workbench({
     let active = true;
     const id = value.id;
     const position = readingPositions.get("detail:" + id) || 0;
-    setDetail(null);
+    setDetail((old) => (old?.id === id ? old : null));
     if (id)
-      read<Detail>("objects/" + encodeURIComponent(id))
+      read<any>("contexts/" + encodeURIComponent(id))
         .then((d) => {
           if (active) {
-            setDetail(d);
+            setDetail(d.object);
+            setContext(d);
             requestAnimationFrame(() => {
-              if (detailRef.current)
-                detailRef.current.scrollTop = position;
+              if (detailRef.current) detailRef.current.scrollTop = position;
             });
           }
         })
@@ -445,7 +519,11 @@ function Workbench({
   useEffect(() => {
     if (
       [
+        "EPISODE",
         "SCENE",
+        "MATERIAL",
+        "ASSET",
+        "REQUIREMENT",
         "PREPARATION",
         "COVERAGE",
         "SHOT_DESIGN",
@@ -457,8 +535,19 @@ function Workbench({
         .then((r) => setEpisodes(r.items))
         .catch(() => {});
   }, [value.kind]);
+  useEffect(() => {
+    if (
+      module === "story" &&
+      value.kind === "SCENE" &&
+      !value.owner &&
+      context?.objectId === value.id
+    ) {
+      const episode = context.primary.find((p: Detail) => p.kind === "EPISODE");
+      if (episode) onChange({ owner: episode.id, offset: 0 });
+    }
+  }, [context?.objectId, value.owner, value.kind, module]);
   const refresh = () => {
-    cache.clear();
+    invalidateReads();
     setAttempt((x) => x + 1);
   };
   async function create() {
@@ -466,9 +555,13 @@ function Workbench({
     try {
       const id = crypto.randomUUID();
       const media =
-        value.kind === "ASSET" && file ? [await uploadMedia(file)] : [];
+        ["ASSET", "SOURCE"].includes(value.kind) && file
+          ? [await uploadMedia(file)]
+          : [];
       if (value.kind === "ASSET" && !media.length)
         throw Error("请先选择此素材版本的实际文件");
+      if (value.kind === "SOURCE" && !file && !newSourceText.trim())
+        throw Error("请填写来源正文或选择原始文件");
       await commands([
         {
           type: "save",
@@ -477,6 +570,14 @@ function Workbench({
           title: newTitle,
           content: {
             ...blankContent(value.kind),
+            ...(value.kind === "SOURCE"
+              ? {
+                  text: newSourceText,
+                  sourceRole,
+                  authority: sourceRole === "PRIMARY" ? "F" : "A",
+                  observation: file ? "ORIGINAL_UNOBSERVED" : "TEXT_REGISTERED",
+                }
+              : {}),
             ...(file ? { mediaType: file.type.split("/")[0] } : {}),
           },
           expectedVersion: 0,
@@ -488,6 +589,7 @@ function Workbench({
       setFile(null);
       setCreating(null);
       setNewTitle("");
+      setNewSourceText("");
       onChange({ id, offset: 0, query: "" });
       refresh();
     } catch (e) {
@@ -504,19 +606,11 @@ function Workbench({
       data-kind={value.kind}
       data-catalog-key={catalog?.key}
     >
-      <div className="tabs" role="tablist" aria-label="内容分类">
-        {(tabs[module] || []).map((kind) => (
-          <button
-            role="tab"
-            aria-selected={value.kind === kind}
-            key={kind}
-            onClick={() => onChange({ kind, id: "", offset: 0, owner: "" })}
-          >
-            {kindLabels[kind]}
-          </button>
-        ))}
-      </div>
+      <WorkspaceTabs module={module} value={value} onChange={onChange} />
       <div className="workspace-toolbar">
+        {["settings", "materials"].includes(module) && (
+          <FacetFilters value={value} onChange={onChange} />
+        )}
         <label className="search">
           <span>⌕</span>
           <input
@@ -530,7 +624,11 @@ function Workbench({
         </label>
         {episodes.length > 0 &&
           [
+            "EPISODE",
             "SCENE",
+            "MATERIAL",
+            "ASSET",
+            "REQUIREMENT",
             "PREPARATION",
             "COVERAGE",
             "SHOT_DESIGN",
@@ -562,22 +660,29 @@ function Workbench({
           />
           包含历史依据
         </label>
-        <button
-          onClick={() => {
-            setNewLinks([]);
-            setFile(null);
-            setCreating({ module, kind: value.kind });
-          }}
-        >
-          ＋ 新建{kindLabels[value.kind]}
-        </button>
+        {value.kind !== "COMMENT" && (
+          <button
+            onClick={() => {
+              setNewLinks([]);
+              setFile(null);
+              setCreating({ module, kind: value.kind });
+            }}
+          >
+            ＋ 新建{kindLabels[value.kind]}
+          </button>
+        )}
+        {value.kind === "COMMENT" && (
+          <span className="muted">在所属正文中圈选或添加评论</span>
+        )}
       </div>
       <OperationError error={error} />
       {error && <button onClick={refresh}>重新读取</button>}
       {creating?.module === module && creating.kind === value.kind && (
         <div className="new-form">
           <label>
-            新建{kindLabels[value.kind]}
+            {value.kind === "SOURCE"
+              ? "登记来源资料"
+              : "新建" + kindLabels[value.kind]}
             <input
               aria-label="新对象标题"
               autoFocus
@@ -619,7 +724,34 @@ function Workbench({
               />
             </>
           )}
-          {value.kind === "ASSET" && (
+          {value.kind === "SOURCE" && (
+            <>
+              <label>
+                资料角色
+                <select
+                  value={sourceRole}
+                  onChange={(e) => setSourceRole(e.target.value)}
+                >
+                  <option value="PRIMARY">原始依据</option>
+                  <option value="DERIVED">派生整理</option>
+                  <option value="AUXILIARY">辅助资料</option>
+                </select>
+              </label>
+              <label>
+                来源正文
+                <textarea
+                  aria-label="来源正文"
+                  rows={5}
+                  value={newSourceText}
+                  onChange={(e) => setNewSourceText(e.target.value)}
+                />
+              </label>
+              <p>
+                原始文件与可读取文字分别登记。上传不表示已实际观察或已采用故事。
+              </p>
+            </>
+          )}
+          {["ASSET", "SOURCE"].includes(value.kind) && (
             <label>
               实际媒体文件
               <input
@@ -634,43 +766,49 @@ function Workbench({
           <button onClick={() => setCreating(null)}>取消</button>
         </div>
       )}
-      <div className="workspace-columns">
+      <div
+        className={"workspace-columns module-" + module + " kind-" + value.kind}
+      >
         <div
           className="catalog"
           ref={listRef}
           onScroll={(e) => {
-            if (catalog) rememberPosition("catalog:" + catalogKey, e.currentTarget.scrollTop);
+            if (catalog)
+              rememberPosition(
+                "catalog:" + catalogKey,
+                e.currentTarget.scrollTop,
+              );
           }}
         >
           <div className="catalog-heading">
             <span>{kindLabels[value.kind]}</span>
             <small>{catalog?.total ?? "…"} 个</small>
           </div>
-          {!catalog ? (
+          {module === "story" &&
+          ["EPISODE", "SCENE"].includes(value.kind) &&
+          !value.query &&
+          !value.historical ? (
+            <EpisodeNavigator
+              episodes={episodes}
+              value={value}
+              onChange={onChange}
+            />
+          ) : !catalog ? (
             <p className="loading" role="status">
               读取目录…
             </p>
           ) : catalog.items.length ? (
-            catalog.items.map((o) => (
-              <button
-                key={o.id}
-                className="catalog-row"
-                data-catalog-id={o.id}
-                aria-current={value.id === o.id ? "location" : undefined}
-                onClick={() => onChange({ id: o.id })}
-              >
-                <small>
-                  {o.displayId || kindLabels[o.kind]}
-                  {drafts[o.id] ? " · 未保存" : ""}
-                </small>
-                <b>{o.title}</b>
-                <span>
-                  <i className={"state-dot state-" + o.state} />
-                  {stateLabels[o.state]}
-                  {o.stale ? " · 依据待核" : ""}
-                </span>
-              </button>
-            ))
+            <div className="catalog-items">
+              {catalog.items.map((o) => (
+                <CatalogItem
+                  key={o.id}
+                  object={o}
+                  selected={value.id === o.id}
+                  unsaved={!!drafts[o.id]}
+                  onChoose={() => onChange({ id: o.id })}
+                />
+              ))}
+            </div>
           ) : (
             <p className="empty">此目录还没有内容。</p>
           )}
@@ -699,10 +837,25 @@ function Workbench({
               rememberPosition("detail:" + value.id, e.currentTarget.scrollTop);
           }}
         >
-          {catalog && detail && detail.id === value.id && detail.kind === value.kind ? (
+          {catalog &&
+          detail &&
+          detail.id === value.id &&
+          detail.kind === value.kind ? (
             <ObjectPanel
               key={detail.id}
               detail={detail}
+              context={context}
+              onContextRefresh={() =>
+                void read("contexts/" + encodeURIComponent(detail.id), {
+                  refresh: true,
+                })
+                  .then((c) =>
+                    setContext((old: any) =>
+                      old?.objectId === c.objectId ? c : old,
+                    ),
+                  )
+                  .catch(setError)
+              }
               requestedRevision={value.revisionId}
               draft={drafts[detail.id]}
               onDraft={(d) => onDraft(detail.id, d)}
@@ -724,12 +877,16 @@ function Workbench({
 function ObjectPanel({
   requestedRevision,
   detail,
+  context,
+  onContextRefresh,
   draft,
   onDraft,
   onRefresh,
   onOpen,
 }: {
   detail: Detail;
+  context: any;
+  onContextRefresh: () => void;
   requestedRevision?: string;
   draft?: Draft;
   onDraft: (d: Draft | null) => void;
@@ -740,18 +897,46 @@ function ObjectPanel({
     [busy, setBusy] = useState(false),
     [error, setError] = useState<any>(null),
     [message, setMessage] = useState(""),
-    [revision, setRevision] = useState(requestedRevision || detail.revision.id),
+    [revision, setRevision] = useState(requestedRevision || ""),
     [historic, setHistoric] = useState<Detail | null>(null),
+    [historicContext, setHistoricContext] = useState<any>(null),
+    [anchor, setAnchor] = useSession<any>(
+      "comment-anchor:" + detail.revision.id,
+      null,
+    ),
     [assistant, setAssistant] = useState(false),
     [source, setSource] = useState<any>(null);
+  const [sourceOffset, setSourceOffset] = useSession(
+    "source-offset:" + (historic || detail).revision.id,
+    0,
+  );
+  const revisionSequence = useRef(0);
   useEffect(() => {
-    setRevision(detail.revision.id);
+    setRevision(requestedRevision || "");
     setHistoric(null);
     setSource(null);
     if (requestedRevision && requestedRevision !== detail.revision.id)
       void chooseRevision(requestedRevision);
   }, [detail.revision.id, requestedRevision]);
   const shown = historic || detail;
+  const shownContext = historic ? historicContext : context;
+  useEffect(() => {
+    let active = true;
+    if (shown.kind === "SOURCE" && shown.revision.content.originalRevisionId)
+      read(
+        "source/" +
+          encodeURIComponent(shown.revision.id) +
+          "?offset=" +
+          sourceOffset,
+      )
+        .then(
+          (s) => active && setSource({ ...s, revisionId: shown.revision.id }),
+        )
+        .catch((e) => active && setError(e));
+    return () => {
+      active = false;
+    };
+  }, [shown.revision.id, sourceOffset]);
   const currentDraft = draft || {
     title: detail.title,
     content: detail.revision.content,
@@ -781,49 +966,100 @@ function ObjectPanel({
     }
   }
   async function chooseRevision(id: string) {
-    setRevision(id);
+    const sequence = ++revisionSequence.current;
+    setRevision(id === detail.revision.id ? "" : id);
     setSource(null);
     if (id === detail.revision.id) {
       setHistoric(null);
       return;
     }
     try {
-      setHistoric(
-        await read(
-          "objects/" +
-            encodeURIComponent(detail.id) +
-            "?revisionId=" +
-            encodeURIComponent(id),
-        ),
+      const selected = await read(
+        "contexts/" +
+          encodeURIComponent(detail.id) +
+          "?revisionId=" +
+          encodeURIComponent(id),
       );
+      if (sequence !== revisionSequence.current) return;
+      setHistoric(selected.object);
+      setHistoricContext(selected);
     } catch (e) {
       setError(e);
     }
   }
-  async function loadSource(offset = 0) {
-    try {
-      setSource(
-        await read(
-          "source/" +
-            encodeURIComponent(shown.revision.id) +
-            "?offset=" +
-            offset,
-        ),
-      );
-    } catch (e) {
-      setError(e);
-    }
+  function loadSource(offset = 0) {
+    setSourceOffset(offset);
   }
 
-  if (revision !== detail.revision.id && historic?.revision.id !== revision)
+  if (
+    revision &&
+    revision !== detail.revision.id &&
+    historic?.revision.id !== revision
+  )
     return <p role="status">正在读取所选修订…</p>;
   return (
     <article
       className="object-panel"
-      data-ready="detail"
+      data-ready={
+        shown.kind === "SOURCE" &&
+        shown.revision.content.originalRevisionId &&
+        (!source ||
+          source.revisionId !== shown.revision.id ||
+          source.offset !== sourceOffset)
+          ? undefined
+          : "detail"
+      }
       data-object-id={shown.id}
       data-object-kind={shown.kind}
       data-object-version={shown.version}
+      onMouseUp={() => {
+        const selection = window.getSelection();
+        if (!selection?.rangeCount || selection.isCollapsed) return;
+        const range = selection.getRangeAt(0),
+          element =
+            range.startContainer.nodeType === 1
+              ? (range.startContainer as Element)
+              : range.startContainer.parentElement,
+          end =
+            range.endContainer.nodeType === 1
+              ? (range.endContainer as Element)
+              : range.endContainer.parentElement;
+        const body = element?.closest("[data-content-object]");
+        if (
+          body?.getAttribute("data-content-object") !== shown.id ||
+          body.getAttribute("data-content-revision") !== shown.revision.id
+        )
+          return;
+        const block = element?.closest("[data-block-id]"),
+          field = element?.closest("[data-content-path]"),
+          quote = selection.toString();
+        if (
+          block &&
+          block.contains(end) &&
+          (
+            shown.revision.content.blocks || shown.revision.content.scriptBlocks
+          )?.some(
+            (b: any) =>
+              b.id === block.getAttribute("data-block-id") &&
+              b.text.includes(quote),
+          )
+        )
+          setAnchor({ blockId: block.getAttribute("data-block-id"), quote });
+        else if (field && field.contains(end)) {
+          try {
+            const path = JSON.parse(
+              field.getAttribute("data-content-path") || "[]",
+            );
+            const text = path.reduce(
+              (v: any, k: string) =>
+                v && Object.hasOwn(v, k) ? v[k] : undefined,
+              shown.revision.content,
+            );
+            if (typeof text === "string" && text.includes(quote))
+              setAnchor({ path, quote });
+          } catch {}
+        }
+      }}
     >
       <header className="object-heading">
         <div>
@@ -840,7 +1076,7 @@ function ObjectPanel({
       <div className="object-actions">
         <select
           aria-label="查看版本"
-          value={revision}
+          value={revision || detail.revision.id}
           onChange={(e) => void chooseRevision(e.target.value)}
         >
           {!detail.versions.some((v) => v.id === revision) && historic && (
@@ -854,7 +1090,7 @@ function ObjectPanel({
             </option>
           ))}
         </select>
-        {!historic && detail.kind !== "ASSET" && (
+        {!historic && !["ASSET", "SOURCE"].includes(detail.kind) && (
           <button onClick={() => setEditing(!editing)} disabled={busy}>
             {editing ? "返回阅读" : "编辑内容"}
           </button>
@@ -868,6 +1104,15 @@ function ObjectPanel({
         {draft && <span className="unsaved">有未保存修改</span>}
       </div>
       <OperationError error={error} />
+      {error && (
+        <button onClick={onRefresh}>读取最新版本（保留未保存修改）</button>
+      )}
+      {draft && draft.basedOnVersion !== detail.version && (
+        <p className="notice">
+          你的修改基于版本 {draft.basedOnVersion}；当前版本已变为{" "}
+          {detail.version}。本地修改仍保留，请先核对最新内容再整理修改。
+        </p>
+      )}
       {message && (
         <p role="status" className="success">
           {message}
@@ -914,16 +1159,25 @@ function ObjectPanel({
         </>
       ) : (
         <>
-          <Content detail={shown} onOpen={onOpen} />
+          <ReviewContext
+            detail={shown}
+            context={shownContext}
+            onOpen={onOpen}
+          />
+          {shown.kind === "RELATION" && <RelationshipCanvas onOpen={onOpen} />}
+          {shown.kind === "SPACE" && <StorySpaceSettings />}
+          <DomainReading detail={shown} onOpen={onOpen} />
           {shown.kind === "SOURCE" &&
             shown.revision.content.originalRevisionId && (
               <section className="source-reader">
                 <button onClick={() => void loadSource()}>
                   读取原始资料正文
                 </button>
-                {source && (
+                {source &&
+                source.revisionId === shown.revision.id &&
+                source.offset === sourceOffset ? (
                   <>
-                    <pre>{source.text}</pre>
+                    <SourceText text={source.text} />
                     <div className="pager">
                       <button
                         disabled={!source.offset}
@@ -945,6 +1199,10 @@ function ObjectPanel({
                       </button>
                     </div>
                   </>
+                ) : (
+                  <p className="source-loading" role="status">
+                    正在读取此修订的来源正文…
+                  </p>
                 )}
               </section>
             )}
@@ -991,8 +1249,25 @@ function ObjectPanel({
           />
         </>
       )}
+      {!historic &&
+        !editing &&
+        !["COMMENT", "GUIDANCE", "SOURCE"].includes(detail.kind) && (
+          <Comments
+            detail={shown}
+            context={shownContext}
+            anchor={anchor}
+            onClearAnchor={() => setAnchor(null)}
+            onOpen={onOpen}
+            onChanged={onContextRefresh}
+          />
+        )}
       {assistant && (
-        <Assistant detail={detail} onApplied={onRefresh} onOpen={onOpen} />
+        <Assistant
+          detail={detail}
+          onApplied={onRefresh}
+          onOpen={onOpen}
+          onClose={() => setAssistant(false)}
+        />
       )}
       {shown.reviews.length > 0 && (
         <details className="review-history">
@@ -1156,12 +1431,21 @@ function ReviewPanel({
     </section>
   );
 }
-function SystemPanel({ tab }: { tab: string }) {
+function SystemPanel({
+  tab,
+  onNavigate,
+  onConfigure,
+}: {
+  tab: string;
+  onNavigate: (m: string) => void;
+  onConfigure: () => void;
+}) {
   const [configuration, setConfiguration] = useState<any>(null),
     [health, setHealth] = useState<any>(null),
     [error, setError] = useState<any>(null),
     [title, setTitle] = useState(""),
     [configDraft, setConfigDraft] = useSession<any>("configuration-drafts", {}),
+    [configBusy, setConfigBusy] = useState(false),
     [message, setMessage] = useState("");
   useEffect(() => {
     read("configurations")
@@ -1175,6 +1459,9 @@ function SystemPanel({ tab }: { tab: string }) {
     read("health", { refresh: true }).then(setHealth).catch(setError);
   }, []);
   async function save(scope: string) {
+    if (configBusy) return;
+    setConfigBusy(true);
+    setError(null);
     try {
       const c = configuration.items.find((x: any) => x.scope === scope),
         draft = configDraft[scope];
@@ -1196,6 +1483,8 @@ function SystemPanel({ tab }: { tab: string }) {
       setMessage("配置已保存并回读");
     } catch (e) {
       setError(e);
+    } finally {
+      setConfigBusy(false);
     }
   }
   return (
@@ -1205,36 +1494,75 @@ function SystemPanel({ tab }: { tab: string }) {
     >
       <OperationError error={error} />
       {message && <p role="status">{message}</p>}
-      {tab === "config" ? (
+      {tab === "start" ? (
+        <div className="management-start">
+          <section>
+            <span className="eyebrow">开始使用</span>
+            <h2>一个故事，一个独立的创作工作空间</h2>
+            <p>
+              导入来源资料，组织故事与集场，再逐步完成设定、素材准备和全剧制作。人、项目
+              Codex 与网页助手共用同一份业务状态。
+            </p>
+            <div className="management-readiness">
+              <div>
+                <small>实例规则</small>
+                <b>{configuration?.items?.length ? "已登记" : "待配置"}</b>
+              </div>
+              <div>
+                <small>业务存储</small>
+                <b>{health ? "PostgreSQL" : "读取中"}</b>
+              </div>
+              <div>
+                <small>后台工作器</small>
+                <b>{health?.worker ? "已连接" : "未连接"}</b>
+              </div>
+            </div>
+            <button className="primary" onClick={onConfigure}>
+              核对系统配置与审阅标准 →
+            </button>
+            <button onClick={() => onNavigate("story")}>
+              打开故事来源资料
+            </button>
+          </section>
+          <section>
+            <h2>人与 AI 如何协作</h2>
+            <p>
+              在正文中圈选、评论，并请助手优化意见。助手建议先预览，再应用为草稿；提交审阅和确认采用各有明确动作。
+            </p>
+            <p>
+              项目目录中的 Codex 通过 review
+              命令读取、修改与查询结果。系统能力不足时先升级软件，不直接修改业务数据库。
+            </p>
+          </section>
+          <details>
+            <summary>为下一部故事建立独立项目</summary>
+            <pre>
+              node review-software/tools/project.mjs create /新项目目录 --source
+              /核心仓库目录 --title 故事名
+            </pre>
+          </details>
+        </div>
+      ) : tab === "config" ? (
         <>
-          {configuration?.items.map((c: any) => (
-            <section key={c.scope}>
-              <h2>{c.scope === "project" ? "项目配置" : "系统配置"}</h2>
-              <ConfigEditor
-                value={configDraft[c.scope]?.content || c.content}
-                onChange={(content) =>
-                  setConfigDraft((old: any) => ({
-                    ...old,
-                    [c.scope]: {
-                      content,
-                      basedOnVersion: old[c.scope]?.basedOnVersion ?? c.version,
-                    },
-                  }))
-                }
-              />
-              <button
-                className="primary"
-                disabled={!configDraft[c.scope]}
-                onClick={() => void save(c.scope)}
-              >
-                保存{c.scope === "project" ? "项目" : "系统"}配置
-              </button>
-            </section>
-          ))}
+          <ConfigurationWorkspace
+            busy={configBusy}
+            configuration={configuration}
+            drafts={configDraft}
+            onChange={(scope, content, version) =>
+              setConfigDraft((old: any) => ({
+                ...old,
+                [scope]: {
+                  content,
+                  basedOnVersion: old[scope]?.basedOnVersion ?? version,
+                },
+              }))
+            }
+            onSave={(scope) => void save(scope)}
+          />
         </>
       ) : (
         <>
-          <h2>数据与运行</h2>
+          <h2>这个故事的数据与运行</h2>
           <dl>
             <dt>软件版本</dt>
             <dd className="mono">{health?.softwareCommit || "读取中"}</dd>
@@ -1254,6 +1582,27 @@ function SystemPanel({ tab }: { tab: string }) {
             完整项目包还包含登记媒体。使用项目命令可导出、核验和导入到独立空白审阅台。
           </p>
           <pre>npm run review -- export --output 项目包目录</pre>
+          <details>
+            <summary>独立恢复与实例核验</summary>
+            <p>
+              先核验项目包，再导入独立空白项目。恢复不覆盖当前实例，普通项目包不包含凭据和执行资格。
+            </p>
+            <pre>
+              {"npm run review -- verify --file 项目包目录\n" +
+                "npm run review -- import --file 项目包目录"}
+            </pre>
+          </details>
+          <button
+            onClick={() =>
+              void read("health", { refresh: true })
+                .then(setHealth)
+                .catch(setError)
+            }
+          >
+            刷新运行状态
+          </button>
+          <RuntimeOperations />
+          <MaintenancePanel />
         </>
       )}
     </section>

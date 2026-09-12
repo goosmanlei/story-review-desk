@@ -8,12 +8,19 @@ export function Assistant({
   detail,
   onApplied,
   onOpen,
+  onClose,
 }: {
   detail: Detail;
   onApplied: () => void;
   onOpen: (id: string, revisionId?: string) => void;
+  onClose?: () => void;
 }) {
-  const [prompt, setPrompt] = useSession("assistant-prompt:" + detail.id, ""),
+  const [prompt, setPrompt] = useSession(
+      "assistant-prompt:" + detail.id,
+      detail.kind === "COMMENT"
+        ? "请结合评论的原始上下文，把这条意见优化为清楚、具体、可核对的修改建议。保留原观点，不替我作正式判断。"
+        : "",
+    ),
     [operation, setOperation] = useSession<any>(
       "assistant-job:" + detail.id,
       null,
@@ -37,11 +44,13 @@ export function Assistant({
         if (!active) return;
         setOperation(value);
         if (value.status === "SUCCEEDED") {
-          setPreview(
-            await read("suggestions/" + operation.operationId, {
+          const suggestion = await read(
+            "suggestions/" + operation.operationId,
+            {
               refresh: true,
-            }),
+            },
           );
+          if (active) setPreview(suggestion);
           return;
         }
         if (["QUEUED", "RUNNING"].includes(value.status))
@@ -61,6 +70,7 @@ export function Assistant({
     setError(null);
     setPreview(null);
     const operationId = crypto.randomUUID();
+    setOperation({ operationId, status: "RESULT_UNKNOWN" });
     try {
       setOperation(
         await post("jobs", {
@@ -72,7 +82,13 @@ export function Assistant({
           prompt,
         }),
       );
-    } catch (e) {
+    } catch (e: any) {
+      if (e.responseStatus && e.responseStatus < 500)
+        setOperation({
+          operationId,
+          status: "FAILED",
+          error: { message: e.message },
+        });
       setError(e);
     } finally {
       setBusy(false);
@@ -100,8 +116,29 @@ export function Assistant({
     }
   }
   return (
-    <aside className="assistant-panel">
-      <h3>结合当前版本讨论</h3>
+    <aside className="assistant-panel" aria-label="AI 助手">
+      <header>
+        <div>
+          <small>AI 助手 · 当前修订 {detail.revision.number}</small>
+          <h3>
+            {detail.kind === "COMMENT" ? "优化这条评论" : "结合当前版本讨论"}
+          </h3>
+        </div>
+        {onClose && (
+          <button aria-label="收起 AI 助手" onClick={onClose}>
+            ×
+          </button>
+        )}
+      </header>
+      <p className="assistant-context-title">{detail.title}</p>
+      {detail.kind === "COMMENT" && (
+        <blockquote>
+          {detail.revision.content.anchor?.quote && (
+            <p>{detail.revision.content.anchor.quote}</p>
+          )}
+          <p>{detail.revision.content.text}</p>
+        </blockquote>
+      )}
       <p>先预览建议，应用时保存为草稿。未应用正文保留 10 分钟。</p>
       <textarea
         aria-label="给助手的问题"
@@ -113,7 +150,7 @@ export function Assistant({
         disabled={
           busy ||
           !prompt.trim() ||
-          ["QUEUED", "RUNNING"].includes(operation?.status)
+          ["QUEUED", "RUNNING", "RESULT_UNKNOWN"].includes(operation?.status)
         }
         onClick={ask}
       >
@@ -141,6 +178,33 @@ export function Assistant({
         </p>
       )}
       {operation?.error && <p>{operation.error.message}</p>}
+      {operation?.status === "RESULT_UNKNOWN" && (
+        <button
+          onClick={() =>
+            void read("operations/" + operation.operationId, { refresh: true })
+              .then(setOperation)
+              .catch(setError)
+          }
+        >
+          核查原操作结果
+        </button>
+      )}
+      {operation?.status === "QUEUED" && (
+        <button
+          onClick={() =>
+            void post("operations/" + operation.operationId + "/cancel", {
+              operationId: crypto.randomUUID(),
+            })
+              .then(() =>
+                read("operations/" + operation.operationId, { refresh: true }),
+              )
+              .then(setOperation)
+              .catch(setError)
+          }
+        >
+          取消这次请求
+        </button>
+      )}
       {preview && (
         <section>
           <h4>建议预览</h4>
@@ -161,17 +225,19 @@ export function Assistant({
             }}
             onOpen={onOpen}
           />
-          <button
-            className="primary"
-            disabled={
-              busy ||
-              preview.revisionId !== detail.revision.id ||
-              !!preview.appliedRevisionId
-            }
-            onClick={apply}
-          >
-            将此建议应用为草稿
-          </button>
+          {detail.kind !== "SOURCE" && (
+            <button
+              className="primary"
+              disabled={
+                busy ||
+                preview.revisionId !== detail.revision.id ||
+                !!preview.appliedRevisionId
+              }
+              onClick={apply}
+            >
+              将此建议应用为草稿
+            </button>
+          )}
         </section>
       )}
     </aside>

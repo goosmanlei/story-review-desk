@@ -1,5 +1,9 @@
 import { mutationGate } from "./runtime-gate.mjs";
 import {
+  maintenanceKinds,
+  validateMaintenance,
+} from "./project/maintenance-contract.mjs";
+import {
   readFile,
   mkdir,
   copyFile,
@@ -26,10 +30,12 @@ export async function enqueue(pool, request) {
       "MEDIA_REGISTER",
       "GENERATE",
       "MEDIA_PROCESS",
+      ...maintenanceKinds,
     ].includes(request.kind),
     "JOB_KIND",
     "后台任务类型无效",
   );
+  if (maintenanceKinds.includes(request.kind)) validateMaintenance(request);
   const fingerprint = { ...request };
   delete fingerprint.filename;
   const requestHash = hash(fingerprint);
@@ -360,7 +366,15 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         "SPOOL_PATH",
         "任务暂存目录无效",
       );
-    if (job.kind === "IMPORT")
+    if (maintenanceKinds.includes(job.kind)) {
+      check(
+        typeof providers.maintenance === "function",
+        "MAINTENANCE_UNAVAILABLE",
+        "本机维护工作器尚未配置",
+        503,
+      );
+      result = await providers.maintenance(request);
+    } else if (job.kind === "IMPORT")
       result = await importRecords(pool, request.filename, {
         expectedSha256: request.sha256,
         mediaRoot: path.join(root, "media"),

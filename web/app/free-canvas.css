@@ -1,0 +1,358 @@
+.free-canvas {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line, #d3cab9);
+  background: var(--paper-bright, #fffdf8);
+  color: var(--ink, #302d28);
+  border-radius: 8px;
+}
+.free-canvas > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line, #d3cab9);
+}
+.free-canvas > header strong {
+  font-size: 16px;
+}
+.free-canvas > header p {
+  margin: 5px 0 0;
+  font-size: 13px;
+  color: var(--muted, #716a60);
+  line-height: 1.5;
+}
+.free-canvas-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.free-canvas-tools output {
+  min-width: 48px;
+  text-align: center;
+  font: 13px var(--mono, monospace);
+  color: var(--muted, #716a60);
+}
+.free-canvas button {
+  font-family: inherit;
+}
+.free-canvas-tools button,
+.free-canvas .board-readable-list button {
+  border: 1px solid var(--line, #d3cab9);
+  background: var(--paper-bright, #fffdf8);
+  color: inherit;
+  min-height: 36px;
+  padding: 6px 10px;
+  font-size: 14px;
+  border-radius: 4px;
+}
+.free-canvas button:focus-visible,
+.free-canvas-viewport:focus-visible {
+  outline: 3px solid var(--red, #9b493f);
+  outline-offset: 3px;
+}
+.free-canvas-help {
+  padding: 8px 16px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted, #716a60);
+  background: var(--paper-soft, #f5f0e7);
+}
+.free-canvas-help span {
+  margin-left: 12px;
+}
+.free-canvas .free-canvas-viewport {
+  position: relative;
+  overflow: hidden !important;
+  touch-action: none;
+  cursor: grab;
+  background-color: var(--paper, #f8f4e9);
+  background-image: radial-gradient(#b6ad9e70 0.8px, transparent 0.8px);
+  background-size: 20px 20px;
+  overscroll-behavior: contain;
+  min-height: 280px;
+  max-height: calc(100dvh - 150px);
+  isolation: isolate;
+}
+.free-canvas-viewport.is-moving {
+  cursor: grabbing;
+  user-select: none;
+}
+.free-canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  transform-origin: 0 0;
+}
+.free-canvas-connectors {
+  position: absolute;
+  inset: 0;
+  overflow: visible !important;
+  width: 1px !important;
+  height: 1px !important;
+  pointer-events: none;
+}
+.free-canvas-connectors > path {
+  fill: none;
+  stroke: #78857b;
+  stroke-width: 1.6;
+  stroke-linejoin: round;
+  opacity: 0.75;
+}
+.free-canvas-connectors > path.is-related {
+  stroke: var(--red, #9b493f);
+  stroke-width: 2.5;
+  opacity: 1;
+}
+.free-canvas-connectors > path.is-uncertain {
+  stroke-dasharray: 6 5;
+}
+.free-canvas-connectors marker path {
+  fill: #78857b;
+}
+.free-canvas-anchor path {
+  stroke: #797e85;
+  stroke-dasharray: 4 4;
+  fill: none;
+}
+.free-canvas-anchor circle {
+  fill: #3d5d78;
+  stroke: white;
+  stroke-width: 2;
+}
+.free-canvas-anchor text {
+  font-size: 12px;
+  fill: #3d5d78;
+  paint-order: stroke;
+  stroke: var(--paper, #f8f4e9);
+  stroke-width: 4px;
+}
+.free-canvas-group {
+  position: absolute;
+  font-weight: 700;
+  font-size: 16px;
+  white-space: nowrap;
+  padding-bottom: 8px;
+}
+.free-canvas .free-canvas-node {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  text-align: left;
+  padding: 12px !important;
+  border: 1px solid var(--line-strong, #b6aa95) !important;
+  border-left: 4px solid var(--node-tone) !important;
+  border-radius: 6px;
+  background: var(--paper-bright, #fffdf8) !important;
+  color: var(--ink, #302d28) !important;
+  box-shadow: 0 3px 9px #3024160b;
+  cursor: grab;
+  transition:
+    box-shadow 0.12s,
+    border-color 0.12s;
+  user-select: none;
+}
+.free-canvas .free-canvas-node.selected,
+.free-canvas .free-canvas-node:hover {
+  border-color: var(--node-tone) !important;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-tone) 28%, transparent),
+    0 6px 20px #30241613;
+}
+.free-canvas-symbol {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  color: var(--node-tone);
+}
+.free-canvas-symbol svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+}
+.free-canvas-node-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 3px;
+}
+.free-canvas-node-copy small {
+  font-size: 12px;
+  color: var(--node-tone);
+  line-height: 1.2;
+}
+.free-canvas-node-copy strong {
+  font-size: 16px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.free-canvas-node-copy > span {
+  font-size: 12px;
+  color: var(--muted, #716a60);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+.free-canvas .free-canvas-edge-label {
+  position: absolute;
+  min-height: 34px;
+  border: 1px solid #99a297;
+  padding: 5px 9px !important;
+  border-radius: 5px;
+  background: var(--paper-bright, #fffdf8);
+  color: #425449;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  box-shadow: 0 1px 4px #3024160b;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.free-canvas .free-canvas-edge-label:disabled {
+  opacity: 1;
+  cursor: default;
+}
+.free-canvas .free-canvas-edge-label.is-uncertain {
+  border-style: dashed;
+}
+.free-canvas .board-readable-list {
+  font-size: 14px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line, #d3cab9);
+}
+.free-canvas .board-readable-list > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.free-canvas .board-readable-list small {
+  display: block;
+}
+.free-canvas .board-readable-list summary {
+  cursor: pointer;
+}
+.free-canvas .board-readable-list p {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.free-canvas .board-readable-list button[aria-pressed="true"] {
+  border-color: var(--red, #9b493f);
+}
+@media (max-width: 600px) {
+  .free-canvas > header {
+    padding: 12px;
+  }
+  .free-canvas-help span {
+    display: none;
+  }
+  .free-canvas-tools {
+    gap: 4px;
+  }
+  .free-canvas-tools button {
+    padding: 6px 8px;
+  }
+  .free-canvas .free-canvas-viewport {
+    max-height: 70dvh;
+  }
+  .free-canvas-help {
+    padding: 8px 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .free-canvas * {
+    transition: none !important;
+  }
+}
+.free-canvas.is-readonly .free-canvas-node {
+  cursor: pointer;
+}
+/* Curved relationship reading is opt-in for subjects; other canvases retain their styles. */
+.free-canvas.is-curved .free-canvas-related-marker path {
+  fill: var(--red, #9b493f);
+}
+.free-canvas.is-curved .free-canvas-connectors > path.is-related {
+  stroke-width: 3.2;
+}
+.free-canvas.is-curved .free-canvas-connectors > path.is-caption {
+  stroke-width: 1.2;
+  opacity: 0.7;
+}
+.free-canvas.is-curved .free-canvas-edge-label.is-related {
+  border: 2px solid var(--red, #9b493f);
+  background: color-mix(
+    in srgb,
+    var(--red, #9b493f) 7%,
+    var(--paper-bright, #fffdf8)
+  );
+  color: var(--red, #9b493f);
+  font-weight: 650;
+}
+
+/* Opt-in subject overview emphasis. No geometry, hit targets or camera changes. */
+.free-canvas.is-preserved-emphasis .free-canvas-node.is-related {
+  box-shadow:
+    0 0 0 2px var(--red, #9b493f),
+    0 3px 9px #3024160b;
+  opacity: 1;
+}
+.free-canvas.is-preserved-emphasis .free-canvas-node.is-muted {
+  opacity: 0.48;
+}
+.free-canvas.is-preserved-emphasis
+  .free-canvas-connectors
+  > path[data-canvas-related="false"] {
+  opacity: 0.22;
+}
+.free-canvas-background {
+  position: absolute;
+  pointer-events: none;
+  z-index: -1;
+}
+.free-canvas-background > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.spatial-map-backdrop {
+  font-family: inherit;
+}
+.spatial-map-title {
+  font-size: 23px;
+  font-weight: 700;
+  fill: #575f50;
+  letter-spacing: 3px;
+}
+.spatial-map-note {
+  font-size: 13px;
+  fill: #7c7f70;
+}
+.spatial-map-region {
+  font-size: 16px;
+  font-weight: 600;
+  fill: #768371;
+  letter-spacing: 1px;
+}
+.free-canvas.is-preserved-emphasis .free-canvas-edge-label:not(.is-related) {
+  opacity: 0.45;
+}
+.free-canvas.is-preserved-emphasis .free-canvas-node.is-muted:hover,
+.free-canvas.is-preserved-emphasis .free-canvas-node.is-muted:focus-visible {
+  opacity: 0.8;
+}

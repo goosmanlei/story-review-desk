@@ -9,7 +9,7 @@ for line in sys.stdin:
     if method=='initialize':send({'id':message['id'],'result':{}})
     elif method=='thread/start':
         assert message['params']['sandbox']=='read-only'
-        assert {x['name'] for x in message['params']['dynamicTools']}=={'read_object','read_source'}
+        assert {x['name'] for x in message['params']['dynamicTools']}=={'read_object','read_context','list_objects','read_source'}
         send({'id':message['id'],'result':{'thread':{'id':'mock-thread'}}})
     elif method=='turn/start':
         value=json.loads(message['params']['input'][0]['text']);obj=value['object']
@@ -20,6 +20,12 @@ for line in sys.stdin:
         parsed=json.loads(message['result']['contentItems'][0]['text']);assert parsed['revision']['id']=='fixture-revision'
         send({'id':'read-2','method':'item/tool/call','params':{'threadId':'mock-thread','turnId':'mock-turn','tool':'read_source','arguments':{'revisionId':'fixture-revision','offset':0}}})
     elif message.get('id')=='read-2':
+        send({'id':'read-3','method':'item/tool/call','params':{'threadId':'mock-thread','turnId':'mock-turn','tool':'read_context','arguments':{'id':'fixture'}}})
+    elif message.get('id')=='read-3':
+        parsed=json.loads(message['result']['contentItems'][0]['text']);assert parsed['primary'][0]['revision']['id']=='parent-revision'
+        send({'id':'read-4','method':'item/tool/call','params':{'threadId':'mock-thread','turnId':'mock-turn','tool':'list_objects','arguments':{'kind':'SCENE','query':'信件'}}})
+    elif message.get('id')=='read-4':
+        parsed=json.loads(message['result']['contentItems'][0]['text']);assert parsed['items'][0]['id']=='fixture'
         answer=json.dumps({'summary':'受控模拟建议','patch':{'text':'模拟修订'}})
         send({'method':'item/completed','params':{'threadId':'mock-thread','turnId':'mock-turn','item':{'id':'answer','type':'agentMessage','text':answer}}})
         send({'method':'turn/completed','params':{'threadId':'mock-thread','turn':{'id':'mock-turn','status':'completed'}}})

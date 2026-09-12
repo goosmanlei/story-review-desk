@@ -35,7 +35,43 @@ test("host Codex protocol uses only versioned business reads and rejects other t
       JSON.stringify(
         req.url.includes("/source/")
           ? { original_sha256: "b".repeat(64), offset: 0, text: "原始依据" }
-          : object,
+          : req.url.includes("/contexts/")
+            ? {
+                object,
+                primary: [
+                  {
+                    ...object,
+                    id: "parent",
+                    contextBinding: "EXACT_INPUT",
+                    revision: { ...object.revision, id: "parent-revision" },
+                  },
+                ],
+                basis: [
+                  {
+                    objectId: "fixture",
+                    revisionId: "fixture-revision",
+                    sha256: object.revision.sha256,
+                    objectVersion: 1,
+                  },
+                  {
+                    objectId: "parent",
+                    revisionId: "parent-revision",
+                    sha256: object.revision.sha256,
+                  },
+                ],
+              }
+            : req.url.includes("/objects?")
+              ? {
+                  items: [
+                    {
+                      ...object,
+                      draftRevisionId: object.revision.id,
+                      revisionSha256: object.revision.sha256,
+                    },
+                  ],
+                  nextOffset: null,
+                }
+              : object,
       ),
     );
   });
@@ -58,9 +94,12 @@ test("host Codex protocol uses only versioned business reads and rejects other t
   });
   assert.equal(requestId, "mock-thread/mock-turn");
   assert.equal(result.value.patch.text, "模拟修订");
-  assert.equal(result.value.sourceVersions.length, 2);
+  assert.equal(result.value.sourceVersions.length, 5);
   assert.equal(result.value.sourceVersions[0].objectVersion, 1);
   assert.equal(result.value.sourceVersions[1].length, 4);
+  assert.equal(result.value.sourceVersions[3].revisionId, "parent-revision");
+  assert.equal(result.value.sourceVersions[3].objectVersion, undefined);
+  assert.equal(result.value.sourceVersions[4].objectVersion, 1);
   assert.equal((await result.phase.finish()).status, "CLEANED");
   process.env.MOCK_ILLEGAL_TOOL = "1";
   try {

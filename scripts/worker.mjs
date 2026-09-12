@@ -5,6 +5,7 @@ import {
   closeDatabase,
 } from "../server/db.mjs";
 import { workOnce, sweepJobs } from "../server/jobs.mjs";
+import { runMaintenance } from "../server/project/maintenance.mjs";
 import { randomUUID } from "node:crypto";
 import { processProvider } from "../server/process-provider.mjs";
 import path from "node:path";
@@ -18,7 +19,9 @@ for (const signal of ["SIGTERM", "SIGINT"])
   process.on(signal, () => {
     stopped = true;
   });
-const providers = {},
+const providers = {
+    maintenance: (request) => runMaintenance(pool, root, request),
+  },
   runningPhases = new Map();
 async function invoke(command, payload, onRequestId) {
   const result = await processProvider({ root, command, payload, onRequestId });
@@ -79,6 +82,9 @@ const heartbeat = async () =>
         capabilities: [
           "IMPORT",
           "MEDIA_REGISTER",
+          "MAINTENANCE_VERIFY",
+          "MAINTENANCE_BACKUP",
+          "MAINTENANCE_RESTORE",
           ...(providers.suggest ? ["AI_SUGGEST"] : []),
           ...(providers.generate ? ["GENERATE", "MEDIA_PROCESS"] : []),
         ],

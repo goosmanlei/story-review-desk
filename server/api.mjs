@@ -1,12 +1,23 @@
 import { mutationGate } from "./runtime-gate.mjs";
 import { database, machineConfiguration, transaction } from "./db.mjs";
 import { catalog, objectDetail, workSummary } from "./repository.mjs";
+import {
+  objectContext,
+  facets,
+  relationshipGraph,
+  spatialBaseline,
+} from "./workspaces.mjs";
 import { execute, operation } from "./commands.mjs";
 import { check, ReviewError, errorBody } from "./shared/contracts.mjs";
 import { exportRecords } from "./transfer.mjs";
 import { mediaResponse, receiveFile } from "./files.mjs";
 import { enqueue, cancelJob, suggestion, applySuggestion } from "./jobs.mjs";
 import { rm } from "node:fs/promises";
+import {
+  maintenanceState,
+  backupDownload,
+  maintenanceKinds,
+} from "./project/maintenance-contract.mjs";
 
 const json = (body, status = 200) =>
   Response.json(body, {
@@ -73,6 +84,15 @@ export async function dispatch(request) {
     }
     const pool = await database();
     const runtimeEpoch = request.headers.get("x-review-runtime");
+    if (method === "GET" && route[0] === "maintenance") {
+      if (route[1] && route[2] === "download")
+        return backupDownload(
+          pool,
+          (await machineConfiguration()).root,
+          route[1],
+        );
+      return json(await maintenanceState(pool));
+    }
     if (method !== "GET") {
       check(
         runtimeEpoch && /^[a-f0-9-]{36}$/.test(runtimeEpoch),
@@ -157,8 +177,12 @@ export async function dispatch(request) {
     if (method === "POST" && route[0] === "jobs") {
       const body = await requestJson(request);
       check(
-        ["AI_SUGGEST", "GENERATE", "MEDIA_PROCESS"].includes(body.kind) &&
-          !Object.hasOwn(body, "filename"),
+        [
+          "AI_SUGGEST",
+          "GENERATE",
+          "MEDIA_PROCESS",
+          ...maintenanceKinds,
+        ].includes(body.kind) && !Object.hasOwn(body, "filename"),
         "JOB_KIND",
         "请使用受控上传或业务任务入口",
       );
@@ -203,6 +227,43 @@ export async function dispatch(request) {
     }
     if (method === "GET" && route[0] === "work")
       return json(await transaction(pool, workSummary, { readOnly: true }));
+    if (method === "GET" && route[0] === "contexts" && route[1])
+      return json(
+        await transaction(
+          pool,
+          (tx) =>
+            objectContext(tx, route[1], {
+              revisionId: url.searchParams.get("revisionId") || undefined,
+            }),
+          { readOnly: true },
+        ),
+      );
+    if (method === "GET" && route[0] === "facets")
+      return json(
+        await transaction(
+          pool,
+          (tx) => facets(tx, url.searchParams.get("kind")),
+          { readOnly: true },
+        ),
+      );
+    if (
+      method === "GET" &&
+      route[0] === "settings" &&
+      route[1] === "spatial-baseline"
+    )
+      return json(await transaction(pool, spatialBaseline, { readOnly: true }));
+    if (method === "GET" && route[0] === "relationships")
+      return json(
+        await transaction(
+          pool,
+          (tx) =>
+            relationshipGraph(tx, {
+              owner: url.searchParams.get("owner"),
+              offset: Number(url.searchParams.get("offset") || 0),
+            }),
+          { readOnly: true },
+        ),
+      );
     if (method === "GET" && route[0] === "objects") {
       if (route[1] || url.searchParams.has("id"))
         return json(
@@ -216,10 +277,23 @@ export async function dispatch(request) {
           ),
         );
       const options = Object.fromEntries(
-        ["module", "kind", "owner", "state", "query"].map((k) => [
-          k,
-          url.searchParams.get(k) || undefined,
-        ]),
+        [
+          "module",
+          "kind",
+          "owner",
+          "state",
+          "query",
+          "category",
+          "mediaType",
+          "entity",
+          "lane",
+          "gate",
+          "attention",
+          "actor",
+          "chain",
+          "workStage",
+          "workState",
+        ].map((k) => [k, url.searchParams.get(k) || undefined]),
       );
       options.limit = Number(url.searchParams.get("limit") || 50);
       options.offset = Number(url.searchParams.get("offset") || 0);

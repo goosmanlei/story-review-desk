@@ -12,6 +12,12 @@ objects 保存永久身份、当前草稿头和采用头；revisions 保存不�
 
 入口：GET health / work / objects / objects/:id / source/:revisionId / media/:sha / configurations / operations/:id；POST transactions / jobs / upload / import / operations/:id/cancel；GET export / suggestions/:id。事务支持 save、submit、review、rights.record、configuration.save、suggestion.apply。对象读取可指定 revisionId，返回该版本的内容、关系、输入与判断。
 
+六入口沿用既有的视觉、目录和阅读交互：当前工作的工作链与阶段、故事结构与集场卷宗、主体分类与关系画板、基础及过程素材、五阶段制作、配置与运行维护。重构修改接口和状态，不以通用对象表单取代业务阅读场景。GET contexts/:id 在同一数据库快照返回正文、集场、素材版本、评论和精确引用；basis 列出实际返回内容的版本依据，供助手应用前复核。GET facets、relationships、settings/spatial-baseline 提供有界投影；空间基线只读取已登记原始资料，保留原坐标与场次身份。
+
+正文评论的 target 绑定永久对象、修订及 expectedVersion；圈选绑定原正文块或字段路径。修改、解决评论保留原 target 和 anchor，历史评论不换绑到新稿。原始 SOURCE 正文不可覆盖；新资料另行登记。助手的 read_object、read_context、list_objects、read_source 只读 /api/v1，所有实际读取的正文与元数据版本均参与建议的应用校验。
+
+当前工作仅按现有对象、精确失效记录和在途操作组织阶段，不恢复旧队列或创作授权。登记数不是全剧正式范围的分母。所有浏览入口保持相同版本、媒体身份及历史边界。
+
 后台状态为 QUEUED、RUNNING、SUCCEEDED、FAILED、CANCELLED、RESULT_UNKNOWN；队列上限 100，单 worker 并发 1。失联的执行先标结果未知，禁止自动再次调用。AI 建议绑定所读对象、原始资料版本和哈希，应用前重新核对；正文保留 10 分钟。操作回执及未知结果不按建议或普通日志过期。
 
 浏览器缓存按 UTF-8 字节核算，至多 24 MiB，空闲 5 分钟淘汰；后端不缓存整剧读模型。连接池每个进程最多 8 个连接；分页目录和详情按需读取。轮询仅查询在途操作，不改变业务修订。未保存内容、筛选、阅读位置和圈选留在当前浏览器会话。

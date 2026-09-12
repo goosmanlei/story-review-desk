@@ -1,6 +1,7 @@
 "use client";
 import type { Detail, Draft } from "./types";
 import { DependencyPicker } from "./dependency-picker";
+import { fieldLabels } from "./content";
 import { ConfigEditor } from "./config-editor";
 import { LinkPicker } from "./link-picker";
 const fields: Record<string, Array<[string, string]>> = {
@@ -108,9 +109,15 @@ export function Editor({
           onChange={(e) => onChange({ ...draft, title: e.target.value })}
         />
       </label>
-      {(fields[detail.kind] || [["description", "说明"]]).map(
-        ([key, label]) => draft.content[key] && typeof draft.content[key] === "object" ? (
-          <fieldset key={key}><legend>{label}</legend><ConfigEditor value={draft.content[key]} onChange={(v) => set(key, v)} /></fieldset>
+      {(fields[detail.kind] || [["description", "说明"]]).map(([key, label]) =>
+        draft.content[key] && typeof draft.content[key] === "object" ? (
+          <fieldset key={key}>
+            <legend>{label}</legend>
+            <ConfigEditor
+              value={draft.content[key]}
+              onChange={(v) => set(key, v)}
+            />
+          </fieldset>
         ) : (
           <label key={key}>
             {label}
@@ -335,6 +342,21 @@ export function Editor({
         <DependencyPicker detail={detail} draft={draft} onChange={onChange} />
       )}
       {[
+        "authoringCuts",
+        "reviewDossier",
+        "sequences",
+        "causalChains",
+        "sourceNarrationIndex",
+        "changeSummary",
+        "sceneRole",
+        "informationBoundary",
+        "sourceDialogue",
+        "soundAndDialogueIntent",
+        "entityStateRequirements",
+        "timeAndSpace",
+        "materialGaps",
+        "nextPreparationAction",
+        "reviewFocus",
         "design",
         "camera",
         "dressing",
@@ -356,7 +378,7 @@ export function Editor({
         .filter((key) => draft.content[key] !== undefined)
         .map((key) => (
           <details key={key}>
-            <summary>详细内容</summary>
+            <summary>{fieldLabels[key] || "详细内容"}</summary>
             <ConfigEditor
               value={{ [key]: draft.content[key] }}
               onChange={(value) => set(key, value[key])}

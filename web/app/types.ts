@@ -11,6 +11,21 @@ export type Summary = {
   position: number;
   historical: boolean;
   stale?: boolean;
+  preview?: {
+    category?: string;
+    description?: string;
+    mediaType?: string;
+    lane?: string;
+    seconds?: number;
+  };
+  family?: { id: string; title: string };
+  thumbnail?: {
+    sha256: string;
+    mimeType: string;
+    availability: string;
+    assetId: string;
+    adopted?: boolean;
+  };
 };
 export type Detail = Summary & {
   revision: {

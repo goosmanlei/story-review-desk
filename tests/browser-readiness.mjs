@@ -7,7 +7,7 @@ export async function workspaceReady(page, module, expectedKind, expectedId) {
     if ((query.get("query") || "") !== w.querySelector('[aria-label="搜索对象"]').value) return false;
     const owner = w.querySelector('[aria-label="分集筛选"]');
     if (owner && (query.get("owner") || "") !== owner.value) return false;
-    const rows = w.querySelectorAll(".catalog-row"), d = w.querySelector("article[data-ready=detail]");
+    const rows = w.querySelectorAll("[data-catalog-id]"), d = w.querySelector("article[data-ready=detail]");
     if (!rows.length) return !d && !expectedId;
     return d?.dataset.objectKind === w.dataset.kind && (!expectedId || d.dataset.objectId === expectedId) && [...rows].some((r) => r.getAttribute("aria-current") === "location" && r.dataset.catalogId === d.dataset.objectId);
   }, { module, expectedKind, expectedId });

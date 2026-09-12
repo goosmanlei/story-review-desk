@@ -1,4 +1,5 @@
 "use client";
+import { fieldLabels } from "./content";
 const labels: Record<string, string> = {
   reviewStandards: "审阅标准",
   entityTypes: "主体类型",
@@ -72,8 +73,9 @@ export function ConfigEditor({
   depth?: number;
   readOnly?: boolean;
 }) {
-  const title = labels[name] || name;
-  const locked = readOnly || name === "id" || /(?:Id|Ids|Ref|Refs|Hash|Sha256)$/.test(name);
+  const title = labels[name] || fieldLabels[name] || name;
+  const locked =
+    readOnly || name === "id" || /(?:Id|Ids|Ref|Refs|Hash|Sha256)$/.test(name);
   if (name === "limits")
     return <p>资源上限：缓存 24 MiB，空闲 5 分钟淘汰；后台队列最多 100 项。</p>;
   if (typeof value === "boolean")

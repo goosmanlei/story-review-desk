@@ -14,12 +14,17 @@ const help = `review — 与网页共用 /api/v1 的业务命令
 
   review list --module story [--kind SCENE] [--owner EPISODE_ID]
   review read OBJECT_ID [--revision REVISION_ID]
+  review context OBJECT_ID [--revision REVISION_ID]
+  review facets --kind MATERIAL
+  review relationships [--owner ENTITY_ID] [--offset N]
+  review spatial
   review save OBJECT_ID --file draft.json --expected-version N
   review submit OBJECT_ID --expected-version N
   review review OBJECT_ID --file judgment.json --expected-version N
   review transaction --file transaction.json
   review configuration [system|project] [--file config.json --expected-version N]
   review status OPERATION_ID
+  review maintenance [verify|backup|restore --file restore.json]
   review export --output PROJECT_PACKAGE_DIRECTORY
   review import --file PROJECT_PACKAGE_DIRECTORY
   review verify --file PROJECT_PACKAGE_DIRECTORY
@@ -53,6 +58,16 @@ export async function main(argv = process.argv.slice(2)) {
       offset: { type: "string" },
       limit: { type: "string" },
       historical: { type: "boolean" },
+      category: { type: "string" },
+      mediaType: { type: "string" },
+      entity: { type: "string" },
+      lane: { type: "string" },
+      gate: { type: "string" },
+      attention: { type: "string" },
+      actor: { type: "string" },
+      chain: { type: "string" },
+      workStage: { type: "string" },
+      workState: { type: "string" },
       output: { type: "string" },
     },
   });
@@ -108,7 +123,7 @@ export async function main(argv = process.argv.slice(2)) {
   let endpoint, body;
   const [command, id] = positionals;
   const readInput = async () => JSON.parse(await readFile(values.file, "utf8"));
-  if (command === "list") {
+  if (["list", "facets", "relationships"].includes(command)) {
     const query = new URLSearchParams();
     for (const k of [
       "module",
@@ -118,19 +133,40 @@ export async function main(argv = process.argv.slice(2)) {
       "offset",
       "limit",
       "historical",
+      "category",
+      "mediaType",
+      "entity",
+      "lane",
+      "gate",
+      "attention",
+      "actor",
+      "chain",
+      "workStage",
+      "workState",
     ])
       if (values[k] !== undefined) query.set(k, String(values[k]));
-    endpoint = "objects?" + query;
-  } else if (command === "read")
+    endpoint = (command === "list" ? "objects" : command) + "?" + query;
+  } else if (["read", "context"].includes(command))
     endpoint =
-      "objects/" +
+      (command === "read" ? "objects/" : "contexts/") +
       encodeURIComponent(id) +
       (values.revision
         ? "?revisionId=" + encodeURIComponent(values.revision)
         : "");
+  else if (command === "spatial") endpoint = "settings/spatial-baseline";
   else if (command === "status")
     endpoint = "operations/" + encodeURIComponent(id);
-  else if (command === "transaction") {
+  else if (command === "maintenance") {
+    endpoint = id ? "jobs" : "maintenance";
+    if (id) {
+      if (!["verify", "backup", "restore"].includes(id))
+        throw Error("维护任务类型无效");
+      body = {
+        ...(values.file ? await readInput() : {}),
+        kind: "MAINTENANCE_" + id.toUpperCase(),
+      };
+    }
+  } else if (command === "transaction") {
     endpoint = "transactions";
     body = await readInput();
   } else if (command === "configuration" && !values.file)

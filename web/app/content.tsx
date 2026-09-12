@@ -1,8 +1,62 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 import { captureSelection, restoreSelection } from "./session";
+import {
+  productionFieldLabels,
+  productionValueLabels,
+} from "./production-labels";
 import type { Detail } from "./types";
-const fieldLabels: Record<string, string> = {
+export const fieldLabels: Record<string, string> = {
+  episodeTask: "本集任务",
+  characterAction: "人物行动",
+  expressionFocus: "表达重点",
+  deliveredResult: "交付给观众的结果",
+  changedState: "状态变化",
+  unresolvedQuestions: "留下的问题",
+  information: "信息与因果",
+  characterKnowledge: "人物知情边界",
+  comedyBeats: "喜剧节拍",
+  role: "承担作用",
+  inheritedInformation: "承接信息",
+  newInformation: "新增信息",
+  withheldInformation: "暂不揭晓",
+  causalLinks: "因果关系",
+  whyNeeded: "为什么需要",
+  onScreenRequirement: "画面内需求",
+  authorityClass: "依据属性",
+  businessCategoryPrimaryName: "素材分类",
+  businessCategorySecondaryName: "用途分类",
+  requirements: "需求",
+  quote: "原文引用",
+  locator: "来源位置",
+  treatment: "原文处理",
+  summary: "摘要",
+  mustPreserve: "必须保留",
+  setupSceneIds: "铺垫场次",
+  payoffSceneIds: "揭晓场次",
+  runtimeMethod: "时长口径",
+  changeSummary: "创作说明",
+  sourceNarrationIndex: "原文处理索引",
+  flowBlockReasons: "下传受阻原因",
+  rightsStatus: "权利状态",
+  qaStatus: "质检结论",
+  canFlowDownstream: "可供下游使用",
+  rightsFacts: "权利事实",
+  materialRequirementRefs: "素材需求引用",
+  audienceGain: "观众所得",
+  audiencePosition: "观众的位置",
+  authoringUnknowns: "创作待核项",
+  coverageRole: "覆盖职责",
+  displayName: "人物",
+  hiddenTruth: "隐藏真相",
+  informationLayers: "信息层次",
+  knowledge: "人物知情",
+  outputState: "结束状态",
+  progressionSlices: "推进段落",
+  sequenceTitle: "段落",
+  structuralRole: "结构职责",
+  turningPoint: "转折",
+  visibleAction: "可见行动",
   description: "说明",
   text: "正文",
   purpose: "场景任务",
@@ -150,7 +204,16 @@ const fieldLabels: Record<string, string> = {
   trialStatus: "原试制状态",
   imageTechnicalFacts: "图像技术事实",
 };
-function Rich({ value, depth = 0 }: { value: any; depth?: number }) {
+Object.assign(fieldLabels, productionFieldLabels);
+export function Rich({
+  value,
+  depth = 0,
+  path = [],
+}: {
+  value: any;
+  depth?: number;
+  path?: string[];
+}) {
   if (value === null || value === undefined || value === "") return null;
   if (
     typeof value === "string" ||
@@ -158,8 +221,14 @@ function Rich({ value, depth = 0 }: { value: any; depth?: number }) {
     typeof value === "boolean"
   )
     return (
-      <p className="rich-text">
-        {typeof value === "boolean" ? (value ? "是" : "否") : String(value)}
+      <p className="rich-text" data-content-path={JSON.stringify(path)}>
+        {typeof value === "boolean"
+          ? value
+            ? "是"
+            : "否"
+          : typeof value === "string"
+            ? productionValueLabels[value] || value
+            : String(value)}
       </p>
     );
   if (Array.isArray(value))
@@ -167,7 +236,7 @@ function Rich({ value, depth = 0 }: { value: any; depth?: number }) {
       <div className="rich-list">
         {value.map((item, i) => (
           <div className="rich-item" key={item?.id || i}>
-            <Rich value={item} depth={depth + 1} />
+            <Rich value={item} depth={depth + 1} path={[...path, String(i)]} />
           </div>
         ))}
       </div>
@@ -179,7 +248,10 @@ function Rich({ value, depth = 0 }: { value: any; depth?: number }) {
     )
   )
     return (
-      <p className="rich-text">
+      <p
+        className="rich-text"
+        data-content-path={JSON.stringify([...path, "text"])}
+      >
         {value.class && <span className="pill">{value.class}</span>}{" "}
         {value.text}
       </p>
@@ -197,7 +269,7 @@ function Rich({ value, depth = 0 }: { value: any; depth?: number }) {
         .map(([key, item]) => (
           <div className="rich-field" key={key}>
             {depth < 3 && <h4>{fieldLabels[key]}</h4>}
-            <Rich value={item} depth={depth + 1} />
+            <Rich value={item} depth={depth + 1} path={[...path, key]} />
           </div>
         ))}
     </div>
@@ -211,7 +283,8 @@ export function Content({
   onOpen: (id: string, revisionId?: string) => void;
 }) {
   const c = detail.revision.content,
-    [zoom, setZoom] = useState<string | null>(null);
+    [zoom, setZoom] = useState<string | null>(null),
+    [scale, setScale] = useState(100);
   const bodyRef = useRef<HTMLDivElement>(null),
     selectionKey = detail.id + ":" + detail.revision.id;
   useEffect(() => {
@@ -225,6 +298,8 @@ export function Content({
     <div
       ref={bodyRef}
       className="content-body"
+      data-content-object={detail.id}
+      data-content-revision={detail.revision.id}
       onMouseUp={() => {
         if (bodyRef.current) captureSelection(selectionKey, bodyRef.current);
       }}
@@ -292,7 +367,14 @@ export function Content({
           ))}
         </div>
       ) : (
-        c.text && <p className="rich-text main-text">{c.text}</p>
+        c.text && (
+          <p
+            className="rich-text main-text"
+            data-content-path={JSON.stringify(["text"])}
+          >
+            {c.text}
+          </p>
+        )
       )}
       <Rich
         value={Object.fromEntries(
@@ -354,7 +436,43 @@ export function Content({
           <button autoFocus onClick={() => setZoom(null)}>
             关闭
           </button>
-          <img src={"/api/v1/media/" + zoom} alt={detail.title} />
+          <div
+            className="image-zoom-controls"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <label>
+              缩放
+              <input
+                aria-label="原图缩放"
+                type="range"
+                min="40"
+                max="300"
+                step="10"
+                value={scale}
+                onChange={(e) => setScale(Number(e.target.value))}
+              />
+            </label>
+            <span>{scale}%</span>
+            <button onClick={() => setScale(100)}>适合窗口</button>
+            <a href={"/api/v1/media/" + zoom} target="_blank" rel="noreferrer">
+              打开原图
+            </a>
+          </div>
+          <div
+            className="image-zoom-scroll"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <img
+              style={{
+                width: scale + "%",
+                maxWidth: "none",
+                maxHeight: "none",
+                objectFit: "contain",
+              }}
+              src={"/api/v1/media/" + zoom}
+              alt={detail.title}
+            />
+          </div>
         </div>
       )}
     </div>

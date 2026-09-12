@@ -125,6 +125,16 @@ async function save(tx, command, context) {
     "请填写标题",
   );
   const previous = old?.draft_revision_id || old?.adopted_revision_id || null;
+  if (module.validateTarget) {
+    const oldContent = previous
+      ? (
+          await tx.query("SELECT content FROM revisions WHERE id=$1", [
+            previous,
+          ])
+        ).rows[0]?.content
+      : null;
+    await module.validateTarget(tx, kind, content, oldContent);
+  }
   const links =
     command.links ??
     (previous
@@ -709,7 +719,11 @@ export async function execute(pool, request) {
     await tx.query("SAVEPOINT commands");
     try {
       const requested = request.commands
-        .flatMap((c) => [c.id, ...(c.links || []).map((x) => x.id)])
+        .flatMap((c) => [
+          c.id,
+          c.content?.target?.objectId,
+          ...(c.links || []).map((x) => x.id),
+        ])
         .filter(Boolean);
       const suggestionIds = request.commands
         .filter((c) => c.type === "suggestion.apply")

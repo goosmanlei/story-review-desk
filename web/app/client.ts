@@ -1,7 +1,7 @@
 import { BoundedCache } from "../../server/shared/cache.mjs";
 export const cache = new BoundedCache();
 let runtime: Promise<string> | undefined;
-async function runtimeHeaders() {
+export async function runtimeHeaders() {
   runtime ??= fetch("/api/v1/health", { cache: "no-store" }).then(async (r) => {
     if (!r.ok) throw Error("无法读取实例运行期");
     return (await r.json()).project.runtimeEpoch;
@@ -9,6 +9,12 @@ async function runtimeHeaders() {
   return { "x-review-runtime": await runtime };
 }
 const pending = new Map<string, Promise<any>>();
+let cacheGeneration = 0;
+export function invalidateReads() {
+  cacheGeneration++;
+  cache.clear();
+  pending.clear();
+}
 export async function post(url: string, body: any) {
   const response = await fetch("/api/v1/" + url, {
       method: "POST",
@@ -22,6 +28,7 @@ export async function post(url: string, body: any) {
   if (!response.ok || value.status === "FAILED")
     throw Object.assign(Error(value.error?.message || "操作失败"), {
       operationId: body.operationId,
+      responseStatus: response.status,
     });
   return value;
 }
@@ -72,13 +79,18 @@ export async function read<T = any>(
     if (value !== undefined) return value;
     if (pending.has(url)) return pending.get(url)!;
   }
+  const generation = cacheGeneration;
   const request = fetch("/api/v1/" + url, { cache: "no-store" })
     .then(async (response) => {
       const body = await response.json();
       if (!response.ok) throw Error(body.error?.message || "读取失败");
-      return cache.set(url, body);
+      if (generation === cacheGeneration && pending.get(url) === request)
+        cache.set(url, body);
+      return body;
     })
-    .finally(() => pending.delete(url));
+    .finally(() => {
+      if (pending.get(url) === request) pending.delete(url);
+    });
   pending.set(url, request);
   return request;
 }
@@ -102,7 +114,8 @@ export async function commands(
         operationId,
         receipt,
       });
-    cache.clear();
+    invalidateReads();
+    window.dispatchEvent(new Event("review:changed"));
     return receipt;
   } catch (error) {
     if (error instanceof Error) Object.assign(error, { operationId });
