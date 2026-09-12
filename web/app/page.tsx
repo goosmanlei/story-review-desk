@@ -108,7 +108,7 @@ export default function Desk() {
       const u = new URL(location.href),
         w = u.searchParams.get("view") || "overview";
       setWorkspace(w);
-      if (u.searchParams.get("id"))
+      if (u.searchParams.has("id") || u.searchParams.has("kind"))
         setViews((old) => ({
           ...old,
           [w]: {
@@ -369,7 +369,8 @@ function Workbench({
   drafts: Record<string, Draft>;
   onDraft: (id: string, draft: Draft | null) => void;
 }) {
-  const [catalog, setCatalog] = useState<{
+  const [loadedCatalog, setCatalog] = useState<{
+      key: string;
       items: Summary[];
       total: number;
       nextOffset: number | null;
@@ -377,7 +378,7 @@ function Workbench({
     [detail, setDetail] = useState<Detail | null>(null),
     [error, setError] = useState<any>(null),
     [attempt, setAttempt] = useState(0),
-    [creating, setCreating] = useState(false),
+    [creating, setCreating] = useState<{ module: string; kind: string } | null>(null),
     [newTitle, setNewTitle] = useState(""),
     [busy, setBusy] = useState(false),
     [newLinks, setNewLinks] = useState<any[]>([]),
@@ -393,18 +394,21 @@ function Workbench({
     historical: String(value.historical),
     ...(value.owner ? { owner: value.owner } : {}),
   }).toString();
+  // Effects from a render that changed the query still see its previous state.
+  // Only the catalog for this exact query may choose or display an object.
+  const catalog = loadedCatalog?.key === catalogKey ? loadedCatalog : null;
   useEffect(() => {
     let active = true;
+    const position = readingPositions.get("catalog:" + catalogKey) || 0;
     setCatalog(null);
     setError(null);
     read("objects?" + catalogKey)
       .then((rows) => {
         if (active) {
-          setCatalog(rows);
+          setCatalog({ ...rows, key: catalogKey });
           requestAnimationFrame(() => {
             if (listRef.current)
-              listRef.current.scrollTop =
-                readingPositions.get("catalog:" + catalogKey) || 0;
+              listRef.current.scrollTop = position;
           });
         }
       })
@@ -420,6 +424,7 @@ function Workbench({
   useEffect(() => {
     let active = true;
     const id = value.id;
+    const position = readingPositions.get("detail:" + id) || 0;
     setDetail(null);
     if (id)
       read<Detail>("objects/" + encodeURIComponent(id))
@@ -428,8 +433,7 @@ function Workbench({
             setDetail(d);
             requestAnimationFrame(() => {
               if (detailRef.current)
-                detailRef.current.scrollTop =
-                  readingPositions.get("detail:" + id) || 0;
+                detailRef.current.scrollTop = position;
             });
           }
         })
@@ -482,7 +486,7 @@ function Workbench({
       ]);
       setNewLinks([]);
       setFile(null);
-      setCreating(false);
+      setCreating(null);
       setNewTitle("");
       onChange({ id, offset: 0, query: "" });
       refresh();
@@ -496,6 +500,9 @@ function Workbench({
     <section
       className="workbench"
       data-ready={catalog ? "workspace" : undefined}
+      data-module={module}
+      data-kind={value.kind}
+      data-catalog-key={catalog?.key}
     >
       <div className="tabs" role="tablist" aria-label="内容分类">
         {(tabs[module] || []).map((kind) => (
@@ -559,7 +566,7 @@ function Workbench({
           onClick={() => {
             setNewLinks([]);
             setFile(null);
-            setCreating(true);
+            setCreating({ module, kind: value.kind });
           }}
         >
           ＋ 新建{kindLabels[value.kind]}
@@ -567,7 +574,7 @@ function Workbench({
       </div>
       <OperationError error={error} />
       {error && <button onClick={refresh}>重新读取</button>}
-      {creating && (
+      {creating?.module === module && creating.kind === value.kind && (
         <div className="new-form">
           <label>
             新建{kindLabels[value.kind]}
@@ -624,16 +631,16 @@ function Workbench({
           <button disabled={busy || !newTitle.trim()} onClick={create}>
             创建草稿
           </button>
-          <button onClick={() => setCreating(false)}>取消</button>
+          <button onClick={() => setCreating(null)}>取消</button>
         </div>
       )}
       <div className="workspace-columns">
         <div
           className="catalog"
           ref={listRef}
-          onScroll={(e) =>
-            rememberPosition("catalog:" + catalogKey, e.currentTarget.scrollTop)
-          }
+          onScroll={(e) => {
+            if (catalog) rememberPosition("catalog:" + catalogKey, e.currentTarget.scrollTop);
+          }}
         >
           <div className="catalog-heading">
             <span>{kindLabels[value.kind]}</span>
@@ -648,6 +655,7 @@ function Workbench({
               <button
                 key={o.id}
                 className="catalog-row"
+                data-catalog-id={o.id}
                 aria-current={value.id === o.id ? "location" : undefined}
                 onClick={() => onChange({ id: o.id })}
               >
@@ -687,10 +695,11 @@ function Workbench({
           className="detail-scroll"
           ref={detailRef}
           onScroll={(e) => {
-            rememberPosition("detail:" + value.id, e.currentTarget.scrollTop);
+            if (catalog && detail?.id === value.id)
+              rememberPosition("detail:" + value.id, e.currentTarget.scrollTop);
           }}
         >
-          {detail && detail.id === value.id ? (
+          {catalog && detail && detail.id === value.id && detail.kind === value.kind ? (
             <ObjectPanel
               key={detail.id}
               detail={detail}
@@ -813,6 +822,7 @@ function ObjectPanel({
       className="object-panel"
       data-ready="detail"
       data-object-id={shown.id}
+      data-object-kind={shown.kind}
       data-object-version={shown.version}
     >
       <header className="object-heading">

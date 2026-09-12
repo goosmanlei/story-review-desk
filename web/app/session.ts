@@ -32,9 +32,16 @@ export function rememberPosition(key: string, value: number) {
     readingPositions.delete(readingPositions.keys().next().value!);
 }
 
+type SelectionAnchor = { path: number[]; offset: number };
+function selectionAnchor(root: Node, node: Node, offset: number): SelectionAnchor {
+  const path: number[] = [];
+  for (let current = node; current !== root; current = current.parentNode!)
+    path.unshift(Array.prototype.indexOf.call(current.parentNode!.childNodes, current));
+  return { path, offset };
+}
 const selections = new Map<
   string,
-  { start: number; end: number; text: string }
+  { start: number; end: number; text: string; startAnchor: SelectionAnchor; endAnchor: SelectionAnchor }
 >();
 export function captureSelection(key: string, root: HTMLElement) {
   const selection = window.getSelection();
@@ -55,6 +62,8 @@ export function captureSelection(key: string, root: HTMLElement) {
     start: before.toString().length,
     end: before.toString().length + text.length,
     text,
+    startAnchor: selectionAnchor(root, range.startContainer, range.startOffset),
+    endAnchor: selectionAnchor(root, range.endContainer, range.endOffset),
   });
   if (selections.size > 1000)
     selections.delete(selections.keys().next().value!);
@@ -63,6 +72,22 @@ export function restoreSelection(key: string, root: HTMLElement) {
   const saved = selections.get(key);
   if (!saved || root.textContent?.slice(saved.start, saved.end) !== saved.text)
     return;
+  const locate = (anchor: SelectionAnchor): Node | undefined =>
+    anchor.path.reduce<Node | undefined>((node, index) => node?.childNodes[index], root);
+  const startNode = locate(saved.startAnchor), endNode = locate(saved.endAnchor);
+  if (startNode && endNode) {
+    try {
+      const exact = document.createRange();
+      exact.setStart(startNode, saved.startAnchor.offset);
+      exact.setEnd(endNode, saved.endAnchor.offset);
+      if (exact.toString() === saved.text) {
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(exact);
+        return;
+      }
+    } catch { /* Changed DOM shape: restore validated character offsets below. */ }
+  }
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT),
     range = document.createRange();
   let offset = 0,
@@ -70,7 +95,7 @@ export function restoreSelection(key: string, root: HTMLElement) {
     node;
   while ((node = walker.nextNode())) {
     const length = node.textContent?.length || 0;
-    if (!start && offset + length >= saved.start) {
+    if (!start && offset + length > saved.start) {
       range.setStart(node, saved.start - offset);
       start = true;
     }
