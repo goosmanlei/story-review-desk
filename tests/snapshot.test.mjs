@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdir,readFile,writeFile,symlink,copyFile,rm} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,symlink,copyFile,cp,rm} from 'node:fs/promises';
 import {Readable} from 'node:stream';
 import {execFileSync} from 'node:child_process';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import {requiredPhase} from '../tools/process-resources.mjs';
 import {writePackageRecords} from '../server/project/package.mjs';
 import {saveSnapshot,verifySnapshot,materializeSnapshot,lfsPointer,parsePointer} from '../server/project/snapshot.mjs';
 import {hash} from '../server/shared/contracts.mjs';
+import {ownedBackup,snapshotIndex} from '../server/project/maintenance-contract.mjs';
 
 test('reference snapshots retain one predecessor and restore without a network or expanded working files',async t=>{
  const phase=await requiredPhase(process.cwd()),outer=process.env.REVIEW_TASK_DIR;
@@ -25,6 +26,8 @@ test('reference snapshots retain one predecessor and restore without a network o
  const current=path.join(root,'project-data/current'),options={projectRoot:root,phase:{read:async()=>({phaseId:'verify',resources:[{path:stage}]}),update:async fn=>fn({resources:[]})}};
  const first=await saveSnapshot(await packageFor('first'),current,options);
  const before=await verifySnapshot(current,options);
+ const baseline=path.join(root,'project-data/baseline');await cp(current,baseline,{recursive:true});
+ await writeFile(path.join(baseline,'manifest.json'),JSON.stringify({...before.snapshot,operationId:'baseline-fixture'}));
  assert.equal(before.snapshot.package.transfer.sha256,first.sha256);
  assert.deepEqual(parsePointer(await readFile(path.join(current,'media',sha))),{sha256:sha,bytes:bytes.length});
  const restored=path.join(stage,'restored');await materializeSnapshot(current,restored,options);
@@ -36,6 +39,10 @@ test('reference snapshots retain one predecessor and restore without a network o
  assert.equal((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);
  await saveSnapshot(await packageFor('third'),current,options);
  assert.notEqual((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);
+ const frozen=await ownedBackup(null,path.join(root,'instance'),'baseline-fixture');assert.equal(frozen.slot,'baseline');assert.equal(frozen.sha256,first.sha256);
+ assert.equal((await snapshotIndex(path.join(root,'instance'))).length,3);
+ await materializeSnapshot(frozen.directory,path.join(stage,'baseline-restored'),options);
+ assert.deepEqual(await readFile(path.join(stage,'baseline-restored/media',sha)),bytes);
  await assert.rejects(verifySnapshot(path.join(root,'../sealed-archive'),options),e=>e.code==='SNAPSHOT_SCOPE');
  await assert.rejects(materializeSnapshot(current,path.join(root,'project-data/expanded'),options),e=>e.code==='SNAPSHOT_DESTINATION');
  const pointer=path.join(current,'media',sha);await writeFile(pointer,lfsPointer('f'.repeat(64),bytes.length));

@@ -151,7 +151,7 @@
         "server/project/maintenance-contract.mjs",
         "tools/snapshot.mjs"
       ],
-      "sourceDigest": "d2dd5d36366894a20f47903fa86c044a78d2a2f167db46e0f80cbc07c934ce75"
+      "sourceDigest": "f7ed47c6214275229e2b323c4b597dfa25bd574507d7ad28b9e8e20e5059dd18"
     },
     {
       "id": "instance",

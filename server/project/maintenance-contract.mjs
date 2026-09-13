@@ -20,7 +20,7 @@ export function workspaceMaintenanceRequest(input,{operationId,runtimeEpoch}) {
 const taskId = (id) => "maintenance-" + hash(id).slice(0, 24);
 export async function snapshotIndex(root) {
   const result=[];
-  for(const slot of ['current','previous']){
+  for(const slot of ['current','previous','baseline']){
     const directory=path.join(path.dirname(root),'project-data',slot);
     const info=await lstat(directory).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
     if(!info)continue;
@@ -47,7 +47,7 @@ export async function ownedBackup(pool, root, id) {
   check(
     row?.result?.backupId === id && row.result.format==='review-project-archive' && Date.parse(row.result.expiresAt)>Date.now(),
     "BACKUP_NOT_FOUND",
-    "请选择当前、上一快照或未过期的完整项目包",
+    "请选择当前、上一快照、已登记基线或未过期的完整项目包",
     404,
   );
   const expected = path.join(
