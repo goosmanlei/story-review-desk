@@ -13,6 +13,7 @@
     "review": "node scripts/review.mjs",
     "deploy": "node tools/deploy.mjs",
     "process": "node tools/process.mjs",
+    "tasks": "node tools/tasks.mjs",
     "test": "npm run docs:check && node --test tests/*.test.mjs",
     "test:ui": "node tests/workspace-navigation.ui.mjs",
     "test:types": "tsc --project web/tsconfig.json --noEmit --incremental false",

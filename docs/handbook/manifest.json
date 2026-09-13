@@ -25,7 +25,7 @@
         "server/db.mjs",
         "server/library/service.mjs"
       ],
-      "sourceDigest": "3895cb0d70a2d12a7db847b8d764ff9f03d779874aedac34afc6dffe4b65e012"
+      "sourceDigest": "50306c1cba06ca645fbb92a6d14d60661fcf9be29a35ba3ed3356bc83d63b2ef"
     },
     {
       "id": "domains",
@@ -131,7 +131,7 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "e58ee8ef0e6d2ccabc3fbc6296d4f16cdc338bad665bab19a5b9162bb9e4ec84"
+      "sourceDigest": "f3af8ed080251714b219664a69a3751f6bfcbf5e8d6882b4024206da643113ba"
     },
     {
       "id": "operations",
@@ -149,9 +149,13 @@
         "server/project/snapshot.mjs",
         "server/project/maintenance.mjs",
         "server/project/maintenance-contract.mjs",
-        "tools/snapshot.mjs"
+        "tools/snapshot.mjs",
+        "tools/task-ledger.mjs",
+        "tools/tasks.mjs",
+        "tools/task-skill.mjs",
+        "skills/review-tasks/SKILL.md"
       ],
-      "sourceDigest": "f7ed47c6214275229e2b323c4b597dfa25bd574507d7ad28b9e8e20e5059dd18"
+      "sourceDigest": "1a1662242668990f6731fda5f3f34cfec1d288a062290aee5c5d3f83e18ad813"
     },
     {
       "id": "instance",

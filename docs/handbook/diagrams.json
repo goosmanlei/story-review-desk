@@ -1731,5 +1731,105 @@
         "label": "完整导入"
       }
     ]
+  },
+  {
+    "id": "tasks",
+    "title": "正式任务从澄清到完成",
+    "description": "只有已澄清需求进入账本；中断后核查再继续。",
+    "nodes": [
+      {
+        "id": "clarify",
+        "label": "当场澄清",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "明确目标、范围、验收",
+          "未成熟想法不落盘"
+        ]
+      },
+      {
+        "id": "ready",
+        "label": "正式发布",
+        "domain": "project",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "永久编号与追加账本",
+          "可并发发布"
+        ]
+      },
+      {
+        "id": "run",
+        "label": "串行执行",
+        "domain": "production",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "依赖与优先级领取",
+          "版本、租约与进程核查"
+        ]
+      },
+      {
+        "id": "audit",
+        "label": "审计与结果",
+        "domain": "settings",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "时间、关系、验收证据",
+          "长期保留，可重建视图"
+        ]
+      },
+      {
+        "id": "done",
+        "label": "验收与清理",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "逐项证据与成果引用",
+          "保留任务与恢复信息"
+        ]
+      },
+      {
+        "id": "resume",
+        "label": "检查点与续办",
+        "domain": "story",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "查原进程、版本及操作",
+          "结果未知先阻塞核查"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "clarify",
+        "to": "ready",
+        "label": "澄清完成"
+      },
+      {
+        "from": "ready",
+        "to": "run",
+        "label": "启动后领取"
+      },
+      {
+        "from": "run",
+        "to": "resume",
+        "label": "阶段保存"
+      },
+      {
+        "from": "resume",
+        "to": "done",
+        "label": "达到验收标准"
+      },
+      {
+        "from": "done",
+        "to": "audit",
+        "label": "追加记录"
+      }
+    ]
   }
 ]

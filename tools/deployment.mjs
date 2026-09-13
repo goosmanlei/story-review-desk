@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 import { hash } from "../server/shared/contracts.mjs";
 import { pathToFileURL } from "node:url";
 import { once } from "node:events";
+import { installTaskSkill } from './task-skill.mjs';
 import {
   exists,
   json,
@@ -191,6 +192,7 @@ export async function installSoftware(
     next: { schemaVersion: "1.0", ...manifest },
     status: "INSTALLED",
   });
+  await installTaskSkill(root,target);
 }
 export async function updateCorePin(root, manifest) {
   await atomic(path.join(root, "core-lock.json"), {
@@ -206,7 +208,9 @@ export async function updateCorePin(root, manifest) {
 export async function reconcileSoftware(root) {
   const file = path.join(root, "instance/runtime/software-switch.json"),
     journal = await json(file).catch(() => null);
-  if (!journal || journal.status !== "PREPARED") return;
+  if (!journal) return;
+  if (journal.status === 'INSTALLED') { await installTaskSkill(root,path.join(root,'review-software')); return; }
+  if (journal.status !== "PREPARED") return;
   requireValue(
     journal.target === path.join(root, "review-software") &&
       [journal.candidate, journal.displaced].every(
@@ -220,6 +224,7 @@ export async function reconcileSoftware(root) {
   if (target) {
     const installed = await verifyInstalledSoftware(root);
     if (installed?.commit === journal.next.commit) {
+      await installTaskSkill(root,journal.target);
       await atomic(file, { ...journal, status: "INSTALLED" });
       return;
     }
@@ -247,6 +252,7 @@ export async function reconcileSoftware(root) {
     return;
   }
   await verifyInstalledSoftware(root);
+  await installTaskSkill(root,journal.target);
   await atomic(file, { ...journal, status: "INSTALLED" });
 }
 
