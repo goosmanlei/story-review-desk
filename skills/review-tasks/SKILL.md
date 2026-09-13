@@ -56,6 +56,8 @@ Agent 完成、取消或被替换后立即收尾：先保存结果/检查点，�
 
 ## 稳定表格审计
 
+对话中列任务默认使用 `list --format markdown`，只列 READY、RUNNING、BLOCKED、WAITING_REVIEW。用户明确要求全部或包含终态历史时才加 `--all`，纳入 DONE、CANCELLED、MERGED。`--status`、`--type`、`--task` 与所选范围取交集；例如 `list --status DONE` 为空，`list --all --status DONE` 才返回已完成。JSON 与 Markdown 一致，show、status、audit 保持原语义，完整账本与生成阅读视图不删除历史。
+
 面向用户的 list、status、audit、show 一律调用对应 CLI 的 `--format markdown`，直接沿用共享渲染器结果。任务事实来自事件回放与现场运行态；截图、缓存视图或记忆只用于格式参考。不要自行重新挑列、改写标题、缩短编号、概括同一任务或用散文替换表格。
 
 基础列表长期固定七列、固定顺序：**任务编号｜任务标题｜类别｜状态｜优先级｜发布时间｜前置依赖**。标题始终原样使用正式 title；类别显示系统优化（SYSTEM）或内容创作（CREATIVE）；状态显示中文及原码；依赖使用完整任务编号链接，无依赖填“—”。默认按发布时间升序、编号打破平局；只有用户明确要求时使用 `--sort` 改排序。

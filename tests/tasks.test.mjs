@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {mutate,readLedger,rebuild,audit,startRun,runtimeState} from '../tools/task-ledger.mjs';
 import {installTaskSkill} from '../tools/task-skill.mjs';
+import {main as tasksMain} from '../tools/tasks.mjs';
 
 const cli=fileURLToPath(new URL('../tools/tasks.mjs',import.meta.url));
 const spec=(extra={})=>({clarified:true,discussion:{approved:true,summary:'已讨论并同意修复筛选',feasibility:'已有可控测试输入，可验证',approvedRequirements:['修复并验证筛选']},type:'SYSTEM',title:'修复测试筛选',originalRequest:'发布任务：使筛选符合选择',goal:'筛选显示正确结果',scope:['通用筛选逻辑'],deliverables:['修复及验证结果'],acceptanceCriteria:['筛选结果正确','清空后恢复全部结果'],authorization:'仅测试夹具，不操作真实业务或模型',...extra});
@@ -45,6 +46,27 @@ async function finish(root,id,runId) {
   const t=(await readLedger(root)).tasks[id];
   return change(root,'transition',id,{runId,status:'DONE',reason:'通过验收',result:{summary:'完成',artifacts:['fixture:result'],cleanup:'夹具临时资源已回收',acceptance:t.acceptanceCriteria.map((_,i)=>({criterion:i,evidence:'fixture check passed'}))}});
 }
+
+test('list defaults to every unfinished state; all/filter/empty outputs preserve historical queries',async t=>{
+ const root=await fixture(t),runner=await run(t,root),done=await publish(root,spec({title:'完成任务'}));await next(root,runner.id);await finish(root,done.taskId,runner.id);
+ const cancelled=await publish(root,spec({title:'取消任务'}));await change(root,'transition',cancelled.taskId,{status:'CANCELLED',reason:'夹具取消'});
+ const waiting=await publish(root,spec({title:'待验收任务'}));await next(root,runner.id);await change(root,'transition',waiting.taskId,{runId:runner.id,status:'WAITING_REVIEW',reason:'等待验收'});
+ const blocked=await publish(root,spec({title:'阻塞创作任务',type:'CREATIVE'}));await next(root,runner.id);await change(root,'transition',blocked.taskId,{runId:runner.id,status:'BLOCKED',reason:'夹具阻塞'});
+ const a=await publish(root,spec({title:'合并来源甲'})),b=await publish(root,spec({title:'合并来源乙'}));await mutate(root,'merge',req({taskIds:[a.taskId,b.taskId],expectedVersions:{[a.taskId]:1,[b.taskId]:1},title:'待执行合并目标',reason:'合并夹具'}));
+ const active=await publish(root,spec({title:'执行中任务',priority:0}));await next(root,runner.id);
+ const before=await readLedger(root),query=(...args)=>tasksMain(['list','--project',root,...args]),pending=await query(),all=await query('--all');
+ assert.deepEqual(new Set(pending.map(t=>t.status)),new Set(['READY','RUNNING','BLOCKED','WAITING_REVIEW']));assert.equal(pending.length,4);assert.equal(all.length,8);assert.equal(new Set(all.map(t=>t.status)).size,7);
+ assert.deepEqual(await query('--status','DONE'),[]);assert.deepEqual((await query('--all','--status','DONE')).map(t=>t.id),[done.taskId]);
+ assert.deepEqual((await query('--type','CREATIVE')).map(t=>t.id),[blocked.taskId]);assert.deepEqual(await query('--task',done.taskId),[]);assert.deepEqual((await query('--all','--task',done.taskId)).map(t=>t.id),[done.taskId]);
+ const tableIds=md=>[...md.matchAll(/^\| \[(T-[^\]]+)\]/gm)].map(m=>m[1]);
+ for(const flags of [[],['--all'],['--status','DONE'],['--all','--status','DONE'],['--type','CREATIVE'],['--all','--type','SYSTEM']]){
+  const rows=await query(...flags),md=await query(...flags,'--format','markdown');assert.deepEqual(tableIds(md),rows.map(t=>t.id));assert.match(md,/\| 任务编号 \| 任务标题 \| 类别 \| 状态 \| 优先级 \| 发布时间 \| 前置依赖 \|/);assert(md.includes(`共 ${rows.length} 项任务`));for(const row of rows)assert(md.includes('| '+row.title+' |'));
+ }
+ assert.equal((await tasksMain(['show',done.taskId,'--project',root])).status,'DONE');assert.equal((await tasksMain(['audit','--project',root])).tasks.length,8);assert.equal((await tasksMain(['status','--project',root])).run.id,runner.id);
+ assert.equal((await readLedger(root)).head,before.head);assert.equal((await readLedger(root)).sequence,before.sequence);
+ for(const task of pending)await change(root,'transition',task.id,{runId:runner.id,status:'CANCELLED',reason:'终态空列表夹具'});
+ assert.deepEqual(await query(),[]);const empty=await query('--format','markdown');assert.match(empty,/共 0 项任务/);assert.match(empty,/\| 任务编号 \|/);assert.equal((await query('--all')).length,8);
+});
 
 test('unclarified ideas produce no task files or audit events',async t=>{
   const root=await fixture(t);

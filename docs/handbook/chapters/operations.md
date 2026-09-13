@@ -153,6 +153,8 @@ Codex 在发布成功后先 `audit --operation-id 原发布编号 --format markd
 
 `tasks/README.md` 与 `tasks/items` 是可重建阅读视图，审计从事件回放读取事实。任务和派工的逻辑编号、选择理由、状态、检查点、原操作编号、成果和验收/关闭证据随私库保存。机器路径、原生线程 ID、socket、PID、租约及派工绑定只在 `instance/runtime/task-execution`，不进入公开软件或业务导入包；复制数据不恢复执行资格。
 
+日常 `tasks list` 默认只列 READY、RUNNING、BLOCKED、WAITING_REVIEW。明确指定 `--all` 才纳入 DONE、CANCELLED、MERGED；状态、类别、任务筛选与该范围取交集，所以 `list --status DONE` 为空，而 `list --all --status DONE` 返回匹配的完成历史。JSON 与 Markdown 共用同一集合、发布时间排序和固定七列；空 Markdown 列表仍显示表头和 0 项。此默认范围只影响 list，show、status、audit 及完整历史阅读视图保持原语义。
+
 每个项目只有一个 `run` 协调运行，10 分钟租约，阶段间 heartbeat，guard 内自动续租。旧协调进程仍活跃时不接管。协调进程死去而原命令仍运行时，仅在原命令具有可核验派工及完整资源占用时允许新协调者推进无关任务；未知归属或旧串行命令仍阻断接管。运行身份不能复用。
 
 ### 调度与资源占用

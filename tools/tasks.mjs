@@ -17,7 +17,8 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks install                     安装/更新项目 Skill 与 npm 入口
   tasks init | rebuild              初始化空账本或从事件重建 Markdown 视图
   tasks upgrade --file -             无活跃执行时升级至 v2；保留旧事件
-  tasks list | show TASK_ID          读取权威任务记录
+  tasks list [--all]                 默认列出未完成任务；--all 包含全部终态历史
+  tasks show TASK_ID                 读取单项权威任务记录
   tasks audit [--task ID] [--from ISO] [--to ISO] [--status STATE] [--type SYSTEM|CREATIVE]
   tasks audit --operation-id ID      核查管理操作是否已落账
   tasks commit --file -              发布回读后仅提交本地受管任务记录，无需领取或执行
@@ -42,6 +43,11 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   --format json|markdown             list / show / status / audit；默认 JSON
   --sort published|priority|updated|completed
   --columns completed,progress,blocker,result  Markdown 附表可选列
+
+list 默认范围：READY / RUNNING / BLOCKED / WAITING_REVIEW；
+--all 才纳入 DONE / CANCELLED / MERGED。--status / --type / --task 与范围取交集，
+例如 list --status DONE 返回空，list --all --status DONE 查询已完成。
+JSON 与 Markdown 同范围；show / status / audit 保持原查询语义。
 
 写入共同字段：operationId（重发原编号）、actor（如 USER / PROJECT_CODEX）。
 publish: {task:{clarified:true,type:"SYSTEM",title,originalRequest,goal,scope:[...],
@@ -178,9 +184,10 @@ async function nativeAction(project,action,v) {
 
 export async function main(argv=process.argv.slice(2)) {
   const sep=argv.indexOf('--'), command=sep<0?[]:argv.slice(sep+1);
-  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},core:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
+  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
   const project=path.resolve(v.project||process.cwd()), action=p[0];
   if(v.help||!action||action==='help') return console.log(help);
+  requireTask(!v.all||action==='list','--all 仅适用于 list');
   if(action==='install') return installTaskSkill(project,path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'));
   if(['init','rebuild'].includes(action)) return rebuild(project);
   if(action==='run') return keeper(project);
@@ -196,7 +203,11 @@ export async function main(argv=process.argv.slice(2)) {
   data.tasks=sortTasks(data.tasks,v.sort);
   data.scope=[v.task?'任务 '+v.task:null,v.status||null,v.type||null].filter(Boolean).join(' / ')||'当前项目';
   const options={linkBase:projectLinkBase(project),sort:v.sort,columns:v.columns?.split(',')||[]};
-  if(action==='list') return v.format==='markdown'?renderTasks(data,options):data.tasks;
+  if(action==='list') {
+    if(!v.all)data.tasks=data.tasks.filter(t=>['READY','RUNNING','BLOCKED','WAITING_REVIEW'].includes(t.status));
+    data.scope+=' / '+(v.all?'全部任务（含终态）':'未完成任务');
+    return v.format==='markdown'?renderTasks(data,options):data.tasks;
+  }
   if(action==='show') {requireTask(ledger.tasks[p[1]],'任务不存在');return v.format==='markdown'?renderDetail(ledger.tasks[p[1]],options):ledger.tasks[p[1]];}
   if(action==='audit')return v.format==='markdown'?renderAudit(data,options):data;
   if(action==='status') {
