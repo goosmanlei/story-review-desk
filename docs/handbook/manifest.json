@@ -138,7 +138,7 @@
       "title": "部署、数据与运行维护",
       "summary": "理解固定提交、母本与演示、项目包、配置、恢复和精确清理。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "tools/deploy.mjs",
         "tools/deployment.mjs",
@@ -153,9 +153,12 @@
         "tools/task-ledger.mjs",
         "tools/tasks.mjs",
         "tools/task-skill.mjs",
-        "skills/review-tasks/SKILL.md"
+        "skills/review-tasks/SKILL.md",
+        "tools/task-assignments.mjs",
+        "tools/task-format.mjs",
+        "tools/task-native.mjs"
       ],
-      "sourceDigest": "53a9f288e6a8b6e31963cf6d92f06d06c9c2bdc9a7fa6e3a2a7e01fceceb953f"
+      "sourceDigest": "f62457e89f372276328fdeb90f672b72ac208688dc40f265bc9f1f0a73eeb5d2"
     },
     {
       "id": "instance",

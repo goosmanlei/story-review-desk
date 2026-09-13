@@ -1735,72 +1735,72 @@
   {
     "id": "tasks",
     "title": "正式任务从澄清到完成",
-    "description": "只有已澄清需求进入账本；中断后核查再继续。",
+    "description": "讨论后批量发布；资源互斥派工，验收并关闭 Agent 后完成；固定七列表格审计。",
     "nodes": [
       {
         "id": "clarify",
-        "label": "当场澄清",
+        "label": "当场讨论",
         "domain": "collaboration",
         "col": 0,
         "row": 0,
         "lines": [
-          "明确目标、范围、验收",
-          "未成熟想法不落盘"
+          "目标、范围、可行性、验收",
+          "未成熟部分不落盘"
         ]
       },
       {
         "id": "ready",
-        "label": "正式发布",
+        "label": "批量正式发布",
         "domain": "project",
         "col": 1,
         "row": 0,
         "lines": [
-          "永久编号与追加账本",
-          "可并发发布"
+          "稳定标题、编号与依赖",
+          "一次事务保存已确认任务"
         ]
       },
       {
         "id": "run",
-        "label": "串行执行",
+        "label": "统一调度",
         "domain": "production",
         "col": 2,
         "row": 0,
         "lines": [
-          "依赖与优先级领取",
-          "版本、租约与进程核查"
+          "模型、资源、槽位核查",
+          "原生关闭未验证则主 Agent"
         ]
       },
       {
         "id": "audit",
-        "label": "审计与结果",
+        "label": "固定表格审计",
         "domain": "settings",
         "col": 0,
         "row": 1,
         "lines": [
-          "时间、关系、验收证据",
-          "长期保留，可重建视图"
+          "七列、正式标题、类别与依赖",
+          "北京时间、成果与关闭证据"
         ]
       },
       {
         "id": "done",
-        "label": "验收与清理",
+        "label": "验收、关闭与清理",
         "domain": "materials",
         "col": 1,
         "row": 1,
         "lines": [
-          "逐项证据与成果引用",
-          "保留任务与恢复信息"
+          "交回、主 Agent 验收",
+          "关闭执行并保留聊天历史"
         ]
       },
       {
         "id": "resume",
-        "label": "检查点与续办",
+        "label": "检查点与恢复",
         "domain": "story",
         "col": 2,
         "row": 1,
         "lines": [
-          "查原进程、版本及操作",
-          "结果未知先阻塞核查"
+          "原操作与 Agent 核查",
+          "原派工收敛后新 Agent 续办"
         ]
       }
     ],
@@ -1813,7 +1813,7 @@
       {
         "from": "ready",
         "to": "run",
-        "label": "启动后领取"
+        "label": "依赖与资源可执行"
       },
       {
         "from": "run",
@@ -1823,7 +1823,7 @@
       {
         "from": "resume",
         "to": "done",
-        "label": "达到验收标准"
+        "label": "逐项验收与关闭"
       },
       {
         "from": "done",

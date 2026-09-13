@@ -6,13 +6,16 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {once} from 'node:events';
 import {processLock,processIdentity} from './process-resources.mjs';
-import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask} from './task-ledger.mjs';
+import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities} from './task-ledger.mjs';
 import {installTaskSkill} from './task-skill.mjs';
+import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks,projectLinkBase} from './task-format.mjs';
+import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
 export const help=`tasks — 正式任务管理（不接收未澄清想法）
 
   tasks install                     安装/更新项目 Skill 与 npm 入口
   tasks init | rebuild              初始化空账本或从事件重建 Markdown 视图
+  tasks upgrade --file -             无活跃执行时升级至 v2；保留旧事件
   tasks list | show TASK_ID          读取权威任务记录
   tasks audit [--task ID] [--from ISO] [--to ISO] [--status STATE] [--type SYSTEM|CREATIVE]
   tasks audit --operation-id ID      核查管理操作是否已落账
@@ -20,16 +23,29 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks run                         在当前会话保持执行资格；不会自行调用模型
   tasks heartbeat --run RUN_ID       延长执行租约（10 分钟）
   tasks stop --run RUN_ID            请求停止领取和执行
-  tasks guard --run RUN_ID --task ID [--core] -- COMMAND
+  tasks guard --run RUN_ID --task ID [--assignment ID] [--core] -- COMMAND
                                     校验领取资格并登记执行进程；--core 串行共享核心操作
   tasks publish|next|resume|checkpoint|transition|amend|merge|split --file request.json
+  tasks schedule --file -            原子选择无冲突派工；支持跨正式任务
+  tasks assignment dispatch|start|checkpoint|result|accept|close|reconcile --file -
+  tasks native probe --run ID --slots N [--socket PATH]
+                                    在受管阶段验证同一原生服务；失败降级主 Agent
+  tasks native close --run ID --assignment ID
+                                    暂停 Goal、停止 turn、归档并核验卸载，保留历史
+  tasks native goal|verify-goal --run ID --assignment ID --file -
 
   --project PATH                    默认当前项目根；不能使用源码 worktree 代替账本根
   --file -                          从 stdin 读取 JSON，避免保存临时请求文件
+  --format json|markdown             list / show / status / audit；默认 JSON
+  --sort published|priority|updated|completed
+  --columns completed,progress,blocker,result  Markdown 附表可选列
 
 写入共同字段：operationId（重发原编号）、actor（如 USER / PROJECT_CODEX）。
 publish: {task:{clarified:true,type:"SYSTEM",title,originalRequest,goal,scope:[...],
-  deliverables:[...],acceptanceCriteria:[...],authorization,priority:2,dependencies:[],references:[]}}
+  deliverables:[...],acceptanceCriteria:[...],authorization,priority:2,dependencies:[],references:[],
+  discussion:{approved:true,summary,feasibility,approvedRequirements:[...]}}}
+publish 也接受 tasks:[{key:"a",...},{key:"b",dependencies:["@a"],...}]；
+一次讨论可正式发布多项任务，批内依赖使用 @key，全批原子保存。不接收未讨论部分。
 next: {runId}，自动领取；返回 CURRENT_TASK / RECOVERY_REQUIRED / NO_EXECUTABLE_TASK 时不创建事件。
 其他单任务写入：{taskId,expectedVersions:{"TASK_ID":当前版本},...}
 checkpoint: {runId,checkpoint:{summary,completedSteps:[],nextSteps:[],inputs:[],artifacts:[],
@@ -41,6 +57,15 @@ amend: {changes:{priority,dependencies},reason}，不得改写原意或范围。
 merge: {taskIds:[...],expectedVersions:{...},title,reason}，仅同类且未开始任务。
 split: {taskId,expectedVersions:{...},reason,children:[{title,goal,criterionIndexes:[0]},...]}
 拆解完整承接原验收项；范围、授权与依赖继承父任务。
+schedule: {runId,expectedVersions:{...},assignments:[{taskId,key,goal,deliverables:[...],
+  acceptanceCriteria:[...],resources:[{kind:"FILE|DIRECTORY|OBJECT|UNKNOWN",key:"core/tools/x.mjs",access:"WRITE|READ",version}],
+  execution:{workClass:"LOOKUP|RESEARCH|IMPLEMENTATION|HIGH_RISK",rationale,longRunning:false},dependsOn:[],attemptOf}]}
+assignment: {runId,taskId,assignmentId,expectedVersions:{...},expectedAssignmentVersion,...}
+dispatch: {}，spawn 前保存尝试；start: {workspaceEvidence,workspace（本机路径仅存 runtime）,nativeThreadId（SubAgent 必填）}
+checkpoint: {checkpoint,goalStatus}; result: {checkpoint,result:{summary,artifacts:[],acceptance:[{criterion:0,evidence}]}}
+accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason};
+reconcile: {checkpoint,reconciliation:{processes,workspace,versions,operations,agent}}。
+长派工原生 Goal 须先经隔离/自动跨轮/父端停止验证；否则 FOLLOWUP。未验证关闭则主 Agent 执行。
 
 状态：READY 待执行 / RUNNING 执行中 / BLOCKED 阻塞 / WAITING_REVIEW 待验收 /
 DONE 已完成 / CANCELLED 已取消 / MERGED 已合并。终态只读，变化另发任务。
@@ -70,21 +95,24 @@ async function keeper(project) {
   });
 }
 
-async function guarded(project,runId,taskId,command,core) {
+async function guarded(project,runId,taskId,command,core,assignmentId) {
   requireTask(command.length,'guard 缺少命令');
   const loc=await location(project);
-  const execute=()=>processLock(path.join(loc.runtime,'activity.lock'),async()=>{
+  requireTask(!assignmentId||/^[A-Za-z0-9._-]+$/.test(assignmentId),'派工编号无效');
+  const execute=()=>processLock(path.join(loc.runtime,assignmentId?`activity-${assignmentId}.lock`:'activity.lock'),async()=>{
     await requireRun(loc,runId);
-    const ledger=await readLedger(loc), task=ledger.tasks[taskId];
-    requireTask(task?.status==='RUNNING'&&task.runId===runId,'guard 只能执行当前会话已领取的任务');
-    const owner=processIdentity(); await activity(project,runId,owner);
+    const ledger=await readLedger(loc), bindings=await readBindings(loc);
+    const task=assignmentId?Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)):ledger.tasks[taskId];
+    requireTask(task?.status==='RUNNING'&&(bindings.tasks[task.id]||task.runId)===runId,'guard 只能执行当前会话已领取的任务');
+    requireTask(assignmentId||!task.assignments?.length,'已派工任务必须指定 --assignment');
+    const owner=processIdentity(); await activity(project,runId,owner,null,assignmentId,task.id);
     let child, timer, terminating, failure;
     const stop=signal=>{ if(child?.pid) {try{process.kill(-child.pid,signal);}catch(e){if(e.code!=='ESRCH')throw e;} if(!terminating){terminating=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},10000);terminating.unref();}} };
     const handlers=new Map(['SIGINT','SIGTERM','SIGHUP'].map(s=>[s,()=>stop(s)]));
     try {
-      child=spawn(command[0],command.slice(1),{cwd:loc.root,env:process.env,stdio:'inherit',detached:true});
+      child=spawn(command[0],command.slice(1),{cwd:bindings.assignments[assignmentId]?.workspace||loc.root,env:process.env,stdio:'inherit',detached:true});
       const done=once(child,'close');
-      if(child.pid) await activity(project,runId,owner,processIdentity(child.pid));
+      if(child.pid) await activity(project,runId,owner,processIdentity(child.pid),assignmentId,task.id);
       for(const [s,h] of handlers) process.on(s,h);
       let busy=false;
       timer=setInterval(async()=>{if(busy)return;busy=true;try{await heartbeat(project,runId);}catch(e){failure=e.message;stop('SIGTERM');}finally{busy=false;}},15000);
@@ -93,7 +121,7 @@ async function guarded(project,runId,taskId,command,core) {
     } finally {
       clearInterval(timer);clearTimeout(terminating);
       for(const [s,h] of handlers) process.off(s,h);
-      await clearActivity(project,runId);
+      await clearActivity(project,runId,assignmentId);
     }
   });
   if(!core) return execute();
@@ -103,9 +131,47 @@ async function guarded(project,runId,taskId,command,core) {
   return processLock(path.join(common,'review-tasks.lock'),execute);
 }
 
+async function inputFile(file) {
+  requireTask(file,'写入必须提供 --file request.json 或 --file -');
+  return JSON.parse(file==='-'?await new Promise((resolve,reject)=>{let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>resolve(s));process.stdin.on('error',reject);}):await readFile(file,'utf8'));
+}
+async function nativeAction(project,action,v) {
+  const loc=await location(project),run=await requireRun(loc,v.run,{converging:action==='close'});
+  if(action==='probe') {
+    requireTask(process.env.REVIEW_TASK_DIR,'原生探测须通过受管 process 阶段执行');
+    const slots=Number(v.slots||0);requireTask(Number.isInteger(slots)&&slots>=0&&slots<=32,'slots 须为当前宿主实际可用的 Agent 槽位');
+    const capabilities=await probeNative({availableSlots:slots,probeRoot:process.env.REVIEW_TASK_DIR,socket:v.socket});
+    return configureCapabilities(project,v.run,{...capabilities,...(v.socket?{socket:v.socket}:{})});
+  }
+  const ledger=await readLedger(loc),task=Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===v.assignment));
+  const a=task?.assignments.find(a=>a.id===v.assignment),bindings=await readBindings(loc),binding=bindings.assignments[v.assignment];
+  requireTask(a?.execution.mode==='SUBAGENT'&&binding?.runId===v.run&&binding.nativeThreadId&&!binding.retiredAt,'只操作当前未关闭派工绑定的原生子 Agent');
+  const client=connectNative({socket:binding.socket||run.capabilities.socket});
+  try {
+    await client.initialize();
+    if(action==='close') {
+      const receipt=await closeNativeThread(client,binding.nativeThreadId,binding.parentThreadId||run.capabilities.parentThreadId);
+      await updateBinding(project,v.run,v.assignment,b=>{b.closureReceipt=receipt;});
+      return {assignmentId:a.id,status:'NATIVE_CLOSED',history:'PRESERVED'};
+    }
+    const body=await inputFile(v.file);
+    if(action==='goal') {
+      requireTask(run.capabilities.goalVerified&&a.execution.goalMode==='NATIVE','尚未验证原生子 Goal；使用普通派工');
+      requireTask(['active','paused'].includes(body.status),'Goal 操作只允许 active / paused');
+      if(body.objective)requireTask(body.objective===a.goal,'Goal 目标须匹配派工，不得扩大范围');
+      return client.call('thread/goal/set',{threadId:binding.nativeThreadId,status:body.status,...(body.objective?{objective:body.objective}:{})});
+    }
+    if(action==='verify-goal') {
+      const proof=await verifyGoalProbe(client,{...body,childThreadId:binding.nativeThreadId,parentThreadId:run.capabilities.parentThreadId});
+      return configureCapabilities(project,v.run,{...run.capabilities,...proof});
+    }
+    throw Error('未知原生操作');
+  } finally {client.close();}
+}
+
 export async function main(argv=process.argv.slice(2)) {
   const sep=argv.indexOf('--'), command=sep<0?[]:argv.slice(sep+1);
-  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},core:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
+  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},core:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
   const project=path.resolve(v.project||process.cwd()), action=p[0];
   if(v.help||!action||action==='help') return console.log(help);
   if(action==='install') return installTaskSkill(project,path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'));
@@ -113,15 +179,31 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='run') return keeper(project);
   if(action==='heartbeat') return heartbeat(project,v.run);
   if(action==='stop') return stopRun(project,v.run);
-  if(action==='guard') return guarded(project,v.run,v.task,command,v.core);
+  if(action==='guard') return guarded(project,v.run,v.task,command,v.core,v.assignment);
+  if(action==='native') return nativeAction(project,p[1],v);
+  requireTask(['json','markdown'].includes(v.format),'format 须为 json 或 markdown');
   const ledger=await readLedger(project);
-  if(action==='list') return audit(ledger,{status:v.status,type:v.type}).tasks;
-  if(action==='show') {requireTask(ledger.tasks[p[1]],'任务不存在');return ledger.tasks[p[1]];}
-  if(action==='audit') return audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
-  if(action==='status') return {...await runtimeState(project),interrupted: Object.values(ledger.tasks).filter(t=>t.status==='RUNNING')};
-  requireTask(['publish','next','resume','checkpoint','transition','amend','merge','split'].includes(action),'未知命令；运行 tasks --help');
-  requireTask(v.file,'写入必须提供 --file request.json 或 --file -');
-  const input=v.file==='-'?await new Promise((resolve,reject)=>{let s='';process.stdin.setEncoding('utf8');process.stdin.on('data',x=>s+=x);process.stdin.on('end',()=>resolve(s));process.stdin.on('error',reject);}):await readFile(v.file,'utf8');
-  return mutate(project,action,JSON.parse(input));
+  const data=audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
+  data.tasks=sortTasks(data.tasks,v.sort);
+  data.scope=[v.task?'任务 '+v.task:null,v.status||null,v.type||null].filter(Boolean).join(' / ')||'当前项目';
+  const options={linkBase:projectLinkBase(project),sort:v.sort,columns:v.columns?.split(',')||[]};
+  if(action==='list') return v.format==='markdown'?renderTasks(data,options):data.tasks;
+  if(action==='show') {requireTask(ledger.tasks[p[1]],'任务不存在');return v.format==='markdown'?renderDetail(ledger.tasks[p[1]],options):ledger.tasks[p[1]];}
+  if(action==='audit')return v.format==='markdown'?renderAudit(data,options):data;
+  if(action==='status') {
+    const runtime=await runtimeState(project),interrupted=Object.values(ledger.tasks).filter(t=>t.status==='RUNNING'&&(!runtime.runActive||(runtime.bindings.tasks[t.id]||t.runId)!==runtime.run?.id));
+    return v.format==='markdown'?renderStatus({...data,runtime},options):{...runtime,interrupted};
+  }
+  const mutation=action==='assignment'?`assignment:${p[1]}`:action;
+  requireTask(['publish','upgrade','next','resume','checkpoint','transition','amend','merge','split','schedule','assignment:dispatch','assignment:start','assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(mutation),'未知命令；运行 tasks --help');
+  const request=await inputFile(v.file);
+  if(mutation==='assignment:start'||mutation==='assignment:reconcile'&&request.nativeThreadId) {
+    const a=ledger.tasks[request.taskId]?.assignments?.find(a=>a.id===request.assignmentId);
+    if(a?.execution.mode==='SUBAGENT') {
+      const loc=await location(project),run=await requireRun(loc,request.runId),binding=(await readBindings(loc)).assignments[request.assignmentId],client=connectNative({socket:binding?.socket||run.capabilities.socket});
+      try{await client.initialize();await assertNativeChild(client,request.nativeThreadId,binding?.parentThreadId||run.capabilities.parentThreadId);}finally{client.close();}
+    }
+  }
+  return mutate(project,mutation,request);
 }
-if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url) main().then(r=>{if(r!==undefined)console.log(JSON.stringify(r,null,2));process.exitCode=r?.exitCode||0;}).catch(e=>{console.error(JSON.stringify({error:e.message}));process.exitCode=1;});
+if(process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url) main().then(r=>{if(r!==undefined)console.log(typeof r==='string'?r:JSON.stringify(r,null,2));process.exitCode=r?.exitCode||0;}).catch(e=>{console.error(JSON.stringify({error:e.message}));process.exitCode=1;});

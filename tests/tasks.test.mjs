@@ -10,7 +10,7 @@ import {mutate,readLedger,rebuild,audit,startRun,runtimeState} from '../tools/ta
 import {installTaskSkill} from '../tools/task-skill.mjs';
 
 const cli=fileURLToPath(new URL('../tools/tasks.mjs',import.meta.url));
-const spec=(extra={})=>({clarified:true,type:'SYSTEM',title:'修复测试筛选',originalRequest:'发布任务：使筛选符合选择',goal:'筛选显示正确结果',scope:['通用筛选逻辑'],deliverables:['修复及验证结果'],acceptanceCriteria:['筛选结果正确','清空后恢复全部结果'],authorization:'仅测试夹具，不操作真实业务或模型',...extra});
+const spec=(extra={})=>({clarified:true,discussion:{approved:true,summary:'已讨论并同意修复筛选',feasibility:'已有可控测试输入，可验证',approvedRequirements:['修复并验证筛选']},type:'SYSTEM',title:'修复测试筛选',originalRequest:'发布任务：使筛选符合选择',goal:'筛选显示正确结果',scope:['通用筛选逻辑'],deliverables:['修复及验证结果'],acceptanceCriteria:['筛选结果正确','清空后恢复全部结果'],authorization:'仅测试夹具，不操作真实业务或模型',...extra});
 const req=extra=>({operationId:randomUUID(),actor:'FIXTURE',...extra});
 const cp=extra=>({summary:'已保存进展',completedSteps:['完成定位'],nextSteps:['验证'],inputs:['fixture@1'],artifacts:[],operations:[],...extra});
 async function fixture(t) {

@@ -2,7 +2,7 @@
 
 当前实现为 React / Next.js Node standalone、模块化 Node 服务、一个后台工作器与 PostgreSQL 对象存储。没有内置故事、媒体、数据库或创作授权。
 
-- 正式任务：项目级 review-tasks Skill 与本地 tasks CLI；追加式事件账本、串行领取、阶段检查点、跨会话核查续办、合并拆解和审计。只接收澄清完成的任务，无想法暂存或无人值守调度。部署安装受管 Skill，任务数据仅留在所属项目。
+- 正式任务：review-tasks Skill 与 tasks CLI v2，默认讨论后单项或批量原子发布；统一调度跨任务派工、资源占用、模型选择、阶段检查点、结果验收与关闭，支持跨会话核查。原生关闭未验证时主 Agent 执行；子 Goal 须实测隔离、自动跨轮与父端停止后启用。审计固定七列，标题、类别、依赖与北京时间格式稳定；JSON 接口保留。旧事件原字节保留，无活跃执行时升级账本。
 
 - 构建版本：部署启动时固定完整 Git 提交；受管源码 .review-managed.json、core-lock.json 与运行包 release.json 分别绑定同一提交。
 - 运行绑定：显式项目 instance/instance.json；本机路径、凭据引用、服务回执位于 instance/runtime。
