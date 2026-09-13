@@ -186,6 +186,10 @@ test('all audit surfaces share seven fixed columns, exact title, category, depen
   const empty=renderTasks({tasks:[],asOf:'2026-09-13T17:00:00Z'});assert(empty.includes('2026-09-14 01:00:00'));assert(empty.includes('共 0 项'));assert(empty.includes(header));
   assert(Array.isArray(await main(['list','--project',root])));
   assert.equal((await main(['list','--project',root,'--type','CREATIVE'])).length,1);
+  await writeFile(path.join(root,'instance/runtime/task-execution/run.json'),JSON.stringify({id:'foreign',root,host:'unverifiable-host',projectId:ledger.projectId}));
+  await writeFile(path.join(root,'instance/runtime/task-execution/activity.json'),JSON.stringify({host:'unverifiable-host',root}));
+  const runtime=await runtimeState(root),unknown=renderStatus({...data,runtime});
+  assert.equal(runtime.runActive,null);assert(unknown.includes('UNKNOWN（无法核验原执行者）'));assert(unknown.includes('UNKNOWN（存在无法核验的占用）'));
 });
 
 function nativeFixture({stuck=false,continueGoal=false}={}) {

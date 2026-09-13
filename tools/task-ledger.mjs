@@ -151,7 +151,7 @@ export async function requireRun(loc,id,{converging=false}={}) {
 export async function runtimeState(project) {
   const loc=await location(project);
   const run=await maybe(path.join(loc.runtime,'run.json'));
-  return {run,runActive:!!(run&&!run.closedAt&&!run.stopRequested&&run.host===os.hostname()&&processAlive(run.owner)&&Date.parse(run.expiresAt)>Date.now()),activity:await maybe(path.join(loc.runtime,'activity.json')),activities:(await activities(loc)).map(a=>({...a,live:a.host===os.hostname()&&a.root===loc.root?!!(processAlive(a.owner)||processAlive(a.child)):null})),bindings:await readBindings(loc)};
+  return {run,runActive:run&&(run.host!==os.hostname()||run.root!==loc.root||run.projectId!==loc.projectId)?null:!!(run&&!run.closedAt&&!run.stopRequested&&processAlive(run.owner)&&Date.parse(run.expiresAt)>Date.now()),activity:await maybe(path.join(loc.runtime,'activity.json')),activities:(await activities(loc)).map(a=>({...a,live:a.host===os.hostname()&&a.root===loc.root?!!(processAlive(a.owner)||processAlive(a.child)):null})),bindings:await readBindings(loc)};
 }
 export async function readBindings(loc) {return await maybe(path.join(loc.runtime,'bindings.json')) || {tasks:{},assignments:{}};}
 export async function updateBinding(project,runId,assignmentId,callback) {
