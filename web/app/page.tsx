@@ -40,7 +40,6 @@ import {exactMaterialPanelMatch} from './material-catalog-panel';
 import { EpisodeLogicReview, EpisodeLogicSummary, firstLogicItem, normalizeLogicSelection } from './episode-logic-review';
 import { StoryStructureWorkbench, STORY_OVERVIEW_SECTIONS } from './story-structure-workbench';
 import { EmptyInstanceDesk } from './empty-instance';
-import { TrialScopeEntry } from './trial-entry';
 import { StoryWorkspaceHeading } from './story-workspace-heading';
 import type { EpisodeReviewDossier, StoryOverview, StoryOverviewSectionId } from './story-review-types';
 import {

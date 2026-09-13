@@ -87,7 +87,7 @@
         "server/presentation/material-page.mjs",
         "server/presentation/production-window.mjs"
       ],
-      "sourceDigest": "020c20fbedf8d258c30c48a4b7a9374d6e25f7e88fd22d0f3766577beda1254b"
+      "sourceDigest": "d1c123c33dbb3316ecfe335a7dc14146108b65f2f9e4b80bb8b95b753b4f6ca6"
     },
     {
       "id": "interfaces",
@@ -115,7 +115,7 @@
         "server/collaboration/change-preview.mjs",
         "server/presentation/workspaces.mjs"
       ],
-      "sourceDigest": "5dccfb891304ede69ad1798265f1ad9ab1cf7aa3ce0c1e5bfab4be6ab73ca22c"
+      "sourceDigest": "14e6cdcd5522f7c230b3393cffdde1973ddcd0f858fc3cc3551dc2c1b1a910ea"
     },
     {
       "id": "development",

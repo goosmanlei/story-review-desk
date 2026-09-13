@@ -204,10 +204,12 @@ async function reviewAction(tx,workspace,body) {
   let spec=row.revision.content.reviewSpec,standard,reviewBasis;
   const extra=[];
   if(row.kind==='ASSET') {
+    const outputMedia=(await tx.query("SELECT sha256 FROM asset_media WHERE revision_id=$1 AND role='OUTPUT'",[revisionId])).rows;
+    check(body.versionId===row.id&&outputMedia.length===1&&body.versionSha256===outputMedia[0].sha256,'ASSET_MEDIA_CONFLICT','所审素材版本与原件 SHA 不一致',409);
     if(body.subjectType==='WORK_PRODUCT'){
       const output=(await unit.rows(['EXPECTED_OUTPUT'])).find(o=>o.content.workItemId===body.workItemId&&o.content.expectationState==='PLANNED'),family=(await tx.query('SELECT family_id FROM asset_versions WHERE object_id=$1',[row.id])).rows[0];
       check(output&&idsFor(output,'FAMILY').includes(family?.family_id),'OUTPUT_BINDING','制作成果与本工作项的精确输出不一致',409);spec=output.content.reviewSpec;reviewBasis={id:output.id,expectedVersion:output.version,revisionId:output.revisionId,reviewSpecHash:body.reviewSpecHash};extra.push({type:'assert',id:output.id,expectedVersion:output.version});
-    }else if(workspace!=='candidates/reviews'){
+    }else{
     const requirement=await unit.detail(body.requirementId),family=(await tx.query('SELECT family_id FROM asset_versions WHERE object_id=$1',[row.id])).rows[0];
     check(requirement.kind==='REQUIREMENT'&&requirement.version===body.requirementVersion&&requirement.revision.id===body.requirementRevisionId&&requirement.links.some(l=>l.role==='FAMILY'&&l.id===family?.family_id),'VERSION_CONFLICT','素材需求或归属已改变',409);
     spec=requirement.revision.content.reviewSpec;
@@ -303,12 +305,6 @@ export async function planWorkspaceChange(tx, command, context) {
   if(command.workspace==='sources')return planSourceRegistration(tx,body,context.operationId);
   if(command.workspace==='authoring')return planAuthoringChange(tx,body,context.operationId);
   if(command.workspace==='story-editing')return planStoryEdit(tx,body);
-  if(command.workspace==='candidates/reviews'){
-    const row=await new PresentationRead(tx).detail(body.objectId);
-    const media=(await tx.query("SELECT sha256 FROM asset_media WHERE revision_id=$1 AND role='OUTPUT'",[row.revision.id])).rows;
-    check(row.kind==='ASSET'&&row.revision.content.sourceRef?.trialAssetId===row.id&&row.revision.content.sourceRef.scopeId===body.scopeId&&row.revision.content.sourceRef.versionId===body.versionId&&idFor(row,'FAMILY')===body.mediaId&&media.length===1&&media[0].sha256===body.sha256,'CANDIDATE_IDENTITY','候选范围、版本或原件已改变',409);
-    return reviewAction(tx,'candidates/reviews',{...body,subjectType:'ASSET',subjectId:body.mediaId,versionId:row.id,objectRevisionId:body.objectRevisionId,expectedVersion:body.expectedVersion,reviewSpecHash:body.reviewSpecHash,action:({RELEASED:'APPROVE_AND_RELEASE',REVISION_REQUIRED:'REQUEST_REVISION',DO_NOT_USE:'DO_NOT_USE'})[body.decision],note:body.comment,criterionFindings:(body.criteria||[]).map(c=>({criterionId:c.id,verdict:c.result,note:c.comment||''})),...(body.rightsAttestation==='PROJECT_INTERNAL_ONLY'?{rightsUnknownConfirmation:{confirmed:true,scope:'PROJECT_INTERNAL_ONLY',basis:body.comment||'用户在本次候选审阅中明确确认仅用于本项目内部制作'}}:{})});
-  }
   if(['reviews','episode-plan-reviews'].includes(command.workspace))return reviewAction(tx,command.workspace,body);
   if(command.workspace==='spatial-shot-view')return planSpatialViewChange(tx,body);
   if(command.workspace==='shot-production/recipes')return planShotRecipeChange(tx,body);

@@ -5562,8 +5562,6 @@ body { overflow: hidden; }
   .current-work-card dl div { grid-template-columns:1fr; gap:4px; }
 }
 
-.trial-entry { display: table; margin-top: 10px; color: var(--red-dark); font-weight: 700; }
-.trial-entry:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* Empty stories share the established workspace surfaces and palette. */
 .empty-desk .sidebar-snapshot { margin-top: auto; }

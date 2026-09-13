@@ -7,7 +7,6 @@ import {executionState} from '../production/execution.mjs';
 import {presentRecipe} from './recipe.mjs';
 import {authoringWorkspace} from '../story/authoring.mjs';
 import {shotRecipeWorkspace} from '../production/recipes.mjs';
-import {candidateScopeIndex,candidateSnapshot} from './candidates.mjs';
 import {storyEditor,episodeOrganization} from '../story/editing.mjs';
 import {archivedPlanIndex,archivedReviews} from './archived-story.mjs';
 import {materialProductionWorkspace} from '../materials/production-settings.mjs';
@@ -32,7 +31,7 @@ export async function configurationWorkspace(unit) {
   const rows = await unit.rows(['STORY','EPISODE','SCENE','REQUIREMENT','SHOT_DESIGN']);
   const bindings = rows.filter(r=>r.content.reviewSpec).map(r=>({key:r.id,title:r.title,kind:r.kind,profileId:r.content.reviewSpec.id||'unknown',profileLabel:r.content.reviewSpec.label,reviewSpecHash:hash(r.content.reviewSpec),configurationHash:hash(configuration)}));
   const draft=await workspaceDraft(unit.tx,'configuration');
-  return {snapshotId:await unit.namespace(),releaseId:hash(unit.configurationVersions),revisionId:hash(unit.configurationVersions),sha256:hash(configuration),configuration,defaults:configurationDefaults,bindings,boundStandards:rows.map(r=>r.content.reviewSpec).filter(Boolean),history:[],initialized:true,readOnly:false,draft:draft?{...draft.content,revisionId:draft.revisionId,published:draft.content.status==='PUBLISHED'}:null,trialAvailable:(await candidateScopeIndex(unit)).scopes.length>0};
+  return {snapshotId:await unit.namespace(),releaseId:hash(unit.configurationVersions),revisionId:hash(unit.configurationVersions),sha256:hash(configuration),configuration,defaults:configurationDefaults,bindings,boundStandards:rows.map(r=>r.content.reviewSpec).filter(Boolean),history:[],initialized:true,readOnly:false,draft:draft?{...draft.content,revisionId:draft.revisionId,published:draft.content.status==='PUBLISHED'}:null,trialAvailable:false};
 }
 export async function operationalProjection(unit,familyId) {
   const {assetFamilies,assetVersions}=await assets(unit,familyId?[familyId]:undefined);
@@ -120,8 +119,6 @@ export async function workspaceRead(tx, path, params) {
     result={snapshotId:await unit.namespace(),events,versions:value.assetVersions,assetVersions:value.assetVersions,hasMore:false,nextCursor:null,total:value.assetVersions.length};
   }
   else if(path[0]==='recipes'&&path.length===2){const row=await unit.detail(path[1],params.get('revisionId')||undefined);check(row.kind==='CALL','CALL_REQUIRED','所选对象不是调用定义',404);result={recipe:await presentRecipe(row,unit)};}
-  else if(name==='candidates/scopes')result=await candidateScopeIndex(unit);
-  else if(name==='candidates/snapshot')result=await candidateSnapshot(unit,params.get('scopeId'));
   else check(false,'WORKSPACE_NOT_FOUND','工作区接口不存在：'+name,404);
   return unit.finish(result);
 }

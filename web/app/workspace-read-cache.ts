@@ -96,14 +96,14 @@ async function consistent<T extends Entry<unknown>[]>(read:()=>Promise<T>,signal
   }
 }
 export async function readProductionWorkspace(resource:PagedProductionResource,filters:PagedProductionFilters,
-  scope:string,prerequisites:string[],signal?:AbortSignal,{trialCatalog=false,cursor=null as string|null}={}) {
+  scope:string,prerequisites:string[],signal?:AbortSignal,{cursor=null as string|null}={}) {
   // Every required object crosses the same version barrier before display.
   const entries=await consistent(async()=>{
-    const [base,trials]=await Promise.all([
+    const [base,catalogue]=await Promise.all([
       Promise.all([readCompleteProductionRecord(resource,filters,scope,signal,cursor),...prerequisites.map(url=>readWorkspaceRecord<{releaseId?:string;snapshotId?:string}>(url,scope,signal))]),
       resource==='materials'?Promise.all([readWorkspaceRecord<{page:PagedProductionPayload['page'];total:number}>('/api/v1/workspaces/views/material-catalog',scope,signal)]):Promise.resolve([] as Entry<unknown>[]),
     ]);
-    return [...base,...trials];
+    return [...base,...catalogue];
   },signal);
   const page=entries[0] as Entry<PagedProductionPayload>;
   let payload=page.value;
@@ -114,7 +114,7 @@ export async function readProductionWorkspace(resource:PagedProductionResource,f
     payload={...page.value,page:combined as PagedProductionPayload['page'],count:catalog.total,total:catalog.total,hasMore:false,nextCursor:null};
   }
   const contexts=entries.slice(1,prerequisites.length+1) as Entry<{releaseId?:string;snapshotId?:string}>[];
-  return {payload,contexts:contexts.map(entry=>entry.value),materialCatalog:resource==='materials'?{scope,values:contexts.map(entry=>entry.value),trials:[]}:undefined};
+  return {payload,contexts:contexts.map(entry=>entry.value),materialCatalog:resource==='materials'?{scope,values:contexts.map(entry=>entry.value)}:undefined};
 }
 export async function readWorkspaceBatch<T>(urls:string[],scope:string,signal?:AbortSignal):Promise<T[]> {
   return (await consistent(()=>Promise.all(urls.map(url=>readWorkspaceRecord<T>(url,scope,signal))),signal)).map(entry=>entry.value);

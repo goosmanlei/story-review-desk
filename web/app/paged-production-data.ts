@@ -53,7 +53,7 @@ export type PagedProductionPayload = {
   };
 };
 
-export type MaterialCatalogRead = {scope:string;values:unknown[];trials:unknown[]};
+export type MaterialCatalogRead = {scope:string;values:unknown[]};
 export type PagedProductionWindow = {
   key: string;
   resource: PagedProductionResource;

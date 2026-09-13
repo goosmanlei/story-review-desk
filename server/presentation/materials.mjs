@@ -1,4 +1,3 @@
-import {candidateDirectory} from './candidates.mjs';
 import {spatialCatalog} from '../production/spatial-views.mjs';
 import { present, idsFor, idFor, stateLabel } from './read-unit.mjs';
 import { spatialBaseline } from '../workspaces.mjs';
@@ -45,6 +44,7 @@ export async function materialRows(unit, { requirementId, ids, summary=false } =
     currentShotIds: [], historicalShotIds: [], shotIds: [], episodeIds: [], episodeUids: [], structureCardRefs: [], consumerWorkItemRefs: [], coverageReasons: [], coveredByFamilyRefs: [], coveredByVersionRefs: [], coverageSatisfied: false, bindingStale: false,
     ...present(row), ...(row.content.configurationBinding?{configurationBinding:Object.fromEntries(Object.entries(row.content.configurationBinding).filter(([key])=>key!=='workflow'))}:{}), sceneIds: [...new Set([...idsFor(row, 'SCENE'),...occurrences.scenes.filter(s=>s.references.some(r=>r.requirementId===row.id)).map(s=>s.sceneId)])], assetFamilyRefs: idsFor(row, 'FAMILY'), entityRef: idFor(row, 'ENTITY'), representationRef: idFor(row, 'REPRESENTATION'),
     requirementHash: row.content.requirementHash || row.sha256,
+    ...(row.content.reviewSpec?{reviewSpec:{...row.content.reviewSpec,hash:row.content.reviewSpec.hash||hash(row.content.reviewSpec)}}:{}),
     episodeUids: [...new Set([...(row.content.episodeUids || []), ...occurrences.scenes.filter(s => s.references.some(r => r.requirementId === row.id)).map(s => s.episodeUid).filter(Boolean)])],
     materialUsageBindings:bindingFor(row),coverageSatisfied:direct.some(d=>d.requirement_id===row.id)||bindingFor(row).some(b=>b.eligible),coveredByFamilyRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.family_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.familyId)])],coveredByVersionRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.version_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.versionId)])],
   }));
@@ -143,5 +143,5 @@ export async function materialDirectory(unit, compact=false) {
     const representation = workspace.graph.representations.find(rep => rep.id === r.representationRef || rep.requirementIds.includes(r.id));
     return { requirementId: r.id, entityId: r.entityRef || representation?.entityId || 'UNASSIGNED', stateId: representation?.stateId || 'BASE', representationId: representation?.id, reviewFocus: { points: r.acceptanceCriteria.map(label => ({ label })) } };
   });
-  return { snapshotId: workspace.snapshotId, releaseId: workspace.releaseId, revisionId: workspace.revisionId, ...(compact?{}:{graph: workspace.graph}), bindings, trials: await candidateDirectory(unit,workspace.graph), staleIds: [] };
+  return { snapshotId: workspace.snapshotId, releaseId: workspace.releaseId, revisionId: workspace.revisionId, ...(compact?{}:{graph: workspace.graph}), bindings, staleIds: [] };
 }
