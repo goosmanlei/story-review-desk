@@ -20,7 +20,9 @@ test('reference snapshots retain one predecessor and restore without a network o
  const mediaFile=path.join(stage,'bytes');await writeFile(mediaFile,bytes);
  async function packageFor(label){
   const header={type:'manifest',format:'review-project',version:1,project:{title:label}};
-  const rows=[{table:'objects',row:{id:'scene',module:'story',kind:'SCENE'}},{table:'revisions',row:{id:'r1',object_id:'scene',content:{text:label},sha256:hash({text:label})}},{table:'source_documents',row:{revision_id:'r1',original_sha256:sourceSha,content_bytes:sourceBytes.toString('base64')}},{table:'media',row:{id:'image',version_id:'v1',sha256:sha,byte_size:bytes.length,availability:'PRESENT',mime_type:'image/png'}}];
+  // Repeated saves stream more than 1024 bytes over existing short pointers.
+  const content={text:label.repeat(4096)};
+  const rows=[{table:'objects',row:{id:'scene',module:'story',kind:'SCENE'}},{table:'revisions',row:{id:'r1',object_id:'scene',content,sha256:hash(content)}},{table:'source_documents',row:{revision_id:'r1',original_sha256:sourceSha,content_bytes:sourceBytes.toString('base64')}},{table:'media',row:{id:'image',version_id:'v1',sha256:sha,byte_size:bytes.length,availability:'PRESENT',mime_type:'image/png'}}];
   const dir=path.join(stage,label);await writePackageRecords(Readable.from([JSON.stringify(header)+'\n',...rows.map(r=>JSON.stringify({type:'row',...r})+'\n')]),dir,{copyMedia:async(_,to)=>copyFile(mediaFile,to)});return dir;
  }
  const current=path.join(root,'project-data/current'),options={projectRoot:root,phase:{read:async()=>({phaseId:'verify',resources:[{path:stage}]}),update:async fn=>fn({resources:[]})}};
@@ -36,6 +38,7 @@ test('reference snapshots retain one predecessor and restore without a network o
  const second=await packageFor('second');await assert.rejects(saveSnapshot(second,current,{...options,expectedPreviousSha256:'0'.repeat(64)}),e=>e.code==='VERSION_CONFLICT');
  assert.equal((await verifySnapshot(current,options)).snapshot.package.transfer.sha256,first.sha256);
  await saveSnapshot(second,current,options);
+ assert(parsePointer(await readFile(path.join(current,'data/story/revisions-0000.ndjson'))).bytes>1024);
  assert.equal((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);
  await saveSnapshot(await packageFor('third'),current,options);
  assert.notEqual((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);

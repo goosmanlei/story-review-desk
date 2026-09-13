@@ -57,9 +57,11 @@ function entries(manifest) {
   for(const e of result){relativeFile(e.path);check(/^[a-f0-9]{64}$/.test(e.sha256) && (e.bytes===null||Number.isSafeInteger(e.bytes)&&e.bytes>=0),'SNAPSHOT_MANIFEST','快照内容标识无效');}
   return result;
 }
-async function ingest(root, filename, relative) {
+async function ingest(root, filename) {
   await regular(filename);
-  const child = spawn('git',['-C',root,'lfs','clean','--',relative],{stdio:['pipe','pipe','pipe']});
+  // LFS uses this file's size as an input hint. A destination containing an old
+  // short pointer can truncate a larger stdin stream to the 1024-byte probe.
+  const child = spawn('git',['-C',root,'lfs','clean','--',path.relative(root,filename)],{stdio:['pipe','pipe','pipe']});
   let output='',error='';
   child.stdout.on('data',b=>{if(output.length<1000)output+=b;});
   child.stderr.on('data',b=>{if(error.length<1000)error+=b;});
@@ -131,7 +133,7 @@ export async function saveSnapshot(source,destination,{projectRoot,phase,expecte
     const staging=path.join(taskRoot,'snapshot-'+randomUUID());await mkdir(staging);
     for(const entry of entries(manifest)){
       await safeParents(source,entry.path);
-      const ref=await ingest(projectRoot,path.join(source,entry.path),path.relative(projectRoot,path.join(destination,entry.path)));
+      const ref=await ingest(projectRoot,path.join(source,entry.path));
       check(ref.sha256===entry.sha256 && (entry.bytes===null||ref.bytes===entry.bytes),'SNAPSHOT_OBJECT','导出内容与 LFS 校验不一致');
       await mkdir(path.dirname(path.join(staging,entry.path)),{recursive:true});await writeFile(path.join(staging,entry.path),lfsPointer(ref.sha256,ref.bytes),{flag:'wx'});
     }
