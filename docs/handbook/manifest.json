@@ -122,9 +122,11 @@
         "package.json",
         "tests/object-store.test.mjs",
         "tools/process.mjs",
-        "tools/handbook.mjs"
+        "tools/handbook.mjs",
+        "web/next.config.mjs",
+        "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "a777db534d7703127912977fac7486453d1829199140e105de2ddfc5dc9635e4"
+      "sourceDigest": "a9895433d06c32378c4961a26b6c6595cf0c23ea977462a84cb3771e235b9e62"
     },
     {
       "id": "operations",

@@ -20,7 +20,7 @@
 | 浏览器 | 原版布局、编辑、导航、阅读状态与完整上下文 | original-*.ui.mjs、workspace-navigation.ui.mjs |
 | 性能 | 冷首屏、模块切换、保存、持续使用 | original-cold-process.ui.mjs、ui-performance.mjs |
 | 发布与恢复 | 固定 SHA、原操作续作、隔离数据库、实际服务 | deployment.test.mjs、systemd.test.mjs |
-| 文档 | 链接、覆盖、图源、只读映射、阅读稳定性 | handbook.test.mjs、handbook.ui.mjs |
+| 文档 | 链接、覆盖、图源、只读映射、阅读稳定性、独立运行 | handbook.test.mjs、handbook.ui.mjs、handbook-standalone.integration.mjs |
 
 具体命令以当前 package.json 和测试入口为准。测试应覆盖可观察行为和真实风险；不为每个简单文案改动重复跑全部长时间验收。
 
@@ -46,3 +46,5 @@ npm run cleanup:complete -- --task my-change
 - `docs:build`：编译分章内容、目录与搜索索引，检查总产物预算，输出到受管构建目录。
 
 构建和统一部署均执行手册检查。普通创作修改由实例册下次读取自动体现；只有概念、规则、流程和能力发生变化时才维护通用正文。旧文档入口保留链接，本目录是系统说明的正文维护来源。
+
+独立运行测试直接调用 Next 构建，不提前执行文档命令，不额外复制手册目录；移开构建源目录并断开数据库后，仍须能读取全部章节和图表。这覆盖已安装部署器向新版本升级的构建入口。
