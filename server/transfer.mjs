@@ -7,6 +7,7 @@ import { check, hash, canonical } from "./shared/contracts.mjs";
 import { transaction } from "./db.mjs";
 import { validateConfiguration } from "./project/service.mjs";
 import { moduleFor } from "./modules.mjs";
+import {validateReferenceContent,validateReferenceTargets} from './materials/references.mjs';
 
 import { TABLES, fileSha, ORDER_KEYS } from "./transport-contract.mjs";
 export { TABLES, fileSha, ORDER_KEYS } from "./transport-contract.mjs";
@@ -180,6 +181,10 @@ export async function importRecords(
         );
       }
       await tx.query("SET CONSTRAINTS ALL IMMEDIATE");
+      // JSON references need the same checks as commands after every target has
+      // been imported. A failed reference rolls back the entire import.
+      const references=(await tx.query(`SELECT o.kind,r.content FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) WHERE NOT o.historical`)).rows;
+      for(const row of references){validateReferenceContent(row.kind,row.content);await validateReferenceTargets(tx,row.kind,row.content);}
       await tx.query("UPDATE project SET title=$1", [manifest.title]);
       const result = {
         operationId,

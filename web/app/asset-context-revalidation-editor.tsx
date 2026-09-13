@@ -1,4 +1,5 @@
 'use client';
+import {MaterialJudgmentRecord} from './material-judgment-record';
 import {useEffect,useRef,useState} from 'react';
 import type {AssetContextTarget,AssetContextContent,AssetContextWorkspace} from '../presentation/asset-context-revalidation-service.mjs';
 import {validContextWorkspace,validContextReceipt,validContextLocalDraft,validContextPending,reconcileContextPending,type ContextEditableDraft,type ContextPending,type ContextLocalDraft} from './asset-context-revalidation-client.mjs';
@@ -61,7 +62,7 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
     {imageUrl&&<figure><a href={runtimePath(imageUrl)} target="_blank" rel="noreferrer">{/* eslint-disable-next-line @next/next/no-img-element */}
      <img src={runtimePath(imageUrl)} alt="本次关系复核的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/></a><figcaption>点击查看原图</figcaption></figure>}
     <details><summary>当前关系与原采用依据</summary><pre>{JSON.stringify({versionId:state.versionId,sha256:state.sha256,domainContext:state.domainContext,legacyAdoptionProof:state.legacyAdoptionProof},null,2)}</pre></details>
-    {state.head&&<p>已有关系复核记录。是否可用以重读后的素材状态为准。</p>}
+    {state.head&&<><p>已有关系复核记录。是否可用以重读后的素材状态为准。</p><MaterialJudgmentRecord head={state.head}/></>}
     {state.blockers.map(b=><p key={b}>{b}</p>)}
     {staleLocalDrafts.length>0&&<details><summary>依据变化前的本地观察稿（{staleLocalDrafts.length}）</summary>{staleLocalDrafts.map((old,index)=><div key={index}><p>原依据：{old.releaseId} · {old.basisHash}</p><pre>{JSON.stringify(old.content,null,2)}</pre></div>)}</details>}
     {state.staleDraft&&<details><summary>依据已变化的旧草稿</summary><pre>{JSON.stringify(state.staleDraft.content,null,2)}</pre></details>}

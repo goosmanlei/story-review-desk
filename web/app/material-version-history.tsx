@@ -61,9 +61,8 @@ export function MaterialVersionHistory({
   const adoptedVersionId = resolveAdoptedVersionId(family, stateProjection);
   const latestProjection = latestVersionId ? stateProjection?.assetVersionsById[latestVersionId] : null;
   const latestBase = latestVersionId ? model.assetVersions.find((item) => item.id === latestVersionId) || null : null;
-  const textPath = String(latestProjection?.path || latestBase?.path || '');
   const textToken = String(latestProjection?.mediaToken || latestBase?.mediaToken || '');
-  const isText = /\.(?:txt|md|srt|vtt)$/i.test(textPath);
+  const isText = latestBase?.mediaKind==='TEXT';
 
   return <section className="material-version-history">
     <section className="material-story-basis">

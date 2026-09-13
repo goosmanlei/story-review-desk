@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {snapshotCommand} from '../tools/snapshot.mjs';
 import {
   exportPackage,
   importPackage,
@@ -29,6 +30,10 @@ const help = `review — 与网页共用 /api/v1 的业务命令
   review export --output PROJECT_PACKAGE_DIRECTORY
   review import --file PROJECT_PACKAGE_DIRECTORY
   review verify --file PROJECT_PACKAGE_DIRECTORY
+  review snapshot save
+  review snapshot verify|status [--file SNAPSHOT_DIRECTORY]
+  review snapshot export
+  review snapshot restore --file RESTORE_REQUEST_JSON
 
   --url URL              默认本项目 runtime/machine.json 中的 API 地址
   --project DIRECTORY    默认当前目录
@@ -75,6 +80,10 @@ export async function main(argv = process.argv.slice(2)) {
   if (values.help || !positionals.length) {
     console.log(help);
     return;
+  }
+  if(positionals[0]==='snapshot'){
+    const result=await snapshotCommand(positionals[1]||'status',values,argv);
+    console.log(JSON.stringify(result));if(result?.exitCode)process.exitCode=result.exitCode;return;
   }
   if (positionals[0] === "verify") {
     const result = await verifyPackage(path.resolve(values.file));
@@ -163,13 +172,14 @@ export async function main(argv = process.argv.slice(2)) {
     } else if (id === 'list') endpoint = 'review-library?entries=true';
     else if (!id || id === 'status') endpoint = 'review-library';
     else throw Error('审阅目录命令无效');
-  } else if (command === "spatial") endpoint = "settings/spatial-baseline";
+  } else if (command === "integrity") endpoint = "workspaces/integrity";
+  else if (command === "spatial") endpoint = "settings/spatial-baseline";
   else if (command === "status")
     endpoint = "operations/" + encodeURIComponent(id);
   else if (command === "maintenance") {
     endpoint = id ? "jobs" : "maintenance";
     if (id) {
-      if (!["verify", "backup", "restore"].includes(id))
+      if (!["verify", "backup", "restore", "export"].includes(id))
         throw Error("维护任务类型无效");
       body = {
         ...(values.file ? await readInput() : {}),

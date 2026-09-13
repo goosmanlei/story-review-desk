@@ -5,7 +5,7 @@ import {assets,materialRows} from '../presentation/materials.mjs';
 
 const supported=['STORYBOARD','DIALOGUE_TEMP','DIALOGUE_DRY','START_FRAME','END_FRAME','INTERMEDIATE_FRAME','SHOT_VIDEO'];
 const noteId=id=>'shot-recipe:'+hash(id).slice(0,32);
-const ref=v=>({familyId:v.familyId,versionId:v.id,sha256:v.sha256,revisionId:v.revisionId,objectVersion:v.objectVersion,path:v.path});
+const ref=v=>({familyId:v.familyId,versionId:v.id,sha256:v.sha256,revisionId:v.revisionId,objectVersion:v.objectVersion});
 export async function shotRecipeWorkspace(unit,workItemId){
  identity(workItemId);
  const rows=(await unit.rows(['EXPECTED_OUTPUT'])).filter(r=>r.content.workItemId===workItemId&&r.content.expectationState==='PLANNED');
@@ -52,7 +52,7 @@ export async function planShotRecipeChange(tx,input){
  }
  check(['preview','publish'].includes(input.action)&&value.draft&&value.draft.revisionId===input.draftRevisionId&&!value.blockers.length,'RECIPE_DRAFT','请先保存并核对当前调用包及附件',409);
  const authorContent=content(value.draft.content),suffix=hash(old.revisionId).slice(0,32),callId='shot-call:'+suffix,promptId='shot-prompt:'+suffix;
- const definition={authorContent,workItemRef:input.workItemId,output:value.output,upload:{items:value.inputs.map(i=>({...i,assetFamilyRef:i.familyId,assetVersionRef:i.versionId}))},model:{branch:authorContent.model},prompt:{main:authorContent.prompt,negative:authorContent.negativePrompt},parametersRaw:JSON.stringify(authorContent.parameters),executorKind:'MODEL',definitionStatus:'DRAFT',basis,allowedUse:value.allowedUse};
+ const definition={authorContent,workItemRef:input.workItemId,output:value.output,inputBindings:value.inputs.map((i,index)=>({order:index+1,familyId:i.familyId,versionId:i.versionId,revisionId:i.revisionId,sha256:i.sha256})),model:{branch:authorContent.model},prompt:{main:authorContent.prompt,negative:authorContent.negativePrompt},parameters:authorContent.parameters,executorKind:'MODEL',definitionStatus:'DRAFT',basis,allowedUse:value.allowedUse};
  const previewHash=hash({draft:old.revisionId,definition});assertions.push({type:'assert',id:old.id,expectedVersion:old.version});
  if(input.action==='preview')return {commands:assertions,response:()=>({previewHash,definition,modelCalls:0,generationAuthorized:false})};
  check(input.previewHash===previewHash,'PREVIEW_STALE','调用包预览依据已改变',409);

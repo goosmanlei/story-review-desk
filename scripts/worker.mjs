@@ -6,7 +6,7 @@ import {
 } from "../server/db.mjs";
 import { workOnce, sweepJobs } from "../server/jobs.mjs";
 import { syncLibrary } from '../server/library/service.mjs';
-import { runMaintenance } from "../server/project/maintenance.mjs";
+import { runMaintenance, sweepMaintenance } from "../server/project/maintenance.mjs";
 import { randomUUID } from "node:crypto";
 import { processProvider } from "../server/process-provider.mjs";
 import path from "node:path";
@@ -123,6 +123,7 @@ try {
     if (Date.now() - lastSweep > 5000) {
       await heartbeat();
       await sweepJobs(pool);
+      await sweepMaintenance(pool,root).catch(error=>console.error(JSON.stringify({event:'maintenance-cleanup',code:error.code||'CLEANUP_REQUIRED'})));
       lastSweep = Date.now();
     }
     const worked = await workOnce(pool, { root, workerId, providers });

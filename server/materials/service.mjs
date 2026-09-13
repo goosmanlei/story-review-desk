@@ -1,4 +1,5 @@
 import {verifyProductionReview} from '../production/review-evidence.mjs';
+import {validateReferenceContent,validateReferenceTargets} from './references.mjs';
 import { check, identifier } from "../shared/contracts.mjs";
 export const kinds = [
   "REQUIREMENT",
@@ -9,6 +10,7 @@ export const kinds = [
   "EXPECTED_OUTPUT",
 ];
 export function validate(kind, content) {
+  validateReferenceContent(kind,content);
   if (kind === "REQUIREMENT")
     check(
       typeof content.description === "string" ||
@@ -23,6 +25,7 @@ export function validate(kind, content) {
       "权利事实无效",
     );
 }
+export const validateTarget = validateReferenceTargets;
 export async function projectLinks(tx, object, revisionId, links) {
   if (object.kind === "MATERIAL")
     await tx.query(

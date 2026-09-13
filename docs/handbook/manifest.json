@@ -42,7 +42,7 @@
         "server/collaboration/service.mjs",
         "server/project/service.mjs"
       ],
-      "sourceDigest": "9d2da435de5f8ad263572642982eb6e41447dc0f54dc040a7ad518c99431b1a3"
+      "sourceDigest": "868333bcd1c2f65c90eae8519eea2c543a3fa61011e1e1abe1ea9a52ab1e8942"
     },
     {
       "id": "data-model",
@@ -55,7 +55,7 @@
         "server/repository.mjs",
         "server/transport-contract.mjs"
       ],
-      "sourceDigest": "0b9c81a115aaf2f86cac75752da48cded9c93a5a87d0cc98a3b33df3eca9f7fc"
+      "sourceDigest": "b4ea00787ff195471efd9966faf6a76ccf3427b18fbce65137201ffe1a42006d"
     },
     {
       "id": "versions",
@@ -66,9 +66,12 @@
       "sources": [
         "server/schema.sql",
         "server/commands.mjs",
-        "server/production/input-locks.mjs"
+        "server/production/input-locks.mjs",
+        "server/materials/references.mjs",
+        "server/materials/usage-reviews.mjs",
+        "server/production/spatial-views.mjs"
       ],
-      "sourceDigest": "a3cb8bf5244417e21d6075c697e07cdc59bb21a14091bf5381d6ca7f2e210924"
+      "sourceDigest": "36a715a1c2e6d7fcea0e5a81351ff7edd3d6300caacd54d838298dc2ee929ec6"
     },
     {
       "id": "layers",
@@ -80,9 +83,11 @@
         "server/api.mjs",
         "server/workspaces.mjs",
         "web/app/workspace-read-cache.ts",
-        "server/presentation/read-unit.mjs"
+        "server/presentation/read-unit.mjs",
+        "server/presentation/material-page.mjs",
+        "server/presentation/production-window.mjs"
       ],
-      "sourceDigest": "dc0e8f2a05ae51efb78018d816db8a23a6a6a5f1a02d7de034c2e9805fc27a49"
+      "sourceDigest": "020c20fbedf8d258c30c48a4b7a9374d6e25f7e88fd22d0f3766577beda1254b"
     },
     {
       "id": "interfaces",
@@ -96,7 +101,7 @@
         "scripts/review.mjs",
         "server/documentation.mjs"
       ],
-      "sourceDigest": "7f63a28836f80af55d571d647a36f730b82d3e75d9014d3ae8068b30a5d6bb17"
+      "sourceDigest": "59f2c68d196e4b2e4c1c76cfdc8b0744e041408834a99a5c8a7def8cae1e3481"
     },
     {
       "id": "collaboration",
@@ -110,7 +115,7 @@
         "server/collaboration/change-preview.mjs",
         "server/presentation/workspaces.mjs"
       ],
-      "sourceDigest": "5ae6bc69a274b7b6ef870b8dbe7a1d09be20f0ee562b5fe1bd11d36f465873a5"
+      "sourceDigest": "5dccfb891304ede69ad1798265f1ad9ab1cf7aa3ce0c1e5bfab4be6ab73ca22c"
     },
     {
       "id": "development",
@@ -126,7 +131,7 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "a9895433d06c32378c4961a26b6c6595cf0c23ea977462a84cb3771e235b9e62"
+      "sourceDigest": "9eee03e241b453af62a47387e73f6f350f842b4177b6b2f9ec79ce178348b7ca"
     },
     {
       "id": "operations",
@@ -140,9 +145,13 @@
         "server/project/package.mjs",
         "server/library/service.mjs",
         "server/project/service.mjs",
-        "tools/process-resources.mjs"
+        "tools/process-resources.mjs",
+        "server/project/snapshot.mjs",
+        "server/project/maintenance.mjs",
+        "server/project/maintenance-contract.mjs",
+        "tools/snapshot.mjs"
       ],
-      "sourceDigest": "19910e2e0ae85c285bb15e8a652a4167adefee1cb7e695a65da99441a63e1d93"
+      "sourceDigest": "d2dd5d36366894a20f47903fa86c044a78d2a2f167db46e0f80cbc07c934ce75"
     },
     {
       "id": "instance",
@@ -154,7 +163,7 @@
         "server/workspaces.mjs",
         "server/repository.mjs"
       ],
-      "sourceDigest": "515be5593afbf429680bcb72534bdae04269e067cbd4281c8e65f982458c37cb"
+      "sourceDigest": "872fcdf770b52c87d73c28aa795e8eeb310f1f3ba0dcb17edd72ddd55f4ca657"
     },
     {
       "id": "reference",
@@ -167,7 +176,7 @@
         "server/modules.mjs",
         "server/api.mjs"
       ],
-      "sourceDigest": "8c4cad939eac0a8c6da6a4b4433ce456d7fc24fdeeb314fe7b4053cb83eebde1"
+      "sourceDigest": "dc3c82a1fc3e1760e7ecd85c33216f919f51acd37bea0cdad8d2f76f717d4e65"
     }
   ],
   "coverage": {

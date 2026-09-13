@@ -6,7 +6,10 @@ async function get(path){const response=await fetch(base+path),body=await respon
 const profile=await get('workspaces/profile');assert.match(profile.instanceId,/^ui-fixture-/);
 async function post(path,body,key=crypto.randomUUID()){const response=await fetch(base+path,{method:'POST',headers:{'Content-Type':'application/json','X-Review-Runtime':profile.deployment.runtimeEpoch,'Idempotency-Key':key},body:JSON.stringify(body)});return {status:response.status,value:await response.json()};}
 async function ok(result){const r=await result;assert.equal(r.status,200,JSON.stringify(r.value));return r.value;}
-const plan=(await get('workspaces/views/episode-plan')).plan,sceneId=plan.content.episodes[0].sceneIds[0];
+const plan=(await get('workspaces/views/episode-plan')).plan;
+const designs=await get('objects?kind=SHOT_DESIGN&limit=100');let sceneId;
+for(const row of designs.items){const design=await get('objects/'+encodeURIComponent(row.id));const scene=design.links.find(l=>l.role==='SCENE')?.id;if(scene&&plan.content.episodes.some(e=>e.sceneIds.includes(scene))&&design.links.filter(l=>l.role==='SHOT').length>=2){sceneId=scene;break;}}
+assert(sceneId,'Fixture needs a current scene with an authored multi-shot design');
 const route='workspaces/shot-production',read=()=>get(route+'?sceneId='+sceneId);
 let workspace=await read();assert.ok(workspace.defaultContent.shots.length>=2);
 const content=structuredClone(workspace.draft?.content||workspace.currentPlan?.content||workspace.defaultContent);
@@ -55,6 +58,6 @@ assert.equal(spatialPublished.status,'SUCCEEDED');assert.equal(spatialPublished.
 space=await get(spatialRoute+'?sceneId='+sceneId+'&viewId='+viewId);
 assert.equal(space.currentView.id,spatialPreview.view.id);assert.equal(space.draft,null);
 assert.ok((await read()).availableSpace.localViews.some(v=>v.id===spatialPreview.view.id));
-const wrongScene=plan.content.episodes[0].sceneIds[1];
+const wrongScene=plan.content.episodes.flatMap(e=>e.sceneIds).find(id=>id!==sceneId);
 const wrong=await fetch(base+spatialRoute+'?sceneId='+wrongScene+'&viewId='+viewId);assert.equal(wrong.status,409);
 console.log('PASS spatial draft, preview, immediate registration, input readback and immutable scene ownership');

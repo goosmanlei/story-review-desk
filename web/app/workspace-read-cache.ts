@@ -68,45 +68,8 @@ function readWorkspaceRecord<T>(url: string, scope: string, signal?: AbortSignal
   });
 }
 function readCompleteProductionRecord(resource: PagedProductionResource, filters: PagedProductionFilters,
-  scope: string, signal?: AbortSignal): Promise<Entry<PagedProductionPayload>> {
-  // Both entrances use one complete, version-bound catalog. Filters are applied
-  // by the original UI; retaining two copies would exhaust the shared budget.
-  const firstUrl = '/api/v1/workspaces/views/production';
-  const record = sharedRecord<PagedProductionPayload>(`${scope}:complete:${firstUrl}`, signal, async (previous, signal) => {
-    for (let attempt = 0; ; attempt++) {
-      try {
-        let cursor: string | null = null, first: PagedProductionPayload | undefined, bytes = 0, etag = '', basis = '', loaded = 0;
-        const cursors = new Set<string>(), rows = new Map<string, Map<string, {id:string}>>();
-        do {
-          const response:Response = await fetch(cursor ? firstUrl+'?cursor='+encodeURIComponent(cursor) : firstUrl, { cache:'no-store', signal,
-            headers: !cursor && previous?.etag && attempt === 0 ? {'If-None-Match':previous.etag} : {} });
-          if (response.status === 304 && !cursor && previous) return {...previous,basis:response.headers.get('X-Review-Basis')||previous.basis};
-          const decoded:{value:PagedProductionPayload;bytes:number} = await responseJson<PagedProductionPayload>(response);
-          const page:PagedProductionPayload = decoded.value;
-          if (!first) { first = page; etag = response.headers.get('ETag') || ''; basis = response.headers.get('X-Review-Basis') || ''; }
-          if ((basis && basis !== response.headers.get('X-Review-Basis')) || page.snapshotId !== first.snapshotId || page.readVersion !== first.readVersion || page.operationRevision !== first.operationRevision || page.total !== first.total)
-            throw Object.assign(new Error('工作区版本在分页中变化，正在重新读取'), {status:409});
-          if (page.hasMore !== Boolean(page.nextCursor) || page.count < 0) throw new Error('分页返回不完整，无法展示目录');
-          for (const [collection, values] of Object.entries(page.page)) {
-            if (!Array.isArray(values)) continue;
-            let index = rows.get(collection); if (!index) { index = new Map(); rows.set(collection, index); }
-            for (const row of values) {
-              if(!row||typeof row!=='object'||typeof row.id!=='string')throw new Error('目录条目缺少永久身份');
-              index.set(row.id,row as {id:string});
-            }
-          }
-          bytes += decoded.bytes; loaded += page.count; cursor = page.nextCursor;
-          if (cursor && cursors.has(cursor)) throw new Error('分页游标重复，已停止读取');
-          if (cursor) cursors.add(cursor);
-        } while (cursor);
-        if (!first || loaded !== first.total || (rows.get('workItems')?.size || 0) !== first.total) throw new Error('工作区对象数与目录总数不一致，请重试');
-        return { value: {...first, page:{...first.page,...Object.fromEntries([...rows].map(([key, values]) => [key, [...values.values()]]))}, count:loaded, hasMore:false, nextCursor:null}, bytes, etag, basis };
-      } catch (error) {
-        if ((error as {status?:number}).status !== 409 || attempt >= 1 || signal.aborted) throw error;
-      }
-    }
-  });
-  return resource==='production'?record:record.then(entry=>({...entry,value:{...entry.value,count:entry.value.page.materialRequirements?.length||0,total:entry.value.page.materialRequirements?.length||0,appliedMode:'requirements'}}));
+  scope: string, signal?: AbortSignal, cursor:string|null=null): Promise<Entry<PagedProductionPayload>> {
+  return readWorkspaceRecord<PagedProductionPayload>(pagedProductionUrl(resource,filters,cursor),scope,signal);
 }
 
 export async function readWorkspaceJson<T>(url: string, scope: string, signal?: AbortSignal): Promise<T> {
@@ -132,30 +95,26 @@ async function consistent<T extends Entry<unknown>[]>(read:()=>Promise<T>,signal
     if(attempt>=1)throw new Error('工作区版本在读取中变化，请重新完整读取');
   }
 }
-async function readTrialCatalogRecords(scope:string,signal?:AbortSignal):Promise<Entry<unknown>[]> {
-  const index=await readWorkspaceRecord<{scopes:Array<{id:string}>}>('/api/v1/workspaces/candidates/scopes',scope,signal);
-  if(!Array.isArray(index.value.scopes)||index.value.scopes.some(item=>typeof item.id!=='string')||new Set(index.value.scopes.map(item=>item.id)).size!==index.value.scopes.length)throw new Error('试制范围格式不匹配。');
-  const snapshots=await Promise.all(index.value.scopes.map(async item=>{
-    const record=await readWorkspaceRecord<{mode:string;scope:{id:string};assets:Array<{scopeId?:string}>;recipes:unknown[]}>('/api/v1/workspaces/candidates/snapshot?scopeId='+encodeURIComponent(item.id),scope,signal);
-    const data=record.value;
-    if(data.mode!=='LOCAL_TRIAL'||data.scope?.id!==item.id||!Array.isArray(data.assets)||!Array.isArray(data.recipes))throw new Error('试制资料范围或格式不匹配。');
-    return {...record,value:data.assets.every(asset=>asset.scopeId===item.id)?data:{...data,assets:data.assets.map(asset=>({...asset,scopeId:item.id}))}};
-  }));
-  return [index,...snapshots];
-}
 export async function readProductionWorkspace(resource:PagedProductionResource,filters:PagedProductionFilters,
-  scope:string,prerequisites:string[],signal?:AbortSignal,{trialCatalog=false}={}) {
-  // Start every independent prerequisite together; discovered trial scopes join
-  // the same version barrier before any catalog is exposed to its child editor.
+  scope:string,prerequisites:string[],signal?:AbortSignal,{trialCatalog=false,cursor=null as string|null}={}) {
+  // Every required object crosses the same version barrier before display.
   const entries=await consistent(async()=>{
     const [base,trials]=await Promise.all([
-      Promise.all([readCompleteProductionRecord(resource,filters,scope,signal),...prerequisites.map(url=>readWorkspaceRecord<{releaseId?:string;snapshotId?:string}>(url,scope,signal))]),
-      trialCatalog?readTrialCatalogRecords(scope,signal):Promise.resolve([] as Entry<unknown>[]),
+      Promise.all([readCompleteProductionRecord(resource,filters,scope,signal,cursor),...prerequisites.map(url=>readWorkspaceRecord<{releaseId?:string;snapshotId?:string}>(url,scope,signal))]),
+      resource==='materials'?Promise.all([readWorkspaceRecord<{page:PagedProductionPayload['page'];total:number}>('/api/v1/workspaces/views/material-catalog',scope,signal)]):Promise.resolve([] as Entry<unknown>[]),
     ]);
     return [...base,...trials];
   },signal);
-  const page=entries[0] as Entry<PagedProductionPayload>,contexts=entries.slice(1,prerequisites.length+1) as Entry<{releaseId?:string;snapshotId?:string}>[];
-  return {payload:page.value,contexts:contexts.map(entry=>entry.value),materialCatalog:resource==='materials'?{scope,values:contexts.map(entry=>entry.value),trials:trialCatalog?entries.slice(prerequisites.length+2).map(entry=>entry.value):[]}:undefined};
+  const page=entries[0] as Entry<PagedProductionPayload>;
+  let payload=page.value;
+  if(resource==='materials'){
+    const catalog=entries.at(-1)!.value as {page:PagedProductionPayload['page'];total:number};
+    const combined={...catalog.page,...page.value.page} as Record<string,unknown>;
+    for(const [key,rows]of Object.entries(catalog.page)){if(!Array.isArray(rows))continue;const incoming=(page.value.page as Record<string,unknown>)[key];combined[key]=[...new Map([...rows,...(Array.isArray(incoming)?incoming:[])].map(r=>[r.id,r])).values()];}
+    payload={...page.value,page:combined as PagedProductionPayload['page'],count:catalog.total,total:catalog.total,hasMore:false,nextCursor:null};
+  }
+  const contexts=entries.slice(1,prerequisites.length+1) as Entry<{releaseId?:string;snapshotId?:string}>[];
+  return {payload,contexts:contexts.map(entry=>entry.value),materialCatalog:resource==='materials'?{scope,values:contexts.map(entry=>entry.value),trials:[]}:undefined};
 }
 export async function readWorkspaceBatch<T>(urls:string[],scope:string,signal?:AbortSignal):Promise<T[]> {
   return (await consistent(()=>Promise.all(urls.map(url=>readWorkspaceRecord<T>(url,scope,signal))),signal)).map(entry=>entry.value);

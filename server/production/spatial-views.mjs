@@ -4,6 +4,7 @@ import {spatialBaseline} from '../workspaces.mjs';
 
 export const spatialOptions={cameraOrigins:['NORTH_INTERIOR','NORTHEAST_INTERIOR','EAST_INTERIOR','SOUTHEAST_INTERIOR','SOUTH_INTERIOR','SOUTHWEST_INTERIOR','WEST_INTERIOR','NORTHWEST_INTERIOR','CENTER_INTERIOR'],cameraDirections:['NORTH','NORTHEAST','EAST','SOUTHEAST','SOUTH','SOUTHWEST','WEST','NORTHWEST'],cameraHeights:['EYE_LEVEL','LOW','HIGH'],dressingKinds:['BED','BOWL_RACK','TABLE','CHAIR','SHELF','BENCH','CONTAINER'],relations:['NORTH_OF','SOUTH_OF','EAST_OF','WEST_OF','AT'],orientations:['EAST_WEST','NORTH_SOUTH','NONE']};
 const list=v=>Array.isArray(v)?v:[];
+export function spatialAuthor(view){return {sceneId:view.sceneBinding.sceneId,viewId:view.viewId,locationId:view.base.locationId,zoneId:view.base.zoneId,camera:Object.fromEntries(Object.entries(view.camera).filter(([key])=>key!=='id')),dressing:view.dressing,note:view.note};}
 export async function spatialCatalog(unit) {
   const baseline=await spatialBaseline(unit.tx),spec=baseline.specification;
   if(!spec)return {sourceBinding:null,version:null,locations:[],states:[]};
@@ -20,15 +21,20 @@ export async function spatialCatalog(unit) {
 export async function spatialViewWorkspace(unit,input) {
   identity(input.sceneId);const scene=await unit.detail(input.sceneId);check(scene.kind==='SCENE','SCENE_REQUIRED','请选择永久场');
   const viewId=input.viewId||'SPATIAL-AUTHOR-'+hash({sceneId:input.sceneId}).slice(0,24);identity(viewId);
-  const old=(await unit.rows(['NOTE'],{ids:['spatial-view:'+viewId]}))[0];
+  const records=(await unit.tx.query(`SELECT o.id,o.title,jsonb_build_object('sceneId',r.content->'sceneId','viewId',r.content->'viewId','status',r.content->'status') AS content
+    FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id)
+    WHERE o.kind IN ('SPACE','NOTE') AND NOT o.historical AND r.content->>'role'='SPATIAL_VIEW'
+    AND (r.content->>'sceneId'=$1 OR r.content->>'viewId'=$2) ORDER BY o.id`,[scene.id,viewId])).rows;
+  const matches=records.filter(r=>r.content.viewId===viewId);check(matches.length<=1,'SPATIAL_AMBIGUOUS','局部视图身份重复',409);
+  const old=matches.length?(await unit.rows(['SPACE','NOTE'],{ids:[matches[0].id]}))[0]:null;
   check(!old||old.content.sceneId===scene.id,'SPATIAL_IDENTITY','局部空间不能换绑永久场',409);
   let published=old?.content.status==='PUBLISHED'?old:null;
   if(!published&&old?.content.publishedRevisionId){const d=await unit.detail(old.id,old.content.publishedRevisionId);published={...old,revisionId:d.revision.id,content:d.revision.content};}
   const catalog=await spatialCatalog(unit),basis={sceneId:scene.id,sceneRevisionId:scene.revision.id,sceneContentHash:scene.revision.sha256,sourceBinding:catalog.sourceBinding,catalogBinding:catalog.catalogBinding,currentRevisionId:published?.revisionId||null},basisHash=hash(basis),draft=old?.content.status==='DRAFT'?old:null;
   const currentView=published?.content.view||null;
-  const defaults=published?.content.author||{sceneId:scene.id,viewId,locationId:'',zoneId:'',camera:{origin:'',looks:'',height:'EYE_LEVEL',purpose:''},dressing:[],note:''};
+  const defaults=published?.content.author||(currentView?spatialAuthor(currentView):{sceneId:scene.id,viewId,locationId:'',zoneId:'',camera:{origin:'',looks:'',height:'EYE_LEVEL',purpose:''},dressing:[],note:''});
   const stale=draft&&draft.content.basisHash!==basisHash;
-  const value={sceneId:scene.id,viewId,releaseId:hash(basis),basisHash,draftHeadRevisionId:draft?.revisionId||null,draft:draft&&!stale?{revisionId:draft.revisionId,content:draft.content.author}:null,staleDraft:stale?{revisionId:draft.revisionId,content:draft.content.author,reason:'本场正文或空间依据已改变，请核对原稿后重新保存'}:null,defaults,currentView,availableLocations:catalog.locations,options:spatialOptions,blockers:catalog.sourceBinding?[]:['当前项目尚未登记空间基线'],jobs:[],readOnly:scene.historical};
+  const value={sceneId:scene.id,viewId,releaseId:hash(basis),basisHash,draftHeadRevisionId:draft?.revisionId||null,draft:draft&&!stale?{revisionId:draft.revisionId,content:draft.content.author}:null,staleDraft:stale?{revisionId:draft.revisionId,content:draft.content.author,reason:'本场正文或空间依据已改变，请核对原稿后重新保存'}:null,defaults,currentView,availableViews:records.filter(r=>r.content.sceneId===scene.id).map(r=>({viewId:r.content.viewId,label:r.title})),availableLocations:catalog.locations,options:spatialOptions,blockers:catalog.sourceBinding?[]:['当前项目尚未登记空间基线'],jobs:[],readOnly:scene.historical};
   return {value,scene,old,published,catalog,basis};
 }
 function validateAuthor(value,state) {
@@ -37,7 +43,7 @@ function validateAuthor(value,state) {
   check(allowed(value,['sceneId','viewId','locationId','zoneId','camera','dressing','note'])&&value.sceneId===state.scene.id&&value.viewId===state.value.viewId,'SPATIAL_IDENTITY','局部空间作者稿身份无效');
   const location=state.catalog.locations.find(l=>l.id===value.locationId),zone=location?.zones.find(z=>z.id===value.zoneId);
   check(location&&zone,'SPATIAL_ZONE','请在已登记的空间地点与区域内设计',409);
-  const before=state.published?.content.author;
+  const before=state.published?.content.author||(state.published?.content.view?spatialAuthor(state.published.content.view):null);
   check(!before||before.locationId===value.locationId&&before.zoneId===value.zoneId,'SPATIAL_IDENTITY','已有局部视图不能换绑地点与区域',409);
   check(allowed(value.camera,['origin','looks','height','purpose'])&&spatialOptions.cameraOrigins.includes(value.camera.origin)&&spatialOptions.cameraDirections.includes(value.camera.looks)&&spatialOptions.cameraHeights.includes(value.camera.height)&&text(value.camera.purpose),'SPATIAL_CAMERA','请完整填写机位、朝向、高度和用途');
   check(Array.isArray(value.dressing)&&value.dressing.length<=20&&new Set(value.dressing.map(d=>d.id)).size===value.dressing.length,'SPATIAL_DRESSING','家具摆位无效或身份重复');
@@ -60,16 +66,16 @@ export async function planSpatialViewChange(tx,input) {
   if(input.action==='save'){
     check(input.expectedReleaseId===value.releaseId&&input.expectedBasisHash===value.basisHash&&(input.expectedDraftRevisionId||null)===value.draftHeadRevisionId,'VERSION_CONFLICT','空间草稿或当前依据已改变；编辑仍保留',409);
     validateAuthor(input.content,state);
-    return {commands:[...assertions,{type:'save',id:'spatial-view:'+value.viewId,kind:'NOTE',title:'局部机位与摆位',expectedVersion:old?.version||0,content:{role:'SPATIAL_VIEW',sceneId:value.sceneId,viewId:value.viewId,status:'DRAFT',author:input.content,basisHash:value.basisHash,publishedRevisionId:published?.revisionId||null},links:[{id:value.sceneId,role:'SCENE'}]}],response:results=>({revisionId:results.at(-1).revisionId,modelCalls:0,formalAdoptionPerformed:false})};
+    return {commands:[...assertions,{type:'save',id:old?.id||'spatial-view:'+value.viewId,kind:old?.kind||'SPACE',title:old?.title||'局部机位与摆位',expectedVersion:old?.version||0,content:{role:'SPATIAL_VIEW',sceneId:value.sceneId,viewId:value.viewId,status:'DRAFT',author:input.content,basisHash:value.basisHash,publishedRevisionId:published?.revisionId||null},links:[{id:value.sceneId,role:'SCENE'}]}],response:results=>({revisionId:results.at(-1).revisionId,modelCalls:0,formalAdoptionPerformed:false})};
   }
   check(['preview','publish'].includes(input.action)&&old?.content.status==='DRAFT'&&old.revisionId===input.draftRevisionId&&old.content.basisHash===value.basisHash,'VERSION_CONFLICT','空间草稿或依据已改变，请核对并重新保存',409);
   const view=validateAuthor(old.content.author,state),previewHash=hash({view,draft:old.revisionId,basis:value.basisHash});
   if(input.action==='preview')return {commands:[...assertions,{type:'assert',id:old.id,expectedVersion:old.version}],response:()=>({view,previewHash,modelCalls:0,formalAdoptionPerformed:false})};
   check(input.previewHash===previewHash,'PREVIEW_STALE','空间预览已改变',409);
-  return {commands:[...assertions,{type:'save',id:old.id,expectedVersion:old.version,content:{...old.content,status:'PUBLISHED',view,publishedRevisionId:null},dependencies:[{revisionId:state.scene.revision.id,purpose:'CONTENT'},{revisionId:state.catalog.sourceBinding.revisionId,purpose:'DESIGN'},...(state.catalog.catalogBinding?[{revisionId:state.catalog.catalogBinding.revisionId,purpose:'DEFINITION'}]:[])]}],response:results=>({revisionId:results.at(-1).revisionId,status:'SUCCEEDED',view,modelCalls:0,formalAdoptionPerformed:false})};
+  return {commands:[...assertions,{type:'save',id:old.id,expectedVersion:old.version,content:{role:'SPATIAL_VIEW',sceneId:value.sceneId,viewId:value.viewId,status:'PUBLISHED',view,publishedRevisionId:null},dependencies:[{revisionId:state.scene.revision.id,purpose:'CONTENT'},{revisionId:state.catalog.sourceBinding.revisionId,purpose:'DESIGN'},...(state.catalog.catalogBinding?[{revisionId:state.catalog.catalogBinding.revisionId,purpose:'DEFINITION'}]:[])]}],response:results=>({revisionId:results.at(-1).revisionId,status:'SUCCEEDED',view,modelCalls:0,formalAdoptionPerformed:false})};
 }
 export async function availableLocalViews(unit,sceneId) {
-  const rows=(await unit.rows(['NOTE'])).filter(r=>r.content.role==='SPATIAL_VIEW'&&(!sceneId||r.content.sceneId===sceneId)),views=[];
+  const rows=(await unit.rows(['SPACE','NOTE'],{roles:['SPATIAL_VIEW']})).filter(r=>!sceneId||r.content.sceneId===sceneId),views=[];
   for(const r of rows){let content=r.content,revisionId=r.revisionId;if(content.status!=='PUBLISHED'&&content.publishedRevisionId){const d=await unit.detail(r.id,content.publishedRevisionId);content=d.revision.content;revisionId=d.revision.id;}if(content.status==='PUBLISHED'&&content.view){const v=content.view;views.push({id:v.id,viewId:v.viewId,revisionId,objectId:r.id,expectedVersion:r.version,label:v.camera.purpose,locationId:v.base.locationId,zoneId:v.base.zoneId,cameraId:v.camera.id,sceneBinding:v.sceneBinding,base:v.base});}}
   return views;
 }

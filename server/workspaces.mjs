@@ -164,16 +164,17 @@ export async function relationshipGraph(tx, { owner, offset = 0 } = {}) {
 }
 
 export async function spatialBaseline(tx) {
-  // This is a logical source alias in the business snapshot, never a filesystem
-  // lookup or a compiler/read-model dependency. Original coordinates stay read-only.
-  const row = (
+  // Spatial specifications are registered domain sources, independent of filenames.
+  const rows = (
     await tx.query(
       `SELECT o.id,r.id AS "revisionId",s.logical_path AS "logicalPath",s.original_sha256 AS sha256,s.content_bytes AS bytes
     FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) JOIN source_documents s ON s.revision_id=r.id
-    WHERE s.logical_path=$1 ORDER BY o.updated_at DESC,o.id LIMIT 1`,
-      ["data/production_map_spec.json"],
+    WHERE r.content->>'role'='SPATIAL_SPECIFICATION' ORDER BY o.updated_at DESC,o.id LIMIT 2`,
+      [],
     )
-  ).rows[0];
+  ).rows;
+  check(rows.length<=1,"SPATIAL_AMBIGUOUS","多个空间规格同时生效，请明确现行对象",409);
+  const row=rows[0];
   if (!row)
     return {
       status: "NOT_CONFIGURED",

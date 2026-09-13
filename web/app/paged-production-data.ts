@@ -151,7 +151,7 @@ export function pagedProductionUrl(
   cursor: string | null,
 ) {
   const endpoint = `/api/v1/workspaces/views/${resource}`;
-  const params = new URLSearchParams({ limit: '100' });
+  const params = new URLSearchParams({ limit: '50' });
   if (resource === 'materials') params.set('detail', 'summary');
   if (filters.phaseId) params.set('phaseId', filters.phaseId);
   if (filters.gateId) params.set('gateId', filters.gateId);

@@ -7,6 +7,7 @@ import {
   readFile,
   writeFile,
   rename,
+  rm,
 } from "node:fs/promises";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
@@ -21,7 +22,7 @@ import {
   verifyPackage,
   writePackageRecords,
 } from "./package.mjs";
-import { beginPhase } from "../../tools/process-resources.mjs";
+import { beginPhase, ProcessPhase, readProcessConfig } from "../../tools/process-resources.mjs";
 import { createProject } from "../../tools/project.mjs";
 import {
   databaseConnection,
@@ -30,6 +31,9 @@ import {
 } from "../../tools/deployment.mjs";
 import { freePort } from "../../tools/io.mjs";
 
+import { saveSnapshot, materializeSnapshot } from './snapshot.mjs';
+import { businessIntegrity } from './integrity.mjs';
+import { transaction } from '../db.mjs';
 import { validateMaintenance, ownedBackup } from "./maintenance-contract.mjs";
 const taskId = (id) => "maintenance-" + hash(id).slice(0, 24);
 async function tar(phase, directory) {
@@ -92,9 +96,14 @@ export async function runMaintenance(pool, root, request) {
   try {
     await phase.budget();
     if (request.kind === "MAINTENANCE_RESTORE") {
-      const backup = await ownedBackup(pool, root, request.backupId),
-        source = path.join(backup.directory, "package"),
-        manifest = await verifyPackage(source);
+      const backup = await ownedBackup(pool, root, request.backupId), source=path.join(directory,'package');
+      if(backup.format==='review-project-snapshot')await materializeSnapshot(backup.directory,source,{projectRoot:project,phase});
+      else {
+        const uploaded=path.join(root,'runtime/spool',request.operationId+'.restore');
+        await mkdir(path.dirname(uploaded),{recursive:true});await copyFile(path.join(backup.directory,'project-package.tar'),uploaded,1);
+        try{await importPackage(phase,root,{filename:uploaded,sha256:backup.archiveSha256},directory);}finally{await rm(uploaded);}
+      }
+      const manifest=await verifyPackage(source);
       check(
         manifest.transfer.sha256 === backup.sha256,
         "BACKUP_CHANGED",
@@ -116,7 +125,7 @@ export async function runMaintenance(pool, root, request) {
         title: manifest.project.title,
         source: machine.sourceRepository || undefined,
         port: await freePort(),
-        initializeGit: false,
+        initializeGit: true,
       });
       await cp(
         path.join(project, "review-software"),
@@ -202,6 +211,10 @@ export async function runMaintenance(pool, root, request) {
         started: false,
       };
     }
+    if(request.kind==='MAINTENANCE_VERIFY'){
+      const integrity=await transaction(pool,tx=>businessIntegrity(tx),{readOnly:true});
+      check(integrity.issueCount===0,'BUSINESS_INTEGRITY','当前业务关联需要处理',409,integrity);
+    }
     const destination = path.join(directory, "package");
     const manifest = request.kind==="MAINTENANCE_IMPORT"?await importPackage(phase,root,request,directory):await writePackageRecords(
       Readable.from(exportRecords(pool)),
@@ -233,21 +246,24 @@ export async function runMaintenance(pool, root, request) {
       mediaFiles: manifest.media.length,
       passed: true,
     };
-    if (['MAINTENANCE_BACKUP','MAINTENANCE_EXPORT','MAINTENANCE_IMPORT'].includes(request.kind)) {
+    if(request.kind==='MAINTENANCE_BACKUP'){
+      const snapshot=await saveSnapshot(destination,path.join(project,'project-data/current'),{projectRoot:project,phase,operationId:request.operationId,expectedPreviousSha256:request.expectedPreviousSha256});
+      durable=true;
+      Object.assign(result,snapshot,{backupId:request.operationId});
+    }
+    if (['MAINTENANCE_EXPORT','MAINTENANCE_IMPORT'].includes(request.kind)) {
       await tar(phase, directory);
       await phase.budget();
       Object.assign(result, {
         backupId: request.operationId,
+        format:'review-project-archive',expiresAt:new Date(Date.now()+24*60*60*1000).toISOString(),
         directory,
         archiveSha256: await fileSha(
           path.join(directory, "project-package.tar"),
         ),
       });
-      await phase.retain(
-        "path",
-        directory,
-        "用户创建并核验的完整业务备份；不自动删除，不读取封存旧项目备份",
-      );
+      await rm(destination,{recursive:true});
+      await phase.retain('path',directory,'用户明确导入或导出的完整项目包；24 小时下载和恢复窗口，到期由工作器精确清退');
       durable = true;
     }
     outcome = "SUCCEEDED";
@@ -267,4 +283,19 @@ export async function runMaintenance(pool, root, request) {
       throw error;
     }
   }
+}
+
+/** Only archives produced by this worker with an explicit expiry are eligible. */
+export async function sweepMaintenance(pool,root){
+ const rows=(await pool.query("SELECT id,result FROM operations WHERE status='SUCCEEDED' AND kind IN ('MAINTENANCE_EXPORT','MAINTENANCE_IMPORT') AND result->>'format'='review-project-archive' AND result->>'cleanedAt' IS NULL ORDER BY created_at LIMIT 100")).rows;
+ for(const row of rows){
+  if(!(Date.parse(row.result.expiresAt)<=Date.now()))continue;
+  const config=await readProcessConfig(path.dirname(root)),file=path.join(config.root,config.registry,taskId(row.id),'execute.json');
+  const record=JSON.parse(await readFile(file,'utf8')),phase=new ProcessPhase(config,file,record.token);
+  check(record.taskId===taskId(row.id)&&record.resources[0].path===row.result.directory,'ARCHIVE_OWNERSHIP','导出包清理身份不符');
+  await phase.update(r=>{for(const resource of r.resources)if(resource.kind==='path'&&resource.path===row.result.directory&&resource.state==='RETAINED')resource.state='TEMPORARY';r.status='CLEANUP_REQUIRED';});
+  const cleanup=await phase.finish({recover:true,outcome:'EXPIRED'});
+  check(cleanup.status==='CLEANED','ARCHIVE_CLEANUP','导出包清理尚未完成',409);
+  await pool.query("UPDATE operations SET result=result||jsonb_build_object('cleanedAt',now()) WHERE id=$1 AND status='SUCCEEDED'",[row.id]);
+ }
 }

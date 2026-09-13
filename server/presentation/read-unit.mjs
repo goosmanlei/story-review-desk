@@ -10,18 +10,18 @@ export class PresentationRead {
     this.basis.set(row.id, { objectId: row.id, revisionId: row.revisionId, expectedVersion: row.version, sha256: row.sha256 });
     return row;
   }
-  async rows(kinds, { historical = false, content = true, ids, roles, excludeRoles } = {}) {
-    const key = JSON.stringify([kinds, historical, content, ids, roles, excludeRoles]);
+  async rows(kinds, { historical = false, content = true, ids, roles, excludeRoles, fields } = {}) {
+    const key = JSON.stringify([kinds, historical, content, ids, roles, excludeRoles, fields]);
     if (this.loaded.has(key)) return this.loaded.get(key);
     const result = await this.tx.query(`SELECT ${summaries},r.id AS "revisionId",r.sha256,
-      ${content ? 'r.content' : "jsonb_build_object('slugline',r.content->'slugline','runtime',r.content->'runtime','type',r.content->'type') AS content"},
+      ${fields ? "COALESCE((SELECT jsonb_object_agg(key,value) FROM jsonb_each(r.content) WHERE key=ANY($6::text[])),'{}'::jsonb) AS content" : content ? 'r.content' : "jsonb_build_object('slugline',r.content->'slugline','runtime',r.content->'runtime','type',r.content->'type') AS content"},
       COALESCE((SELECT jsonb_agg(jsonb_build_object('id',m.member_id,'role',m.role,'position',m.position) ORDER BY m.position,m.member_id)
         FROM revision_memberships m WHERE m.revision_id=r.id),'[]'::jsonb) AS links
       FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id)
       WHERE o.kind=ANY($1::text[]) AND ($2 OR NOT o.historical) AND ($3::text[] IS NULL OR o.id=ANY($3))
       AND ($4::text[] IS NULL OR r.content->>'role'=ANY($4))
       AND ($5::text[] IS NULL OR NOT COALESCE(r.content->>'role','')=ANY($5))
-      ORDER BY o.position,o.id LIMIT 5001`, [kinds, historical, ids || null, roles || null, excludeRoles || null]);
+      ORDER BY o.position,o.id LIMIT 5001`, [kinds, historical, ids || null, roles || null, excludeRoles || null, ...(fields?[fields]:[])]);
     check(result.rows.length <= 5000, 'WORKSPACE_LIMIT', '此工作区需要进一步按对象范围读取', 413);
     const value = result.rows.map(row => this.bind(row)); this.loaded.set(key, value); return value;
   }

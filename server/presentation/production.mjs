@@ -1,6 +1,8 @@
+import {productionWindow} from './production-window.mjs';
+import {materialPage} from './material-page.mjs';
 import { present, idFor, idsFor, stateLabel } from './read-unit.mjs';
 import { episodePlan, sceneRow } from './story.mjs';
-import { assets, materialRows } from './materials.mjs';
+import { assets, materialRows, realizedOutput } from './materials.mjs';
 import { workStateSql } from '../shared/workflow.mjs';
 import { hash, check } from '../shared/contracts.mjs';
 import { reviewEvent } from './review.mjs';
@@ -20,26 +22,28 @@ export async function preparationWorkspace(unit, sceneId) {
   return { snapshotId: await unit.namespace(), releaseId: unit.version(), revisionId: unit.version(), content: { basis: { planId: plan?.content.planId, planRevisionId: plan?.revisionId }, scenes, episodes }, candidate: plan ? { revisionId: plan.revisionId, contentHash: plan.contentHash, episodes, scenes: plan.content.narrativeRevision.scenes.map(s => ({ id:s.id, displayId:s.displayId, title:s.title, contentHash:s.contentHash })) } : null, materialLinks, comments, stale: false, readOnly: false };
 }
 
-export async function productionPage(unit, params, materials = false) {
+export async function productionPage(unit, params, materials = false, {catalog=false}={}) {
+  if(materials)return materialPage(unit,params);
+  const window=await productionWindow(unit,params,{catalog});
   const model = await unit.blankModel();
-  const requirements = await materialRows(unit, { requirementId: params.get('requirementId') });
-  const media = await assets(unit);
+  const requirements = await materialRows(unit, { summary:true });
+  const media = await assets(unit,undefined,{summary:true});
   Object.assign(model, media, { materialRequirements: requirements });
   const plan = await episodePlan(unit);
-  const scenes = await unit.rows(['SCENE'], { historical:true });
+  const scenes = await unit.rows(['SCENE'], { fields:['slugline','purpose','runtime','contentHash'] });
   model.scenes = scenes.map(r => ({ ...sceneRow(r), episodeIds: [], shotIds: [], segmentIds: [], structureCardRefs: [], materialRequirementRefs: requirements.filter(q => q.sceneIds.includes(r.id)).map(q => q.id) }));
   model.episodes = plan?.content.episodes.map(e => ({ ...e, id:e.episodeUid, canonicalScopeId:e.episodeUid, segmentIds:[], shotIds:[], calibrationShotCount:0, scopeRole:'CURRENT', sourceRef:e.revisionId })) || [];
-  const designs = await unit.rows(['SHOT_DESIGN']);
+  const designs = await unit.rows(['SHOT_DESIGN'],{fields:['sceneId','title','status','reviewSpec']});
   const currentScenes = new Set(plan?.content.episodes.flatMap(e=>e.sceneIds)||[]);
   const currentShots = new Set(designs.filter(d=>currentScenes.has(idFor(d,'SCENE'))&&!['DISABLED','ARCHIVED'].includes(d.state)).flatMap(d=>idsFor(d,'SHOT')));
-  const shots = await unit.rows(['SHOT'], { historical:true });
+  const shots = await unit.rows(['SHOT'], { fields:['title','label','shotNumber','sceneId','scopeRole'] });
   model.shots = shots.map(r => {const current=!r.historical&&currentScenes.has(idFor(r,'SCENE'))&&currentShots.has(r.id);return { ...present(r), id:r.id, sceneId:idFor(r,'SCENE'), shotId:r.id, shotUid:r.id, scopeRole:current?'CURRENT':'HISTORICAL', historyRole:current?'CURRENT':'HISTORICAL', activeInCurrentProduction:current, requiredAssetRefs:idsFor(r,'REQUIREMENT'), materialRequirementRefs:idsFor(r,'REQUIREMENT'), workPackageRefs:[], workItemRefs:[], segmentId:'', episodeId:plan?.content.episodes.find(e=>e.sceneIds.includes(idFor(r,'SCENE')))?.episodeUid || '', sourceRef:r.revisionId, lifecycleState:stateLabel(r.state) };});
   model.shotPlanSetRevisions = designs.map(r => ({ ...present(r), id:r.revisionId, subjectId:r.id, sceneId:idFor(r,'SCENE'), scopeId:idFor(r,'SCENE'), scopeType:'SCENE', revisionState:r.state, status:r.state, shotSpecs:idsFor(r,'SHOT').map(id=>model.shots.find(s=>s.id===id)).filter(Boolean), shots:idsFor(r,'SHOT').map(id=>model.shots.find(s=>s.id===id)).filter(Boolean) }));
   model.episodePlanRevisions = plan ? [{ id:plan.revisionId, planId:plan.content.planId, episodes:plan.content.episodes, retiredEpisodeUids:[], status:plan.sourceRole, scopeRole:plan.sourceRole === 'CURRENT'?'CURRENT':'PROPOSAL', isCurrentProposal:plan.sourceRole!=='CURRENT' }] : [];
   model.revisionPointers = { currentEpisodePlanRevisionId:plan?.sourceRole==='CURRENT'?plan.revisionId:null, episodePlanProposalRevisionId:plan?.revisionId };
-  const planNotes=await unit.rows(['NOTE']),materialPlans=planNotes.filter(r=>r.content.role==='MATERIAL_PRODUCTION');
-  const calls=await unit.rows(['CALL']),expectations=await unit.rows(['EXPECTED_OUTPUT']);
-  model.expectedOutputs=expectations.map(r=>{const actual=media.assetVersions.find(v=>v.basis?.expectedOutputId===r.id&&v.outputState==='PRESENT');return {...present(r),familyId:idFor(r,'FAMILY'),expectedOutputId:r.id,...(actual?{expectationState:'REALIZED',realizedVersionId:actual.id,realizedVersionSha256:actual.sha256}:{})};});
+  const planNotes=await unit.rows(['NOTE'],{roles:['MATERIAL_PRODUCTION','SHOT_RECIPE'],fields:['role','requirementId','workItemId','currentCallId']}),materialPlans=planNotes.filter(r=>r.content.role==='MATERIAL_PRODUCTION');
+  const calls=await unit.rows(['CALL'],{fields:['workItemRef','declaredGate','definitionStatus']}),expectations=await unit.rows(['EXPECTED_OUTPUT'],{ids:window.ids,...(catalog?{fields:['workItemId','workPackageId','gateId','phaseId','scopeId','scopeType','sceneId','shotId','mediaType','deliverableKey','outputSlot','expectationState','realizedVersionId','realizedVersionSha256','productionPlanId','plannedVersionLabel']}:{} )});
+  model.expectedOutputs=expectations.map(r=>realizedOutput(r,media.assetVersions));
   model.materialWorkItems=requirements.filter(r=>r.requirementClass!=='EVIDENCE_ONLY').map(r=>{
     const call=calls.find(c=>c.id===materialPlans.find(p=>p.content.requirementId===r.id)?.content.currentCallId)||calls.find(c=>idsFor(c,'REQUIREMENT').includes(r.id)),family=media.assetFamilies.find(f=>r.assetFamilyRefs.includes(f.id)),version=media.assetVersions.find(v=>v.id===family?.currentVersionRef);
     return {id:call?.content.workItemRef||'material:'+r.id,label:r.title,lane:'MATERIAL_PREP',workflowStepId:null,requirementRef:r.id,requirementHash:r.requirementHash,scopeType:'PROJECT',scopeId:r.id,episodeIds:r.episodeIds,episodeUids:r.episodeUids,sceneIds:r.sceneIds,shotIds:r.shotIds,structureCardRefs:r.structureCardRefs,inputAssetRefs:call?idsFor(call,'FAMILY').filter(id=>id!==family?.id):[],outputAssetRef:family?.id||r.plannedAssetFamilyId||null,additionalOutputAssetRefs:r.assetFamilyRefs.filter(id=>id!==family?.id),consumerWorkItemRefs:r.consumerWorkItemRefs,sourceRef:call?.revisionId||r.revisionId,executionDefinitionRef:call?.id||null,definitionAuthoringState:call?'DEFINED':'REQUIRED',declaredExecutionGate:call?.content.declaredGate||'UNKNOWN',generationAllowed:false,executionBlockReasons:['EXPLICIT_GENERATION_AUTHORIZATION_REQUIRED'],applicabilityState:'REQUIRED',lifecycleState:version?.lifecycleState||'PLANNED',outputState:version?.outputState||'NOT_GENERATED',reviewDecision:version?.reviewDecision||'PENDING_REVIEW',canFlowDownstream:version?.canFlowDownstream||false,flowBlockReasons:version?.flowBlockReasons||[],reviewSpec:r.reviewSpec};
@@ -47,7 +51,7 @@ export async function productionPage(unit, params, materials = false) {
   model.materialRequirements=requirements.map(r=>({...r,materialWorkItemRef:model.materialWorkItems.find(i=>i.requirementRef===r.id)?.id||null}));
   const stages={SHOT_PLAN_INPUT_LOCK:['W01','INPUT_LOCK'],STORYBOARD_DIALOGUE:['W02','P07'],ANIMATIC_LOCK:['W03','P09'],KEYFRAMES:['W04','KFA'],SHOT_VIDEO:['W05','P11'],SHOT_LOCK:['W06','SHOT_LOCK_RECORD'],PICTURE_LOCK:['W07','PICTURE_LOCK'],SOUND_MIX_SUBTITLES:['W07','SOUND'],SCENE_QA:['W07','SCENE_QA'],EPISODE_ASSEMBLY:['W08','EPISODE_ASSEMBLY'],EPISODE_REVIEW:['W08','EPISODE_REVIEW'],EPISODE_TECH_QC:['W08','EPISODE_TECH_QC'],SERIES_CONTINUITY:['W09','SERIES_CONTINUITY'],RIGHTS_SAFETY_TECH:['W09','RIGHTS'],DELIVERY_ARCHIVE:['W09','DELIVERY']};
   model.workflowSteps=Object.entries(stages).filter(([,value],i,rows)=>rows.findIndex(([,v])=>v[0]===value[0])===i).map(([gateId,[id]])=>{const gate=model.productionGates.find(g=>g.id===gateId);return {id,order:Number(id.slice(1)),label:gate.label,purpose:gate.purpose,reviewFocus:gate.purpose,output:gate.label,unlock:'经本步骤审阅后进入后续制作',gateIds:Object.entries(stages).filter(([,s])=>s[0]===id).map(([g])=>g)};});
-  const settingsByOutput=new Map((await unit.tx.query("SELECT d.consumer_revision_id,r.content FROM dependencies d JOIN revisions r ON r.id=d.dependency_revision_id WHERE d.consumer_revision_id=ANY($1::text[]) AND r.content->>'role'='SHOT_PRODUCTION_SETTINGS'",[expectations.map(r=>r.revisionId)])).rows.map(r=>[r.consumer_revision_id,r.content.settings]));
+  const settingsByOutput=new Map((await unit.tx.query("SELECT d.consumer_revision_id,jsonb_build_object('settings',jsonb_build_object('inputs',r.content#>'{settings,inputs}','previsInputs',r.content#>'{settings,previsInputs}')) AS content FROM dependencies d JOIN revisions r ON r.id=d.dependency_revision_id WHERE d.consumer_revision_id=ANY($1::text[]) AND r.content->>'role'='SHOT_PRODUCTION_SETTINGS'",[expectations.map(r=>r.revisionId)])).rows.map(r=>[r.consumer_revision_id,r.content.settings]));
   for(const row of expectations.filter(r=>r.content.workItemId&&r.content.workPackageId&&stages[r.content.gateId]&&r.content.expectationState!=='RETIRED')){
     const value=row.content,shot=model.shots.find(s=>s.id===value.shotId),scene=model.scenes.find(s=>s.id===value.sceneId),family=media.assetFamilies.find(f=>f.id===idFor(row,'FAMILY'));
     if(!scene||value.shotId&&!shot||!family)continue;
@@ -59,7 +63,7 @@ export async function productionPage(unit, params, materials = false) {
     let pkg=model.workPackages.find(p=>p.id===value.workPackageId);
     if(!pkg){pkg={id:value.workPackageId,stepId,label:model.productionGates.find(g=>g.id===value.gateId).label,scopeType:value.scopeType,scopeId:value.scopeId,sceneId:value.sceneId,episodeId:episode?.episodeUid||'',episodeUid:episode?.episodeUid||null,segmentId:null,shotIds:value.shotId?[value.shotId]:model.shots.filter(s=>s.sceneId===value.sceneId&&s.activeInCurrentProduction).map(s=>s.id),workItemRefs:[],applicable:true,applicabilityState:'REQUIRED',notApplicableReason:null,isShared:!value.shotId,phaseId:value.phaseId,gateId:value.gateId,scopeRole:current?'CURRENT':'HISTORICAL',activityRole:current?'CURRENT_PRODUCTION':'HISTORICAL_EVIDENCE',activeInCurrentProduction:current,lifecycleState,canFlowDownstream:false,flowBlockReasons:[]};model.workPackages.push(pkg);}
     pkg.workItemRefs.push(value.workItemId);
-    family.expectedOutputRefs=[...new Set([...(family.expectedOutputRefs||[]),row.id])];family.currentExpectedOutputId=family.currentVersionId?null:row.id;family.nextExpectedOutputId=row.id;family.lifecycleState=lifecycleState;
+    family.expectedOutputRefs=[...new Set([...(family.expectedOutputRefs||[]),row.id])];family.currentVersionId=family.currentVersionRef;family.currentExpectedOutputId=family.currentVersionId?null:row.id;family.nextExpectedOutputId=realizedOutput(row,media.assetVersions).expectationState==='PLANNED'?row.id:null;family.lifecycleState=lifecycleState;
     model.reviewContexts.push({id:contextId,schemaVersion:'2.0',scopeType:value.scopeType,scopeId:value.scopeId,semanticStatus:'AUTHORED_DRAFT',reviewable:current,contextHash:hash({output:row.revisionId,scene:scene.revisionId,shot:shot?.revisionId}),position:{sceneId:scene.id,shotId:shot?.id||null},scene:{id:scene.id,slugline:scene.slugline,scriptExcerpt:scene.text||'',shotIds:pkg.shotIds},sourceRefs:[row.revisionId,scene.revisionId]});
   }
   for(const shot of model.shots){shot.workPackageRefs=model.workPackages.filter(p=>p.shotIds.includes(shot.id)).map(p=>p.id);shot.workItemRefs=model.workItems.filter(w=>w.shotId===shot.id).map(w=>w.id);}
@@ -70,7 +74,7 @@ export async function productionPage(unit, params, materials = false) {
   model.episodePlanRevisions=model.episodePlanRevisions.map(r=>({...r,episodes:model.episodes}));
   const count = materials ? requirements.length : model.workItems.length;
   const page = model;
-  return { schemaVersion:'1.0', snapshotId:await unit.namespace(), readVersion:unit.version(), count, total:count, hasMore:false, nextCursor:null, appliedMode:'requirements', appliedFilters:Object.fromEntries(['phaseId','gateId','scopeType','scopeId'].map(k=>[k,params.get(k)])), page };
+  return { schemaVersion:'1.0', snapshotId:await unit.namespace(), ...window, count:model.workItems.length, page };
 }
 
 const chainDefinitions = [

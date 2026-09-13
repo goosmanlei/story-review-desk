@@ -39,7 +39,7 @@ export function materialReferenceEdges(graph:DomainGraph,rows:MaterialCanvasRow[
  });
 }
 
-export type MaterialImageVersion={id:string;familyId:string;path:string|null;sha256:string|null;outputState?:string|null;historyRole?:string|null;lifecycleState?:string|null;mediaRetirement?:{state?:string}|null};
+export type MaterialImageVersion={mediaKind?:string;id:string;familyId:string;path:string|null;sha256:string|null;outputState?:string|null;historyRole?:string|null;lifecycleState?:string|null;mediaRetirement?:{state?:string}|null};
 /** Reading columns follow registered reference arrows, never state order or titles.
  * Cyclic/ambiguous residues keep level zero instead of inventing a production order. */
 export function materialReferenceLevels(rows:MaterialCanvasRow[],edges:MaterialReferenceEdge[]):Record<string,number>{
@@ -56,7 +56,7 @@ type ThumbnailFamily={id:string;currentVersionId:string|null;versionRefs:string[
 export function materialRepresentativeImage<T extends MaterialImageVersion>(model:{assetFamilies:ThumbnailFamily[];assetVersions:T[]}|undefined,familyIds:readonly string[]):T|undefined{
  if(!model)return undefined;
  const families=model.assetFamilies.filter(family=>familyIds.includes(family.id)&&model.assetFamilies.filter(row=>row.id===family.id).length===1);
- const eligible=(version:T,family:ThumbnailFamily)=>version.familyId===family.id&&family.versionRefs.includes(version.id)&&model.assetVersions.filter(row=>row.id===version.id).length===1&&version.outputState==='PRESENT'&&typeof version.path==='string'&&/\.(png|jpe?g|webp)$/i.test(version.path)&&typeof version.sha256==='string'&&/^[a-f0-9]{64}$/.test(version.sha256)&&!version.mediaRetirement&& !['EVIDENCE_ONLY','DELETED_AUDIT','DO_NOT_USE','SUPERSEDED'].includes(version.historyRole||'')&&!['DO_NOT_USE','EVIDENCE_ONLY','DELETED'].includes(version.lifecycleState||'');
+ const eligible=(version:T,family:ThumbnailFamily)=>version.familyId===family.id&&family.versionRefs.includes(version.id)&&model.assetVersions.filter(row=>row.id===version.id).length===1&&version.outputState==='PRESENT'&&version.mediaKind==='IMAGE'&&typeof version.sha256==='string'&&/^[a-f0-9]{64}$/.test(version.sha256)&&!version.mediaRetirement&& !['EVIDENCE_ONLY','DELETED_AUDIT','DO_NOT_USE','SUPERSEDED'].includes(version.historyRole||'')&&!['DO_NOT_USE','EVIDENCE_ONLY','DELETED'].includes(version.lifecycleState||'');
  const current=families.flatMap(family=>model.assetVersions.filter(version=>version.id===family.currentVersionId&&eligible(version,family)));
  if(current.length)return current[0];
  for(const family of families)for(const id of [...family.versionRefs].reverse()){const version=model.assetVersions.find(row=>row.id===id);if(version&&eligible(version,family))return version;}

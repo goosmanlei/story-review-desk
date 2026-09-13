@@ -429,6 +429,7 @@ export type ScopedReviewContext = {
 };
 
 export type V7AssetVersion = LifecycleProjection & {
+  mediaKind?: 'IMAGE'|'AUDIO'|'VIDEO'|'TEXT'|'UNKNOWN';
   imageTechnicalFacts?: import('../presentation/image-technical-spec.mjs').ImageTechnicalFacts;
   imageTechnicalSpecHash?: string;
   id: string;
@@ -1282,10 +1283,10 @@ function currentVersion(model: ProductionModel, family?: V7AssetFamily | null) {
 export function registrationParentVersion(model: ProductionModel, family?: V7AssetFamily | null) {
   if (!family) return null;
   const current = currentVersion(model, family);
-  if (current?.outputState === 'PRESENT' && current.path && current.sha256) return current;
+  if (current?.outputState === 'PRESENT' && current.sha256) return current;
   const materializedHistory = family.versionRefs
     .map((id) => model.assetVersions.find((item) => item.id === id) || null)
-    .filter((item): item is V7AssetVersion => Boolean(item?.path && item?.sha256 && item?.outputState === 'PRESENT'));
+    .filter((item): item is V7AssetVersion => Boolean(item?.sha256 && item?.outputState === 'PRESENT'));
   return materializedHistory[materializedHistory.length - 1] || null;
 }
 
@@ -1444,13 +1445,13 @@ export type ExecutionRecipe = {
   definitionHash: string;
   currentRevisionId: string;
   reviewSpec?: { title: string; question: string; criteria: string[] } | null;
-  upload: { rawText: string; items: Array<{ order: number; path: string; assetFamilyRef?: string; assetVersionRef?: string; sha256?:string }> };
+  upload: { rawText?: string; items: Array<{ order: number; path?: string; label?: string; mediaUrl?:string|null; revisionId?:string; bindingState?:string; assetFamilyRef?: string; assetVersionRef?: string; sha256?:string }> };
   model: { branch: string | null; rawRule: string; resolution: string };
   parametersRaw?: string | null;
   prompt: { main: string | null; negative: string | null; negativeApplication: string };
-  output: { path: string; mediaType: string; assetFamilyRef?: string | null; expectedOutputRef?: string | null };
+  output: { path?: string; label?:string; mediaType: string; assetFamilyRef?: string | null; expectedOutputRef?: string | null };
   declaredGate: string;
-  rawSourceBlock: string;
+  rawSourceBlock?: string;
 };
 
 export function useExecutionRecipe(recipeId?: string | null) {
@@ -1549,7 +1550,7 @@ export function useReviewOperations(
     if (!subjectId || !subjectType) return;
     const targetKey = subjectType + '::' + subjectId + '::' + (versionId || 'NO_VERSION') + '::' + (contextHash || 'NO_CONTEXT');
     const controller = new AbortController();
-    const operationRequest = fetch('/api/v1/workspaces/operations/snapshot', { signal: controller.signal }).then(async (response) => {
+    const operationRequest = fetch('/api/v1/workspaces/operations/snapshot'+(subjectType==='ASSET'?'?familyId='+encodeURIComponent(subjectId):''), { signal: controller.signal }).then(async (response) => {
       if (!response.ok) throw new Error(`operation snapshot HTTP ${response.status}`);
       return response.json() as Promise<OperationalSnapshot>;
     });
@@ -1848,7 +1849,7 @@ export function VersionPanel({ model, family, selectedVersionId, onSelectVersion
     {version && version.audioProxy && <audio controls preload="metadata" src={runtimePath(version.audioProxy)}>你的浏览器不支持音频播放。</audio>}
     <div className="v6-version-list">{familyVersions.map((item) => <button className={(item.id === version?.id ? 'active ' : '') + 'tone-' + statusToneFromRecord(item)} key={item.id} onClick={() => onSelectVersion(item.id)}><b>{visibleText(item.label)}</b><StatusHeadline record={item} compact /><small>{visibleText(deriveHeadlineState(item).meaning)}</small></button>)}{expectedOutputs.map((item) => <button className={(item.id === expected?.id ? 'active ' : '') + 'tone-waiting is-expected-output'} key={item.id} onClick={() => onSelectVersion(item.id)}><b>{visibleText(item.plannedVersionLabel)}</b><span>计划产出 · 尚无文件</span><small>不可预览、不可审阅、不可采用</small></button>)}{!familyVersions.length && !expectedOutputs.length && <p className="v6-empty-note">当前资产尚无文件版本或计划产出记录。</p>}</div>
     {expected && <article className="creator-expected-output" role="status"><small>EXPECTED OUTPUT · 不是资产版本</small><b>{visibleText(expected.label || expected.plannedVersionLabel)}</b><p>这里只登记应当产出的固定目标。当前没有候选文件与SHA-256，因此不能预览、提交审阅或作为下游输入。</p><dl><div><dt>计划文件</dt><dd><code>{compactPath(expected.targetPath)}</code></dd></div><div><dt>兼容旧深链</dt><dd><code>{publicRef(expected.legacyVersionId)}</code></dd></div><div><dt>执行定义</dt><dd>{publicRef(expected.executionDefinitionRef) || '尚未登记'}</dd></div></dl></article>}
-    {version && <details className="v7-technical-details v7-version-tech"><summary>统一状态、路径与哈希</summary><UnifiedStatusPanel record={version} showGateReason={false} /><div className="v6-version-facts"><p><b>资产／版本</b><code>{publicRef(family.id) + ' / ' + publicRef(version.id)}</code></p><p><b>路径</b><code>{compactPath(version.path)}</code></p><p><b>SHA-256</b><code>{version.sha256 || '无文件，不生成哈希'}</code></p>{(version.historyId || version.resourceId) && <p><b>历史凭据</b><code>{(version.historyId || '—') + ' / ' + (version.resourceId || '—')}</code></p>}{version.reason && <p><b>历史处置</b><span>{visibleText(version.reason)}</span></p>}</div></details>}
+    {version && <details className="v7-technical-details v7-version-tech"><summary>状态与媒体标识</summary><UnifiedStatusPanel record={version} showGateReason={false} /><div className="v6-version-facts"><p><b>资产／版本</b><code>{publicRef(family.id) + ' / ' + publicRef(version.id)}</code></p><p><b>SHA-256</b><code>{version.sha256 || '无文件，不生成哈希'}</code></p>{(version.historyId || version.resourceId) && <p><b>历史凭据</b><code>{(version.historyId || '—') + ' / ' + (version.resourceId || '—')}</code></p>}{version.reason && <p><b>历史处置</b><span>{visibleText(version.reason)}</span></p>}</div></details>}
   </section>;
 }
 
@@ -1894,7 +1895,6 @@ function storyboardReviewQueue(model: ProductionModel) {
       target.item
       && target.version?.outputState === 'PRESENT'
       && target.version.historyRole !== 'EVIDENCE_ONLY'
-      && target.version.path
       && target.version.sha256,
     );
   });
@@ -2475,8 +2475,8 @@ function ReviewTargetPanel({
   onMediaError: () => void;
   effectiveReview: ReviewEventRecord | null;
 }) {
-  const kind = mediaKind(version?.path || null);
-  const comparisonKind = mediaKind(comparisonVersion?.path || null);
+  const kind = version?.mediaKind==='TEXT'?'UNKNOWN':version?.mediaKind || 'UNKNOWN';
+  const comparisonKind = comparisonVersion?.mediaKind || 'UNKNOWN';
   const isInspectingDependency = Boolean(inspectedFamily && inspectedFamily.id !== family?.id);
   const projectedItem = withReviewProjection(item, effectiveReview);
   const isShotScope = reviewContext?.scopeType === 'SHOT';
@@ -2493,16 +2493,16 @@ function ReviewTargetPanel({
         {originalMediaUrl && kind === 'IMAGE' && <img src={runtimePath(originalMediaUrl)} alt={visibleText(family?.label || item.id) + '与登记SHA一致的原件'} onLoad={onMediaReady} onError={onMediaError} />}
         {originalMediaUrl && kind === 'AUDIO' && <audio controls preload="metadata" src={runtimePath(originalMediaUrl)} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持音频播放。</audio>}
         {originalMediaUrl && kind === 'VIDEO' && <video controls preload="metadata" src={runtimePath(originalMediaUrl)} onCanPlay={onMediaReady} onError={onMediaError}>你的浏览器不支持视频播放。</video>}
-        {!originalMediaUrl && version?.outputState === 'PRESENT' && version.path && version.sha256 && !originalMediaError && <div><b>正在解析与登记SHA一致的原件…</b><p>{visibleText(version.path)}</p></div>}
-        {(!version || version.outputState !== 'PRESENT' || !version.path || !version.sha256) && <div><b>当前没有可正式裁决的原件</b><p>{visibleText(version?.path || recipe?.output.path || '固定输出路径未登记')}</p><small>仍可核对执行配方和依赖，但不能提交结果裁决。</small></div>}
-        {originalMediaUrl && kind === 'UNKNOWN' && /\.(json|txt|md)$/i.test(version?.path||'') && version?.sha256 && <TextReviewOriginal url={originalMediaUrl} sha256={version.sha256} onReady={onMediaReady} onError={onMediaError}/> }
-        {originalMediaUrl && kind === 'UNKNOWN' && !/\.(json|txt|md)$/i.test(version?.path||'') && <div><b>该文件需在原件窗口核对</b><p>{visibleText(version?.path)}</p><small>当前类型不支持内嵌预览。</small></div>}
+        {!originalMediaUrl && version?.outputState === 'PRESENT' && version.sha256 && !originalMediaError && <div><b>正在解析与登记SHA一致的原件…</b><p>{visibleText(version.label)}</p></div>}
+        {(!version || version.outputState !== 'PRESENT' || !version.sha256) && <div><b>当前没有可正式裁决的原件</b><p>{visibleText(version?.label || recipe?.output.label || '预期产物尚未登记')}</p><small>仍可核对执行配方和依赖，但不能提交结果裁决。</small></div>}
+        {originalMediaUrl && version?.mediaKind === 'TEXT' && version?.sha256 && <TextReviewOriginal url={originalMediaUrl} sha256={version.sha256} onReady={onMediaReady} onError={onMediaError}/> }
+        {originalMediaUrl && kind === 'UNKNOWN' && version?.mediaKind !== 'TEXT' && <div><b>该文件需在原件窗口核对</b><p>{visibleText(version?.label)}</p><small>当前类型不支持内嵌预览。</small></div>}
       </div></figure>
       {showComparison && comparisonVersion && <figure><figcaption><b>B · 只作比较证据</b><span>{visibleText(comparisonVersion.label)}</span></figcaption><div className="v8-review-media is-evidence">
         {comparisonMediaUrl && comparisonKind === 'IMAGE' && <img src={runtimePath(comparisonMediaUrl)} alt={visibleText(comparisonFamily?.label || comparisonVersion.id) + '比较证据'} />}
         {comparisonMediaUrl && comparisonKind === 'AUDIO' && <audio controls preload="metadata" src={runtimePath(comparisonMediaUrl)}>你的浏览器不支持音频播放。</audio>}
         {comparisonMediaUrl && comparisonKind === 'VIDEO' && <video controls preload="metadata" src={runtimePath(comparisonMediaUrl)}>你的浏览器不支持视频播放。</video>}
-        {!comparisonMediaUrl && <div><b>比较原件暂不可预览</b><p>{visibleText(comparisonVersion.path || comparisonMediaError || '没有登记媒体路径')}</p></div>}
+        {!comparisonMediaUrl && <div><b>比较原件暂不可预览</b><p>{visibleText(comparisonMediaError || '没有登记可用媒体')}</p></div>}
       </div></figure>}
     </div>
     <div className="v8-original-proof"><div><b>与裁决绑定的原件</b><code>{publicRef(version?.id) || '无版本'}<br />{version?.sha256 || '无SHA-256'}</code></div>{originalMediaUrl ? <a href={runtimePath(originalMediaUrl)} target="_blank" rel="noreferrer">在新窗口打开SHA绑定原件</a> : <span>原件地址不可用</span>}</div>
@@ -2521,7 +2521,7 @@ function recipeCallPackage(recipe: ExecutionRecipe) {
     callPackageHash: recipe.definitionHash,
     executorKind: recipe.executorKind,
     model: recipe.model,
-    inputBindings: recipe.upload.items.map((item) => ({ order: item.order, path: item.path, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null })),
+    inputBindings: recipe.upload.items.map((item) => ({ order: item.order, revisionId:item.revisionId, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null })),
     prompt: recipe.prompt,
     parametersRaw: recipe.parametersRaw || null,
     output: recipe.output,
@@ -2544,7 +2544,7 @@ function reviewerCallPackage(recipe: ExecutionRecipe) {
     callPackageHash: recipe.definitionHash,
     executorKind: recipe.executorKind,
     model: recipe.model,
-    inputBindings: recipe.upload.items.map((item) => ({ order: item.order, path: item.path, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null })),
+    inputBindings: recipe.upload.items.map((item) => ({ order: item.order, revisionId:item.revisionId, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null })),
     prompt: completeProductionPrompt(recipe),
     parametersRaw: recipe.parametersRaw || null,
     output: recipe.output,
@@ -2560,7 +2560,7 @@ function recipeCallPackageMarkdown(recipe: ExecutionRecipe, reviewerView = false
       ...(recipe.upload.items.length ? [
         '',
         '## 上传附件（严格保序）',
-        ...recipe.upload.items.map((item) => `${item.order}. ${item.path}`),
+        ...recipe.upload.items.map((item) => `${item.order}. ${item.label || item.assetVersionRef} · ${item.sha256 || "待完善"}`),
       ] : []),
       '',
       '## 完整 Prompt',
@@ -2569,8 +2569,8 @@ function recipeCallPackageMarkdown(recipe: ExecutionRecipe, reviewerView = false
       '## 参数／规格',
       recipe.parametersRaw || '无／不适用',
       '',
-      '## 固定输出',
-      recipe.output.path,
+      '## 预期产物',
+      recipe.output.label || recipe.title,
     ].join('\n');
   }
   return [
@@ -2582,7 +2582,7 @@ function recipeCallPackageMarkdown(recipe: ExecutionRecipe, reviewerView = false
     `- 模型／执行器：${recipe.executorKind} · ${recipe.model.branch || recipe.model.rawRule}`,
     '',
     '## 上传附件（严格保序）',
-    ...(recipe.upload.items.length ? recipe.upload.items.map((item) => `${item.order}. ${item.path}`) : ['无附件']),
+    ...(recipe.upload.items.length ? recipe.upload.items.map((item) => `${item.order}. ${item.label || item.assetVersionRef} · ${item.sha256 || "待完善"}`) : ['无附件']),
     '',
     '## 主 Prompt',
     recipe.prompt.main || '不适用（人工剪辑任务）',
@@ -2593,8 +2593,8 @@ function recipeCallPackageMarkdown(recipe: ExecutionRecipe, reviewerView = false
     '## 参数／规格',
     recipe.parametersRaw || '无／不适用',
     '',
-    '## 固定输出',
-    recipe.output.path,
+    '## 预期产物',
+    recipe.output.label || recipe.title,
     '',
     '## 声明门禁',
     recipe.declaredGate,
@@ -2626,7 +2626,7 @@ function RecipeExecutionControlsInner({recipe,context}:RecipeControlsProps) {
   const setExecutor=(v:Fields['executor'])=>set('executor',v),setExecutionRequestId=(v:string)=>set('executionRequestId',v),setRunEventId=(v:string)=>set('runEventId',v),setResultLabel=(v:string)=>set('resultLabel',v),setRunId=(v:string)=>set('runId',v),setRunState=(v:string)=>set('runState',v),setProviderRunId=(v:string)=>set('providerRunId',v),setRunNote=(v:string)=>set('runNote',v),setActualPrompt=(v:string)=>set('actualPrompt',v),setActualNegativePrompt=(v:string)=>set('actualNegativePrompt',v);
   const [message,setMessage]=useState('这里只创建明确范围的执行授权，不会在浏览器中直接调用模型。'),[busy,setBusy]=useState(false),[resultFile,setResultFile]=useState<File|null>(null);
   async function queryExecution(){setBusy(true);try{const r=await fetch('/api/v1/workspaces/execution-requests?executionRequestId='+encodeURIComponent(executionRequestId),{cache:'no-store'}),value=await r.json();if(!r.ok)throw Error(value.error||'原请求读取失败');if(value.basis.callId!==recipe.id||value.basis.callRevisionId!==recipe.currentRevisionId)throw Error('此请求属于其他调用版本');setExecutor(value.executor);setRunId(value.latestRun?.runId||'');setRunEventId(value.latestRun?.eventId||'');setRunState(value.latestRun?.state||'');setProviderRunId(value.latestRun?.providerRunId||'');setMessage('原请求和运行状态已核对，未重新执行。');}catch(e){setMessage(e instanceof Error?e.message:'查询失败');}finally{setBusy(false);}}
-  const inputBindings = recipe.upload.items.map((item) => ({ order: item.order, path: item.path, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null }));
+  const inputBindings = recipe.upload.items.map((item) => ({ order: item.order, revisionId:item.revisionId, assetFamilyRef: item.assetFamilyRef || '', assetVersionRef: item.assetVersionRef || '', sha256:item.sha256||null }));
 
   async function authorize() {
     if (!context.familyId) { setMessage('当前工作项没有输出资产族，不能创建生成授权。'); return; }
@@ -2773,20 +2773,19 @@ function RecipeExecutionControlsInner({recipe,context}:RecipeControlsProps) {
   </section>;
 }
 
-export function RecipePanel({ definitionRef, recipe, error, title = '制作依据：附件、Prompt、模型与固定输出', executionContext, authorWorkItemId, defaultOpen = false, reviewerView = false, expanded = false, compact = false }: { definitionRef?: string | null; recipe: ExecutionRecipe | null; error?: string; title?: string; executionContext?: ExecutionUiContext; authorWorkItemId?:string; defaultOpen?: boolean; reviewerView?: boolean; expanded?: boolean; compact?: boolean }) {
+export function RecipePanel({ definitionRef, recipe, error, title = '制作设置：参考素材、Prompt、模型与产物', executionContext, authorWorkItemId, defaultOpen = false, reviewerView = false, expanded = false, compact = false }: { definitionRef?: string | null; recipe: ExecutionRecipe | null; error?: string; title?: string; executionContext?: ExecutionUiContext; authorWorkItemId?:string; defaultOpen?: boolean; reviewerView?: boolean; expanded?: boolean; compact?: boolean }) {
   const {hostedReadOnly}=useRuntimeMode();
   const packageJson = recipe ? JSON.stringify(reviewerView ? reviewerCallPackage(recipe) : recipeCallPackage(recipe), null, 2) : '';
   const packageMarkdown = recipe ? recipeCallPackageMarkdown(recipe, reviewerView) : '';
   const completePrompt = recipe ? completeProductionPrompt(recipe) : '';
   const Wrapper = expanded ? 'section' : 'details';
-  const fixedOutput = recipe ? <section className="creator-recipe-section is-output"><header><b>固定输出</b><code title={recipe.output.path}>{recipe.output.path}</code><ClipboardButton value={recipe.output.path} label="复制固定输出" /></header></section> : null;
+  const fixedOutput = recipe ? <section className="creator-recipe-section is-output"><header><b>预期产物</b><span>{visibleText(recipe.output.label || recipe.title)} · {recipe.output.mediaType}</span></header></section> : null;
   return <Wrapper {...(!expanded ? { open: defaultOpen } : {})} className={`v7-technical-details v8-recipe-panel${compact ? ' material-recipe-compact' : ''}`}>{expanded ? <h4>{title}</h4> : <summary>{title}</summary>}{!definitionRef ? <p className="v6-empty-note">当前对象没有独立执行定义；不伪造Prompt。</p> : error ? <p className="v8-inline-error">完整执行配方读取失败：{visibleText(error)}</p> : !recipe ? <p className="v6-empty-note">正在按需读取完整执行配方…</p> : <div>
     {compact&&fixedOutput}
     <div className="creator-call-package-actions"><ClipboardButton value={packageMarkdown} label="复制完整调用包" /><ClipboardButton value={packageJson} label={reviewerView ? '复制生产资料 JSON' : '复制调用包 JSON'} /></div>
     {!reviewerView && <p><b>执行定义</b><code>{publicRef(recipe.id)} · {publicRef(recipe.currentRevisionId)}<br />{recipe.definitionHash}</code></p>}
     <p><b>模型／执行器</b><span>{visibleText(recipe.executorKind + ' · ' + (recipe.model.branch || recipe.model.rawRule))}</span></p>
-    {recipe.upload.items.length > 0 && <section className="creator-recipe-section"><header><b>上传附件（严格保序）</b><ClipboardButton value={recipe.upload.items.map((item) => `${item.order}. ${item.path}`).join('\n')} label="复制附件清单" /></header><ol>{recipe.upload.items.map((upload) => <li key={upload.order + upload.path}><span>{upload.order}</span><code>{visibleText(upload.path)}</code></li>)}</ol></section>}
-    {recipe.upload.items.length > 0 && recipe.upload.rawText && <section className="creator-recipe-section"><header><b>附件定义</b><ClipboardButton value={recipe.upload.rawText} label="复制附件定义" /></header><pre>{visibleText(recipe.upload.rawText)}</pre></section>}
+    {recipe.upload.items.length > 0 && <section className="creator-recipe-section"><header><b>参考素材（按输入顺序）</b><ClipboardButton value={recipe.upload.items.map(item => `${item.order}. ${item.label || item.assetVersionRef} · ${item.sha256 || '待完善'}`).join('\n')} label="复制参考素材" /></header><ol>{recipe.upload.items.map(upload => <li key={upload.order + ':' + upload.assetVersionRef}><span>{upload.order}</span>{upload.mediaUrl ? <a href={runtimePath(upload.mediaUrl)} target="_blank" rel="noreferrer">{visibleText(upload.label || '参考素材')}</a> : <span>{visibleText(upload.label || '参考素材待完善')}</span>}</li>)}</ol></section>}
     {reviewerView
       ? <section className="creator-recipe-section"><header><b>完整 Prompt</b><ClipboardButton value={completePrompt} label="复制完整 Prompt" /></header><pre>{visibleText(completePrompt)}</pre></section>
       : <><section className="creator-recipe-section"><header><b>主 Prompt</b><ClipboardButton value={recipe.prompt.main || '不适用（人工剪辑任务）'} label="复制主Prompt" /></header><pre>{visibleText(recipe.prompt.main || '不适用（人工剪辑任务）')}</pre></section><section className="creator-recipe-section"><header><b>负面 Prompt</b><ClipboardButton value={recipe.prompt.negative || '无／不适用'} label="复制负面Prompt" /></header><pre>{visibleText(recipe.prompt.negative || '无／不适用')}</pre></section></>}
@@ -2794,7 +2793,6 @@ export function RecipePanel({ definitionRef, recipe, error, title = '制作依�
     {!compact&&fixedOutput}
     {!reviewerView && recipe.reviewSpec && <><p><b>执行定义附带的审阅提示</b><span>{visibleText(recipe.reviewSpec.question)}</span></p><ul>{recipe.reviewSpec.criteria.map((criterion) => <li key={criterion}>{visibleText(criterion)}</li>)}</ul></>}
     {executionContext && <RecipeExecutionControls key={`${recipe.id}:${recipe.currentRevisionId}:${executionContext.workItemId}:${executionContext.configurationBinding?.configurationHash || "LEGACY"}`} recipe={recipe} context={executionContext} />}
-    {!reviewerView && <details><summary>查看执行脚本全文（语义化展示）</summary><pre>{visibleText(recipe.rawSourceBlock)}</pre></details>}
   </div>}{authorWorkItemId&&!reviewerView&&<ShotProductionRecipeEditor key={authorWorkItemId} workItemId={authorWorkItemId} definitionRef={definitionRef} readOnly={hostedReadOnly}/>}</Wrapper>;
 }
 
@@ -2803,7 +2801,7 @@ type WorkbenchSurface = 'PRE_OUTPUT' | 'REVIEW' | 'REVIEW_BLOCKED' | 'REVISION' 
 function resolveWorkbenchSurface(item: V7WorkItem, version: V7AssetVersion | null, formalReviewSupported: boolean): WorkbenchSurface {
   const lifecycle = item.lifecycleState || version?.lifecycleState || 'WAITING_UPSTREAM';
   if (lifecycle === 'REVIEW_PENDING') {
-    const outputBound = version?.outputState === 'PRESENT' && Boolean(version.path && version.sha256);
+    const outputBound = version?.outputState === 'PRESENT' && Boolean(version.sha256);
     return formalReviewSupported && outputBound ? 'REVIEW' : 'REVIEW_BLOCKED';
   }
   if (lifecycle === 'REVISION_REQUIRED') return 'REVISION';

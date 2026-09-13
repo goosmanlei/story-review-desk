@@ -127,7 +127,7 @@ export async function createProject(
   );
   await writeFile(
     path.join(root, ".gitattributes"),
-    "* text=auto\n*.ndjson -text\n*.png binary\n*.jpg binary\n*.mp4 binary\n*.wav binary\n",
+    "* text=auto\n*.ndjson -text\n*.png binary\n*.jpg binary\n*.mp4 binary\n*.wav binary\nproject-data/*/data/** filter=lfs diff=lfs merge=lfs -text\nproject-data/*/media/** filter=lfs diff=lfs merge=lfs -text\nproject-data/*/originals/** filter=lfs diff=lfs merge=lfs -text\n",
     { flag: "wx" },
   );
   await writeFile(

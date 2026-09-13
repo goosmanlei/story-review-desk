@@ -8,6 +8,7 @@
 | GET objects、objects/:id、contexts/:id | 分页目录、精确修订及上下文 | 对象、关系、basis |
 | GET source/:revisionId、media/:sha | 原始资料与登记媒体 | 原字节；媒体支持 Range |
 | GET facets、relationships、settings/spatial-baseline | 分类、关系与空间投影 | 有界读取 |
+| GET workspaces/integrity | 当前对象、素材归属、制作设置和精确引用核验 | 问题对象及原因 |
 | GET workspaces/... | 原版工作区读取投影 | 页面所需的一致上下文 |
 | POST transactions | 保存、提交、判断及配置事务 | 操作回执和命令结果 |
 | POST workspaces/... | 工作区动作 | 转换为所属对象服务命令 |

@@ -1,3 +1,4 @@
+import {referenceDependencies,normalizeReferenceInputs} from './materials/references.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
 import { transaction } from "./db.mjs";
 import { moduleFor } from "./modules.mjs";
@@ -97,7 +98,7 @@ async function save(tx, command, context) {
     "实际素材不可覆盖，请登记新版本",
     409,
   );
-  const content = { ...objectValue(command.content) };
+  let content = { ...objectValue(command.content) };
   if (!old && !content.reviewSpec) {
     const configuration = (
       await tx.query(
@@ -121,6 +122,7 @@ async function save(tx, command, context) {
   }
   if(old&&kind==='REQUIREMENT')delete content.requirementHash;
   module.validate?.(kind, content);
+  content=await normalizeReferenceInputs(tx,kind,content);
   const title = command.title ?? old?.title;
   check(
     typeof title === "string" && title.trim() && title.length <= 500,
@@ -128,17 +130,17 @@ async function save(tx, command, context) {
     "请填写标题",
   );
   const previous = old?.draft_revision_id || old?.adopted_revision_id || null;
-  if (module.validateTarget) {
-    const oldContent = previous
+  const oldContent = previous
       ? (
           await tx.query("SELECT content FROM revisions WHERE id=$1", [
             previous,
           ])
         ).rows[0]?.content
       : null;
+  if (module.validateTarget) {
     await module.validateTarget(tx, kind, content, oldContent);
   }
-  const links =
+  let links =
     command.links ??
     (previous
       ? (
@@ -148,6 +150,7 @@ async function save(tx, command, context) {
           )
         ).rows
       : []);
+  if(kind==='NOTE'&&content.role==='MATERIAL_OCCURRENCE')links=[...links.filter(l=>!['SCENE','REQUIREMENT'].includes(l.role)),{id:content.sceneId,role:'SCENE'},{id:content.reference.requirementId,role:'REQUIREMENT'}];
   validateLinks(links);
   for (const link of links) {
     const target = (
@@ -163,7 +166,7 @@ async function save(tx, command, context) {
         { id: link.id },
       );
   }
-  const dependencies =
+  let dependencies =
     command.dependencies ??
     (previous
       ? (
@@ -178,6 +181,12 @@ async function save(tx, command, context) {
     "INVALID_DEPENDENCIES",
     "输入依据必须是有界列表",
   );
+  if(command.dependencies===undefined){
+    const previousReferences=await referenceDependencies(tx,kind,oldContent||{});
+    dependencies=dependencies.filter(d=>!previousReferences.some(p=>p.revisionId===d.revisionId&&p.purpose===d.purpose));
+  }
+  for(const d of await referenceDependencies(tx,kind,content))if(!dependencies.some(v=>v.revisionId===d.revisionId&&v.purpose===d.purpose))dependencies.push(d);
+  check(dependencies.length<=2000,"INVALID_DEPENDENCIES","输入依据必须是有界列表");
   for (const dependency of dependencies) {
     check(
       ["SOURCE", "CONTENT", "DEFINITION", "DESIGN", "ACTUAL_INPUT"].includes(
@@ -791,6 +800,11 @@ export async function execute(pool, request) {
           c.id,
           c.content?.target?.objectId,
           ...(c.links || []).map((x) => x.id),
+          ...(c.content?.sourceBindings||[]).map(s=>s.objectId),
+          ...(c.content?.inputBindings||c.content?.upload?.items||[]).flatMap(i=>[i.familyId||i.assetFamilyRef,i.versionId||i.assetVersionRef]),
+          c.content?.output?.assetFamilyRef,c.content?.output?.assetVersionRef,c.content?.output?.expectedOutputRef,
+          c.content?.role==='MATERIAL_OCCURRENCE'?c.content.sceneId:null,
+          c.content?.role==='MATERIAL_OCCURRENCE'?c.content.reference?.requirementId:null,
         ])
         .filter(Boolean);
       const suggestionIds = commands

@@ -22,7 +22,7 @@ all 先本地后 VPS；本地失败停止。SSH 不通报告 SKIPPED 并返回�
 
 ## 宿主依赖与目标配置
 
-需要 Node.js 22.13+、npm、Python 3、FFmpeg（含 ffprobe）、Docker；Linux 使用 systemd，macOS 使用 LaunchAgent。SSH 使用既有主机信任和 BatchMode。普通部署检查依赖，不安装系统软件或接管旧版非标准目录；反向代理及 TLS 由宿主管理。
+需要 Node.js 22.13+、npm、Python 3、FFmpeg（含 ffprobe）、Docker；使用离线引用快照的项目还需要 Git 与 Git LFS。Linux 使用 systemd，macOS 使用 LaunchAgent。SSH 使用既有主机信任和 BatchMode。普通部署检查依赖，不安装系统软件或接管旧版非标准目录；反向代理及 TLS 由宿主管理。
 
 ```json
 {
@@ -52,7 +52,7 @@ all 先本地后 VPS；本地失败停止。SSH 不通报告 SKIPPED 并返回�
 
 版本 2 项目包由 manifest、模块分块 NDJSON、原始资料及 SHA 媒体构成，流式处理。单条记录上限 64 MiB，整体不要求装入内存。保留永久身份、草稿与采用头、关系、必要历史、未采用候选和正式证明。
 
-导入仅允许空白独立实例，核对所有分块、原件和 PRESENT 媒体的字节 SHA；MISSING 和 RETIRED 保持原事实。拒绝路径逃逸、符号链接、非空数据库或身份冲突。不恢复旧队列、会话和生成资格；导入产生新运行期，旧页面必须重新读取。
+导入仅允许空白独立实例，核对所有分块、原件和 PRESENT 媒体的字节 SHA；MISSING 和 RETIRED 保持原事实。素材附件、来源及使用位置还须通过与普通保存相同的对象、修订和 SHA 校验，任一失败回滚整笔导入。拒绝路径逃逸、符号链接、非空数据库或身份冲突。不恢复旧队列、会话和生成资格；导入产生新运行期，旧页面必须重新读取。
 
 | 配置归属 | 例子 | 是否进入普通项目包 |
 | --- | --- | --- |
@@ -86,13 +86,39 @@ sync 和 verify 返回 operationId；必须查询成功回执。verify 强制核
 
 resolve 核验实际文件身份、与原件的硬链接关系和字节，返回精确媒体版本或文本来源依据及项目内 exactPath。工作器未运行时，目录保留最后一次同步结果，应先检查状态再判断是否为当前稿。
 
-## 备份与恢复
+## 快照、完整项目包与恢复
 
-“系统管理 → 数据与运行”提供核验、备份、导入和独立恢复。后台核验完整包后才提供下载。恢复只使用本实例已核验备份编号，在受管新目录建立独立 PostgreSQL 和软件副本；当前实例不切换，也不启动真实模型任务。
+![运行原件、引用快照与独立离线恢复库](../assets/snapshots.svg)
+
+“系统管理 → 数据与运行”提供保存恢复快照、导出完整包、导入和独立恢复。业务数据库仍是当前权威；快照是一次冻结的可恢复状态，不参与网页日常读取。
+
+| 保存位置 | 内容与用途 | 保留方式 |
+| --- | --- | --- |
+| instance/media | 按 SHA 登记的运行原件 | 当前作品及有效版本闭包 |
+| project-data/current | 当前 manifest、数据块／媒体／来源的 LFS 指针 | 每次成功保存替换 |
+| project-data/previous | 紧邻当前的一次恢复快照 | 下一次成功保存时轮换 |
+| .git/lfs/objects | 独立的完整内容库 | 离线恢复当前与上一快照；不能与运行原件硬链接 |
+| 受管导出目录 | 自包含 tar 完整包 | 明确导出才产生，成功后保留 24 小时 |
+| review-library | 人可阅读的媒体入口 | 与运行原件硬链接，共享字节 |
+
+快照工作文件保持指针，关闭自动 smudge，避免检出后再次展开完整媒体。离线核验逐一检查指针、大小与内容库 SHA，不下载网络对象，也不依赖运行原件。项目只使用自己的独立 `.git/lfs/objects`；自定义共享 LFS 存储和仓库外路径不能用作这个恢复库。
+
+后台工作器先生成并核验快照，取得独占锁后切换 current／previous。失败保留原快照；切换结果未知时保留恢复输入和原操作编号，阻断新保存，先核查原操作。完整下载包只有显式导出或导入时产生，清退到期归档前核对操作、阶段和占用，不清理未知任务。需要长期保留完整包时，将下载文件存放到用户自行管理的位置。
+
+恢复使用当前／上一快照编号或未过期完整包编号，在受管新目录建立独立 PostgreSQL 和软件副本；当前实例不切换，也不启动真实模型任务。快照先从离线库展开到恢复阶段，再通过标准导入校验；阶段结束清除临时展开内容。
 
 普通部署保留当前与上一软件／数据库恢复点。更旧资源必须确认活动指针、身份、SHA 和占用后清理。用户明确保留的备份与独立恢复副本不按普通日志期限删除。封存旧项目备份不被自动读取、扫描或删除。
 
-CLI 对应 `review maintenance verify`、`review maintenance backup`、`review maintenance restore --file restore.json`；恢复请求包含已核验的 backupId、targetName 与 explicit:true。恢复结果给出独立目录；新副本不会自动启动 Web，可从该目录使用正常部署入口上线。
+```bash
+npm run review -- snapshot save
+npm run review -- snapshot verify
+npm run review -- snapshot status
+npm run review -- snapshot export
+npm run review -- snapshot restore --file restore.json
+npm run review -- status OPERATION_ID
+```
+
+save、export、restore 与网页共用后台维护接口；verify 是不写数据的离线核验。`review maintenance verify` 另核对运行数据库、关联与原件。恢复请求包含 backupId、targetName 与 explicit:true。恢复结果给出独立目录；新副本不会自动启动 Web，可从该目录使用正常部署入口上线。
 
 ## 过程资源与宿主配置
 

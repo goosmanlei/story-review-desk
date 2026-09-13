@@ -9,7 +9,7 @@ type MaterialDispositionRow = {
 };
 
 export function currentMaterialDirectoryRow(row: MaterialDispositionRow): boolean {
-  if (row.requirementClass !== 'REQUIRED') return false;
+  if (!['REQUIRED','OPTIONAL'].includes(row.requirementClass||'')) return false;
   if (row.currentDisposition !== undefined) {
     return (row.currentDisposition === 'CURRENT_ATOMIC' || row.currentDisposition === 'CURRENT_AGGREGATE')
       && row.requirementReplacement?.protocol === 'MATERIAL_REQUIREMENT_REPLACEMENT_V1'

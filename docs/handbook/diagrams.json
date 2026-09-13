@@ -1627,5 +1627,109 @@
         "label": "事务导入"
       }
     ]
+  },
+  {
+    "id": "snapshots",
+    "title": "运行原件与离线快照各司其职",
+    "description": "快照保存指针，LFS 保存独立恢复字节；只有显式导出时展开完整包。",
+    "nodes": [
+      {
+        "id": "db",
+        "label": "当前业务数据库",
+        "domain": "project",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "对象、修订与精确关系"
+        ]
+      },
+      {
+        "id": "snapshots",
+        "label": "当前／上一快照",
+        "domain": "project",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "manifest 与 LFS 指针",
+          "只保留一次前驱"
+        ]
+      },
+      {
+        "id": "lfs",
+        "label": "独立离线内容库",
+        "domain": "project",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "完整字节按 SHA 去重",
+          "不依赖运行原件或网络"
+        ]
+      },
+      {
+        "id": "media",
+        "label": "运行媒体原件",
+        "domain": "materials",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "服务播放与查看",
+          "review-library 共享硬链接"
+        ]
+      },
+      {
+        "id": "archive",
+        "label": "临时完整项目包",
+        "domain": "project",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "显式导出、下载或传输",
+          "24 小时后按归属清退"
+        ]
+      },
+      {
+        "id": "restore",
+        "label": "独立恢复实例",
+        "domain": "project",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "标准导入与 SHA 核验",
+          "新数据库，不切换当前实例"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "db",
+        "to": "snapshots",
+        "label": "冻结"
+      },
+      {
+        "from": "snapshots",
+        "to": "lfs",
+        "label": "内容引用"
+      },
+      {
+        "from": "media",
+        "to": "archive",
+        "label": "显式导出"
+      },
+      {
+        "from": "db",
+        "to": "archive",
+        "label": "流式分块"
+      },
+      {
+        "from": "lfs",
+        "to": "restore",
+        "label": "离线还原"
+      },
+      {
+        "from": "archive",
+        "to": "restore",
+        "label": "完整导入"
+      }
+    ]
   }
 ]

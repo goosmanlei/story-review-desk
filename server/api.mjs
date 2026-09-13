@@ -112,7 +112,7 @@ export async function dispatch(request) {
       if(route.slice(1).join('/')==='script-comments/polish')return json(await transaction(pool,tx=>commentPolishResult(tx,url.searchParams.get('operationId')),{readOnly:true}));
       if (route[1] === 'media' && route[2]) return mediaResponse(request, pool, (await machineConfiguration()).root, route[2]);
       if (route[1] === 'maintenance') {
-        const state=await maintenanceState(pool),project=(await pool.query('SELECT instance_id AS "instanceId",runtime_epoch AS "runtimeEpoch" FROM project')).rows[0];
+        const state=await maintenanceState(pool,(await machineConfiguration()).root),project=(await pool.query('SELECT instance_id AS "instanceId",runtime_epoch AS "runtimeEpoch" FROM project')).rows[0];
         return json({...state,runtime:{...project,status:'运行中'},storage:{provider:'PostgreSQL',authority:'对象与不可变修订'},capabilities:{verify:true,backup:true,export:true,restore:true}});
       }
       const value=await transaction(pool,tx=>cachedWorkspace(tx,route.slice(1),url.searchParams,request.headers.get('if-none-match')),{readOnly:true});
@@ -125,7 +125,7 @@ export async function dispatch(request) {
           (await machineConfiguration()).root,
           route[1],
         );
-      return json(await maintenanceState(pool));
+      return json(await maintenanceState(pool,(await machineConfiguration()).root));
     }
     if (method !== "GET") {
       check(

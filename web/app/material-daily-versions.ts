@@ -36,6 +36,6 @@ export function resolveExactMaterialSelection<V extends VersionIdentity,E extend
  if(expected.expectationState==='PLANNED'&&!expected.realizedVersionId&&!expected.realizedVersionSha256)return {version:null,expected};
  if(expected.expectationState!=='REALIZED'||!expected.realizedVersionId||!expected.realizedVersionSha256)return unresolved;
  const realized=exactMaterialVersion(model,family,expected.realizedVersionId);
- if(!realized||realized.outputState!=='PRESENT'||!realized.path||!/^[a-f0-9]{64}$/i.test(realized.sha256||'')||realized.sha256!==expected.realizedVersionSha256)return unresolved;
+ if(!realized||realized.outputState!=='PRESENT'||!/^[a-f0-9]{64}$/i.test(realized.sha256||'')||realized.sha256!==expected.realizedVersionSha256)return unresolved;
  return {version:realized,expected:null};
 }

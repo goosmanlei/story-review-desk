@@ -78,7 +78,7 @@ export async function episodePlan(unit, requested, archive = false) {
 }
 
 export async function sourceCatalog(unit) {
-  const rows = (await unit.rows(['SOURCE'],{excludeRoles:['NARRATIVE_SUPPORT','SPATIAL_CATALOG','ARCHIVED_EPISODE_PLAN']}));
+  const rows = (await unit.rows(['SOURCE'],{excludeRoles:['NARRATIVE_SUPPORT','SPATIAL_CATALOG','SPATIAL_SPECIFICATION','ARCHIVED_EPISODE_PLAN']}));
   const sources = [];
   for (const row of rows) {
     const original = (await unit.tx.query('SELECT logical_path,mime_type,original_sha256,octet_length(content_bytes) AS bytes FROM source_documents WHERE revision_id=$1', [row.revisionId])).rows[0];
@@ -123,8 +123,8 @@ export async function storySources(unit) {
   const recording=recordings.length===1?recordings[0]:null;
   return { evidenceOrder:(await unit.configuration()).sources.order.map(s=>s.label),
     audio:recording?{...recording.evidence,audioUrl:'/api/v1/media/'+recording.sha256,byteSize:Number(recording.bytes)}:{title:'原始录音未唯一登记',audioUrl:'',byteSize:0,duration:'UNKNOWN',reviewUse:'尚无可唯一绑定的录音；未自动选择同名或相邻媒体。'},
-    transcript:{title:timed?.title||'逐字稿',sourcePath:timed?.aliases[0]||'',payloadCharacterCount:segments.reduce((sum,s)=>sum+s.text.length,0),segmentCount:segments.length,sections,segments,introBlocks:paragraphs((timed?.text||'').split(/^## /m)[0]),rawMarkdown:timed?.text||'',sha256:timed?.sha256},
-    outline:{title:outline?.title||'辅助来源',sourcePath:outline?.aliases[0]||'',blocks:paragraphs(outline?.text),rawMarkdown:outline?.text||''} };
+    transcript:{objectId:timed?.id||null,title:timed?.title||'逐字稿',sourcePath:timed?.aliases[0]||'',payloadCharacterCount:segments.reduce((sum,s)=>sum+s.text.length,0),segmentCount:segments.length,sections,segments,introBlocks:paragraphs((timed?.text||'').split(/^## /m)[0]),rawMarkdown:timed?.text||'',sha256:timed?.sha256},
+    outline:{objectId:outline?.id||null,title:outline?.title||'辅助来源',sourcePath:outline?.aliases[0]||'',blocks:paragraphs(outline?.text),rawMarkdown:outline?.text||''} };
 
 }
 

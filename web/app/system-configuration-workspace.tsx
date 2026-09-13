@@ -779,14 +779,7 @@ export function SystemConfigurationWorkspace() {
             <>
               <DomainConfigurationEditor value={config.domain} mode="references" readonly={Boolean(readonly)} onChange={domain=>edit(c=>{if(c.schemaVersion!=="2.1")c.schemaVersion="2.0";c.domain=domain;})} />
               <h3>连续性检查</h3>
-              {text(
-                "当前规范的实例文档别名",
-                config.sources.continuity.specAlias,
-                (v) =>
-                  edit((c) => {
-                    c.sources.continuity.specAlias = v;
-                  }),
-              )}
+              <p>空间规格通过故事设定中的空间管理登记，使用对象身份与修订关联。</p>
               <p>必需空间绑定：地点、状态、区域、机位、冻结点。</p>
               {config.sources.continuity.themes.map((theme, index) => (
                 <div className="configuration-type" key={theme.id}>
@@ -894,31 +887,7 @@ export function SystemConfigurationWorkspace() {
               <p>启用助手仅开放建议入口；启动服务不会发起模型请求。</p>
             </>
           )}
-          {group === "trial" && (
-            <>
-              <p>试制入口暂作为独立模块保留，只管理已登记试制范围的显示；不改变正式需求、审阅或采用状态。</p>
-              <div className="configuration-options">
-                <label>
-                  <input
-                    disabled={readonly}
-                    type="checkbox"
-                    checked={config.presentation.trialEnabled}
-                    onChange={(e) =>
-                      edit((c) => {
-                        c.presentation.trialEnabled = e.target.checked;
-                      })
-                    }
-                  />
-                  显示已登记的试制范围入口
-                </label>
-              </div>
-              {text("试制入口名称", config.presentation.trialLabel, (v) =>
-                edit((c) => {
-                  c.presentation.trialLabel = v;
-                }),
-              )}
-            </>
-          )}
+
         </section>
       </div>
       <footer className="configuration-footer">

@@ -17,7 +17,7 @@ assert.notEqual(scene,other);
 const sceneURL=base+'/?view=story&storyMode=logic&narrativeLevel=scene&episode='+encodeURIComponent(episode.episodeUid)+'&scene='+encodeURIComponent(scene);
 const original=await get('objects/'+encodeURIComponent(scene)),untouched=await get('objects/'+encodeURIComponent(other));
 const browser=await chromium.launch({channel:'chrome',args:['--enable-precise-memory-info']});
-const errors=[],cold=[],modules=[],scenes=[],saves=[],resources=[];
+const errors=[],cold=[],modules=[],scenes=[],saves=[],resources=[],domainSaves={story:[],materials:[],configuration:[]};
 const observe=page=>{page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&/Cannot update|hydration|Each child/.test(m.text()))errors.push(m.text());});};
 const stats=xs=>{const s=[...xs].sort((a,b)=>a-b);return{n:s.length,p50:Math.round(s[Math.floor(s.length/2)]||0),p95:Math.round(s[Math.min(s.length-1,Math.ceil(s.length*.95)-1)]||0),max:Math.round(s.at(-1)||0)};};
 let report;
@@ -43,6 +43,28 @@ try{
   scenes.push(await timedInteraction(page,page.locator('.episode-scene-navigator button[data-scene-id="'+id+'"]'),()=>originalReady(page,'story',id)));
  }
  console.log(JSON.stringify({moduleMs:stats(modules),sceneMs:stats(scenes)}));
+ const catalogue=(await get('workspaces/views/materials?limit=100')).page.materialRequirements;
+ let requirementId,materialInitial;
+ for(const row of catalogue){const candidate=await get('workspaces/material-production?requirementId='+encodeURIComponent(row.id));if(candidate.defaults&&candidate.parentVersionId&&!candidate.readOnly){requirementId=row.id;materialInitial=candidate;break;}}
+ assert(requirementId,'Fixture needs editable current material settings');
+ const materialPage=await ctx.newPage(),configPage=await ctx.newPage();observe(materialPage);observe(configPage);
+ const materialURL=base+'/?view=materials&material='+encodeURIComponent(requirementId),configURL=base+'/?view=system&systemTab=configuration';
+ await materialPage.goto(materialURL);await originalReady(materialPage,'materials');
+ const materialEditor=materialPage.getByRole('region',{name:'基础素材制作资料'}),materialInput=materialEditor.getByRole('textbox',{name:'完整主提示词',exact:true});
+ const openMaterial=async()=>{if(!await materialInput.isVisible())await materialEditor.getByRole('button',{name:'修订素材制作资料',exact:true}).click();await materialInput.waitFor();};
+ await openMaterial();await configPage.goto(configURL);await originalReady(configPage,'system');
+ const configInput=configPage.getByRole('textbox',{name:'故事名称',exact:true}),configInitial=await get('workspaces/configuration');await configInput.waitFor();
+ const configTitle=await configInput.inputValue();
+ const extraSave=async(domain,index)=>{
+  if(domain==='materials'){
+   const text=materialInitial.defaults.prompt+'\n隔离素材草稿验收 '+index;await materialInput.fill(text);
+   if(index%10===0){await materialPage.goto(base+'/?view=settings');await originalReady(materialPage,'settings');await materialPage.goto(materialURL);await openMaterial();assert.equal(await materialInput.inputValue(),text,'Material draft lost across navigation');}
+   return timedInteraction(materialPage,materialEditor.getByRole('button',{name:'保存制作资料草稿',exact:true}),async()=>{await materialEditor.getByRole('status').filter({hasText:'草稿已保存'}).waitFor();const value=await get('workspaces/material-production?requirementId='+encodeURIComponent(requirementId));assert.equal(value.draft.content.prompt,text);assert.equal(value.parentVersionId,materialInitial.parentVersionId);assert.equal(value.currentDefinitionId,materialInitial.currentDefinitionId);});
+  }
+  const title=configTitle+' · 隔离配置草稿验收 '+index;await configInput.fill(title);
+  if(index%10===0){await configPage.goto(base+'/?view=overview');await originalReady(configPage,'overview');await configPage.goto(configURL);await configInput.waitFor();assert.equal(await configInput.inputValue(),title,'Configuration draft lost across navigation');}
+  return timedInteraction(configPage,configPage.getByRole('button',{name:'保存草稿',exact:true}),async()=>{await configPage.getByText('草稿已保存，当前有效规则保持原版本',{exact:false}).waitFor();const value=await get('workspaces/configuration');assert.equal(value.draft.configuration.presentation.storyTitle,title);assert.deepEqual(value.configuration,configInitial.configuration);});
+ };
  const cdp=await ctx.newCDPSession(page);await cdp.send('HeapProfiler.enable');
  const sample=async()=>{const editor=page.getByRole('region',{name:'集场正文编辑'});if(await editor.isVisible())await page.getByText('编辑本稿',{exact:true}).click();await page.evaluate(()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r))));await cdp.send('HeapProfiler.collectGarbage');resources.push({at:Date.now(),...(await cdp.send('Memory.getDOMCounters')),heap:await page.evaluate(()=>performance.memory.usedJSHeapSize)});};
  await sample();
@@ -50,6 +72,10 @@ try{
  for(let i=0;i<steps;i++){
   const [view,label]=originalModules[i%6];await nav(label).click();await originalReady(page,view);
   if(savedCount<Math.floor((i+1)*saveCount/steps)){
+   const domain=['story','materials','configuration'][savedCount%3];
+   if(domain!=='story'){
+    const ms=await extraSave(domain,savedCount);saves.push(ms);domainSaves[domain].push(ms);savedCount++;
+   }else{
    await nav('故事创作').click();await originalReady(page,'story',scene);
    const editor=page.getByRole('region',{name:'集场正文编辑'});
    if(!await editor.isVisible())await page.getByText('编辑本稿',{exact:true}).click();
@@ -64,8 +90,9 @@ try{
    const ms=await timedInteraction(page,editor.getByRole('button',{name:'保存本稿草稿',exact:true}),async()=>{
     await editor.getByRole('status').filter({hasText:'草稿已保存'}).waitFor();
     const fresh=await get('objects/'+encodeURIComponent(scene));assert.equal(fresh.version,++version);assert.equal(fresh.revision.content.blocks[0].text,text);assert.equal(fresh.adoptedRevisionId,original.adoptedRevisionId);
-   });saves.push(ms);savedCount++;
+   });saves.push(ms);domainSaves.story.push(ms);savedCount++;
    await originalReady(page,'story',scene);
+   }
   }
   if(i%5===4)console.log(JSON.stringify({progress:i+1,saves:savedCount,elapsedSeconds:Math.round((Date.now()-start)/1000)}));
   if(i%25===24){await nav('故事创作').click();await originalReady(page,'story',scene);await sample();}
@@ -81,8 +108,8 @@ try{
  if(resources.at(-1).heap-resources[0].heap>32*1024*1024)findings.push('Retained heap growth exceeds 32 MiB after cache warmup');
  if(errors.length)findings.push('Browser errors');
  if(savedCount!==saveCount)findings.push('Save count mismatch');
- report={status:findings.length?'FAILED':'PASSED',software:health.softwareCommit,fixture:health.project.instanceId,browser:await browser.version(),viewport:{width:1440,height:1000},coldBrowserMs:cold.map(Math.round),moduleMs:stats(modules),sceneMs:stats(scenes),saveMs:stats(saves),soak:{minutes:(Date.now()-start)/60000,switches:steps,saves:savedCount,resources},findings,errors,realModelCalls:0,productionWrites:0};
- const output=path.resolve('.process/stages/ui-performance-'+Date.now());await phase.directory(output);await writeFile(path.join(output,'performance.json'),JSON.stringify(report,null,2));await phase.transfer('path',output,'local-delivery');
+ report={status:findings.length?'FAILED':'PASSED',software:health.softwareCommit,fixture:health.project.instanceId,browser:await browser.version(),viewport:{width:1440,height:1000},coldBrowserMs:cold.map(Math.round),moduleMs:stats(modules),sceneMs:stats(scenes),saveMs:stats(saves),domainSaveMs:Object.fromEntries(Object.entries(domainSaves).map(([domain,values])=>[domain,stats(values)])),soak:{minutes:(Date.now()-start)/60000,switches:steps,saves:savedCount,resources},findings,errors,realModelCalls:0,productionWrites:0};
+ const output=path.join(phase.config.root,'.process/stages/ui-performance-'+Date.now());await phase.directory(output);await writeFile(path.join(output,'performance.json'),JSON.stringify(report,null,2));await phase.transfer('path',output,'local-delivery');
  console.log(JSON.stringify({...report,reportPath:path.join(output,'performance.json')}));
  if(findings.length)process.exitCode=1;
 }finally{await browser.close();}

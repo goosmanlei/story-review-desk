@@ -1,5 +1,5 @@
 import { createReadStream } from "node:fs";
-import { lstat } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import path from "node:path";
 import { check, hash, identity } from "../shared/contracts.mjs";
@@ -18,7 +18,25 @@ export function workspaceMaintenanceRequest(input,{operationId,runtimeEpoch}) {
   validateMaintenance(request);return request;
 }
 const taskId = (id) => "maintenance-" + hash(id).slice(0, 24);
+export async function snapshotIndex(root) {
+  const result=[];
+  for(const slot of ['current','previous']){
+    const directory=path.join(path.dirname(root),'project-data',slot);
+    const info=await lstat(directory).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
+    if(!info)continue;
+    check(info.isDirectory()&&!info.isSymbolicLink(),'SNAPSHOT_DIRECTORY','快照目录不安全',409);
+    const file=path.join(directory,'manifest.json'),stat=await lstat(file);
+    check(stat.isFile()&&!stat.isSymbolicLink()&&stat.size<=32*1024*1024,'SNAPSHOT_MANIFEST','快照清单不安全',409);
+    const manifest=JSON.parse(await readFile(file,'utf8'));
+    if(manifest.format!=='review-project-snapshot')continue;
+    result.push({id:manifest.operationId||slot,backupId:manifest.operationId||slot,slot,format:manifest.format,directory,
+      sha256:manifest.package.transfer.sha256,mediaFiles:manifest.package.media.length,createdAt:manifest.createdAt});
+  }
+  return result;
+}
 export async function ownedBackup(pool, root, id) {
+  const snapshot=(await snapshotIndex(root)).find(s=>s.id===id);
+  if(snapshot)return snapshot;
   identity(id);
   const row = (
     await pool.query(
@@ -27,9 +45,9 @@ export async function ownedBackup(pool, root, id) {
     )
   ).rows[0];
   check(
-    row?.result?.backupId === id,
+    row?.result?.backupId === id && row.result.format==='review-project-archive' && Date.parse(row.result.expiresAt)>Date.now(),
     "BACKUP_NOT_FOUND",
-    "请选择本实例已核验的完整备份",
+    "请选择当前、上一快照或未过期的完整项目包",
     404,
   );
   const expected = path.join(
@@ -75,32 +93,27 @@ export function validateMaintenance(request) {
     );
   }
 }
-export async function maintenanceState(pool) {
+export async function maintenanceState(pool, root) {
   const rows = (
     await pool.query(
       `SELECT id,kind,status,result,error,created_at AS "createdAt",updated_at AS "updatedAt" FROM operations WHERE kind=ANY($1::text[]) ORDER BY created_at DESC LIMIT 100`,
       [maintenanceKinds],
     )
   ).rows;
+  const snapshotOperation=root?await readFile(path.join(root,'runtime/snapshot-operation.json'),'utf8').then(JSON.parse).catch(e=>{if(e.code==='ENOENT')return null;throw e;}):null;
   return {
+    snapshotOperation:snapshotOperation?{operationId:snapshotOperation.operationId,status:snapshotOperation.status,sha256:snapshotOperation.sha256}:null,
     operations: rows.map(r=>({...r,operationId:r.id,action:{MAINTENANCE_VERIFY:'verify',MAINTENANCE_BACKUP:'backup',MAINTENANCE_RESTORE:'restore',MAINTENANCE_EXPORT:'export',MAINTENANCE_IMPORT:'import'}[r.kind],error:r.error?.message||r.error||null})),
-    backups: rows
-      .filter(
-        (r) => ['MAINTENANCE_BACKUP','MAINTENANCE_EXPORT','MAINTENANCE_IMPORT'].includes(r.kind) && r.status === "SUCCEEDED",
-      )
-      .map((r) => ({
-        id: r.id,
-        createdAt: r.createdAt,
-        sha256: r.result?.sha256,
-        mediaFiles: r.result?.mediaFiles,
-        downloadUrl:
-          "/api/v1/maintenance/" + encodeURIComponent(r.id) + "/download",
-      })),
+    backups: [ ...(root?await snapshotIndex(root):[]), ...rows
+      .filter(r=>r.status==='SUCCEEDED' && r.result?.format==='review-project-archive' && Date.parse(r.result.expiresAt)>Date.now())
+      .map(r=>({id:r.id,createdAt:r.createdAt,sha256:r.result.sha256,mediaFiles:r.result.mediaFiles,expiresAt:r.result.expiresAt,
+        downloadUrl:'/api/v1/maintenance/'+encodeURIComponent(r.id)+'/download'})) ],
   };
 }
 export async function backupDownload(pool, root, id) {
-  const backup = await ownedBackup(pool, root, id),
-    file = path.join(backup.directory, "project-package.tar"),
+  const backup = await ownedBackup(pool, root, id);
+  check(backup.format==='review-project-archive','SNAPSHOT_EXPORT_REQUIRED','请先导出完整项目包，再下载',409);
+  const file = path.join(backup.directory, "project-package.tar"),
     info = await lstat(file);
   check(
     info.isFile() &&

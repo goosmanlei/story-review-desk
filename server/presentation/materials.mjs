@@ -8,9 +8,26 @@ import { workspaceDraft } from '../workspace-drafts.mjs';
 
 export function assetReviewContextHash(version,requirements){return hash({version:version.revisionId,sha256:version.sha256,requirements:requirements.filter(r=>r.assetFamilyRefs.includes(version.familyId)).map(r=>[r.id,r.revisionId,r.reviewSpec?.hash]),rights:version.projectRightsGate});}
 
-export async function materialRows(unit, { requirementId } = {}) {
-  const rows = await unit.rows(['REQUIREMENT'], { ids: requirementId ? [requirementId] : undefined });
-  const occurrences = await materialOccurrences(unit);
+export function realizedOutput(row, versions) {
+  const actual=versions.filter(v=>v.familyId===idFor(row,'FAMILY')&&v.outputState==='PRESENT'&&
+    (v.expectedOutputId===row.id||v.basis?.expectedOutputId===row.id||row.content.realizedVersionId===v.id&&row.content.realizedVersionSha256===v.sha256))
+    .sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||a.id.localeCompare(b.id)).at(-1);
+  return {...present(row),familyId:idFor(row,'FAMILY'),expectedOutputId:row.id,
+    ...(actual?{expectationState:'REALIZED',realizedVersionId:actual.id,realizedVersionSha256:actual.sha256}:{})};
+}
+
+export async function materialRows(unit, { requirementId, ids, summary=false } = {}) {
+  const rows = await unit.rows(['REQUIREMENT'], { ids: requirementId ? [requirementId] : ids, ...(summary?{fields:['title','requirementClass','mediaKind','mediaType','category','reuseScope','storyApplicability','acceptanceProfile','requirementHash','cardSpec']}:{} ) });
+  const occurrences = await materialOccurrences(unit,{requirementIds:rows.map(r=>r.id)});
+  const direct=(await unit.tx.query(`SELECT q.owner_id AS requirement_id,a.id AS version_id,f.object_id AS family_id
+    FROM memberships q JOIN material_families f ON f.object_id=q.member_id
+    JOIN objects a ON a.id=f.adopted_asset_id AND a.state='ADOPTED'
+    JOIN rights rt ON rt.revision_id=a.adopted_revision_id
+    JOIN asset_media am ON am.revision_id=a.adopted_revision_id AND am.role='OUTPUT'
+    JOIN media m ON m.id=am.media_id AND m.version_id=am.media_version_id AND m.sha256=am.sha256
+    WHERE q.role='FAMILY' AND q.owner_id=ANY($1::text[]) AND m.availability='PRESENT'
+    AND (rt.fact='CLEAR' OR rt.fact='UNKNOWN' AND rt.internal_attestation)
+    AND NOT EXISTS(SELECT 1 FROM invalidations i WHERE i.consumer_revision_id=a.adopted_revision_id)`,[rows.map(r=>r.id)])).rows;
   const usages=(await unit.tx.query(`SELECT n.id,r.id AS revision_id,r.content,rv.id AS event_id,
     EXISTS(SELECT 1 FROM invalidations i WHERE i.consumer_revision_id=r.id) AS stale,
     EXISTS(SELECT 1 FROM objects a JOIN rights rt ON rt.revision_id=a.adopted_revision_id
@@ -26,22 +43,25 @@ export async function materialRows(unit, { requirementId } = {}) {
   return rows.map(row => ({
     requirementClass: 'REQUIRED', mediaKind: row.content.mediaType || 'UNKNOWN', category: '', reuseScope: 'PROJECT', storyBasis: {}, storyApplicability: {}, acceptanceCriteria: [], acceptanceProfile: '',
     currentShotIds: [], historicalShotIds: [], shotIds: [], episodeIds: [], episodeUids: [], structureCardRefs: [], consumerWorkItemRefs: [], coverageReasons: [], coveredByFamilyRefs: [], coveredByVersionRefs: [], coverageSatisfied: false, bindingStale: false,
-    ...present(row), ...(row.content.configurationBinding?{configurationBinding:Object.fromEntries(Object.entries(row.content.configurationBinding).filter(([key])=>key!=='workflow'))}:{}), sceneIds: idsFor(row, 'SCENE'), assetFamilyRefs: idsFor(row, 'FAMILY'), entityRef: idFor(row, 'ENTITY'), representationRef: idFor(row, 'REPRESENTATION'),
+    ...present(row), ...(row.content.configurationBinding?{configurationBinding:Object.fromEntries(Object.entries(row.content.configurationBinding).filter(([key])=>key!=='workflow'))}:{}), sceneIds: [...new Set([...idsFor(row, 'SCENE'),...occurrences.scenes.filter(s=>s.references.some(r=>r.requirementId===row.id)).map(s=>s.sceneId)])], assetFamilyRefs: idsFor(row, 'FAMILY'), entityRef: idFor(row, 'ENTITY'), representationRef: idFor(row, 'REPRESENTATION'),
     requirementHash: row.content.requirementHash || row.sha256,
     episodeUids: [...new Set([...(row.content.episodeUids || []), ...occurrences.scenes.filter(s => s.references.some(r => r.requirementId === row.id)).map(s => s.episodeUid).filter(Boolean)])],
-    materialUsageBindings:bindingFor(row),coverageSatisfied:bindingFor(row).some(b=>b.eligible),coveredByFamilyRefs:bindingFor(row).filter(b=>b.eligible).map(b=>b.familyId),coveredByVersionRefs:bindingFor(row).filter(b=>b.eligible).map(b=>b.versionId),
+    materialUsageBindings:bindingFor(row),coverageSatisfied:direct.some(d=>d.requirement_id===row.id)||bindingFor(row).some(b=>b.eligible),coveredByFamilyRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.family_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.familyId)])],coveredByVersionRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.version_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.versionId)])],
   }));
 }
 
-export async function assets(unit, familyIds) {
-  const families = await unit.rows(['MATERIAL'], { ids: familyIds });
-  const rows = await unit.rows(['ASSET'], { historical: true }),expectations=await unit.rows(['EXPECTED_OUTPUT']);
-  const allowed = new Set(families.map(f => f.id));
-  const relationships = (await unit.tx.query('SELECT object_id AS id,family_id AS "familyId",parent_asset_id AS "parentAssetId" FROM asset_versions')).rows;
-  const media = (await unit.tx.query('SELECT a.revision_id AS "revisionId",a.role,m.* FROM asset_media a JOIN media m ON m.id=a.media_id AND m.version_id=a.media_version_id ORDER BY (a.role=\'OUTPUT\') DESC')).rows;
-  const adopted = (await unit.tx.query('SELECT object_id AS id,adopted_asset_id AS "adoptedAssetId" FROM material_families')).rows;
-  const rights=(await unit.tx.query('SELECT * FROM rights')).rows;
-  const stale=new Set((await unit.tx.query('SELECT DISTINCT consumer_revision_id FROM invalidations')).rows.map(r=>r.consumer_revision_id));
+export async function assets(unit, familyIds, {summary=false}={}) {
+  const families = await unit.rows(['MATERIAL'], { ids: familyIds,...(summary?{fields:['label','kind','mediaKind','subtype','executionDefinitionRef']}:{} ) });
+  const allowed = new Set(families.map(f => f.id)),selected=[...allowed];
+  const relationships = (await unit.tx.query('SELECT object_id AS id,family_id AS "familyId",parent_asset_id AS "parentAssetId" FROM asset_versions WHERE family_id=ANY($1::text[])',[selected])).rows;
+  const rows=await unit.rows(['ASSET'],{historical:true,ids:relationships.map(r=>r.id),...(summary?{fields:['label','mediaKind','historyRole','expectedOutputId','basis']}:{} )});
+  const expectedIds=(await unit.tx.query("SELECT owner_id FROM memberships WHERE role='FAMILY' AND member_id=ANY($1::text[])",[selected])).rows.map(r=>r.owner_id);
+  const expectations=await unit.rows(['EXPECTED_OUTPUT'],{ids:expectedIds,...(summary?{fields:['expectationState']}:{} )});
+  const revisionIds=rows.map(r=>r.revisionId);
+  const media=(await unit.tx.query("SELECT a.revision_id AS \"revisionId\",a.role,m.* FROM asset_media a JOIN media m ON m.id=a.media_id AND m.version_id=a.media_version_id WHERE a.revision_id=ANY($1::text[]) ORDER BY (a.role='OUTPUT') DESC",[revisionIds])).rows;
+  const adopted=(await unit.tx.query('SELECT object_id AS id,adopted_asset_id AS "adoptedAssetId" FROM material_families WHERE object_id=ANY($1::text[])',[selected])).rows;
+  const rights=(await unit.tx.query('SELECT * FROM rights WHERE revision_id=ANY($1::text[])',[revisionIds])).rows;
+  const stale=new Set((await unit.tx.query('SELECT DISTINCT consumer_revision_id FROM invalidations WHERE consumer_revision_id=ANY($1::text[])',[revisionIds])).rows.map(r=>r.consumer_revision_id));
   const versions = rows.flatMap(row => {
     const relation = relationships.find(r => r.id === row.id);
     if (!relation || !allowed.has(relation.familyId)) return [];
@@ -49,8 +69,8 @@ export async function assets(unit, familyIds) {
     const preview = media.find(m => m.revisionId === row.revisionId && m.role === 'PREVIEW' && m.availability === 'PRESENT');
     const right=rights.find(r=>r.revision_id===row.revisionId),rightsAllowed=right?.fact==='CLEAR'||right?.fact!=='BLOCKED'&&right?.internal_attestation===true;
     const lifecycle=row.state==='DRAFT'||row.state==='SUBMITTED'?'REVIEW_PENDING':stateLabel(row.state);
-    return [{ ...present(row), familyId: relation.familyId, parentVersionId: relation.parentAssetId, label: row.content.label || row.title,
-      path: file?.original_path || row.content.path || null, sha256: file?.sha256 || row.content.sha256 || null,
+    return [{ ...present(row), createdAt:row.createdAt, updatedAt:row.updatedAt, familyId: relation.familyId, parentVersionId: relation.parentAssetId, label: row.content.label || row.title,
+      sha256: file?.sha256 || null,
       mediaUrl: file?.availability === 'PRESENT' ? '/api/v1/media/' + file.sha256 : null,
       mediaToken: file?.sha256 || null, preview: preview ? '/api/v1/media/' + preview.sha256 : file?.mime_type.startsWith('image/') && file.availability === 'PRESENT' ? '/api/v1/media/' + file.sha256 : null,
       mediaKind: file?.mime_type.startsWith('audio/') ? 'AUDIO' : file?.mime_type.startsWith('video/') ? 'VIDEO' : file?.mime_type.startsWith('image/') ? 'IMAGE' : 'TEXT',
@@ -62,8 +82,8 @@ export async function assets(unit, familyIds) {
     }];
   });
   return { assetVersions: versions, assetFamilies: families.map(row => {
-    const owned = versions.filter(v => v.familyId === row.id), adoptedId = adopted.find(f => f.id === row.id)?.adoptedAssetId;
-    const outputs=expectations.filter(o=>idFor(o,'FAMILY')===row.id),planned=outputs.filter(o=>o.content.expectationState==='PLANNED').sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt))[0];
+    const owned = versions.filter(v => v.familyId === row.id).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||a.id.localeCompare(b.id)), adoptedId = adopted.find(f => f.id === row.id)?.adoptedAssetId;
+    const outputs=expectations.filter(o=>idFor(o,'FAMILY')===row.id),planned=outputs.filter(o=>realizedOutput(o,owned).expectationState==='PLANNED').sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt))[0];
     return { ...present(row), label: row.content.label || row.title, kind: row.content.kind || owned[0]?.mediaKind || 'UNKNOWN', versionRefs: owned.map(v => v.id), currentVersionRef: adoptedId || owned.filter(v => v.historyRole !== 'HISTORICAL').at(-1)?.id || owned.at(-1)?.id || null,
       expectedOutputRefs:outputs.map(o=>o.id),nextExpectedOutputId:planned?.id||null,currentExpectedOutputId:adoptedId?null:planned?.id||null,
       adoptedVersionRef: adoptedId || null, currentVersionId: adoptedId || null, sceneIds: idsFor(row,'SCENE'), shotIds: idsFor(row,'SHOT'), episodeIds: row.content.episodeIds || [], usedByRefs: row.content.usedByRefs || [], flowBlockReasons: row.content.flowBlockReasons || [],

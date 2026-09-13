@@ -1,4 +1,5 @@
 'use client';
+import {MaterialJudgmentRecord} from './material-judgment-record';
 import {useEffect,useState} from 'react';
 import type {MaterialUsageContent,MaterialUsageTarget} from '../presentation/material-usage-model.mjs';
 import type {MaterialUsageSelection,MaterialUsageWorkspace} from '../presentation/material-usage-service.mjs';
@@ -71,7 +72,7 @@ function Editor({requirementId}:{requirementId:string}){
      <img src={runtimePath(imageUrl)} alt="本次用途审阅的原图" style={{width:'100%',maxHeight:420,objectFit:'contain'}}/>
     </a><figcaption>点击查看原图</figcaption></figure>}
     <details><summary>查看绑定版本与文件校验值</summary><p>{state.versionId}</p><code>{state.sha256}</code></details>
-    {state.head&&<p>最近登记：{actionLabels[state.head.action as keyof typeof actionLabels]||'已记录用途判断'}。是否可用以当前素材覆盖状态为准。</p>}
+    {state.head&&<><p>最近登记：{actionLabels[state.head.action as keyof typeof actionLabels]||'已记录用途判断'}。是否可用以当前素材覆盖状态为准。</p><MaterialJudgmentRecord head={state.head}/></>}
     {state.blockers.map(b=><p key={b}>{b}</p>)}
     {state.staleDraft&&<details><summary>查看依据已变化的旧草稿</summary><pre>{JSON.stringify(state.staleDraft.content,null,2)}</pre></details>}
     <fieldset disabled={blocked}>

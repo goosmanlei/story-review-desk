@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile, writeFile, mkdir, copyFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, copyFile, rm } from "node:fs/promises";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -151,6 +151,8 @@ test("maintenance backup, download, verification and independent restore share t
     ).status,
     "SUCCEEDED",
   );
+  execFileSync('git',['init','-q',root]);
+  t.after(()=>rm(path.join(root,'.git'),{recursive:true}));
   const selected = await resolveSource(process.cwd()),
     manifest = await snapshotSource(
       selected,
@@ -164,6 +166,12 @@ test("maintenance backup, download, verification and independent restore share t
   t.after(async () => {
     const policy = await readProcessConfig(root);
     for (const { file, record } of await phaseRecords(root)) {
+      const fixtureGit=path.join(record.resources[0].path,'restored-fixture','.git');
+      if(await readFile(path.join(fixtureGit,'config'),'utf8').catch(()=>null)){
+        assert.equal(execFileSync('git',['--git-dir='+fixtureGit,'remote'],{encoding:'utf8'}).trim(),'');
+        assert.equal(execFileSync('git',['--git-dir='+fixtureGit,'for-each-ref'],{encoding:'utf8',stdio:'pipe'}).trim(),'');
+        await rm(fixtureGit,{recursive:true});
+      }
       const owned = new ProcessPhase(policy, file, record.token);
       await owned.update((r) => {
         for (const resource of r.resources)
@@ -204,22 +212,23 @@ test("maintenance backup, download, verification and independent restore share t
   ).rows;
   const backup = await run("MAINTENANCE_BACKUP");
   assert.equal(
-    (await maintenanceState(pool)).backups[0].id,
+    (await maintenanceState(pool,path.join(root,"instance"))).backups[0].id,
     backup.operationId,
   );
+  const exported=await run('MAINTENANCE_EXPORT');
   const download = await backupDownload(
     pool,
     path.join(root, "instance"),
-    backup.operationId,
+    exported.operationId,
   );
   assert.equal(download.status, 200);
   assert((await download.arrayBuffer()).byteLength > 1000);
   const spool=path.join(root,'instance/runtime/spool');await mkdir(spool,{recursive:true});
   const uploaded=path.join(spool,randomUUID());
-  await copyFile(path.join(backup.result.directory,'project-package.tar'),uploaded);
-  const imported=await run('MAINTENANCE_IMPORT',{filename:uploaded,sha256:backup.result.archiveSha256});
+  await copyFile(path.join(exported.result.directory,'project-package.tar'),uploaded);
+  const imported=await run('MAINTENANCE_IMPORT',{filename:uploaded,sha256:exported.result.archiveSha256});
   assert.equal(imported.result.sha256,backup.result.sha256);
-  assert((await maintenanceState(pool)).backups.some(b=>b.id===imported.operationId));
+  assert((await maintenanceState(pool,path.join(root,"instance"))).backups.some(b=>b.id===imported.operationId));
   await assert.rejects(runMaintenance(pool,path.join(root,'instance'),{operationId:randomUUID(),kind:'MAINTENANCE_IMPORT',sourcePath:path.resolve(root,'../outside-project')}),/project-data/);
   await run("MAINTENANCE_VERIFY");
   const restore = await run("MAINTENANCE_RESTORE", {
@@ -277,6 +286,6 @@ test("maintenance backup, download, verification and independent restore share t
   );
   await assert.rejects(
     backupDownload(pool, path.join(root, "instance"), "unknown"),
-    /已核验/,
+    /快照|项目包/,
   );
 });

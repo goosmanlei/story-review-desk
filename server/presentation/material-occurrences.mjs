@@ -26,11 +26,14 @@ export function projectOccurrences(evidence, scenes, requirements, episodes) {
   return { projectionPolicy: 'PER_OCCURRENCE_V2', scenes: result, pending };
 }
 
-export async function materialOccurrences(unit) {
-  if (unit.materialOccurrences) return unit.materialOccurrences;
-  const evidence = (await unit.tx.query("SELECT content FROM provenance WHERE kind='aux:preparation-material-links' ORDER BY id")).rows;
-  // Multiple imported ledgers cannot be arbitrarily collapsed into a current one.
-  const entries = evidence.length === 1 ? evidence[0].content : { scenes: [] };
-  const scenes = await unit.rows(['SCENE']), requirements = await unit.rows(['REQUIREMENT']), episodes = await unit.rows(['EPISODE']);
-  return unit.materialOccurrences = projectOccurrences(entries, scenes, requirements, episodes);
+export async function materialOccurrences(unit,{requirementIds}={}) {
+  const key='occurrences:'+JSON.stringify(requirementIds||null);
+  if(unit.loaded.has(key))return unit.loaded.get(key);
+  const noteIds=requirementIds?(await unit.tx.query("SELECT owner_id FROM memberships WHERE role='REQUIREMENT' AND member_id=ANY($1::text[])",[requirementIds])).rows.map(r=>r.owner_id):undefined;
+  const notes=await unit.rows(['NOTE'],{roles:['MATERIAL_OCCURRENCE'],ids:noteIds});
+  const grouped=new Map();
+  for(const row of notes){const c=row.content;let scene=grouped.get(c.sceneId);if(!scene){scene={sceneId:c.sceneId,sceneContentHash:c.sceneContentHash,references:[],unboundNeeds:[]};grouped.set(c.sceneId,scene);}scene.references.push(c.reference);}
+  const entries={scenes:[...grouped.values()]};
+  const scenes = await unit.rows(['SCENE'],{ids:[...grouped.keys()],fields:['contentHash']}), requirements = await unit.rows(['REQUIREMENT'],{ids:requirementIds,fields:['requirementHash']}), episodes = await unit.rows(['EPISODE'],{fields:[]});
+  const result=projectOccurrences(entries, scenes, requirements, episodes);unit.loaded.set(key,result);return result;
 }

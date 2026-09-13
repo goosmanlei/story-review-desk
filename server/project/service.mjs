@@ -1,7 +1,9 @@
 import { check, objectValue } from "../shared/contracts.mjs";
 import { validateLibrary } from '../library/contract.mjs';
+import {validateReferenceContent,validateReferenceTargets} from '../materials/references.mjs';
 export const kinds = ["GUIDANCE", "NOTE"];
 export function validate(kind, content) {
+  validateReferenceContent(kind,content);
   if (kind === "GUIDANCE")
     check(
       typeof content.text === "string",
@@ -9,6 +11,7 @@ export function validate(kind, content) {
       "指引必须包含正文",
     );
 }
+export const validateTarget=validateReferenceTargets;
 export const SYSTEM_FIELDS = new Set([
   "reviewStandards",
   "entityTypes",

@@ -1,0 +1,46 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdir,readFile,writeFile,symlink,copyFile,rm} from 'node:fs/promises';
+import {Readable} from 'node:stream';
+import {execFileSync} from 'node:child_process';
+import path from 'node:path';
+import {requiredPhase} from '../tools/process-resources.mjs';
+import {writePackageRecords} from '../server/project/package.mjs';
+import {saveSnapshot,verifySnapshot,materializeSnapshot,lfsPointer,parsePointer} from '../server/project/snapshot.mjs';
+import {hash} from '../server/shared/contracts.mjs';
+
+test('reference snapshots retain one predecessor and restore without a network or expanded working files',async t=>{
+ const phase=await requiredPhase(process.cwd()),outer=process.env.REVIEW_TASK_DIR;
+ const root=path.join(outer,'snapshot-project'),stage=path.join(root,'.process/stages/verify');
+ await mkdir(stage,{recursive:true});await mkdir(path.join(root,'instance/runtime'),{recursive:true});await mkdir(path.join(root,'project-data'));
+ execFileSync('git',['init','-q',root]);process.env.REVIEW_TASK_DIR=stage;t.after(async()=>{process.env.REVIEW_TASK_DIR=outer;await rm(path.join(root,'.git'),{recursive:true});});
+ await writeFile(path.join(root,'.gitattributes'),'project-data/*/data/** filter=lfs diff=lfs merge=lfs -text\nproject-data/*/media/** filter=lfs diff=lfs merge=lfs -text\nproject-data/*/originals/** filter=lfs diff=lfs merge=lfs -text\n');
+ const bytes=Buffer.from('an original media object'),sha=hash(bytes),sourceBytes=Buffer.from('source text'),sourceSha=hash(sourceBytes);
+ const mediaFile=path.join(stage,'bytes');await writeFile(mediaFile,bytes);
+ async function packageFor(label){
+  const header={type:'manifest',format:'review-project',version:1,project:{title:label}};
+  const rows=[{table:'objects',row:{id:'scene',module:'story',kind:'SCENE'}},{table:'revisions',row:{id:'r1',object_id:'scene',content:{text:label},sha256:hash({text:label})}},{table:'source_documents',row:{revision_id:'r1',original_sha256:sourceSha,content_bytes:sourceBytes.toString('base64')}},{table:'media',row:{id:'image',version_id:'v1',sha256:sha,byte_size:bytes.length,availability:'PRESENT',mime_type:'image/png'}}];
+  const dir=path.join(stage,label);await writePackageRecords(Readable.from([JSON.stringify(header)+'\n',...rows.map(r=>JSON.stringify({type:'row',...r})+'\n')]),dir,{copyMedia:async(_,to)=>copyFile(mediaFile,to)});return dir;
+ }
+ const current=path.join(root,'project-data/current'),options={projectRoot:root,phase:{read:async()=>({phaseId:'verify',resources:[{path:stage}]}),update:async fn=>fn({resources:[]})}};
+ const first=await saveSnapshot(await packageFor('first'),current,options);
+ const before=await verifySnapshot(current,options);
+ assert.equal(before.snapshot.package.transfer.sha256,first.sha256);
+ assert.deepEqual(parsePointer(await readFile(path.join(current,'media',sha))),{sha256:sha,bytes:bytes.length});
+ const restored=path.join(stage,'restored');await materializeSnapshot(current,restored,options);
+ assert.deepEqual(await readFile(path.join(restored,'media',sha)),bytes);
+ assert.deepEqual(await readFile(path.join(restored,'originals',sourceSha)),sourceBytes);
+ const second=await packageFor('second');await assert.rejects(saveSnapshot(second,current,{...options,expectedPreviousSha256:'0'.repeat(64)}),e=>e.code==='VERSION_CONFLICT');
+ assert.equal((await verifySnapshot(current,options)).snapshot.package.transfer.sha256,first.sha256);
+ await saveSnapshot(second,current,options);
+ assert.equal((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);
+ await saveSnapshot(await packageFor('third'),current,options);
+ assert.notEqual((await verifySnapshot(path.join(root,'project-data/previous'),options)).snapshot.package.transfer.sha256,first.sha256);
+ await assert.rejects(verifySnapshot(path.join(root,'../sealed-archive'),options),e=>e.code==='SNAPSHOT_SCOPE');
+ await assert.rejects(materializeSnapshot(current,path.join(root,'project-data/expanded'),options),e=>e.code==='SNAPSHOT_DESTINATION');
+ const pointer=path.join(current,'media',sha);await writeFile(pointer,lfsPointer('f'.repeat(64),bytes.length));
+ await assert.rejects(verifySnapshot(current,options),e=>e.code==='SNAPSHOT_POINTER');
+ await writeFile(pointer,lfsPointer(sha,bytes.length));await rm(pointer);await symlink(mediaFile,pointer);
+ await assert.rejects(verifySnapshot(current,options),e=>e.code==='SNAPSHOT_FILE');
+ assert.equal(parsePointer(lfsPointer(sha,Number.MAX_SAFE_INTEGER+1)),null);
+});

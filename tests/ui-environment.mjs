@@ -29,6 +29,7 @@ import { workOnce } from "../server/jobs.mjs";
 const { values } = parseArgs({
   options: {
     mirror: { type: "string" },
+    records: { type: "string" },
     "media-root": { type: "string" },
     port: { type: "string", default: "3911" },
     standalone: { type: "boolean" },
@@ -124,16 +125,19 @@ await pool.query(
   "INSERT INTO project(instance_id,runtime_epoch,title) VALUES($1,$2,'界面验收实例')",
   [instanceId, randomUUID()],
 );
-if (values.mirror) {
+if (values.mirror || values.records) {
   if (!values["media-root"])
     throw Error("Mirroring requires the registered media root");
   const file = path.join(workspace, "fixture.ndjson");
+  if(values.records) await cp(path.resolve(values.records),file,{errorOnExist:true,force:false});
+  else {
   const response = await fetch(new URL("/api/v1/export", values.mirror));
   if (!response.ok) throw Error("Fixture export failed");
   await pipeline(
     Readable.fromWeb(response.body),
     createWriteStream(file, { flags: "wx", mode: 0o600 }),
   );
+  }
   const hashes = new Set();
   for await (const line of createInterface({
     input: createReadStream(file),

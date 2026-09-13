@@ -5,7 +5,7 @@ import {workspaceDraft} from '../workspace-drafts.mjs';
 
 const modes={usage:{workspace:'material-usage',protocol:'MATERIAL_USAGE_V1',role:'MATERIAL_USAGE_REVIEW',key:'usageId'},context:{workspace:'asset-context-revalidation',protocol:'ASSET_CONTEXT_REVALIDATION_V1',role:'ASSET_CONTEXT_REVALIDATION',key:'revalidationId'}};
 const reviewed=result=>({APPROVE_AND_RELEASE:'ADOPT',REQUEST_REVISION:'REQUEST_CHANGES',DO_NOT_USE:'DISABLE'})[result];
-function frozenSpec(spec){check(spec?.criteria?.length,'REVIEW_SPEC_REQUIRED','此需求尚未登记完整验收标准',409);const value={...spec,criteria:spec.criteria.map(c=>({...c,question:c.question||c.description||'',allowNA:c.allowNA===true}))};return {...value,hash:hash(value)};}
+function frozenSpec(spec){check(spec?.criteria?.length,'REVIEW_SPEC_REQUIRED','此需求尚未登记完整验收标准',409);const {hash:previousHash,...definition}=spec;const value={...definition,criteria:spec.criteria.map(c=>({...c,question:c.question||c.description||'',allowNA:c.allowNA===true}))};return {...value,hash:hash(value)};}
 const contextSpec=frozenSpec({id:'current-material-domain',label:'当前实体关系复核',criteria:[{id:'identity',label:'主体身份与状态',question:'原图是否符合当前登记的主体身份、状态与形态？',required:true},{id:'relations',label:'关系与适用范围',question:'继承、排除和用途范围是否符合当前关系，且没有改写原生成事实？',required:true},{id:'original',label:'原件与采用依据',question:'是否查看精确版本原件，并核对原采用记录及实际输入？',required:true}]});
 const targetOf=input=>({familyId:input.familyId,versionId:input.versionId,sha256:input.sha256,...(input.requirementId?{requirementId:input.requirementId}:{})});
 async function requirementBasis(unit,id){const row=await unit.detail(id);check(row.kind==='REQUIREMENT','REQUIREMENT_REQUIRED','请选择素材需求');return {row,value:{...row.revision.content,requirementId:row.id,requirementHash:row.revision.content.requirementHash||row.revision.sha256,revisionId:row.revision.id,reviewSpec:frozenSpec(row.revision.content.reviewSpec)}};}
@@ -49,7 +49,7 @@ export async function materialReviewWorkspace(unit,mode,input){
   const current=draft?.basisHash===basisHash;
   const head=old?(await unit.tx.query('SELECT r.id,r.content FROM objects o JOIN revisions r ON r.id=o.adopted_revision_id WHERE o.id=$1',[old.id])).rows[0]:null;
   const jobs=(await unit.tx.query("SELECT id AS \"jobId\",id AS \"requestId\",status,error FROM operations WHERE request#>>'{commands,0,workspace}'=$1 AND request#>>'{commands,0,input,versionId}'=$2 AND COALESCE(request#>>'{commands,0,input,requirementId}','')=$3 AND request#>>'{commands,0,input,action}'='publish' ORDER BY created_at DESC LIMIT 20",[definition.workspace,input.versionId,input.requirementId||''])).rows.map(r=>({...r,error:r.error?.message}));
-  return {value:{...value,draftHeadRevisionId:old?.revisionId||null,draft:current?draft:null,staleDraft:draft&&!current?{...draft,reason:'实际依据已变化'}:null,head:head?{revisionId:head.id,...head.content.reviewContent,action:head.content.reviewContent.decision?.action||head.content.reviewContent.action}:null,jobs},basis,old,name,definition};
+  return {value:{...value,draftHeadRevisionId:old?.revisionId||null,draft:current?draft:null,staleDraft:draft&&!current?{...draft,reason:'实际依据已变化'}:null,head:head?{revisionId:head.id,reviewSpec:head.content.reviewSpec,...head.content.reviewContent,action:head.content.reviewContent.decision?.action||head.content.reviewContent.action}:null,jobs},basis,old,name,definition};
 }
 
 function validateReview(mode,content,state){

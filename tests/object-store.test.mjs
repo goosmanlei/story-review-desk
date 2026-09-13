@@ -1,4 +1,8 @@
 import {prepareManifestRender} from '../server/production/manifests.mjs';
+import {materialPage} from '../server/presentation/material-page.mjs';
+import {productionWindow} from '../server/presentation/production-window.mjs';
+import {PresentationRead} from '../server/presentation/read-unit.mjs';
+import {materialOccurrences} from '../server/presentation/material-occurrences.mjs';
 import {hash} from '../server/shared/contracts.mjs';
 import {exportRecords} from '../server/transfer.mjs';
 import {cachedWorkspace,presentationToken} from '../server/presentation/cache.mjs';
@@ -938,8 +942,8 @@ test("object transactions, concurrency, adoption and exact dependency invalidati
     const action=async(workspace,input)=>{const result=await run([{type:'workspace.change',workspace,input}]);assert.equal(result.status,'SUCCEEDED',JSON.stringify(result));return result.workspace;};
     const sceneId='animatic-scene',shotId='animatic-shot';
     const spec={version:'fixture-v1',locations:[{id:'LOC',name:'合成场地'}],states:[{id:'BASE',label:'基础态'}],locationPackages:[{id:'LOC',zones:[{id:'ZONE'}],cameras:[{id:'CAM',zoneIds:['ZONE']}]}]};
-    const bytes=Buffer.from(JSON.stringify(spec)),source=await create('production-space','SOURCE',{text:bytes.toString()});
-    await pool.query("INSERT INTO source_documents(revision_id,original_revision_id,original_sha256,mime_type,content_bytes,logical_path,role) VALUES($1,$1,$2,'application/json',$3,'data/production_map_spec.json','PRODUCTION_SPACE')",[source.revisionId,hash(bytes),bytes]);
+    const bytes=Buffer.from(JSON.stringify(spec)),source=await create('production-space','SOURCE',{role:'SPATIAL_SPECIFICATION',text:bytes.toString()});
+    await pool.query("INSERT INTO source_documents(revision_id,original_revision_id,original_sha256,mime_type,content_bytes,logical_path,role) VALUES($1,$1,$2,'application/json',$3,'空间制作规格','SPATIAL_SPECIFICATION')",[source.revisionId,hash(bytes),bytes]);
     let settings=await read('shot-production',{sceneId});const content=settings.defaultContent;
     Object.assign(content.shots[0],{space:{loc:'LOC',state:'BASE',zone:'ZONE',camera:'CAM',freeze:hash(bytes)},videoBranch:'SILENT'});
     const saved=await action('shot-production',{action:'save',sceneId,content,expectedReleaseId:settings.releaseId,expectedDraftRevisionId:settings.draftHeadRevisionId});
@@ -1005,6 +1009,53 @@ test("object transactions, concurrency, adoption and exact dependency invalidati
     const direct=await create('production-bypass','ASSET',{basis:{expectedOutputId:output.id}},{links:asset.links,media:asset.media.map(m=>({id:m.id,versionId:m.version_id,sha256:m.sha256,role:m.role}))});
     let candidate=await readObject(pool,'production-bypass');await run([{type:'rights.record',id:candidate.id,expectedVersion:candidate.version,revisionId:candidate.revision.id,explicit:true,fact:'CLEAR',evidence:{note:'隔离'}}]);candidate=await readObject(pool,candidate.id);await run([{type:'submit',id:candidate.id,expectedVersion:candidate.version}]);
     const denied=await run([{type:'review',id:candidate.id,expectedVersion:candidate.version+1,revisionId:candidate.revision.id,decision:'ADOPT',explicit:true,note:'缺少制作依据'}]);assert.equal(denied.error.code,'PRODUCTION_REVIEW_BASIS');
+  });
+
+  await t.test('native references reject wrong identities and retain exact inputs without global invalidation',async()=>{
+    const bytesSha='9'.repeat(64);
+    await create('native-family','MATERIAL');await create('native-other-family','MATERIAL');
+    await pool.query("INSERT INTO media(id,version_id,sha256,byte_size,mime_type,availability) VALUES('native-file','v1',$1,4,'image/png','PRESENT')",[bytesSha]);
+    const source=await create('native-image','ASSET',{}, {links:[{id:'native-family',role:'FAMILY'}],media:[{id:'native-file',versionId:'v1',sha256:bytesSha,role:'OUTPUT'}]});
+    const input={familyId:'native-family',versionId:'native-image',sha256:bytesSha};
+    const good=await create('native-call','CALL',{inputBindings:[input]});
+    const call=await readObject(pool,'native-call');
+    assert.equal(call.revision.content.inputBindings[0].revisionId,source.revisionId);
+    assert.equal((await pool.query("SELECT count(*) FROM dependencies WHERE consumer_revision_id=$1 AND dependency_revision_id=$2 AND purpose='ACTUAL_INPUT'",[good.revisionId,source.revisionId])).rows[0].count,'1');
+    const invalid=await run([save('native-bad-call','CALL',0,{inputBindings:[{...input,familyId:'native-other-family'}]})]);
+    assert.equal(invalid.error.code,'INPUT_REFERENCE');
+    assert.equal((await run([save('native-path-call','CALL',0,{output:{path:'generated/file.png'}})])).error.code,'PATH_REFERENCE');
+    const q=await create('native-requirement','REQUIREMENT',{description:'An independently versioned purpose'});
+    await adopt('native-requirement');
+    const s=await create('native-scene','SCENE',{text:'Unchanged scene'});
+    const reference={requirementId:'native-requirement',requirementRevisionId:q.revisionId,requirementHash:(await readObject(pool,'native-requirement')).revision.sha256,sourceSceneRevisionId:s.revisionId};
+    const occurrence=await create('native-occurrence','NOTE',{role:'MATERIAL_OCCURRENCE',sceneId:'native-scene',sceneContentHash:(await readObject(pool,'native-scene')).revision.sha256,reference});
+    const readOccurrence=()=>transaction(pool,tx=>materialOccurrences(new PresentationRead(tx),{requirementIds:['native-requirement']}),{readOnly:true});
+    assert.equal((await readOccurrence()).scenes[0].references.length,1);
+    assert.deepEqual((await readObject(pool,'native-occurrence')).links.map(l=>l.role).sort(),['REQUIREMENT','SCENE']);
+    const changed=await run([save('native-requirement','REQUIREMENT',(await readObject(pool,'native-requirement')).version,{description:'Changed purpose'})]);assert.equal(changed.status,'SUCCEEDED');
+    assert.equal((await readOccurrence()).pending.length,1);
+    await adopt('native-requirement');
+    const invalidated=(await pool.query('SELECT consumer_revision_id FROM invalidations WHERE changed_revision_id=$1',[q.revisionId])).rows.map(r=>r.consumer_revision_id);
+    assert(invalidated.includes(occurrence.revisionId));assert(!invalidated.includes(good.revisionId));
+    assert.equal((await readObject(pool,'native-scene')).revision.id,s.revisionId);
+  });
+  await t.test('material and production cursors cover more than one hundred objects and bind filters',async()=>{
+    for(let start=0;start<105;start+=50){const commands=[];for(let i=start;i<Math.min(start+50,105);i++)commands.push(save('paged-requirement-'+String(i).padStart(3,'0'),'REQUIREMENT',0,{description:'Page fixture',category:'Paging fixture',mediaKind:i%2?'AUDIO':'IMAGE'}));assert.equal((await run(commands)).status,'SUCCEEDED');}
+    const read=params=>transaction(pool,tx=>materialPage(new PresentationRead(tx),new URLSearchParams(params)),{readOnly:true});
+    const ids=[];let cursor;do{const page=await read({category:'Paging fixture',...(cursor?{cursor}:{})});assert(page.count<=50);ids.push(...page.page.materialRequirements.map(r=>r.id));cursor=page.nextCursor;}while(cursor);
+    assert.equal(ids.length,105);assert.equal(new Set(ids).size,105);
+    assert.equal((await read({requirementId:'paged-requirement-104'})).page.materialRequirements[0].id,'paged-requirement-104');
+    const first=await read({category:'Paging fixture'});
+    await assert.rejects(read({category:'Another filter',cursor:first.nextCursor}),{code:'VERSION_CONFLICT'});
+    await run([save('paged-requirement-104','REQUIREMENT',1,{description:'Changed while paging',category:'Paging fixture'})]);
+    await assert.rejects(read({category:'Paging fixture',cursor:first.nextCursor}),{code:'VERSION_CONFLICT'});
+    for(let start=0;start<105;start+=50){const commands=[];for(let i=start;i<Math.min(start+50,105);i++)commands.push(save('paged-output-'+String(i).padStart(3,'0'),'EXPECTED_OUTPUT',0,{workItemId:'page-work-'+i,workPackageId:'page-package',phaseId:'PAGE_PHASE',gateId:'PAGE_GATE',sceneId:'native-scene'}));assert.equal((await run(commands)).status,'SUCCEEDED');}
+    const window=params=>transaction(pool,tx=>productionWindow(new PresentationRead(tx),new URLSearchParams(params)),{readOnly:true});
+    const out=[];cursor=null;do{const page=await window({phaseId:'PAGE_PHASE',...(cursor?{cursor}:{})});out.push(...page.ids);cursor=page.nextCursor;}while(cursor);
+    assert.equal(out.length,105);assert.equal(new Set(out).size,105);
+    const firstWindow=await window({phaseId:'PAGE_PHASE'});
+    await assert.rejects(window({phaseId:'PAGE_PHASE',gateId:'other',cursor:firstWindow.nextCursor}),{code:'VERSION_CONFLICT'});
+    assert.equal((await window({phaseId:'PAGE_PHASE',scopeType:'SCENE',scopeId:'other-scene'})).count,0);
   });
 
 });

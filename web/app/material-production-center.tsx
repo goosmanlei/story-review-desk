@@ -288,148 +288,9 @@ function productionPromptText(value: unknown) {
   return productionFactText(value);
 }
 
-function MaterialCandidateProductionFacts({
-  family,
-  version,
-  historical,
-}: {
-  family: V7AssetFamily;
-  version: V7AssetVersion | null;
-  historical: boolean;
-}) {
-  const hasStableVersionIdentity = Boolean(version?.id && /^[a-f0-9]{64}$/i.test(version.sha256 || ''));
-  const [candidate, setCandidate] = useState<MaterialCandidateProductionEvent | null>(null);
-  const [status, setStatus] = useState<'LOADING' | 'READY' | 'ABSENT' | 'ERROR'>(hasStableVersionIdentity ? 'LOADING' : 'ABSENT');
-  const [message, setMessage] = useState(hasStableVersionIdentity
-    ? '正在读取该版本的实际生成登记…'
-    : '尚无可核验生成登记；制作定义不代表已执行。');
-
-  useEffect(() => {
-    const controller = new AbortController();
-    if (!hasStableVersionIdentity || !version?.id || !version.sha256) return () => controller.abort();
-    const query = new URLSearchParams({ familyId: family.id, versionId: version.id, sha256: version.sha256, limit: '2' });
-    if (historical) query.set('productionEvidence', '1');
-    void fetch(`/api/v1/workspaces/asset-versions?${query.toString()}`, { cache: 'no-store', signal: controller.signal })
-      .then(async (response) => {
-        const payload = await response.json() as { events?: MaterialCandidateProductionEvent[]; error?: string };
-        if (!response.ok) throw new Error(payload.error || `HTTP ${response.status}`);
-        const matches = (payload.events || []).filter((event) => (
-          event.familyId === family.id
-          && event.versionId === version.id
-          && String(event.sha256 || '').toLowerCase() === String(version.sha256 || '').toLowerCase()
-        ));
-        if (matches.length > 1) throw new Error('同一版本与SHA出现多条候选生成登记，已失败关闭');
-        if (!matches.length) {
-          setCandidate(null);
-          setStatus('ABSENT');
-          setMessage(historical
-            ? '该历史版本未找到与版本和SHA完全一致的候选生成事件；生产资料将逐项标记缺项，不借用当前配方。'
-            : '未找到与本版本及SHA一致的生成事件；当前配方只作制作定义，不证明实际调用。');
-          return;
-        }
-        setCandidate(matches[0]);
-        setStatus('READY');
-        const evidence = matches[0].productionEvidence;
-        setMessage(historical
-          ? !evidence
-            ? '服务端未返回历史生产证据投影；全部字段失败关闭，不展示事件中的未核验值。'
-            : evidence.counts.CONFLICT
-              ? `服务端核验发现 ${evidence.counts.CONFLICT} 项冲突；冲突值不展示，也不会由当前配方补齐。`
-              : '以下只展示经服务端逐字段核验、与所选历史版本及SHA精确绑定的生产资料。'
-          : '以下出处精确绑定本版本与SHA；AI Review仍需服务端再次核验。');
-      })
-      .catch((reason) => {
-        if (controller.signal.aborted) return;
-        setStatus('ERROR');
-        setMessage(`实际生成事实读取失败：${visibleText(reason instanceof Error ? reason.message : '未知错误')}`);
-      });
-    return () => controller.abort();
-  }, [family.id, hasStableVersionIdentity, historical, version?.id, version?.sha256]);
-
-  const evidence = candidate?.productionEvidence;
-  const missingEvidence = (reason: string): MaterialProductionEvidenceField => ({ status: 'MISSING', reason });
-  const historicalFields = evidence?.fields || {
-    inputBindings: missingEvidence('没有服务端核验过的输入绑定证据。'),
-    actualPrompt: missingEvidence('没有服务端核验过的实际 Prompt 证据。'),
-    executionDefinition: missingEvidence('没有服务端核验过的执行定义证据。'),
-    model: missingEvidence('没有服务端核验过的模型证据。'),
-    parameters: missingEvidence('没有服务端核验过的参数证据。'),
-    run: missingEvidence('没有服务端核验过的 Run 证据。'),
-    output: missingEvidence('没有服务端核验过的产出文件证据。'),
-    parentVersion: missingEvidence('没有服务端核验过的父版本证据。'),
-  };
-  const historicalCounts = Object.values(historicalFields).reduce<Record<MaterialProductionEvidenceStatus, number>>((result, field) => {
-    result[field.status] += 1;
-    return result;
-  }, { VERIFIED: 0, MISSING: 0, CONFLICT: 0 });
-  const verifiedObject = (field: MaterialProductionEvidenceField) => field.status === 'VERIFIED' && field.value && typeof field.value === 'object'
-    ? field.value as Record<string, unknown>
-    : null;
-  const promptEvidence = verifiedObject(historicalFields.actualPrompt);
-  const inputEvidence = verifiedObject(historicalFields.inputBindings);
-  const definitionEvidence = verifiedObject(historicalFields.executionDefinition);
-  const runEvidence = verifiedObject(historicalFields.run);
-  const outputEvidence = verifiedObject(historicalFields.output);
-  const parentEvidence = verifiedObject(historicalFields.parentVersion);
-
-  if (!historical && status === 'ABSENT') return null;
-  return <section className={`material-candidate-facts${historical ? ' is-historical' : ''}`} data-production-material-mode={historical ? 'HISTORICAL' : 'CURRENT'} data-production-material-status={status}>
-    <header><b>{historical ? '该历史版本的生产资料' : '生成出处'}</b>{historical && <i>{historicalCounts.CONFLICT ? `${historicalCounts.CONFLICT} 项冲突 · ${historicalCounts.MISSING} 项缺项` : historicalCounts.MISSING ? `${historicalCounts.MISSING} 项缺项` : '资料完整'}</i>}</header>
-    <p role="status">{message}</p>
-    {!historical && candidate && <div className="material-generation-provenance">
-      <p>上方制作定义不替代本版本的实际执行证据。</p>
-      <dl>
-        <div><dt>登记 / Run</dt><dd><code>{[candidate.eventId,candidate.runId,candidate.executionRequestId].filter(Boolean).map(publicRef).join(' · ') || '缺项'}</code></dd></div>
-        <div><dt>实际 Prompt SHA</dt><dd><code>{candidate.actualPromptHash || '缺项'}</code></dd></div>
-        {(candidate.callPackageHash||candidate.executionDefinitionHash)&&<div><dt>调用包 SHA</dt><dd><code>{candidate.callPackageHash||candidate.executionDefinitionHash}</code></dd></div>}
-        {candidate.parentVersionId&&<div><dt>父版本</dt><dd><code>{publicRef(candidate.parentVersionId)} · {candidate.parentVersionSha256 || 'SHA 缺项'}</code></dd></div>}
-      </dl>
-      {Array.isArray(candidate.inputBindings)&&candidate.inputBindings.length>0&&<section className="material-input-provenance"><b>实际附件出处（原登记顺序）</b><pre>{visibleText(productionFactText(candidate.inputBindings))}</pre><code>{candidate.inputBindingsHash || '输入绑定 SHA 缺项'}</code></section>}
-      {candidate.promptChangedFromCallPackage&&<section className="creator-recipe-section material-prompt-difference"><header><b>本版本实际 Prompt 与当前调用包不同</b></header><p role="status">{candidate.promptSyncRequired ? '获批后仍需受控同步；下方最新定义不是本次实际调用。' : '变化未标记同步，AI Review 将失败关闭。'}</p><pre>{visibleText(productionPromptText(candidate.actualPrompt ?? '实际 Prompt 缺项'))}</pre><code>实际 {candidate.actualPromptHash || '缺项'} · 配方 {candidate.recipePromptHash || '缺项'}</code></section>}
-    </div>}
-    {historical && <div className="material-historical-production-grid">
-      {!(inputEvidence && Array.isArray(inputEvidence.bindings) && inputEvidence.bindings.length === 0) && <MaterialProductionDatum label="参考附件与输入版本" status={historicalFields.inputBindings.status}>
-        {inputEvidence
-          ? <><pre>{productionFactText(inputEvidence.bindings)}</pre><code>{String(inputEvidence.sha256 || '')}</code></>
-          : <p>{visibleText(historicalFields.inputBindings.reason)}</p>}
-      </MaterialProductionDatum>}
-      <MaterialProductionDatum label="本次实际完整 Prompt" status={historicalFields.actualPrompt.status}>
-        {promptEvidence
-          ? <><pre>{productionPromptText(promptEvidence.content)}</pre><code>{String(promptEvidence.sha256 || '')}</code></>
-          : <p>{visibleText(historicalFields.actualPrompt.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="执行定义与配方" status={historicalFields.executionDefinition.status}>
-        {definitionEvidence
-          ? <p><code>{publicRef(String(definitionEvidence.executionDefinitionId || 'UNKNOWN'))}<br />{String(definitionEvidence.callPackageHash || definitionEvidence.definitionHash || '')}</code></p>
-          : <p>{visibleText(historicalFields.executionDefinition.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="模型／执行器" status={historicalFields.model.status}>
-        {historicalFields.model.status === 'VERIFIED'
-          ? <pre>{productionFactText(historicalFields.model.value)}</pre>
-          : <p>{visibleText(historicalFields.model.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="模型参数" status={historicalFields.parameters.status}>
-        {historicalFields.parameters.status === 'VERIFIED'
-          ? <pre>{productionFactText(historicalFields.parameters.value)}</pre>
-          : <p>{visibleText(historicalFields.parameters.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="Run 与调用包" status={historicalFields.run.status}>
-        {runEvidence
-          ? <p><code>{publicRef(String(runEvidence.executionDefinitionId || 'UNKNOWN'))}<br />{publicRef(String(runEvidence.runId || 'UNKNOWN'))}<br />{publicRef(String(runEvidence.executionRequestId || 'UNKNOWN'))}<br />{String(runEvidence.callPackageHash || '')}</code></p>
-          : <p>{visibleText(historicalFields.run.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="产出文件" status={historicalFields.output.status}>
-        {outputEvidence
-          ? <p><code>{visibleText(String(outputEvidence.path || ''))}<br />{String(outputEvidence.sha256 || '')}</code></p>
-          : <p>{visibleText(historicalFields.output.reason)}</p>}
-      </MaterialProductionDatum>
-      <MaterialProductionDatum label="父版本／返修链" status={historicalFields.parentVersion.status}>
-        {parentEvidence
-          ? <p><code>{publicRef(String(parentEvidence.parentVersionId || 'ROOT'))}<br />{String(parentEvidence.parentVersionSha256 || parentEvidence.parentBindingState || '')}</code></p>
-          : <p>{visibleText(historicalFields.parentVersion.reason)}</p>}
-      </MaterialProductionDatum>
-    </div>}
-  </section>;
+function MaterialCandidateProductionFacts({family,version}:{family:V7AssetFamily;version:V7AssetVersion|null;historical:boolean}) {
+  if(!version)return null;
+  return <section className="material-candidate-facts"><header><b>当前素材版本</b></header><p>{visibleText(version.label || family.label || family.id)} · {visibleText(version.lifecycleState)}</p>{version.sha256&&<details><summary>媒体完整性</summary><code>{version.sha256}</code></details>}</section>;
 }
 
 function aiRecommendationLabel(value: MaterialAIReviewDraft['qualityRecommendation']) {
@@ -461,7 +322,7 @@ function MaterialOutputViewer({
   const lightboxDialog = useRef<HTMLDialogElement>(null);
   const imageOrigin = useRef<HTMLButtonElement>(null);
   const [zoom, setZoom] = useState(100);
-  const kind = mediaKind(version?.path || null);
+  const kind = version?.mediaKind==='TEXT'?'UNKNOWN':version?.mediaKind || 'UNKNOWN';
   const deleted = Boolean(version && (version.outputState === 'DELETED' || version.historyRole === 'DELETED_AUDIT'));
   const dailyVersionRefs=dailyMaterialVersionRefs(model,family);
   const expectedOutputs = pendingMaterialExpectedOutputs(model,family);
@@ -492,11 +353,11 @@ function MaterialOutputViewer({
           })}
           {expectedOutputs.map((item) => item && <button type="button" key={item.id} aria-pressed={selectedRecordId===item.id} onClick={()=>onSelectVersion(item.id)}>{visibleText(item.plannedVersionLabel)} · 尚未产出</button>)}
         </fieldset>
-      <p className="material-output-summary">{category || '类别待核'}<span>{(version ? version.path || '该版本路径未知' : selectedExpected?.targetPath || outputPath || '尚无固定输出').split('/').at(-1)}</span></p>
+      <p className="material-output-summary">{category || '类别待核'}<span>{version?.label || family?.label || selectedExpected?.plannedVersionLabel || '尚未登记产物'}</span></p>
     </header>
     <div className="material-output-layout" data-material-output-layout>
       <div className={`material-output-canvas is-${kind.toLowerCase()}`}>
-        {selectedExpected ? <div className="material-output-empty"><b>该计划版本尚未产出</b><p>固定产物区域保持在原位；当前只有 ExpectedOutput，没有文件、SHA-256 或可审阅内容。</p><code>{visibleText(selectedExpected.targetPath || '目标路径 UNKNOWN')}</code></div>
+        {selectedExpected ? <div className="material-output-empty"><b>该计划版本尚未产出</b><p>此制作设置已登记预期产物，生成后会在这里显示实际媒体及其版本。</p><code>{visibleText(selectedExpected.plannedVersionLabel || '预期产物')}</code></div>
           : deleted ? <div className="material-output-empty"><b>该历史版本的文件已删除</b><p>这里只保留最小删除凭据；不能预览、采用或重新进入生产链。</p></div>
             : !version ? <div className="material-output-empty"><b>尚未产出候选</b><p>产物生成并登记实际文件与 SHA-256 后，会在同一区域直接进入详细 Review。</p></div>
               : kind === 'IMAGE' && mediaUrl ? <button ref={imageOrigin} type="button" className="material-output-image" onClick={() => { setZoom(100); setLightboxOpen(true); }}>
@@ -579,8 +440,7 @@ function AssetReviewForm({
       : version?.projectRightsGate || versionProjection?.projectRightsGate || 'UNKNOWN',
   );
   const hasArtifact = Boolean(
-    version?.path
-    && /^[a-f0-9]{64}$/i.test(version.sha256 || '')
+    version && /^[a-f0-9]{64}$/i.test(version.sha256 || '')
     && outputState !== 'DELETED'
     && lifecycleState !== 'DELETED_AUDIT',
   );
@@ -865,7 +725,7 @@ function AssetReviewForm({
   }
 
   return <section className="material-review-form">
-    <header><h3>审阅当前素材版本</h3><span className={decisionApplied && operations.effective?.action === 'APPROVE_AND_RELEASE' ? 'tone-good' : undefined}>{hasDecisionProjection && !decisionApplied ? '裁决状态 UNKNOWN' : reviewActionLabel(decisionApplied ? operations.effective?.action : '')}</span></header>
+    <header><h3>审阅当前素材版本</h3><span className={decisionApplied && operations.effective?.action === 'APPROVE_AND_RELEASE' ? 'tone-good' : undefined}>{hasDecisionProjection && !decisionApplied ? '裁决状态 UNKNOWN' : reviewActionLabel(decisionApplied ? operations.effective?.action : lifecycleState==='RELEASED'?'APPROVE_AND_RELEASE':lifecycleState==='REVISION_REQUIRED'?'REQUEST_REVISION':'')}</span></header>
     <section className="material-ai-review" aria-label="AI辅助 Review">
 
       {!hasArtifact && version && <small>暂无可核验产物。</small>}
@@ -934,7 +794,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
   const model = useMemo(() => detail && detail.snapshotId === snapshotId ? mergePagedProductionModel(summaryModel, detail.page) : summaryModel, [detail, snapshotId, summaryModel]);
   const currentEpisodePlan = episodePlanIsCurrent(model);
   const requirements = useMemo(() => (model.materialRequirements || []).filter((requirement) => (
-    requirement.requirementClass === 'REQUIRED'
+    ['REQUIRED','OPTIONAL'].includes(requirement.requirementClass)
     &&
     (requirement.id === viewState.requirementId || materialRequirementVisibleInEpisodePlan(requirement, model.episodes, currentEpisodePlan))
   )), [currentEpisodePlan, model.episodes, model.materialRequirements, viewState.requirementId]);
@@ -1098,24 +958,24 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
         {hasUsageBindings&&<section className="material-production-materials" aria-label="已登记的图片用途"><header><h3>已登记的图片用途</h3><span>{selectedRequirement.coverageSatisfied?'本需求已覆盖':'本需求待完成'}</span></header>{selectedRequirement.materialUsageBindings!.map(binding=>{const version=model.assetVersions.find(v=>v.id===binding.versionId&&v.sha256===binding.sha256),url=version?.mediaToken?runtimePath('/api/v1/media/'+version.mediaToken):null;return <section key={binding.usageId}><p>{binding.eligible?'当前用途可用':'当前用途不可用'} · {binding.versionId}</p>{url&&<a href={runtimePath(url)} target="_blank" rel="noreferrer">查看绑定原图</a>}{!binding.eligible&&binding.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>;})}{usageOnlyLeaf&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>}</section>}
         {!composition&&!usageOnlyLeaf&&<div className="material-review-focus">
           <div className="material-output-zone">
-            <MaterialOutputViewer outputPath={recipe?.output?.path} category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={selectedVersion?.id || explicitSelectedExpected?.id || viewState.versionId || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />
+            <MaterialOutputViewer category={selectedClassification?.businessCategorySecondary || selectedClassification?.businessCategoryPrimary} model={model} family={selectedFamily} version={selectedVersion} selectedRecordId={selectedVersion?.id || explicitSelectedExpected?.id || viewState.versionId || null} onSelectVersion={(versionId) => patch({ familyId: selectedFamily?.id || null, versionId })} />
           </div>
           <section className="material-review-zone" data-material-section="review">
             <MaterialReviewPoints requirement={selectedRequirement} version={selectedVersion} historical={isHistoricalVersion}/>
-            {currentProductionTarget && !isHistoricalVersion && selectedFamily && (selectedFamily.kind==='IMAGE'||selectedFamily.kind==='VISUAL'&&selectedRequirement.mediaType==='IMAGE') && selectedVersion?.sha256 && selectedVersion.reviewDecision==='RELEASED' && selectedVersion.legacyState?.approvalStatus==='APPROVED' && !selectedVersion.canFlowDownstream && <AssetContextRevalidationEditor target={{familyId:selectedFamily.id,versionId:selectedVersion.id,sha256:selectedVersion.sha256}} mediaToken={selectedVersion.mediaToken || undefined}/>}
+            {currentProductionTarget && !isHistoricalVersion && selectedFamily && (selectedFamily.kind==='IMAGE'||selectedFamily.kind==='VISUAL'&&selectedRequirement.mediaType==='IMAGE') && selectedVersion?.sha256 && selectedVersion.reviewDecision==='RELEASED' && !selectedVersion.canFlowDownstream && <AssetContextRevalidationEditor target={{familyId:selectedFamily.id,versionId:selectedVersion.id,sha256:selectedVersion.sha256}} mediaToken={selectedVersion.mediaToken || undefined}/>}
             {selectedFamily
               ? <AssetReviewForm key={`${selectedRequirement.requirementHash}:${selectedRequirement.reviewSpec?.hash || 'LEGACY'}:${selectedVersion?.id || viewState.versionId || 'NO_VERSION'}`} requirement={selectedRequirement} family={selectedFamily} version={selectedVersion} operations={operations} />
               : <div className="v6-empty-note"><b>Review 区已保留</b><p>当前还没有资产族或候选文件；登记文件与 SHA-256 后在这里进行 AI 辅助与正式人工 Review。</p></div>}
           </section>
         </div>}
         <section className="material-production-materials" data-material-section="production" data-production-version-id={selectedVersion?.id || explicitSelectedExpected?.id || 'NO_VERSION'}>
-          <header><h3>全部生产资料</h3><span>{isHistoricalVersion ? `${visibleText(selectedVersion?.label || '历史版本')} · 版本绑定资料` : selectedVersion ? `${visibleText(selectedVersion.label)} · 最新生产资料` : composition ? '由各项素材共同满足' : hasUsageBindings ? '已有图片用途审阅记录' : '尚未产出 · 最新生产资料'}</span></header>
+          <header><h3>当前制作设置</h3><span>{isHistoricalVersion ? `${visibleText(selectedVersion?.label || '历史版本')} · 版本绑定资料` : selectedVersion ? `${visibleText(selectedVersion.label)} · 下一候选的制作依据` : composition ? '由各项素材共同满足' : hasUsageBindings ? '已有图片用途审阅记录' : '尚未产出 · 下一候选的制作依据'}</span></header>
           <CharacterCardRequirementPreview requirement={selectedRequirement} />
           {!isHistoricalVersion && <ImageTechnicalSpecPanel spec={selectedRequirement.configurationBinding?.technicalSpec} hash={selectedRequirement.configurationBinding?.technicalSpecHash} facts={selectedVersion?.imageTechnicalSpecHash===selectedRequirement.configurationBinding?.technicalSpecHash?selectedVersion?.imageTechnicalFacts:undefined} versionSha256={selectedVersion?.sha256} />}
           {selectedFamily
-            ? <>{!isHistoricalVersion && <RecipePanel expanded compact definitionRef={selectedItem?.executionDefinitionRef} recipe={recipe} error={recipeError} title="" defaultOpen reviewerView />}<MaterialCandidateProductionFacts key={`${selectedFamily.id}:${selectedVersion?.id || 'NO_VERSION'}:${selectedVersion?.sha256 || 'NO_SHA'}:${selectedVersion?.outputState || 'NO_OUTPUT'}`} family={selectedFamily} version={selectedVersion} historical={isHistoricalVersion} /></>
+            ? <>{!isHistoricalVersion && <RecipePanel expanded compact definitionRef={selectedItem?.executionDefinitionRef} recipe={recipe} error={recipeError} title="参考素材、提示词与参数" defaultOpen reviewerView />}<MaterialCandidateProductionFacts key={`${selectedFamily.id}:${selectedVersion?.id || 'NO_VERSION'}:${selectedVersion?.sha256 || 'NO_SHA'}:${selectedVersion?.outputState || 'NO_OUTPUT'}`} family={selectedFamily} version={selectedVersion} historical={isHistoricalVersion} /></>
             : composition ? <p>逐项完成上方素材后，这项组合需求才会就绪。</p> : <>{currentProductionTarget&&!hasUsageBindings&&<p className="v6-empty-note">{usageOnlyLeaf?'这项需求尚未绑定产物，可制作新图或审阅已有图片的新用途。':'这项需求尚未绑定产物，可建立制作资料并生成候选。'}</p>}{usageOnlyLeaf&&!hasUsageBindings&&<MaterialUsageEditor requirementId={selectedRequirement.id}/>} {currentProductionTarget&&!hasEligibleUsage&&selectedRequirement.sourceKind === 'DOMAIN_GRAPH' && !selectedRequirement.assetFamilyRefs.length && !selectedRequirement.plannedAssetFamilyId && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} />}</>}
-          {currentProductionTarget && selectedFamily && !isHistoricalVersion && (selectedItem?.materialProductionPlanId || selectedFamily.materialProductionPlanId || selectedFamily.kind === 'AUDIO' && selectedVersion?.sha256 && recipe?.model?.branch === 'seed-audio-1.0' && selectedItem?.executionDefinitionRef) && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} revision />}
+          {currentProductionTarget && selectedFamily && !isHistoricalVersion && selectedItem?.executionDefinitionRef && <MaterialProductionSetupEditor requirementId={selectedRequirement.id} revision />}
         </section>
         <section className="material-purpose-usage" data-material-section="purpose-usage">
           <header><h3>用途与使用位置</h3></header>
@@ -1126,7 +986,7 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
               ['依据说明',storyBasis?.evidenceSpecificity],
               ['全剧适用依据',selectedRequirement.storyApplicability?.kind==='PROJECT_LEVEL' ? selectedRequirement.projectScopeReason||selectedRequirement.storyApplicability.reason : ''],
             ].filter(([,text])=>materialDisplayText(text)).map(([label,text])=><p key={label}><b>{label}：</b>{visibleText(text!)}</p>)}{!storyBasis ? <p role="status">当前详情未提供用途上下文，暂不可用。</p> : materialDisplayText(storyBasis.whyNeeded)||materialDisplayText(storyBasis.onScreenRequirement)?null:<p>当前详情没有可用的用途说明。</p>}{storyEvidenceRefs.some(ref=>materialDisplayText(ref))&&<code>{storyEvidenceRefs.map(materialDisplayText).filter(Boolean).join('；')}</code>}</section>
-            <section><h4>会在哪里使用</h4><div className="material-use-links">{currentEpisodePlan ? selectedRequirement.sceneIds.filter(id=>model.scenes.some(s=>s.id===id&&s.scopeRole==='CURRENT')).map((sceneId) => <button key={sceneId} onClick={() => onOpenStoryScene(sceneId)}>阅读对应场剧本 →</button>) : <p>候选集场关联见目录集、场筛选，尚未绑定为正式输入；旧用途只作历史证据。</p>}{(selectedClassification?.currentShotIds || []).map((shotId) => <button key={shotId} onClick={() => onOpenConsumer(shotId)}>{shotId} →</button>)}</div>{!(selectedClassification?.currentShotIds || []).length && <p>尚无正式镜头绑定。</p>}</section>
+            <section><h4>会在哪里使用</h4><div className="material-use-links">{currentEpisodePlan ? selectedRequirement.sceneIds.filter(id=>model.scenes.some(s=>s.id===id&&s.scopeRole==='CURRENT')).map((sceneId) => <button key={sceneId} onClick={() => onOpenStoryScene(sceneId)}>{model.scenes.find(s=>s.id===sceneId)?.title || sceneId} · 阅读剧本 →</button>) : <p>候选集场关联见目录集、场筛选，尚未绑定为正式输入；旧用途只作历史证据。</p>}{(selectedClassification?.currentShotIds || []).map((shotId) => <button key={shotId} onClick={() => onOpenConsumer(shotId)}>{shotId} →</button>)}</div>{!(selectedClassification?.currentShotIds || []).length && <p>尚无正式镜头绑定。</p>}</section>
           </div>
         </section>
 

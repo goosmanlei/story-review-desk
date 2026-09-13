@@ -18,7 +18,7 @@ test("handbook compiles all chapters, keeps precise schema inventory and serves 
     output = path.join(process.env.REVIEW_TASK_DIR, "handbook");
   const result = await buildHandbook({ root, output });
   assert.equal(result.chapters, 12);
-  assert.equal(result.diagrams, 17);
+  assert.equal(result.diagrams, JSON.parse(await readFile(new URL("../docs/handbook/diagrams.json",import.meta.url),"utf8")).length);
   assert(result.bytes < 2 * 1024 * 1024);
   const schema = await inventory(root);
   assert.match(

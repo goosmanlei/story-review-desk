@@ -2369,7 +2369,6 @@ export const configurationDefaults = {
       }
     ],
     "continuity": {
-      "specAlias": "",
       "requiredCoordinates": [
         "LOC",
         "STATE",

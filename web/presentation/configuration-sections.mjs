@@ -4,5 +4,5 @@ export const CONFIGURATION_SECTIONS = Object.freeze([
   { id: 'setting', label: '资料与设定', groups: [['sources', '来源核对'], ['entities', '实体体系'], ['references', '参考与连续性']] },
   { id: 'production', label: '素材与制作', groups: [['taxonomy', '素材分类'], ['workflow', '制作流程']] },
   { id: 'review', label: '审阅标准', groups: [['review', '审阅标准']] },
-  { id: 'collaboration', label: 'AI 配置', groups: [['assistant', 'AI 助手'], ['codex', '项目 Codex'], ['trial', '试制入口']] },
+  { id: 'collaboration', label: 'AI 配置', groups: [['assistant', 'AI 助手'], ['codex', '项目 Codex']] },
 ]);

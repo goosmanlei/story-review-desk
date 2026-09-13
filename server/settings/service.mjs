@@ -1,6 +1,8 @@
+import {validateReferenceContent,validateReferenceTargets} from '../materials/references.mjs';
 import { check } from "../shared/contracts.mjs";
 export const kinds = ["ENTITY", "STATE", "REPRESENTATION", "RELATION", "SPACE"];
 export function validate(kind, content) {
+  validateReferenceContent(kind,content);
   if (kind === "ENTITY")
     check(
       typeof content.description === "string",
@@ -44,3 +46,5 @@ export async function projectLinks(tx, object, revisionId, links) {
     ],
   );
 }
+
+export const validateTarget=validateReferenceTargets;

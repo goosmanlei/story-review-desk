@@ -34,7 +34,7 @@ export async function inputLockWorkspace(unit,input) {
  const reviewRequired=reviewObjects.filter(r=>r.adoptedRevisionId!==r.revision.id).map(r=>({id:r.id,kind:r.kind,title:r.title,revisionId:r.revision.id,version:r.version,criteria:r.revision.content.reviewSpec?.criteria||[]}));
  const basis={callId:call.id,callRevisionId:call.revision.id,callVersion:call.version,outputId:output.id,outputRevisionId:output.revisionId,outputVersion:output.version,familyId:familyIds[0],inputs,reviewRequired,lockSpec};
  const lockId='input-lock:'+hash({call:call.revision.id,output:output.revisionId,inputs}).slice(0,32),lock=(await unit.rows(['INPUT_LOCK'],{ids:[lockId]}))[0];
- return {call,output,reviewObjects,dependencies,inputs,lock,basis,lockSpec,value:{snapshotId:await unit.namespace(),basisHash:hash(basis),recipe:presentRecipe(call),inputs,reviewRequired,lockCriteria:lockSpec?.criteria||[],blockers,lock:lock?{id:lock.id,revisionId:lock.revisionId,version:lock.version,state:lock.state}:null}};
+ return {call,output,reviewObjects,dependencies,inputs,lock,basis,lockSpec,value:{snapshotId:await unit.namespace(),basisHash:hash(basis),recipe:await presentRecipe(call,unit),inputs,reviewRequired,lockCriteria:lockSpec?.criteria||[],blockers,lock:lock?{id:lock.id,revisionId:lock.revisionId,version:lock.version,state:lock.state}:null}};
 }
 export async function planInputLockChange(tx,input) {
  const state=await inputLockWorkspace(new PresentationRead(tx),input);

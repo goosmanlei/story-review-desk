@@ -1,7 +1,7 @@
 import { check, identity } from "./shared/contracts.mjs";
 import { transaction } from "./db.mjs";
 import { workChains, workStateSql } from "./shared/workflow.mjs";
-export const summaries = `o.id,o.module,o.kind,o.display_id AS "displayId",o.title,o.version,o.state,o.draft_revision_id AS "draftRevisionId",o.adopted_revision_id AS "adoptedRevisionId",o.position,o.historical,o.updated_at AS "updatedAt"`;
+export const summaries = `o.id,o.module,o.kind,o.display_id AS "displayId",o.title,o.version,o.state,o.draft_revision_id AS "draftRevisionId",o.adopted_revision_id AS "adoptedRevisionId",o.position,o.historical,o.created_at AS "createdAt",o.updated_at AS "updatedAt"`;
 export async function catalog(
   tx,
   {
