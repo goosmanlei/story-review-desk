@@ -3,6 +3,9 @@ export type MaterialPanelKind='closed'|'entity'|'state'|'material'|'relation';
 export type MaterialDefinitionTarget={collection:'states'|'representations'|'requirements'|'relations';id:string};
 export type MaterialPanelIntent={kind:MaterialPanelKind;id:string;entityId:string;familyId:string;versionId:string;trial:boolean;error:string;legacy:boolean;definition?:MaterialDefinitionTarget};
 const kinds:MaterialPanelKind[]=['closed','entity','state','material','relation'];
+export function sameMaterialPanel(a:MaterialPanelIntent,b:MaterialPanelIntent):boolean{
+ return a.kind===b.kind&&a.id===b.id&&a.entityId===b.entityId&&a.familyId===b.familyId&&a.versionId===b.versionId&&a.trial===b.trial&&a.definition?.collection===b.definition?.collection&&a.definition?.id===b.definition?.id;
+}
 export function materialPanelIntent(params:URLSearchParams):MaterialPanelIntent{
  // The page resolver accepts this old exact family alias before normalizing
  // its URL. Capture the same intent on the drawer's first mount.

@@ -57,6 +57,7 @@ export function queryProductionMaterialPage(sourceModel,projection,query) {
       lifecycleStates:[...new Set(catalog.rows.map(row=>row.lifecycleState))].sort(),
       episodeUids:[...new Set(catalog.rows.flatMap(row=>row.episodeUids))].sort(),sceneIds:[...new Set(catalog.rows.flatMap(row=>row.sceneIds))].sort()},
     page:query.summary?{}:{workItems,workPackages,assetFamilies,assetVersions,expectedOutputs,
+      workflowSteps:list(model.workflowSteps).filter(step=>workPackages.some(row=>row.stepId===step.id)),
       shots:list(model.shots).filter(row=>shotIds.has(row.id)),scenes:list(model.scenes).filter(row=>sceneIds.has(row.id)),
       episodes:list(model.episodes).filter(row=>episodeUids.has(row.episodeUid)),
       reviewContexts:list(model.reviewContexts).filter(row=>reviewContextIds.has(row.id))},

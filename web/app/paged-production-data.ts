@@ -11,6 +11,7 @@ export type PagedProductionFilters = {
 };
 
 type ProductionPage = Partial<Pick<ProductionModel,
+  | 'workflowSteps'
   | 'workItems'
   | 'workPackages'
   | 'assetFamilies'
@@ -69,6 +70,7 @@ export type PagedProductionWindow = {
 };
 
 const productionArrayKeys = [
+  'workflowSteps',
   'workItems',
   'workPackages',
   'assetFamilies',

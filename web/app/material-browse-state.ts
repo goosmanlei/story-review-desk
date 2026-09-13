@@ -1,7 +1,7 @@
 import {instanceLocalStorage} from './client-storage';
 
 const key='material-browse-v1';
-const fields=['materialCatalog','processQ','processKind','processMedia','processState','processGate','processEpisode','processScene','processShot','entity','materialEntityType','materialMedia','materialPrimary','materialCategory','materialEpisode','materialScene','materialCreatorStage','materialCoverage','materialQ'] as const;
+const fields=['materialCatalog','processQ','processKind','processMedia','processState','processGate','processEpisode','processScene','processShot','entity','materialDirectoryQ','materialEntityType','materialMedia','materialPrimary','materialCategory','materialEpisode','materialScene','materialCreatorStage','materialCoverage','materialQ'] as const;
 export function saveMaterialBrowseLocation(url:URL) {
   if(url.searchParams.get('view')!=='materials')return;
   try{instanceLocalStorage.setItem(key,JSON.stringify(Object.fromEntries(fields.flatMap(field=>url.searchParams.has(field)?[[field,url.searchParams.get(field)]]:[]))));}catch{/* Reading remains available without device storage. */}

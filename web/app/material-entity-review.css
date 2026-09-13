@@ -1,4 +1,4 @@
-.material-entity-review{--material-line:var(--line,#d1cbbf);--material-paper:var(--paper,#f7f4ea);--material-ink:var(--ink,#25251f);--material-muted:var(--muted,#6c6d63);--material-accent:var(--accent,#9e3329);color:var(--material-ink);min-width:0}
+.material-entity-review,.material-review-drawer{--material-line:var(--line,#d1cbbf);--material-paper:var(--paper,#f7f4ea);--material-ink:var(--ink,#25251f);--material-muted:var(--muted,#6c6d63);--material-accent:var(--accent,#9e3329);color:var(--material-ink);min-width:0}
 .material-entity-review button,.material-entity-review input{font:inherit}
 .material-catalog-filters{border:1px solid var(--material-line);background:var(--material-paper);margin-bottom:1.25rem;padding:1rem 1.15rem}
 .material-catalog-filters>header{display:flex;align-items:end;gap:1rem;justify-content:space-between}

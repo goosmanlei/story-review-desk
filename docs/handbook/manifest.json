@@ -135,9 +135,15 @@
         "web/app/settings-entity-graph.tsx",
         "server/materials/overall-review.mjs",
         "server/materials/review-focus.mjs",
-        "web/app/material-business-focus.tsx"
+        "web/app/material-business-focus.tsx",
+        "web/app/entity-material-catalog.tsx",
+        "web/app/material-production-center.tsx",
+        "web/app/material-catalog-panel.ts",
+        "web/app/material-browse-state.ts",
+        "web/app/paged-production-data.ts",
+        "server/presentation/production-material-query.mjs"
       ],
-      "sourceDigest": "55bfbf21cdebee110355e6056862693c11355473f8bd3612a9d0559ad3b3e6bc"
+      "sourceDigest": "361a675a3eaa63d66586d5ce29862269c300d62c37e4c223c60f9bfc4697cd29"
     },
     {
       "id": "development",

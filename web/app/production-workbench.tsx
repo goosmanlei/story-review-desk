@@ -2923,11 +2923,11 @@ function WorkPackageDetail({ model, shot, workPackage, context, operations, onNa
   const p07 = items.filter((item) => item.pipelineStageCode === 'P07');
   const p08 = items.filter((item) => item.pipelineStageCode === 'P08');
   const reviewContext = workProductReviewContext(model, selectedItem, workPackage);
-  const criteria = selectedItem ? (selectedItem.reviewSpec?.criteria || criteriaForReviewScope(selectedItem, shot.reviewContext, reviewContext)) : [];
+  const criteria = selectedItem ? (selectedItem.reviewSpec?.criteria || (shot.reviewContext||reviewContext&&reviewContext.scopeType!=='SHOT' ? criteriaForReviewScope(selectedItem, shot.reviewContext, reviewContext) : [])) : [];
   const projectedSelectedItem = selectedItem ? withReviewProjection(withOperationalProjection(selectedItem, operations.workItemProjection), operations.effective) : null;
   const activeItem = projectedSelectedItem || selectedItem;
   const companionLifecycleReady = (selectedItem?.additionalOutputAssetRefs || []).length === 0;
-  const formalReviewSupported = Boolean(reviewContext?.reviewable && reviewContext.semanticStatus !== 'UNKNOWN_STALE_BINDING' && companionLifecycleReady);
+  const formalReviewSupported = Boolean(criteria.length && reviewContext?.reviewable && reviewContext.semanticStatus !== 'UNKNOWN_STALE_BINDING' && companionLifecycleReady);
   const surface = activeItem ? resolveWorkbenchSurface(activeItem, decisionVersion, formalReviewSupported) : 'PRE_OUTPUT';
   const postTask = postTaskForItem(model, selectedItem);
 
@@ -2969,6 +2969,7 @@ function WorkPackageDetail({ model, shot, workPackage, context, operations, onNa
       <header><div><small>{workflowDisplay(step.order)}</small><h3>{visibleText(step.label)}</h3><p>{scopeLabel(workPackage, items.length) + ' · ' + visibleText(workPackage.label)}</p></div><DirectorState value={workPackage.applicabilityState === 'SATISFIED_BY_EXISTING' ? 'SATISFIED_BY_EXISTING' : activeItem?.lifecycleState || workPackage.lifecycleState || 'UNKNOWN'} /></header>
       {workPackage.applicabilityState === 'SATISFIED_BY_EXISTING' ? <div className="v7-not-applicable v8-package-satisfied"><b>本步骤已由校准时期的既有地点状态资产满足</b><p>无需补造没有真实执行内容的兼容任务；从粗分镜开始审阅本镜。</p></div> : workPackage.applicabilityState === 'NOT_REQUIRED' ? <div className="v7-not-applicable v8-package-not-required"><b>本镜无需口型步骤</b><p>无对白或非口型分支在动态镜头通过后即可锁镜；这不是缺失，也不计入完成率。</p></div> : workPackage.stepId === 'W02' ? <div className="v7-parallel-work"><header><b>选择实际审阅对象</b><span>粗分镜与本镜适用对白并行，完成后共同汇入全场Animatic锁时</span></header><div><section><h4>画面支线 <small>粗分镜</small></h4>{p07.map((item) => <WorkItemButton key={item.id} item={item} selected={selectedItem && selectedItem.id === item.id} onSelect={selectItem} />)}</section>{p08.length > 0 && <i>∥</i>}{p08.length > 0 && <section><h4>声音支线 <small>对白干声</small></h4>{p08.map((item) => <WorkItemButton key={item.id} item={item} selected={selectedItem && selectedItem.id === item.id} onSelect={selectItem} />)}</section>}</div>{p08.length === 0 && <p className="v6-empty-note">本镜无台词，不制造空白对白任务。</p>}</div> : <div className={'v7-work-item-list ' + (workPackage.stepId === 'W04' ? 'is-dual-output' : '')}>{items.map((item) => <WorkItemButton key={item.id} item={item} selected={selectedItem && selectedItem.id === item.id} onSelect={selectItem} />)}</div>}
       {workPackage.applicabilityState === 'REQUIRED' && selectedItem && <>
+        {!criteria.length&&<p role="status">审阅标准或精确镜头上下文尚未登记（UNKNOWN）；当前可查阅制作信息，正式审阅保持关闭。</p>}
         <ScopeStageContext model={model} shot={shot} workPackage={workPackage} item={activeItem || selectedItem} task={postTask} reviewContext={reviewContext} />
         {shotMaterialRequirements.length > 0 && <section className="creator-shot-material-demands" aria-label="本镜素材需求与输入冻结状态"><header><div><small>SHOT MATERIAL REQUIREMENTS</small><h3>本镜待冻结素材需求</h3><p>ShotSpec 只声明需要哪些素材；只有下方输入资产显示精确采用版本与 SHA 时，才算完成输入冻结。</p></div><span>{inputListedRequirementIds.size} 已列入输入 · {shotMaterialRequirements.length - inputListedRequirementIds.size} 待冻结</span></header><div>{shotMaterialRequirements.map((requirement) => {
           const card = requirement.cardSpec?.role === 'INSTANCE' ? requirement.cardSpec : null;

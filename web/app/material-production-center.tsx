@@ -1,5 +1,6 @@
 'use client';
 import {MaterialJudgmentRecord} from './material-judgment-record';
+import {saveMaterialBrowseLocation} from './material-browse-state';
 import {useRetainedDraft} from './draft-retention';
 import {useManagementDraftGuard} from './management-draft-guard';
 import {MaterialBusinessFocus,useMaterialBusinessFocus} from './material-business-focus';
@@ -658,9 +659,13 @@ export function MaterialProductionCenter(props:Props) {
   const [catalog,setCatalog]=useState<'basic'|'production'>('basic');
   useEffect(()=>{const read=()=>setCatalog(new URL(window.location.href).searchParams.get('materialCatalog')==='production'?'production':'basic');read();window.addEventListener('popstate',read);window.addEventListener('review:material-catalog-location',read);return()=>{window.removeEventListener('popstate',read);window.removeEventListener('review:material-catalog-location',read);};},[]);
   function selectCatalog(next:'basic'|'production'){
+    if(next===catalog||!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;
     const url=new URL(window.location.href);url.searchParams.set('materialCatalog',next);
-    for(const key of ['material','family','version','asset','materialPanel','productionMaterial','productionMaterialVersion'])url.searchParams.delete(key);
-    window.history.replaceState(window.history.state,'',url);setCatalog(next);
+    for(const key of ['material','family','version','asset','productionMaterial','productionMaterialVersion','materialState','materialRelation','materialTrial','materialTrialVersion','materialDefinitionId','materialDefinitionKind','materialDefinitionTab','materialRepresentation'])url.searchParams.delete(key);
+    // Directory selection survives a tab change; opening a detail requires a
+    // new explicit intent. Never reinterpret retained entity as a legacy link.
+    url.searchParams.set('materialPanel','closed');
+    window.history.replaceState(window.history.state,'',url);saveMaterialBrowseLocation(url);setCatalog(next);
     props.onViewStateChange({...props.viewState,requirementId:null,familyId:null,versionId:null});
     window.dispatchEvent(new Event('review:material-catalog-location'));
   }
