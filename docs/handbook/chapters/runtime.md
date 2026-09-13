@@ -22,7 +22,7 @@ macOS 由 LaunchAgent 托管，Linux 由 systemd 托管。服务监督器启动 
 | instance/runtime | 本机配置、凭据引用、运行包和回执 | 本机部署与维护 |
 | guidance | 故事规则的受控字节副本 | GUIDANCE 保存、提交、确认后回读 |
 | project-data | 可验证、可移植的业务包 | 正式导入导出接口 |
-| review-library | 人可浏览的语义目录与链接 | 工作器自动维护的只读投影 |
+| review-library | 人可浏览的语义目录，文件与原件共享内容 | 工作器自动维护的只读硬链接投影 |
 | .process | 有归属的阶段资源 | 登记、交接、精确清退 |
 
 ## 本地与 VPS

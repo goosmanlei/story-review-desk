@@ -1,7 +1,7 @@
 import { check, identity } from '../shared/contracts.mjs';
 
 export const libraryKinds = ['REVIEW_LIBRARY_SYNC', 'REVIEW_LIBRARY_VERIFY'];
-export const LIBRARY_FORMAT = 1;
+export const LIBRARY_FORMAT = 2;
 export function libraryPath(value) {
   check(typeof value === 'string' && value.length <= 600 &&
     /^(texts|images|audio|videos|other)\/[a-z0-9][a-z0-9./_-]*$/.test(value) &&

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile, lstat, readlink, symlink, unlink, chmod, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, lstat, readlink, symlink, link, unlink, chmod, rename } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -48,7 +48,7 @@ test('screenplay exports ordered body and performance, without support documents
   assert(!text.includes('不得导出的附文'));
 });
 
-test('library builds exact links and texts, refreshes atomically and detects drift in an isolated project', async t => {
+test('library shares media bytes with typed hard links, migrates old trees and detects drift', async t => {
   const outer = await requiredPhase(process.cwd()); assert(outer);
   const project = path.join(process.env.REVIEW_TASK_DIR, 'library-fixture'), root = path.join(project, 'instance');
   const container = 'review-library-fixture-' + randomUUID(), labels = await outer.expect('container', container);
@@ -78,7 +78,7 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   await create('story','STORY',{},[{id:'episode',role:'EPISODE'}]);
   const config = { reviewLibrary: { enabled:true,texts:[{kind:'source',objectId:'original',revisionId:source.revisionId,path:'texts/sources/original.md'},{kind:'screenplay',objectId:'story',path:'texts/screenplays/current.md'}] } };
   await commands([{type:'configuration.save',scope:'project',content:config,expectedVersion:0}]);
-  const media = Buffer.from('fixture media bytes'), sha = hash(media);
+  const media = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=', 'base64'), sha = hash(media);
   await writeFile(path.join(root,'media',sha),media);
   for (const id of ['portrait','portrait-copy']) await pool.query("INSERT INTO media(id,version_id,sha256,byte_size,mime_type,availability,original_path) VALUES($1,'v1',$2,$3,'image/png','PRESENT','Character_Portrait_V001.png')",[id,sha,media.length]);
   await pool.query("INSERT INTO media(id,version_id,sha256,byte_size,mime_type,availability) VALUES('gone','v1',$1,0,'video/mp4','RETIRED')",['b'.repeat(64)]);
@@ -88,15 +88,50 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   await (await import('node:fs/promises')).rmdir(path.join(project,'review-library'));
   let result = await syncLibrary(pool,root,{full:true});
   assert.equal(result.status,'CURRENT'); assert.equal(result.counts.files,4); assert.equal(result.counts.unavailable,1);
+  // Recreate a valid format-1 generation to exercise the real upgrade path,
+  // including unchanged database contents and later retirement of old symlinks.
+  const stateFile = path.join(root,'runtime/review-library/state.json');
+  const legacyState = JSON.parse(await readFile(stateFile,'utf8'));
+  const legacyDirectory = path.join(project,legacyState.current.directory);
+  const legacyFile = path.join(legacyDirectory,'manifest.json');
+  const legacyManifest = JSON.parse(await readFile(legacyFile,'utf8'));
+  for (const e of legacyManifest.entries.filter(e=>e.path)) {
+    const file=path.join(legacyDirectory,'tree',e.path);
+    const target=e.kind==='media'?path.join(root,'media',e.sha256):path.join(legacyDirectory,'text-blobs',e.sha256);
+    await chmod(path.dirname(file),0o700); await unlink(file); await symlink(path.relative(path.dirname(file),target),file);
+    delete e.fileIdentity;
+  }
+  legacyManifest.formatVersion=1;
+  const legacyBytes=Buffer.from(JSON.stringify(legacyManifest)+'\n');
+  await chmod(legacyFile,0o600); await writeFile(legacyFile,legacyBytes); await chmod(legacyFile,0o400);
+  legacyState.current.manifestSha256=hash(legacyBytes); await writeFile(stateFile,JSON.stringify(legacyState));
+  assert.equal((await readLibrary(pool,root)).status,'STALE');
+  result=await syncLibrary(pool,root); assert.equal(result.status,'CURRENT');
+  assert.notEqual((await readlink(path.join(project,'review-library'))),legacyState.current.directory+'/tree');
   const firstPointer = await readlink(path.join(project,'review-library'));
   assert.equal((await lstat(path.join(project,firstPointer))).mode&0o222,0);
   let catalog = await readLibrary(pool,root,{entries:true});
   const images = catalog.entries.filter(e=>e.kind==='media'&&e.path);
   assert.equal(images.length,2); assert.notEqual(images[0].path,images[1].path);
-  for (const e of images) assert.equal(hash(await readFile(path.join(project,'review-library',e.path))),sha);
+  const originalStat=await lstat(path.join(root,'media',sha));
+  for (const e of images) {
+    const file=path.join(project,'review-library',e.path), st=await lstat(file);
+    assert(st.isFile()); assert(!st.isSymbolicLink());
+    assert.equal(st.dev,originalStat.dev); assert.equal(st.ino,originalStat.ino);
+    assert.equal(hash(await readFile(file)),sha);
+  }
   assert.equal(Number((await lstat(path.join(root,'media',sha))).mode)&0o222,0);
   assert.deepEqual(await readFile(path.join(project,'review-library/texts/sources/original.md')),original);
+  assert((await lstat(path.join(project,'review-library/texts/sources/original.md'))).isFile());
   assert.match(await readFile(path.join(project,'review-library/texts/screenplays/current.md'),'utf8'),/第一版正文/);
+  if (process.platform==='darwin') {
+    const probe=path.join(process.env.REVIEW_TASK_DIR,'library-file-type');
+    execFileSync('clang',['-framework','Foundation','-framework','AppKit',fileURLToPath(new URL('fixtures/library-file-type.m',import.meta.url)),'-o',probe],{stdio:'pipe'});
+    const types=JSON.parse(execFileSync(probe,[path.join(project,'review-library',images[0].path),path.join(project,'review-library/texts/sources/original.md')],{encoding:'utf8'}));
+    assert.equal(types[0].type,'public.png'); assert(types[0].application);
+    assert.notEqual(types[1].type,'public.data'); assert.notEqual(types[1].type,'public.symlink');
+    t.diagnostic('macOS identifies the media entry as '+types[0].type+'; default application: '+types[0].application);
+  }
   const resolved = await readLibrary(pool,root,{entryPath:'review-library/'+images[0].path});
   assert.equal(resolved.entry.mediaId,images[0].mediaId); assert.equal(resolved.exactPath,'instance/media/'+sha);
   for (const kind of ['REVIEW_LIBRARY_SYNC','REVIEW_LIBRARY_VERIFY']) {
@@ -117,7 +152,7 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   assert.match(await readFile(path.join(project,'review-library/texts/screenplays/current.md'),'utf8'),/第二版正文/);
   assert.match(await readFile(path.join(project,firstPointer,'texts/screenplays/current.md'),'utf8'),/第一版正文/);
   assert.equal((await readLibrary(pool,root,{entries:true})).entries.find(e=>e.key===images[0].key).path,images[0].path);
-  // Relocating the whole project preserves the relative link graph without rewriting any link.
+  // Relocating the whole project preserves the root pointer and shared media inodes.
   const moved = project+'-moved'; await rename(project,moved);
   assert.equal(hash(await readFile(path.join(moved,'review-library',images[0].path))),sha);
   await rename(moved,project);
@@ -133,17 +168,24 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   assert.equal(await readlink(path.join(project,'review-library')),pointer);
   assert.equal((await readLibrary(pool,root)).status,'ERROR');
   await writeFile(path.join(root,'media',sha),media); await syncLibrary(pool,root);
-  const link = path.join(project,'review-library',images[0].path), target = await readlink(link);
-  assert.equal((await lstat(path.dirname(link))).mode&0o222,0);
-  await chmod(path.dirname(link),0o700); // Deliberate tampering must opt out of the read-only directory first.
-  await unlink(link); await symlink('/not-an-owned-media-file',link);
+  const alias = path.join(project,'review-library',images[0].path), target = path.join(root,'media',sha);
+  assert.equal((await lstat(path.dirname(alias))).mode&0o222,0);
+  await chmod(path.dirname(alias),0o700); // Deliberate tampering must opt out of the read-only directory first.
+  await unlink(alias); await symlink(target,alias);
   await assert.rejects(syncLibrary(pool,root),{code:'LIBRARY_LINK_CHANGED'});
   await assert.rejects(readLibrary(pool,root,{entryPath:images[0].path}),{code:'LIBRARY_LINK_CHANGED'});
-  await unlink(link); await symlink(target,link); await syncLibrary(pool,root);
+  // An identical-byte copy is still a second file and must not be accepted.
+  await unlink(alias); await writeFile(alias,media,{mode:0o400});
+  await assert.rejects(syncLibrary(pool,root),{code:'LIBRARY_LINK_CHANGED'});
+  await assert.rejects(readLibrary(pool,root,{entryPath:images[0].path}),{code:'LIBRARY_LINK_CHANGED'});
+  await unlink(alias); await link(target,alias); await syncLibrary(pool,root);
   // A third generation retires exactly the oldest owned tree.
   await commands([{type:'save',id:'scene',kind:'SCENE',expectedVersion:scene.version+1,content:{text:'第三版正文'}}]);
   result = await syncLibrary(pool,root); assert.equal(result.cleanupPending,0);
   await assert.rejects(lstat(path.join(project,firstPointer)),{code:'ENOENT'});
+  await assert.rejects(lstat(legacyDirectory),{code:'ENOENT'});
+  assert.equal((await lstat(target)).ino,originalStat.ino);
+  assert.equal(hash(await readFile(target)),sha);
   let exportedConfig;
   for await (const line of exportRecords(pool)) { const r=JSON.parse(line); if(r.table==='configurations'&&r.row.scope==='project') exportedConfig=r.row.content; }
   assert.deepEqual(exportedConfig.reviewLibrary,config.reviewLibrary);
@@ -151,7 +193,6 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   assert.equal(snapshot.entries.filter(e=>e.kind==='source').length,1);
   assert.equal(snapshot.entries.find(e=>e.kind==='screenplay').basis.find(b=>b.objectId==='scene').expectedVersion,3);
   // Recover a crash after the root swap but before the state pointer was committed.
-  const stateFile = path.join(root,'runtime/review-library/state.json');
   const state = JSON.parse(await readFile(stateFile,'utf8'));
   state.pending=state.current; state.current=state.previous; state.previous=null; state.counts={};
   await writeFile(stateFile,JSON.stringify(state));

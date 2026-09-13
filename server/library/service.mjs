@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, mkdir, readlink, symlink, rename, rm, lstat, readdir, chmod } from 'node:fs/promises';
+import { open, mkdir, readlink, symlink, link, rename, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { check, hash } from '../shared/contracts.mjs';
@@ -94,17 +94,38 @@ async function verifyBlob(file, sha256, size, fingerprints, full, protect = fals
 function targetFor(root, generation, entry) {
   return entry.kind === 'media' ? path.join(root, 'media', entry.sha256) : path.join(directoryFor(root, generation), 'text-blobs', entry.sha256);
 }
+const fileIdentity = st => `${st.dev}:${st.ino}`;
+async function checkEntry(root, generation, manifest, entry, checkMedia = true) {
+  libraryPath(entry.path);
+  const file = path.join(directoryFor(root, generation), 'tree', entry.path), target = targetFor(root, generation, entry);
+  await plainDirectory(path.dirname(file));
+  const st = await info(file);
+  if (manifest.formatVersion === 1) {
+    check(st?.isSymbolicLink() && await readlink(file) === path.relative(path.dirname(file), target), 'LIBRARY_LINK_CHANGED', '审阅链接被替换或指向其他原件', 409, { path: entry.path });
+  } else {
+    check(st?.isFile() && fileIdentity(st) === entry.fileIdentity, 'LIBRARY_LINK_CHANGED', '审阅文件被替换', 409, { path: entry.path });
+    if (checkMedia) {
+      await plainDirectory(path.dirname(target));
+      const original = await info(target);
+      check(original?.isFile(), 'LIBRARY_BLOB_MISSING', '审阅原件缺失或路径不是普通文件', 409, { sha256: entry.sha256 });
+      check(fileIdentity(st) === fileIdentity(original), 'LIBRARY_LINK_CHANGED', '审阅文件与原件不再共享同一文件', 409, { path: entry.path });
+    }
+  }
+  return { file, target };
+}
 async function checkGeneration(root, generation, fingerprints = {}, full = false, checkMedia = true) {
   const manifest = await manifestRead(root, generation), directory = directoryFor(root, generation);
   check(hash(await readBytes(path.join(directory, 'tree/README.md'))) === manifest.readmeSha256, 'LIBRARY_README_HASH', '目录说明已被修改', 409);
   const seen = new Set();
   for (const entry of manifest.entries) {
     if (!entry.path) continue;
-    libraryPath(entry.path);
-    const file = path.join(directory, 'tree', entry.path), target = targetFor(root, generation, entry);
-    await plainDirectory(path.dirname(file));
-    check((await info(file))?.isSymbolicLink() && await readlink(file) === path.relative(path.dirname(file), target), 'LIBRARY_LINK_CHANGED', '审阅链接被替换或指向其他原件', 409, { path: entry.path });
-    if (!seen.has(target) && (checkMedia || entry.kind !== 'media')) { await verifyBlob(target, entry.sha256, entry.bytes, fingerprints, full, checkMedia); seen.add(target); }
+    const { file, target } = await checkEntry(root, generation, manifest, entry, checkMedia);
+    if (!seen.has(target) && (checkMedia || entry.kind !== 'media' || manifest.formatVersion >= 2)) {
+      // A retired hard link still owns its bytes even after the canonical name was
+      // removed. Validate that owned inode before unlinking it during cleanup.
+      await verifyBlob(!checkMedia && manifest.formatVersion >= 2 ? file : target, entry.sha256, entry.bytes, fingerprints, full, checkMedia);
+      seen.add(target);
+    }
   }
   check(await readlink(path.join(directory, 'tree/.catalog.json')) === '../manifest.json', 'LIBRARY_INDEX_CHANGED', '目录索引入口已改变', 409);
   if (checkMedia) {
@@ -166,7 +187,7 @@ async function retire(root, state) {
 function readme(snapshot) {
   const texts = snapshot.entries.filter(e => e.kind !== 'media');
   return Buffer.from(`# 资源审阅目录\n\n此目录由审阅台自动维护。文件名使用业务语义，正文保留原语言。\n\n` +
-    `媒体入口绑定固定版本和 SHA；当前剧本是随系统正文更新的只读导出。软链没有独立写权限，请通过业务接口保存修改。\n\n` +
+    `媒体入口通过硬链接与原件共享同一份磁盘内容，保留可直接打开的扩展名，不复制媒体。当前剧本是随系统正文更新的只读导出。目录和文件只读，请通过业务接口保存修改。\n\n` +
     `- 查看同步状态：\`npm run review -- library status\`\n- 完整校验：\`npm run review -- library verify\`\n- 精确定位：\`npm run review -- library resolve review-library/相对文件路径\`\n- 列举文件：\`rg --files --hidden --no-ignore -L review-library\`\n- 名称、版本及来源映射：\`.catalog.json\`（含中文名称，可供搜索）\n\n` +
     `## 文本\n\n${texts.map(e => `- [${e.title}](${e.path})（${e.state}）`).join('\n') || '本项目尚未选择目录文本。'}\n\n` +
     `## 媒体\n\nimages 按人物、场景、道具、分镜及参考组织；audio 按声音、对白、环境声、音乐、音效及来源组织；videos 按预演、镜头及合成组织。归属不足的文件位于 unclassified。\n\n候选、历史、预览和采用状态见索引。可打开、已登记或同步成功不表示已观察、已采用或权利已确认。\n`);
@@ -233,7 +254,12 @@ async function synchronize(pool, root, { full = false } = {}) {
         if (!entry.path) continue;
         const file = path.join(directory, 'tree', entry.path), target = targetFor(root, generation, entry);
         await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-        await symlink(path.relative(path.dirname(file), target), file);
+        await plainDirectory(path.dirname(target));
+        check((await info(target))?.isFile(), 'LIBRARY_BLOB_MISSING', '审阅原件缺失或路径不是普通文件', 409, { sha256: entry.sha256 });
+        await link(target, file).catch(error => {
+          check(false, 'LIBRARY_HARDLINK_UNAVAILABLE', '无法建立审阅硬链接；审阅目录与原件须在支持硬链接的同一文件系统，未复制媒体', 409, { cause: error.code });
+        });
+        entry.fileIdentity = fileIdentity(await lstat(file));
       }
       const description = readme(snapshot);
       await write(path.join(directory, 'tree/README.md'), description);
@@ -295,14 +321,12 @@ export async function readLibrary(pool, root, { entryPath, entries = false } = {
   const active = await assertRoot(root, state);
   if (!active || active.directory !== state.current.directory) return { ...result, status: 'STALE' };
   const manifest = await manifestRead(root, state.current);
-  if (manifest.token !== head.token && result.status !== 'ERROR') result.status = 'STALE';
+  if ((manifest.token !== head.token || manifest.formatVersion !== LIBRARY_FORMAT) && result.status !== 'ERROR') result.status = 'STALE';
   if (entryPath) {
     const relative = libraryPath(entryPath.replace(/^review-library\//, ''));
     const entry = manifest.entries.find(e => e.path === relative);
     check(entry, 'LIBRARY_ENTRY_NOT_FOUND', '此路径不在审阅索引中', 404);
-    const file = path.join(directoryFor(root, state.current), 'tree', relative), target = targetFor(root, state.current, entry);
-    await plainDirectory(path.dirname(file));
-    check((await info(file))?.isSymbolicLink() && await readlink(file) === path.relative(path.dirname(file), target), 'LIBRARY_LINK_CHANGED', '审阅链接已改变', 409);
+    const { target } = await checkEntry(root, state.current, manifest, entry);
     await verifyBlob(target, entry.sha256, entry.bytes, {}, true);
     return { ...result, entry, exactPath: path.relative(path.dirname(root), target), instanceId: manifest.instanceId, runtimeEpoch: manifest.runtimeEpoch };
   }
