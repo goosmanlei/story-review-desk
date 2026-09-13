@@ -1,3 +1,4 @@
+import {MATERIAL_OVERALL,validateOverallCommand} from './materials/overall-review.mjs';
 import {referenceDependencies,normalizeReferenceInputs} from './materials/references.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
 import { transaction } from "./db.mjs";
@@ -452,7 +453,8 @@ async function review(tx, command, context) {
     criteria=standard.criteria;
     for(const finding of findings){const criterion=criteria.find(c=>c.id===finding.criterionId);if(criterion)finding.criterion={...criterion,standardId:standard.id,configurationVersion:configuration.version};}
   }
-  if (criteria.length)
+  if(command.reviewMode!==undefined)await validateOverallCommand(tx,object,revision,command);
+  if (criteria.length&&command.reviewMode!==MATERIAL_OVERALL)
     for (const criterion of criteria.filter((c) => c.required !== false)) {
       const f = findings.find((x) => x.criterionId === criterion.id);
       check(
@@ -501,7 +503,7 @@ async function review(tx, command, context) {
   );
   const reviewEvidence={...Object.fromEntries(Object.entries(command.reviewMetadata||{}).filter(([key])=>['subjectType','subjectId','workItemId','workPackageId','productionPhaseId','productionGateId','scopeType','scopeId','contextHash','reviewContextRef','reviewSpecHash','subjectRevisionId','versionId','versionSha256'].includes(key))),
     ...(command.productionEvidence?{shotProductionEvidence:command.productionEvidence}:{}),
-    ...(command.reviewBasis?{reviewBasis:command.reviewBasis}:{}),eventId:reviewId,objectRevisionId:revisionId};
+    ...(command.reviewBasis?{reviewBasis:command.reviewBasis}:{}),...(command.reviewMode?{reviewMode:command.reviewMode}:{}),...(command.businessContext?{businessContext:command.businessContext}:{}),eventId:reviewId,objectRevisionId:revisionId};
   check(JSON.stringify(reviewEvidence).length<=80000,'REVIEW_EVIDENCE_LIMIT','审阅依据超过保存范围');
   await tx.query("INSERT INTO provenance(id,object_id,revision_id,kind,original_id,original_sha256,content) VALUES($1,$2,$3,'review',$4,$5,$6)",[identifier('review-proof'),object.id,revisionId,reviewId,hash(reviewEvidence),reviewEvidence]);
   const state = {

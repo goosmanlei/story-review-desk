@@ -1,5 +1,8 @@
 'use client';
-import {fillUnansweredWithPass} from './review-shortcuts';
+import {MaterialJudgmentRecord} from './material-judgment-record';
+import {useRetainedDraft} from './draft-retention';
+import {useManagementDraftGuard} from './management-draft-guard';
+import {MaterialBusinessFocus,useMaterialBusinessFocus} from './material-business-focus';
 
 import { projectIdFor } from './instance-profile';
 
@@ -49,7 +52,6 @@ import {dailyMaterialVersionRefs,exactMaterialVersion,isDeletedMaterialVersion,p
 import { publicRef, visibleText } from './review-semantics';
 import { useRuntimeMode } from './runtime-mode';
 import { useAssistantFocus } from './assistant/context-provider';
-import { useProjectAssistantDraftTargets } from './assistant/project-draft-adapters';
 import {waitForOperation} from './operation-client';
 
 export type MaterialCenterViewState = {
@@ -97,7 +99,6 @@ type Props = {
   onOpenConsumer: (shotId: string) => void;
 };
 
-type Finding = { verdict: '' | 'PASS' | 'FAIL' | 'NA'; note: string };
 
 type ReviewCorrectionLockReason = {
   code: string;
@@ -128,9 +129,7 @@ function reviewActionLabel(action: ReviewAction | '' | undefined) {
   return '等待裁决';
 }
 
-function normalizedLines(value: string) {
-  return value.split('\n').map((item) => item.trim()).filter(Boolean);
-}
+
 
 function characterCardTriggerLabel(requirement: MaterialRequirement) {
   const spec = requirement.cardSpec;
@@ -393,12 +392,11 @@ function AssetReviewForm({
 }) {
   const { hostedReadOnly } = useRuntimeMode();
   const criteria = useMemo(() => requirement.reviewSpec?.criteria || requirement.acceptanceCriteria.map((label, index) => ({ id: `material-${String(index + 1).padStart(2, '0')}`, label })), [requirement.acceptanceCriteria,requirement.reviewSpec]);
-  const [action, setAction] = useState<ReviewAction | ''>('');
-  const [findings, setFindings] = useState<Record<string, Finding>>(() => Object.fromEntries(criteria.map((criterion) => [criterion.id, { verdict: '', note: '' }])));
-  const [note, setNote] = useState('');
-  const [preserve, setPreserve] = useState('');
-  const [change, setChange] = useState('');
-  const [mustNotRegress, setMustNotRegress] = useState('');
+  const [overallDraft,setOverallDraft,overallRetained]=useRetainedDraft<{action:ReviewAction|'';note:string;basis:string}>('material-overall:'+requirement.id+':'+(version?.id||'NONE'));
+  const action=overallDraft?.action||'',note=overallDraft?.note||'';
+  useManagementDraftGuard(Boolean(overallDraft)&&!overallRetained,'素材整体审阅说明');
+  function setAction(value:ReviewAction|''){setOverallDraft(old=>({...old||{note:'',basis:currentBasis},action:value}));}
+  function setNote(value:string){setOverallDraft(old=>({...old||{action:'',basis:currentBasis},note:value}));}
   const [rightsConfirmed, setRightsConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [aiBusy, setAiBusy] = useState(false);
@@ -406,10 +404,7 @@ function AssetReviewForm({
   const [aiMessage, setAiMessage] = useState('');
   const [message, setMessage] = useState('');
   const [headConflict, setHeadConflict] = useState<ReviewHeadConflict | null>(null);
-  const [hydrationRevision, setHydrationRevision] = useState(0);
-  const hydratedReviewKeyRef = useRef('');
-  const reviewTargetKey = `${family.id}::${version?.id || 'NO_VERSION'}::${requirement.reviewSpec?.hash || 'LEGACY'}`;
-  const previousReviewTargetKeyRef = useRef(reviewTargetKey);
+  const [focusAttempt,setFocusAttempt]=useState(0);
   const versionProjection = version ? operations.stateProjection?.assetVersionsById[version.id] : null;
   const contextHash = typeof versionProjection?.reviewContextHash === 'string' ? versionProjection.reviewContextHash : '';
   const outputState = String(versionProjection?.outputState || version?.outputState || 'UNKNOWN');
@@ -447,72 +442,11 @@ function AssetReviewForm({
   const isPresent = hasArtifact && outputState === 'PRESENT';
   const reviewEligible = Boolean(version && (lifecycleState === 'REVIEW_PENDING' || (!hasDecisionProjection&&versionProjection?.adoptionFact) || (decisionApplied && correctionState === 'OPEN')));
 
-  useEffect(() => {
-    if (previousReviewTargetKeyRef.current === reviewTargetKey) return;
-    previousReviewTargetKeyRef.current = reviewTargetKey;
-    hydratedReviewKeyRef.current = '';
-    setHeadConflict(null);
-  }, [reviewTargetKey]);
-
-  const hydrationKey = `${version?.id || 'NO_VERSION'}::${operations.effective?.eventId || 'NO_DECISION'}::${contextHash || 'NO_CONTEXT'}::${criteria.map((criterion) => criterion.id).join(',')}::${hydrationRevision}`;
-  useEffect(() => {
-    if (headConflict) return;
-    if (hydratedReviewKeyRef.current === hydrationKey) return;
-    hydratedReviewKeyRef.current = hydrationKey;
-    const effective = decisionApplied ? operations.effective : null;
-    const priorFindings = new Map((effective?.criterionFindings || []).map((finding) => [finding.criterionId, finding]));
-    setAction(effective?.action || '');
-    setFindings(Object.fromEntries(criteria.map((criterion) => {
-      const prior = priorFindings.get(criterion.id);
-      return [criterion.id, {
-        verdict: prior?.verdict || '',
-        note: prior?.note || '',
-      }];
-    })));
-    setNote(effective?.note || '');
-    setPreserve((effective?.revisionInstructions?.preserve || []).join('\n'));
-    setChange((effective?.revisionInstructions?.change || []).join('\n'));
-    setMustNotRegress((effective?.revisionInstructions?.mustNotRegress || []).join('\n'));
-    setRightsConfirmed(false);
-    setAiDraft(null);
-    setAiMessage('');
-    setMessage('');
-  }, [criteria, decisionApplied, headConflict, hydrationKey, operations.effective]);
-
-  const allJudged = criteria.every((criterion) => Boolean(findings[criterion.id]?.verdict));
-  const revisionChanges = normalizedLines(change);
-  const currentDecisionSignature = JSON.stringify({
-    action: action || '',
-    criterionFindings: criteria.map((criterion) => ({
-      criterionId: criterion.id,
-      verdict: findings[criterion.id]?.verdict || '',
-      note: findings[criterion.id]?.note.trim() || '',
-    })),
-    revisionInstructions: action === 'REQUEST_REVISION' ? {
-      preserve: normalizedLines(preserve),
-      change: revisionChanges,
-      mustNotRegress: normalizedLines(mustNotRegress),
-    } : null,
-    note: note.trim(),
-  });
-  const effectiveFindingById = new Map((operations.effective?.criterionFindings || []).map((finding) => [finding.criterionId, finding]));
-  const effectiveDecisionSignature = JSON.stringify({
-    action: decisionApplied ? operations.effective?.action || '' : '',
-    criterionFindings: criteria.map((criterion) => {
-      const finding = effectiveFindingById.get(criterion.id);
-      return {
-        criterionId: criterion.id,
-        verdict: finding?.verdict || '',
-        note: finding?.note?.trim() || '',
-      };
-    }),
-    revisionInstructions: decisionApplied && operations.effective?.action === 'REQUEST_REVISION' ? {
-      preserve: operations.effective.revisionInstructions?.preserve || [],
-      change: operations.effective.revisionInstructions?.change || [],
-      mustNotRegress: operations.effective.revisionInstructions?.mustNotRegress || [],
-    } : null,
-    note: decisionApplied ? operations.effective?.note?.trim() || '' : '',
-  });
+  const focus=useMaterialBusinessFocus(requirement.id,version?.id,contextHash+':'+(operations.effective?.eventId||'')+':'+focusAttempt);
+  const currentBasis=JSON.stringify([operations.snapshotId,version?.id,version?.sha256,versionProjection?.revisionId,requirement.reviewSpec?.hash,focus.value?.contextHash,projectedHeadEventId]);
+  const basisChanged=Boolean(overallDraft&&focus.value&&overallDraft.basis!==currentBasis);
+  const currentDecisionSignature=JSON.stringify({action,note:note.trim()});
+  const effectiveDecisionSignature=JSON.stringify({action:decisionApplied?operations.effective?.action||'':'',note:decisionApplied?operations.effective?.note?.trim()||'':''});
   const hasDecisionChanges = !decisionApplied || currentDecisionSignature !== effectiveDecisionSignature;
   const canSubmit = Boolean(
     !correctionLocked
@@ -523,47 +457,16 @@ function AssetReviewForm({
     && operations.snapshotId
     && operations.mutationEtag
     && action
-    && allJudged
+    && !basisChanged && Boolean(focus.value) && !focus.value?.historical && !focus.error
+    && (action!=='REQUEST_REVISION'||note.trim().length>0)
     && hasDecisionChanges
-    && (action !== 'APPROVE_AND_RELEASE' || criteria.every((criterion) => findings[criterion.id]?.verdict !== 'FAIL'))
     && (action !== 'APPROVE_AND_RELEASE' || reviewRightsFact !== 'UNKNOWN' || rightsConfirmed)
   );
 
-  const assistantDrafts = useProjectAssistantDraftTargets({
-    identity: `material:${operations.snapshotId || 'LOADING'}:${requirement.id}:${version?.id || 'NO_VERSION'}:${version?.sha256 || 'NO_SHA'}:${contextHash}:${requirement.reviewSpec?.hash || 'LEGACY'}:${projectedHeadEventId || 'NO_DECISION'}`,
-    subjectId: requirement.id, versionId: version?.id, defaultFieldId: 'note',
-    fields: version ? [
-      ...criteria.map((criterion) => ({ fieldId: `criterion:${criterion.id}`, label: `${requirement.title} · ${criterion.label}意见`, value: findings[criterion.id]?.note || '' })),
-      { fieldId: 'note', label: `${requirement.title} · 总体说明`, value: note },
-      ...(action === 'REQUEST_REVISION' ? [
-        { fieldId: 'preserve', label: `${requirement.title} · 必须保留`, value: preserve },
-        { fieldId: 'change', label: `${requirement.title} · 必须修改`, value: change },
-        { fieldId: 'mustNotRegress', label: `${requirement.title} · 不得退化`, value: mustNotRegress },
-      ] : []),
-    ] : [],
-    canAdopt: Boolean(version && !hostedReadOnly && !busy && !aiBusy && !operations.loading && !operations.error
-      && !correctionLocked && !headConflict && contextHash),
-    disabledReason: '当前版本审阅草稿已锁定或绑定正在更新；建议仍可复制。',
-    applyField: (fieldId, nextValue) => {
-      if (fieldId === 'note') setNote(nextValue);
-      else if (fieldId === 'preserve') setPreserve(nextValue);
-      else if (fieldId === 'change') setChange(nextValue);
-      else if (fieldId === 'mustNotRegress') setMustNotRegress(nextValue);
-      else updateFinding(fieldId.slice('criterion:'.length), { note: nextValue });
-    },
-  });
-
-  function chooseAction(value: ReviewAction | '') {
-    setAction(value);
-    if (value === 'APPROVE_AND_RELEASE') setFindings(current => fillUnansweredWithPass(current,criteria.map(criterion=>criterion.id)));
-  }
-
-  function updateFinding(id: string, patch: Partial<Finding>) {
-    setFindings((current) => ({ ...current, [id]: { ...(current[id] || { verdict: '', note: '' }), ...patch } }));
-  }
+  function chooseAction(value:ReviewAction|''){setAction(value);}
 
   async function requestAIReview() {
-    if (!version || !hasArtifact || !operations.snapshotId || !operations.mutationEtag || !contextHash) return;
+    if (!version || !hasArtifact || !operations.snapshotId || !operations.mutationEtag || !contextHash || !focus.value) return;
     const body = {
       schemaVersion: '1.0',
       snapshotId: operations.snapshotId,
@@ -573,6 +476,7 @@ function AssetReviewForm({
       versionId: version.id,
       versionSha256: version.sha256,
       contextHash,
+      businessContextHash:focus.value.contextHash,
     };
     try {
       setAiBusy(true);
@@ -606,30 +510,15 @@ function AssetReviewForm({
 
   function applyAIDraft() {
     if (!aiDraft || correctionLocked) return;
-    setFindings((current) => {
-      const next = { ...current };
-      for (const finding of aiDraft.criterionFindings) {
-        if (!next[finding.criterionId]) continue;
-        next[finding.criterionId] = {
-          verdict: finding.verdict === 'UNKNOWN' ? '' : finding.verdict,
-          note: finding.note,
-        };
-      }
-      return next;
-    });
     setNote(aiDraft.overallNote);
-    setPreserve((aiDraft.revisionInstructions?.preserve || []).join('\n'));
-    setChange((aiDraft.revisionInstructions?.change || []).join('\n'));
-    setMustNotRegress((aiDraft.revisionInstructions?.mustNotRegress || []).join('\n'));
     setAction('');
     setAiMessage('参考意见已填入可编辑字段；正式动作仍未选择，请人工复核、修改后再决定。');
   }
 
   function loadLatestDecision() {
     if (!decisionApplied) return;
-    hydratedReviewKeyRef.current = '';
+    setOverallDraft({action:'',note:operations.effective?.note||'',basis:currentBasis});
     setHeadConflict(null);
-    setHydrationRevision((value) => value + 1);
   }
 
   async function submit() {
@@ -653,16 +542,9 @@ function AssetReviewForm({
         versionSha256: version.sha256,
         contextHash,
         action,
-        criterionFindings: criteria.map((criterion) => ({
-          criterionId: criterion.id,
-          verdict: findings[criterion.id].verdict,
-          note: findings[criterion.id].note.trim(),
-        })),
-        revisionInstructions: action === 'REQUEST_REVISION' ? {
-          preserve: normalizedLines(preserve),
-          change: revisionChanges,
-          mustNotRegress: normalizedLines(mustNotRegress),
-        } : null,
+        reviewMode:'MATERIAL_OVERALL_V1',
+        businessContextHash:focus.value?.contextHash,
+        criterionFindings:[],
         rightsUnknownConfirmation: action === 'APPROVE_AND_RELEASE' && reviewRightsFact === 'UNKNOWN'
           ? { confirmed: rightsConfirmed, scope: 'PROJECT_INTERNAL_ONLY', basis: note.trim() || '用户在本次审阅中明确确认仅限项目内部生产；未填写补充说明。' }
           : null,
@@ -694,6 +576,7 @@ function AssetReviewForm({
           'REVIEW_CORRECTION_REQUIRES_HEAD',
         ].includes(String(payload.reasonCode || ''));
         if (correctionConflict) {
+          setFocusAttempt(value=>value+1);
           setHeadConflict({
             expectedHeadEventId: projectedHeadEventId || operations.effective?.eventId || '',
             expectedMutationEtag: operations.mutationEtag,
@@ -714,6 +597,7 @@ function AssetReviewForm({
                 : payload.error || `HTTP ${response.status}`;
         throw new Error(conflictMessage);
       }
+      setOverallDraft(null);
       setMessage(`正式裁决已应用：${payload.eventId || '成功'}。素材需求覆盖与消费者资格已按同一资产生命周期重算。`);
       operations.refresh();
       window.dispatchEvent(new CustomEvent('review:operations-updated'));
@@ -731,14 +615,14 @@ function AssetReviewForm({
       {!hasArtifact && version && <small>暂无可核验产物。</small>}
       {aiDraft && <article className="material-ai-draft">
         <header><b>AI参考结论：{aiRecommendationLabel(aiDraft.qualityRecommendation)}</b><span>未保存</span></header>
-        <p>{visibleText(aiDraft.summary)}</p>
+        <p>{visibleText(aiDraft.summary)}</p><details><summary>按标准组织的只读观察</summary>{aiDraft.criterionFindings.map(f=><p key={f.criterionId}><b>{criteria.find(c=>c.id===f.criterionId)?.label||f.criterionId}</b> · {f.verdict}：{visibleText(f.note)}</p>)}</details>
         <ul>{aiDraft.observations.map((item) => <li key={`observed-${item}`}>{visibleText(item)}</li>)}</ul>
         {aiDraft.unobserved.length > 0 && <details><summary>未观察或仍为 UNKNOWN 的证据</summary><ul>{aiDraft.unobserved.map((item) => <li key={`unobserved-${item}`}>{visibleText(item)}</li>)}</ul></details>}
-        <button type="button" disabled={correctionLocked} onClick={applyAIDraft}>填入下方可编辑表单</button>
+        <button type="button" disabled={correctionLocked} onClick={applyAIDraft}>填入整体审阅说明</button>
       </article>}
       {aiMessage && <p role="status" aria-live="polite">{aiMessage}</p>}
     </section>
-    {decisionApplied && correctionState === 'OPEN' && <div className="creator-mobile-review-block material-review-correctable" role="status"><b>当前裁决仍可纠正</b><span>修改后提交会追加一条新的 ReviewEvent，取代当前投影；旧裁决 {publicRef(operations.effective?.eventId || '')} 仍保留作审计。登记后继版本、启动下游执行或源同步后会自动锁定。</span>{!hasDecisionChanges && <small>当前表单与既有裁决相同；至少修改一项后才可提交。</small>}</div>}
+    {decisionApplied && correctionState === 'OPEN' && <div className="creator-mobile-review-block material-review-correctable" role="status"><b>当前裁决仍可纠正</b><span>此素材尚未进入后续制作，可以提交新的整体结论；原判断会保留。</span>{!hasDecisionChanges && <small>当前表单与既有裁决相同；至少修改一项后才可提交。</small>}</div>}
     {hasDecisionProjection && correctionLocked && <div className="creator-mobile-review-block material-review-immutable" role="status"><b>{correctionState === 'LOCKED' ? '当前裁决已经进入下一状态，不能再纠正' : '当前裁决的纠错状态无法确认，已安全锁定'}</b>{correctionProjection?.lockReasons?.length
       ? <ul className="material-review-lock-reasons">{correctionProjection.lockReasons.map((reason) => <li key={`${reason.code}-${reason.evidenceId}`}>{visibleText(reason.message)}（{publicRef(reason.evidenceId)}）</li>)}</ul>
       : <span>请刷新运行快照；在服务端确认当前裁决头与下游绑定前，不会覆盖现有结果。</span>}</div>}
@@ -748,25 +632,21 @@ function AssetReviewForm({
     {!version && <p className="v6-empty-note">当前需求还没有资产版本，先完成执行定义与候选登记。</p>}
     {version && !hasArtifact && <p className="v6-empty-note">当前版本没有可核验的文件与SHA-256，不能提交正式裁决。</p>}
     {version && <>
-      <div className="material-criteria-list">{criteria.map((criterion) => <article key={criterion.id} data-criterion-id={criterion.id}><div className="material-criterion-copy"><b>{criterion.label}</b>{"question" in criterion&&materialCriterionDescription(criterion.label,criterion.question)&&<p>{materialCriterionDescription(criterion.label,criterion.question)}</p>}</div><div role="group" aria-label={`${criterion.label}判断`}>{(['PASS', 'FAIL', 'NA'] as const).filter(v=>v!=='NA'||!("allowNA" in criterion)||criterion.allowNA!==false).map((verdict) => {
-        const selected = findings[criterion.id]?.verdict === verdict;
-        return <button type="button" disabled={correctionLocked} key={verdict} aria-pressed={selected} className={selected ? 'active' : ''} onClick={() => updateFinding(criterion.id, { verdict: selected ? '' : verdict })}>{verdict === 'PASS' ? '符合' : verdict === 'FAIL' ? '不符合' : '不适用'}</button>;
-      })}</div><textarea rows={2} disabled={correctionLocked} value={findings[criterion.id]?.note || ''} onFocus={() => assistantDrafts.activateField(`criterion:${criterion.id}`)} onChange={(event) => updateFinding(criterion.id, { note: event.target.value })} placeholder={findings[criterion.id]?.verdict === 'FAIL' ? '可选：写明可复现的具体问题' : '可选：补充证据或观察'} /></article>)}</div>
-      {action === 'APPROVE_AND_RELEASE' && reviewRightsFact === 'UNKNOWN' && <label className="material-rights-confirm"><input disabled={correctionLocked} type="checkbox" checked={rightsConfirmed} onChange={(event) => setRightsConfirmed(event.target.checked)} />我确认本次仅按 PROJECT_INTERNAL_ONLY 在项目内部下传；原始权利事实仍为 UNKNOWN。</label>}
-      <label className="material-review-note">总体说明（可选）<textarea rows={2} disabled={correctionLocked} value={note} onFocus={() => assistantDrafts.activateField('note')} onChange={(event) => setNote(event.target.value)} placeholder="可选：补充本次裁决依据" /></label>
-
-      {action === 'REQUEST_REVISION' && <div className="material-revision-grid"><label>必须保留（可选）<textarea rows={2} disabled={correctionLocked} value={preserve} onFocus={() => assistantDrafts.activateField('preserve')} onChange={(event) => setPreserve(event.target.value)} placeholder="可选；每行一条" /></label><label>必须修改（可选）<textarea rows={2} disabled={correctionLocked} value={change} onFocus={() => assistantDrafts.activateField('change')} onChange={(event) => setChange(event.target.value)} placeholder="可选；每行一条" /></label><label>不得退化（可选）<textarea rows={2} disabled={correctionLocked} value={mustNotRegress} onFocus={() => assistantDrafts.activateField('mustNotRegress')} onChange={(event) => setMustNotRegress(event.target.value)} placeholder="可选；每行一条" /></label></div>}
-      {action === 'APPROVE_AND_RELEASE' && criteria.some(c=>findings[c.id]?.verdict==='FAIL') && <p role="alert">已有“不符合”判断已保留，请先核对冲突项或选择“要求修改”。</p>}
+      <MaterialBusinessFocus value={focus.value} error={focus.error}/>
+      <section className="material-criteria-list" aria-label="只读审阅标准">{criteria.map(criterion=><article key={criterion.id} data-criterion-id={criterion.id}><b>{criterion.label}</b>{'question'in criterion&&materialCriterionDescription(criterion.label,criterion.question)&&<p>{materialCriterionDescription(criterion.label,criterion.question)}</p>}</article>)}</section>
+      {basisChanged&&<div role="alert"><p>业务依据或裁决头已变化，整体说明已保留。重新核对后再选择结论。</p><button type="button" onClick={()=>{setOverallDraft({action:'',note,basis:currentBasis});setRightsConfirmed(false);setHeadConflict(null);}}>已核对当前依据，保留说明</button></div>}
+      {action==='APPROVE_AND_RELEASE'&&reviewRightsFact==='UNKNOWN'&&<label className="material-rights-confirm"><input disabled={correctionLocked} type="checkbox" checked={rightsConfirmed} onChange={e=>setRightsConfirmed(e.target.checked)}/>我确认本次仅按 PROJECT_INTERNAL_ONLY 在项目内部下传；原始权利事实仍为 UNKNOWN。</label>}
+      <label className="material-review-note">整体审阅说明{action==='REQUEST_REVISION'?'（必填）':'（通过时可选）'}<textarea aria-label="整体审阅说明" rows={4} disabled={correctionLocked} value={note} onChange={e=>setNote(e.target.value)} placeholder="说明本素材需要修改的内容或整体判断依据"/></label>
+      {action==='REQUEST_REVISION'&&!note.trim()&&<p role="status">要求修改时请填写整体审阅说明。</p>}
       <div className="material-review-submit-bar">
       <div className="material-review-actions is-submit-adjacent" role="group" aria-label="正式审阅动作（可再次点击取消）">{([
-        ['APPROVE_AND_RELEASE', '通过并放行'],
+        ['APPROVE_AND_RELEASE', '通过并采用'],
         ['REQUEST_REVISION', '要求修改'],
-        ['DO_NOT_USE', '禁止使用'],
       ] as Array<[ReviewAction, string]>).map(([value, label]) => {
         const selected = action === value;
         return <button type="button" disabled={correctionLocked} key={value} aria-pressed={selected} className={selected ? 'active' : ''} onClick={() => chooseAction(selected ? '' : value)}>{label}</button>;
       })}</div>
-      <div className="material-review-assist-actions"><button type="button" className="material-ai-review-action" disabled={hostedReadOnly || aiBusy || !hasArtifact} onClick={() => void requestAIReview()}>{aiBusy ? '正在分析…' : 'AI 辅助审阅'}</button><button className="material-draft-assistant-action" type="button" disabled={hostedReadOnly || !assistantDrafts.hasTargets} onClick={assistantDrafts.askAboutActiveDraft}>结合这条意见问助手</button></div>
+      <div className="material-review-assist-actions"><button type="button" className="material-ai-review-action" disabled={hostedReadOnly || aiBusy || !hasArtifact} onClick={() => void requestAIReview()}>{aiBusy ? '正在分析…' : 'AI 辅助审阅'}</button></div>
       <button className="creator-authorize-button" disabled={busy || !canSubmit || hostedReadOnly} onClick={() => void submit()}>{busy ? '正在提交…' : hostedReadOnly ? '远端镜像不可正式提交' : decisionApplied ? '提交纠错并取代旧裁决' : '提交正式裁决'}</button>
       </div>
     </>}
@@ -963,9 +843,10 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
           <section className="material-review-zone" data-material-section="review">
             <MaterialReviewPoints requirement={selectedRequirement} version={selectedVersion} historical={isHistoricalVersion}/>
             {currentProductionTarget && !isHistoricalVersion && selectedFamily && (selectedFamily.kind==='IMAGE'||selectedFamily.kind==='VISUAL'&&selectedRequirement.mediaType==='IMAGE') && selectedVersion?.sha256 && selectedVersion.reviewDecision==='RELEASED' && !selectedVersion.canFlowDownstream && <AssetContextRevalidationEditor target={{familyId:selectedFamily.id,versionId:selectedVersion.id,sha256:selectedVersion.sha256}} mediaToken={selectedVersion.mediaToken || undefined}/>}
-            {selectedFamily
+            {operations.events.length>0&&<section aria-label="历史素材审阅"><h4>历史审阅记录</h4>{operations.events.map(event=><div key={event.eventId}><small>{reviewActionLabel(event.action)} · {event.versionId}</small><MaterialJudgmentRecord head={event as unknown as Record<string,unknown>}/></div>)}</section>}
+            {selectedFamily&&!isHistoricalVersion
               ? <AssetReviewForm key={`${selectedRequirement.requirementHash}:${selectedRequirement.reviewSpec?.hash || 'LEGACY'}:${selectedVersion?.id || viewState.versionId || 'NO_VERSION'}`} requirement={selectedRequirement} family={selectedFamily} version={selectedVersion} operations={operations} />
-              : <div className="v6-empty-note"><b>Review 区已保留</b><p>当前还没有资产族或候选文件；登记文件与 SHA-256 后在这里进行 AI 辅助与正式人工 Review。</p></div>}
+              : isHistoricalVersion?null:<div className="v6-empty-note"><b>Review 区已保留</b><p>当前还没有资产族或候选文件；登记文件与 SHA-256 后在这里进行 AI 辅助与正式人工 Review。</p></div>}
           </section>
         </div>}
         <section className="material-production-materials" data-material-section="production" data-production-version-id={selectedVersion?.id || explicitSelectedExpected?.id || 'NO_VERSION'}>

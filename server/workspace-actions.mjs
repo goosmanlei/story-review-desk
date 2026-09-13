@@ -1,3 +1,5 @@
+import {materialReviewFocus} from './materials/review-focus.mjs';
+import {MATERIAL_OVERALL,validateOverallInput} from './materials/overall-review.mjs';
 import {planEntityComment} from './settings/comments.mjs';
 import {planFeedbackChange} from './story/feedback.mjs';
 import {planManifestPreview} from './production/manifests.mjs';
@@ -217,6 +219,7 @@ async function reviewAction(tx,workspace,body) {
     spec=requirement.revision.content.reviewSpec;
     reviewBasis={id:requirement.id,expectedVersion:requirement.version,revisionId:requirement.revision.id,reviewSpecHash:body.reviewSpecHash};
     extra.push({type:'assert',id:requirement.id,expectedVersion:requirement.version});
+    const focus=await materialReviewFocus(unit,{requirementId:requirement.id,versionId:row.id});check(!focus.historical&&body.businessContextHash===focus.contextHash,'MATERIAL_REVIEW_CONTEXT_STALE','素材业务关注重点已改变，请保留说明并重新核对',409);extra.push(...focus.sources.map(s=>({type:'assert',id:s.objectId,expectedVersion:s.expectedVersion})));
     }
     const rights=(await tx.query('SELECT * FROM rights WHERE revision_id=$1',[revisionId])).rows[0];
     if(body.rightsUnknownConfirmation) {
@@ -231,9 +234,11 @@ async function reviewAction(tx,workspace,body) {
     check(body.configurationVersion===standard.expectedVersion,'VERSION_CONFLICT','审阅标准已改变',409);
   }
   check(spec&&body.reviewSpecHash===(spec.hash||hash(spec)),'REVIEW_SPEC_CONFLICT','审阅标准与所见版本不一致',409);
+  const overall=row.kind==='ASSET'&&body.subjectType==='ASSET';
+  if(overall)validateOverallInput({...body,note:body.note??''});else check(body.reviewMode===undefined,'MATERIAL_REVIEW_SCOPE','其他审阅页面须保留原逐项契约');
   const findings=(body.criterionFindings||[]).map(f=>({...f,criterionId:episode&&f.criterionId.startsWith('episode:'+id+':')?f.criterionId.slice(('episode:'+id+':').length):f.criterionId}));
   check(new Set(findings.map(f=>f.criterionId)).size===findings.length,'REVIEW_FINDINGS','判断条目不能重复');
-  for(const c of spec.criteria.filter(c=>c.required!==false)) {
+  for(const c of overall?[]:spec.criteria.filter(c=>c.required!==false)) {
     const finding=findings.find(f=>f.criterionId===c.id);
     check(finding&&['PASS','FAIL','NA'].includes(finding.verdict),'REQUIRED_CRITERION','请完成全部审阅条目');
     check(finding.verdict!=='NA'||c.allowNA===true,'NA_NOT_ALLOWED','此项不能选择不适用');
@@ -242,10 +247,10 @@ async function reviewAction(tx,workspace,body) {
   const commands=[...extra],supersedes=body.supersedesReviewEventId||body.supersedesEpisodeSubmissionEventId;
   let version=row.version+extra.filter(c=>c.type==='rights.record').length;
   if(['DRAFT','CHANGES_REQUESTED'].includes(row.state)&&decision!=='DISABLE'&&!supersedes) {commands.push({type:'submit',id,expectedVersion:version,revisionId});version++;}
-  commands.push({type:'review',id,expectedVersion:version,revisionId,decision,explicit:true,reassess:row.state==='ADOPTED'&&!row.reviews.length,note:body.note||'',findings,reviewStandard:standard,reviewBasis,productionEvidence:body.shotProductionEvidence,reviewMetadata:Object.fromEntries(['subjectType','subjectId','workItemId','workPackageId','productionPhaseId','productionGateId','scopeType','scopeId','contextHash','reviewContextRef','reviewSpecHash','subjectRevisionId','versionId','versionSha256'].filter(k=>body[k]!==undefined).map(k=>[k,body[k]])),...(supersedes?{supersedesReviewId:supersedes}:{})});
+  commands.push({type:'review',id,expectedVersion:version,revisionId,decision,explicit:true,reassess:row.state==='ADOPTED'&&!row.reviews.length,note:body.note||'',findings,...(overall?{reviewMode:MATERIAL_OVERALL,businessContextHash:body.businessContextHash}:{}),reviewStandard:standard,reviewBasis,productionEvidence:body.shotProductionEvidence,reviewMetadata:Object.fromEntries(['subjectType','subjectId','workItemId','workPackageId','productionPhaseId','productionGateId','scopeType','scopeId','contextHash','reviewContextRef','reviewSpecHash','subjectRevisionId','versionId','versionSha256'].filter(k=>body[k]!==undefined).map(k=>[k,body[k]])),...(supersedes?{supersedesReviewId:supersedes}:{})});
   return {commands,response:results=>{
     const last=results.at(-1),action=body.reviewAction||body.action;
-    return {eventId:last.reviewId,event:{eventId:last.reviewId,episodeUid:episode?id:undefined,subjectRevisionId:body.subjectRevisionId,objectRevisionId:revisionId,action,recommendation:action,criterionFindings:body.criterionFindings,note:body.note||'',sourceSyncRequired:false},adopted:last.state==='ADOPTED',affected:last.affected,allEpisodesSubmitted:false};
+    return {eventId:last.reviewId,event:{eventId:last.reviewId,episodeUid:episode?id:undefined,subjectRevisionId:body.subjectRevisionId,objectRevisionId:revisionId,action,recommendation:action,criterionFindings:body.criterionFindings||[],...(overall?{reviewMode:MATERIAL_OVERALL}:{}),note:body.note||'',sourceSyncRequired:false},adopted:last.state==='ADOPTED',affected:last.affected,allEpisodesSubmitted:false};
   }};
 }
 

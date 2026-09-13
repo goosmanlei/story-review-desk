@@ -71,7 +71,7 @@
         "server/materials/usage-reviews.mjs",
         "server/production/spatial-views.mjs"
       ],
-      "sourceDigest": "1c0e337a26a99d1d5c4fdaaff8f2aabd58b7e4fd4364614f7b804965e6558027"
+      "sourceDigest": "aff17922d5542cd42e26d38f10bf9c9a4f959b1536f6c4835dc02d32e49d4076"
     },
     {
       "id": "layers",
@@ -111,7 +111,7 @@
         "scripts/review.mjs",
         "server/documentation.mjs"
       ],
-      "sourceDigest": "e059fd04dbb55e7d740bceb764f4c329ba3bb356ce359d8af71c51290f0db961"
+      "sourceDigest": "062829d6aad3c8643627fcce3cac22630b756494c81ab8b7187d410a309c5565"
     },
     {
       "id": "collaboration",
@@ -132,9 +132,12 @@
         "web/app/entity-comments.tsx",
         "web/app/comment-polish-client.ts",
         "server/collaboration/comment-polish.mjs",
-        "web/app/settings-entity-graph.tsx"
+        "web/app/settings-entity-graph.tsx",
+        "server/materials/overall-review.mjs",
+        "server/materials/review-focus.mjs",
+        "web/app/material-business-focus.tsx"
       ],
-      "sourceDigest": "b9aeb43bb5ff52cddc0547bd98db2a97f7982ce0a307cca46c9f7d17dbb53cbe"
+      "sourceDigest": "55bfbf21cdebee110355e6056862693c11355473f8bd3612a9d0559ad3b3e6bc"
     },
     {
       "id": "development",

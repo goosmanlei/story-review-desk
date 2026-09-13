@@ -1,3 +1,4 @@
+import {MATERIAL_OVERALL,validateOverallInput} from './overall-review.mjs';
 import {check,hash} from '../shared/contracts.mjs';
 import {PresentationRead,idFor,idsFor} from '../presentation/read-unit.mjs';
 import {assets,domainWorkspace} from '../presentation/materials.mjs';
@@ -47,23 +48,25 @@ export async function materialReviewWorkspace(unit,mode,input){
   const value={protocol:definition.protocol,supported:true,...target,readOnly:blockers.length>0,releaseId,basisHash,[definition.key]:name,reviewSpec,blockers,sourceVersion:{...target,path:media[0].original_path,media:media[0],projectRightsGate:rights?.fact,adoption:{revisionId:asset.adoptedRevisionId}},...(requirement?{requirement:requirement.value,sourceAdoption:{revisionId:asset.adoptedRevisionId}}:{domainContext,legacyAdoptionProof:{revisionId:asset.adoptedRevisionId,reviews:asset.reviews}})};
   const draft=old?.state==='DRAFT'?{...target,[definition.key]:name,revisionId:old.revisionId,baseReleaseId:old.content.baseReleaseId,basisHash:old.content.basisHash,content:old.content.reviewContent}:null;
   const current=draft?.basisHash===basisHash;
-  const head=old?(await unit.tx.query('SELECT r.id,r.content FROM objects o JOIN revisions r ON r.id=o.adopted_revision_id WHERE o.id=$1',[old.id])).rows[0]:null;
+  const head=old?(await unit.tx.query('SELECT r.id,r.content,rv.decision,rv.id AS event_id FROM objects o LEFT JOIN LATERAL(SELECT id,revision_id,decision FROM reviews WHERE object_id=o.id ORDER BY created_at DESC,id DESC LIMIT 1)rv ON true JOIN revisions r ON r.id=COALESCE(rv.revision_id,o.adopted_revision_id) WHERE o.id=$1',[old.id])).rows[0]:null;
   const jobs=(await unit.tx.query("SELECT id AS \"jobId\",id AS \"requestId\",status,error FROM operations WHERE request#>>'{commands,0,workspace}'=$1 AND request#>>'{commands,0,input,versionId}'=$2 AND COALESCE(request#>>'{commands,0,input,requirementId}','')=$3 AND request#>>'{commands,0,input,action}'='publish' ORDER BY created_at DESC LIMIT 20",[definition.workspace,input.versionId,input.requirementId||''])).rows.map(r=>({...r,error:r.error?.message}));
-  return {value:{...value,draftHeadRevisionId:old?.revisionId||null,draft:current?draft:null,staleDraft:draft&&!current?{...draft,reason:'实际依据已变化'}:null,head:head?{revisionId:head.id,reviewSpec:head.content.reviewSpec,...head.content.reviewContent,action:head.content.reviewContent.decision?.action||head.content.reviewContent.action}:null,jobs},basis,old,name,definition};
+  return {value:{...value,draftHeadRevisionId:old?.revisionId||null,draft:current?draft:null,staleDraft:draft&&!current?{...draft,reason:'实际依据已变化'}:null,head:head?{revisionId:head.id,eventId:head.event_id,reviewSpec:head.content.reviewSpec,...head.content.reviewContent,action:({ADOPT:'APPROVE_AND_RELEASE',REQUEST_CHANGES:'REQUEST_REVISION',DISABLE:'DO_NOT_USE'})[head.decision]||head.content.reviewContent.decision?.action||head.content.reviewContent.action}:null,jobs},basis,old,name,definition};
 }
 
 function validateReview(mode,content,state){
-  check(content&&typeof content==='object','REVIEW_CONTENT','缺少复核正文');
-  const decision=mode==='usage'?content.decision:{action:'APPROVE_AND_RELEASE',reviewSpecHash:state.reviewSpec.hash,criterionFindings:content.criterionFindings,note:content.note};
-  check(reviewed(decision?.action)&&decision.reviewSpecHash===state.reviewSpec.hash,'REVIEW_SPEC_CONFLICT','判断与当前标准不一致',409);
-  check(typeof decision.note==='string'&&decision.note.trim(),'REVIEW_NOTE','请填写判断说明');
-  const findings=decision.criterionFindings;
-  check(Array.isArray(findings)&&new Set(findings.map(f=>f.criterionId)).size===findings.length&&findings.length===state.reviewSpec.criteria.length,'REVIEW_FINDINGS','请完整填写逐项判断');
-  for(const c of state.reviewSpec.criteria){const finding=findings.find(f=>f.criterionId===c.id);check(finding&&['PASS','FAIL','NA'].includes(finding.verdict)&&typeof finding.note==='string'&&finding.note.trim()&&(finding.verdict!=='NA'||c.allowNA),'REVIEW_FINDINGS','请完成每项判断并填写依据');}
-  check(decision.action!=='APPROVE_AND_RELEASE'||!findings.some(f=>f.verdict==='FAIL'),'REVIEW_FAILED_CRITERIA','失败项不能同时通过');
-  if(mode==='usage')check(typeof content.purposeNote==='string'&&content.purposeNote.trim()&&content.authorization?.scope==='PROJECT_INTERNAL_ONLY'&&typeof content.authorization.basis==='string'&&content.authorization.basis.trim()&&content.observation?.originalViewed===true&&content.observation.versionId===state.versionId&&content.observation.sha256===state.sha256&&typeof content.observation.note==='string'&&content.observation.note.trim(),'USAGE_OBSERVATION','须明确用途、内部使用依据，并核对本次精确原图');
-  else check(content.purpose==='LEGACY_ADOPTION_DOMAIN_REVALIDATION'&&content.action==='CONFIRM_CURRENT_DOMAIN'&&content.observedVersionId===state.versionId&&content.observedSha256===state.sha256&&content.originalViewed===true,'CONTEXT_OBSERVATION','须明确查看本次精确原图并核对当前关系');
-  return decision;
+ check(content&&typeof content==='object','REVIEW_CONTENT','缺少复核正文');
+ const decision=mode==='usage'?content.decision:{action:content.action==='REQUEST_CURRENT_DOMAIN_REVISION'?'REQUEST_REVISION':'APPROVE_AND_RELEASE',reviewSpecHash:state.reviewSpec.hash,criterionFindings:content.criterionFindings,note:content.note};
+ check(decision&&decision.reviewSpecHash===state.reviewSpec.hash,'REVIEW_SPEC_CONFLICT','判断与当前标准不一致',409);
+ validateOverallInput({...decision,reviewMode:content.reviewMode});
+ if(mode==='usage')check(typeof content.purposeNote==='string'&&content.purposeNote.trim()&&content.authorization?.scope==='PROJECT_INTERNAL_ONLY'&&typeof content.authorization.basis==='string'&&content.authorization.basis.trim()&&content.observation?.originalViewed===true&&content.observation.versionId===state.versionId&&content.observation.sha256===state.sha256&&typeof content.observation.note==='string','USAGE_OBSERVATION','须明确用途、内部使用依据，并核对本次精确原图');
+ else check(content.purpose==='LEGACY_ADOPTION_DOMAIN_REVALIDATION'&&['CONFIRM_CURRENT_DOMAIN','REQUEST_CURRENT_DOMAIN_REVISION'].includes(content.action)&&content.observedVersionId===state.versionId&&content.observedSha256===state.sha256&&content.originalViewed===true,'CONTEXT_OBSERVATION','须明确查看本次精确原图并核对当前关系');
+ return {...decision,criterionFindings:[]};
+}
+export async function validateOverallNote(tx,mode,content,command){
+ const state=await materialReviewWorkspace(new PresentationRead(tx),mode,content.target);
+ check(!state.value.readOnly&&state.value.basisHash===content.basisHash&&state.name===content.workspace,'VERSION_CONFLICT','原图、权利或复核依据已经变化',409);
+ const decision=validateReview(mode,content.reviewContent,state.value);
+ check(command.decision===reviewed(decision.action)&&command.note===decision.note,'MATERIAL_REVIEW_CONTENT','正式结论必须与已保存整体说明一致');
 }
 
 export async function planMaterialReview(tx,mode,input){
@@ -81,5 +84,5 @@ export async function planMaterialReview(tx,mode,input){
   const decision=validateReview(mode,old.content.reviewContent,value),body={schemaVersion:mode==='usage'?'MATERIAL_USAGE_REVIEW_V1':'ASSET_CONTEXT_REVALIDATION_SOURCE_V1',[definition.key]:name,baseReleaseId:value.releaseId,draftRevisionId:old.revisionId,basis:{source:targetOf(input),...(mode==='usage'?{requirement:value.requirement}:{current:{reviewSpec:value.reviewSpec,domainContext:value.domainContext}})},content:old.content.reviewContent},previewHash=hash(body);
   if(input.action==='preview')return {commands:[...assert,{type:'assert',id:old.id,expectedVersion:old.version}],response:()=>({...flags,previewHash,[mode==='usage'?'usage':'revalidation']:body})};
   check(input.action==='publish'&&input.previewHash===previewHash,'PREVIEW_STALE','预览已改变，请重新核对',409);
-  return {commands:[...assert,{type:'submit',id:old.id,expectedVersion:old.version,revisionId:old.revisionId},{type:'review',id:old.id,expectedVersion:old.version+1,revisionId:old.revisionId,decision:reviewed(decision.action),explicit:true,findings:decision.criterionFindings,note:decision.note}],response:results=>({...flags,[definition.key]:name,revisionId:old.revisionId,eventId:results.at(-1).reviewId})};
+  return {commands:[...assert,{type:'submit',id:old.id,expectedVersion:old.version,revisionId:old.revisionId},{type:'review',id:old.id,expectedVersion:old.version+1,revisionId:old.revisionId,decision:reviewed(decision.action),explicit:true,reviewMode:MATERIAL_OVERALL,findings:[],note:decision.note}],response:results=>({...flags,[definition.key]:name,revisionId:old.revisionId,eventId:results.at(-1).reviewId})};
 }

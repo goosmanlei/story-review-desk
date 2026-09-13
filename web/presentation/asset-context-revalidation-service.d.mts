@@ -2,7 +2,7 @@ import type {InstanceReadUnit,InstanceUnit,InstanceRepository} from './index.mjs
 import type {projectOperationalState,assetReviewContextHash,assetReviewTransitionProjection,safeGeneratedPath,hashStableFile} from '../../app/api/v8/_store';
 import type {ReviewSpec} from './configuration-model.mjs';
 export type AssetContextTarget={familyId:string;versionId:string;sha256:string};
-export type AssetContextContent={purpose:'LEGACY_ADOPTION_DOMAIN_REVALIDATION';action:'CONFIRM_CURRENT_DOMAIN';observedVersionId:string;observedSha256:string;originalViewed:true;criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA';note:string}>;note:string};
+export type AssetContextContent={reviewMode?:'MATERIAL_OVERALL_V1';purpose:'LEGACY_ADOPTION_DOMAIN_REVALIDATION';action:'CONFIRM_CURRENT_DOMAIN'|'REQUEST_CURRENT_DOMAIN_REVISION';observedVersionId:string;observedSha256:string;originalViewed:true;criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA';note:string}>;note:string};
 export type AssetContextApi={projectOperationalState:typeof projectOperationalState;assetReviewContextHash:typeof assetReviewContextHash;assetReviewTransitionProjection:typeof assetReviewTransitionProjection;safeGeneratedPath?:typeof safeGeneratedPath;hashStableFile?:typeof hashStableFile};
 export type AssetContextDraft=AssetContextTarget&{revalidationId:string;baseReleaseId:string;basisHash:string;content:AssetContextContent;revisionId:string};
 export type AssetContextResult=AssetContextTarget&{releaseId:string;revalidationId:string;revalidationRevisionId:string;eventId:string;action:'CONFIRM_CURRENT_DOMAIN';sourceRef:string;sourceRevisionId:string;sourceSha256:string;modelCalls:0;formalAdoptionPerformed:false;contextRevalidationPerformed:true};

@@ -1,3 +1,4 @@
+import {materialReviewFocus} from '../materials/review-focus.mjs';
 import {entityComments} from '../settings/comments.mjs';
 import {feedbackWorkspace} from '../story/feedback.mjs';
 import {businessIntegrity} from '../project/integrity.mjs';
@@ -64,6 +65,7 @@ export async function workspaceRead(tx, path, params) {
   else if(name==='execution-requests')result=await executionState(tx,params.get('executionRequestId'));
   else if(name==='authoring')result=await authoringWorkspace(unit);
   else if(name==='episode-organization')result=await episodeOrganization(unit,params.get('episodeId'));
+  else if(name==='material-review-focus')result=await materialReviewFocus(unit,Object.fromEntries(params));
   else if(name==='entity-comments')result=await entityComments(unit,params);
   else if(name==='story-feedback')result=await feedbackWorkspace(unit,params);
   else if(name==='story-editing')result=await storyEditor(unit,params.get('objectId'));

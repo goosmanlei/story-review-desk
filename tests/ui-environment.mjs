@@ -295,6 +295,13 @@ const tick = setInterval(async () => {
         maintenance: (request) =>
           runMaintenance(pool, path.join(project, "instance"), request),
         suggest: async ({ object, request }) => {
+          if(request.materialReview){
+            const {input,businessFocus,context,spec}=request.materialReview;
+            assert.equal(businessFocus.contextHash,input.businessContextHash);
+            assert(businessFocus.sections.length||businessFocus.missing.length);
+            assert(context.resources.some(r=>r.id===input.requirementId&&r.text.includes(businessFocus.contextHash)));
+            return {summary:'受控素材整体意见',patch:{materialReview:{summary:'受控素材整体意见',overallNote:'请核对主体状态及具体用途；此处没有声称已观察原图。',qualityRecommendation:'INSUFFICIENT_EVIDENCE',criterionFindings:spec.criteria.map(c=>({criterionId:c.id,verdict:'UNKNOWN',note:'仅受控验证，原件观察未知'})),observations:[],unobserved:['未观察原图']}},sourceVersions:[],observedImageIds:[]};
+          }
           if(request.commentPolish?.target?.kind==='ENTITY_SETTING'){
             const {target,context,input}=request.commentPolish;
             assert.equal(request.objectId,target.objectId);assert.equal(request.revisionId,target.revisionId);

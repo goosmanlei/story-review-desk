@@ -12,8 +12,9 @@ const endpoint='/api/v1/workspaces/asset-context-revalidation';
 const jobs:Record<string,string>={QUEUED:'等待登记',RUNNING:'正在登记',SUCCEEDED:'复核已登记',FAILED:'登记失败',RESULT_UNKNOWN:'结果待核查'};
 const targetOf=(v:AssetContextTarget):AssetContextTarget=>({familyId:v.familyId,versionId:v.versionId,sha256:v.sha256});
 async function read<T=unknown>(response:Response):Promise<T>{if(response.status===404)throw Error('当前系统尚未支持旧采用图片的关系复核，请更新后重读');const value=await response.json() as {error?:string|{message?:string};message?:string};if(!response.ok)throw Error(typeof value.error==='string'?value.error:value.error?.message||value.message||'关系复核未完成');return value as T;}
-function blank(w:AssetContextWorkspace):ContextEditableDraft{return {purpose:'LEGACY_ADOPTION_DOMAIN_REVALIDATION',action:'CONFIRM_CURRENT_DOMAIN',observedVersionId:w.versionId,observedSha256:w.sha256,originalViewed:false,criterionFindings:w.reviewSpec.criteria.map(c=>({criterionId:c.id,verdict:'',note:''})),note:''};}
-function complete(d:ContextEditableDraft,w:AssetContextWorkspace):AssetContextContent {if(!d.originalViewed||!d.note.trim()||w.reviewSpec.criteria.some(c=>!d.criterionFindings.some(f=>f.criterionId===c.id&&(f.verdict==='PASS'||f.verdict==='NA'&&c.allowNA)&&f.note.trim())))throw Error('请查看原图并完成每项判断；存在不通过项时不能确认当前关系。');return {purpose:d.purpose,action:d.action,observedVersionId:d.observedVersionId,observedSha256:d.observedSha256,originalViewed:true,criterionFindings:d.criterionFindings as AssetContextContent['criterionFindings'],note:d.note};}
+function blank(w:AssetContextWorkspace):ContextEditableDraft{return {reviewMode:'MATERIAL_OVERALL_V1',purpose:'LEGACY_ADOPTION_DOMAIN_REVALIDATION',action:'',observedVersionId:w.versionId,observedSha256:w.sha256,originalViewed:false,criterionFindings:[],note:''};}
+function editable(content:ContextEditableDraft|undefined,w:AssetContextWorkspace):ContextEditableDraft{if(!content)return blank(w);if(content.reviewMode==='MATERIAL_OVERALL_V1')return content;return {...blank(w),note:content.note};}
+function complete(d:ContextEditableDraft,w:AssetContextWorkspace):AssetContextContent{if(!d.originalViewed||!['CONFIRM_CURRENT_DOMAIN','REQUEST_CURRENT_DOMAIN_REVISION'].includes(d.action)||d.action==='REQUEST_CURRENT_DOMAIN_REVISION'&&!d.note.trim())throw Error('请查看原图并选择整体结论；要求修改时须填写整体说明。');return {...d,reviewMode:'MATERIAL_OVERALL_V1',action:d.action as AssetContextContent['action'],originalViewed:true,criterionFindings:[]};}
 
 export function AssetContextRevalidationEditor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:string}) {
  const {hostedReadOnly}=useRuntimeMode();return hostedReadOnly?null:<Editor key={target.familyId+':'+target.versionId+':'+target.sha256} target={target} mediaToken={mediaToken}/>;
@@ -32,9 +33,9 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
   try{const l=instanceSessionStorage.getItem(draftKey),p=instanceSessionStorage.getItem(pendingKey),old=instanceSessionStorage.getItem(staleKey);if(old){const values:unknown=JSON.parse(old);if(!Array.isArray(values))throw Error('Invalid stale draft list');stale=values.map(value=>validContextLocalDraft(value,target));}if(l)local=validContextLocalDraft(JSON.parse(l),target);if(p)stored=validContextPending(JSON.parse(p),target);}catch{setStorageError(true);throw Error('本地草稿或待核查请求无法读取，暂时停止提交以免丢稿或重复登记。');}
   setState(w);setPreview(null);setPending(stored);setStaleLocalDrafts(stale);
   if(stored){const result=reconcileContextPending(stored,w);if(result.confirmed){remember(null);if(result.draft){removeStorage(draftKey);local=null;}setMessage(result.job?'已找到原登记任务，请核对下方结果。':'已找到原保存请求的草稿。');}else setMessage('原请求结果尚未核实；继续重读，暂不重复提交。');}
-  if(local&&local.basisHash===w.basisHash&&local.releaseId===w.releaseId){setDraft(local.content);setDirty(true);}
+  if(local&&local.basisHash===w.basisHash&&local.releaseId===w.releaseId){setDraft(editable(local.content,w));setDirty(true);}
   else if(local){if(!stale.some(old=>JSON.stringify(old)===JSON.stringify(local))){const preserved=[...stale,local];writeStorage(staleKey,JSON.stringify(preserved));setStaleLocalDrafts(preserved);}const reset=blank(w);reset.note=local.content.note;setDraft(reset);setDirty(true);rememberDraft(reset,w);setMessage('依据已变化，旧稿已完整保留在下方；请按当前原图与标准重新判断。');}
-  else {setDraft(w.draft?{...w.draft.content,originalViewed:false}:blank(w));setDirty(false);}
+  else {setDraft(w.draft?{...editable(w.draft.content,w),originalViewed:false}:blank(w));setDirty(Boolean(w.draft&&w.draft.content.reviewMode!=='MATERIAL_OVERALL_V1'));}
  }catch(e){if(!signal?.aborted)setMessage(e instanceof Error?e.message:'读取失败');}finally{if(!signal?.aborted)setBusy(false);}}
  const loadController=useRef<AbortController|null>(null);
  useEffect(()=>()=>loadController.current?.abort(),[]);
@@ -49,7 +50,7 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
   if(!response.ok&&response.status<500){submitted=false;if(action!=='preview')remember(null);}
   const result=validContextReceipt(await read(response),action,state);submitted=false;if(action!=='preview')remember(null);
   if(action==='save'){removeStorage(draftKey);const revisionId=String(result.revisionId);setState({...state,draftHeadRevisionId:revisionId,staleDraft:null,draft:{...targetOf(state),revalidationId:state.revalidationId,baseReleaseId:state.releaseId,basisHash:state.basisHash,revisionId,content}});setDirty(false);setPreview(null);setMessage('复核草稿已保存，请预览后登记。');}
-  else if(action==='preview'){setPreview(result);setMessage('请核对当前关系、原图与逐项判断。');}
+  else if(action==='preview'){setPreview(result);setMessage('请核对当前关系、原图与整体结论。');}
   else {setPreview(null);setState({...state,jobs:[{jobId:String(result.operationId),requestId,status:'SUCCEEDED'},...state.jobs]});setMessage('当前关系复核已登记并生效，原采用记录保留。');window.dispatchEvent(new Event('review:operations-updated'));}
  }catch(e){setMessage((e instanceof Error?e.message:'复核未完成')+(submitted&&action!=='preview'?'；结果待核查，请重读原请求，勿重复提交。':''));}finally{setBusy(false);}}
  const blocked=busy||!!pending||storageError||!!state&&(state.readOnly||state.blockers.length>0||state.jobs.some(j=>['QUEUED','RUNNING','RESULT_UNKNOWN'].includes(j.status)));
@@ -65,13 +66,15 @@ function Editor({target,mediaToken}:{target:AssetContextTarget;mediaToken?:strin
     {state.head&&<><p>已有关系复核记录。是否可用以重读后的素材状态为准。</p><MaterialJudgmentRecord head={state.head}/></>}
     {state.blockers.map(b=><p key={b}>{b}</p>)}
     {staleLocalDrafts.length>0&&<details><summary>依据变化前的本地观察稿（{staleLocalDrafts.length}）</summary>{staleLocalDrafts.map((old,index)=><div key={index}><p>原依据：{old.releaseId} · {old.basisHash}</p><pre>{JSON.stringify(old.content,null,2)}</pre></div>)}</details>}
+    {state.draft&&state.draft.content.reviewMode!=='MATERIAL_OVERALL_V1'&&<details><summary>旧分项草稿（只读）</summary><pre>{JSON.stringify(state.draft.content,null,2)}</pre></details>}
     {state.staleDraft&&<details><summary>依据已变化的旧草稿</summary><pre>{JSON.stringify(state.staleDraft.content,null,2)}</pre></details>}
     <fieldset disabled={blocked}>
      <label><input type="checkbox" checked={draft.originalViewed} onChange={e=>edit({...draft,originalViewed:e.target.checked})}/>已查看此版本原图，并核对当前关系</label>
-     {state.reviewSpec.criteria.map(c=>{const f=draft.criterionFindings.find(f=>f.criterionId===c.id);return <fieldset key={c.id}><legend>{c.label}</legend><p>{c.question}</p><label>判断<select value={f?.verdict||''} onChange={e=>edit({...draft,criterionFindings:draft.criterionFindings.map(f=>f.criterionId===c.id?{...f,verdict:e.target.value as typeof f.verdict}:f)})}><option value="">请选择</option><option value="PASS">通过</option><option value="FAIL">不通过</option>{c.allowNA&&<option value="NA">不适用</option>}</select></label><label>判断依据<textarea value={f?.note||''} onChange={e=>edit({...draft,criterionFindings:draft.criterionFindings.map(f=>f.criterionId===c.id?{...f,note:e.target.value}:f)})}/></label></fieldset>;})}
-     <label>原图观察与当前适用范围<textarea value={draft.note} onChange={e=>edit({...draft,note:e.target.value})}/></label>
+     <section aria-label="只读关系复核标准">{state.reviewSpec.criteria.map(c=><article key={c.id}><b>{c.label}</b><p>{c.question}</p></article>)}</section>
+     <label>整体结论<select aria-label="关系复核整体结论" value={draft.action} onChange={e=>edit({...draft,action:e.target.value as ContextEditableDraft['action']})}><option value="">请选择</option><option value="CONFIRM_CURRENT_DOMAIN">通过当前关系复核</option><option value="REQUEST_CURRENT_DOMAIN_REVISION">要求修改</option></select></label>
+     <label>整体审阅说明（要求修改时必填）<textarea aria-label="关系复核整体审阅说明" value={draft.note} onChange={e=>edit({...draft,note:e.target.value})}/></label>
     </fieldset>
-    <p>{dirty?'未保存内容已暂存于此浏览器。':''}{draft.criterionFindings.some(f=>f.verdict==='FAIL')?'存在不通过项：观察保留在本地，不能确认当前关系。':''}</p>
+    <p>{dirty?'未保存内容已暂存于此浏览器。':''}</p>
     <footer><button type="button" disabled={blocked||!dirty} onClick={()=>void act('save')}>保存复核草稿</button><button type="button" disabled={blocked||dirty||!state.draft} onClick={()=>void act('preview')}>预览关系复核</button></footer>
     {preview&&<section><h4>待登记关系复核</h4><p>{draft.note}</p><details><summary>完整复核内容</summary><pre>{JSON.stringify(preview.revalidation,null,2)}</pre></details><button type="button" disabled={blocked||dirty} onClick={()=>void act('publish')}>确认登记当前关系复核</button></section>}
     {state.jobs.map(j=><p key={j.jobId}>{jobs[j.status]}{j.error?'：'+j.error:''}{j.status==='SUCCEEDED'&&<button type="button" disabled={dirty||!!pending} onClick={()=>window.location.reload()}>读取素材最新状态</button>}</p>)}

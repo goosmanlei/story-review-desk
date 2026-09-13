@@ -1,5 +1,5 @@
 import type {AssetContextTarget,AssetContextContent,AssetContextWorkspace,AssetContextDraft} from '../presentation/asset-context-revalidation-service.mjs';
-export type ContextEditableDraft=Omit<AssetContextContent,'criterionFindings'|'originalViewed'>&{originalViewed:boolean;criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA'|'';note:string}>};
+export type ContextEditableDraft=Omit<AssetContextContent,'criterionFindings'|'originalViewed'|'action'>&{action:AssetContextContent['action']|'';originalViewed:boolean;criterionFindings:Array<{criterionId:string;verdict:'PASS'|'FAIL'|'NA'|'';note:string}>};
 export type ContextPending={action:'save'|'publish';target:AssetContextTarget;requestId:string;basisHash:string;releaseId:string;oldDraftRevisionId:string|null;content:AssetContextContent};
 export type ContextLocalDraft={target:AssetContextTarget;basisHash:string;releaseId:string;content:ContextEditableDraft};
 export function sameContextTarget(a:unknown,b:unknown):boolean;

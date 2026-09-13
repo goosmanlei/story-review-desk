@@ -1,4 +1,5 @@
 'use client';
+import {HistoricalMaterialFocus} from './material-business-focus';
 import {readWorkspaceJson,readWorkspaceBatch,workspaceCacheScope} from './workspace-read-cache';
 import {useInstanceProfile} from './instance-context';
 import type {MaterialCatalogRead} from './paged-production-data';
@@ -26,10 +27,10 @@ import {exactMaterialRepresentation,materialAttributes,materialReferenceEdges,ma
 import {MaterialAppearanceIcon,materialMediaAppearance,materialStageAppearance} from './material-appearance';
 import './material-entity-review.css';
 
-export function MaterialReviewPoints({requirement,historical=false}:{requirement:MaterialRequirement;version?:V7AssetVersion|null;historical?:boolean}){
+export function MaterialReviewPoints({requirement,version,historical=false}:{requirement:MaterialRequirement;version?:V7AssetVersion|null;historical?:boolean}){
  const points=materialExtraReviewPoints(requirement);
  if(!historical&&!points.length)return null;
- return <section className="entity-review-points" aria-label="审阅要点">{historical?<p>历史版本按实际生产资料和原冻结标准核对；当前要求不补作历史生成依据。</p>:<><h3>补充审阅要点</h3><ul>{points.map((p,i)=><li key={i}>{visibleText(p)}</li>)}</ul></>}</section>;
+ return <section className="entity-review-points" aria-label="审阅要点">{historical?<HistoricalMaterialFocus requirementId={requirement.id} versionId={version?.id}/>:<><h3>补充审阅要点</h3><ul>{points.map((p,i)=><li key={i}>{visibleText(p)}</li>)}</ul></>}</section>;
 }
 
 type Directory={revisionId?:string;releaseId?:string;graph:DomainGraph;bindings:Array<{requirementId:string;entityId:string;stateId:string;representationId?:string;reviewFocus?:{points:Array<{label:string}>}}>;staleIds:string[]};
