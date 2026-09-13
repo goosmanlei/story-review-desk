@@ -17,6 +17,8 @@ import { execute } from '../server/commands.mjs';
 import { hash } from '../server/shared/contracts.mjs';
 import { enqueue, workOnce } from '../server/jobs.mjs';
 import { exportRecords } from '../server/transfer.mjs';
+import { dispatch } from '../server/api.mjs';
+import { closeDatabase } from '../server/db.mjs';
 
 test('semantic names preserve version, bound length and reject unsafe paths', () => {
   const row = { id: 'same', version_id: 'v1', sha256: 'a'.repeat(64), mime_type: 'image/png', original_path: '../../old/Character_Portrait_V001.png' };
@@ -57,6 +59,9 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   const pool = new pg.Pool({ ...database, max: 4 }); t.after(() => pool.end());
   for (let i = 0; ; i++) { try { await pool.query('SELECT 1'); break; } catch(e) { if (i > 100) throw e; await new Promise(r => setTimeout(r,100)); } }
   await createProject(project, { title:'隔离审阅测试', instanceId:'library-fixture', source:fileURLToPath(new URL('..',import.meta.url)), database, initializeGit:false, host:'fixture' });
+  const oldInstance = process.env.REVIEW_INSTANCE_ROOT;
+  process.env.REVIEW_INSTANCE_ROOT = root;
+  t.after(async () => { await closeDatabase(); if(oldInstance === undefined) delete process.env.REVIEW_INSTANCE_ROOT; else process.env.REVIEW_INSTANCE_ROOT=oldInstance; });
   await pool.query(await readFile(new URL('../server/schema.sql',import.meta.url),'utf8'));
   const epoch = randomUUID();
   await pool.query("INSERT INTO project(instance_id,runtime_epoch,title) VALUES('library-fixture',$1,'隔离审阅测试')",[epoch]);
@@ -93,6 +98,16 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   assert.match(await readFile(path.join(project,'review-library/texts/screenplays/current.md'),'utf8'),/第一版正文/);
   const resolved = await readLibrary(pool,root,{entryPath:'review-library/'+images[0].path});
   assert.equal(resolved.entry.mediaId,images[0].mediaId); assert.equal(resolved.exactPath,'instance/media/'+sha);
+  for (const kind of ['REVIEW_LIBRARY_SYNC','REVIEW_LIBRARY_VERIFY']) {
+    const operationId=randomUUID();
+    const response=await dispatch(new Request('http://localhost/api/v1/jobs',{method:'POST',headers:{'Content-Type':'application/json','x-review-runtime':epoch},body:JSON.stringify({operationId,kind})}));
+    assert.equal(response.status,202,await response.clone().text());
+    await workOnce(pool,{root,workerId:'library-api-test',providers:{}});
+    const receipt=await dispatch(new Request('http://localhost/api/v1/operations/'+operationId));
+    assert.equal((await receipt.json()).status,'SUCCEEDED');
+  }
+  const apiResolved=await dispatch(new Request('http://localhost/api/v1/review-library?path='+encodeURIComponent(images[0].path)));
+  assert.equal(apiResolved.status,200); assert.equal((await apiResolved.json()).entry.sha256,sha);
   await syncLibrary(pool,root); assert.equal(await readlink(path.join(project,'review-library')),firstPointer);
   await commands([{type:'save',id:'scene',kind:'SCENE',expectedVersion:scene.version,content:{blocks:[{id:'block',type:'action',text:'第二版正文'}]}}]);
   assert.equal((await readLibrary(pool,root)).status,'STALE');

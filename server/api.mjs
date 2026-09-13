@@ -1,5 +1,6 @@
 import {prepareManifestRender} from './production/manifests.mjs';
 import { readLibrary } from './library/service.mjs';
+import { libraryKinds } from './library/contract.mjs';
 import {cachedWorkspace} from './presentation/cache.mjs';
 import {prepareAnimaticRender} from './production/animatic-jobs.mjs';
 import {sourceUploadRequest} from './story/sources.mjs';
@@ -254,6 +255,7 @@ export async function dispatch(request) {
           "GENERATE",
           "MEDIA_PROCESS",
           ...maintenanceKinds,
+          ...libraryKinds,
         ].includes(body.kind) && !Object.hasOwn(body, "filename"),
         "JOB_KIND",
         "请使用受控上传或业务任务入口",
