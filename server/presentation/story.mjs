@@ -74,7 +74,7 @@ export async function episodePlan(unit, requested, archive = false) {
     };
     return [ep.episodeUid, { opening: excerpt('opening'), ending: excerpt('ending') }];
   }));
-  return { readOnly:historical, revisionId: story.revisionId, objectVersion: story.version, sourceRole: story.state === 'ADOPTED' ? 'CURRENT' : 'CANDIDATE', snapshotId: await unit.namespace(), contentHash, contextHash: hash({ contentHash, reviewSpec: spec }), baseRevisionHash: story.content.baseScriptSha256 || story.sha256, criteriaVersion: spec.criteriaVersion || '2.0', basisBindingsHash: unit.version(), subjectNames: Object.fromEntries(entities.map(e => [e.id, e.title])), reviewSpec: spec, content, presentation };
+  return { readOnly:historical, revisionId: story.revisionId, objectVersion: story.version, objectState: story.state, sourceRole: story.state === 'ADOPTED' ? 'CURRENT' : 'CANDIDATE', snapshotId: await unit.namespace(), contentHash, contextHash: hash({ contentHash, reviewSpec: spec }), baseRevisionHash: story.content.baseScriptSha256 || story.sha256, criteriaVersion: spec.criteriaVersion || '2.0', basisBindingsHash: unit.version(), subjectNames: Object.fromEntries(entities.map(e => [e.id, e.title])), reviewSpec: spec, content, presentation };
 }
 
 export async function sourceCatalog(unit) {

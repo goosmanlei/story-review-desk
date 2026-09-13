@@ -9,7 +9,7 @@ export type EpisodePlanEpisode = {
 export type EpisodePlanContent = { planId: string; episodes: EpisodePlanEpisode[]; retiredEpisodeUids: string[]; changeSummary?: string; narrativeRevision?: NarrativeRevision };
 export type EpisodeExcerpt = { sceneId: string; blocks: Array<{ id: string; type: string; speaker: string; performanceNote: string; text: string }> };
 export type EpisodePlanContext = {
-  revisionId: string; readOnly?: boolean; archived?:boolean; sourceRole: 'CURRENT' | 'PROPOSAL' | 'CANDIDATE';
+  revisionId: string; objectState?: string; readOnly?: boolean; archived?:boolean; sourceRole: 'CURRENT' | 'PROPOSAL' | 'CANDIDATE';
   snapshotId: string; contentHash: string; contextHash: string | null; baseRevisionHash: string;
   subjectNames: Record<string, string>;
   reviewSpec?: import("../presentation/configuration-model.mjs").ReviewSpec;

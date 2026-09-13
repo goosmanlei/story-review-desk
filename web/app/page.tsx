@@ -24,7 +24,6 @@ import { SystemManagement, SourceImport } from './system-management';
 import { StorySettingsWorkspace } from './story-settings-workspace';
 import {saveMaterialBrowseLocation,restoreMaterialBrowseLocation} from './material-browse-state';
 import { GenericAuthoringWorkspace } from './generic-authoring-workspace';
-import {StoryHistory} from './story-history';
 import { GenericSourceReader, type GenericSourceFocus } from './generic-source-reader';
 import { HistoricalVerificationSource } from './historical-verification-source';
 import { publicRef, visibleText } from './review-semantics';
@@ -940,7 +939,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
   const storySequences = storyStructure.sequences;
   const causalChains = reviewData.creativeLineage.causalChains ?? [];
   const storyOverview = reviewData.creativeLineage.storyOverview;
-  const { plan: resolvedEpisodePlan, error: episodePlanError } = useEpisodePlanContext(activeView === 'story', reviewData.snapshotId);
+  const { plan: resolvedEpisodePlan, error: episodePlanError } = useEpisodePlanContext(activeView === 'story', reviewData.snapshotId, storyView);
   const [narrativeLocationRevision, setNarrativeLocationRevision] = useState('');
   const narrativeCandidate = resolvedEpisodePlan?.content.narrativeRevision;
   const episodeDecisions = (resolvedEpisodePlan?.content.episodes || []).map((episode) => ({ ...episode, episodeId: episode.displayId,
@@ -2502,6 +2501,14 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
 
   function selectStoryMode(nextMode: StoryView) {
     if (nextMode !== storyView && !canLeaveCurrentView()) return;
+    if (nextMode === 'story-structure') {
+      const url = new URL(window.location.href);
+      url.searchParams.set('storyMode', nextMode);
+      url.searchParams.delete('episodePlanRevision');
+      url.searchParams.delete('episodePlanArchive');
+      pushDestination(url);
+      window.dispatchEvent(new Event('review:story-refresh'));
+    }
     setStoryView(nextMode);
     setReaderAnchor(null);
   }
@@ -2513,6 +2520,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     url.searchParams.delete('structureSection');
     pushDestination(url);
     setNarrativeSection(section);
+    window.dispatchEvent(new Event('review:story-refresh'));
   }
 
   function selectLogicItem(nextGroup: EpisodeCriterionId, nextItem: string) {
@@ -2900,7 +2908,6 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
           </section>}} />}
 
         {storyView === 'story-structure' && resolvedEpisodePlan?.content.narrativeRevision && <NarrativeOverview plan={resolvedEpisodePlan} tab={narrativeSection} onSelectTab={selectNarrativeSection}/>}
-        {storyView === 'story-structure' && <StoryHistory/>}
         {storyView === 'story-structure' && resolvedEpisodePlan && !narrativeCandidate && storyOverview && <StoryStructureWorkbench
           overview={storyOverview}
           selectedSection={storyStructureSection}

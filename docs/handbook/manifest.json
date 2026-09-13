@@ -78,16 +78,20 @@
       "title": "分层设计与页面读取",
       "summary": "把阅读体验、协议、业务规则和数据事务放在各自负责的位置。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/api.mjs",
         "server/workspaces.mjs",
         "web/app/workspace-read-cache.ts",
         "server/presentation/read-unit.mjs",
         "server/presentation/material-page.mjs",
-        "server/presentation/production-window.mjs"
+        "server/presentation/production-window.mjs",
+        "web/app/page.tsx",
+        "web/app/use-episode-plan-context.ts",
+        "web/app/narrative-revision-reader.tsx",
+        "server/presentation/story.mjs"
       ],
-      "sourceDigest": "d1c123c33dbb3316ecfe335a7dc14146108b65f2f9e4b80bb8b95b753b4f6ca6"
+      "sourceDigest": "4496ccdfe16f4c64aeca84b99e2308d76ff6bd94e6f2385d3ce60796848db462"
     },
     {
       "id": "interfaces",

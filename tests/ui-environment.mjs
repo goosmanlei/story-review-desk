@@ -58,6 +58,7 @@ if (values.committed) {
     "scripts",
     "docs",
     "tests",
+    "skills",
     "package.json",
     "package-lock.json",
   ])
