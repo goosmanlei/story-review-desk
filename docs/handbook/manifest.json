@@ -178,9 +178,10 @@
         "skills/review-tasks/SKILL.md",
         "tools/task-assignments.mjs",
         "tools/task-format.mjs",
-        "tools/task-native.mjs"
+        "tools/task-native.mjs",
+        "tools/task-git.mjs"
       ],
-      "sourceDigest": "2dd6c34d0031614744c3e6294278d03daa0a39c9c8d1b416e5d80d134beadef7"
+      "sourceDigest": "9f946a2524581eaa0780c8604cb60f8114c5c2616d5bf02920b0fc1b00d0ec36"
     },
     {
       "id": "instance",

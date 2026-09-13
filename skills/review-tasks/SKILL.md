@@ -15,6 +15,10 @@ description: 在审阅台故事项目中讨论并批量发布正式系统优化�
 
 单项用 `publish {task:...}`；多项用 `publish {tasks:[...]}`，每项设置稳定 key，批内依赖写 `@key`，已有任务依赖写完整 ID。同一批的正式任务原子落账。每项须 `clarified:true` 和 `discussion:{approved:true,summary,feasibility,approvedRequirements:[...]}`。同一 operationId 重放返回原结果，不能改内容重用编号。发布只组织入队；用户已启动持续执行时，调度器在安全阶段纳入新任务。
 
+发布成功后，用 `audit --operation-id 原发布编号 --format markdown` 回读，再自行调用 `commit --file -`，请求为 `{operationId,actor:"PROJECT_CODEX",publishOperationId:"原发布编号"}`。这一步已获授权，不再请示，也不要求任务领取或执行租约。只提交本地受管账本、绑定与必要阅读视图，包含尚未提交的完整前序链；不 push、不启动执行器、不随其他状态变更自动提交。报告发布任务、提交状态、实际 SHA 与账本序号。
+
+使用专用入口保留其他已暂存、未暂存和未跟踪内容；不得以 `git add tasks/` 替代。视图不一致先核查再 `rebuild`。失败或中断保留已发布事实，先用 `commit-status --operation-id 原管理提交编号` 查看 Git 证据，再以相同请求恢复，不重复发布。原提交结果重放不会纳入后来事件；后续正式发布使用新的管理提交编号。未知 Git 锁、未结束合并／变基、受管文件暂存冲突或不能证明恢复范围时保留现场。
+
 SYSTEM 首先改通用《审阅台》核心，再验证《九头案》继承；CREATIVE 在当前项目业务接口内独立推进。保持本轮精确创作与外部操作授权，不恢复旧授权。默认优先级 2；依赖优先于优先级。已发布且未开始的同类任务可 merge、split；拆解覆盖全部原验收项，保留原案和关系。新目标或新范围先讨论再发布，终态只读。
 
 ## 执行和自动派工

@@ -135,6 +135,16 @@ save、export、restore 与网页共用后台维护接口；verify 是不写数�
 
 `publish` 支持单个 task 或 tasks 数组（每批 1–50 项，可分批处理更多问题），每项须 clarified 和 discussion.approved 为 true。批内 key 唯一，用 `@key` 引用同批依赖，已有任务用正式 ID。全部校验通过后一次追加事件，任何一项未讨论、依赖不存在或形成循环时整批不发布；未成熟部分应在讨论阶段排除。
 
+### 发布后的本地管理提交
+
+Codex 在发布成功后先 `audit --operation-id 原发布编号 --format markdown` 回读，再自行调用 `commit --file -`，输入 `{operationId,actor,publishOperationId}`。不要求任务为 RUNNING 或存在执行租约，不重复请求授权。该流程只创建本地 Git 提交；publish 本身保持入队语义，其他状态变化也不自动提交。推送仍遵循独立交付授权。
+
+提交入口在当前项目仓库内锁定账本，验证项目绑定、事件哈希与连续版本链、完整未提交前序、确定性阅读视图及 HEAD 中的历史前缀。清单只包含 `tasks/project.json`、实际事件文件、`tasks/README.md` 和实际任务对应的 `tasks/items/编号.md`；未知卡片、artifacts、故事、源码和 runtime 不自动纳入。视图的截至时间固定为最后事件时间，rebuild 不制造空变更；视图被手改或缺失时先核查并重建。
+
+使用标准 `index.lock` 排斥常规 Git 写入，在独立 index 中从 HEAD 构建并核查精确提交树，通过 `commit-tree` 和父提交 CAS 更新分支，再仅更新原暂存区中的受管条目。无关文件内容和暂存条目保留，不执行 checkout、reset、stash、hooks、filters 或 push。需已有本地分支及初始提交；未完成合并／变基、split index、未知锁、受管文件不同暂存内容或父仓库路径均拒绝并保留现场。
+
+管理提交回执仅存 runtime，记录原操作、发布编号、账本序号和头摘要、提交 SHA、精确清单及 index 恢复指纹。返回 SUCCEEDED / NO_CHANGES 时可报告实际 SHA；失败不撤销发布。中断先 `commit-status --operation-id 原管理提交编号` 核查原提交是否进入历史和 index 是否完成，再重放相同请求：只有分支和 index／锁指纹能共同证明范围才恢复，否则保留现场。相同请求返回原结果，后来事件须新管理提交；同内容不造空提交。并发发布与提交共用账本锁，后发事件保留待提交事实，执行资格与业务对象不受影响。
+
 ### 账本、版本与运行资格
 
 `tasks/project.json` 绑定故事实例及协议版本。v2 CLI 可回放 v1/v2 事件；已有 v1 账本须在没有活跃执行者、命令和未关闭派工时显式 upgrade。旧事件及编号不改写，旧 CLI 读取 v2 绑定即拒绝，不能降级写入。新项目直接使用 v2。

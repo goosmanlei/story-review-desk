@@ -8,6 +8,7 @@ import {once} from 'node:events';
 import {processLock,processIdentity} from './process-resources.mjs';
 import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities} from './task-ledger.mjs';
 import {installTaskSkill} from './task-skill.mjs';
+import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
 import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks,projectLinkBase} from './task-format.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
@@ -19,6 +20,8 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks list | show TASK_ID          读取权威任务记录
   tasks audit [--task ID] [--from ISO] [--to ISO] [--status STATE] [--type SYSTEM|CREATIVE]
   tasks audit --operation-id ID      核查管理操作是否已落账
+  tasks commit --file -              发布回读后仅提交本地受管任务记录，无需领取或执行
+  tasks commit-status --operation-id ID  只读核查原管理提交和 Git 证据
   tasks status                      查看执行占用及中断任务
   tasks run                         在当前会话保持执行资格；不会自行调用模型
   tasks heartbeat --run RUN_ID       延长执行租约（10 分钟）
@@ -46,6 +49,10 @@ publish: {task:{clarified:true,type:"SYSTEM",title,originalRequest,goal,scope:[.
   discussion:{approved:true,summary,feasibility,approvedRequirements:[...]}}}
 publish 也接受 tasks:[{key:"a",...},{key:"b",dependencies:["@a"],...}]；
 一次讨论可正式发布多项任务，批内依赖使用 @key，全批原子保存。不接收未讨论部分。
+发布成功后先 audit --operation-id 原编号 回读，再自行调用 commit；不需重复请示。
+commit: {operationId,actor,publishOperationId}，包含当前完整前序链与必要视图；
+仅本地 commit，不 push、不启动执行器、不随其他状态变化自动提交。
+失败不撤销发布，先 commit-status 查原编号，再用相同请求补交；不重新 publish。
 next: {runId}，自动领取；返回 CURRENT_TASK / RECOVERY_REQUIRED / NO_EXECUTABLE_TASK 时不创建事件。
 其他单任务写入：{taskId,expectedVersions:{"TASK_ID":当前版本},...}
 checkpoint: {runId,checkpoint:{summary,completedSteps:[],nextSteps:[],inputs:[],artifacts:[],
@@ -181,6 +188,8 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='stop') return stopRun(project,v.run);
   if(action==='guard') return guarded(project,v.run,v.task,command,v.core,v.assignment);
   if(action==='native') return nativeAction(project,p[1],v);
+  if(action==='commit')return commitTaskRecords(project,await inputFile(v.file));
+  if(action==='commit-status')return taskCommitStatus(project,v['operation-id']);
   requireTask(['json','markdown'].includes(v.format),'format 须为 json 或 markdown');
   const ledger=await readLedger(project);
   const data=audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
