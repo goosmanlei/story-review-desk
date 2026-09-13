@@ -4,6 +4,7 @@ import {WorkspaceReadBoundary} from './workspace-read-boundary';
 import {readWorkspaceJson,workspaceCacheScope} from './workspace-read-cache';
 import {useInstanceProfile} from './instance-context';
 
+import {usePreparationNavigation,usePreparationReading} from './preparation-navigation';
 import {runtimePath} from './runtime-path';
 import {useEffect,useState,useRef} from 'react';
 import {managementMutation,readManagementResponse} from './system-management-client';
@@ -85,6 +86,7 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  const {hostedReadOnly}=useRuntimeMode();
  const instance=useInstanceProfile(),cacheScope=workspaceCacheScope(instance);
  const [state,setState]=useState<State|null>(null),[error,setError]=useState(''),[attempt,setAttempt]=useState(0),[selected,setSelected]=useState(''),[selectedEpisode,setSelectedEpisode]=useState(''),[stageSelection,setStageSelection]=useState(''),[gateSelection,setGateSelection]=useState(''),[busy,setBusy]=useState(false),[section,setSection]=useState('INTENT');
+ const navigation=usePreparationNavigation(cacheScope);
  const [remoteWorkflow,setRemoteWorkflow]=useState<PreparationWorkflow|null>(null),[configurationError,setConfigurationError]=useState('');
  const dirty=useRef(false),latestState=useRef<State|null>(null),locationSelection=useRef({href:'',episodeUid:'',sceneId:'',stageId:'',gateId:''});
  useEffect(()=>{if(workflow)return;const c=new AbortController();void readWorkspaceJson<{definition?:PreparationWorkflow}>('/api/v1/workspaces/workflow',cacheScope,c.signal).then(value=>{if(c.signal.aborted)return;if(!value.definition||value.definition.phases.length!==5||value.definition.gates.length!==15)throw Error('共享制作检查配置尚未完整');setRemoteWorkflow(value.definition);setConfigurationError('');}).catch(e=>{if(!c.signal.aborted){setRemoteWorkflow(null);setConfigurationError(e.message||'共享流程配置读取失败');}});return()=>c.abort();},[workflow,attempt]);
@@ -140,6 +142,7 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  function chooseContext(episodeUid:string,sceneId:string){
   if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;
   dirty.current=false;
+  if(!episodeMode)navigation.setExpanded(episodeUid,true);
   const url=preparationSelectionUrl(episodeUid,episodeMode?'':sceneId,stage.id);
   // Changing the navigation scope leaves any previous exact shot/work focus.
   for(const key of ['scene','shot','work','item','family','version','target','asset'])url.searchParams.delete(key);
@@ -150,39 +153,62 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
   // cancel late deep-link resolution without creating another history entry.
   window.dispatchEvent(new Event('review:production-location'));
  }
- function chooseScene(id:string){const next=episodeScenes.find(s=>s.sceneId===id);if(next)chooseContext(next.episodeUid,next.sceneId);}
- function chooseEpisode(uid:string){const nextEpisode=episodes.find(e=>e.episodeUid===uid);if(!nextEpisode)return;const next=episodeMode?undefined:scenes.find(s=>s.episodeUid===uid&&nextEpisode.sceneIds.includes(s.sceneId));chooseContext(uid,next?.sceneId||'');}
+ function chooseScene(id:string){const next=scenes.find(s=>s.sceneId===id);if(next)chooseContext(next.episodeUid,next.sceneId);}
+ function chooseEpisode(uid:string){const nextEpisode=episodes.find(e=>e.episodeUid===uid);if(!nextEpisode)return;const remembered=navigation.lastScene(uid),next=episodeMode?undefined:scenes.find(s=>s.episodeUid===uid&&nextEpisode.sceneIds.includes(s.sceneId)&&s.sceneId===remembered)||scenes.find(s=>s.episodeUid===uid&&nextEpisode.sceneIds.includes(s.sceneId));chooseContext(uid,next?.sceneId||'');}
  function chooseCheck(stageId:CreatorProductionStageId,gateId:string){
   if(selectionError||!leaveDraft())return;const nextStage=CREATOR_PRODUCTION_STAGES.find(s=>s.id===stageId),nextGate=configuredGates.find(g=>g.id===gateId);
   if(!nextStage||!nextGate||!nextStage.gateIds.includes(nextGate.id))return;
-  const nextScene=nextStage.scope==='SCENE'?(scene||episodeScenes[0]):undefined;
+  const nextScene=nextStage.scope==='SCENE'?(scene||episodeScenes.find(s=>s.sceneId===navigation.lastScene(episode?.episodeUid||''))||episodeScenes[0]):undefined;
   const nextCanonical=creatorProductionGateDefinition(nextGate.id)?.scopeType||null;
   const context=nextCanonical&&episode?{creatorStageId:nextStage.id,navigationScopeType:nextCanonical==='PROJECT'?'PROJECT' as const:nextStage.scope,scopeType:nextCanonical,episodeUid:episode.episodeUid,...(nextStage.scope==='SCENE'&&nextScene?{sceneId:nextScene.sceneId}:{}),phaseId:nextGate.phaseId,gateId:nextGate.id}:undefined;
+  if(onStageChange){
+   onStageChange(nextGate.phaseId,nextGate.id,nextStage.id,context);
+   // The parent may reject a pending edit or unresolved navigation. Do not
+   // switch the visible module until its guarded URL change has succeeded.
+   const params=new URLSearchParams(window.location.search);
+   if(params.get('creatorStage')!==slug(nextStage.id)||params.get('productionGate')!==slug(nextGate.id))return;
+  }else{
+   if(!window.dispatchEvent(new Event('review:configuration-before-leave',{cancelable:true})))return;
+   const url=preparationSelectionUrl(episode?.episodeUid||'',nextScene?.sceneId||'',nextStage.id,nextGate);if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);
+  }
   setStageSelection(nextStage.id);setGateSelection(nextGate.id);setSelected(nextScene?.sceneId||'');
-  if(onStageChange)onStageChange(nextGate.phaseId,nextGate.id,nextStage.id,context);
-  else{const url=preparationSelectionUrl(episode?.episodeUid||'',nextScene?.sceneId||'',nextStage.id,nextGate);if(url.href!==window.location.href)window.history.pushState({...window.history.state},'',url);}
   rememberLocation(episode?.episodeUid||'',nextScene?.sceneId||'');
  }
  async function submit(action:'comment'|'save'){if(!state||!scene||!breakdownMode||stageError||state.stale||hostedReadOnly||state.readOnly||selectionError)return;setBusy(true);try{const content=action==='save'?{...state.content,scenes:state.content!.scenes.map(s=>s.sceneId===scene.sceneId?{...s,preparation:draft}:s)}:undefined;const receipt=await managementMutation<{objectId?:string;expectedVersion?:number;revisionId?:string}>('/api/v1/workspaces/production-preparation',{action,objectId:(pendingDraft?.scene||scene).objectId,sceneId:scene.sceneId,expectedVersion:(pendingDraft?.scene||scene).expectedVersion,expectedRevisionId:(pendingDraft?.scene||scene).revisionId,...(action==='comment'?{text:comment}:{preparation:draft})});setPendingDraft(action==='comment'&&editing?{...pendingDraft!,comment:''}:action==='save'&&comment?{...pendingDraft!,scene:{...(pendingDraft?.scene||scene),objectId:receipt.objectId,expectedVersion:receipt.expectedVersion,revisionId:receipt.revisionId},editing:false,draft:{}}:null);setAttempt(v=>v+1);}catch(e){setError(e instanceof Error?e.message:'保存未完成');}finally{setBusy(false);}}
  const editable=Boolean(scene)&&!scene?.navigationOnly&&breakdownMode&&!selectionError&&!stageError&&!hostedReadOnly&&!state?.readOnly&&!state?.stale;
  const stageContext:PreparationStageContext|undefined=!selectionError&&!stageError&&gate&&canonicalScopeType&&episode&&(episodeMode||scene)?{creatorStageId:stage.id,navigationScopeType,scopeType:canonicalScopeType,episodeUid:episode.episodeUid,...(!episodeMode&&scene?{sceneId:scene.sceneId}:{}),phaseId:gate.phaseId,gateId:gate.id}:undefined;
  const exportChecks=stageGates.filter(g=>stage.exportGateIds.includes(g.id)),regularChecks=stageGates.filter(g=>!stage.exportGateIds.includes(g.id));
+ useEffect(()=>{if(episode&&scene&&!selectionError)navigation.rememberScene(episode.episodeUid,scene.sceneId);},[episode?.episodeUid,scene?.sceneId,selectionError,cacheScope]);
+ const readingKey=JSON.stringify([cacheScope,gate?.id,episode?.episodeUid,scene?.sceneId||'']);
+ const contentReading=usePreparationReading(readingKey,Boolean(state&&definition),navigation);
+ const directoryReading=usePreparationReading(cacheScope+':directory',Boolean(state&&definition),navigation);
  const checkButtons=(checks:typeof stageGates)=><div className="preparation-check-list">{checks.map(g=><button type="button" key={g.id} data-production-check={g.id} disabled={Boolean(selectionError)} aria-pressed={g.id===gate?.id} onClick={()=>chooseCheck(stage.id,g.id)}><strong>{g.label}</strong>{g.purpose&&<span>{g.purpose}</span>}</button>)}</div>;
  if(!state||!definition)return <section className="production-preparation-loading" aria-busy={!error&&!configurationError}><p role={error||configurationError?'alert':'status'}>{error||configurationError||'正在读取制作准备与集场上下文…'}</p>{(error||configurationError)&&<button onClick={()=>setAttempt(value=>value+1)}>重新完整读取</button>}</section>;
- return <WorkspaceReadBoundary><section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
+ return <section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
   <nav className="creator-production-stages" aria-label="全剧制作模块">{CREATOR_PRODUCTION_STAGES.map((s,i)=><button type="button" key={s.id} data-creator-stage={s.id} disabled={Boolean(selectionError)} aria-pressed={s.id===stage.id} onClick={()=>chooseCheck(s.id,s.defaultGateId)}><small>{String(i+1).padStart(2,'0')}</small><strong>{s.label}</strong></button>)}</nav>
-  {shotProductionMode&&<nav className="shot-production-step-navigation" aria-label="镜头制作六步骤">{checkButtons(regularChecks)}</nav>}
-  <nav className="preparation-episode-chips" aria-label="制作上下文分集">{episodes.map(ep=><button type="button" key={ep.episodeUid} data-preparation-episode={ep.episodeUid} aria-pressed={ep.episodeUid===episode?.episodeUid} onClick={()=>chooseEpisode(ep.episodeUid)}><b>{ep.displayId}</b><span>{ep.title}</span></button>)}{state&&!episodes.length&&<p>尚未建立候选分集。正式制作范围仍待确定。</p>}</nav>
+  {!!regularChecks.length&&<nav className={'preparation-step-navigation'+(shotProductionMode?' shot-production-step-navigation':'')} aria-label={stage.label+'子步骤'}>{checkButtons(regularChecks)}</nav>}
   {error&&<p className="workflow-warning" role="alert">{error}<button type="button" onClick={()=>setAttempt(v=>v+1)}>重新读取</button></p>}
   {configurationError&&<p className="workflow-warning" role="alert">{configurationError}。没有使用另一套检查模板。</p>}
   {(selectionError||stageError)&&<p className="workflow-warning" role="alert">{selectionError||stageError}</p>}
   {state?.stale&&<p className="workflow-warning" role="alert">候选或正文依据已变化。保留原稿供对照，不能自动换绑、编辑或转交。</p>}
   {!state&&!error&&<p role="status">正在读取制作准备与集场上下文…</p>}
-  <div className={'preparation-stage-layout'+(episodeMode?' is-episode':'')}>
-   {!episodeMode&&<aside className="preparation-scene-directory"><nav aria-label="制作上下文场次">{episodeScenes.map(s=><button type="button" key={s.sceneId} data-preparation-scene={s.sceneId} aria-current={scene?.sceneId===s.sceneId?'location':undefined} onClick={()=>chooseScene(s.sceneId)}><b>{s.displayId}</b><span>{(!state?.stale?state?.candidate?.scenes.find(c=>c.id===s.sceneId)?.title:undefined)||String(s.sourceSummary?.title||'场准备')}</span></button>)}</nav>{state&&!episodeScenes.length&&<p>此集尚无可定位的场准备。</p>}</aside>}
-   <main className="preparation-stage-workspace" data-creator-scope={navigationScopeType}>
+  <div className="preparation-stage-layout">
+   <aside className="preparation-scene-directory" ref={directoryReading.pane} tabIndex={0} aria-label={episodeMode?'制作分集目录':'制作集场目录'}>
+    <header><strong>{episodeMode?'分集目录':'集 · 场目录'}</strong><small>{episodes.length} 集{!episodeMode?' · '+scenes.length+' 场':''}</small></header>
+    <div ref={directoryReading.body}><nav aria-label={episodeMode?'制作上下文分集':'制作上下文集场'}>{episodes.map(ep=>{
+     const open=navigation.expanded[ep.episodeUid]??ep.episodeUid===episode?.episodeUid,children=scenes.filter(s=>s.episodeUid===ep.episodeUid&&ep.sceneIds.includes(s.sceneId));
+     return <section className="preparation-directory-episode" key={ep.episodeUid}>
+      <div className="preparation-directory-episode-row" data-current-episode={ep.episodeUid===episode?.episodeUid||undefined}>
+       {!episodeMode&&<button type="button" className="preparation-directory-toggle" data-preparation-toggle={ep.episodeUid} aria-label={(open?'收起':'展开')+' '+ep.displayId+' '+ep.title} aria-expanded={open} aria-controls={'preparation-scenes-'+ep.episodeUid} onClick={()=>navigation.setExpanded(ep.episodeUid,!open)}>{open?'▾':'▸'}</button>}
+       <button type="button" data-preparation-episode={ep.episodeUid} aria-pressed={ep.episodeUid===episode?.episodeUid} onClick={()=>chooseEpisode(ep.episodeUid)}><b>{ep.displayId}</b><span>{ep.title}</span></button>
+      </div>
+      {!episodeMode&&<div className="preparation-directory-scenes" id={'preparation-scenes-'+ep.episodeUid} hidden={!open}>{children.map(s=><button type="button" key={s.sceneId} data-preparation-scene={s.sceneId} aria-current={scene?.sceneId===s.sceneId?'location':undefined} onClick={()=>chooseScene(s.sceneId)}><b>{s.displayId}</b><span>{(!state?.stale?state?.candidate?.scenes.find(c=>c.id===s.sceneId)?.title:undefined)||String(s.sourceSummary?.title||'场准备')}</span></button>)}{!children.length&&<p>此集尚无可定位的场准备。</p>}</div>}
+     </section>;
+    })}{!episodes.length&&<p>尚未建立候选分集。正式制作范围仍待确定。</p>}</nav></div>
+   </aside>
+   <main className="preparation-stage-workspace" ref={contentReading.pane} tabIndex={0} aria-label="当前制作内容" data-creator-scope={navigationScopeType} data-preparation-current-episode={stageContext?.episodeUid} data-preparation-current-scene={stageContext?.sceneId} data-preparation-current-gate={stageContext?.gateId}>
+    <div ref={contentReading.body}><WorkspaceReadBoundary preserveLayout>
     <header className="preparation-stage-heading"><div><small>{navigationScopeType==='PROJECT'?'全剧导出检查':episodeMode?episode?.displayId:[episode?.displayId,scene?.displayId].filter(Boolean).join(' / ')}</small><h2>{selectionError?'制作上下文需核对':episodeMode?(episode?.title||'选择分集'):source?.title||String(scene?.sourceSummary?.title||'选择本场')}</h2><p>{stage.purpose}</p></div>{scene&&typeof state?.content?.basis.candidateRevisionId==='string'&&<a href={runtimePath('?view=story&storyMode=logic&narrativeLevel=scene&episodePlanRevision='+encodeURIComponent(state.content.basis.candidateRevisionId)+'&episode='+encodeURIComponent(scene.episodeUid)+'&scene='+encodeURIComponent(scene.sceneId))}>阅读对应正文 →</a>}</header>
-    {!shotProductionMode&&!!regularChecks.length&&<details className="preparation-stage-checks"><summary>阶段检查{gate&&canonicalScopeType!=='PROJECT'?' · '+gate.label:''}</summary>{checkButtons(regularChecks)}</details>}
     {!!exportChecks.length&&<details className="preparation-stage-checks preparation-export-checks" open={navigationScopeType==='PROJECT'}><summary>全剧导出检查 · 独立全剧范围</summary><p>当前分集仅用于阅读导航。这些检查覆盖全剧，不作为所选分集的通过或采用。</p>{checkButtons(exportChecks)}</details>}
     {!selectionError&&!stageError&&(stageContext&&renderStage?renderStage(stageContext):<section className="workflow-empty"><h3>本上下文尚未建立正式制作对象</h3><p>{!gate||!canonicalScopeType?'检查配置或精确作用域尚未可读，不能从阶段名称推断正式范围。':'准备稿不解锁制作。需由已采用正文和精确输入建立对应正式对象后，才能判断缺项及推进动作。'}</p><small>正式范围与进度：待确定（UNKNOWN）</small></section>)}
     {breakdownMode&&scene&&!scene.navigationOnly&&!stageError&&<section className="preparation-authoring-basis" aria-label="本场镜头设计准备依据">
@@ -193,7 +219,8 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
      <details className="preparation-exact-basis"><summary>精确依据与转交边界</summary><dl><div><dt>永久场身份</dt><dd>{scene.sceneId}</dd></div><div><dt>正文哈希</dt><dd>{scene.sceneContentHash}</dd></div><div><dt>准备稿修订</dt><dd>{state?.revisionId}</dd></div></dl><p>准备参考不是被采用的素材输入。正式转交仍须完成分集方案、场正文和场级镜头意图的审阅及受控同步，再建立正式镜头计划；不从旧场号映射或补造镜头。</p></details>
     </section>}
     {state&&!state.content&&breakdownMode&&<section className="workflow-empty"><h3>尚未登记制作准备稿</h3><p>先基于完整候选整理各场作用、画面动作、实体状态和素材缺项。准备稿不会创建正式镜头身份。</p></section>}
+    </WorkspaceReadBoundary></div>
    </main>
   </div>
- </section></WorkspaceReadBoundary>;
+ </section>;
 }

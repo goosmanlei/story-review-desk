@@ -16,6 +16,7 @@ import { criteriaForReviewScope } from '../presentation/review-criteria.mjs';
 
 import { configuredProductionProgress } from './gate-evaluation';
 
+import {useWorkspaceReadiness} from './workspace-read-boundary';
 import {ProductionPreparationWorkspace} from './production-preparation-workspace';
 import { instanceLocalStorage } from './client-storage';
 import { projectIdFor } from './instance-profile';
@@ -3126,6 +3127,7 @@ type FullProductionWorkbenchProps = {
   onOpenMaterial: (requirementId: string) => void;
   onOpenReviewOverview?: () => void;
   dataWindow?: {
+    readReady?:boolean;
     loaded: number;
     total: number | null;
     hasMore: boolean;
@@ -3402,10 +3404,15 @@ function productionContractIssues(model: ProductionModel) {
   return issues;
 }
 
+function ProductionWindowReadiness({dataWindow,children}:{dataWindow:FullProductionWorkbenchProps['dataWindow'];children:React.ReactNode}){
+  useWorkspaceReadiness(Boolean(dataWindow&&dataWindow.readReady===false),dataWindow?.error||'',()=>dataWindow?.onRetry());
+  return <>{children}</>;
+}
+
 export function FullProductionWorkbench(props: FullProductionWorkbenchProps) {
   const issues = productionContractIssues(props.model);
   if (issues.length) return <section className="v8-inline-error production-contract-failed" role="alert"><b>制作检查定义：UNKNOWN</b><p>当前页面已失败关闭，没有使用前端内置检查兜底。</p><details><summary>查看配置缺项</summary><ul>{issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></details></section>;
-  return <ProductionPreparationWorkspace workflow={{phases:productionPhases(props.model),gates:productionGates(props.model)}} initialPhaseId={props.context.phaseId} initialGateId={props.context.gateId} onStageChange={(phaseId,gateId,creatorStageId,selection)=>props.onNavigate({shotId:'',workPackageId:'',workItemId:null,familyId:null,versionId:null,phaseId:phaseId as ProductionPhaseId,gateId:gateId as ProductionGateId,creatorStageId,preparationEpisodeUid:selection?.episodeUid,preparationSceneId:selection?.sceneId,navigationScopeType:selection?.navigationScopeType})} renderStage={({sceneId,episodeUid,phaseId,gateId,navigationScopeType})=><FullProductionWorkbenchReady {...props} contextualSceneId={sceneId} contextualEpisodeUid={episodeUid} navigationScopeType={navigationScopeType} context={{...props.context,phaseId:phaseId as ProductionPhaseId,gateId:gateId as ProductionGateId}}/>}/>;
+  return <ProductionPreparationWorkspace workflow={{phases:productionPhases(props.model),gates:productionGates(props.model)}} initialPhaseId={props.context.phaseId} initialGateId={props.context.gateId} onStageChange={(phaseId,gateId,creatorStageId,selection)=>props.onNavigate({shotId:'',workPackageId:'',workItemId:null,familyId:null,versionId:null,phaseId:phaseId as ProductionPhaseId,gateId:gateId as ProductionGateId,creatorStageId,preparationEpisodeUid:selection?.episodeUid,preparationSceneId:selection?.sceneId,navigationScopeType:selection?.navigationScopeType})} renderStage={({sceneId,episodeUid,phaseId,gateId,navigationScopeType})=><ProductionWindowReadiness dataWindow={props.dataWindow}><FullProductionWorkbenchReady {...props} contextualSceneId={sceneId} contextualEpisodeUid={episodeUid} navigationScopeType={navigationScopeType} context={{...props.context,phaseId:phaseId as ProductionPhaseId,gateId:gateId as ProductionGateId}}/></ProductionWindowReadiness>}/>;
 }
 
 function FullProductionWorkbenchReady({ model, context, onNavigate, onOpenMaterial, dataWindow, contextualSceneId, contextualEpisodeUid, navigationScopeType }: FullProductionWorkbenchProps & {contextualSceneId?:string;contextualEpisodeUid?:string;navigationScopeType:'SCENE'|'EPISODE'|'PROJECT'}) {

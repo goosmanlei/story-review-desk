@@ -1020,6 +1020,9 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     : activeView === 'materials'
       ? materialWindow.initialized && !materialWindow.loading && !materialWindow.error
       : true;
+  const pipelineNavigationScope=useRef('');
+  if(activeView==='pipeline'&&activeProductionReady)pipelineNavigationScope.current=workspaceCacheScope(instance);
+  const pipelineNavigationReady=pipelineNavigationScope.current===workspaceCacheScope(instance);
   const storyInstruction: Record<StoryView, string> = genericAuthoring ? {
     source:'阅读本故事已登记的原始依据、派生整理与辅助资料。原件是否已观察、文字是否可读及资料待核事项分别记录。',
     'story-structure':'整理故事结构、完整剧本与实体关系；作者草稿保留版本，完整候选按对应流程审阅和采用。',
@@ -2830,7 +2833,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
         <div className={`workspace-content ${navigationOrigin ? 'has-source-return' : ''}`}>
           {navigationOrigin && <nav className="source-return-bar" aria-label="返回来源"><button type="button" onClick={() => window.history.back()}>← 返回：{navigationOrigin.label}</button><span>浏览器后退会恢复来源页、筛选和滚动位置</span></nav>}
           {navigationError && <div className="navigation-error" role="alert"><b>没有跳到错误对象</b><span>{navigationError}</span><button type="button" onClick={blockedPersistentRoute ? recoverBlockedPersistentRoute : () => setNavigationError('')}>{blockedPersistentRoute === 'EPISODE' ? '打开当前分集目录' : blockedPersistentRoute ? '回到当前导航' : '关闭'}</button></div>}
-          {activePagedWindow && !activeProductionReady && <section className="production-view-loading" aria-live="polite"><h2>{activePagedWindow.error ? '当前工作区数据未完整读取' : '正在装入完整工作区数据'}</h2><p>{activePagedWindow.error ? `读取未完成：${activePagedWindow.error}` : activePagedWindow.resource === 'production' ? `正在读取制作准备、集场上下文与制作对象…` : '正在读取完整素材目录；全部必要数据校验一致后展示，详情按需读取。'}</p>{activePagedWindow.error && <button type="button" onClick={() => void onNeedProduction({ resource: activePagedWindow.resource, filters: activePagedWindow.filters, mode:'all',force:true })}>重新完整读取</button>}{activePagedWindow.loading && <span>读取中…</span>}</section>}
+          {activePagedWindow && !activeProductionReady && !(activeView==='pipeline'&&pipelineNavigationReady) && <section className="production-view-loading" aria-live="polite"><h2>{activePagedWindow.error ? '当前工作区数据未完整读取' : '正在装入完整工作区数据'}</h2><p>{activePagedWindow.error ? `读取未完成：${activePagedWindow.error}` : activePagedWindow.resource === 'production' ? `正在读取制作准备、集场上下文与制作对象…` : '正在读取完整素材目录；全部必要数据校验一致后展示，详情按需读取。'}</p>{activePagedWindow.error && <button type="button" onClick={() => void onNeedProduction({ resource: activePagedWindow.resource, filters: activePagedWindow.filters, mode:'all',force:true })}>重新完整读取</button>}{activePagedWindow.loading && <span>读取中…</span>}</section>}
           {activeView === 'overview' && <section className="workspace-view overview-view" aria-labelledby="overview-title">
             <CurrentWorkCenter
               reviewRemaining={reviewableStoryboardCount}
@@ -2840,9 +2843,9 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
             />
           </section>}
 
-          {activeProductionReady && activeView === 'pipeline' && <section className="workspace-view pipeline-view v6-page" aria-labelledby="pipeline-v6-title">
+          {pipelineNavigationReady && activeView === 'pipeline' && <section className="workspace-view pipeline-view v6-page" aria-labelledby="pipeline-v6-title">
             <header className="workspace-heading v6-page-heading"><div><p>FULL PRODUCTION</p><h1 id="pipeline-v6-title">从拆镜表达，到整集成片</h1></div><p>讲清每镜要表达什么，准备输入并生成，再从场与集审阅合成效果。导出前统一核对跨集连续性、权利与技术要求；未锁定的正式范围保持 UNKNOWN。</p></header>
-            <FullProductionWorkbench model={productionModel} context={productionContext} onNavigate={navigateProduction} onOpenMaterial={(requirementId) => void openMaterialCenter(requirementId, `全剧制作 · 输入素材 ${publicRef(requirementId)}`)} dataWindow={{ ...pipelineWindow, onLoadMore: () => void onNeedProduction({ resource: 'production', filters: pipelineFilters, mode: 'next' }), onRetry: () => void onNeedProduction({ resource: 'production', filters: pipelineFilters, mode: pipelineWindow.initialized ? 'next' : 'initial' }) }} />
+            <FullProductionWorkbench model={productionModel} context={productionContext} onNavigate={navigateProduction} onOpenMaterial={(requirementId) => void openMaterialCenter(requirementId, `全剧制作 · 输入素材 ${publicRef(requirementId)}`)} dataWindow={{ ...pipelineWindow, readReady:activeProductionReady, onLoadMore: () => void onNeedProduction({ resource: 'production', filters: pipelineFilters, mode: 'next' }), onRetry: () => void onNeedProduction({ resource: 'production', filters: pipelineFilters, mode: pipelineWindow.initialized ? 'next' : 'initial' }) }} />
           </section>}
 
       {activeView === 'story' && <section className="content-section story-section" id="story">

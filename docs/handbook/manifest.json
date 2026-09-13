@@ -100,9 +100,14 @@
         "web/app/system-management.css",
         "web/app/story-settings-workspace.tsx",
         "web/app/story-settings-canvas.tsx",
-        "server/presentation/materials.mjs"
+        "server/presentation/materials.mjs",
+        "web/app/production-preparation-workspace.tsx",
+        "web/app/preparation-navigation.tsx",
+        "web/app/preparation-workspace.css",
+        "web/app/workspace-read-boundary.tsx",
+        "web/app/production-workbench.tsx"
       ],
-      "sourceDigest": "444374fd1099f9beafd58f73b4baab9e21e5609be151e0083cb3b6169ec97d13"
+      "sourceDigest": "ab0562e48d0e50959b2c970c3979be650d6d67e36c7830811e6438c4fb903782"
     },
     {
       "id": "interfaces",
