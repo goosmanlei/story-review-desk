@@ -396,7 +396,7 @@ export async function projections(ledger) {
   }
   for(const t of rows) {
     const body=[`# ${t.title}`,'',`编号：${t.id} · 类型：${t.type} · 状态：${labels[t.status]} · 版本：${t.version}`,'',`发布时间：${t.publishedAt}\n\n开始时间：${t.startedAt||'尚未开始'}\n\n完成时间：${t.completedAt||'尚未完成'}`,'','## 正式要求','',t.goal,'','用户原话：\n\n'+t.originalRequest,'','范围：\n\n'+t.scope.map(x=>'- '+x).join('\n'),'','交付物：\n\n'+t.deliverables.map(x=>'- '+x).join('\n'),'','验收标准：\n\n'+t.acceptanceCriteria.map((x,i)=>`${i+1}. ${x}`).join('\n'),'','授权边界：\n\n'+t.authorization,'',`依赖：${t.dependencies.join(', ')||'无'}\n\n关系：${[t.parentId,...(t.children||[]),t.mergedInto,...(t.sources||[])].filter(Boolean).join(', ')||'无'}`,'','## 当前进展','',t.blockReason||'',t.checkpoint?.summary||'尚无执行检查点','',...(t.checkpoint?.completedSteps||[]).map(x=>'- 已完成：'+x),...(t.checkpoint?.nextSteps||[]).map(x=>'- 下一步：'+x),'','## 结果','',t.result?.summary||'尚未完成','',...(t.result?.acceptance||[]).map(x=>`- 验收 ${x.criterion+1}：${x.evidence}`),...(t.result?.artifacts||[]).map(x=>'- 成果：'+x),t.result?'\n清理：'+t.result.cleanup:'','', '此文件由追加式任务账本生成；通过 tasks CLI 修改。',''].join('\n');
-    await markdown(path.join(cards,t.id+'.md'),body+(t.discussion?'\n讨论结论：'+t.discussion.summary+'\n\n可行性：'+t.discussion.feasibility+'\n':'')+renderAssignments([t])+'\n');
+    await markdown(path.join(cards,t.id+'.md'),(body+(t.discussion?'\n讨论结论：'+t.discussion.summary+'\n\n可行性：'+t.discussion.feasibility+'\n':'')+renderAssignments([t])).trimEnd()+'\n');
   }
   await markdown(path.join(base,'README.md'),'# 正式任务\n\n'+renderTasks({tasks:rows,asOf:timestamp()},{linkBase:'items'})+'\n\n此视图由追加式事件生成；通过 tasks CLI 修改。\n');
 }
