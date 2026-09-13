@@ -91,9 +91,10 @@
         "web/app/narrative-revision-reader.tsx",
         "server/presentation/story.mjs",
         "web/app/generic-source-reader.tsx",
-        "web/app/globals.css"
+        "web/app/globals.css",
+        "web/app/system-management.css"
       ],
-      "sourceDigest": "c53232e0ed8159aa05c66db4903ab8a7f06b4f0c958365c763524cb0ea49f177"
+      "sourceDigest": "116d38afc0fe49318dfe85b7acdc56c321f8eeeb84974e26dd3884507a76b9ed"
     },
     {
       "id": "interfaces",

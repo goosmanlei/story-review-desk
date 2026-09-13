@@ -5762,7 +5762,6 @@ body { overflow: hidden; }
 }
 
 /* One player survives source selection; only the document body scrolls. */
-.unified-source-workspace .text-reader-index { color: #d9d5ca; background: #20221d; }
 .unified-source-workspace .source-reader-main { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0,1fr); }
 .unified-source-workspace .source-reader-main:not(:has(> .source-audio-panel)) { grid-template-rows: minmax(0,1fr); }
 .unified-source-workspace .source-reader-main > .source-audio-panel { margin: 0; padding: 12px 20px; border-left: 1px solid var(--line); }
