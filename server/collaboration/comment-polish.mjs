@@ -1,3 +1,4 @@
+import {entityPolishContext} from '../settings/comments.mjs';
 import {check,hash,identity} from '../shared/contracts.mjs';
 import {transaction} from '../db.mjs';
 import {PresentationRead} from '../presentation/read-unit.mjs';
@@ -6,6 +7,7 @@ import {commentTargets,sceneReviewContext} from '../presentation/review.mjs';
 import {assistantContext,assertSourceVersions} from './assistant-context.mjs';
 
 async function contextFor(tx,input){
+  if(input.target?.kind==='ENTITY_SETTING')return entityPolishContext(tx,input);
   const unit=new PresentationRead(tx),plan=await episodePlan(unit);check(plan,'COMMENT_BASIS','请先选择故事正文',409);
   check(input.snapshotId===await unit.namespace(),'CONTEXT_INSTANCE','评论不属于当前运行期',409);
   const target=(await commentTargets(unit,plan)).find(t=>input.target?t.kind===input.target.kind&&t.subjectId===input.target.subjectId:t.kind==='SCENE_SCRIPT'&&t.subjectId===input.sceneId);
@@ -43,5 +45,5 @@ export async function commentPolishResult(tx,operationId){
   const meta=row.request.commentPolish,value=(await tx.query('SELECT content FROM suggestions WHERE operation_id=$1 AND expires_at>now()',[operationId])).rows[0];
   check(value,'SUGGESTION_EXPIRED','建议已超过 10 分钟保留期，原请求回执仍可核查',410);
   await assertSourceVersions(tx,[...meta.context.sourceVersions,...value.content.sourceVersions||[]]);
-  return {operationId,requestId:operationId,polishedComment:value.content.summary,model:value.content.model||'AI',snapshotId:meta.input.snapshotId,sceneId:meta.input.sceneId,sceneContentHash:meta.input.sceneContentHash,businessContextHash:meta.input.businessContextHash,requestMode:meta.input.commentDraft.trim()?'POLISH_DRAFT':'SUGGEST_FROM_CONTEXT',sourceContext:{directBeatCount:meta.context.resources?.filter(r=>r.role==='SOURCE').length||0,relatedBeatCount:0}};
+  return {operationId,requestId:operationId,polishedComment:value.content.summary,model:value.content.model||'AI',snapshotId:meta.input.snapshotId,sceneId:meta.input.sceneId,sceneContentHash:meta.input.sceneContentHash,businessContextHash:meta.input.businessContextHash,requestMode:meta.input.commentDraft.trim()?'POLISH_DRAFT':'SUGGEST_FROM_CONTEXT',sourceContext:{directBeatCount:meta.context.resources?.filter(r=>r.role==='SOURCE').length||0,relatedBeatCount:0,missing:meta.context.missing||[]}};
 }

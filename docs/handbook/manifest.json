@@ -92,9 +92,12 @@
         "server/presentation/story.mjs",
         "web/app/generic-source-reader.tsx",
         "web/app/globals.css",
-        "web/app/system-management.css"
+        "web/app/system-management.css",
+        "web/app/story-settings-workspace.tsx",
+        "web/app/story-settings-canvas.tsx",
+        "server/presentation/materials.mjs"
       ],
-      "sourceDigest": "116d38afc0fe49318dfe85b7acdc56c321f8eeeb84974e26dd3884507a76b9ed"
+      "sourceDigest": "c2a3be21e2ad0f1f5480edb8d7934737aa34079b7e7571933f4dd7b19416f73d"
     },
     {
       "id": "interfaces",
@@ -124,9 +127,13 @@
         "server/story/feedback.mjs",
         "scripts/review.mjs",
         "web/app/episode-plan-workbench.tsx",
-        "web/app/episode-scene-reading.tsx"
+        "web/app/episode-scene-reading.tsx",
+        "server/settings/comments.mjs",
+        "web/app/entity-comments.tsx",
+        "web/app/comment-polish-client.ts",
+        "server/collaboration/comment-polish.mjs"
       ],
-      "sourceDigest": "eb575bbba4388789e1aa0ec125b8fbea75215e41f74b0f43848c411e787d7684"
+      "sourceDigest": "1dd973d9f68a501b7129ba2eda155cff1f5bb3aa41ff32880d857960d97acad0"
     },
     {
       "id": "development",

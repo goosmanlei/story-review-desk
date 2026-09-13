@@ -114,7 +114,7 @@ export async function domainWorkspace(unit, owner = 'SETTINGS') {
     }
     graph[collection].push(record);
     const rowOwner = row.kind === 'ENTITY' || row.kind === 'RELATION' && record.from.kind === 'ENTITY' && record.to.kind === 'ENTITY' ? 'SETTINGS' : 'MATERIAL';
-    ownership[collection + ':' + row.id] = { owner: rowOwner, reason: '由登记对象类型和精确关联确定维护入口', recordHash: hash(record), expectedVersion: row.version, revisionId: row.revisionId };
+    ownership[collection + ':' + row.id] = { owner: rowOwner, reason: '由登记对象类型和精确关联确定维护入口', recordHash: hash(record), expectedVersion: row.version, revisionId: row.revisionId, state:row.state, adoptedRevisionId:row.adoptedRevisionId };
   }
   const baseline = await spatialBaseline(unit.tx);
   const spec = baseline.specification,catalog=await spatialCatalog(unit);

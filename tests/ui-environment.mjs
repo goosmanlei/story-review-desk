@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 // Managed, isolated browser fixture. Optional mirroring uses the public export
 // and exact registered SHA files. All model responses are controlled test data.
 import {
@@ -293,14 +294,25 @@ const tick = setInterval(async () => {
       providers: {
         maintenance: (request) =>
           runMaintenance(pool, path.join(project, "instance"), request),
-        suggest: async ({ object }) => ({
+        suggest: async ({ object, request }) => {
+          if(request.commentPolish?.target?.kind==='ENTITY_SETTING'){
+            const {target,context,input}=request.commentPolish;
+            assert.equal(request.objectId,target.objectId);assert.equal(request.revisionId,target.revisionId);
+            const selected=context.resources.find(r=>r.semanticEntityId===target.entityId);assert(selected);
+            assert.equal(JSON.parse(selected.text).description,target.body.description);
+            assert(context.sourceVersions.some(v=>v.objectId===target.objectId&&v.revisionId===target.revisionId));
+            assert.equal(selected.role,target.candidate?'CANDIDATE':'CURRENT');
+            if(target.adopted)assert(context.resources.some(r=>r.role==='ADOPTED'&&r.versionId===target.adopted.revisionId));
+            return {summary:input.commentDraft+' (controlled entity polish)',patch:{},sourceVersions:[]};
+          }
+          return ({
           summary: "受控模拟：建议将意见明确为可核对的修改点。",
           patch:
             object.kind === "COMMENT"
               ? { text: object.revision.content.text + "（受控模拟优化）" }
               : { description: "受控模拟建议" },
           sourceVersions: [],
-        }),
+        });},
       },
     });
   } catch (e) {
