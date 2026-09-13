@@ -131,7 +131,7 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "9eee03e241b453af62a47387e73f6f350f842b4177b6b2f9ec79ce178348b7ca"
+      "sourceDigest": "e58ee8ef0e6d2ccabc3fbc6296d4f16cdc338bad665bab19a5b9162bb9e4ec84"
     },
     {
       "id": "operations",
