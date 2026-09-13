@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { open, mkdir, readlink, symlink, rename, rm, lstat, readdir } from 'node:fs/promises';
+import { open, mkdir, readlink, symlink, rename, rm, lstat, readdir, chmod } from 'node:fs/promises';
 import { randomUUID, createHash } from 'node:crypto';
 import path from 'node:path';
 import { check, hash } from '../shared/contracts.mjs';
@@ -12,6 +12,7 @@ import { startProcessPhase, main as processCommand } from '../../tools/process.m
 const absent = error => { if (error.code !== 'ENOENT') throw error; return null; };
 const info = file => lstat(file).catch(absent);
 const queues = new Map();
+const treeDirectories = ['texts','texts/sources','texts/screenplays','images','audio','videos','other'];
 const metadataRoot = root => path.join(root, 'runtime/review-library');
 async function plainDirectory(directory, create = false) {
   const parts = path.resolve(directory).split(path.sep).filter(Boolean);
@@ -106,6 +107,19 @@ async function checkGeneration(root, generation, fingerprints = {}, full = false
     if (!seen.has(target) && (checkMedia || entry.kind !== 'media')) { await verifyBlob(target, entry.sha256, entry.bytes, fingerprints, full, checkMedia); seen.add(target); }
   }
   check(await readlink(path.join(directory, 'tree/.catalog.json')) === '../manifest.json', 'LIBRARY_INDEX_CHANGED', '目录索引入口已改变', 409);
+  if (checkMedia) {
+    // Seal only registered directories, without following links. Besides accidental
+    // edits this prevents Finder from adding .DS_Store files to a generated tree.
+    const directories = new Set([directory, path.join(directory, 'tree'), path.join(directory, 'text-blobs'), ...treeDirectories.map(p => path.join(directory, 'tree', p))]);
+    for (const entry of manifest.entries.filter(e => e.path)) {
+      let parent = path.dirname(path.join(directory, 'tree', entry.path));
+      while (parent !== directory) { directories.add(parent); parent = path.dirname(parent); }
+    }
+    for (const parent of [...directories].sort((a, b) => b.length - a.length)) {
+      await plainDirectory(parent);
+      if (((await lstat(parent)).mode & 0o222) !== 0) await chmod(parent, 0o500);
+    }
+  }
   return { manifest, fingerprints, checkedBlobs: seen.size };
 }
 // Only the owned tree is inspected; links are checked as directory entries and never followed for deletion.
@@ -197,7 +211,7 @@ async function synchronize(pool, root, { full = false } = {}) {
       await phase.budget();
       generation = { directory: '.process/shared/review-library-' + id, context: await phase.context() };
       const directory = await phase.directory(directoryFor(root, generation));
-      for (const part of ['tree/texts/sources','tree/texts/screenplays','tree/images','tree/audio','tree/videos','tree/other','text-blobs']) await mkdir(path.join(directory, part), { recursive: true, mode: 0o700 });
+      for (const part of [...treeDirectories.map(p => 'tree/' + p),'text-blobs']) await mkdir(path.join(directory, part), { recursive: true, mode: 0o700 });
       const previousManifest = state.current ? await manifestRead(root, state.current) : null;
       const oldNames = new Map((previousManifest?.entries || []).filter(e => e.kind === 'media').map(e => [e.key, e.path]));
       const names = new Set();

@@ -89,6 +89,7 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   let result = await syncLibrary(pool,root,{full:true});
   assert.equal(result.status,'CURRENT'); assert.equal(result.counts.files,4); assert.equal(result.counts.unavailable,1);
   const firstPointer = await readlink(path.join(project,'review-library'));
+  assert.equal((await lstat(path.join(project,firstPointer))).mode&0o222,0);
   let catalog = await readLibrary(pool,root,{entries:true});
   const images = catalog.entries.filter(e=>e.kind==='media'&&e.path);
   assert.equal(images.length,2); assert.notEqual(images[0].path,images[1].path);
@@ -133,6 +134,8 @@ test('library builds exact links and texts, refreshes atomically and detects dri
   assert.equal((await readLibrary(pool,root)).status,'ERROR');
   await writeFile(path.join(root,'media',sha),media); await syncLibrary(pool,root);
   const link = path.join(project,'review-library',images[0].path), target = await readlink(link);
+  assert.equal((await lstat(path.dirname(link))).mode&0o222,0);
+  await chmod(path.dirname(link),0o700); // Deliberate tampering must opt out of the read-only directory first.
   await unlink(link); await symlink('/not-an-owned-media-file',link);
   await assert.rejects(syncLibrary(pool,root),{code:'LIBRARY_LINK_CHANGED'});
   await assert.rejects(readLibrary(pool,root,{entryPath:images[0].path}),{code:'LIBRARY_LINK_CHANGED'});
