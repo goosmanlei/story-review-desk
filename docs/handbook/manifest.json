@@ -18,14 +18,19 @@
       "title": "运行架构与项目边界",
       "summary": "分清核心软件、故事实例、进程、数据库和媒体各自的位置。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "tools/service.mjs",
         "tools/deployment.mjs",
         "server/db.mjs",
-        "server/library/service.mjs"
+        "server/library/service.mjs",
+        "web/app/instance-context.tsx",
+        "web/app/instance-state-page.tsx",
+        "web/app/instance-state-page.css",
+        "web/app/runtime-request-boundary.tsx",
+        "web/app/client-storage.ts"
       ],
-      "sourceDigest": "50306c1cba06ca645fbb92a6d14d60661fcf9be29a35ba3ed3356bc83d63b2ef"
+      "sourceDigest": "24d8f7f1bf5f5458ffa9f12add7dab47b212db9bb340d47e8287c2fb979c0073"
     },
     {
       "id": "domains",

@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { configureClientStorage } from './client-storage';
 import { instanceProfile, type InstanceProfile } from './instance-profile';
 import {configureRuntimeBinding,runtimePath} from './runtime-request-boundary';
+import {InstanceStatePage} from './instance-state-page';
 
 const InstanceContext = createContext<InstanceProfile>(instanceProfile(null));
 
@@ -46,9 +47,9 @@ export function InstanceProfileProvider({ children }: { children: ReactNode }) {
     refresh();const timer=window.setInterval(refresh,15000);window.addEventListener('review:configuration-updated',refresh);window.addEventListener('review:runtime-changed',changed);
     return () => { active = false;window.clearInterval(timer);window.removeEventListener('review:configuration-updated',refresh);window.removeEventListener('review:runtime-changed',changed); };
   }, []);
-  if(stale)return <main role="alert"><h1>审阅台已更新</h1><p>当前页面属于上一部署或运行期，已停止写入。请刷新后继续；旧草稿不会自动回灌。</p><button onClick={()=>window.location.reload()}>刷新页面</button></main>;
-  if (error) return <main role="alert"><p>{error}</p><button onClick={() => window.location.reload()}>重新加载</button></main>;
-  if (profile.instanceId === 'UNKNOWN') return <main aria-busy="true">正在读取审阅台实例…</main>;
+  if(stale)return <InstanceStatePage state="updated"/>;
+  if (error) return <InstanceStatePage state="error" error={error}/>;
+  if (profile.instanceId === 'UNKNOWN') return <InstanceStatePage state="loading"/>;
   return <InstanceContext.Provider value={profile}>{children}</InstanceContext.Provider>;
 }
 
