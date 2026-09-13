@@ -9,6 +9,6 @@ export default {
   poweredByHeader: false,
   serverExternalPackages: ["pg", "pinyin-pro"],
   cacheMaxMemorySize: 0,
-  outputFileTracingIncludes: { "/*": ["../server/schema.sql"] },
+  outputFileTracingIncludes: { "/*": ["../server/schema.sql", "../web/.handbook/**/*"] },
   experimental: { webpackMemoryOptimizations: true },
 };

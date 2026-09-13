@@ -1,0 +1,1631 @@
+[
+  {
+    "id": "overview",
+    "title": "同一故事，三个协作入口",
+    "description": "网页、项目 Codex 和网页助手共享业务接口，长任务由工作器执行。",
+    "nodes": [
+      {
+        "id": "human",
+        "label": "审阅台网页",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "阅读、编辑、正式判断"
+        ]
+      },
+      {
+        "id": "codex",
+        "label": "项目 Codex",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "CLI / API 推进创作"
+        ]
+      },
+      {
+        "id": "assistant",
+        "label": "网页助手",
+        "domain": "collaboration",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "讨论与修改预览"
+        ]
+      },
+      {
+        "id": "api",
+        "label": "统一业务接口",
+        "domain": "project",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "/api/v1 · 版本与幂等"
+        ]
+      },
+      {
+        "id": "data",
+        "label": "对象与不可变修订",
+        "domain": "settings",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "PostgreSQL · 精确关系"
+        ]
+      },
+      {
+        "id": "worker",
+        "label": "后台工作器",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "模型、媒体和长任务"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "human",
+        "to": "api",
+        "label": "请求"
+      },
+      {
+        "from": "codex",
+        "to": "api",
+        "label": "请求"
+      },
+      {
+        "from": "assistant",
+        "to": "api",
+        "label": "受控请求"
+      },
+      {
+        "from": "api",
+        "to": "data",
+        "label": "事务"
+      },
+      {
+        "from": "data",
+        "to": "worker",
+        "label": "领取任务"
+      }
+    ]
+  },
+  {
+    "id": "runtime",
+    "title": "运行组件各自负责什么",
+    "description": "Web 和一个后台工作器是原生 Node 进程，数据库是 PostgreSQL。",
+    "nodes": [
+      {
+        "id": "browser",
+        "label": "浏览器 / CLI",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "用户发起阅读与动作"
+        ]
+      },
+      {
+        "id": "web",
+        "label": "Web · Next.js",
+        "domain": "project",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "页面、HTTP、业务事务"
+        ]
+      },
+      {
+        "id": "pg",
+        "label": "PostgreSQL",
+        "domain": "settings",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "对象、关系、队列与回执"
+        ]
+      },
+      {
+        "id": "host",
+        "label": "宿主 Codex / 程序",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "已有认证与受控协议"
+        ]
+      },
+      {
+        "id": "worker",
+        "label": "一个后台工作器",
+        "domain": "production",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "并发 1 · 有界领取"
+        ]
+      },
+      {
+        "id": "media",
+        "label": "实例媒体",
+        "domain": "materials",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "SHA 字节 · 登记可用性"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "browser",
+        "to": "web",
+        "label": "HTTP"
+      },
+      {
+        "from": "web",
+        "to": "pg",
+        "label": "事务"
+      },
+      {
+        "from": "pg",
+        "to": "worker",
+        "label": "领取"
+      },
+      {
+        "from": "worker",
+        "to": "host",
+        "label": "执行"
+      },
+      {
+        "from": "worker",
+        "to": "media",
+        "label": "登记"
+      }
+    ]
+  },
+  {
+    "id": "project",
+    "title": "业务权威与派生阅读入口",
+    "description": "核心软件按提交发布，数据库与登记媒体是权威，目录和导出是可核验投影。",
+    "nodes": [
+      {
+        "id": "core",
+        "label": "核心软件",
+        "domain": "project",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "源码、手册与工具"
+        ]
+      },
+      {
+        "id": "managed",
+        "label": "受管软件包",
+        "domain": "project",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "固定 SHA · 自包含发布"
+        ]
+      },
+      {
+        "id": "runtime",
+        "label": "本机运行信息",
+        "domain": "project",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "机器配置与私有回执"
+        ]
+      },
+      {
+        "id": "db",
+        "label": "业务数据库",
+        "domain": "story",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "永久对象与不可变历史"
+        ]
+      },
+      {
+        "id": "sha",
+        "label": "登记媒体",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "instance/media/SHA"
+        ]
+      },
+      {
+        "id": "library",
+        "label": "资源审阅目录",
+        "domain": "materials",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "可读软链 · 只读投影"
+        ]
+      },
+      {
+        "id": "package",
+        "label": "可移植项目包",
+        "domain": "settings",
+        "col": 0,
+        "row": 2,
+        "lines": [
+          "模块数据、原件与媒体"
+        ]
+      },
+      {
+        "id": "guidance",
+        "label": "故事指引副本",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 2,
+        "lines": [
+          "按采用字节同步"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "core",
+        "to": "managed",
+        "label": "发布"
+      },
+      {
+        "from": "managed",
+        "to": "runtime",
+        "label": "启动"
+      },
+      {
+        "from": "db",
+        "to": "package",
+        "label": "导出"
+      },
+      {
+        "from": "db",
+        "to": "guidance",
+        "label": "同步"
+      },
+      {
+        "from": "sha",
+        "to": "library",
+        "label": "相对链接"
+      },
+      {
+        "from": "db",
+        "to": "library",
+        "label": "映射",
+        "type": "relation"
+      }
+    ]
+  },
+  {
+    "id": "domains",
+    "title": "六个领域，通过明确引用协作",
+    "description": "故事、设定、素材、制作、协作与项目管理按业务职责划分。",
+    "nodes": [
+      {
+        "id": "story",
+        "label": "故事",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "来源 · 结构 · 集 · 场"
+        ]
+      },
+      {
+        "id": "settings",
+        "label": "设定",
+        "domain": "settings",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "实体 · 状态 · 关系 · 空间"
+        ]
+      },
+      {
+        "id": "materials",
+        "label": "素材",
+        "domain": "materials",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "需求 · 素材族 · 版本"
+        ]
+      },
+      {
+        "id": "collaboration",
+        "label": "协作",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "评论 · 判断 · AI 建议"
+        ]
+      },
+      {
+        "id": "project",
+        "label": "项目管理",
+        "domain": "project",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "指引 · 配置 · 维护"
+        ]
+      },
+      {
+        "id": "production",
+        "label": "制作",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "准备 · 镜头 · 输入 · 成片"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "story",
+        "to": "settings",
+        "label": "依据",
+        "type": "relation"
+      },
+      {
+        "from": "settings",
+        "to": "materials",
+        "label": "定义",
+        "type": "relation"
+      },
+      {
+        "from": "materials",
+        "to": "production",
+        "label": "输入"
+      },
+      {
+        "from": "collaboration",
+        "to": "story",
+        "label": "审阅",
+        "type": "relation"
+      },
+      {
+        "from": "project",
+        "to": "production",
+        "label": "规则",
+        "type": "relation"
+      }
+    ]
+  },
+  {
+    "id": "data-core",
+    "title": "对象不是某一稿，修订才是确切内容",
+    "description": "一个对象拥有多个不可变修订，当前归属和修订归属分开保存。",
+    "nodes": [
+      {
+        "id": "objects",
+        "label": "objects",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "PK id · version · state",
+          "draft / adopted revision"
+        ]
+      },
+      {
+        "id": "revisions",
+        "label": "revisions",
+        "domain": "settings",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "PK id · FK object_id",
+          "正文 JSONB · SHA"
+        ]
+      },
+      {
+        "id": "members",
+        "label": "memberships",
+        "domain": "materials",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "owner_id → member_id",
+          "当前归属与角色"
+        ]
+      },
+      {
+        "id": "rev-members",
+        "label": "revision_memberships",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "revision_id → member_id",
+          "原修订的成员与顺序"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "objects",
+        "to": "revisions",
+        "label": "1 → 多"
+      },
+      {
+        "from": "objects",
+        "to": "members",
+        "label": "当前归属"
+      },
+      {
+        "from": "revisions",
+        "to": "rev-members",
+        "label": "精确归属"
+      }
+    ]
+  },
+  {
+    "id": "data-media",
+    "title": "素材族、版本和媒体是不同身份",
+    "description": "素材族选择采用的素材版本，素材修订绑定实际媒体版本和 SHA。",
+    "nodes": [
+      {
+        "id": "requirement",
+        "label": "REQUIREMENT",
+        "domain": "materials",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "需要什么 · 用于哪里"
+        ]
+      },
+      {
+        "id": "family",
+        "label": "MATERIAL / family",
+        "domain": "materials",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "稳定素材族",
+          "选择采用的 ASSET"
+        ]
+      },
+      {
+        "id": "asset",
+        "label": "ASSET / version",
+        "domain": "materials",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "独立版本对象",
+          "不可原位替换"
+        ]
+      },
+      {
+        "id": "rights",
+        "label": "rights / rights_events",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "权利事实与历史证明"
+        ]
+      },
+      {
+        "id": "binding",
+        "label": "asset_media",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "revision → media version",
+          "OUTPUT / PREVIEW 等用途"
+        ]
+      },
+      {
+        "id": "media",
+        "label": "media",
+        "domain": "project",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "id + version_id + SHA",
+          "PRESENT / MISSING / RETIRED"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "requirement",
+        "to": "family",
+        "label": "需求",
+        "type": "relation"
+      },
+      {
+        "from": "family",
+        "to": "asset",
+        "label": "1 → 多"
+      },
+      {
+        "from": "asset",
+        "to": "binding",
+        "label": "修订绑定"
+      },
+      {
+        "from": "binding",
+        "to": "media",
+        "label": "精确三元组"
+      },
+      {
+        "from": "asset",
+        "to": "rights",
+        "label": "权利证明",
+        "type": "relation"
+      }
+    ]
+  },
+  {
+    "id": "data-evidence",
+    "title": "业务内容和判断一起留下依据",
+    "description": "dependencies 引用确切修订，reviews 与 provenance 保存判断和证明。",
+    "nodes": [
+      {
+        "id": "input",
+        "label": "依据修订",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "来源、需求、素材或设计"
+        ]
+      },
+      {
+        "id": "dependency",
+        "label": "dependencies",
+        "domain": "settings",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "依赖修订 + 用途"
+        ]
+      },
+      {
+        "id": "consumer",
+        "label": "消费方修订",
+        "domain": "production",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "镜头、输入锁或组装"
+        ]
+      },
+      {
+        "id": "change",
+        "label": "invalidations",
+        "domain": "production",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "变化来源与受影响修订"
+        ]
+      },
+      {
+        "id": "review",
+        "label": "reviews",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "对象 + 修订 + 决定"
+        ]
+      },
+      {
+        "id": "proof",
+        "label": "provenance",
+        "domain": "project",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "原身份、SHA 与证明内容"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "consumer",
+        "to": "dependency",
+        "label": "引用"
+      },
+      {
+        "from": "dependency",
+        "to": "input",
+        "label": "精确版本"
+      },
+      {
+        "from": "consumer",
+        "to": "proof",
+        "label": "证明",
+        "type": "relation"
+      },
+      {
+        "from": "review",
+        "to": "consumer",
+        "label": "判断"
+      },
+      {
+        "from": "input",
+        "to": "change",
+        "label": "采用变化"
+      }
+    ]
+  },
+  {
+    "id": "states",
+    "title": "保存新稿，再提交和判断",
+    "description": "正常创作路径保存草稿、提交待审，并明确采用或要求修改。",
+    "nodes": [
+      {
+        "id": "draft",
+        "label": "DRAFT · 草稿",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "保存产生新的不可变修订"
+        ]
+      },
+      {
+        "id": "submitted",
+        "label": "SUBMITTED · 待审",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "选择这一修订提交"
+        ]
+      },
+      {
+        "id": "adopted",
+        "label": "ADOPTED · 采用",
+        "domain": "materials",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "判断与采用头一并更新"
+        ]
+      },
+      {
+        "id": "rewrite",
+        "label": "保存修改",
+        "domain": "story",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "继续修改、重新提交"
+        ]
+      },
+      {
+        "id": "changes",
+        "label": "CHANGES_REQUESTED",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "保留具体修改意见"
+        ]
+      },
+      {
+        "id": "disabled",
+        "label": "DISABLED · 禁用",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "独立判断 · 阻断下传"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "draft",
+        "to": "submitted",
+        "label": "提交"
+      },
+      {
+        "from": "submitted",
+        "to": "adopted",
+        "label": "采用"
+      },
+      {
+        "from": "submitted",
+        "to": "changes",
+        "label": "要求修改"
+      },
+      {
+        "from": "changes",
+        "to": "rewrite",
+        "label": "修改"
+      },
+      {
+        "from": "rewrite",
+        "to": "draft",
+        "label": "新稿"
+      },
+      {
+        "from": "adopted",
+        "to": "disabled",
+        "label": "禁用",
+        "type": "relation"
+      }
+    ]
+  },
+  {
+    "id": "heads",
+    "title": "草稿头前移，旧采用头继续有效",
+    "description": "r2 是新草稿，已采用头仍然指向 r1；只有正式确认后采用头才前移。",
+    "nodes": [
+      {
+        "id": "object",
+        "label": "永久对象",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "同一 sceneId",
+          "version 随动作核对"
+        ]
+      },
+      {
+        "id": "draft",
+        "label": "草稿头",
+        "domain": "story",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "draft_revision_id"
+        ]
+      },
+      {
+        "id": "r2",
+        "label": "修订 r2",
+        "domain": "story",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "新稿 · 尚未采用"
+        ]
+      },
+      {
+        "id": "adopted",
+        "label": "采用头",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "adopted_revision_id"
+        ]
+      },
+      {
+        "id": "r1",
+        "label": "修订 r1",
+        "domain": "materials",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "原采用内容 · 不可变"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "object",
+        "to": "draft",
+        "label": "当前稿"
+      },
+      {
+        "from": "draft",
+        "to": "r2",
+        "label": "指向"
+      },
+      {
+        "from": "object",
+        "to": "adopted",
+        "label": "采用版本"
+      },
+      {
+        "from": "adopted",
+        "to": "r1",
+        "label": "指向"
+      }
+    ]
+  },
+  {
+    "id": "invalidation",
+    "title": "换素材，不等于推翻需求和设计",
+    "description": "设计依赖需求定义；实际输入锁引用确切素材。变化只影响实际引用的版本。",
+    "nodes": [
+      {
+        "id": "definition",
+        "label": "需求定义 r1",
+        "domain": "settings",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "需要一段雨声"
+        ]
+      },
+      {
+        "id": "design",
+        "label": "镜头设计 r3",
+        "domain": "production",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "依赖需求定义"
+        ]
+      },
+      {
+        "id": "lock",
+        "label": "实际输入锁 r2",
+        "domain": "production",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "独立核对输入与权利"
+        ]
+      },
+      {
+        "id": "asset",
+        "label": "雨声版本 v1",
+        "domain": "materials",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "原采用素材"
+        ]
+      },
+      {
+        "id": "new",
+        "label": "雨声版本 v2",
+        "domain": "materials",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "新采用素材"
+        ]
+      },
+      {
+        "id": "affected",
+        "label": "受影响下游",
+        "domain": "collaboration",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "按精确依赖重新核对"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "design",
+        "to": "definition",
+        "label": "DEFINITION"
+      },
+      {
+        "from": "lock",
+        "to": "asset",
+        "label": "ACTUAL_INPUT"
+      },
+      {
+        "from": "asset",
+        "to": "new",
+        "label": "换版",
+        "type": "relation"
+      },
+      {
+        "from": "new",
+        "to": "affected",
+        "label": "失效检查"
+      },
+      {
+        "from": "lock",
+        "to": "affected",
+        "label": "相关下游",
+        "type": "relation"
+      }
+    ]
+  },
+  {
+    "id": "layers",
+    "title": "表现、编排、规则与事务分层",
+    "description": "页面没有另一套业务规则，接口也不通过 HTTP 互相调用。",
+    "nodes": [
+      {
+        "id": "ui",
+        "label": "页面与 CLI",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "交互 · 草稿 · 阅读状态"
+        ]
+      },
+      {
+        "id": "http",
+        "label": "接口层",
+        "domain": "project",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "协议 · 参数 · 运行期"
+        ]
+      },
+      {
+        "id": "projection",
+        "label": "读取投影",
+        "domain": "settings",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "同一快照的完整上下文"
+        ]
+      },
+      {
+        "id": "service",
+        "label": "编排与领域服务",
+        "domain": "production",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "动作规划 · 对象约束"
+        ]
+      },
+      {
+        "id": "repository",
+        "label": "事务与数据访问",
+        "domain": "project",
+        "col": 0,
+        "row": 2,
+        "lines": [
+          "稳定加锁 · 回滚 · 查询"
+        ]
+      },
+      {
+        "id": "storage",
+        "label": "PostgreSQL / 媒体",
+        "domain": "materials",
+        "col": 1,
+        "row": 2,
+        "lines": [
+          "引用约束 · 不可变历史"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "ui",
+        "to": "http",
+        "label": "请求"
+      },
+      {
+        "from": "http",
+        "to": "service",
+        "label": "调用"
+      },
+      {
+        "from": "http",
+        "to": "projection",
+        "label": "读取"
+      },
+      {
+        "from": "projection",
+        "to": "repository",
+        "label": "查询"
+      },
+      {
+        "from": "service",
+        "to": "repository",
+        "label": "命令"
+      },
+      {
+        "from": "repository",
+        "to": "storage",
+        "label": "存取"
+      }
+    ]
+  },
+  {
+    "id": "transaction",
+    "title": "一次修改的请求与回读",
+    "description": "先读取版本，再发送带操作编号的事务，成功或冲突都有可查询回执。",
+    "nodes": [
+      {
+        "id": "read",
+        "label": "读取对象与运行期",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "object version + epoch"
+        ]
+      },
+      {
+        "id": "request",
+        "label": "发送事务",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "operationId + expectedVersion"
+        ]
+      },
+      {
+        "id": "check",
+        "label": "核对与稳定加锁",
+        "domain": "project",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "同号同内容返回原回执"
+        ]
+      },
+      {
+        "id": "result",
+        "label": "回读结果",
+        "domain": "materials",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "采用头、修订与 operation"
+        ]
+      },
+      {
+        "id": "commit",
+        "label": "提交或回滚",
+        "domain": "settings",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "全部成功才生效"
+        ]
+      },
+      {
+        "id": "rules",
+        "label": "校验领域条件",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "身份、来源、权利与输入"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "read",
+        "to": "request",
+        "label": "携带版本"
+      },
+      {
+        "from": "request",
+        "to": "check",
+        "label": "请求"
+      },
+      {
+        "from": "check",
+        "to": "rules",
+        "label": "核对"
+      },
+      {
+        "from": "rules",
+        "to": "commit",
+        "label": "原子生效"
+      },
+      {
+        "from": "commit",
+        "to": "result",
+        "label": "回执"
+      }
+    ]
+  },
+  {
+    "id": "collaboration",
+    "title": "创作、判断和执行各有位置",
+    "description": "人做判断，AI 提供建议，工作器执行明确授权的长任务。",
+    "nodes": [
+      {
+        "id": "source",
+        "label": "来源与正文",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "作者整理、改写与提交"
+        ]
+      },
+      {
+        "id": "needs",
+        "label": "设定与需求",
+        "domain": "settings",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "身份、状态、素材用途"
+        ]
+      },
+      {
+        "id": "design",
+        "label": "镜头与准备",
+        "domain": "production",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "表达与空间、制作依据"
+        ]
+      },
+      {
+        "id": "review",
+        "label": "人的判断",
+        "domain": "collaboration",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "审阅上下文 · 确认采用"
+        ]
+      },
+      {
+        "id": "suggest",
+        "label": "AI 辅助",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "讨论 → 预览 → 草稿"
+        ]
+      },
+      {
+        "id": "lock",
+        "label": "实际输入与授权",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "精确版本 · 本轮资格"
+        ]
+      },
+      {
+        "id": "output",
+        "label": "观察与成片审阅",
+        "domain": "materials",
+        "col": 0,
+        "row": 2,
+        "lines": [
+          "登记不等于实际观察"
+        ]
+      },
+      {
+        "id": "worker",
+        "label": "后台执行",
+        "domain": "project",
+        "col": 1,
+        "row": 2,
+        "lines": [
+          "确定性处理 / 配置的模型"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "source",
+        "to": "needs",
+        "label": "依据"
+      },
+      {
+        "from": "needs",
+        "to": "design",
+        "label": "定义"
+      },
+      {
+        "from": "source",
+        "to": "review",
+        "label": "提交"
+      },
+      {
+        "from": "suggest",
+        "to": "review",
+        "label": "辅助",
+        "type": "relation"
+      },
+      {
+        "from": "design",
+        "to": "lock",
+        "label": "采用后核对"
+      },
+      {
+        "from": "lock",
+        "to": "worker",
+        "label": "明确执行"
+      },
+      {
+        "from": "worker",
+        "to": "output",
+        "label": "登记结果"
+      }
+    ]
+  },
+  {
+    "id": "jobs",
+    "title": "长任务需要可查询的最终状态",
+    "description": "未知结果先核查原操作，不能自动当作失败再执行一次。",
+    "nodes": [
+      {
+        "id": "queued",
+        "label": "QUEUED",
+        "domain": "project",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "有界排队"
+        ]
+      },
+      {
+        "id": "running",
+        "label": "RUNNING",
+        "domain": "production",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "工作器领取 · 租约"
+        ]
+      },
+      {
+        "id": "success",
+        "label": "SUCCEEDED",
+        "domain": "materials",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "结果与证明已登记"
+        ]
+      },
+      {
+        "id": "cancel",
+        "label": "CANCELLED",
+        "domain": "project",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "取消已确认"
+        ]
+      },
+      {
+        "id": "unknown",
+        "label": "RESULT_UNKNOWN",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "核查请求编号与外部结果"
+        ]
+      },
+      {
+        "id": "failed",
+        "label": "FAILED",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "失败原因已明确"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "queued",
+        "to": "running",
+        "label": "领取"
+      },
+      {
+        "from": "running",
+        "to": "success",
+        "label": "成功"
+      },
+      {
+        "from": "queued",
+        "to": "cancel",
+        "label": "取消"
+      },
+      {
+        "from": "running",
+        "to": "unknown",
+        "label": "结果不明"
+      },
+      {
+        "from": "running",
+        "to": "failed",
+        "label": "已知失败"
+      }
+    ]
+  },
+  {
+    "id": "development",
+    "title": "实现、验证、文档和发布一起交付",
+    "description": "从明确业务意图开始，完成隔离验证后提交并以固定版本发布。",
+    "nodes": [
+      {
+        "id": "intent",
+        "label": "明确业务变化",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "对象、版本、成功与失败"
+        ]
+      },
+      {
+        "id": "implement",
+        "label": "所属领域实现",
+        "domain": "production",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "接口与业务服务复用"
+        ]
+      },
+      {
+        "id": "test",
+        "label": "隔离质检",
+        "domain": "settings",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "规则、事务、浏览器"
+        ]
+      },
+      {
+        "id": "deliver",
+        "label": "运行核验与清理",
+        "domain": "project",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "本地 / VPS 实际结果"
+        ]
+      },
+      {
+        "id": "commit",
+        "label": "提交并固定 SHA",
+        "domain": "project",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "本轮代码 · 正常推送"
+        ]
+      },
+      {
+        "id": "docs",
+        "label": "同步手册",
+        "domain": "collaboration",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "图文、来源与覆盖检查"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "intent",
+        "to": "implement",
+        "label": "设计"
+      },
+      {
+        "from": "implement",
+        "to": "test",
+        "label": "验证"
+      },
+      {
+        "from": "test",
+        "to": "docs",
+        "label": "复核"
+      },
+      {
+        "from": "docs",
+        "to": "commit",
+        "label": "交付"
+      },
+      {
+        "from": "commit",
+        "to": "deliver",
+        "label": "部署"
+      }
+    ]
+  },
+  {
+    "id": "deployment",
+    "title": "同一提交，按目标顺序发布",
+    "description": "本地保留数据，VPS 导入冻结母本；失败和未知结果按原操作处理。",
+    "nodes": [
+      {
+        "id": "sha",
+        "label": "固定核心 HEAD",
+        "domain": "project",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "排除未提交与未跟踪文件"
+        ]
+      },
+      {
+        "id": "build",
+        "label": "隔离构建与手册",
+        "domain": "settings",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "构建、依赖与清单校验"
+        ]
+      },
+      {
+        "id": "local",
+        "label": "本地切换",
+        "domain": "story",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "保留当前业务数据库"
+        ]
+      },
+      {
+        "id": "verify",
+        "label": "实际核验与清理",
+        "domain": "materials",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "API、媒体、worker、SHA"
+        ]
+      },
+      {
+        "id": "vps",
+        "label": "VPS 候选与切换",
+        "domain": "production",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "独立演示数据库"
+        ]
+      },
+      {
+        "id": "freeze",
+        "label": "冻结本地业务包",
+        "domain": "story",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "原件、媒体与精确关系"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "sha",
+        "to": "build",
+        "label": "干净 Git"
+      },
+      {
+        "from": "build",
+        "to": "local",
+        "label": "先本地"
+      },
+      {
+        "from": "local",
+        "to": "freeze",
+        "label": "成功后"
+      },
+      {
+        "from": "freeze",
+        "to": "vps",
+        "label": "传输导入"
+      },
+      {
+        "from": "vps",
+        "to": "verify",
+        "label": "公网核验"
+      }
+    ]
+  },
+  {
+    "id": "package",
+    "title": "可以迁移的故事，与留在本机的资格",
+    "description": "项目包保存创作事实，不携带机器凭据、旧执行队列和封存备份。",
+    "nodes": [
+      {
+        "id": "db",
+        "label": "数据库业务",
+        "domain": "story",
+        "col": 0,
+        "row": 0,
+        "lines": [
+          "对象、修订、关系与判断"
+        ]
+      },
+      {
+        "id": "bytes",
+        "label": "原始资料与媒体",
+        "domain": "materials",
+        "col": 1,
+        "row": 0,
+        "lines": [
+          "原件字节与登记 SHA"
+        ]
+      },
+      {
+        "id": "package",
+        "label": "版本 2 项目包",
+        "domain": "settings",
+        "col": 2,
+        "row": 0,
+        "lines": [
+          "manifest + 分模块数据"
+        ]
+      },
+      {
+        "id": "machine",
+        "label": "本机配置与凭据",
+        "domain": "project",
+        "col": 0,
+        "row": 1,
+        "lines": [
+          "留在实例 runtime"
+        ]
+      },
+      {
+        "id": "queue",
+        "label": "旧队列与执行资格",
+        "domain": "collaboration",
+        "col": 1,
+        "row": 1,
+        "lines": [
+          "不导入 · 不恢复授权"
+        ]
+      },
+      {
+        "id": "new",
+        "label": "空白独立实例",
+        "domain": "production",
+        "col": 2,
+        "row": 1,
+        "lines": [
+          "核验导入 · 新运行期"
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "db",
+        "to": "package",
+        "label": "导出"
+      },
+      {
+        "from": "bytes",
+        "to": "package",
+        "label": "核验字节"
+      },
+      {
+        "from": "package",
+        "to": "new",
+        "label": "事务导入"
+      }
+    ]
+  }
+]

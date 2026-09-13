@@ -1,0 +1,299 @@
+{
+  "version": 1,
+  "chapters": [
+    {
+      "id": "overview",
+      "title": "阅读导览与系统全景",
+      "summary": "先了解系统如何连接创作、判断与实现，再按角色选择阅读路径。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/modules.mjs",
+        "server/shared/workflow.mjs"
+      ],
+      "sourceDigest": "c534631688161e61efc4c7cb946609ad918ffe335aefdb53dc7f0ed9a6ec4bdd"
+    },
+    {
+      "id": "runtime",
+      "title": "运行架构与项目边界",
+      "summary": "分清核心软件、故事实例、进程、数据库和媒体各自的位置。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "tools/service.mjs",
+        "tools/deployment.mjs",
+        "server/db.mjs",
+        "server/library/service.mjs"
+      ],
+      "sourceDigest": "e1ca6c6869cd7bd41483f39d06e4781c5705509222966a2d9f7285eb83d9ab79"
+    },
+    {
+      "id": "domains",
+      "title": "领域划分与职责",
+      "summary": "按业务责任划分六个领域，页面入口可以组合多个领域。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/modules.mjs",
+        "server/story/service.mjs",
+        "server/settings/service.mjs",
+        "server/materials/service.mjs",
+        "server/production/service.mjs",
+        "server/collaboration/service.mjs",
+        "server/project/service.mjs"
+      ],
+      "sourceDigest": "9d2da435de5f8ad263572642982eb6e41447dc0f54dc040a7ad518c99431b1a3"
+    },
+    {
+      "id": "data-model",
+      "title": "数据实体与关系",
+      "summary": "从永久身份出发，理解关系表、丰富正文、原件和证据如何共同保存事实。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/schema.sql",
+        "server/repository.mjs",
+        "server/transport-contract.mjs"
+      ],
+      "sourceDigest": "0b9c81a115aaf2f86cac75752da48cded9c93a5a87d0cc98a3b33df3eca9f7fc"
+    },
+    {
+      "id": "versions",
+      "title": "状态、版本与变化影响",
+      "summary": "一次采用改变什么，哪些判断仍需独立完成，什么情况下下游需要重新核对。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/schema.sql",
+        "server/commands.mjs",
+        "server/production/input-locks.mjs"
+      ],
+      "sourceDigest": "a3cb8bf5244417e21d6075c697e07cdc59bb21a14091bf5381d6ca7f2e210924"
+    },
+    {
+      "id": "layers",
+      "title": "分层设计与页面读取",
+      "summary": "把阅读体验、协议、业务规则和数据事务放在各自负责的位置。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/api.mjs",
+        "server/workspaces.mjs",
+        "web/app/workspace-read-cache.ts",
+        "server/presentation/read-unit.mjs"
+      ],
+      "sourceDigest": "dc0e8f2a05ae51efb78018d816db8a23a6a6a5f1a02d7de034c2e9805fc27a49"
+    },
+    {
+      "id": "interfaces",
+      "title": "接口与一致性契约",
+      "summary": "理解三入口如何共享读写规则、处理并发、重放和长任务。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/api.mjs",
+        "server/commands.mjs",
+        "scripts/review.mjs",
+        "server/documentation.mjs"
+      ],
+      "sourceDigest": "7f63a28836f80af55d571d647a36f730b82d3e75d9014d3ae8068b30a5d6bb17"
+    },
+    {
+      "id": "collaboration",
+      "title": "人与 AI 的完整协作流程",
+      "summary": "把讨论、建议、草稿、正式判断和实际生成放回完整业务链。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/jobs.mjs",
+        "server/collaboration/service.mjs",
+        "server/collaboration/change-preview.mjs",
+        "server/presentation/workspaces.mjs"
+      ],
+      "sourceDigest": "5ae6bc69a274b7b6ef870b8dbe7a1d09be20f0ee562b5fe1bd11d36f465873a5"
+    },
+    {
+      "id": "development",
+      "title": "开发与质检流程",
+      "summary": "把实现、业务验证、界面验证、文档和发布作为一次完整交付。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "package.json",
+        "tests/object-store.test.mjs",
+        "tools/process.mjs",
+        "tools/handbook.mjs"
+      ],
+      "sourceDigest": "a777db534d7703127912977fac7486453d1829199140e105de2ddfc5dc9635e4"
+    },
+    {
+      "id": "operations",
+      "title": "部署、数据与运行维护",
+      "summary": "理解固定提交、母本与演示、项目包、配置、恢复和精确清理。",
+      "part": "通用主册",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "tools/deploy.mjs",
+        "tools/deployment.mjs",
+        "server/project/package.mjs",
+        "server/library/service.mjs",
+        "server/project/service.mjs",
+        "tools/process-resources.mjs"
+      ],
+      "sourceDigest": "acc2bf60036cac703c734263ba806d361d81296c0b267eeb3b345f5e8c86274e"
+    },
+    {
+      "id": "instance",
+      "title": "当前项目实例册",
+      "summary": "从本项目的真实对象出发，查看同一修订中的依据、关系和判断。",
+      "part": "当前项目",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/workspaces.mjs",
+        "server/repository.mjs"
+      ],
+      "sourceDigest": "515be5593afbf429680bcb72534bdae04269e067cbd4281c8e65f982458c37cb"
+    },
+    {
+      "id": "reference",
+      "title": "术语、实现索引与设计决策",
+      "summary": "查阅完整实体／接口覆盖、关键取舍、维护方式和能力边界。",
+      "part": "查阅附录",
+      "reviewedAt": "2026-09-13",
+      "sources": [
+        "server/schema.sql",
+        "server/modules.mjs",
+        "server/api.mjs"
+      ],
+      "sourceDigest": "8c4cad939eac0a8c6da6a4b4433ce456d7fc24fdeeb314fe7b4053cb83eebde1"
+    }
+  ],
+  "coverage": {
+    "tables": {
+      "project": "data-model",
+      "schema_version": "data-model",
+      "objects": "data-model",
+      "revisions": "data-model",
+      "episode_scenes": "data-model",
+      "entity_relations": "data-model",
+      "memberships": "data-model",
+      "revision_memberships": "data-model",
+      "material_families": "data-model",
+      "asset_versions": "data-model",
+      "dependencies": "data-model",
+      "invalidations": "data-model",
+      "media": "data-model",
+      "asset_media": "data-model",
+      "rights": "data-model",
+      "rights_events": "data-model",
+      "reviews": "data-model",
+      "source_documents": "data-model",
+      "provenance": "data-model",
+      "configurations": "data-model",
+      "operations": "collaboration",
+      "suggestions": "collaboration",
+      "runtime_status": "collaboration"
+    },
+    "kinds": {
+      "SOURCE": "domains",
+      "STORY": "domains",
+      "EPISODE": "domains",
+      "SCENE": "domains",
+      "ENTITY": "domains",
+      "STATE": "domains",
+      "REPRESENTATION": "domains",
+      "RELATION": "domains",
+      "SPACE": "domains",
+      "REQUIREMENT": "domains",
+      "MATERIAL": "domains",
+      "ASSET": "domains",
+      "PROMPT": "domains",
+      "CALL": "domains",
+      "EXPECTED_OUTPUT": "domains",
+      "PREPARATION": "domains",
+      "COVERAGE": "domains",
+      "SHOT_DESIGN": "domains",
+      "SHOT": "domains",
+      "INPUT_LOCK": "domains",
+      "ASSEMBLY": "domains",
+      "DELIVERABLE": "domains",
+      "COMMENT": "domains",
+      "JUDGMENT": "domains",
+      "GUIDANCE": "domains",
+      "NOTE": "domains"
+    },
+    "routes": {
+      "assistant": "interfaces",
+      "configurations": "interfaces",
+      "contexts": "interfaces",
+      "documentation": "layers",
+      "export": "interfaces",
+      "facets": "interfaces",
+      "health": "interfaces",
+      "import": "interfaces",
+      "jobs": "interfaces",
+      "maintenance": "operations",
+      "media": "interfaces",
+      "objects": "interfaces",
+      "operations": "interfaces",
+      "relationships": "interfaces",
+      "review-library": "operations",
+      "settings": "interfaces",
+      "source": "interfaces",
+      "suggestions": "interfaces",
+      "transactions": "interfaces",
+      "upload": "interfaces",
+      "work": "interfaces",
+      "workspaces": "interfaces"
+    },
+    "states": {
+      "module:story": "versions",
+      "module:settings": "versions",
+      "module:materials": "versions",
+      "module:production": "versions",
+      "module:collaboration": "versions",
+      "module:project": "versions",
+      "state:DRAFT": "versions",
+      "state:SUBMITTED": "versions",
+      "state:ADOPTED": "versions",
+      "state:CHANGES_REQUESTED": "versions",
+      "state:DISABLED": "versions",
+      "state:ARCHIVED": "versions",
+      "role:ENTITY": "versions",
+      "role:STATE": "versions",
+      "role:REPRESENTATION": "versions",
+      "role:REQUIREMENT": "versions",
+      "role:FAMILY": "versions",
+      "role:SCENE": "versions",
+      "role:SHOT": "versions",
+      "role:EPISODE": "versions",
+      "role:OUTPUT": "versions",
+      "role:SOURCE": "versions",
+      "role:COMMENT": "versions",
+      "purpose:SOURCE": "versions",
+      "purpose:CONTENT": "versions",
+      "purpose:DEFINITION": "versions",
+      "purpose:DESIGN": "versions",
+      "purpose:ACTUAL_INPUT": "versions",
+      "availability:PRESENT": "versions",
+      "availability:MISSING": "versions",
+      "availability:RETIRED": "versions",
+      "role:PREVIEW": "versions",
+      "role:ATTACHMENT": "versions",
+      "fact:UNKNOWN": "versions",
+      "fact:CLEAR": "versions",
+      "fact:BLOCKED": "versions",
+      "decision:ADOPT": "versions",
+      "decision:REQUEST_CHANGES": "versions",
+      "decision:DISABLE": "versions",
+      "scope:system": "versions",
+      "scope:project": "versions",
+      "status:QUEUED": "versions",
+      "status:RUNNING": "versions",
+      "status:SUCCEEDED": "versions",
+      "status:FAILED": "versions",
+      "status:CANCELLED": "versions",
+      "status:RESULT_UNKNOWN": "versions"
+    }
+  }
+}

@@ -1,0 +1,695 @@
+.architecture-handbook {
+  --book-paper: var(--paper-bright, #fffdf7);
+  color: var(--ink, #302d25);
+  min-width: 0;
+}
+.handbook-cover {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 25px 28px 24px;
+  background: var(--paper-soft, #f3ede1);
+  border-top: 3px solid var(--accent, #984f3d);
+  margin-bottom: 20px;
+}
+.handbook-eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  color: var(--accent, #984f3d);
+  font-weight: 650;
+}
+.handbook-cover h2 {
+  font-family: var(--font-serif, serif);
+  font-size: 30px;
+  margin: 12px 0;
+}
+.handbook-cover p {
+  font-size: 14px;
+  line-height: 1.8;
+  margin: 0;
+  color: var(--muted, #726858);
+  max-width: 620px;
+}
+.handbook-edition {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted);
+}
+.handbook-edition code {
+  border: 1px solid var(--line);
+  padding: 6px 10px;
+}
+.handbook-layout {
+  display: grid;
+  grid-template-columns: 205px minmax(0, 1fr);
+  border: 1px solid var(--line);
+  min-width: 0;
+  background: var(--book-paper);
+}
+.handbook-directory {
+  background: var(--paper-soft);
+  padding: 18px 12px;
+  border-right: 1px solid var(--line);
+  max-height: 78vh;
+  overflow: auto;
+}
+.handbook-search {
+  display: grid;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  padding: 0 4px 18px;
+}
+.handbook-search input {
+  width: 100%;
+  padding: 9px !important;
+  font-size: 12px !important;
+  background: var(--book-paper) !important;
+}
+.handbook-directory nav {
+  display: grid;
+  gap: 3px;
+}
+.handbook-directory nav button {
+  display: grid;
+  grid-template-columns: 22px 1fr;
+  text-align: left;
+  gap: 4px 5px;
+  border: 0;
+  border-left: 2px solid transparent;
+  padding: 11px 9px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.handbook-directory nav button span {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+.handbook-directory nav button b {
+  font-size: 13px;
+  font-weight: 550;
+  line-height: 1.55;
+}
+.handbook-directory nav button small {
+  grid-column: 2;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.handbook-directory nav button[aria-current="page"] {
+  background: var(--book-paper);
+  border-left-color: var(--accent);
+  color: var(--accent);
+}
+.handbook-directory button:hover {
+  background: var(--book-paper);
+}
+.handbook-reading-column {
+  min-width: 0;
+}
+.handbook-reading-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  position: relative;
+  min-height: 46px;
+  box-sizing: border-box;
+}
+.handbook-reading-toolbar > span {
+  margin-right: auto;
+  color: var(--muted);
+}
+.handbook-reading-toolbar button,
+.handbook-reading-toolbar summary {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+}
+.handbook-reading-toolbar details nav {
+  position: absolute;
+  z-index: 5;
+  right: 12px;
+  top: 40px;
+  background: var(--book-paper);
+  padding: 12px;
+  box-shadow: 0 5px 25px #302d2526;
+  border: 1px solid var(--line);
+  max-height: 50vh;
+  overflow: auto;
+  max-width: 300px;
+  display: grid;
+  gap: 6px;
+}
+.handbook-reading-toolbar details nav button {
+  text-align: left;
+  padding: 8px;
+  color: var(--ink);
+}
+.handbook-content {
+  height: min(76vh, 920px);
+  overflow: auto;
+  padding: 28px 32px 22px;
+  scrollbar-gutter: stable;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  overscroll-behavior: contain;
+}
+.handbook-prose {
+  font-size: 15px;
+  line-height: 1.95;
+}
+.handbook-prose h1 {
+  font-size: 27px;
+  line-height: 1.5;
+  margin: 0 0 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--font-serif, serif);
+}
+.handbook-prose h2 {
+  font-size: 20px;
+  line-height: 1.55;
+  margin: 34px 0 13px;
+  scroll-margin-top: 18px;
+}
+.handbook-prose h3 {
+  font-size: 17px;
+  margin: 24px 0 10px;
+}
+.handbook-prose p {
+  margin: 13px 0;
+}
+.handbook-prose a,
+.handbook-instance a,
+.handbook-chapter-footer a {
+  color: var(--accent);
+  text-underline-offset: 4px;
+}
+.handbook-prose img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  margin: 22px 0;
+  cursor: zoom-in;
+  background: #fcfaf5;
+}
+.handbook-prose table,
+.handbook-instance table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  line-height: 1.75;
+  margin: 18px 0;
+  table-layout: fixed;
+}
+.handbook-prose th,
+.handbook-prose td,
+.handbook-instance th,
+.handbook-instance td {
+  border: 1px solid var(--line);
+  padding: 10px 12px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+.handbook-prose th,
+.handbook-instance th {
+  background: var(--paper-soft);
+  font-weight: 600;
+}
+.handbook-prose code,
+.handbook-instance code {
+  font-size: 0.86em;
+  word-break: break-word;
+}
+.handbook-prose pre {
+  overflow: auto;
+  white-space: pre;
+  line-height: 1.65;
+  padding: 18px;
+  background: var(--paper-soft);
+  border-left: 2px solid var(--line-strong);
+  font-size: 12px;
+}
+.handbook-prose ul,
+.handbook-prose ol {
+  padding-left: 24px;
+}
+.handbook-prose li {
+  margin: 7px 0;
+}
+.handbook-prose details {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+.handbook-prose summary,
+.handbook-chapter-footer summary,
+.handbook-instance summary {
+  cursor: pointer;
+  font-weight: 550;
+}
+.handbook-chapter-footer {
+  margin-top: 32px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.handbook-chapter-footer li {
+  padding: 6px 0;
+  overflow-wrap: anywhere;
+}
+.handbook-chapter-footer code {
+  display: block;
+  font-size: 10px;
+  opacity: 0.8;
+}
+.handbook-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-top: 18px;
+  font-size: 12px;
+}
+.handbook-pagination button,
+.handbook-instance button,
+.handbook-search-results button {
+  font: inherit;
+  color: var(--ink);
+  background: var(--book-paper);
+  border: 1px solid var(--line);
+  padding: 8px 12px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.handbook-pagination button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.handbook-search-results {
+  display: grid;
+  gap: 10px;
+}
+.handbook-search-results button {
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+.handbook-search-results b {
+  font-size: 13px;
+}
+.handbook-search-results span {
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.handbook-search-results > small {
+  color: var(--muted);
+  padding: 0 6px;
+}
+.handbook-loading {
+  min-height: 500px;
+  color: var(--muted);
+  padding: 40px 0;
+}
+.handbook-error {
+  padding: 14px 22px;
+  color: #914734;
+  background: #f8e9df;
+}
+.handbook-diagram-dialog {
+  border: 1px solid var(--line);
+  padding: 0;
+  background: var(--book-paper);
+  color: var(--ink);
+  width: 92vw;
+  max-width: 1500px;
+  max-height: 92vh;
+  border-radius: 7px;
+}
+.handbook-diagram-dialog::backdrop {
+  background: #25231fd0;
+}
+.handbook-diagram-dialog header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 12px 22px;
+  border-bottom: 1px solid var(--line);
+}
+.handbook-diagram-dialog h3 {
+  font-size: 18px;
+  margin: 0 auto 0 0;
+}
+.handbook-diagram-dialog label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.handbook-diagram-dialog input {
+  width: 120px;
+}
+.handbook-diagram-dialog button {
+  background: transparent;
+  border: 1px solid var(--line);
+  padding: 7px 12px;
+  cursor: pointer;
+  color: var(--ink);
+}
+.handbook-diagram-dialog > p {
+  padding: 0 22px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.handbook-diagram-viewport {
+  overflow: auto;
+  max-height: 70vh;
+  min-height: 200px;
+  padding: 12px;
+  overscroll-behavior: contain;
+}
+.handbook-diagram-viewport img {
+  display: block;
+  height: auto;
+}
+.architecture-handbook button:focus-visible,
+.architecture-handbook a:focus-visible,
+.architecture-handbook input:focus-visible,
+.architecture-handbook summary:focus-visible,
+.handbook-content:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.handbook-instance {
+  border-top: 3px solid var(--line-strong);
+  margin-top: 28px;
+  padding-top: 26px;
+  font-size: 13px;
+  line-height: 1.8;
+  min-width: 0;
+}
+.handbook-instance > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.handbook-instance h2 {
+  font-size: 25px;
+  margin: 8px 0;
+}
+.handbook-instance h3 {
+  font-size: 18px;
+}
+.handbook-instance h4 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.handbook-instance small {
+  display: block;
+  color: var(--muted);
+}
+.handbook-domain-counts {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 18px 0;
+}
+.handbook-domain-counts > div {
+  padding: 12px;
+  background: var(--paper-soft);
+  border-left: 2px solid var(--line-strong);
+}
+.handbook-domain-counts b {
+  font-size: 24px;
+  display: block;
+  font-family: Georgia, serif;
+}
+.handbook-domain-counts span {
+  color: var(--muted);
+  font-size: 11px;
+}
+.handbook-instance-controls {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: end;
+  margin: 20px 0;
+}
+.handbook-instance-controls label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.handbook-instance-controls label.handbook-check {
+  display: flex;
+  align-items: center;
+  padding-bottom: 8px;
+}
+.handbook-instance input,
+.handbook-instance select {
+  max-width: 100%;
+  font-size: 12px !important;
+}
+.handbook-object-picker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 260px;
+  overflow: auto;
+}
+.handbook-object-picker button {
+  text-align: left;
+  font-size: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+}
+.handbook-object-picker button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--paper-soft);
+}
+.handbook-object-picker small {
+  white-space: nowrap;
+  font-size: 10px;
+}
+.handbook-selected {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+  border-bottom: 1px solid var(--line);
+  padding: 20px 0;
+}
+.handbook-selected label {
+  min-width: 130px;
+  display: grid;
+  gap: 6px;
+  font-size: 11px;
+}
+.handbook-muted {
+  color: var(--muted);
+  font-size: 12px;
+}
+.handbook-heads {
+  display: grid;
+  gap: 8px;
+}
+.handbook-heads > div {
+  display: grid;
+  grid-template-columns: 75px 1fr;
+  gap: 10px;
+  padding: 8px;
+  background: var(--paper-soft);
+}
+.handbook-heads dt {
+  font-size: 11px;
+  color: var(--muted);
+}
+.handbook-heads dd {
+  margin: 0;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.handbook-instance-graph {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(110px, 0.75fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  margin: 24px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 20px 0;
+}
+.handbook-instance-graph ul,
+.handbook-related ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 8px;
+}
+.handbook-instance-graph > section:not(.handbook-graph-center) {
+  max-height: 420px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.handbook-instance-graph li button,
+.handbook-related li button {
+  text-align: left;
+  width: 100%;
+  display: grid;
+  gap: 5px;
+  padding: 9px;
+  border-left: 3px solid #7b9476;
+  font-size: 12px;
+}
+.handbook-instance-graph li code {
+  font-size: 9px;
+}
+.handbook-graph-center {
+  align-self: center;
+  padding: 14px;
+  background: var(--paper-soft);
+  border: 1px solid var(--accent);
+  display: grid;
+  gap: 10px;
+  text-align: center;
+}
+.handbook-graph-center code {
+  font-size: 9px;
+}
+.handbook-graph-center p {
+  font-size: 11px;
+  color: var(--muted);
+}
+.handbook-related {
+  border: 1px dashed var(--line-strong);
+  padding: 14px;
+  margin: 16px 0;
+}
+.handbook-related ul {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.handbook-related li button {
+  border-left: 2px dashed var(--line-strong);
+}
+.handbook-callout {
+  padding: 18px;
+  background: var(--paper-soft);
+  border-left: 3px solid var(--accent);
+}
+.handbook-instance blockquote {
+  margin: 12px 0;
+  padding: 14px;
+  border-left: 3px solid var(--line-strong);
+  background: var(--paper-soft);
+}
+@media (max-width: 1000px) {
+  .handbook-layout {
+    grid-template-columns: 175px minmax(0, 1fr);
+  }
+  .handbook-content {
+    padding: 22px;
+  }
+  .handbook-cover {
+    padding: 20px;
+  }
+  .handbook-prose {
+    font-size: 14px;
+  }
+  .handbook-prose th,
+  .handbook-prose td {
+    padding: 8px;
+  }
+  .handbook-instance-graph {
+    grid-template-columns: 1fr;
+  }
+  .handbook-graph-center {
+    grid-row: 1;
+  }
+  .handbook-prose h1 {
+    font-size: 23px;
+  }
+}
+@media (max-width: 700px) {
+  .handbook-cover {
+    gap: 12px;
+  }
+  .handbook-cover h2 {
+    font-size: 24px;
+  }
+  .handbook-edition {
+    font-size: 10px;
+  }
+  .handbook-layout {
+    display: block;
+  }
+  .handbook-directory {
+    max-height: 245px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 12px;
+  }
+  .handbook-directory nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .handbook-content {
+    height: 72vh;
+    padding: 18px 14px;
+  }
+  .handbook-prose {
+    font-size: 14px;
+  }
+  .handbook-reading-toolbar {
+    padding: 12px;
+  }
+  .handbook-prose th,
+  .handbook-prose td {
+    font-size: 11px;
+    padding: 6px;
+  }
+  .handbook-cover p {
+    font-size: 12px;
+  }
+  .handbook-diagram-dialog header {
+    flex-wrap: wrap;
+    gap: 10px;
+    padding: 12px;
+  }
+  .handbook-diagram-dialog h3 {
+    width: 100%;
+    font-size: 16px;
+  }
+  .handbook-selected {
+    display: block;
+  }
+  .handbook-selected label {
+    margin-top: 12px;
+  }
+  .handbook-object-picker {
+    grid-template-columns: 1fr;
+  }
+  .handbook-domain-counts {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}

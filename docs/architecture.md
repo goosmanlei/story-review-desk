@@ -1,31 +1,10 @@
 # 数据与业务接口
 
-Web、review CLI 和网页助手访问 /api/v1。server/api.mjs 负责协议，六个模块负责业务约束，repository / commands / transfer 负责事务及存取。接口不互相调用。Next standalone 只负责页面和 HTTP；工作器独立领取后台任务。
+完整说明已统一维护于[系统架构手册](handbook/README.md)。网页入口为“系统管理 → 系统架构”。
 
-objects 保存永久身份、当前草稿头和采用头；revisions 保存不可变正文、SHA、作者及修订号。集场顺序、实体关系、素材族、素材版本、媒体版本、关系归属和精确依赖使用关系表与索引。JSONB 保存对象自身的丰富内容；显示编号不作主键。source_documents 保留原始字节，保存来源说明的新稿仍指向同一原始资料。
-
-保存产生草稿；提交进入待审；确认在同一事务中保存判断、采用修订和精确失效。已采用正文后续改动不改变旧采用头。素材版本本身不可覆盖，须在所属素材族新建版本。禁用及权利阻断即时阻断实际下传。内部适用确认不表示商业许可或法律审查。
-
-依赖绑定 revisionId 及用途。设计依赖需求版本，实际输入依赖已采用的素材、调用或 Prompt 版本；改素材不废弃只依赖需求的设计。INPUT_LOCK 的采用检查全部实际输入、媒体可用性及权利；执行还需本次 objectId/revisionId 的显式授权和一个产出素材族。
-
-所有写请求携带 operationId、对象 expectedVersion；HTTP 另携带从 health 得到的 x-review-runtime。CLI 自动绑定运行期。相同请求重放返回原回执，同编号异内容或版本冲突明确拒绝。多对象按稳定顺序加锁并全量核对；失败回滚业务变化，保留失败回执。旧运行期页面在恢复后无法写入。
-
-入口：GET health / work / objects / objects/:id / source/:revisionId / media/:sha / configurations / operations/:id；POST transactions / jobs / upload / import / operations/:id/cancel；GET export / suggestions/:id。事务支持 save、submit、review、rights.record、configuration.save、suggestion.apply。对象读取可指定 revisionId，返回该版本的内容、关系、输入与判断。
-
-GET review-library 返回本实例目录同步状态；`?entries=true` 返回登记索引，`?path=...` 核验并解析单个审阅入口。REVIEW_LIBRARY_SYNC / REVIEW_LIBRARY_VERIFY 通过 jobs 及同一工作器执行，使用运行期与 operationId 的既有约束。目录由 library 服务从一致数据库快照构建，是可重建读取投影；不增加数据库表、正式审阅事件或第二业务写点。完整目录元数据与正文绑定版本 1 导出格式，格式变更须提升版本并重建。
-
-六入口沿用既有的视觉、目录和阅读交互：当前工作的工作链与阶段、故事结构与集场卷宗、主体分类与关系画板、基础及过程素材、五阶段制作、配置与运行维护。重构修改接口和状态，不以通用对象表单取代业务阅读场景。GET contexts/:id 在同一数据库快照返回正文、集场、素材版本、评论和精确引用；basis 列出实际返回内容的版本依据，供助手应用前复核。GET facets、relationships、settings/spatial-baseline 提供有界投影；空间基线只读取已登记原始资料，保留原坐标与场次身份。
-
-正文评论的 target 绑定永久对象、修订及 expectedVersion；圈选绑定原正文块或字段路径。修改、解决评论保留原 target 和 anchor，历史评论不换绑到新稿。原始 SOURCE 正文不可覆盖；新资料另行登记。助手的 read_object、read_context、list_objects、read_source 只读 /api/v1，所有实际读取的正文与元数据版本均参与建议的应用校验。
-
-当前工作仅按现有对象、精确失效记录和在途操作组织阶段，不恢复旧队列或创作授权。登记数不是全剧正式范围的分母。所有浏览入口保持相同版本、媒体身份及历史边界。
-
-后台状态为 QUEUED、RUNNING、SUCCEEDED、FAILED、CANCELLED、RESULT_UNKNOWN；队列上限 100，单 worker 并发 1。失联的执行先标结果未知，禁止自动再次调用。AI 建议绑定所读对象、原始资料版本和哈希，应用前重新核对；正文保留 10 分钟。操作回执及未知结果不按建议或普通日志过期。
-
-浏览器与后端各有至多 24 MiB 的读取缓存，按 UTF-8 字节核算，空闲 5 分钟淘汰；不保留第二套整剧读模型。素材和制作共用一份目录缓存。后端按对象修订、配置与媒体可用性核对缓存，普通写入仍只核对实际目标及来源的版本。连接池每个进程最多 8 个连接，分页目录和详情按需读取。轮询不改变业务修订；SSE 读取后立即释放事务。未保存内容、筛选、阅读位置和圈选留在当前浏览器会话，读取缓存失效不删除草稿。
-
-原版工作区通过 /workspaces 的读取投影及事务规划器连接所属服务。来源、分集历史、候选和正式审阅均读取正常业务对象；来源存在多个版本时要求选择原修订，不按逻辑文件名猜测。网页提供集场组织与正文、主体与关系、素材用途、准备稿、镜头、调用包、时间线的编辑和审阅。
-
-网页助手保留讨论、执行、对话记录、当前对象与页面意见上下文。讨论只生成意见；执行先返回当前对象的修改前后预览。用户点击确认保存后，通过 suggestion.apply 核对对象、来源及配置版本并保存草稿。执行模式不自动采用、改权利或生成媒体。原图工具只提供按素材版本和 SHA 验证的图片字节；音视频观察不由元数据推断。
-
-预演及输入／单镜验收清单由同一工作器确定性生成并登记为普通候选。制作审阅依据持久保存于 provenance，随业务包往返；实际观察项不自动勾选。关键帧联合审阅绑定本镜锁时、画面、叠加、边界及精确素材，单镜验收绑定当前视频与整场预演。实际输入、配方和排队执行再次核对这些依据，修改其他镜头不无差别废弃本镜。
+- [领域职责](handbook/chapters/domains.md)
+- [数据实体与关系](handbook/chapters/data-model.md)
+- [状态、版本与变化影响](handbook/chapters/versions.md)
+- [分层与页面读取](handbook/chapters/layers.md)
+- [接口与一致性契约](handbook/chapters/interfaces.md)
+- [人与 AI 协作](handbook/chapters/collaboration.md)

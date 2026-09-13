@@ -17,6 +17,7 @@ npm run deploy -- --target all --dry-run
 创建命令使用当前核心仓库创建并部署空白项目；不导入故事、不调用模型。创建后访问项目配置的本地端口。
 
 - [软件工作规则](AGENTS.md)、[发行状态](STATE.md)
+- [系统架构手册](docs/handbook/README.md)：系统管理 → 系统架构；图文主册与当前项目只读实例映射。
 - [数据与业务接口](docs/architecture.md)
 - [部署、状态与恢复](docs/deployment.md)
 - [导入导出与配置](docs/project-data.md)

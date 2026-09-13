@@ -17,7 +17,7 @@ try{
     if(view.startsWith('system')){
       const tabs=page.getByRole('tablist',{name:'系统管理模块'});
       await tabs.waitFor();
-      assert.deepEqual(await tabs.getByRole('tab').allTextContents(),['使用与初始化','系统配置','数据与运行']);
+      assert.deepEqual(await tabs.getByRole('tab').allTextContents(),['使用与初始化','系统配置','数据与运行','系统架构']);
       if(view.endsWith('systemTab=unavailable'))await page.locator('#management-panel-start h2').waitFor();
     }
     const body=(await page.locator('body').innerText()).slice(0,1800);

@@ -1,3 +1,4 @@
+import {documentationResponse} from './documentation.mjs';
 import {prepareManifestRender} from './production/manifests.mjs';
 import { readLibrary } from './library/service.mjs';
 import { libraryKinds } from './library/contract.mjs';
@@ -68,6 +69,7 @@ export async function dispatch(request) {
         .filter(Boolean)
         .map(decodeURIComponent),
       method = request.method;
+    if (route[0] === "documentation") return documentationResponse(request, route);
     if (method !== "GET") {
       const origin = request.headers.get("origin");
       check(

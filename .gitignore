@@ -16,3 +16,4 @@ public/runtime/
 test-results/
 tests/.test-tmp/
 next-env.d.ts
+web/.handbook/

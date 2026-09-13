@@ -1,11 +1,5 @@
 # 过程资源管理
 
-在创建临时文件、容器、卷、镜像或构建缓存之前，用 process run 登记 task 与 phase。执行器分配独立目录和缓存环境，保存 PID 及出生时间，给 Docker 资源标注精确任务 token。归属、设备/inode、Docker ID 与标签是删除前置条件。未知路径、符号链接、Git 工作和其他进程占用均阻断清理。
+阶段登记、具名交接、保留范围、预算和精确清理统一见[手册：过程资源与宿主配置](handbook/chapters/operations.md#过程资源与宿主配置)。开发执行示例见[开发与质检](handbook/chapters/development.md#受管执行)。
 
-临时磁盘默认上限 64 GiB，保留至少 8 GiB 可用空间。阶段成功、失败或取消后立即回收临时资源；异常退出由当前服务监督器每 5 分钟有界补清。宿主可手动执行 cleanup:sweep。日志至多 7 天及 100 MiB，执行未知保留受管恢复输入而非按普通日志清除。
-
-跨阶段输出必须在阶段 scratch 之外，提前登记并 transfer 给具名消费者；消费者结束时 release。正式运行包和当前数据库须先 retain 再切换指针，保留理由与恢复证明。仅当前及上一恢复点继续保留；旧资源先核对活动指针、SHA、占用与恢复范围，再按同一登记精确清理。
-
-`process run` 自动建立开放的父任务。使用同一 task、不同 phase 执行后续阶段；生产阶段退出后，具名交接仍由父任务持有，后台补清不会按时间猜测其失效。全部阶段结束后用 `cleanup:finish -- --task ID` 明确结束父任务；已结束的 task 不复用。直接调用底层阶段 API 的编排器须自行登记父任务生命周期。
-
-父任务交付依次执行 cleanup:finish、cleanup:check、cleanup:complete，参数 --task ID；额外清单用 --manifest 指定，空清单仍核查项目镜像。清理器只处理已登记资源，不接管未知目录，不全局 prune。任一目标主机状态未知、消费者未释放或实际残留均不能报告清理完成。封存备份永不扫描或删除。
+父任务结束依次执行 cleanup:finish、cleanup:check、cleanup:complete；跨主机清理均须验证，未知结果保留恢复依据。封存备份不被系统访问或清理。

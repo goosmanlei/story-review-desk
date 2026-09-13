@@ -56,6 +56,7 @@ if (values.committed) {
     "tools",
     "scripts",
     "docs",
+    "tests",
     "package.json",
     "package-lock.json",
   ])
@@ -65,6 +66,7 @@ if (values.committed) {
         !p.includes(path.sep + ".next") && !p.endsWith(".tsbuildinfo"),
     });
 await symlink(path.resolve("node_modules"), path.join(source, "node_modules"));
+execFileSync(process.execPath,[path.join(source,'tools/handbook.mjs'),'build'],{cwd:source,env:process.env,stdio:'inherit'});
 const container = "review-ui-" + randomUUID();
 const labels = await phase.expect("container", container);
 execFileSync(
@@ -356,6 +358,7 @@ const child = spawn(
       ...process.env,
       REVIEW_INSTANCE_ROOT: path.join(project, "instance"),
       REVIEW_SOFTWARE_COMMIT: softwareCommit,
+      REVIEW_DOCUMENTATION_ROOT: path.join(source, "web/.handbook"),
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
     },

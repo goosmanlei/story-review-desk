@@ -115,6 +115,7 @@ export async function serve(root) {
       NEXT_TELEMETRY_DISABLED: "1",
       REVIEW_INSTANCE_ROOT: path.join(root, "instance"),
       REVIEW_SOFTWARE_COMMIT: active.commit,
+      REVIEW_DOCUMENTATION_ROOT: path.join(release, "web/.handbook"),
       PORT: String(machine.port),
       HOSTNAME: machine.listenHost || "127.0.0.1",
     },

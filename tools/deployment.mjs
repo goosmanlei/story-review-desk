@@ -382,6 +382,7 @@ export async function buildRelease(
     cwd: build,
     env: environment,
   });
+  await command(process.execPath, [path.join(build, "tools/handbook.mjs"), "build"], {cwd: build, env: environment});
   await command(
     process.execPath,
     [
@@ -407,6 +408,7 @@ export async function buildRelease(
     path.join(release, "web/.next/static"),
     { recursive: true },
   );
+  await cp(path.join(build, "web/.handbook"), path.join(release, "web/.handbook"), {recursive:true});
   await cp(path.join(frozen, "server"), path.join(release, "server"), {
     recursive: true,
   });
