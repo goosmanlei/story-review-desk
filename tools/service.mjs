@@ -195,6 +195,15 @@ const xml = (value) =>
         "'": "&apos;",
       })[c],
   );
+export function systemdServiceContent(root, { nodeBinary, driver, name, system }) {
+  requireValue(path.posix.isAbsolute(root) && !/[\r\n]/.test(root) && root.trimEnd() === root,
+    "systemd 项目路径须为无换行或尾部空白的绝对路径");
+  const quote = (v) => '"' + String(v).replaceAll("%", "%%")
+    .replaceAll("\\", "\\\\").replaceAll('"', '\\"') + '"';
+  // WorkingDirectory is a path value, not an ExecStart argument: systemd
+  // preserves quotes here and then rejects the resulting non-absolute path.
+  return `[Unit]\nDescription=Story Review ${name}\nAfter=network.target\n[Service]\nType=simple\nExecStart=${[nodeBinary, driver, "run", root].map(quote).join(" ")}\nWorkingDirectory=${root.replaceAll("%", "%%")}\nRestart=always\nRestartSec=5\nTimeoutStopSec=20\n[Install]\nWantedBy=${system ? "multi-user.target" : "default.target"}\n`;
+}
 export async function installService(root) {
   const instance = await json(path.join(root, "instance/instance.json")),
     machine = await json(path.join(root, "instance/runtime/machine.json")),
@@ -218,14 +227,10 @@ export async function installService(root) {
         : path.join(os.homedir(), ".config/systemd/user"),
       name + ".service",
     );
-    const quote = (v) =>
-      '"' +
-      String(v)
-        .replaceAll("%", "%%")
-        .replaceAll("\\", "\\\\")
-        .replaceAll('"', '\\"') +
-      '"';
-    content = `[Unit]\nDescription=Story Review ${token(instance.id)}\nAfter=network.target\n[Service]\nType=simple\nExecStart=${[machine.nodeBinary || process.execPath, driver, "run", root].map(quote).join(" ")}\nWorkingDirectory=${quote(root)}\nRestart=always\nRestartSec=5\nTimeoutStopSec=20\n[Install]\nWantedBy=${system ? "multi-user.target" : "default.target"}\n`;
+    content = systemdServiceContent(root, {
+      nodeBinary: machine.nodeBinary || process.execPath,
+      driver, name: token(instance.id), system,
+    });
     args = { kind: "systemd", system, name: name + ".service" };
   }
   requireValue(!/[\r\n]/.test(root), "项目路径不能包含换行");

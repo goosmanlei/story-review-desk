@@ -160,6 +160,12 @@ async function transport(host, args, { inputFile, inputText } = {}) {
   requireValue(code === 0, "VPS 执行失败：" + (error || output).slice(-2000));
   return output;
 }
+export function completedRemoteReceipt(receipt, { operationId, commit, baselineSha256 }) {
+  if (!receipt || receipt.status !== "SUCCEEDED" || receipt.cleanup !== "CLEANED") return null;
+  requireValue(receipt.operationId === operationId && receipt.commit === commit &&
+    receipt.baselineSha256 === baselineSha256, "VPS 已完成回执与冻结输入不符");
+  return receipt;
+}
 export async function deployRemote(
   root,
   { operationId, commit, frozen, manifest, phase, target, resume, save },
@@ -247,6 +253,20 @@ export async function deployRemote(
     await atomic(path.join(input, "frozen.json"), frozenInput);
     await rm(payload, { recursive: true });
     await phase.transfer("path", input, consumer);
+  }
+  if (resume) {
+    let actual;
+    try {
+      const file = path.posix.join(target.projectRoot, "instance/runtime/deployments", operationId + ".json");
+      actual = JSON.parse(run("ssh", [...sshArgs(target.sshHost), "cat " + shellQuote(file)], { timeout: 12000 }));
+    } catch {}
+    const completed = completedRemoteReceipt(actual, {
+      operationId, commit, baselineSha256: frozenInput.baselineSha256,
+    });
+    if (completed) {
+      await clearRemote(root, task, consumer, operationId, completed);
+      return { status: "SUCCEEDED", stage: "REMOTE_FINISHED", remote: completed, reconciled: true };
+    }
   }
   await save({
     stage: "TRANSFERRING",

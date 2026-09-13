@@ -17,7 +17,7 @@ import {
   reconcileSoftware,
 } from "../tools/deployment.mjs";
 import { parseDeploymentArgs, deploymentExit } from "../tools/deploy.mjs";
-import { bootstrap, checkRemoteConnection } from "../tools/remote.mjs";
+import { bootstrap, checkRemoteConnection, completedRemoteReceipt } from "../tools/remote.mjs";
 import { json, atomic } from "../tools/io.mjs";
 
 test("deployment targets and outcomes are explicit", () => {
@@ -57,6 +57,17 @@ test("deployment targets and outcomes are explicit", () => {
     }).connected,
     false,
   );
+});
+
+test("resume accepts only a completed remote receipt for the original frozen input", () => {
+  const expected = { operationId: "original-operation", commit: "a".repeat(40), baselineSha256: "b".repeat(64) };
+  const receipt = { ...expected, status: "SUCCEEDED", cleanup: "CLEANED" };
+  assert.equal(completedRemoteReceipt(receipt, expected), receipt);
+  for (const key of ["operationId", "commit", "baselineSha256"])
+    assert.throws(() => completedRemoteReceipt({ ...receipt, [key]: "different" }, expected));
+  assert.equal(completedRemoteReceipt({ ...receipt, cleanup: "TRANSPORT_PENDING" }, expected), null);
+  assert.equal(completedRemoteReceipt({ ...receipt, status: "RESULT_UNKNOWN" }, expected), null);
+  assert.equal(completedRemoteReceipt({ ...receipt, status: "FAILED" }, expected), null);
 });
 
 test("clean Git snapshot stays fixed; owned software swaps recover and protect user changes", async (t) => {
