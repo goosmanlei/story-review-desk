@@ -16,6 +16,10 @@ const help = `review — 与网页共用 /api/v1 的业务命令
   review list --module story [--kind SCENE] [--owner EPISODE_ID]
   review read OBJECT_ID [--revision REVISION_ID]
   review context OBJECT_ID [--revision REVISION_ID]
+  review feedback EPISODE_ID              完整读取指定集的已保存反馈（自动翻页）
+  review feedback-preview --file -        保存完整新稿预览与逐条回应
+  review feedback-result PREVIEW_ID       回查预览或已应用结果
+  review feedback-apply --file -          用户明确应用后保存新草稿
   review facets --kind MATERIAL
   review relationships [--owner ENTITY_ID] [--offset N]
   review spatial
@@ -132,7 +136,25 @@ export async function main(argv = process.argv.slice(2)) {
   }
   let endpoint, body;
   const [command, id] = positionals;
-  const readInput = async () => JSON.parse(await readFile(values.file, "utf8"));
+  const readInput = async () => {
+    if(values.file !== '-') return JSON.parse(await readFile(values.file, 'utf8'));
+    let content='';for await(const chunk of process.stdin)content+=chunk;
+    return JSON.parse(content);
+  };
+  if(command === 'feedback') {
+    const params = new URLSearchParams({episodeId:id});let result,feedback=[];
+    do {
+      const response = await fetch(new URL('api/v1/workspaces/story-feedback?'+params,root),{signal:AbortSignal.timeout(60000)});
+      const page=await response.json();if(!response.ok)throw new Error(page.error?.message||page.error||'反馈读取失败');
+      result=page;feedback.push(...page.feedback);
+      params.set('contextHash',page.contextHash);
+      if(page.nextCursor)params.set('cursor',page.nextCursor);
+    } while(result.nextCursor);
+    const text=JSON.stringify({...result,feedback});
+    if(values.output)await writeFile(values.output,text+'\n',{flag:'wx',mode:0o600});else console.log(text);
+    return;
+  }
+
   if (["list", "facets", "relationships"].includes(command)) {
     const query = new URLSearchParams();
     for (const k of [

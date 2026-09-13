@@ -1,7 +1,6 @@
 'use client';
 
 import {runtimePath} from './runtime-path';
-import {StoryObjectEditor} from './story-object-editor';
 import {fillUnansweredWithPass} from './review-shortcuts';
 
 import { instanceLocalStorage } from './client-storage';
@@ -668,7 +667,6 @@ function EpisodePlanWorkbenchStateful({ resolvedPlan, model, snapshotId, baseRev
       {!historicalReadOnly && !validation.valid && <span>{validation.issues.length}项结构问题需要先修复。</span>}
     </section>
 
-    {!selectedSceneId&&<StoryObjectEditor objectId={selectedEpisode.episodeUid} readOnly={historicalReadOnly} sceneNames={Object.fromEntries(Object.entries(navigationSceneLabels).map(([id,s])=>[id,s.displayId+' '+s.title]))}/>}
     {renderEpisodeLayout?renderEpisodeLayout({criterionStates,navigation,criteria:reviewCriteria}):<>{navigation}<div className="episode-review-workspace">
       <div className="episode-review-reading">{typeof children === 'function' ? children({ criterionStates }) : children}</div>
       {reviewCriteria}

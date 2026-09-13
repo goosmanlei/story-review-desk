@@ -40,3 +40,15 @@ Codex 适配沿用宿主认证，凭据不进入故事包。外部制作命令�
 预演、输入验收清单和单镜验收清单作为普通候选登记。制作审阅依据保存在 provenance 并随业务包往返；实际观察项不会自动勾选。
 
 关键帧联合审阅绑定本镜的锁时、画面、叠加、边界和精确素材；单镜验收绑定当前视频与整场预演。实际输入、配方和排队执行会再次核对这些依据。修改其他镜头不会无差别废弃本镜。
+
+## 项目 Codex 按反馈修稿
+
+叙事拆解保留正文阅读、圈选评论、六项判断和审阅意见，不提供“编辑本稿”入口。通用草稿接口及其他创作页面继续保留。用户在项目 Codex 对话中指定永久集身份或清晰的意见范围后，Codex 才开始读取和准备修改；保存评论或提交审阅本身不会启动修稿。
+
+1. `npm run review -- feedback EPISODE_ID` 读取本集全部已保存未关闭评论和最新审阅意见，CLI 自动完成分页且核对同一 contextHash。返回原对象、修订、圈选、来源及相邻集上下文。浏览器未提交草稿不属于已保存反馈。接口分页带 contextHash，期间变化则拒绝混合结果。
+2. 逐项区分 CURRENT、HISTORICAL、ANCHOR_STALE。相同圈选的不同意见列出 potentialConflictWith，表示需人工核对的潜在冲突；系统不冒充已完成语义裁决。历史或锚点失效意见不能自动标为已处理，须保留原引用并说明未处理原因。
+3. 准备预览请求：episodeId、contextHash、新 previewId、changes 和 responses。每项 changes 带 objectId、revisionId、expectedVersion、title、content；正文沿用 story-editing 的稳定段落及字段契约。每条反馈须唯一回应，含 feedbackId、outcome（ADDRESSED／DEFERRED／NEEDS_CLARIFICATION）、explanation、objectIds；潜在冲突被处理时另写已确认依据 conflictResolution。原文预览作为完整集场稿呈现，逐条回应独立于正文。
+4. `npm run review -- feedback-preview --file -` 经标准事务保存 NOTE 预览，保留完整新稿、全部输入版本与逐条回应，尚不写入剧本。`feedback-result PREVIEW_ID` 回读完整预览，或用 `--revision` 读取精确历史。先向用户展示完整稿和独立回应，歧义、冲突或范围不明时澄清。
+5. 用户明确应用该预览后，`feedback-apply --file -` 提交 previewId、revisionId、expectedVersion、explicit:true。服务在加锁后再次核对完整反馈、正文和预览；并发变化则拒绝陈旧写入，保留原预览。成功只产生新草稿，结果 NOTE 的精确依赖指向新稿修订，并保留输入修订。用 `feedback-result` 回查输出及回应；不自动采用、改变正式判断或关闭评论。
+
+这套流程使用当前项目的 `/api/v1/workspaces/story-feedback` 读取和工作区事务，不另建模型队列。系统测试仅使用隔离数据和受控稿件。本次系统能力不授权处理真实创作意见或恢复旧创作批次。

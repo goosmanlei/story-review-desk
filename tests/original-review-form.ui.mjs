@@ -12,11 +12,14 @@ try{
  page.on('pageerror',error=>errors.push(error.message));
  await page.goto(base+'/?view=story&storyMode=logic&episode='+encodeURIComponent(episode.episodeUid),{waitUntil:'networkidle'});
  const form=page.getByRole('form',{name:episode.displayId+'本集审阅提交'});
- await form.waitFor();assert.deepEqual((await page.getByRole('alert').allTextContents()).filter(t=>t.trim()),[]);
+ await form.waitFor();assert.equal(await page.getByText('编辑本稿',{exact:true}).count(),0);assert.deepEqual((await page.getByRole('alert').allTextContents()).filter(t=>t.trim()),[]);
  const pass=page.getByRole('radio',{name:'通过',exact:true});assert.equal(await pass.count(),6);
  for(const control of await pass.all())await control.click();
  await form.locator('input[value=APPROVE_AND_RELEASE]').check();
  await form.getByRole('textbox',{name:episode.displayId+'本集审阅意见'}).fill('仅隔离浏览器验收：保留原版六项判断和提交交互。');
+ await page.reload({waitUntil:'networkidle'});await form.waitFor();assert.equal(await form.getByRole('textbox',{name:episode.displayId+'本集审阅意见'}).inputValue(),'仅隔离浏览器验收：保留原版六项判断和提交交互。');
+ await page.goto(base+'/?view=story&storyMode=logic&narrativeLevel=scene&episode='+encodeURIComponent(episode.episodeUid)+'&scene='+encodeURIComponent(episode.sceneIds[0]),{waitUntil:'networkidle'});await page.locator('.episode-scene-reader').waitFor();assert.equal(await page.getByText('编辑本稿',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:/查看评论/}).count(),1);
+ await page.goto(base+'/?view=story&storyMode=logic&episode='+encodeURIComponent(episode.episodeUid),{waitUntil:'networkidle'});await form.waitFor();assert.equal(await form.getByRole('textbox',{name:episode.displayId+'本集审阅意见'}).inputValue(),'仅隔离浏览器验收：保留原版六项判断和提交交互。');
  const submit=form.locator('button[type=submit]');assert.equal(await submit.isEnabled(),true);
  let response=page.waitForResponse(r=>r.request().method()==='POST'&&r.url().endsWith('/workspaces/episode-plan-reviews'));
  await submit.click();let saved=await response;assert.equal(saved.status(),200,await saved.text());

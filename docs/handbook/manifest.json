@@ -62,7 +62,7 @@
       "title": "状态、版本与变化影响",
       "summary": "一次采用改变什么，哪些判断仍需独立完成，什么情况下下游需要重新核对。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/schema.sql",
         "server/commands.mjs",
@@ -71,7 +71,7 @@
         "server/materials/usage-reviews.mjs",
         "server/production/spatial-views.mjs"
       ],
-      "sourceDigest": "36a715a1c2e6d7fcea0e5a81351ff7edd3d6300caacd54d838298dc2ee929ec6"
+      "sourceDigest": "1c0e337a26a99d1d5c4fdaaff8f2aabd58b7e4fd4364614f7b804965e6558027"
     },
     {
       "id": "layers",
@@ -101,28 +101,32 @@
       "title": "接口与一致性契约",
       "summary": "理解三入口如何共享读写规则、处理并发、重放和长任务。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/api.mjs",
         "server/commands.mjs",
         "scripts/review.mjs",
         "server/documentation.mjs"
       ],
-      "sourceDigest": "59f2c68d196e4b2e4c1c76cfdc8b0744e041408834a99a5c8a7def8cae1e3481"
+      "sourceDigest": "e059fd04dbb55e7d740bceb764f4c329ba3bb356ce359d8af71c51290f0db961"
     },
     {
       "id": "collaboration",
       "title": "人与 AI 的完整协作流程",
       "summary": "把讨论、建议、草稿、正式判断和实际生成放回完整业务链。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/jobs.mjs",
         "server/collaboration/service.mjs",
         "server/collaboration/change-preview.mjs",
-        "server/presentation/workspaces.mjs"
+        "server/presentation/workspaces.mjs",
+        "server/story/feedback.mjs",
+        "scripts/review.mjs",
+        "web/app/episode-plan-workbench.tsx",
+        "web/app/episode-scene-reading.tsx"
       ],
-      "sourceDigest": "14e6cdcd5522f7c230b3393cffdde1973ddcd0f858fc3cc3551dc2c1b1a910ea"
+      "sourceDigest": "eb575bbba4388789e1aa0ec125b8fbea75215e41f74b0f43848c411e787d7684"
     },
     {
       "id": "development",

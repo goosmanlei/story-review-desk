@@ -789,11 +789,11 @@ export async function execute(pool, request) {
     );
     await tx.query("SAVEPOINT commands");
     try {
-      let commands=request.commands, presentation;
+      let commands=request.commands, presentation, validateAfterLock;
       if(commands.some(c=>c.type==='workspace.change')) {
         check(commands.length===1,'WORKSPACE_TRANSACTION','工作区动作必须独立提交');
         const planned=await planWorkspaceChange(tx,commands[0],request);
-        commands=planned.commands;presentation=planned.response;
+        commands=planned.commands;presentation=planned.response;validateAfterLock=planned.validateAfterLock;
       }
       const requested = commands
         .flatMap((c) => [
@@ -855,6 +855,7 @@ export async function execute(pool, request) {
         "SELECT id FROM objects WHERE id=ANY($1::text[]) ORDER BY id FOR UPDATE",
         [ids],
       );
+      if(validateAfterLock)await validateAfterLock();
       const results = [];
       for (let command of commands) {
         if(command.revisionIdFrom!==undefined) {

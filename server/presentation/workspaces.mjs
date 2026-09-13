@@ -1,3 +1,4 @@
+import {feedbackWorkspace} from '../story/feedback.mjs';
 import {businessIntegrity} from '../project/integrity.mjs';
 import {materialCatalog} from './material-page.mjs';
 import {productionEvidenceTemplate} from '../production/review-evidence.mjs';
@@ -62,6 +63,7 @@ export async function workspaceRead(tx, path, params) {
   else if(name==='execution-requests')result=await executionState(tx,params.get('executionRequestId'));
   else if(name==='authoring')result=await authoringWorkspace(unit);
   else if(name==='episode-organization')result=await episodeOrganization(unit,params.get('episodeId'));
+  else if(name==='story-feedback')result=await feedbackWorkspace(unit,params);
   else if(name==='story-editing')result=await storyEditor(unit,params.get('objectId'));
   else if(name==='creative-revisions')result=await creativeRevisions(unit,params);
   else if(name==='script-comments')result=await storyComments(unit,params);

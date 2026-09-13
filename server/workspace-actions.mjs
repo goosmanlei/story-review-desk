@@ -1,3 +1,4 @@
+import {planFeedbackChange} from './story/feedback.mjs';
 import {planManifestPreview} from './production/manifests.mjs';
 import {planEpisodeOrganization} from './story/editing.mjs';
 import {planInputLockChange} from './production/input-locks.mjs';
@@ -304,6 +305,7 @@ export async function planWorkspaceChange(tx, command, context) {
   if(command.workspace==='asset-context-revalidation')return planMaterialReview(tx,'context',body);
   if(command.workspace==='sources')return planSourceRegistration(tx,body,context.operationId);
   if(command.workspace==='authoring')return planAuthoringChange(tx,body,context.operationId);
+  if(command.workspace==='story-feedback')return planFeedbackChange(tx,body);
   if(command.workspace==='story-editing')return planStoryEdit(tx,body);
   if(['reviews','episode-plan-reviews'].includes(command.workspace))return reviewAction(tx,command.workspace,body);
   if(command.workspace==='spatial-shot-view')return planSpatialViewChange(tx,body);

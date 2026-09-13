@@ -5,7 +5,6 @@ import type { NarrativeBlock, RuntimeEstimate } from './narrative-revision';
 import { runtimeLabel } from './narrative-revision';
 import { useSceneNarrativeContext } from './scene-narrative-panel';
 import { CommentScriptBlocks } from './story-comments';
-import {StoryObjectEditor} from './story-object-editor';
 
 type ReadingScene = {
   id: string;
@@ -55,7 +54,6 @@ function SceneReading({ scene, runtime, readOnly }: { scene: ReadingScene; runti
         <CommentScriptBlocks anchorPrefix="" sceneId={scene.id} blocks={scene.scriptBlocks}/>
       </div>
     </article>
-    <StoryObjectEditor objectId={scene.id} readOnly={readOnly}/>
   </section>;
 }
 
