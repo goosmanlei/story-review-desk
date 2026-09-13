@@ -89,9 +89,11 @@
         "web/app/page.tsx",
         "web/app/use-episode-plan-context.ts",
         "web/app/narrative-revision-reader.tsx",
-        "server/presentation/story.mjs"
+        "server/presentation/story.mjs",
+        "web/app/generic-source-reader.tsx",
+        "web/app/globals.css"
       ],
-      "sourceDigest": "4496ccdfe16f4c64aeca84b99e2308d76ff6bd94e6f2385d3ce60796848db462"
+      "sourceDigest": "c53232e0ed8159aa05c66db4903ab8a7f06b4f0c958365c763524cb0ea49f177"
     },
     {
       "id": "interfaces",
