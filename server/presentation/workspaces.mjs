@@ -105,6 +105,7 @@ export async function workspaceRead(tx, path, params) {
   else if(path[0]==='recipes'&&path.length===2){const row=await unit.detail(path[1],params.get('revisionId')||undefined);check(row.kind==='CALL','CALL_REQUIRED','所选对象不是调用定义',404);result={recipe:presentRecipe(row)};}
   else if(name==='candidates/scopes')result=await candidateScopeIndex(unit);
   else if(name==='candidates/snapshot')result=await candidateSnapshot(unit,params.get('scopeId'));
+  else if(name==='orchestration')result={schemaVersion:'1.0',readOnly:true,instanceId:(await unit.profile()).instanceId,observedAt:new Date().toISOString(),mode:{enabled:false,status:'STOPPED'},scheduler:{hostStatus:'STOPPED',heartbeatAt:null,blocked:false},pools:[],workers:[],processing:[],queue:[],completed:{tasks:[],total:0,page:0,pageSize:20},decisions:[],autoRefresh:false};
   else check(false,'WORKSPACE_NOT_FOUND','工作区接口不存在：'+name,404);
   return unit.finish(result);
 }

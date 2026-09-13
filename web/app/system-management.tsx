@@ -12,9 +12,10 @@ import { useInstanceProfile } from './instance-context';
 import { managementMutation, readManagementResponse, managementLabel } from './system-management-client';
 import './system-management.css';
 import {MaintenanceTransfer} from './maintenance-transfer';
+import {OrchestrationDashboard} from './orchestration-dashboard';
 
 const ConfigurationWorkspace = dynamic(() => import('./system-configuration-workspace').then(m => m.SystemConfigurationWorkspace), { loading: () => <p role="status">正在读取系统配置…</p> });
-const tabs = [['start', '使用与初始化'], ['configuration', '系统配置'], ['runtime', '数据与运行']] as const;
+const tabs = [['start', '使用与初始化'], ['configuration', '系统配置'], ['runtime', '数据与运行'], ['orchestration', '多 Agent 协作']] as const;
 type Tab = typeof tabs[number][0];
 type Source = { id: string; title: string; role: string; format: string; sha256: string; revisionId: string; status: string; observation?: string; textAvailable?:boolean; text?: string };
 type SourceState = { releaseId: string; sources: Source[]; readOnly?: boolean };
@@ -146,6 +147,7 @@ export function SystemManagement({ technicalAppendix }: { technicalAppendix?: Re
       {tabReady && tab==='start' && <div className="management-stack"><SystemInitialization openConfiguration={()=>select('configuration')}/><details className="management-card management-new-story"><summary>为下一部故事建立独立项目</summary><p>使用干净软件与空实例，以新项目根目录作为 Codex 工作目录。确认系统规则后即可开始作者草稿，并在来源资料中显式导入原文。</p><code>npm run project:create -- /新项目目录 --title 故事名</code></details></div>}
       {tabReady && tab==='configuration' && <ConfigurationWorkspace />}
       {tabReady && tab==='runtime' && <DataAndRuntime technicalAppendix={technicalAppendix} />}
+      {tabReady && tab==='orchestration' && <OrchestrationDashboard />}
     </div>
   </section>;
 }
