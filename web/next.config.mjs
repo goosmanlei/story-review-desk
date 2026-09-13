@@ -7,7 +7,7 @@ export default {
     "..",
   ),
   poweredByHeader: false,
-  serverExternalPackages: ["pg"],
+  serverExternalPackages: ["pg", "pinyin-pro"],
   cacheMaxMemorySize: 0,
   outputFileTracingIncludes: { "/*": ["../server/schema.sql"] },
   experimental: { webpackMemoryOptimizations: true },
