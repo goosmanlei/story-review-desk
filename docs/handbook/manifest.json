@@ -97,7 +97,7 @@
         "web/app/story-settings-canvas.tsx",
         "server/presentation/materials.mjs"
       ],
-      "sourceDigest": "c2a3be21e2ad0f1f5480edb8d7934737aa34079b7e7571933f4dd7b19416f73d"
+      "sourceDigest": "444374fd1099f9beafd58f73b4baab9e21e5609be151e0083cb3b6169ec97d13"
     },
     {
       "id": "interfaces",
@@ -131,9 +131,10 @@
         "server/settings/comments.mjs",
         "web/app/entity-comments.tsx",
         "web/app/comment-polish-client.ts",
-        "server/collaboration/comment-polish.mjs"
+        "server/collaboration/comment-polish.mjs",
+        "web/app/settings-entity-graph.tsx"
       ],
-      "sourceDigest": "1dd973d9f68a501b7129ba2eda155cff1f5bb3aa41ff32880d857960d97acad0"
+      "sourceDigest": "b9aeb43bb5ff52cddc0547bd98db2a97f7982ce0a307cca46c9f7d17dbb53cbe"
     },
     {
       "id": "development",

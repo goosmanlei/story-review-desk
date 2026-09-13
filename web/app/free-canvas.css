@@ -20,3 +20,5 @@
 .spatial-map-region{font-size:16px;font-weight:600;fill:#768371;letter-spacing:1px}
 .free-canvas.is-preserved-emphasis .free-canvas-edge-label:not(.is-related){opacity:.45}
 .free-canvas.is-preserved-emphasis .free-canvas-node.is-muted:hover,.free-canvas.is-preserved-emphasis .free-canvas-node.is-muted:focus-visible{opacity:.8}
+
+.free-canvas-thumbnail{display:flex;flex:0 0 72px;height:66px;align-items:center;justify-content:center;overflow:hidden;border-radius:4px;background:var(--paper-soft,#f5f0e7)}.free-canvas-thumbnail img{width:100%;height:100%;object-fit:contain}.free-canvas-thumbnail>span{font-size:11px;text-align:center;white-space:normal;color:var(--muted);padding:4px}

@@ -3,7 +3,7 @@ import {useMemo,useState} from 'react';
 import {FreeCanvas,canvasTone,type CanvasIcon,type FreeCanvasNode,type FreeCanvasEdge} from './free-canvas';
 import './entity-workspace.css';
 
-export type CanvasNode={id:string;label:string;group:string;detail?:string;facts?:string[];x?:number;y?:number;width?:number;height?:number;icon?:CanvasIcon;tone?:string;badge?:FreeCanvasNode['badge'];draggable?:boolean;anchor?:{x:number;y:number;label?:string}};
+export type CanvasNode={id:string;label:string;group:string;detail?:string;facts?:string[];thumbnail?:string;mediaPlaceholder?:string;x?:number;y?:number;width?:number;height?:number;icon?:CanvasIcon;tone?:string;badge?:FreeCanvasNode['badge'];draggable?:boolean;anchor?:{x:number;y:number;label?:string}};
 export type CanvasEdge=FreeCanvasEdge;
 export type RelationshipCanvasProps={nodes:CanvasNode[];edges:CanvasEdge[];selectedId?:string;selectedEdgeId?:string;onSelect:(id:string)=>void;onSelectEdge?:(id:string)=>void;onOpenNode?:(id:string)=>void;label?:string;viewportKey?:string;height?:number|string;layout?:'columns'|'flow';showGroups?:boolean;notice?:string;defaultAllEdges?:boolean;readOnly?:boolean;showReadableList?:boolean;edgeRouting?:'orthogonal'|'curved';preserveGraphOnSelect?:boolean;onClearSelection?:()=>void;background?:import('./free-canvas').CanvasBackground};
 export function RelationshipCanvas({nodes,edges,selectedId,selectedEdgeId,onSelect,onSelectEdge,onOpenNode,label='实体关系',viewportKey,height=540,layout='columns',showGroups=true,notice,defaultAllEdges=false,readOnly=false,showReadableList=true,edgeRouting='orthogonal',preserveGraphOnSelect=false,onClearSelection,background}:RelationshipCanvasProps){
