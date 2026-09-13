@@ -169,6 +169,14 @@ export async function runPhase({
   return { ...result, exitCode: code };
 }
 
+export async function startProcessPhase(root, task, phase) {
+  return parentTask(root, task, async (file, previous) => {
+    if (previous && previous.status !== "OPEN") throw Error("Parent task is closed; use a new task identity");
+    if (file && !previous) await atomic(file, { schemaVersion: "1.0", taskId: task, status: "OPEN", startedAt: new Date().toISOString() });
+    return beginPhase(root, task, phase);
+  });
+}
+
 export async function main(argv = process.argv.slice(2)) {
   const separator = argv.indexOf("--"),
     args = separator < 0 ? argv : argv.slice(0, separator),

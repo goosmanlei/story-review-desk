@@ -12,6 +12,8 @@ objects 保存永久身份、当前草稿头和采用头；revisions 保存不�
 
 入口：GET health / work / objects / objects/:id / source/:revisionId / media/:sha / configurations / operations/:id；POST transactions / jobs / upload / import / operations/:id/cancel；GET export / suggestions/:id。事务支持 save、submit、review、rights.record、configuration.save、suggestion.apply。对象读取可指定 revisionId，返回该版本的内容、关系、输入与判断。
 
+GET review-library 返回本实例目录同步状态；`?entries=true` 返回登记索引，`?path=...` 核验并解析单个审阅入口。REVIEW_LIBRARY_SYNC / REVIEW_LIBRARY_VERIFY 通过 jobs 及同一工作器执行，使用运行期与 operationId 的既有约束。目录由 library 服务从一致数据库快照构建，是可重建读取投影；不增加数据库表、正式审阅事件或第二业务写点。完整目录元数据与正文绑定版本 1 导出格式，格式变更须提升版本并重建。
+
 六入口沿用既有的视觉、目录和阅读交互：当前工作的工作链与阶段、故事结构与集场卷宗、主体分类与关系画板、基础及过程素材、五阶段制作、配置与运行维护。重构修改接口和状态，不以通用对象表单取代业务阅读场景。GET contexts/:id 在同一数据库快照返回正文、集场、素材版本、评论和精确引用；basis 列出实际返回内容的版本依据，供助手应用前复核。GET facets、relationships、settings/spatial-baseline 提供有界投影；空间基线只读取已登记原始资料，保留原坐标与场次身份。
 
 正文评论的 target 绑定永久对象、修订及 expectedVersion；圈选绑定原正文块或字段路径。修改、解决评论保留原 target 和 anchor，历史评论不换绑到新稿。原始 SOURCE 正文不可覆盖；新资料另行登记。助手的 read_object、read_context、list_objects、read_source 只读 /api/v1，所有实际读取的正文与元数据版本均参与建议的应用校验。

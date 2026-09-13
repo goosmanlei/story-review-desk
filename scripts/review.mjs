@@ -18,6 +18,7 @@ const help = `review — 与网页共用 /api/v1 的业务命令
   review facets --kind MATERIAL
   review relationships [--owner ENTITY_ID] [--offset N]
   review spatial
+  review library [status|sync|verify|resolve PATH|list]
   review save OBJECT_ID --file draft.json --expected-version N
   review submit OBJECT_ID --expected-version N
   review review OBJECT_ID --file judgment.json --expected-version N
@@ -153,7 +154,16 @@ export async function main(argv = process.argv.slice(2)) {
       (values.revision
         ? "?revisionId=" + encodeURIComponent(values.revision)
         : "");
-  else if (command === "spatial") endpoint = "settings/spatial-baseline";
+  else if (command === 'library') {
+    if (['sync','verify'].includes(id)) {
+      endpoint = 'jobs'; body = { kind: id === 'verify' ? 'REVIEW_LIBRARY_VERIFY' : 'REVIEW_LIBRARY_SYNC' };
+    } else if (id === 'resolve') {
+      if (!positionals[2]) throw Error('请提供 review-library 内的相对路径');
+      endpoint = 'review-library?path=' + encodeURIComponent(positionals[2]);
+    } else if (id === 'list') endpoint = 'review-library?entries=true';
+    else if (!id || id === 'status') endpoint = 'review-library';
+    else throw Error('审阅目录命令无效');
+  } else if (command === "spatial") endpoint = "settings/spatial-baseline";
   else if (command === "status")
     endpoint = "operations/" + encodeURIComponent(id);
   else if (command === "maintenance") {

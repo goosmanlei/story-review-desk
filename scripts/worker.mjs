@@ -5,6 +5,7 @@ import {
   closeDatabase,
 } from "../server/db.mjs";
 import { workOnce, sweepJobs } from "../server/jobs.mjs";
+import { syncLibrary } from '../server/library/service.mjs';
 import { runMaintenance } from "../server/project/maintenance.mjs";
 import { randomUUID } from "node:crypto";
 import { processProvider } from "../server/process-provider.mjs";
@@ -97,6 +98,8 @@ const heartbeat = async () =>
           "MAINTENANCE_VERIFY",
           "MAINTENANCE_BACKUP",
           "MAINTENANCE_RESTORE",
+          "REVIEW_LIBRARY_SYNC",
+          "REVIEW_LIBRARY_VERIFY",
           ...(providers.suggest ? ["AI_SUGGEST"] : []),
           ...(providers.generate ? ["GENERATE", "MEDIA_PROCESS"] : []),
         ],
@@ -104,6 +107,16 @@ const heartbeat = async () =>
     ],
   );
 await heartbeat();
+// This bounded projection loop also runs while a provider is waiting on I/O.
+let libraryRun = null;
+function refreshLibrary() {
+  if (stopped || libraryRun) return;
+  libraryRun = syncLibrary(pool, root).catch(error => {
+    console.error(JSON.stringify({ event: 'review-library-sync', code: error.code || 'LIBRARY_SYNC_FAILED' }));
+  }).finally(() => { libraryRun = null; });
+}
+refreshLibrary();
+const libraryTimer = setInterval(refreshLibrary, 5000);
 let lastSweep = 0;
 try {
   while (!stopped) {
@@ -116,6 +129,8 @@ try {
     if (!worked) await new Promise((resolve) => setTimeout(resolve, 500));
   }
 } finally {
+  clearInterval(libraryTimer);
+  await libraryRun;
   await pool.query(
     "DELETE FROM runtime_status WHERE name='worker' AND value->>'workerId'=$1",
     [workerId],

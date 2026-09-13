@@ -1,4 +1,6 @@
 import {validateManifestRender} from './production/manifests.mjs';
+import { libraryKinds } from './library/contract.mjs';
+import { syncLibrary } from './library/service.mjs';
 import {validateAnimaticRender} from './production/animatic-jobs.mjs';
 import {executionRecord} from './production/execution.mjs';
 import {sourceObjectCommand} from './story/sources.mjs';
@@ -43,6 +45,7 @@ export async function enqueue(pool, request) {
       "ANIMATIC_RENDER",
       "PRODUCTION_MANIFEST_RENDER",
       ...maintenanceKinds,
+      ...libraryKinds,
     ].includes(request.kind),
     "JOB_KIND",
     "后台任务类型无效",
@@ -396,7 +399,9 @@ export async function workOnce(pool, { root, workerId, providers = {} }) {
         "SPOOL_PATH",
         "任务暂存目录无效",
       );
-    if (maintenanceKinds.includes(job.kind)) {
+    if (libraryKinds.includes(job.kind)) {
+      result = await syncLibrary(pool, root, { full: job.kind === 'REVIEW_LIBRARY_VERIFY' });
+    } else if (maintenanceKinds.includes(job.kind)) {
       check(
         typeof providers.maintenance === "function",
         "MAINTENANCE_UNAVAILABLE",

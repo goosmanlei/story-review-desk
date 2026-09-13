@@ -1,4 +1,5 @@
 import { check, objectValue } from "../shared/contracts.mjs";
+import { validateLibrary } from '../library/contract.mjs';
 export const kinds = ["GUIDANCE", "NOTE"];
 export function validate(kind, content) {
   if (kind === "GUIDANCE")
@@ -29,6 +30,7 @@ export const PROJECT_FIELDS = new Set([
   "sourcePriority",
   "candidateOptions",
   "preferredCollaborator",
+  "reviewLibrary",
 ]);
 export function validateConfiguration(scope, content) {
   objectValue(content);
@@ -59,6 +61,7 @@ export function validateConfiguration(scope, content) {
     }
   }
   visit(content);
+  if (scope === 'project' && content.reviewLibrary !== undefined) validateLibrary(content.reviewLibrary);
   if (scope === "system" && content.limits) {
     for (const [key, maximum] of Object.entries({
       cacheBytes: 24 * 1024 * 1024,

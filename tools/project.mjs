@@ -122,7 +122,7 @@ export async function createProject(
   await atomic(path.join(root, "package.json"), pkg);
   await writeFile(
     path.join(root, ".gitignore"),
-    "instance/runtime/\ninstance/media/\nproject-data/media/\n.process/\n.DS_Store\n*.swp\n",
+    "instance/runtime/\ninstance/media/\nproject-data/media/\n.process/\n/review-library\n/.review-library-*\n.DS_Store\n*.swp\n",
     { flag: "wx" },
   );
   await writeFile(

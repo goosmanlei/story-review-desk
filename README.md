@@ -20,6 +20,7 @@ npm run deploy -- --target all --dry-run
 - [数据与业务接口](docs/architecture.md)
 - [部署、状态与恢复](docs/deployment.md)
 - [导入导出与配置](docs/project-data.md)
+- 项目目录资源审阅：`npm run review -- library status`；命名、文本选择与校验见[项目目录审阅](docs/project-data.md#项目目录审阅)。
 - [过程资源管理](docs/process-cleanup.md)
 
 独立开发时经受管执行器运行检查：`npm run process -- run --task development --phase contracts -- npm test`。业务测试使用隔离 PostgreSQL 与模拟模型，不产生实际创作或付费调用。

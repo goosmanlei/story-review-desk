@@ -1,4 +1,5 @@
 import {prepareManifestRender} from './production/manifests.mjs';
+import { readLibrary } from './library/service.mjs';
 import {cachedWorkspace} from './presentation/cache.mjs';
 import {prepareAnimaticRender} from './production/animatic-jobs.mjs';
 import {sourceUploadRequest} from './story/sources.mjs';
@@ -95,6 +96,10 @@ export async function dispatch(request) {
     }
     const pool = await database();
     const runtimeEpoch = request.headers.get("x-review-runtime");
+    if (method === 'GET' && route[0] === 'review-library')
+      return json(await readLibrary(pool, (await machineConfiguration()).root, {
+        entries: url.searchParams.get('entries') === 'true', entryPath: url.searchParams.get('path') || undefined,
+      }));
     if(method==='GET'&&route[0]==='assistant'){
       if(route[1]==='events')return conversationEvents(pool,request,url.searchParams);
       if(route[1]==='conversations')return json(await transaction(pool,tx=>conversationList(tx,url.searchParams),{readOnly:true}));
