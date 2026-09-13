@@ -6,6 +6,7 @@ import {atomic, plainDirectory} from './io.mjs';
 import {processLock, processIdentity, processAlive} from './process-resources.mjs';
 import {assignmentMutation, assignmentOpen, assignmentUnknown} from './task-assignments.mjs';
 import {renderTasks,taskLabels,renderAssignments} from './task-format.mjs';
+import {taskCapacity,requireTaskCapacity} from './task-capacity.mjs';
 
 export const states = ['READY','RUNNING','BLOCKED','WAITING_REVIEW','DONE','CANCELLED','MERGED'];
 export const labels = taskLabels;
@@ -206,6 +207,7 @@ export async function activity(project,id,owner,child=null,assignmentId=null,tas
   return withRuntime(project,async loc=>{
     await requireRun(loc,id);
     const ledger=await readLedger(loc),bindings=await readBindings(loc);
+    requireTaskCapacity(ledger.tasks);
     if(assignmentId) {
       identity(assignmentId);
       const task=Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)),a=task?.assignments.find(a=>a.id===assignmentId);
@@ -283,13 +285,15 @@ export async function mutate(project,action,request) {
       if(!changed.size)return result;
     } else if(action==='next') {
       await requireRun(loc,request.runId);
+      requireTaskCapacity(tasks);
       const unfinished=Object.values(tasks).filter(t=>t.status==='RUNNING');
-      if(unfinished.length) return {status:unfinished.every(t=>owner(t)===request.runId)?'CURRENT_TASK':'RECOVERY_REQUIRED',tasks:unfinished};
+      if(unfinished.length) return {status:unfinished.every(t=>owner(t)===request.runId)?'CURRENT_TASK':'RECOVERY_REQUIRED',tasks:unfinished,capacity:taskCapacity(tasks)};
       requireTask(!Object.values(tasks).some(t=>t.assignments?.some(assignmentOpen)),'仍有未关闭派工，不能使用串行 next');
       requireTask(!await activeActivity(loc),'原执行命令仍在运行，不能领取新任务');
       const candidates=Object.values(tasks).filter(t=>t.status==='READY' && !t.children?.length && t.dependencies.every(d=>complete(tasks,d))).sort((a,b)=>a.priority-b.priority||a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
       const t=candidates[0];
       if(!t) return {status:'NO_EXECUTABLE_TASK',remaining:Object.values(tasks).filter(t=>!terminal.has(t.status))};
+      requireTaskCapacity(tasks,t.id);
       touch(t); t.status='RUNNING'; t.startedAt ||= at; bindings.tasks[t.id]=request.runId;delete t.runId;t.blockReason=null;
       result={taskId:t.id,status:t.status};
     } else if(action==='checkpoint') {
@@ -301,6 +305,7 @@ export async function mutate(project,action,request) {
       const t=get(request.taskId); await requireRun(loc,request.runId);
       requireTask(t.status==='RUNNING' && owner(t)!==request.runId,'仅续办原会话中断的任务');
       requireTask(!t.assignments?.some(assignmentOpen),'先用 assignment reconcile 核查原派工');
+      requireTaskCapacity(tasks,t.id);
       const r=request.reconciliation;
       for(const k of ['processes','workspace','versions','operations']) text(r?.[k],`reconciliation.${k}`);
       requireTask(!await activeActivity(loc),'原命令仍在运行');

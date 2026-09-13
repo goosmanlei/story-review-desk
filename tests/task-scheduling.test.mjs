@@ -6,7 +6,8 @@ import {once} from 'node:events';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
-import {mutate,readLedger,startRun,stopRun,runtimeState,updateBinding,configureCapabilities} from '../tools/task-ledger.mjs';
+import {mutate,readLedger,startRun,stopRun,runtimeState,updateBinding,configureCapabilities,activity} from '../tools/task-ledger.mjs';
+import {taskCapacity} from '../tools/task-capacity.mjs';
 import {resources,conflicts,chooseExecution} from '../tools/task-assignments.mjs';
 import {main} from '../tools/tasks.mjs';
 import {renderTasks,renderStatus,renderAudit,renderDetail} from '../tools/task-format.mjs';
@@ -113,6 +114,53 @@ test('atomic scheduling respects resource overlap, priority, dependencies and sl
   assert.equal(result.assignments[0].execution.model,'gpt-5.6-sol');
 });
 
+test('project task capacity is three unique identities including main, helpers and unfinished closure',async t=>{
+ const root=await fixture(t),ids=[];for(let i=0;i<4;i++)ids.push((await publish(root,{title:'并行正式任务 '+i})).taskId);
+ const run=await startRun(root,{capabilities:{...caps,availableSlots:8}});
+ const first=await schedule(root,run.id,ids.map((id,i)=>candidate(id,'task-'+i,{execution:{rationale:'受控能力夹具',...(i===0?{mode:'MAIN'}:{})}})));
+ assert.equal(first.assignments.length,3);assert.equal(first.deferred[0].reason,'TASK_CAPACITY');assert.equal(first.capacity.occupied,3);assert.equal(first.capacity.available,0);
+ const extra=(await schedule(root,run.id,[candidate(ids[1],'auxiliary')])).assignments[0];assert(extra);assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3);
+ const mainTask=first.assignments.find(a=>a.taskId===ids[0]);await started(root,run.id,mainTask);await accepted(root,run.id,mainTask);
+ assert.equal((await schedule(root,run.id,[candidate(ids[3],'fourth')])).deferred[0].reason,'TASK_CAPACITY');
+ await closed(root,run.id,mainTask);assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3,'parent still needs formal completion');
+ const current=await mutate(root,'next',req({runId:run.id}));assert.equal(current.status,'CURRENT_TASK');assert.equal(current.capacity.occupied,3);
+ await change(root,'transition',ids[0],null,run.id,{status:'DONE',reason:'夹具收尾完成',result:{summary:'已验收',artifacts:[],cleanup:'fixture清理完成',acceptance:[{criterion:0,evidence:'通过'}]}});
+ const refill=await schedule(root,run.id,[candidate(ids[3],'fourth')]);assert.equal(refill.assignments.length,1);assert.equal(refill.capacity.occupied,3);assert.equal(refill.assignments[0].taskId,ids[3]);
+ const status=await main(['status','--project',root]);assert.equal(status.taskCapacity.occupied,3);assert.equal(status.taskCapacity.limit,3);
+ assert.match(await main(['status','--project',root,'--format','markdown']),/正式任务占用.*3 \/ 3/);
+});
+
+test('agent capacity and unverified closure lower actual execution without inventing parallel agents',async t=>{
+ const root=await fixture(t),ids=[];for(let i=0;i<4;i++)ids.push((await publish(root)).taskId);
+ const run=await startRun(root,{capabilities:{...caps,availableSlots:1}}),one=await schedule(root,run.id,ids.map((id,i)=>candidate(id,'agent-'+i)));
+ assert.equal(one.assignments.length,1);assert(one.deferred.every(d=>d.reason==='AGENT_CAPACITY'));
+ await configureCapabilities(root,run.id,{...caps,availableSlots:0});await assert.rejects(change(root,'assignment:dispatch',ids[0],one.assignments[0].id,run.id),/AGENT_CAPACITY/);
+ const serialRoot=await fixture(t),a=await publish(serialRoot),b=await publish(serialRoot),serial=await startRun(serialRoot,{capabilities:{delegation:false,closeVerified:false,availableSlots:0,limitation:'fixture close unavailable'}});
+ const result=await schedule(serialRoot,serial.id,[candidate(a.taskId,'a'),candidate(b.taskId,'b')]);assert.equal(result.assignments.length,1);assert.equal(result.assignments[0].execution.mode,'MAIN');assert.equal(result.deferred[0].reason,'MAIN_CAPACITY');assert.match(result.assignments[0].execution.limitation,/close unavailable/);
+});
+
+test('an imported over-capacity ledger blocks next/resume/dispatch/start/guard but allows convergence',async t=>{
+ const root=await fixture(t),ids=[];for(let i=0;i<4;i++)ids.push((await publish(root)).taskId);
+ const run=await startRun(root,{capabilities:{...caps,availableSlots:8}}),assigned=(await schedule(root,run.id,ids.slice(0,3).map((id,i)=>candidate(id,'reserved-'+i)))).assignments;
+ await change(root,'assignment:dispatch',ids[0],assigned[0].id,run.id);
+ // Valid historical v2 event from a writer that predates the task-count limit.
+ const ledger=await readLedger(root),at=new Date().toISOString(),old={...ledger.tasks[ids[3]],version:2,status:'RUNNING',runId:'old-coordinator',startedAt:at,updatedAt:at};
+ const event={schemaVersion:2,projectId:ledger.projectId,sequence:ledger.sequence+1,previousHash:ledger.head,operationId:randomUUID(),requestHash:'f'.repeat(64),action:'next',actor:'LEGACY_FIXTURE',at,tasks:[old],result:{taskId:old.id,status:'RUNNING'}};
+ const stable=v=>Array.isArray(v)?v.map(stable):v&&typeof v==='object'?Object.fromEntries(Object.keys(v).sort().map(k=>[k,stable(v[k])])):v;
+ event.hash=createHash('sha256').update(JSON.stringify(stable(event))).digest('hex');await writeFile(path.join(root,'tasks/events',String(event.sequence).padStart(10,'0')+'-'+event.hash+'.json'),JSON.stringify(event,null,2)+'\n');
+ const before=(await readLedger(root)).head;
+ await assert.rejects(mutate(root,'next',req({runId:run.id})),/TASK_CAPACITY/);
+ await assert.rejects(change(root,'resume',ids[3],null,run.id,{checkpoint:cp(),reconciliation:{processes:'已停止',workspace:'已核查',versions:'已核查',operations:'无外部操作'}}),/TASK_CAPACITY/);
+ await assert.rejects(change(root,'assignment:dispatch',ids[1],assigned[1].id,run.id),/TASK_CAPACITY/);
+ await assert.rejects(change(root,'assignment:start',ids[0],assigned[0].id,run.id,{nativeThreadId:'never-started',workspaceEvidence:'fixture'}),/TASK_CAPACITY/);
+ await assert.rejects(activity(root,run.id,run.owner,null,assigned[0].id,ids[0]),/TASK_CAPACITY/);assert.equal((await readLedger(root)).head,before);
+ await change(root,'assignment:reconcile',ids[0],assigned[0].id,run.id,{checkpoint:cp(),noAgentCreated:true,noAgentEvidence:'fixture only recorded dispatch; no native spawn happened',reconciliation:{processes:'没有原执行进程',workspace:'无工作区',versions:'未改变',operations:'无外部操作',agent:'确认未创建'}});
+ await change(root,'assignment:close',ids[0],assigned[0].id,run.id,{outcome:'CANCELLED',reason:'收敛旧超限',cleanup:'没有Agent或过程资源'});
+ await change(root,'transition',ids[0],null,run.id,{status:'CANCELLED',reason:'收敛旧超限完成'});
+ assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3);
+ const resumed=await change(root,'resume',ids[3],null,run.id,{checkpoint:cp(),reconciliation:{processes:'原执行已停止',workspace:'已核查',versions:'未改变',operations:'无外部操作'}});assert.equal(resumed.status,'RUNNING');assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3);
+});
+
 test('immutable reads parallelize; unknown resources and path aliases cannot bypass reservations',()=>{
   const read=resources([{kind:'FILE',key:'core/a',access:'READ',version:'sha1'}]);
   assert.equal(conflicts(read,read),false);
@@ -160,16 +208,17 @@ test('unknown operations preserve only affected reservations; stop permits conve
   await assert.rejects(change(root,'assignment:close',a.taskId,a.id,run.id,{outcome:'CANCELLED',reason:'stop',cleanup:'keep'}),/未知操作/);
 });
 
-test('assignment guard permits concurrent independent commands and prevents early release',async t=>{
-  const root=await fixture(t),t1=await publish(root),t2=await publish(root),run=await startRun(root,{capabilities:caps});
-  const assigned=(await schedule(root,run.id,[candidate(t1.taskId,'a'),candidate(t2.taskId,'b')])).assignments;
+test('assignment guard runs three independent task commands concurrently and prevents early release',async t=>{
+  const root=await fixture(t),t1=await publish(root),t2=await publish(root),t3=await publish(root),t4=await publish(root),run=await startRun(root,{capabilities:caps});
+  const scheduled=await schedule(root,run.id,[candidate(t1.taskId,'a'),candidate(t2.taskId,'b'),candidate(t3.taskId,'c'),candidate(t4.taskId,'d')]),assigned=scheduled.assignments;
+  assert.equal(scheduled.deferred[0].reason,'TASK_CAPACITY');
   for(const a of assigned)await started(root,run.id,a);
   const children=assigned.map(a=>spawn(process.execPath,[cli,'guard','--project',root,'--run',run.id,'--assignment',a.id,'--',process.execPath,'-e','setTimeout(()=>{},1500)'],{stdio:['ignore','pipe','pipe']}));
   const done=children.map(c=>once(c,'close'));t.after(()=>children.forEach(c=>{if(c.exitCode===null)c.kill('SIGTERM');}));
-  let state;for(let i=0;i<100;i++){state=await runtimeState(root);if(state.activities.filter(a=>a.child&&a.live).length===2)break;await new Promise(r=>setTimeout(r,20));}
-  assert.equal(state.activities.filter(a=>a.child&&a.live).length,2);
+  let state;for(let i=0;i<100;i++){state=await runtimeState(root);if(state.activities.filter(a=>a.child&&a.live).length===3)break;await new Promise(r=>setTimeout(r,20));}
+  assert.equal(state.activities.filter(a=>a.child&&a.live).length,3);
   await assert.rejects(accepted(root,run.id,assigned[0]),/命令仍在运行/);
-  assert.deepEqual((await Promise.all(done)).map(x=>x[0]),[0,0]);
+  assert.deepEqual((await Promise.all(done)).map(x=>x[0]),[0,0,0]);
   assert.equal((await runtimeState(root)).activities.length,0);
 });
 

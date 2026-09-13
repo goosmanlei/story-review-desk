@@ -1,5 +1,6 @@
 import path from 'node:path';
 import {realpath,lstat} from 'node:fs/promises';
+import {taskCapacity,taskCapacityReason,requireTaskCapacity} from './task-capacity.mjs';
 
 // Logical reservations are durable. Native thread IDs, worktrees and leases live
 // in runtime bindings and are deliberately never copied into these records.
@@ -87,6 +88,7 @@ export async function assignmentMutation(ctx) {
       else if ((s.dependsOn||[]).some(d=>{const a=find(d).assignment;return a.status!=='CLOSED'||a.outcome!=='ACCEPTED';})) reason='ASSIGNMENT_DEPENDENCY';
       else if (open.some(x=>conflicts(rs,x.assignment.resources))) reason='RESOURCE_CONFLICT';
       else if (Object.values(tasks).some(x=>x.status==='RUNNING'&&!x.assignments?.length)) reason='LEGACY_EXCLUSIVE';
+      else if (taskCapacityReason(tasks,t.id)) reason='TASK_CAPACITY';
       else if (execution.mode==='MAIN' && open.some(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED')) reason='MAIN_CAPACITY';
       else if (execution.mode==='SUBAGENT' && open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length >= Math.max(0,capabilities.availableSlots || 0)) reason='AGENT_CAPACITY';
       if (reason) {deferred.push({taskId:t.id,key:s.key,reason});continue;}
@@ -98,12 +100,18 @@ export async function assignmentMutation(ctx) {
       delete t.runId;bindings.tasks[t.id]=request.runId;bindings.assignments[id]={runId:request.runId,dispatchIntentAt:at};
       selected.push(a);
     }
-    return {status:selected.length?'SCHEDULED':'NO_EXECUTABLE_ASSIGNMENT',assignments:selected,deferred};
+    return {status:selected.length?'SCHEDULED':'NO_EXECUTABLE_ASSIGNMENT',assignments:selected,deferred,capacity:taskCapacity(tasks)};
   }
   const t=get(request.taskId), a=t.assignments?.find(x=>x.id===request.assignmentId);
   demand(a,'派工不存在');demand(a.version===request.expectedAssignmentVersion,`派工版本冲突：当前为 ${a.version}`);
   demand(assignmentOpen(a),'已关闭派工只读；返工或新任务须重新调度新的 Agent');
   const binding=bindings.assignments[a.id] ||= {};
+  if(['assignment:dispatch','assignment:start'].includes(action)){
+    requireTaskCapacity(tasks,t.id);
+    const open=all().filter(x=>assignmentOpen(x.assignment));
+    if(a.execution.mode==='SUBAGENT')demand(capabilities.delegation&&capabilities.closeVerified&&open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length<=Math.max(0,capabilities.availableSlots||0),'AGENT_CAPACITY：当前原生能力或槽位不足；保留原派工，先核查收尾');
+    else demand(open.filter(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED').length<=1,'MAIN_CAPACITY：主 Agent 只能串行执行');
+  }
   if(action==='assignment:reconcile') {
     for(const k of ['processes','workspace','versions','operations','agent']) nonempty(request.reconciliation?.[k],`reconciliation.${k}`);
     demand(!await active(a.id),'原受管命令仍在运行');

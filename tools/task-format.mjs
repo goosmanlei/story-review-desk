@@ -32,6 +32,7 @@ export function renderStatus(data,options={}) {
   const runtime=data.runtime||{},open=(data.tasks||[]).flatMap(t=>(t.assignments||[]).filter(a=>a.status!=='CLOSED'));
   const activityCount=(runtime.activities||[]).filter(a=>a.live===true).length;
   const rows=[['执行者',runtime.runActive===null?'UNKNOWN（无法核验原执行者）':runtime.runActive?'当前会话执行中':'无活跃执行者'],['未关闭派工',open.length?`${open.length} 项`:'无'],['受管命令',(runtime.activities||[]).some(a=>a.live===null)?'UNKNOWN（存在无法核验的占用）':activityCount?`${activityCount} 项正在运行`:'无活跃命令'],['执行能力',runtime.run?.capabilities?.limitation||(runtime.run?.capabilities?.delegation?'SubAgent 自动调度':'主 Agent 执行')]];
+  if(runtime.taskCapacity)rows.push(['正式任务占用',`${runtime.taskCapacity.occupied} / ${runtime.taskCapacity.limit} 项；可补入 ${runtime.taskCapacity.available} 项（仍须通过依赖、资源及执行能力检查）`]);
   return renderTasks(data,options)+'\n\n'+table(['项目','当前情况'],rows.map(r=>r.map(cell)));
 }
 export function renderDetail(task,{linkBase='tasks/items'}={}) {

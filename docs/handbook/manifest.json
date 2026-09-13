@@ -190,9 +190,10 @@
         "tools/task-assignments.mjs",
         "tools/task-format.mjs",
         "tools/task-native.mjs",
-        "tools/task-git.mjs"
+        "tools/task-git.mjs",
+        "tools/task-capacity.mjs"
       ],
-      "sourceDigest": "146fba6774b798b94a260a90f815d7c283b12e6af5c10605bbe17c328ae4f0bf"
+      "sourceDigest": "ead582ea10337fe2e60540bda4941893069d7a09165d27d250e1ec33e40fd64d"
     },
     {
       "id": "instance",

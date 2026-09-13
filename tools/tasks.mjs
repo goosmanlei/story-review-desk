@@ -9,6 +9,7 @@ import {processLock,processIdentity} from './process-resources.mjs';
 import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities} from './task-ledger.mjs';
 import {installTaskSkill} from './task-skill.mjs';
 import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
+import {taskCapacity} from './task-capacity.mjs';
 import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks,projectLinkBase} from './task-format.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
@@ -31,6 +32,7 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
                                     校验领取资格并登记执行进程；--core 串行共享核心操作
   tasks publish|next|resume|checkpoint|transition|amend|merge|split --file request.json
   tasks schedule --file -            原子选择无冲突派工；支持跨正式任务
+                                    最多占用 3 个正式任务；主 Agent、预留和未关闭派工计入
   tasks assignment dispatch|start|checkpoint|result|accept|close|reconcile --file -
   tasks native probe --run ID --slots N [--socket PATH]
                                     在受管阶段验证同一原生服务；失败降级主 Agent
@@ -79,6 +81,10 @@ checkpoint: {checkpoint,goalStatus}; result: {checkpoint,result:{summary,artifac
 accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason};
 reconcile: {checkpoint,reconciliation:{processes,workspace,versions,operations,agent}}。
 长派工原生 Goal 须先经隔离/自动跨轮/父端停止验证；否则 FOLLOWUP。未验证关闭则主 Agent 执行。
+TASK_CAPACITY 表示项目已占用 3 个不同任务；同任务辅助派工只增加 Agent 占用。
+MAIN_CAPACITY / AGENT_CAPACITY 仍按实际能力限制执行。交回或空闲不释放占用，
+收尾关闭并完成任务后，协调者重新 schedule 按依赖和优先级补入待办。
+next 保持未知资源的串行兼容，不能绕过上限；旧超限记录只允许 reconcile/close/收尾。
 
 状态：READY 待执行 / RUNNING 执行中 / BLOCKED 阻塞 / WAITING_REVIEW 待验收 /
 DONE 已完成 / CANCELLED 已取消 / MERGED 已合并。终态只读，变化另发任务。
@@ -212,6 +218,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='audit')return v.format==='markdown'?renderAudit(data,options):data;
   if(action==='status') {
     const runtime=await runtimeState(project),interrupted=Object.values(ledger.tasks).filter(t=>t.status==='RUNNING'&&(!runtime.runActive||(runtime.bindings.tasks[t.id]||t.runId)!==runtime.run?.id));
+    runtime.taskCapacity=taskCapacity(ledger.tasks);
     return v.format==='markdown'?renderStatus({...data,runtime},options):{...runtime,interrupted};
   }
   const mutation=action==='assignment'?`assignment:${p[1]}`:action;
