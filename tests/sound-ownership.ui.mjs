@@ -56,7 +56,7 @@ await page.route('**/api/v1/workspaces/sound-ownership?*',async route=>{const re
 const visitScope=async(path,label,bindingId,expected)=>{await page.goto(base+path,{waitUntil:'networkidle'});const region=page.getByRole('region',{name:label,exact:true});await region.waitFor();const card=region.locator('[data-sound-binding-id="'+bindingId+'"]');await card.waitFor();assert.match(await card.innerText(),new RegExp(expected));browserChecks.push(label);return {region,card};};
 try{
   await page.goto(base+'/?view=settings',{waitUntil:'networkidle'});
-  await page.getByText('声音归属与待确认',{exact:true}).waitFor();const pendingCard=page.locator('[data-sound-binding-id="'+pendingId+'"]');await pendingCard.waitFor();
+  await page.getByText('声音归属与待确认',{exact:true}).waitFor();assert.equal(await page.locator('.sound-ownership-directory').evaluate(node=>node.open),false);await page.getByText('声音归属与待确认',{exact:true}).click();const pendingCard=page.locator('[data-sound-binding-id="'+pendingId+'"]');await pendingCard.waitFor();
   for(const text of [pendingReason,pendingTodo,...missingEvidence,'草稿（未采用）'])await pendingCard.getByText(text,{exact:false}).waitFor();
   assert.equal(await pendingCard.getByRole('button').count(),0,'Sound cards cannot adopt or generate');
   const statusFilters=page.getByRole('navigation',{name:'声音归属状态筛选',exact:true});
@@ -98,7 +98,7 @@ try{
   assert(ownerOffsets.includes(0)&&ownerOffsets.includes(500));browserChecks.push('scope reads subsequent API pages');
   pagedOwner=false;
   await page.goto(base+'/?view=settings',{waitUntil:'networkidle'});
-  await page.getByRole('textbox',{name:'搜索声音归属',exact:true}).fill('cursor-race');
+  await page.getByText('声音归属与待确认',{exact:true}).click();await page.getByRole('textbox',{name:'搜索声音归属',exact:true}).fill('cursor-race');
   await page.getByRole('button',{name:'检索',exact:true}).click();await page.getByText('初始分页结果',{exact:true}).waitFor();
   await page.getByRole('button',{name:'继续读取声音归属',exact:true}).click();await oldPageRequested;
   await page.getByRole('navigation',{name:'声音归属状态筛选',exact:true}).getByRole('button',{name:'待确认',exact:true}).click();
@@ -107,7 +107,7 @@ try{
   releaseOldPage();await oldResponse;await page.waitForLoadState('networkidle');
   assert.equal(await page.getByText('旧分页响应不得覆盖',{exact:true}).count(),0);
   assert(await page.getByText('当前筛选结果',{exact:true}).isVisible());browserChecks.push('late previous page cannot overwrite new filter');
-  await page.setViewportSize({width:390,height:844});await page.goto(base+'/?view=settings',{waitUntil:'networkidle'});await page.getByText('声音归属与待确认',{exact:true}).waitFor();await page.screenshot({path:out+'/sound-ownership-narrow.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));browserChecks.push('narrow layout has no horizontal overflow');
+  await page.setViewportSize({width:390,height:844});await page.goto(base+'/?view=settings',{waitUntil:'networkidle'});await page.getByText('声音归属与待确认',{exact:true}).waitFor();await page.getByText('声音归属与待确认',{exact:true}).click();await page.screenshot({path:out+'/sound-ownership-narrow.png',fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));browserChecks.push('narrow layout has no horizontal overflow');
   assert(soundReads.some(query=>new URLSearchParams(query).get('status')==='UNKNOWN'));assert(soundReads.some(query=>new URLSearchParams(query).get('q')===usages.STORY));assert.deepEqual(browserWrites,[],'Browser review and navigation do not write business data');assert.deepEqual(errors,[]);
   const result={status:'PASS',fixture:profile.instanceId,setupWrites,apiChecks,browserChecks,browserPostCount:browserWrites.length,pageErrors:errors};writeFileSync(out+'/sound-ownership-ui.json',JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify(result));
 }finally{await browser.close();}
