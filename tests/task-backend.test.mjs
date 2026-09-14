@@ -337,9 +337,11 @@ test('tracking running work refreshes overlap evidence after dispatch initially 
  const loc=await location(s.root),sampleFile=path.join(loc.runtime,'parallel-validation-sample.json');
  const old={checkedAt:'2020-01-01T00:00:00.000Z',serviceId:'fixture-service',results:[{assignmentId:'old-unaccepted'}]};await writeFile(sampleFile,JSON.stringify(old));
  const calls=[],client={close(){},async flush(){},async call(method,params){calls.push(method);const thread=threads[params.threadId];if(method==='thread/read')return {thread:{id:thread.id,cwd:thread.cwd,status:{type:thread.active?'active':'idle'}}};if(method==='thread/turns/list')return {data:[{id:thread.turnId,status:'inProgress',items:[]}]};if(method==='thread/loaded/list')return {data:Object.keys(threads)};throw Error('Unexpected RPC '+method);}};
- const options={verifyServer:async()=>({record:{serviceId:'fixture-service',generation:'fixture-generation'},client})};
+ let observations=0;const record={serviceId:'fixture-service',generation:'fixture-generation'};
+ const worker={...client,async call(method,params){assert(!params.threadId||params.threadId==='overlap-thread-0','worker must never read another assignment');return client.call(method,params);}};
+ const options={verifyServer:async()=>({record,client:worker}),verifyObserver:async()=>{observations++;return {record,client};}};
  assert.equal((await syncBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');assert.deepEqual(JSON.parse(await readFile(sampleFile,'utf8')),old);
  threads['overlap-thread-1'].active=true;
  assert.equal((await syncBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');const sample=JSON.parse(await readFile(sampleFile,'utf8'));
- assert.deepEqual(sample.results.map(r=>r.assignmentId).sort(),states.map(x=>x.assignment.id).sort());assert.deepEqual(sample.results.map(r=>r.turnId).sort(),['overlap-turn-0','overlap-turn-1']);assert.notEqual(sample.checkedAt,old.checkedAt);assert(!calls.some(method=>['thread/start','turn/start'].includes(method)));
+ assert.deepEqual(sample.results.map(r=>r.assignmentId).sort(),states.map(x=>x.assignment.id).sort());assert.deepEqual(sample.results.map(r=>r.turnId).sort(),['overlap-turn-0','overlap-turn-1']);assert.notEqual(sample.checkedAt,old.checkedAt);assert.equal(observations,2);assert(!calls.some(method=>['thread/start','turn/start'].includes(method)));
 });

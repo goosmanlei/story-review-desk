@@ -110,11 +110,11 @@ export async function dispatchBackend(project,runId,assignmentId,request){
   const turn=await v.client.call('turn/start',{threadId,input:[{type:'text',text:request.prompt}],model:s.assignment.execution.model,effort:s.assignment.execution.effort,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'},outputSchema:schema});
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.state='RUNNING';b.backendRequest.turnId=turn.turn.id;b.backendRequest.startedAt=new Date().toISOString();});
   await v.client.flush();
-  await observeParallel(project,v).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
+  await observeParallel(project).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
   return withDecisionStatus(project,assignmentId,{assignmentId,serviceId:v.record.serviceId,nativeThreadId:threadId,turnId:turn.turn.id,status:'RUNNING',model:s.assignment.execution.model,effort:s.assignment.execution.effort});
  }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest?.operationId===request.operationId&&b.backendRequest.hash===fingerprint){b.backendRequest.error=error.message;b.backendRequest.state='RESULT_UNKNOWN';}});throw error;}finally{v.client.close();}
 }
-export async function syncBackend(project,runId,assignmentId,{verifyServer=verifyBackendServer}={}){
+export async function syncBackend(project,runId,assignmentId,{verifyServer=verifyBackendServer,verifyObserver=verifyTaskServer}={}){
  await restoreBackendReceipts(project,runId,assignmentId);
  const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.backendRequest,'BACKEND_REQUEST：没有原调用');
  if(!s.binding.nativeThreadId)return {assignmentId,status:'RESULT_UNKNOWN',reason:'创建回执丢失，禁止重发；保留原调用与服务日志待核查'};
@@ -147,7 +147,7 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   await confirmDecisionFollowup(project,runId,assignmentId);
   // A dispatch reply can arrive before its thread reports active. Sample actual
   // overlap again while tracking running work, including recovered work.
-  if(status==='RUNNING')await observeParallel(project,v).catch(error=>atomic(path.join(s.loc.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
+  if(status==='RUNNING')await observeParallel(project,verifyObserver).catch(error=>atomic(path.join(s.loc.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
   await v.client.flush();
   return withDecisionStatus(project,assignmentId,{assignmentId,operationId:s.binding.backendRequest.operationId,status,nativeThreadId:state.thread.id,turnId:turn.id,resultReady:!!result,error:turn.error||null});
  }finally{v.client.close();}
@@ -194,14 +194,24 @@ export async function recoverBackend(project,runId,assignmentId,{ensureServer=en
  }finally{v.client.close();}
  return syncBackend(project,runId,assignmentId,{verifyServer});
 }
-async function observeParallel(project,v){
- const loc=await location(project),bindings=await readBindings(loc),ledger=await readLedger(loc),results=[];
- for(const a of Object.values(ledger.tasks).flatMap(t=>t.assignments||[])){
-  const b=bindings.assignments[a.id];if(a.status!=='RUNNING'||b?.backendServiceId!==v.record.serviceId||!b.backendRequest?.turnId)continue;
-  const thread=await assertBackendThread(project,a.id,b.nativeThreadId,v.client,{allowUnloaded:true});
-  if(thread.status?.type==='active')results.push({assignmentId:a.id,status:'RUNNING',nativeThreadId:b.nativeThreadId,turnId:b.backendRequest.turnId});
- }
- if(results.length>=2)await atomic(path.join(loc.runtime,'parallel-validation-sample.json'),{checkedAt:new Date().toISOString(),serviceId:v.record.serviceId,results});
+async function observeParallel(project,verifyObserver=verifyTaskServer){
+ const loc=await location(project),bindings=await readBindings(loc),ledger=await readLedger(loc);
+ const candidates=Object.values(ledger.tasks).flatMap(t=>t.assignments||[]).filter(a=>a.status==='RUNNING'&&bindings.assignments[a.id]?.backendServiceId&&bindings.assignments[a.id]?.backendRequest?.turnId);
+ if(candidates.length<2)return;
+ // Worker RPC connections are confined to one assignment. The coordinator uses
+ // a separately verified read-only observer and still checks each exact binding.
+ const v=await verifyObserver(project),results=[];
+ try{
+  for(const a of candidates){
+   const b=bindings.assignments[a.id];if(b.backendServiceId!==v.record.serviceId)continue;
+   const thread=await assertBackendThread(project,a.id,b.nativeThreadId,v.client,{allowUnloaded:true});
+   if(thread.status?.type==='active'){
+    const turns=await nativeTurns(v.client,b.nativeThreadId);
+    if(turns.some(t=>t.id===b.backendRequest.turnId&&t.status==='inProgress'))results.push({assignmentId:a.id,status:'RUNNING',nativeThreadId:b.nativeThreadId,turnId:b.backendRequest.turnId});
+   }
+  }
+  if(results.length>=2)await atomic(path.join(loc.runtime,'parallel-validation-sample.json'),{checkedAt:new Date().toISOString(),serviceId:v.record.serviceId,generation:v.record.generation,results});
+ }finally{v.client.close();}
 }
 export async function verifyExecution(project,runId){
  const loc=await location(project),run=await requireRun(loc,runId),ledger=await readLedger(loc),bindings=await readBindings(loc);
@@ -242,7 +252,7 @@ export async function continueBackend(project,runId,assignmentId,request,{verify
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.turnId=turn.turn.id;b.backendRequest.startedAt=new Date().toISOString();b.backendRequest.state='RUNNING';});
   await confirmDecisionFollowup(project,runId,assignmentId);
   await v.client.flush();
-  await observeParallel(project,v).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));return withDecisionStatus(project,assignmentId,{assignmentId,status:'RUNNING',turnId:turn.turn.id,nativeThreadId:s.binding.nativeThreadId});
+  await observeParallel(project).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));return withDecisionStatus(project,assignmentId,{assignmentId,status:'RUNNING',turnId:turn.turn.id,nativeThreadId:s.binding.nativeThreadId});
  }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest.operationId===request.operationId){b.backendRequest.state='RESULT_UNKNOWN';b.backendRequest.error=error.message;}});throw error;}finally{v.client.close();}
 }
 export const decisionFollowupPrompt=decisions=>'继续原派工的同一范围。以下是主会话保存的用户明确答复；先核对已完成步骤及原操作，不能重复副作用，不扩大授权。\n'+JSON.stringify(decisions.map(d=>({decisionId:d.id,question:d.question,answer:d.answer.value,completedSteps:d.completedSteps,pendingWork:d.pendingWork})));
