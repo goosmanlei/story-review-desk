@@ -245,7 +245,7 @@
         "tools/vendor/terminal-width/strip-ansi.mjs",
         "tools/vendor/terminal-width/ansi-regex.mjs"
       ],
-      "sourceDigest": "172a74401080d73268bf475747f15325cd7097763af9c46f78b9ec7dcb3df4a7"
+      "sourceDigest": "93ca329c50592bf3db2da217bcaca6c96654c07493dcce0a1314fc67242d675d"
     },
     {
       "id": "instance",

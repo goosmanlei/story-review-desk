@@ -1,5 +1,5 @@
 import path from 'node:path';
-import {realpath,readFile,mkdir,lstat} from 'node:fs/promises';
+import {realpath,readFile,mkdir,lstat,readdir} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
@@ -122,7 +122,17 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   await v.client.flush();
   await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true});
   const state=await v.client.call('thread/read',{threadId:s.binding.nativeThreadId,includeTurns:false});
-  const turns=await nativeTurns(v.client,s.binding.nativeThreadId);
+  let turns,observed;
+  try { turns=await nativeTurns(v.client,s.binding.nativeThreadId); }
+  catch(error) {
+   if(!/unsupported|not supported|unknown method/i.test(error.message))throw error;
+   // Some legacy stores cannot page or read turns after the service restarts.
+   // Only the original receiver's bound, immutable completion is a fallback.
+   requireTask(['idle','notLoaded'].includes(state.thread.status?.type),'BACKEND_TURN_UNKNOWN：历史读取不支持且线程尚未确认空闲，保留原操作');
+   observed=await readObservedBackendTurn(s.loc.runtime,assignmentId,s.binding);
+   if(!observed)return {assignmentId,operationId:s.binding.backendRequest.operationId,status:'RESULT_UNKNOWN',reason:'历史读取不支持，且没有可核对的原轮次完成通知；保留原操作，不重复执行'};
+   turns=[observed.turn];
+  }
   if(state.thread.status?.type==='active'&&s.binding.backendRequest.turnId)requireTask(turns.filter(t=>t.status==='inProgress').every(t=>t.id===s.binding.backendRequest.turnId),'BACKEND_TURN_MISMATCH：存在其他活动轮次，不能套用原轮次结果');
   let turn=turns.find(t=>t.id===s.binding.backendRequest.turnId);
   // A single visible turn is not proof of the original operation. Only a durable
@@ -131,7 +141,7 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   requireTask(state.thread.status?.type!=='active'||turn.status==='inProgress','BACKEND_TURN_MISMATCH：线程活动状态与原轮次不符，保留现场');
   const status=turn.status==='completed'?'SUCCEEDED':['failed','interrupted'].includes(turn.status)?'FAILED':'RUNNING';
   let items=turn.items||[];
-  if(status==='SUCCEEDED'&&!items.length){
+  if(status==='SUCCEEDED'&&!items.length&&!observed){
    try{let cursor;do{const page=await v.client.call('thread/items/list',{threadId:s.binding.nativeThreadId,turnId:turn.id,limit:30,...(cursor?{cursor}:{})});items.push(...page.data);cursor=page.nextCursor;if(items.length>5000)throw Error('BACKEND_RESULT_LIMIT：结果条目超过读取范围');}while(cursor);}
    catch(error){if(!/unknown|unsupported|not supported/i.test(error.message))throw error;const history=await v.client.call('thread/read',{threadId:s.binding.nativeThreadId,includeTurns:true});items=history.thread.turns?.find(t=>t.id===turn.id)?.items||[];}
   }
@@ -140,7 +150,7 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   await updateBinding(project,runId,assignmentId,b=>{requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId&&(!b.backendRequest.turnId||b.backendRequest.turnId===turn.id),'BACKEND_OPERATION_CHANGED：原操作已改变');b.backendRequest.turnId=turn.id;b.backendRequest.state=status;b.backendRequest.nativeStatus=turn.status;b.backendRequest.error=turn.error||null;if(status!=='RUNNING')b.backendRequest.completedAt ||= new Date().toISOString();});
   const directory=path.join(s.loc.runtime,'backend-results');await mkdir(directory,{recursive:true,mode:0o700});
   if(status!=='RUNNING'){
-   const saved={assignmentId,operationId:s.binding.backendRequest.operationId,originRunId:s.binding.originRunId||s.binding.runId,runId,serviceId:s.binding.backendServiceId,generation:v.record.generation,threadId:state.thread.id,turnId:turn.id,status,nativeStatus:turn.status,result,finalResponse:final||null,error:turn.error||null,checkedAt:new Date().toISOString()};
+   const saved={assignmentId,operationId:s.binding.backendRequest.operationId,originRunId:s.binding.originRunId||s.binding.runId,runId,serviceId:s.binding.backendServiceId,generation:v.record.generation,threadId:state.thread.id,turnId:turn.id,status,nativeStatus:turn.status,result,finalResponse:final||null,error:turn.error||null,...(observed?{source:observed.source}:{}),checkedAt:new Date().toISOString()};
    await atomic(path.join(directory,'operations',requestFingerprint({assignmentId,operationId:saved.operationId})+'.json'),saved);
    await atomic(path.join(directory,assignmentId+'.json'),saved);
   }
@@ -151,6 +161,39 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   await v.client.flush();
   return withDecisionStatus(project,assignmentId,{assignmentId,operationId:s.binding.backendRequest.operationId,status,nativeThreadId:state.thread.id,turnId:turn.id,resultReady:!!result,error:turn.error||null});
  }finally{v.client.close();}
+}
+export async function readObservedBackendTurn(runtime,assignmentId,binding) {
+ const request=binding.backendRequest,threadId=binding.nativeThreadId,turnId=request?.turnId;
+ if(!threadId||!turnId||binding.backendCreation?.threadId!==threadId)return null;
+ const key=decisionHash({assignmentId,operationId:request.operationId,method:'turn/start'});
+ const receipt=await readDecisionFile(path.join(runtime,'decision-channel/calls',key+'.json'));
+ if(!receipt)return null;
+ requireTask(receipt.rpcId===key&&receipt.state==='SUCCEEDED'&&receipt.method==='turn/start'&&receipt.assignmentId===assignmentId&&receipt.operationId===request.operationId&&receipt.serviceId===binding.backendServiceId&&receipt.generation===request.generation&&receipt.params?.threadId===threadId&&receipt.result?.turn?.id===turnId&&typeof receipt.connectionId==='string'&&receipt.connectionId,'BACKEND_NOTIFICATION_RECEIPT：原启动回执不能对应本派工轮次');
+ const directory=path.join(runtime,'decision-channel/inbox');
+ const names=(await readdir(directory).catch(e=>{if(e.code==='ENOENT')return [];throw e;})).filter(n=>/^[a-f0-9]{64}\.json$/.test(n));
+ requireTask(names.length<=50000,'BACKEND_NOTIFICATION_LIMIT：通知超过有界回读范围，保留原操作');
+ const completions=[],items=[];
+ for(const name of names) {
+  const entry=await readDecisionFile(path.join(directory,name)),message=entry?.message,params=message?.params;
+  if(!params||(params.threadId||params.conversationId)!==threadId||(params.turnId||params.turn?.id)!==turnId||!['turn/completed','item/completed'].includes(message.method))continue;
+  if(entry.serviceId!==receipt.serviceId||entry.generation!==receipt.generation||entry.connectionId!==receipt.connectionId)continue;
+  const hash=decisionHash({serviceId:entry.serviceId,generation:entry.generation,connectionId:entry.connectionId,message});
+  requireTask(entry.id===hash&&name===hash+'.json'&&!Object.hasOwn(message,'id'),'BACKEND_NOTIFICATION_INTEGRITY：完成通知身份或摘要不符');
+  requireTask(Number.isFinite(Date.parse(entry.receivedAt))&&Number.isFinite(Date.parse(receipt.at))&&Date.parse(entry.receivedAt)>=Date.parse(receipt.at),'BACKEND_NOTIFICATION_TIME：通知先于原执行意图或时间未知');
+  if(message.method==='turn/completed')completions.push(entry);
+  else if(params.item?.type==='agentMessage'&&params.item.phase==='final_answer')items.push(entry);
+ }
+ if(!completions.length)return null;
+ requireTask(completions.every(e=>['completed','failed','interrupted'].includes(e.message.params.turn.status)),'BACKEND_NOTIFICATION_STATUS：原轮次缺少终态');
+ requireTask(new Set(completions.map(e=>decisionHash(e.message.params.turn))).size===1,'BACKEND_NOTIFICATION_CONFLICT：原轮次完成通知冲突');
+ const completion=completions[0],turn=structuredClone(completion.message.params.turn);
+ const finalItems=(turn.items||[]).filter(i=>i.type==='agentMessage'&&i.phase==='final_answer');
+ for(const entry of items)if(Date.parse(entry.receivedAt)<=Date.parse(completion.receivedAt))finalItems.push(entry.message.params.item);
+ const unique=new Map(finalItems.map(i=>[decisionHash({id:i.id,text:i.text}),i]));
+ requireTask(unique.size<=1,'BACKEND_NOTIFICATION_CONFLICT：原轮次最终答复冲突');
+ // Missing final text remains resultReady=false; no report file is substituted.
+ turn.items=[...unique.values()];
+ return {turn,source:{kind:'PERSISTED_ORIGINAL_NOTIFICATION',receiptId:key,notificationId:completion.id,generation:completion.generation,connectionId:completion.connectionId}};
 }
 export async function collectBackend(project,runId,assignmentId,operationId){
  await assertNoPendingDecisions(project,assignmentId);
@@ -182,7 +225,7 @@ export async function recoverBackend(project,runId,assignmentId,{ensureServer=en
   const thread=await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true});
   // Resume subscribes this persistent connection to the original thread. It
   // does not start a turn and does not transfer old callback IDs to a new one.
-  await v.client.call('thread/resume',{threadId:s.binding.nativeThreadId,cwd:s.binding.workspace,approvalPolicy:'never'});
+  await v.client.call('thread/resume',{threadId:s.binding.nativeThreadId,cwd:s.binding.workspace,approvalPolicy:'never',excludeTurns:true});
   await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client);
   await updateBinding(project,runId,assignmentId,b=>{
    requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId,'BACKEND_OPERATION_CHANGED：原操作已改变');

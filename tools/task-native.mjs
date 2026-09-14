@@ -76,13 +76,21 @@ export async function nativeTurns(client,threadId,{itemsView='notLoaded'}={}) {
 export async function closeNativeThread(client,threadId,parentThreadId,{probe=false,verifyOwnership,activeTurnIds,resumeIfUnloaded=false}={}) {
   if(!threadId||threadId===parentThreadId)throw Error('只能关闭当前派工的独立子会话');
   if(!probe){if(verifyOwnership)await verifyOwnership();else await assertNativeChild(client,threadId,parentThreadId);}
-  const goal=await client.call('thread/goal/get',{threadId});
-  if(goal.goal && !['complete','paused'].includes(goal.goal.status)) await client.call('thread/goal/set',{threadId,status:'paused'});
   let current=await client.call('thread/read',{threadId,includeTurns:false});
   if(current.thread.status?.type==='notLoaded'&&(probe||resumeIfUnloaded)){
-    await client.call('thread/resume',{threadId,cwd:current.thread.cwd,approvalPolicy:'never'});
+    let hydrationError;
+    try {await client.call('thread/resume',{threadId,cwd:current.thread.cwd,approvalPolicy:'never',excludeTurns:true});}
+    catch(error) {
+      // An explicit history error can arrive after the original runtime was
+      // loaded. Query that runtime; never repeat resume or infer from a timeout.
+      if(!/unsupported|not supported|unknown method/i.test(error.message))throw error;
+      hydrationError=error;
+    }
     current=await client.call('thread/read',{threadId,includeTurns:false});
+    if(!['idle','active'].includes(current.thread.status?.type))throw hydrationError||Error('原会话恢复状态尚未核验');
   }
+  const goal=await client.call('thread/goal/get',{threadId});
+  if(goal.goal && !['complete','paused'].includes(goal.goal.status)) await client.call('thread/goal/set',{threadId,status:'paused'});
   if(current.thread.status?.type==='active'){
     const turns=activeTurnIds?.length?activeTurnIds:(await nativeTurns(client,threadId)).filter(t=>t.status==='inProgress').map(t=>t.id);
     if(!turns.length)throw Error('活动轮次身份未知，不能确认关闭');
