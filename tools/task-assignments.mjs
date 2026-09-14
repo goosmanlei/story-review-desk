@@ -99,7 +99,7 @@ export async function assignmentMutation(ctx) {
         dependsOn:s.dependsOn||[],attemptOf:s.attemptOf||null,createdAt:at,updatedAt:at,startedAt:null,
         deliveredAt:null,acceptedAt:null,closedAt:null,checkpoint:null,result:null};
       touch(t);t.assignments ||= [];t.assignments.push(a);t.status='RUNNING';t.startedAt ||= at;t.blockReason=null;
-      delete t.runId;bindings.tasks[t.id]=request.runId;bindings.assignments[id]={runId:request.runId,dispatchIntentAt:at};
+      delete t.runId;bindings.tasks[t.id]=request.runId;bindings.assignments[id]={runId:request.runId,originRunId:request.runId,dispatchIntentAt:at};
       selected.push(a);
     }
     return {status:selected.length?'SCHEDULED':'NO_EXECUTABLE_ASSIGNMENT',assignments:selected,deferred,capacity:taskCapacity(tasks)};
@@ -116,6 +116,7 @@ export async function assignmentMutation(ctx) {
     else demand(open.filter(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED').length<=1,'MAIN_CAPACITY：主 Agent 只能串行执行');
   }
   if(action==='assignment:reconcile') {
+    await ctx.reconcileOwner?.(binding);
     for(const k of ['processes','workspace','versions','operations','agent']) nonempty(request.reconciliation?.[k],`reconciliation.${k}`);
     demand(!await active(a.id),'原受管命令仍在运行');
     if(request.nativeThreadId) {
@@ -125,7 +126,7 @@ export async function assignmentMutation(ctx) {
       binding.nativeThreadId=request.nativeThreadId;
     }
     if(request.noAgentCreated===true) {
-      demand(!binding.nativeThreadId,'已有原生身份，不能声明未创建');nonempty(request.noAgentEvidence,'核查原 spawn 未创建 Agent 的证据');
+      demand(!binding.nativeThreadId&&!binding.backendRequest,'已有原生身份或原服务调用意图，不能声明未创建；先对账');nonempty(request.noAgentEvidence,'核查原 spawn 未创建 Agent 的证据');
       binding.noAgentCreated=true;binding.noAgentEvidence=request.noAgentEvidence;
     }
     const cp=checkpoint(request.checkpoint,a.checkpoint);
@@ -134,6 +135,10 @@ export async function assignmentMutation(ctx) {
     else if(!['DELIVERED','ACCEPTED'].includes(a.status)||assignmentUnknown(a))a.status='BLOCKED';
     a.reconciliation=request.reconciliation;
     a.blockReason=assignmentUnknown(a)?'原操作结果仍未知；只查询原编号':'中断派工须核查并关闭；后续使用新 Agent';
+    if(binding.runId!==request.runId){
+      binding.originRunId||=binding.runId;binding.ownershipHistory||=[];
+      binding.ownershipHistory.push({fromRunId:binding.runId,toRunId:request.runId,operationId:request.operationId,backendOperationId:binding.backendRequest?.operationId||null,checkpointOperationIds:(cp.operations||[]).map(op=>op.id),at});
+    }
     binding.runId=request.runId;bindings.tasks[t.id]=request.runId;
   } else {
     owner(a);
@@ -165,6 +170,7 @@ export async function assignmentMutation(ctx) {
       bump(t,a);a.checkpoint=checkpoint(request.checkpoint,a.checkpoint);
       if(request.goalStatus) {demand(['ACTIVE','COMPLETE','PAUSED','UNKNOWN','UNAVAILABLE'].includes(request.goalStatus),'Goal 状态无效');a.goalStatus=request.goalStatus;}
     } else if(action==='assignment:result') {
+      if(request.expectedBackendOperationId)demand(binding.backendRequest?.operationId===request.expectedBackendOperationId&&binding.backendRequest.state==='SUCCEEDED','BACKEND_OPERATION_CHANGED：回收结果与当前已完成原操作不符');
       demand(!(a.decisions||[]).some(d=>d.status!=='RESOLVED'),'DECISION_PENDING：尚有未解决决策，不可交回完整成果');
       demand(['RUNNING','BLOCKED'].includes(a.status),'只接收已执行派工的结果');
       demand(!await active(a.id),'受管命令仍在运行');

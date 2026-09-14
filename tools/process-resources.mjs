@@ -14,6 +14,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { bootIdentity } from "./execution-runtime.mjs";
 
 const missing = (e) => e.code === "ENOENT";
 const json = async (p) => JSON.parse(await readFile(p, "utf8"));
@@ -48,13 +49,14 @@ export function processIdentity(pid = process.pid) {
       "-o",
       "stat=",
     ]).match(/^(.+?)\s+(\S+)$/);
-    return !match || match[2].includes("Z") ? null : { pid, birth: match[1] };
+    return !match || match[2].includes("Z") ? null : { pid, birth: match[1], bootId: bootIdentity() };
   } catch (e) {
     if (e.status === 1) return null;
     throw e;
   }
 }
 export function processAlive(owner) {
+  if (owner?.bootId && owner.bootId !== bootIdentity()) return false;
   const now = owner && processIdentity(owner.pid);
   return Boolean(now?.birth && now.birth === owner.birth);
 }
@@ -128,9 +130,11 @@ export async function processLock(
         }
       };
       child.stdout.on('data', receive);
-      child.once("exit", () =>
-        reject(Error("Process resource lock is busy or unavailable")),
-      );
+      child.once("exit", (code) => {
+        const error = Error(code === 75 ? "Process resource lock is busy" : "Process resource lock is unavailable");
+        error.code = code === 75 ? "PROCESS_LOCK_BUSY" : "PROCESS_LOCK_UNAVAILABLE";
+        reject(error);
+      });
     });
     return await callback();
   } finally {

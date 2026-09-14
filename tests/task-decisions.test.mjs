@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 import {mkdtemp,mkdir,writeFile,readFile,rm,lstat} from 'node:fs/promises';
 import {mutate,location,readLedger,readBindings,startRun,updateBinding,stopRun} from '../tools/task-ledger.mjs';
 import {decisionHash,encodeDecisionAnswer,pendingDecisions} from '../tools/task-decision-protocol.mjs';
-import {decisionSnapshot,decisionVersions,listDecisions,persistDecisionMessage,drainDecisionInbox,deliverDecision,assertNoPendingDecisions,cancelAssignmentDecisions,readDecisionFile} from '../tools/task-decisions.mjs';
+import {decisionSnapshot,decisionVersions,listDecisions,persistDecisionMessage,drainDecisionInbox,deliverDecision,assertNoPendingDecisions,cancelAssignmentDecisions,readDecisionFile,durableDecisionFile} from '../tools/task-decisions.mjs';
 import {taskCapacity} from '../tools/task-capacity.mjs';
 import {main} from '../tools/tasks.mjs';
 import {runDecisionChannel,channelPaths,channelClient,callDecisionChannel} from '../tools/task-decision-channel.mjs';
@@ -232,7 +232,11 @@ test('invalidated request uses a checked same-scope FOLLOWUP; replay, active, fa
  await assert.rejects(continueBackend(s.root,s.run.id,s.id,{...request,prompt:'expand scope'},{verifyServer}),/DECISION_FOLLOWUP/);
  failAfterStart=true;await assert.rejects(continueBackend(s.root,s.run.id,s.id,request,{verifyServer}),/lost response/);assert.equal(calls,1);
  assert.equal((await decisionSnapshot(s.root,d.id)).decision.status,'DELIVERY_UNKNOWN');
- const recovered=await continueBackend(s.root,s.run.id,s.id,request,{verifyServer});assert.equal(recovered.status,'RUNNING');assert.equal(calls,1,'回执丢失按原轮次核查，不重启工作');
+ const unknown=await continueBackend(s.root,s.run.id,s.id,request,{verifyServer});assert.equal(unknown.status,'RESULT_UNKNOWN');assert.equal(calls,1,'唯一可见轮次不能证明其属于原操作');
+ assert.equal((await decisionSnapshot(s.root,d.id)).decision.status,'DELIVERY_UNKNOWN');
+ const receiptId=decisionHash({assignmentId:s.id,operationId:request.operationId,method:'turn/start'});
+ await durableDecisionFile(path.join(s.loc.runtime,'decision-channel/calls',receiptId+'.json'),{assignmentId:s.id,operationId:request.operationId,method:'turn/start',state:'SUCCEEDED',...s.service,params:{threadId:s.threadId},result:{turn:{id:'followup-turn'}},at:new Date().toISOString()});
+ const recovered=await continueBackend(s.root,s.run.id,s.id,request,{verifyServer});assert.equal(recovered.status,'RUNNING');assert.equal(calls,1,'精确原调用回执恢复轮次，不重启工作');
  assert.equal((await decisionSnapshot(s.root,d.id)).decision.status,'RESOLVED');
  await assert.rejects(continueBackend(s.root,s.run.id,s.id,{operationId:'different',prompt:'another turn'},{verifyServer}),/上一轮尚未确认成功/);assert.equal(calls,1);
  turns.push({id:'foreign-active',status:'inProgress'});await assert.rejects(syncBackend(s.root,s.run.id,s.id,{verifyServer}),/BACKEND_TURN_MISMATCH/);
@@ -278,4 +282,68 @@ test('a late request cancelled during shutdown cannot inherit an earlier ACCEPTE
  await assert.rejects(assignmentChange(s,'close',{outcome:'ACCEPTED',cleanup:'fixture closed'}),/DECISION_PENDING/);
  await assignmentChange(s,'close',{outcome:'CANCELLED',reason:'新出现的问题未解决',cleanup:'fixture closed; recovery retained'});
  assert.equal((await decisionSnapshot(s.root,d.id)).assignment.outcome,'CANCELLED');
+});
+
+test('original RPC intent fences pre-send, completed-without-receipt and duplicate requests across receiver restart',async t=>{
+ for(const window of ['before-send','completed-without-receipt','receipt-saved'])await t.test(window,async t=>{
+  const s=await fixture(t),cwd=process.cwd(),codexHome=process.env.CODEX_HOME;
+  process.chdir(s.root);process.env.CODEX_HOME='isolated-home';await mkdir('isolated-home');
+  let native,runner;
+  t.after(async()=>{if(native){native.close();await runner;}process.chdir(cwd);if(codexHome===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=codexHome;});
+  const p=await channelPaths(s.root);s.service.serviceId=p.serviceId;
+  await writeFile(path.join(s.loc.runtime,'server/server.json'),JSON.stringify(s.service));
+  await updateBinding(s.root,s.run.id,s.id,b=>{b.backendServiceId=p.serviceId;b.backendCreation.serviceId=p.serviceId;b.backendRequest.state='TURN_STARTING';b.backendRequest.generation=s.service.generation;delete b.backendRequest.turnId;});
+  const operationId=(await readBindings(s.loc)).assignments[s.id].backendRequest.operationId;
+  const params={threadId:s.threadId,input:[{type:'text',text:'execute original once'}]},rpcId=decisionHash({assignmentId:s.id,operationId,method:'turn/start'}),file=path.join(p.directory,'calls',rpcId+'.json');
+  const effect=path.join(s.root,'isolated-effect.json');await durableDecisionFile(effect,{operationId,count:0});
+  if(window==='before-send')await durableDecisionFile(file,{rpcId,assignmentId:s.id,operationId,method:'turn/start',params,...s.service,state:'PENDING'});
+  const start=async()=>{
+   const spec={id:randomUUID(),root:s.root,...s.service,sourceDigest:'fixture',socket:p.channelSocket};
+   runner=runDecisionChannel(spec,{handleSignals:false,verifyServer:async(project,{connect})=>{
+    native=connect({socket:'/fixture/native',transportFactory:hooks=>({ready:Promise.resolve(),close(){},async send(m){
+     if(m.method==='initialized')return;
+     if(m.method==='initialize'){hooks.onMessage({id:m.id,result:{userAgent:'fixture'}});return;}
+     assert.equal(m.method,'turn/start');
+     const saved=await readDecisionFile(effect);await durableDecisionFile(effect,{operationId,count:saved.count+1,result:'completed'});
+     if(window==='completed-without-receipt')hooks.onMessage({id:m.id,error:{message:'fixture completed; acknowledgement lost'}});
+     else hooks.onMessage({id:m.id,result:{turn:{id:s.turnId,status:'completed'}}});
+    }})});
+    await native.initialize();return {record:s.service,client:native};
+   }});
+   for(let i=0;i<100;i++){if((await readDecisionFile(p.channelRecord))?.status==='READY')return;await new Promise(r=>setTimeout(r,20));}
+   throw Error('fixture receiver not ready');
+  };
+  await start();
+  const responses=await Promise.allSettled([1,2].map(()=>channelClient(s.root,s.run.id,s.id).call('turn/start',params)));
+  if(window==='receipt-saved')assert(responses.every(r=>r.status==='fulfilled'&&r.value.turn.id===s.turnId));
+  else assert(responses.every(r=>r.status==='rejected'));
+  assert.equal((await readDecisionFile(effect)).count,window==='before-send'?0:1);
+  const prior=await readDecisionFile(file);assert.equal(prior.operationId,operationId);assert.equal(prior.state,window==='receipt-saved'?'SUCCEEDED':window==='before-send'?'PENDING':'RESULT_UNKNOWN');
+  native.close();await runner;native=null;
+  await start();
+  const replay=channelClient(s.root,s.run.id,s.id).call('turn/start',params);
+  if(window==='receipt-saved')assert.equal((await replay).turn.id,s.turnId);
+  else await assert.rejects(replay,/RESULT_UNKNOWN/);
+  await assert.rejects(channelClient(s.root,s.run.id,s.id).call('turn/start',{...params,input:[{type:'text',text:'different request'}]}),/REPLAY/);
+  assert.equal((await readDecisionFile(effect)).count,window==='before-send'?0:1);
+  native.close();await runner;native=null;
+ });
+});
+
+test('two concurrent FOLLOWUP intents cannot replace each other or start two turns',async t=>{
+ const s=await fixture(t);await updateBinding(s.root,s.run.id,s.id,b=>{b.workspace=s.root;});
+ const final=JSON.stringify({summary:'original completed',artifacts:[],acceptance:[],completedSteps:[],nextSteps:[]});
+ let starts=0,turns=[{id:s.turnId,status:'completed',items:[{type:'agentMessage',text:final}]}];
+ const client={close(){},async flush(){},async call(method,p){
+  if(method==='thread/read')return {thread:{id:s.threadId,cwd:s.root,status:{type:starts?'active':'idle'}}};
+  if(method==='thread/loaded/list')return {data:[s.threadId]};
+  if(method==='thread/turns/list')return {data:turns};
+  if(method==='turn/start'){starts++;turns=[...turns,{id:'sole-followup',status:'inProgress',items:[]}];return {turn:{id:'sole-followup'}};}
+  throw Error('Unexpected fixture RPC '+method);
+ }};
+ const verifyServer=async()=>({client,record:s.service,paths:s.loc});
+ const outcomes=await Promise.allSettled(['one','two'].map(id=>continueBackend(s.root,s.run.id,s.id,{operationId:'competing-'+id,prompt:'same bounded next step'},{verifyServer})));
+ assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(starts,1);
+ const saved=(await readBindings(s.loc)).assignments[s.id];assert.equal(saved.backendHistory.length,1);assert.equal(saved.backendRequest.turnId,'sole-followup');
+ const error=outcomes.find(r=>r.status==='rejected').reason;assert.match(error.message,/OPERATION_CHANGED|上一轮尚未确认成功/);
 });

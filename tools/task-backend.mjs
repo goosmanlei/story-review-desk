@@ -3,10 +3,11 @@ import {realpath,readFile,mkdir,lstat} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
-import {atomic} from './io.mjs';
+import {durableExecutionFile as atomic} from './execution-runtime.mjs';
 import {processLock,phaseRecords,requiredPhase} from './process-resources.mjs';
 import {location,readLedger,readBindings,requireRun,requireTask,mutate,updateBinding,configureCapabilities} from './task-ledger.mjs';
-import {ensureTaskServer,verifyTaskServer,probeTaskServer,stopTaskServer} from './task-server.mjs';
+import {ensureAppService as ensureTaskServer,verifyAppService as verifyTaskServer} from './app-service.mjs';
+import {probeTaskServer,stopTaskServer} from './task-server.mjs';
 import {closeNativeThread,nativeTurns} from './task-native.mjs';
 import {channelClient,ensureDecisionChannel,stopDecisionChannel,callDecisionChannel} from './task-decision-channel.mjs';
 import {decisionTool,decisionInstructions,pendingDecisions,decisionHash} from './task-decision-protocol.mjs';
@@ -96,8 +97,8 @@ export async function dispatchBackend(project,runId,assignmentId,request){
  const v=await verifyBackendServer(project,runId,assignmentId);
  try{
   requireTask(v.record.serviceId===s.run.capabilities.backendServiceId,'BACKEND_SERVICE_CHANGED：能力不属于当前服务');
+  await updateBinding(project,runId,assignmentId,b=>{requireTask(!b.backendRequest&&!b.spawnAttemptAt,'BACKEND_REPLAY：原派工已有执行意图，先核查');b.backendServiceId=v.record.serviceId;b.backendGeneration=v.record.generation;b.socket=v.record.socket;b.workspace=workspace;b.backendRequest={operationId:request.operationId,hash:fingerprint,state:'CREATING',generation:v.record.generation,baseCommit:request.baseCommit,prompt:request.prompt,createdAt:new Date().toISOString()};});
   await change(project,runId,assignmentId,'dispatch',request.operationId+'-intent');
-  await updateBinding(project,runId,assignmentId,b=>{b.backendServiceId=v.record.serviceId;b.backendGeneration=v.record.generation;b.socket=v.record.socket;b.workspace=workspace;b.backendRequest={operationId:request.operationId,hash:fingerprint,state:'CREATING',generation:v.record.generation,baseCommit:request.baseCommit,prompt:request.prompt,createdAt:new Date().toISOString()};});
   const developerInstructions='你是项目正式SYSTEM任务的独立软件工作Agent。只在分配的隔离worktree内修改明确资源；不操作故事业务、数据库、媒体、封存备份、凭据、公共服务。不得spawn其他Agent，不commit/push/deploy。使用受管process执行测试。遵守核心AGENTS。完成后输出指定JSON结果并结束，主Agent负责验收和关闭。\n正式任务：'+s.task.title+'\n派工：'+s.assignment.goal+'\n允许改动：'+JSON.stringify(s.assignment.resources)+'\n验收：'+JSON.stringify(s.assignment.acceptanceCriteria);
   const created=await v.client.call('thread/start',{cwd:workspace,model:s.assignment.execution.model,approvalPolicy:'never',sandbox:'danger-full-access',ephemeral:false,historyMode:'legacy',developerInstructions:developerInstructions+'\n'+decisionInstructions,dynamicTools:[decisionTool],serviceName:v.record.serviceId,config:{model_reasoning_effort:s.assignment.execution.effort}});
   const threadId=created.thread.id;
@@ -111,7 +112,7 @@ export async function dispatchBackend(project,runId,assignmentId,request){
   await v.client.flush();
   await observeParallel(project,v).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
   return withDecisionStatus(project,assignmentId,{assignmentId,serviceId:v.record.serviceId,nativeThreadId:threadId,turnId:turn.turn.id,status:'RUNNING',model:s.assignment.execution.model,effort:s.assignment.execution.effort});
- }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest){b.backendRequest.error=error.message;b.backendRequest.state='RESULT_UNKNOWN';}});throw error;}finally{v.client.close();}
+ }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest?.operationId===request.operationId&&b.backendRequest.hash===fingerprint){b.backendRequest.error=error.message;b.backendRequest.state='RESULT_UNKNOWN';}});throw error;}finally{v.client.close();}
 }
 export async function syncBackend(project,runId,assignmentId,{verifyServer=verifyBackendServer}={}){
  await restoreBackendReceipts(project,runId,assignmentId);
@@ -124,8 +125,9 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   const turns=await nativeTurns(v.client,s.binding.nativeThreadId);
   if(state.thread.status?.type==='active'&&s.binding.backendRequest.turnId)requireTask(turns.filter(t=>t.status==='inProgress').every(t=>t.id===s.binding.backendRequest.turnId),'BACKEND_TURN_MISMATCH：存在其他活动轮次，不能套用原轮次结果');
   let turn=turns.find(t=>t.id===s.binding.backendRequest.turnId);
-  if(!turn&&!s.binding.backendRequest.turnId){const previous=new Set((s.binding.backendHistory||[]).map(r=>r.turnId));const candidates=turns.filter(t=>!previous.has(t.id));requireTask(candidates.length<=1,'BACKEND_TURN_AMBIGUOUS：缺失回执且存在多个轮次');turn=candidates[0];}
-  if(!turn)return {assignmentId,status:'RESULT_UNKNOWN',reason:'未发现原轮次，不自动重新执行'};
+  // A single visible turn is not proof of the original operation. Only a durable
+  // receipt may supply its ID; a lost reply otherwise stays unknown.
+  if(!turn){await updateBinding(project,runId,assignmentId,b=>{requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId,'BACKEND_OPERATION_CHANGED：原操作已改变');b.backendRequest.state='RESULT_UNKNOWN';});return {assignmentId,status:'RESULT_UNKNOWN',reason:'未发现原轮次，不自动重新执行'};}
   requireTask(state.thread.status?.type!=='active'||turn.status==='inProgress','BACKEND_TURN_MISMATCH：线程活动状态与原轮次不符，保留现场');
   const status=turn.status==='completed'?'SUCCEEDED':['failed','interrupted'].includes(turn.status)?'FAILED':'RUNNING';
   let items=turn.items||[];
@@ -135,20 +137,30 @@ export async function syncBackend(project,runId,assignmentId,{verifyServer=verif
   }
   const final=items.filter(i=>i.type==='agentMessage').at(-1)?.text;let result;
   if(status==='SUCCEEDED'){try{result=JSON.parse(final);}catch{result=null;}}
-  await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.turnId=turn.id;b.backendRequest.state=status;b.backendRequest.nativeStatus=turn.status;b.backendRequest.error=turn.error||null;if(status!=='RUNNING')b.backendRequest.completedAt ||= new Date().toISOString();});
+  await updateBinding(project,runId,assignmentId,b=>{requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId&&(!b.backendRequest.turnId||b.backendRequest.turnId===turn.id),'BACKEND_OPERATION_CHANGED：原操作已改变');b.backendRequest.turnId=turn.id;b.backendRequest.state=status;b.backendRequest.nativeStatus=turn.status;b.backendRequest.error=turn.error||null;if(status!=='RUNNING')b.backendRequest.completedAt ||= new Date().toISOString();});
   const directory=path.join(s.loc.runtime,'backend-results');await mkdir(directory,{recursive:true,mode:0o700});
-  if(status!=='RUNNING')await atomic(path.join(directory,assignmentId+'.json'),{assignmentId,threadId:state.thread.id,turnId:turn.id,status,nativeStatus:turn.status,result,finalResponse:final||null,error:turn.error||null,checkedAt:new Date().toISOString()});
+  if(status!=='RUNNING'){
+   const saved={assignmentId,operationId:s.binding.backendRequest.operationId,originRunId:s.binding.originRunId||s.binding.runId,runId,serviceId:s.binding.backendServiceId,generation:v.record.generation,threadId:state.thread.id,turnId:turn.id,status,nativeStatus:turn.status,result,finalResponse:final||null,error:turn.error||null,checkedAt:new Date().toISOString()};
+   await atomic(path.join(directory,'operations',requestFingerprint({assignmentId,operationId:saved.operationId})+'.json'),saved);
+   await atomic(path.join(directory,assignmentId+'.json'),saved);
+  }
   await confirmDecisionFollowup(project,runId,assignmentId);
+  // A dispatch reply can arrive before its thread reports active. Sample actual
+  // overlap again while tracking running work, including recovered work.
+  if(status==='RUNNING')await observeParallel(project,v).catch(error=>atomic(path.join(s.loc.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
   await v.client.flush();
-  return withDecisionStatus(project,assignmentId,{assignmentId,status,nativeThreadId:state.thread.id,turnId:turn.id,resultReady:!!result,error:turn.error||null});
+  return withDecisionStatus(project,assignmentId,{assignmentId,operationId:s.binding.backendRequest.operationId,status,nativeThreadId:state.thread.id,turnId:turn.id,resultReady:!!result,error:turn.error||null});
  }finally{v.client.close();}
 }
 export async function collectBackend(project,runId,assignmentId,operationId){
  await assertNoPendingDecisions(project,assignmentId);
  const sync=await syncBackend(project,runId,assignmentId);requireTask(sync.status==='SUCCEEDED'&&sync.resultReady,'BACKEND_RESULT：尚无完整可验收结果');
- const s=await assigned(project,runId,assignmentId,{converging:true}),saved=JSON.parse(await readFile(path.join(s.loc.runtime,'backend-results',assignmentId+'.json'),'utf8'));
+ const s=await assigned(project,runId,assignmentId,{converging:true});
+ requireTask(s.binding.backendRequest.operationId===sync.operationId,'BACKEND_OPERATION_CHANGED：结果回收期间原操作已改变');
+ const saved=JSON.parse(await readFile(path.join(s.loc.runtime,'backend-results/operations',requestFingerprint({assignmentId,operationId:sync.operationId})+'.json'),'utf8'));
+ requireTask(saved.operationId===sync.operationId&&saved.threadId===s.binding.nativeThreadId&&saved.turnId===s.binding.backendRequest.turnId&&saved.status==='SUCCEEDED','BACKEND_RESULT：结果与原操作绑定不符');
  const r=saved.result;
- return change(project,runId,assignmentId,'result',operationId,{checkpoint:{summary:r.summary,completedSteps:r.completedSteps,nextSteps:r.nextSteps,artifacts:r.artifacts,inputs:['core '+s.binding.backendRequest.baseCommit],operations:[{id:s.binding.backendRequest.operationId,kind:'SOFTWARE_AGENT',status:'SUCCEEDED',evidence:'专属服务原轮次已完成，结果已回读保存'}]},result:{summary:r.summary,artifacts:r.artifacts,acceptance:r.acceptance}});
+ return change(project,runId,assignmentId,'result',operationId,{expectedBackendOperationId:sync.operationId,checkpoint:{summary:r.summary,completedSteps:r.completedSteps,nextSteps:r.nextSteps,artifacts:r.artifacts,inputs:['core '+s.binding.backendRequest.baseCommit],operations:[{id:s.binding.backendRequest.operationId,kind:'SOFTWARE_AGENT',status:'SUCCEEDED',evidence:'专属服务原轮次已完成，结果已回读保存'}]},result:{summary:r.summary,artifacts:r.artifacts,acceptance:r.acceptance}});
 }
 export async function closeBackend(project,runId,assignmentId){
  const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.nativeThreadId,'BACKEND_THREAD：原会话身份未知');
@@ -161,20 +173,26 @@ export async function closeBackend(project,runId,assignmentId){
   return {assignmentId,status:'NATIVE_CLOSED',history:'PRESERVED'};
  }finally{v.client.close();}
 }
-export async function recoverBackend(project,runId,assignmentId){
+export async function recoverBackend(project,runId,assignmentId,{ensureServer=ensureTaskServer,ensureChannel=ensureDecisionChannel,verifyServer=verifyBackendServer}={}){
  await restoreBackendReceipts(project,runId,assignmentId);
- const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.backendCreation?.threadId===s.binding.nativeThreadId,'BACKEND_RECOVERY：缺少原创建回执');
+ const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.nativeThreadId&&s.binding.backendCreation?.threadId===s.binding.nativeThreadId,'BACKEND_RECOVERY：缺少原创建回执');
  requireTask(!s.binding.closureReceipt,'BACKEND_CLOSED：已核验关闭的派工不得重新加载');
- await ensureTaskServer(project);await ensureDecisionChannel(project);const v=await verifyBackendServer(project,runId,assignmentId);
+ await ensureServer(project);await ensureChannel(project);const v=await verifyServer(project,runId,assignmentId);
  try{
   const thread=await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true});
   // Resume subscribes this persistent connection to the original thread. It
   // does not start a turn and does not transfer old callback IDs to a new one.
   await v.client.call('thread/resume',{threadId:s.binding.nativeThreadId,cwd:s.binding.workspace,approvalPolicy:'never'});
   await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client);
-  await updateBinding(project,runId,assignmentId,b=>{b.backendGeneration=v.record.generation;b.recoveredAt=new Date().toISOString();});
+  await updateBinding(project,runId,assignmentId,b=>{
+   requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId,'BACKEND_OPERATION_CHANGED：原操作已改变');
+   b.recoveryHistory||=[];
+   if(!b.recoveryHistory.some(r=>r.runId===runId&&r.generation===v.record.generation&&r.operationId===b.backendRequest.operationId))
+    b.recoveryHistory.push({runId,originRunId:b.originRunId||b.runId,operationId:b.backendRequest.operationId,serviceId:b.backendServiceId,previousGeneration:b.backendGeneration,generation:v.record.generation,threadId:b.nativeThreadId,turnId:b.backendRequest.turnId||null,checkpointOperationIds:(s.assignment.checkpoint?.operations||[]).map(op=>op.id),at:new Date().toISOString()});
+   b.backendGeneration=v.record.generation;b.recoveredAt=new Date().toISOString();
+  });
  }finally{v.client.close();}
- return syncBackend(project,runId,assignmentId);
+ return syncBackend(project,runId,assignmentId,{verifyServer});
 }
 async function observeParallel(project,v){
  const loc=await location(project),bindings=await readBindings(loc),ledger=await readLedger(loc),results=[];
@@ -218,7 +236,7 @@ export async function continueBackend(project,runId,assignmentId,request,{verify
  const v=await verifyServer(project,runId,assignmentId);
  try{
   await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client);
-  await updateBinding(project,runId,assignmentId,b=>{b.backendHistory||=[];b.backendHistory.push(b.backendRequest);b.backendRequest={operationId:request.operationId,hash:fingerprint,prompt:request.prompt,decisionIds:request.decisionIds||[],generation:v.record.generation,baseCommit:b.backendRequest.baseCommit,state:'TURN_STARTING',createdAt:new Date().toISOString()};});
+  await updateBinding(project,runId,assignmentId,b=>{requireTask(b.backendRequest.operationId===s.binding.backendRequest.operationId&&b.backendRequest.turnId===s.binding.backendRequest.turnId&&b.backendRequest.state==='SUCCEEDED'&&!b.closureReceipt,'BACKEND_OPERATION_CHANGED：上一轮状态或原操作已改变，不能并行续办');b.backendHistory||=[];b.backendHistory.push(b.backendRequest);b.backendRequest={operationId:request.operationId,hash:fingerprint,prompt:request.prompt,decisionIds:request.decisionIds||[],generation:v.record.generation,baseCommit:b.backendRequest.baseCommit,state:'TURN_STARTING',createdAt:new Date().toISOString()};});
   for(const id of request.decisionIds||[]){const current=await decisionSnapshot(project,id);await mutate(project,'decision:followup-start',{operationId:'dc-followup-'+decisionHash({operationId:request.operationId,decisionId:id}),actor:'PROJECT_CODEX',runId,...decisionVersions(current),followupOperationId:request.operationId});}
   const turn=await v.client.call('turn/start',{threadId:s.binding.nativeThreadId,input:[{type:'text',text:request.prompt}],model:s.assignment.execution.model,effort:s.assignment.execution.effort,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'},outputSchema:schema});
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.turnId=turn.turn.id;b.backendRequest.startedAt=new Date().toISOString();b.backendRequest.state='RUNNING';});

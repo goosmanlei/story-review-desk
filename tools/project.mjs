@@ -136,7 +136,7 @@ export async function createProject(
   );
   await writeFile(
     path.join(root, "README.md"),
-    `# ${title}\n\n一个项目绑定一个故事。网页、项目 CLI 与助手共用对象服务。\n\n- [工作规则](AGENTS.md)\n- [运行与维护状态](STATE.md)\n- [软件及部署说明](review-software/README.md)\n\n运行 \`npm run deploy\` 部署本机核心仓库当前已提交版本；\`npm run deploy -- --help\` 查看目标与恢复选项。\n`,
+    `# ${title}\n\n一个项目绑定一个故事。网页、项目 CLI 与助手共用对象服务。\n\n- [工作规则](AGENTS.md)\n- [运行与维护状态](STATE.md)\n- [软件及部署说明](review-software/README.md)\n- [App Server](review-software/docs/handbook/chapters/operations.md#app-server-foundation)\n\n运行 \`npm run deploy\` 部署本机核心仓库当前已提交版本；\`npm run deploy -- --help\` 查看目标与恢复选项。\n`,
     { flag: "wx" },
   );
   await writeFile(

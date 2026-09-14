@@ -215,6 +215,60 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 
 完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
 
+### App Server Foundation
+
+通用核心 `tools/app-service.mjs` 统一维护专属服务生命周期和身份核验，`tools/execution-runtime.mjs` 提供本机范围绑定、boot 身份及持久写入。正式任务通过 `task-backend.mjs` 接入，`task-server.mjs` 保留兼容入口和容量、关闭探测策略。服务层不读取正式任务内容，不依赖故事名称、某项任务或固定机器路径；实例 ID 与规范项目根派生的身份和既有 runtime 地址在升级后保持稳定。
+
+| 基础接口 | 调用契约 |
+| --- | --- |
+| `serverPaths(project)` | 显式标准项目根；验证本机范围，返回实例私有路径和服务身份 |
+| `ensureAppService(project)` | 启动锁内复用健康服务，或重建可证明已退出的所属服务；原启动未知时停止 |
+| `verifyAppService(project)` | 联合核对进程/boot、命令、二进制、socket 和 RPC 配置，返回由调用方关闭的连接 |
+| `stopAppService(project, {assertIdle})` | 调用方先核查全部执行占用，再验证无加载线程，仅终止核验所属的子进程 |
+
+正式任务生命周期 CLI 仍经 guard + process；基础接口不代替调度、业务授权或任务验收。配置中的线程上界不代替最多 3 项正式任务、实际容量和资源互斥检查。supervisor 退出但子服务仍可核验时复用原服务，不再次启动实例。
+
+标准 project create、installSourceOnly 和部署升级沿用固定提交的受管源码安装流程，一并交付服务模块、Skill 与手册，项目副本不维护补丁。接收器 ESM 依赖由 `decisionChannelSources` 一起打包，包含任务编号、基础服务和运行记录模块，必须在独立目录实际验证载入。运行中的旧接收器保留代码与连接到原派工收敛，不热替换。
+
+`instance/runtime/task-execution` 的记录仅属于本机：
+
+| 位置 | 恢复用途 |
+| --- | --- |
+| `scope.json` | 本机身份摘要、实例 ID 和规范根目录；跨机器/目录复制不能继承执行资格 |
+| `server/server.json`、`launch.json`、`launch-process.json`、`generations/` | 当前/历史服务代次、启动意图及进程回执；状态目录仍为 `server/state` |
+| `run.json`、`runs/`、`activities/` | 当前/历史协调运行、上一运行编号、boot 身份及受管命令占用 |
+| `bindings.json` | 原协调运行、派工、工作区、原操作、线程/轮次、归属转换及恢复历史 |
+| `decision-channel/calls/` | 以派工、原 operationId、方法定位的调用意图、成功回执或 UNKNOWN |
+| `backend-results/operations/` | 原操作索引的结果回读；派工结果文件保留兼容读取入口 |
+
+关键回执通过文件 fsync、原子替换及目录 fsync 保存；账本仍只追加，不重写旧事件。机器路径、进程、线程、租约和执行资格不进入公开核心或普通项目包。安装/升级不创建协调运行；复制或导入保留长期事实，不恢复历史执行权限。
+
+#### 三类恢复入口与原操作对账
+
+| 中断类型 | 恢复入口与核查 |
+| --- | --- |
+| 专属服务异常退出 | 原 run 有效时，经受管阶段 `backend recover --run RUN_ID --assignment ASSIGNMENT_ID`；核对原服务代次和原回执，必要时重建同实例服务，只订阅原线程并读取原轮次 |
+| 协调会话退出 | 主 Agent 核查旧协调者明确失效，取得新 run；assignment reconcile 携带任务/派工版本、expectedRunId、检查点和五项核查，再 recover 原派工；旧进程存活时租约过期也不能接管 |
+| 同实例机器重启 | 本机 scope 必须匹配；核验旧 boot 与当前启动不同，核查过期活动、工作区和回执。新 run 关联旧 run，再按 reconcile/recover 续办，不依赖旧 PID、连接或内存 |
+
+归属在账本锁内通过版本 CAS 更新，保留 originRunId、旧/新 run、检查点操作及 backend operationId。未确认关闭的 Agent、资源与正式任务占用继续保留。重复恢复只重复核查，不创建线程或工作轮次；已关闭派工拒绝恢复加载。旧协调者身份缺失、归属不符或原命令仍活跃时停止接管，保存恢复输入。
+
+| 中断窗口 | 允许的恢复行为 |
+| --- | --- |
+| 完整意图已保存，创建/发送尚无回执 | 保留原 prompt、operationId 和 CREATING/PENDING；不能用新编号重试 |
+| 成功调用回执已保存，派工绑定未更新 | 精确校验派工、操作、服务代次和工作区后，补齐原线程/轮次 |
+| 原操作实际完成，结果回执未保存 | 已有精确 turnId 时回读原结果；无法证明原 turnId 时保持 UNKNOWN，唯一可见轮次也不是证明 |
+| 原操作仍在执行 | 跟踪原线程/轮次；恢复订阅不发送 turn/start |
+| 请求重复到达或并发 FOLLOWUP | 原调用锁和持久意图防重复发送；成功复用回执，UNKNOWN 先对账；新续办还须原操作状态 CAS |
+
+同一 boot 内缺失 supervisor/子进程回执，不代表创建从未发生，不能只凭旧 PID 消失再启动。重启证明只说明旧进程不再存在，不能说明原工作是否完成。无法核验结果时保持 UNKNOWN、原编号与输入，阻断自动重试。
+
+keeper 关闭循环遇到 `PROCESS_LOCK_BUSY` 时保留 executor 锁，输出 `EXECUTOR_LOCK_BUSY` 并重新核查，不延长租约。guard 在租约失效时照常拒绝执行；`PROCESS_LOCK_UNAVAILABLE` 等故障保留诊断。不能删除内核锁文件、更改绑定或手动延长资格绕过闸门。
+
+派工返回时线程可能尚未报告 active；`backend sync` 跟踪原运行轮次时也采集同服务的实际重叠。只有保存的活动样本与原轮次、成果、逐项验收及物理关闭一致，才通过真实并行核验；旧样本无法验收时不改写为成功。
+
+故障验证使用受管隔离 fixture：实际终止假服务/协调进程、持久原操作回执、跨 Node 进程读取和受控 boot 身份切换，分别记录窗口与执行计数。模拟 boot 切换不等于真实机器重启；实际重启、项目固定版本升级、本地/VPS 部署和源码推送各需独立回执，未执行部分如实标记。
+
 ### 检查点、恢复与完成
 
 #### 用户决策通路

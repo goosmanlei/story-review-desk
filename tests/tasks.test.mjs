@@ -12,6 +12,7 @@ import {persistDecisionMessage,drainDecisionInbox,listDecisions} from '../tools/
 import {installTaskSkill} from '../tools/task-skill.mjs';
 import {main as tasksMain} from '../tools/tasks.mjs';
 import {renderTasks} from '../tools/task-format.mjs';
+import {processLock,processAlive} from '../tools/process-resources.mjs';
 
 const require=createRequire(import.meta.url),MarkdownIt=require('markdown-it');
 const cli=fileURLToPath(new URL('../tools/tasks.mjs',import.meta.url));
@@ -245,4 +246,24 @@ test('symlinked task cards are never overwritten',async t=>{
   const root=await fixture(t), a=await publish(root), target=path.join(root,'protected');await writeFile(target,'keep');
   const card=path.join(root,'tasks/items',a.taskId+'.md');await rm(card);await symlink(target,card);
   await assert.rejects(rebuild(root),/不安全/);assert.equal(await readFile(target,'utf8'),'keep');
+});
+
+test('keeper survives closure lock contention while expired lease still rejects guarded commands',async t=>{
+ const root=await fixture(t),owner=await run(t,root),taskId=(await publish(root)).taskId;
+ await next(root,owner.id);const loc=await location(root),runFile=path.join(loc.runtime,'run.json');
+ const notice=new Promise((resolve,reject)=>{
+  let output='';const timer=setTimeout(()=>reject(Error('missing keeper lock contention notice')),10000);
+  owner.child.stdout.on('data',chunk=>{output+=chunk;for(const line of output.split('\n')){try{const value=JSON.parse(line);if(value.status==='EXECUTOR_LOCK_BUSY'){clearTimeout(timer);resolve(value);}}catch{}}});
+ });
+ const closed=once(owner.child,'close');
+ await processLock(path.join(loc.runtime,'ledger.lock'),async()=>{
+  const expired=JSON.parse(await readFile(runFile,'utf8'));expired.expiresAt='2000-01-01T00:00:00.000Z';await writeFile(runFile,JSON.stringify(expired));
+  const event=await notice;assert.equal(event.runId,owner.id);assert.equal(event.executionLease,'UNCHANGED');assert.equal(processAlive(expired.owner),true);
+  const guard=spawn(process.execPath,[cli,'guard','--project',root,'--run',owner.id,'--task',taskId,'--',process.execPath,'-e',"require('node:fs').writeFileSync('must-not-execute','unsafe')"],{stdio:['ignore','pipe','pipe']});
+  let error='';guard.stderr.on('data',x=>error+=x);guard.stdout.resume();const [code]=await once(guard,'close');assert.notEqual(code,0);assert.match(error,/执行资格失效/);
+  await assert.rejects(readFile(path.join(root,'must-not-execute')),e=>e.code==='ENOENT');
+  assert.equal((await readFile(runFile,'utf8')).includes('2000-01-01'),true,'锁争用不会续租');
+ });
+ const result=await Promise.race([closed,new Promise((_,reject)=>{const timer=setTimeout(()=>reject(Error('keeper did not close after lock release')),8000);timer.unref();})]);
+ assert.equal(result[0],0);assert((await runtimeState(root)).run.closedAt);
 });

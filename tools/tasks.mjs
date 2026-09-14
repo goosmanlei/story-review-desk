@@ -118,7 +118,8 @@ FOLLOWUP_READY 后才能 decisions followup；已关闭派工须关闭收尾并�
 assignment dispatch: {}，创建前保存尝试；start: {workspaceEvidence,workspace（本机路径仅存 runtime）,nativeThreadId（SubAgent 必填）}
 checkpoint: {checkpoint,goalStatus}; result: {checkpoint,result:{summary,artifacts:[],acceptance:[{criterion:0,evidence}]}}
 accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason};
-reconcile: {checkpoint,reconciliation:{processes,workspace,versions,operations,agent}}。
+reconcile: {checkpoint,expectedRunId?:"原协调运行编号",reconciliation:{processes,workspace,versions,operations,agent}}。
+跨协调运行核查已保存的原运行身份，旧进程未明确失效时拒绝；expectedRunId 与任务/派工版本共同核验归属。
 专属服务长派工使用 FOLLOWUP；backend continue 只续办同一未交回派工。未验证关闭则主 Agent 执行。
 TASK_CAPACITY 表示项目已占用 3 个不同任务；同任务辅助派工只增加 Agent 占用。
 MAIN_CAPACITY / AGENT_CAPACITY 仍按实际能力限制执行。交回或空闲不释放占用，
@@ -145,6 +146,7 @@ async function keeper(project) {
     for(const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s,stop);
     try {
       while(true) {
+       try {
         const state=await runtimeState(project);
         const decisions=await listDecisions(project),notice=decisionHash(decisions.map(d=>[d.id,d.status,d.needsPresentation]));
         if(notice!==decisionNotice&&(decisions.length||decisionNotice)){
@@ -157,6 +159,12 @@ async function keeper(project) {
           try { await stopRun(project,run.id,{close:true}); break; }
           catch(e) { if(!e.message.includes('仍在运行')) throw e; }
         }
+       } catch(e) {
+        // Contention is not coordinator death. Retain the executor lock and
+        // retry only discovery/closure; this never renews an expired lease.
+        if(e.code!=='PROCESS_LOCK_BUSY')throw e;
+        console.log(JSON.stringify({status:'EXECUTOR_LOCK_BUSY',runId:run.id,action:'RECHECK',executionLease:'UNCHANGED'}));
+       }
         await new Promise(r=>setTimeout(r,1000));
       }
     } finally { for(const s of ['SIGINT','SIGTERM','SIGHUP']) process.off(s,stop); }

@@ -5,16 +5,17 @@ import {mkdir,readFile,writeFile,lstat,unlink,chmod} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {location,readBindings,readLedger,requireRun,requireTask} from './task-ledger.mjs';
-import {serverPaths,verifyTaskServer} from './task-server.mjs';
+import {serverPaths,verifyAppService as verifyTaskServer} from './app-service.mjs';
 import {processLock,processAlive,processIdentity} from './process-resources.mjs';
 import {plainDirectory} from './io.mjs';
+import {bootIdentity} from './execution-runtime.mjs';
 import {connectNative} from './task-native.mjs';
 import {decisionHash} from './task-decision-protocol.mjs';
 import {durableDecisionFile,readDecisionFile,persistDecisionMessage,drainDecisionInbox,deliverDecision} from './task-decisions.mjs';
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
-export const decisionChannelSources=Object.freeze(['task-decision-daemon.mjs','task-decision-channel.mjs','task-decisions.mjs','task-decision-state.mjs','task-decision-protocol.mjs','task-native.mjs','native-socket.mjs','task-ledger.mjs','task-numbering.mjs','task-assignments.mjs','task-capacity.mjs','task-format.mjs','task-server.mjs','task-server-daemon.mjs','process-resources.mjs','io.mjs'].map(f=>'tools/'+f).concat('server/transport-contract.mjs'));
+export const decisionChannelSources=Object.freeze(['task-decision-daemon.mjs','task-decision-channel.mjs','task-decisions.mjs','task-decision-state.mjs','task-decision-protocol.mjs','task-native.mjs','native-socket.mjs','task-ledger.mjs','task-numbering.mjs','task-assignments.mjs','task-capacity.mjs','task-format.mjs','task-server.mjs','app-service.mjs','execution-runtime.mjs','task-server-daemon.mjs','process-resources.mjs','io.mjs'].map(f=>'tools/'+f).concat('server/transport-contract.mjs'));
 const rpcMethods=new Set(['thread/start','thread/resume','thread/name/set','thread/read','thread/loaded/list','thread/turns/list','thread/items/list','thread/goal/get','thread/goal/set','thread/backgroundTerminals/list','thread/backgroundTerminals/terminate','thread/archive','turn/start','turn/interrupt']);
 export async function channelPaths(project) {
  const p=await serverPaths(project),directory=path.join(p.runtime,'decision-channel');
@@ -52,7 +53,7 @@ export async function ensureDecisionChannel(project) {
    requireTask(previous.sourceDigest===sourceDigest,'DECISION_CHANNEL_VERSION：接收器运行旧代码；先收敛派工并停止服务，再加载新版本');
    await callDecisionChannel(project,{action:'ping'});return {...previous,reused:true};
   }
-  requireTask(!previous||previous.process||previous.status!=='STARTING','DECISION_CHANNEL_START_UNKNOWN：原启动身份未知，先核查原进程');
+  requireTask(!previous||previous.process||previous.status!=='STARTING'||previous.bootId&&previous.bootId!==bootIdentity(),'DECISION_CHANNEL_START_UNKNOWN：原启动身份未知，先核查原进程');
   if(previous){await persistDecisionMessage(project,previous,previous.id,{method:'connection/closed',params:{}});await drainDecisionInbox(project);}
   const socket=await lstat(p.channelSocket).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
   if(socket){requireTask(previous?.serviceId===p.serviceId&&previous.root===p.root&&previous.socketIdentity?.dev===socket.dev&&previous.socketIdentity.ino===socket.ino&&!processAlive(previous.process),'DECISION_CHANNEL_SOCKET：未知占用，保留现场');await unlink(p.channelSocket);}
@@ -63,7 +64,7 @@ export async function ensureDecisionChannel(project) {
    if(prior)requireTask(prior.isFile()&&!prior.isSymbolicLink()&&await readFile(target,'utf8')===data,'DECISION_CHANNEL_CODE：恢复代码被修改，保留现场');
    else await writeFile(target,data,{flag:'wx',mode:0o600});
   }
-  const launch=path.join(p.directory,'launch.json'),spec={id:randomUUID(),root:p.root,serviceId:p.serviceId,generation:v.record.generation,sourceDigest,socket:p.channelSocket};
+  const launch=path.join(p.directory,'launch.json'),spec={id:randomUUID(),bootId:bootIdentity(),root:p.root,serviceId:p.serviceId,generation:v.record.generation,sourceDigest,socket:p.channelSocket};
   await durableDecisionFile(launch,spec);
   await durableDecisionFile(p.channelRecord,{...spec,status:'STARTING',startedAt:new Date().toISOString()});
   const env={...process.env};for(const key of ['REVIEW_PROCESS_CONTEXT','REVIEW_TASK_ID','REVIEW_TASK_DIR','TMPDIR','TMP','TEMP','TEST_TMPDIR','XDG_CACHE_HOME','npm_config_cache','CODEX_THREAD_ID','CODEX_SESSION_ID'])delete env[key];
@@ -144,6 +145,13 @@ export async function runDecisionChannel(spec,{verifyServer=verifyTaskServer,han
      const mutating=['thread/start','thread/resume','turn/start','turn/interrupt','thread/archive','thread/backgroundTerminals/terminate','thread/goal/set'].includes(req.method);
      const perform=async()=>{
       if(once){const prior=await readDecisionFile(file);if(prior){requireTask(decisionHash(prior.params)===decisionHash(req.params),'DECISION_CHANNEL_REPLAY：原调用内容不符');requireTask(prior.state==='SUCCEEDED','DECISION_CHANNEL_RESULT_UNKNOWN：原调用未核查，不重发');return prior.result;}}
+      // The request may have waited for the operation lock while its owner or
+      // original intent changed. Recheck the lease and binding before sending.
+      if(once){
+       await requireRun(p,req.runId);
+       const current=(await readBindings(p)).assignments[req.assignmentId];
+       requireTask(current?.runId===req.runId&&current.backendServiceId===spec.serviceId&&!current.closureReceipt&&!current.retiredAt&&current.backendRequest?.operationId===b.backendRequest.operationId&&current.backendRequest.state===b.backendRequest.state,'DECISION_CHANNEL_ASSIGNMENT：等待锁期间执行归属或原意图已改变');
+      }
       if(mutating)await durableDecisionFile(file,intent);
       try{const result=await v.client.call(req.method,req.params);if(mutating)await durableDecisionFile(file,{...intent,state:'SUCCEEDED',result,completedAt:new Date().toISOString()});return result;}
       catch(error){if(mutating)await durableDecisionFile(file,{...intent,state:'RESULT_UNKNOWN',error:error.message});throw error;}

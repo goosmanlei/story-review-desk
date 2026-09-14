@@ -222,9 +222,12 @@
         "tools/task-decision-protocol.mjs",
         "tools/task-decision-state.mjs",
         "tools/task-decisions.mjs",
-        "tools/task-numbering.mjs"
+        "tools/task-numbering.mjs",
+        "tools/app-service.mjs",
+        "tools/execution-runtime.mjs",
+        "tools/project.mjs"
       ],
-      "sourceDigest": "150c9fa56ca156befe3b7f7846b665f66e32204839e1038daa5d73b44da12580"
+      "sourceDigest": "c92da72deb0a370c991b117d82d0259b1c7c068bacc50a4afea21e89181d5eea"
     },
     {
       "id": "instance",

@@ -2,7 +2,8 @@ import path from 'node:path';
 import os from 'node:os';
 import {createHash, randomUUID} from 'node:crypto';
 import {mkdir, readFile, readdir, lstat, open, link, unlink, realpath} from 'node:fs/promises';
-import {atomic, plainDirectory} from './io.mjs';
+import {plainDirectory} from './io.mjs';
+import {durableExecutionFile as atomic,executionLocation,bindExecutionScope,bootIdentity} from './execution-runtime.mjs';
 import {processLock, processIdentity, processAlive} from './process-resources.mjs';
 import {assignmentMutation, assignmentOpen, assignmentUnknown} from './task-assignments.mjs';
 import {renderTasks,taskLabels,renderAssignments,formatTaskDate,sortTasks} from './task-format.mjs';
@@ -44,10 +45,7 @@ export function validateSpec(s, {discussionRequired=false,batch=false}={}) {
 }
 
 export async function location(project) {
-  const root=await realpath(path.resolve(project)); await plainDirectory(root);
-  const instance=await maybe(path.join(root,'instance/instance.json'));
-  requireTask(instance?.id,'必须显式指向含 instance/instance.json 的故事项目根目录');
-  return {root,projectId:instance.id,events:path.join(root,'tasks/events'),runtime:path.join(root,'instance/runtime/task-execution')};
+  const loc=await executionLocation(project);await plainDirectory(loc.root);return loc;
 }
 
 export async function readLedger(project) {
@@ -177,14 +175,15 @@ export async function setRunPolicy(project,runId,policy){
 }
 export async function withRuntime(project,callback) {
   const loc=await location(project); await directory(loc.runtime);
-  return processLock(path.join(loc.runtime,'ledger.lock'),()=>callback(loc));
+  return processLock(path.join(loc.runtime,'ledger.lock'),async()=>{await bindExecutionScope(loc);return callback(loc);});
 }
 export async function startRun(project,{capabilities}={}) {
   return withRuntime(project,async loc=>{
     requireTask(!(await readLedger(loc)).pendingUpgrade,'先重放原 upgrade 操作完成协议升级');
     const old=await maybe(path.join(loc.runtime,'run.json'));
+    if(old)requireTask(old.root===loc.root&&old.projectId===loc.projectId&&old.host===os.hostname(),'旧执行记录属于其他机器或目录；不能复制执行资格');
     if(old&&!old.closedAt) {
-      requireTask(old.root===loc.root&&old.host===os.hostname(),'旧执行记录属于其他机器或目录；不能复制执行资格');
+      requireTask(Number.isInteger(old.owner?.pid)&&old.owner.pid>0&&typeof old.owner.birth==='string'&&old.owner.birth,'RECOVERY_OWNER_UNKNOWN：缺少原协调者身份，不能按租约接管');
       requireTask(!processAlive(old.owner),'已有执行会话；即使租约超时也不接管存活进程');
     }
     if(await activeActivity(loc)) {
@@ -193,7 +192,9 @@ export async function startRun(project,{capabilities}={}) {
         requireTask(a.assignmentId&&Object.values(ledger.tasks).some(t=>t.assignments?.some(x=>x.id===a.assignmentId&&assignmentOpen(x))),'原执行命令仍在运行且缺少可隔离派工，先核查原进程');
       }
     }
-    const run={id:randomUUID(),root:loc.root,host:os.hostname(),projectId:loc.projectId,owner:processIdentity(),startedAt:timestamp(),expiresAt:new Date(Date.now()+600000).toISOString(),capabilities:capabilities||{delegation:false,closeVerified:false,goalVerified:false,availableSlots:0,limitation:'本次执行尚未验证原生关闭能力'}};
+    if(old)await atomic(path.join(loc.runtime,'runs',old.id+'.json'),{...old,supersededAt:timestamp()});
+    const run={id:randomUUID(),previousRunId:old?.id||null,recoveryKind:old?(old.owner?.bootId&&old.owner.bootId!==bootIdentity()?'MACHINE_RESTART':'COORDINATOR_EXIT'):null,root:loc.root,host:os.hostname(),projectId:loc.projectId,owner:processIdentity(),startedAt:timestamp(),expiresAt:new Date(Date.now()+600000).toISOString(),capabilities:capabilities||{delegation:false,closeVerified:false,goalVerified:false,availableSlots:0,limitation:'本次执行尚未验证原生关闭能力'}};
+    await atomic(path.join(loc.runtime,'runs',run.id+'.json'),run);
     await atomic(path.join(loc.runtime,'run.json'),run); return run;
   });
 }
@@ -312,7 +313,13 @@ export async function mutate(project,action,request) {
       if(action==='schedule'&&run.policy?.stopAfterTaskId&&terminal.has(tasks[run.policy.stopAfterTaskId]?.status))return {status:'PAUSED_BY_POLICY',assignments:[],deferred:[]};
       result=await assignmentMutation({action,request,tasks,at,touch,get,bindings,checkpoint,complete,
         decisionBlocked:async id=>{const {unappliedDecisionRequest}=await import('./task-decisions.mjs');return unappliedDecisionRequest(loc,bindings.assignments[id]?.nativeThreadId);},
-        requireRun:()=>requireRun(loc,request.runId,{converging}),active:id=>activeActivity(loc,id),capabilities:run.capabilities,root:loc.root,
+        requireRun:()=>requireRun(loc,request.runId,{converging}),reconcileOwner:async binding=>{
+          requireTask(!request.expectedRunId||request.expectedRunId===binding.runId,'RECOVERY_CAS：派工原协调运行已改变');
+          if(binding.runId&&binding.runId!==request.runId){
+            const previous=await maybe(path.join(loc.runtime,'runs',binding.runId+'.json'));
+            requireTask(previous&&previous.root===loc.root&&previous.projectId===loc.projectId&&previous.host===os.hostname()&&Number.isInteger(previous.owner?.pid)&&previous.owner.pid>0&&previous.owner.birth&&!processAlive(previous.owner),'RECOVERY_OWNER_UNKNOWN：原协调者未明确失效');
+          }
+        },active:id=>activeActivity(loc,id),capabilities:run.capabilities,root:loc.root,
         idFor:s=>'A-'+digest(request.operationId+':'+s).slice(0,20)});
       if(!changed.size)return result;
     } else if(action==='next') {

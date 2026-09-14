@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {mkdtemp,mkdir,writeFile,rm,stat} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,stat} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {mutate,readLedger,readBindings,startRun,updateBinding,location} from '../tools/task-ledger.mjs';
-import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend,restoreBackendReceipts} from '../tools/task-backend.mjs';
+import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend,restoreBackendReceipts,syncBackend} from '../tools/task-backend.mjs';
 import {closeNativeThread} from '../tools/task-native.mjs';
 import {decisionHash} from '../tools/task-decision-protocol.mjs';
 import {durableDecisionFile} from '../tools/task-decisions.mjs';
@@ -242,4 +243,103 @@ test('persisted connection receipts recover lost thread and turn replies without
  await save('turn/start',{turn:{id:'wrong-turn'}},{serviceId:'other-service'});
  await assert.rejects(restoreBackendReceipts(state.root,state.run.id,state.assignment.id),/BACKEND_RECEIPT/);
  assert.equal((await readBindings(binding.loc)).assignments[state.assignment.id].backendRequest.turnId,undefined);
+});
+
+// Every RPC reads this fixture's disk state, including after a fresh Node
+// process. No native socket, host authentication or model is involved.
+async function persistedNativeOptions(file) {
+ const {readFile,writeFile}=await import('node:fs/promises');
+ const read=async()=>JSON.parse(await readFile(file,'utf8'));
+ const client={close(){},async flush(){},async call(method,params){
+  const state=await read();state.calls.push({method,params});
+  if(['thread/start','turn/start'].includes(method))throw Error('Recovery must never start work');
+  let result;
+  if(method==='thread/resume'){state.loaded=true;result={thread:{id:state.threadId}};}
+  else if(method==='thread/read')result={thread:{id:state.threadId,cwd:state.workspace,status:{type:!state.loaded?'notLoaded':state.turn.status==='inProgress'?'active':'idle'}}};
+  else if(method==='thread/loaded/list')result={data:state.loaded?[state.threadId]:[]};
+  else if(method==='thread/turns/list')result={data:[state.turn]};
+  else throw Error('Unexpected fixture RPC '+method);
+  await writeFile(file,JSON.stringify(state));return result;
+ }};
+ return {ensureServer:async()=>{},ensureChannel:async()=>{},verifyServer:async()=>({record:(await read()).service,client})};
+}
+
+test('recovery tracks the original running turn and recollects completion from disk in a fresh process',async t=>{
+ const s=await fixture(t),binding=await bindThread(s),operationId='original-durable-work';
+ await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={operationId,turnId:'original-turn',generation:'fixture-generation',state:'RUNNING'};});
+ const file=path.join(s.root,'isolated-native.json'),final={summary:'completed once',artifacts:[],acceptance:[{criterion:0,evidence:'fixture effect counter = 1'}],completedSteps:['original work'],nextSteps:[]};
+ await writeFile(file,JSON.stringify({service:{serviceId:binding.serviceId,generation:'replacement-generation'},threadId:binding.threadId,workspace:binding.workspace,loaded:true,turn:{id:'original-turn',status:'inProgress',items:[]},effectCount:1,calls:[]}));
+ const options=await persistedNativeOptions(file);
+ assert.equal((await recoverBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');
+ assert.equal((await recoverBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');
+ let saved=(await readBindings(binding.loc)).assignments[s.assignment.id];
+ assert.equal(saved.recoveryHistory.length,1);assert.equal(saved.recoveryHistory[0].operationId,operationId);
+ assert.equal(saved.recoveryHistory[0].previousGeneration,'fixture-generation');
+ // Actual operation completion is persisted by the fake native service;
+ // the coordinator has no result receipt and its old connection is unloaded.
+ const native=JSON.parse(await readFile(file,'utf8'));native.loaded=false;native.turn.status='completed';native.turn.items=[{type:'agentMessage',text:JSON.stringify(final)}];await writeFile(file,JSON.stringify(native));
+ await assert.rejects(readFile(path.join(binding.loc.runtime,'backend-results',s.assignment.id+'.json')),e=>e.code==='ENOENT');
+ const module=new URL('../tools/task-backend.mjs',import.meta.url).href;
+ const code=`import {readFileSync} from 'node:fs';const x=JSON.parse(readFileSync(0,'utf8'));const {recoverBackend}=await import(x.module);const options=await (${persistedNativeOptions.toString()})(x.file);console.log(JSON.stringify(await recoverBackend(x.root,x.runId,x.assignmentId,options)));`;
+ const result=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',code],{cwd:s.root,encoding:'utf8',input:JSON.stringify({file,module,root:s.root,runId:s.run.id,assignmentId:s.assignment.id})}));
+ assert.equal(result.status,'SUCCEEDED');assert.equal(result.resultReady,true);
+ const recovered=JSON.parse(await readFile(path.join(binding.loc.runtime,'backend-results',s.assignment.id+'.json'),'utf8'));
+ assert.equal(recovered.operationId,operationId);assert.equal(recovered.turnId,'original-turn');assert.deepEqual(recovered.result,final);
+ const historical=path.join(binding.loc.runtime,'backend-results/operations',requestFingerprint({assignmentId:s.assignment.id,operationId})+'.json');
+ assert.equal(JSON.parse(await readFile(historical,'utf8')).operationId,operationId);
+ assert.equal((await recoverBackend(s.root,s.run.id,s.assignment.id,options)).status,'SUCCEEDED');
+ const after=JSON.parse(await readFile(file,'utf8'));assert.equal(after.effectCount,1);assert(!after.calls.some(c=>['thread/start','turn/start'].includes(c.method)));
+ assert(after.calls.filter(c=>c.method==='thread/resume').every(c=>c.params.threadId===binding.threadId));
+});
+
+test('all unresolved creation windows retain their original operation and never infer a turn from history',async t=>{
+ const s=await fixture(t),binding=await bindThread(s),request={operationId:'uncertain-original',prompt:'original input',workspace:binding.workspace,baseCommit:'a'.repeat(40)};
+ const file=path.join(s.root,'isolated-native.json');
+ await writeFile(file,JSON.stringify({service:{serviceId:binding.serviceId,generation:'fixture-generation'},threadId:binding.threadId,workspace:binding.workspace,loaded:true,turn:{id:'unproven-visible-turn',status:'completed',items:[]},effectCount:1,calls:[]}));
+ const options=await persistedNativeOptions(file);
+ for(const state of ['CREATING','PENDING','RESULT_UNKNOWN']){
+  await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={...request,hash:requestFingerprint(request),state,generation:'fixture-generation'};});
+  assert.equal((await syncBackend(s.root,s.run.id,s.assignment.id,options)).status,'RESULT_UNKNOWN');
+  const saved=(await readBindings(binding.loc)).assignments[s.assignment.id];
+  assert.equal(saved.backendRequest.operationId,request.operationId);assert.equal(saved.backendRequest.turnId,undefined);
+  await assert.rejects(dispatchBackend(s.root,s.run.id,s.assignment.id,{...request,operationId:'replacement-id'}),/BACKEND_REPLAY/);
+ }
+ assert.equal(JSON.parse(await readFile(file,'utf8')).effectCount,1);
+});
+
+test('result collection uses original operation CAS and cannot accept a concurrently replaced or unresolved turn',async t=>{
+ const s=await fixture(t);await assignmentChange(s,'assignment:dispatch');const b=await bindThread(s);
+ await writeFile(path.join(b.workspace,'.git'),'fixture worktree identity');
+ await assignmentChange(s,'assignment:start',{nativeThreadId:b.threadId,workspace:b.workspace,workspaceEvidence:'isolated fixture'});
+ const extra={expectedBackendOperationId:'completed-original',checkpoint:{summary:'original completion',operations:[{id:'completed-original',kind:'FIXTURE',status:'SUCCEEDED',evidence:'read original turn'}]},result:{summary:'collected',artifacts:[],acceptance:[{criterion:0,evidence:'original result'}]}};
+ await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={operationId:'concurrent-followup',state:'RUNNING'};});
+ await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED/);
+ await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={operationId:'completed-original',state:'RESULT_UNKNOWN'};});
+ await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED/);
+ await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest.state='SUCCEEDED';});
+ await assignmentChange(s,'assignment:result',extra);
+ assert.equal((await readLedger(s.root)).tasks[s.taskId].assignments[0].status,'DELIVERED');
+});
+
+
+test('tracking running work refreshes overlap evidence after dispatch initially observes an idle peer',async t=>{
+ const s=await fixture(t),current=(await readLedger(s.root)).tasks[s.taskId];
+ const scheduled=await mutate(s.root,'schedule',request({runId:s.run.id,expectedVersions:{[s.taskId]:current.version},assignments:[{taskId:s.taskId,key:'peer',goal:'independent overlap fixture',deliverables:['evidence'],acceptanceCriteria:['overlap'],resources:[{kind:'FILE',key:'core/tests/independent-peer.mjs',access:'WRITE'}],execution:{rationale:'independent fixture'}}]}));
+ const peer={...s,assignment:scheduled.assignments[0]},states=[s,peer],threads={};
+ for(const [i,state]of states.entries()){
+  await assignmentChange(state,'assignment:dispatch');
+  const binding=await bindThread(state,{threadId:'overlap-thread-'+i,workspace:path.join(s.root,'.process','peer-'+i)});
+  await writeFile(path.join(binding.workspace,'.git'),'isolated worktree identity');
+  await assignmentChange(state,'assignment:start',{nativeThreadId:binding.threadId,workspace:binding.workspace,workspaceEvidence:'isolated fixture'});
+  await updateBinding(s.root,s.run.id,state.assignment.id,b=>{b.backendRequest={operationId:'overlap-operation-'+i,turnId:'overlap-turn-'+i,generation:'fixture-generation',state:'RUNNING'};});
+  threads[binding.threadId]={id:binding.threadId,cwd:binding.workspace,active:i===0,turnId:'overlap-turn-'+i};
+ }
+ const loc=await location(s.root),sampleFile=path.join(loc.runtime,'parallel-validation-sample.json');
+ const old={checkedAt:'2020-01-01T00:00:00.000Z',serviceId:'fixture-service',results:[{assignmentId:'old-unaccepted'}]};await writeFile(sampleFile,JSON.stringify(old));
+ const calls=[],client={close(){},async flush(){},async call(method,params){calls.push(method);const thread=threads[params.threadId];if(method==='thread/read')return {thread:{id:thread.id,cwd:thread.cwd,status:{type:thread.active?'active':'idle'}}};if(method==='thread/turns/list')return {data:[{id:thread.turnId,status:'inProgress',items:[]}]};if(method==='thread/loaded/list')return {data:Object.keys(threads)};throw Error('Unexpected RPC '+method);}};
+ const options={verifyServer:async()=>({record:{serviceId:'fixture-service',generation:'fixture-generation'},client})};
+ assert.equal((await syncBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');assert.deepEqual(JSON.parse(await readFile(sampleFile,'utf8')),old);
+ threads['overlap-thread-1'].active=true;
+ assert.equal((await syncBackend(s.root,s.run.id,s.assignment.id,options)).status,'RUNNING');const sample=JSON.parse(await readFile(sampleFile,'utf8'));
+ assert.deepEqual(sample.results.map(r=>r.assignmentId).sort(),states.map(x=>x.assignment.id).sort());assert.deepEqual(sample.results.map(r=>r.turnId).sort(),['overlap-turn-0','overlap-turn-1']);assert.notEqual(sample.checkedAt,old.checkedAt);assert(!calls.some(method=>['thread/start','turn/start'].includes(method)));
 });

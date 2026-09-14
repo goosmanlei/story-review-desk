@@ -1,7 +1,7 @@
 import {randomUUID} from 'node:crypto';
 import {nativeSocket} from './native-socket.mjs';
 
-// Transport connection only. Project service lifecycle belongs to task-server.
+// Transport connection only. Project service lifecycle belongs to app-service.
 // Never delete history, edit Codex databases, or infer closure from an idle turn.
 export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSocket,onRequest,onNotification,onDisconnect,onDiagnostic}={}) {
   const pending=new Map(),serverPending=new Map();let counter=0,closed=false,events=Promise.resolve();

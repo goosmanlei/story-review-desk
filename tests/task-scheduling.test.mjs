@@ -283,3 +283,24 @@ test('an explicit stop-after policy blocks refill after the selected task finish
  assert.equal((await mutate(root,'next',req({runId:run.id}))).status,'PAUSED_BY_POLICY');
  assert.equal((await readLedger(root)).tasks[b.taskId].status,'READY');
 });
+
+test('coordinator exit preserves the running worker identity, original checkpoint and resource reservation',async t=>{
+ const root=await fixture(t),formal=await publish(root);
+ const keeper=spawn(process.execPath,[cli,'run','--project',root],{stdio:['ignore','pipe','pipe']});
+ t.after(()=>{if(keeper.exitCode===null&&keeper.signalCode===null)keeper.kill('SIGKILL');});
+ const oldRun=await new Promise((resolve,reject)=>{let out='';const timer=setTimeout(()=>reject(Error('keeper timeout')),5000);keeper.stdout.on('data',chunk=>{out+=chunk;try{const parsed=JSON.parse(out.split('\n')[0]);clearTimeout(timer);resolve(parsed.runId);}catch{}});});
+ await configureCapabilities(root,oldRun,caps);
+ const a=(await schedule(root,oldRun,[candidate(formal.taskId,'running-work')])).assignments[0];await started(root,oldRun,a);
+ const checkpoint=cp({completedSteps:['persisted original input'],nextSteps:['track original turn'],operations:[{id:'still-running-operation',kind:'FIXTURE',status:'PENDING'}]});
+ await change(root,'assignment:checkpoint',a.taskId,a.id,oldRun,{checkpoint});
+ await updateBinding(root,oldRun,a.id,b=>{b.backendRequest={operationId:'still-running-operation',turnId:'same-turn',state:'RUNNING'};});
+ await assert.rejects(startRun(root),/已有执行会话/);
+ const exited=once(keeper,'close');keeper.kill('SIGKILL');await exited;
+ const next=await startRun(root,{capabilities:caps});assert.equal(next.recoveryKind,'COORDINATOR_EXIT');
+ const t1=(await readLedger(root)).tasks[a.taskId],request=req({runId:next.id,expectedRunId:oldRun,taskId:a.taskId,assignmentId:a.id,expectedVersions:{[a.taskId]:t1.version},expectedAssignmentVersion:t1.assignments[0].version,checkpoint,reconciliation:{processes:'fixture keeper actually exited',workspace:'unchanged',versions:'checked',operations:'original turn remains in progress',agent:'same native worker'}});
+ await mutate(root,'assignment:reconcile',request);assert((await mutate(root,'assignment:reconcile',request)).replayed);
+ const current=(await runtimeState(root)).bindings.assignments[a.id];
+ assert.equal(current.nativeThreadId,'native-'+a.id);assert.equal(current.backendRequest.turnId,'same-turn');assert.equal(current.backendRequest.operationId,'still-running-operation');assert.equal(current.ownershipHistory.length,1);
+ const conflict=await schedule(root,next.id,[candidate(formal.taskId,'duplicate',{resources:a.resources})]);assert.equal(conflict.assignments.length,0);assert.equal(conflict.deferred[0].reason,'RESOURCE_CONFLICT');
+ assert.equal((await readLedger(root)).tasks[a.taskId].assignments.length,1);
+});

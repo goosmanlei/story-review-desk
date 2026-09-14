@@ -8,6 +8,8 @@ import {randomUUID} from 'node:crypto';
 import {chmod,lstat,mkdir,mkdtemp,readFile,rm,symlink,writeFile} from 'node:fs/promises';
 import {ensureTaskServer,serverPaths,verifyTaskServer} from '../tools/task-server.mjs';
 import {processAlive,processIdentity} from '../tools/process-resources.mjs';
+import {stopAppService} from '../tools/app-service.mjs';
+import {bootIdentity,durableExecutionFile} from '../tools/execution-runtime.mjs';
 
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const missing=error=>error.code==='ENOENT';
@@ -62,9 +64,12 @@ async function fakeBinary(root) {
   const file=path.join(root,'fake-codex.mjs');
   await writeFile(file,`#!/usr/bin/env node
 import net from 'node:net';
+import {readFileSync,writeFileSync} from 'node:fs';
 if(process.argv[2]==='--version'){console.log('codex-cli 9.8.7');process.exit(0);}
 const args=process.argv.slice(2),listen=args[args.indexOf('--listen')+1];
 if(args[0]!=='app-server'||!listen?.startsWith('unix://'))process.exit(64);
+let starts=0;try{starts=JSON.parse(readFileSync('fixture-starts.json','utf8'));}catch{}
+writeFileSync('fixture-starts.json',JSON.stringify(starts+1));
 const server=net.createServer(socket=>socket.end());
 server.listen(listen.slice('unix://'.length));
 const stop=()=>server.close(()=>process.exit(0));
@@ -78,6 +83,7 @@ function fakeConnect(paths,{sqliteHome=path.join(paths.directory,'state')}={}) {
   return ({socket})=>{
     assert.equal(socket,paths.socket);
     return {close(){},async initialize(){return {userAgent:'fixture/9.8.7 controlled'};},async call(method) {
+      if(method==='thread/loaded/list')return {data:[]};
       assert.equal(method,'config/read');
       return {config:{sqlite_home:sqliteHome,agents:{max_threads:3}}};
     }};
@@ -138,4 +144,55 @@ test('isolated fake App Server starts once, reuses, and reconciles its recorded 
   assert.ok(launch.args.includes('unix://'+paths.socket));assert.ok(launch.args.includes('sqlite_home='+JSON.stringify(path.join(paths.directory,'state'))));
 
   await assert.rejects(verifyTaskServer(root,{connect:fakeConnect(paths,{sqliteHome:path.join(root,'foreign-state')})}),/SERVER_CONFIGURATION/);
+});
+
+test('service crash and controlled reboot preserve generations and isolate another running instance',{concurrency:false},async t=>{
+ const f=await fixture(t),a=await f.project({name:'instance-a'}),b=await f.project({name:'instance-b'});
+ const enter=async root=>{process.chdir(root);await mkdir('codex-home',{recursive:true});const paths=await serverPaths(root);return {paths,binary:await fakeBinary(root),connect:fakeConnect(paths)};};
+ const first=await enter(a),original=await ensureTaskServer(a,first);
+ const second=await enter(b),unrelated=await ensureTaskServer(b,second);
+ assert.notEqual(original.serviceId,unrelated.serviceId);assert.notEqual(original.sqliteHome,unrelated.sqliteHome);
+ process.chdir(a);
+ const progress=path.join(first.paths.directory,'state/original-operation.json');
+ await durableExecutionFile(progress,{operationId:'original-operation',status:'COMPLETED',result:'executed once'});
+ // Actual SIGKILL of the isolated fake child, never a real App Server.
+ process.kill(original.process.pid,'SIGKILL');
+ for(let i=0;i<100&&(processAlive(original.process)||processAlive(original.supervisor));i++)await wait(25);
+ assert.equal(processAlive(original.process)||processAlive(original.supervisor),false);
+ const restored=await ensureTaskServer(a,first);
+ assert.notEqual(restored.generation,original.generation);assert.equal(restored.sqliteHome,original.sqliteHome);
+ assert.equal(JSON.parse(await readFile(path.join(first.paths.directory,'generations',original.generation+'.json'),'utf8')).generation,original.generation);
+ assert.equal(processAlive(unrelated.process),true);assert.equal(processAlive(unrelated.supervisor),true);
+ // Controlled reboot simulation: both fixture processes have really exited;
+ // only their persisted boot identity is changed. No host reboot occurs.
+ await stopAppService(a,{connect:first.connect,assertIdle:async()=>{}});
+ const old=JSON.parse(await readFile(first.paths.record,'utf8'));
+ old.bootId='controlled-previous-boot';old.process.bootId=old.bootId;old.supervisor.bootId=old.bootId;
+ await durableExecutionFile(first.paths.record,old);
+ const rebooted=await ensureTaskServer(a,first);
+ assert.equal(rebooted.bootId,bootIdentity());assert.notEqual(rebooted.generation,restored.generation);
+ assert.equal(JSON.parse(await readFile(progress,'utf8')).operationId,'original-operation');
+ assert.equal(JSON.parse(await readFile(progress,'utf8')).result,'executed once');
+ assert.equal(JSON.parse(await readFile(path.join(a,'fixture-starts.json'),'utf8')),3);
+ assert.equal((await ensureTaskServer(a,first)).reused,true);
+ process.chdir(b);assert.equal((await ensureTaskServer(b,second)).generation,unrelated.generation);
+ assert.equal(JSON.parse(await readFile(path.join(b,'fixture-starts.json'),'utf8')),1);
+});
+
+test('orphaned service stays unique and a lost child creation receipt remains UNKNOWN',{concurrency:false},async t=>{
+ const f=await fixture(t),root=await f.project({name:'orphan'});process.chdir(root);await mkdir('codex-home');
+ const paths=await serverPaths(root),binary=await fakeBinary(root),connect=fakeConnect(paths);
+ const original=await ensureTaskServer(root,{binary,connect});
+ process.kill(original.supervisor.pid,'SIGKILL');
+ for(let i=0;i<100&&processAlive(original.supervisor);i++)await wait(25);
+ assert.equal(processAlive(original.process),true);
+ assert.equal((await ensureTaskServer(root,{binary,connect})).generation,original.generation);
+ await stopAppService(root,{connect,assertIdle:async()=>{}});
+ const before=await readFile(path.join(root,'fixture-starts.json'),'utf8');
+ await durableExecutionFile(paths.record,{...original,status:'STARTING',process:null,supervisor:null,launchOwner:{...original.supervisor,birth:'exited'}});
+ await rm(path.join(paths.directory,'launch-process.json'));
+ await assert.rejects(ensureTaskServer(root,{binary,connect}),/SERVER_START_UNKNOWN/);
+ await durableExecutionFile(paths.record,{...original,status:'STARTING',process:null});
+ await assert.rejects(ensureTaskServer(root,{binary,connect}),/SERVER_START_UNKNOWN/);
+ assert.equal(await readFile(path.join(root,'fixture-starts.json'),'utf8'),before);
 });

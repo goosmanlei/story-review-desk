@@ -1,10 +1,11 @@
 // Standalone supervisor copied into project runtime, so worktrees can be retired.
-import {readFile,writeFile,rename,open} from 'node:fs/promises';
+import {readFile,open} from 'node:fs/promises';
 import {spawn,execFileSync} from 'node:child_process';
-import {randomUUID} from 'node:crypto';
+import {bootIdentity,durableExecutionFile} from './execution-runtime.mjs';
 const file=process.argv[2],spec=JSON.parse(await readFile(file,'utf8'));
-const identity=pid=>({pid,birth:execFileSync('ps',['-p',String(pid),'-o','lstart='],{encoding:'utf8'}).trim()});
-const save=async value=>{const tmp=spec.record+'.'+randomUUID()+'.tmp';await writeFile(tmp,JSON.stringify(value,null,2)+'\n',{mode:0o600});await rename(tmp,spec.record);};
+const identity=pid=>({pid,bootId:bootIdentity(),birth:execFileSync('ps',['-p',String(pid),'-o','lstart='],{encoding:'utf8'}).trim()});
+let saving=Promise.resolve();
+const save=value=>{saving=saving.then(()=>durableExecutionFile(spec.record,value));return saving;};
 let record={...spec.identity,supervisor:identity(process.pid),status:'STARTING',startedAt:new Date().toISOString()};
 await save(record);
 const log=await open(spec.log,'a',0o600);let logBytes=(await log.stat()).size;
