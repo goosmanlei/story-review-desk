@@ -58,6 +58,7 @@ export async function dispatchBackend(project,runId,assignmentId,request){
   const created=await v.client.call('thread/start',{cwd:workspace,model:s.assignment.execution.model,approvalPolicy:'never',sandbox:'danger-full-access',ephemeral:false,historyMode:'legacy',developerInstructions,serviceName:v.record.serviceId,config:{model_reasoning_effort:s.assignment.execution.effort}});
   const threadId=created.thread.id;
   await updateBinding(project,runId,assignmentId,b=>{b.nativeThreadId=threadId;b.backendCreation={threadId,serviceId:v.record.serviceId,generation:v.record.generation,createdAt:new Date().toISOString()};b.backendRequest.state='CREATED';});
+  await v.client.call('thread/name/set',{threadId,name:assignmentId+' '+s.assignment.goal.slice(0,80)});
   await assertBackendThread(project,assignmentId,threadId,v.client);
   await change(project,runId,assignmentId,'start',request.operationId+'-bind',{nativeThreadId:threadId,workspace,workspaceEvidence:'专属服务创建回执、精确基准提交和独立受管worktree均已核对'});
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.state='TURN_STARTING';});
