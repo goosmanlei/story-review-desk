@@ -11,6 +11,7 @@ import './production-material-catalog.css';
 
 type Page=ProductionMaterialPage&{snapshotId:string;operationRevision:number|string};
 type Location={familyId:string|null;versionId:string|null;filters:ProductionMaterialFilters};
+type FilterOption={value:string;label:string};
 const queryFields={search:'processQ',kind:'processKind',mediaType:'processMedia',lifecycleState:'processState',gateId:'processGate',episodeUid:'processEpisode',sceneId:'processScene',shotId:'processShot'} as const;
 const emptyLocation:Location={familyId:null,versionId:null,filters:{}};
 const filterIdentity=(filters:ProductionMaterialFilters)=>JSON.stringify(Object.keys(queryFields).map(key=>[key,filters[key as keyof ProductionMaterialFilters]||null]));
@@ -18,6 +19,17 @@ const mayLeave=()=>window.dispatchEvent(new Event('review:configuration-before-l
 const lifecycleLabels:Record<string,string>={WAITING_UPSTREAM:'等待上游',READY_TO_START:'待制作',IN_PROGRESS:'制作中',REVIEW_PENDING:'待审阅',RELEASED:'已通过',REVISION_REQUIRED:'需返修',DO_NOT_USE:'禁止使用',UNKNOWN:'待核验',NOT_PRODUCED:'未产出'};
 const mediaLabels:Record<string,string>={IMAGE:'图像',AUDIO:'声音',VIDEO:'视频',TEXT:'文本',UNKNOWN:'媒介待核'};
 const gateLabels:Record<string,string>={SHOT_PLAN_INPUT_LOCK:'镜头设计与输入锁定',STORYBOARD_DIALOGUE:'粗分镜／对白并行',ANIMATIC_LOCK:'Animatic锁时',KEYFRAMES:'正式关键帧',SHOT_VIDEO:'镜头视频',SHOT_LOCK:'单镜锁定'};
+
+function ProductionMaterialFilterGroup({legend,value,allLabel,options,onChange}:{legend:string;value?:string;allLabel:string;options:FilterOption[];onChange:(value:string)=>void}){
+  const displayedOptions=value&&!options.some(option=>option.value===value)?[...options,{value,label:`当前筛选：${visibleText(value)}`}]:options;
+  return <fieldset className="production-material-filter-group">
+    <legend>{legend}</legend>
+    <div className="production-material-filter-options">
+      <button type="button" aria-pressed={!value} onClick={()=>{if(value)onChange('');}}><span>{allLabel}</span></button>
+      {displayedOptions.map(option=><button type="button" key={option.value} aria-pressed={value===option.value} onClick={()=>{if(value!==option.value)onChange(option.value);}}><span>{option.label}</span></button>)}
+    </div>
+  </fieldset>;
+}
 
 function readLocation():Location {
   const params=new URL(window.location.href).searchParams;
@@ -113,13 +125,13 @@ export function ProductionMaterialCatalog({model:baseModel,snapshotId}:{model:Pr
   return <section className="production-material-catalog" aria-label="制作过程素材">
     <header className="production-material-heading"><div><h2>制作过程素材</h2><p>按步骤查找分镜、对白、预演和关键帧，打开同一素材版本及制作信息卡。</p></div><span>{page?`${page.total} 项制作产物`:'正在读取目录'}</span></header>
     <div className="production-material-filters">
-      <label>制作步骤<select value={location.filters.gateId||''} onChange={event=>patchFilter({gateId:event.target.value})}><option value="">全部步骤</option>{Object.entries(gateLabels).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
-      <label>素材种类<select value={location.filters.kind||''} onChange={event=>patchFilter({kind:event.target.value})}><option value="">全部种类</option>{productionMaterialKinds.map(kind=><option key={kind.id} value={kind.id}>{kind.label}</option>)}</select></label>
-      <label>媒介<select value={location.filters.mediaType||''} onChange={event=>patchFilter({mediaType:event.target.value})}><option value="">全部媒介</option>{Object.entries(mediaLabels).map(([id,label])=><option key={id} value={id}>{label}</option>)}</select></label>
-      <label>状态<select value={location.filters.lifecycleState||''} onChange={event=>patchFilter({lifecycleState:event.target.value})}><option value="">全部状态</option>{(page?.facets.lifecycleStates||[]).map(value=><option key={value} value={value}>{lifecycleLabels[value]||visibleText(value)}</option>)}</select></label>
-      <label>分集<select value={location.filters.episodeUid||''} onChange={event=>patchFilter({episodeUid:event.target.value,sceneId:'',shotId:''})}><option value="">全部分集</option>{(page?.facets.episodeUids||[]).map(id=><option key={id} value={id}>{baseModel.episodes.find(row=>row.episodeUid===id)?.displayId||id}</option>)}</select></label>
-      <label>场景<select value={location.filters.sceneId||''} onChange={event=>patchFilter({sceneId:event.target.value,shotId:''})}><option value="">全部场景</option>{(page?.facets.sceneIds||[]).map(id=><option key={id} value={id}>{baseModel.scenes.find(row=>row.id===id)?.title||id}</option>)}</select></label>
-      <label className="production-material-search">搜索<input type="search" value={location.filters.search||''} placeholder="素材、镜头、场景或永久身份" onChange={event=>patchFilter({search:event.target.value})}/></label>
+      <ProductionMaterialFilterGroup legend="制作步骤" value={location.filters.gateId} allLabel="全部步骤" options={Object.entries(gateLabels).map(([value,label])=>({value,label}))} onChange={gateId=>patchFilter({gateId})}/>
+      <ProductionMaterialFilterGroup legend="素材种类" value={location.filters.kind} allLabel="全部种类" options={productionMaterialKinds.map(kind=>({value:kind.id,label:kind.label}))} onChange={kind=>patchFilter({kind})}/>
+      <ProductionMaterialFilterGroup legend="媒介" value={location.filters.mediaType} allLabel="全部媒介" options={Object.entries(mediaLabels).map(([value,label])=>({value,label}))} onChange={mediaType=>patchFilter({mediaType})}/>
+      <ProductionMaterialFilterGroup legend="状态" value={location.filters.lifecycleState} allLabel="全部状态" options={(page?.facets.lifecycleStates||[]).map(value=>({value,label:lifecycleLabels[value]||visibleText(value)}))} onChange={lifecycleState=>patchFilter({lifecycleState})}/>
+      <ProductionMaterialFilterGroup legend="分集" value={location.filters.episodeUid} allLabel="全部分集" options={(page?.facets.episodeUids||[]).map(value=>({value,label:baseModel.episodes.find(row=>row.episodeUid===value)?.displayId||value}))} onChange={episodeUid=>patchFilter({episodeUid,sceneId:'',shotId:''})}/>
+      <ProductionMaterialFilterGroup legend="场景" value={location.filters.sceneId} allLabel="全部场景" options={(page?.facets.sceneIds||[]).map(value=>({value,label:baseModel.scenes.find(row=>row.id===value)?.title||value}))} onChange={sceneId=>patchFilter({sceneId,shotId:''})}/>
+      <label className="production-material-search"><span>搜索</span><input type="search" value={location.filters.search||''} placeholder="素材、镜头、场景或永久身份" onChange={event=>patchFilter({search:event.target.value})}/></label>
     </div>
     {error&&<p role="alert">{error} <button type="button" onClick={()=>{setRequestMore(null);setRevision(value=>value+1);}}>重新读取</button></p>}
     {!!page?.issues.length&&<p role="status">{page.issues.length} 项产物归属或版本绑定待核验，暂未计入当前目录。</p>}

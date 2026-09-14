@@ -167,9 +167,11 @@
         "web/app/paged-production-data.ts",
         "server/presentation/production-material-query.mjs",
         "web/presentation/spatial-placement.mjs",
-        "web/app/material-entity-review.css"
+        "web/app/material-entity-review.css",
+        "web/app/production-material-catalog.tsx",
+        "web/app/production-material-catalog.css"
       ],
-      "sourceDigest": "54142e9d4fa2b910419ea4986180d1291bff5671f777d266e790ce0c8fee893f"
+      "sourceDigest": "0164ee29d5c36dab9e780b1af59c08fab5a4afcdc045a837aa4c1293c795141f"
     },
     {
       "id": "development",
