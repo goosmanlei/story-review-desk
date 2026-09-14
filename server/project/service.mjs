@@ -1,6 +1,7 @@
 import { check, objectValue } from "../shared/contracts.mjs";
 import { validateLibrary } from '../library/contract.mjs';
 import {validateReferenceContent,validateReferenceTargets} from '../materials/references.mjs';
+import {retiredEntityType} from '../shared/entity-types.mjs';
 export const kinds = ["GUIDANCE", "NOTE"];
 export function validate(kind, content) {
   validateReferenceContent(kind,content);
@@ -35,7 +36,7 @@ export const PROJECT_FIELDS = new Set([
   "preferredCollaborator",
   "reviewLibrary",
 ]);
-export function validateConfiguration(scope, content) {
+export function validateConfiguration(scope, content, {historicalImport=false}={}) {
   objectValue(content);
   const allowed =
     scope === "system"
@@ -64,6 +65,7 @@ export function validateConfiguration(scope, content) {
     }
   }
   visit(content);
+  if(!historicalImport&&scope==='system'&&content.entityTypes?.entityTypes)check(content.entityTypes.entityTypes.every(type=>!retiredEntityType(type.id)),'ENTITY_TYPE_RETIRED','系统配置不能重新启用已退役主体类型');
   if (scope === 'project' && content.reviewLibrary !== undefined) validateLibrary(content.reviewLibrary);
   if (scope === "system" && content.limits) {
     for (const [key, maximum] of Object.entries({

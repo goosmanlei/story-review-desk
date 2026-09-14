@@ -45,9 +45,10 @@
         "server/materials/service.mjs",
         "server/production/service.mjs",
         "server/collaboration/service.mjs",
-        "server/project/service.mjs"
+        "server/project/service.mjs",
+        "server/shared/entity-types.mjs"
       ],
-      "sourceDigest": "868333bcd1c2f65c90eae8519eea2c543a3fa61011e1e1abe1ea9a52ab1e8942"
+      "sourceDigest": "1da859effccc73cab2327c4ab10dc1b5724fc37e7e0d0a8f7a86881fe6c1d55d"
     },
     {
       "id": "data-model",
@@ -107,7 +108,7 @@
         "web/app/workspace-read-boundary.tsx",
         "web/app/production-workbench.tsx"
       ],
-      "sourceDigest": "ab0562e48d0e50959b2c970c3979be650d6d67e36c7830811e6438c4fb903782"
+      "sourceDigest": "28f18471fabb160ddcfa5e9ba03f30cfa5d7b6ff2f42ce8b3ad820d5eb1e3f71"
     },
     {
       "id": "interfaces",
@@ -199,7 +200,7 @@
         "tools/task-capacity.mjs",
         "tools/native-socket.mjs"
       ],
-      "sourceDigest": "a601284ee447f633531181e5e05fa11525ad0542ebca20c1d742f893835c7304"
+      "sourceDigest": "78d9a3af5f0e1218386efc9612fdae6f127b6d2d08bee376a3c9449145bb4d10"
     },
     {
       "id": "instance",

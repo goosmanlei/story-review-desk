@@ -20,10 +20,6 @@ export const configurationDefaults = {
         "label": "道具"
       },
       {
-        "id": "ORGANIZATION",
-        "label": "组织"
-      },
-      {
         "id": "SOUND",
         "label": "声音主题"
       },

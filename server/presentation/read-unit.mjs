@@ -1,6 +1,7 @@
 import { hash, check } from '../shared/contracts.mjs';
 import { summaries, objectDetail } from '../repository.mjs';
 import { configurationDefaults, modelArrayKeys, productionGraphDefaults } from './defaults.mjs';
+import {currentDomainTypes} from '../shared/entity-types.mjs';
 
 // A request-local view of object revisions. These structures are UI projections,
 // never another store or a published whole-story snapshot.
@@ -40,7 +41,7 @@ export class PresentationRead {
     this.config = {
       ...defaults,
       template: system.template || defaults.template,
-      domain: { ...defaults.domain, ...system.entityTypes },
+      domain: currentDomainTypes({ ...defaults.domain, ...system.entityTypes }),
       taxonomy: { ...defaults.taxonomy, ...system.materialTypes },
       workflow: { ...defaults.workflow, ...system.productionStages },
       technical: { ...defaults.technical, ...system.technicalStandards, picture: project.pictureBaseline || defaults.technical.picture },

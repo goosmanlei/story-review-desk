@@ -133,7 +133,7 @@ export async function importRecords(
               { id: row.id },
             );
           if (entry.table === "configurations")
-            validateConfiguration(row.scope, row.content);
+            validateConfiguration(row.scope, row.content, {historicalImport:true});
           if (entry.table === "source_documents")
             check(
               hash(Buffer.from(row.content_bytes, "base64")) ===
