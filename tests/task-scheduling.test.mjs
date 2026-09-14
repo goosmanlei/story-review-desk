@@ -230,7 +230,7 @@ test('all audit surfaces share seven fixed columns, exact title, category, depen
   const one=renderTasks(data),two=renderTasks({...data,asOf:'2026-09-14T17:00:00Z'});
   assert.equal(one.split('\n').slice(2).join('\n'),two.split('\n').slice(2).join('\n'));
   for(const output of [one,renderStatus(data),renderAudit(data),await main(['list','--project',root,'--format','markdown'])]) {
-    assert(output.includes(header));assert(output.includes('不变 &#124; 标题 &lt;x&gt; &#91;y&#93;'));assert(output.includes('内容创作（CREATIVE）'));assert(output.includes(`/${a.taskId}.md>`));
+    assert(output.includes(header));assert(output.includes('不变 &#124; 标题 &lt;x&gt; &#91;y&#93;'));assert(output.includes('内容创作（CREATIVE）'));assert(output.includes(a.taskId));assert(!output.includes('.md>'));assert(!output.includes('tasks/items/'));
   }
   assert(renderDetail(ledger.tasks[b.taskId]).includes(a.taskId));
   const empty=renderTasks({tasks:[],asOf:'2026-09-13T17:00:00Z'});assert(empty.includes('2026-09-14 01:00:00'));assert(empty.includes('共 0 项'));assert(empty.includes(header));

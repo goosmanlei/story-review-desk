@@ -176,7 +176,7 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 
 路径大小写按保守冲突处理，拒绝绝对路径、父目录跳转及非规范别名。资源占用持续到派工 CLOSED；交回或空闲不能释放占用。阻塞且命令已结束的主 Agent 派工保留受影响资源，无关资源可以继续。代码派工使用独立受管 Git worktree；专属服务创建与启动轮次回执保存到 runtime，再开始工作。
 
-每项派工依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED。先 schedule，再 backend dispatch 由同一专属服务创建会话并启动轮次；缺失回复先 sync/recover 原调用，禁止盲目重发。一次 Agent 只绑定一项派工，负责人和辅助 Agent 分别登记，主 Agent 统一控制容量。已关闭派工不再改动；重派创建新编号及新 Agent。
+每项派工依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED，有未解决用户决定时进入 WAITING_DECISION。先 schedule，再 backend dispatch 由同一专属服务创建会话并启动轮次；缺失回复先 sync/recover 原调用，禁止盲目重发。一次 Agent 只绑定一项派工，负责人和辅助 Agent 分别登记，主 Agent 统一控制容量。已关闭派工不再改动；重派创建新编号及新 Agent。
 
 `guard --assignment ID` 使用派工独立命令锁和进程记录，允许无冲突命令并行；开始命令时在账本锁内重新核查状态。共享核心整合、正式业务保存、提交推送和部署由主 Agent 串行完成，共享核心命令加 `--core` 锁定真实 Git common directory。guard 不代替业务 CAS，也不约束绕过协议的其他会话。旧 `next` 保留串行兼容，有未收敛派工时不跨过它领取新任务。
 
@@ -204,6 +204,68 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
 
 ### 检查点、恢复与完成
+
+#### 用户决策通路
+
+`tasks run` 的协调循环每秒检查未解决问题，变化时输出 `DECISIONS_CHANGED`，并在 runtime 的 `decision-channel/notices` 保存发现时刻及问题归属。此通知帮助主会话及时发现问题，不能替代主会话实际提问；没有活跃协调会话时，由持久接收器保存待办，恢复后重新发现。
+
+项目 App Server 的工作会话通过持久连接接收器创建、执行和恢复订阅。接收器在 `backend ensure/probe` 的受管阶段启动，CLI 返回或协调租约失效不会结束接收；无活跃协调者时继续保存待转达事项。生命周期、二进制/服务代次和 socket 身份沿用项目服务核验；接收器代码使用 runtime 中的固定内容副本，工作 worktree 退出后仍可接收。运行中的接收器版本不一致时不热换连接：先收敛旧派工并停止所属服务，再加载新版本。不处理公共及其他项目服务。
+
+工作 Agent 主动业务决策使用 `thread/start.dynamicTools` 注册的 `review_task_decision`，在 `item/tool/call` 请求中携带稳定 key、问题、必要背景、选项影响、建议、待决步骤及已完成工作。该调用等待主会话的明确用户答复；普通已授权实现选择继续自主处理。内建 `item/tool/requestUserInput` 为 INPUT，动态业务决定为 BUSINESS，命令/文件/权限的 `requestApproval` 为 APPROVAL。`approvalPolicy: never` 不等于批准业务选择，也不免除人工权限请求的核查。技术性 `currentTime/read` 按本机 schema 返回时间；不认识的服务请求与通知保留诊断，不静默当作成功。
+
+问题及答复的逻辑身份、归属、内容、版本、呈现证据、发送状态和时间随正式任务事件长期保存。原消息先同步写入 `instance/runtime/task-execution/decision-channel/inbox`，再在同一任务账本锁内更新派工；轮次回执稍后落盘时可重放收件。机器服务、连接、线程、轮次、协议请求 ID、原命令/权限、调用回执和工作区只保存在 runtime。请求按原服务代次、线程、轮次和带类型的请求编号区分；重复事件不新增问题。稳定业务 key 已有未解决问题而出现新回调时保留核查，不重复提问或自动换绑。
+
+主会话在派工后、每次 heartbeat/checkpoint 与恢复阶段执行 `decisions list` 和 `decisions status`，把尚未呈现的问题集中转达给用户。转达须说明正式任务原题、派工、问题编号、选项/建议、影响及暂停步骤。CLI 是发现和回执入口，不会自行向交互宿主弹窗，也不向外部通信平台发送消息。主 Agent 真正向用户提问后，才以 `decisions present` 保存消息引用及内容；新协调会话沿用已呈现记录，不把重复 CLI 查询当作新的提问。
+
+| 决策状态 | 意义与允许动作 |
+| --- | --- |
+| OPEN | 原请求待用户答复；尚未呈现时由主会话提问 |
+| ANSWERED | 用户明确答复已落账，原连接仍可接收；仅未尝试发送时允许 deliver |
+| DELIVERY_UNKNOWN | 已持久保存发送/续办意图；写入连接不证明送达，只核查原操作 |
+| NEEDS_RECONCILIATION | 断线、请求清理、服务代次改变或协议不支持；保留问题和答复 |
+| FOLLOWUP_READY | 原请求已核查失效、已有明确答复、原派工允许同范围续办 |
+| RESOLVED | 精确工具回读、原操作人工核查或同范围续办回执证实已交回答复 |
+| CANCELLED | 工作会话已核验停止关闭，保留原问题、答复及未知回传历史；不表示用户同意 |
+
+前五种状态都未解决。派工显示 WAITING_DECISION；任务可能还有其他正在运行的派工，因此正式任务总状态仍可为 RUNNING。`status/show` 的派工附表及 `backend sync` 提供区别，后者同时报告原轮次 executionStatus。等待不等于普通故障 BLOCKED、完整交回 DELIVERED 或正式 WAITING_REVIEW；轮次正常完成也不能跳过决定。collect、直接 assignment result、accept、DONE 均有闸门；未归入账本的相关原请求同样阻止验收。等待派工、Agent、资源与正式任务容量保留到核验关闭，资源独立且无依赖的其他工作仍可推进。
+
+`decisions show ID` 返回当前 `requestFields`，包含所属任务/派工/问题的三个版本及不透明 bindingToken。present/answer/reconcile 都携带这些字段和稳定 operationId；每次写入前重新读取。答复还必须包含 `actor:"USER"`、`explicitUserAnswer:true`、用户原话/消息引用 evidence 和结构化 answer。BUSINESS 为 `{text}`；INPUT 精确映射原问题 ID 为 `{answers:{问题ID:{answers:[文本]}}}`；命令和文件审批仅允许原请求支持的单次 accept/decline/cancel；权限请求为 grant/deny，并限制在原请求本轮权限。审批前用 `show ID --runtime` 查看原始操作、路径和权限并向用户说明。秘密输入、会话授权、持久规则修改、MCP elicitation 等尚不支持的请求只保留诊断，不能扩大授权或假称转达成功。
+
+答复先持久保存，接收器再核对原服务代次、连接、线程、轮次和请求状态，将协议结果写回原请求 ID。相同 operationId 重放只回读，不重发；同号异内容、冲突答复、错误归属及过期版本拒绝。已失效请求的明确答复可保存为待核查，不能送到新请求。`serverRequest/resolved` 同时用于答复和请求清理，不能单独证明送达；本通路不把超时、非阻塞请求的默认项或轮次结束当成用户同意。动态业务工具的完成条目必须匹配原工具、参数、条目及完整答复内容才自动确认；输入与审批缺少精确回读时继续核查原操作。
+
+连接断开或服务重启后，先保留旧接收记录；原创建/轮次调用结果未知时查看 runtime 的 `decision-channel/calls` 与原工作结果，不换号调用。新协调者先核查旧进程和受管命令、`assignment reconcile` 接续归属，再在受管阶段 `backend recover` 订阅原线程并查询原轮次。恢复不新建线程或轮次，不把旧请求编号直接用于新服务。原请求在同一服务重新呈现时，未发送答复可以重新核对绑定；已有发送意图仍不重发。未取得呈现的旧问题不会自动假设已经转达。
+
+`decisions reconcile` 先读取原线程/轮次，再接受 `checkedOriginalOperation:true` 及明确 evidence：DELIVERED 仅用于确认原回传；FOLLOWUP 仅用于原本采用 FOLLOWUP、上一轮成功且未交回/关闭的 INPUT/BUSINESS 派工。随后 `decisions followup` 自动使用保存的问题、用户答复和已完成/待办步骤构造同范围输入，保存新操作与原轮次历史。活动、失败、结果未知不能续办；新轮次回执丢失先查该续办操作，不能重新执行。失效审批不可变为新轮次授权。单轮派工或已关闭派工由主 Agent 先收尾、再创建新派工并核对新请求，不复用旧授权。
+
+停止协调执行后禁止新答复和新工作，仍允许保存检查点、核查及关闭。`backend close` 先中断原轮次、停止并核对后台命令、归档并验证卸载，再取消关联决策，最后 assignment close；关闭失败保留占用。不通过发送“拒绝”替代真实停止核验，也不把 CANCELLED 包装为验收成功。
+
+协议字段已于 2026-09-14 使用本机 `codex-cli 0.154.0 app-server generate-json-schema --experimental` 核对，包括输入、审批、DynamicToolSpec、动态工具完成条目和请求清理通知。请求清理与动态工具回传的语义参考 [OpenAI App Server 官方说明](https://learn.chatgpt.com/docs/app-server)。当前验证包含持久收件、并行归属、版本/重放、协调更换、断线/重启、发送未知、FOLLOWUP 及容量/关闭的受控测试；真实用户呈现与明确答复必须另行执行，不能用 fixture 结果替代。
+
+#### 真实决策往返验收
+
+由主 Agent 在项目继承此核心版本后执行。先核对受管核心、Skill 和 CLI 已同步，保持当前有效 run；以下命令的账本根始终是故事项目。服务生命周期及所有测试通过当前已领取派工的 guard + process 阶段执行，阶段编号每次唯一。机器路径、run/线程/连接和轮次证据只写 runtime；手册和长期成果引用逻辑任务/派工/问题编号。
+
+1. 在受管阶段执行 `backend probe --run RUN_ID`，回读 `decisions status` 确认 READY；旧接收器版本不一致先收敛并关闭，不能热替换。用原正式任务 schedule 一个独立、同范围、`longRunning:true` 的验证派工，使用干净且已登记的 worktree。`backend dispatch` 请求包含唯一 operationId、workspace、baseCommit 和以下 prompt：
+
+   ```text
+   本次仅验证用户决策通路，不改代码，不操作业务或外部服务，不调用故事生成模型。
+   先完成检查点“已准备验收输入”，然后调用 review_task_decision：
+   key=roundtrip-proof；question=请为本次决策通路验收选择一个结果标记；
+   context=只在返回结果中记录用户选择，不触发其他动作；
+   options=[{label:alpha,description:结果记录 alpha},{label:beta,description:结果记录 beta}]；
+   recommendation=两种标记都能完成验收；pendingWork=[记录用户实际选择]；completedSteps=[已准备验收输入]。
+   等待工具返回，不代答、不使用默认值。得到答复后只输出约定结果 JSON，
+   summary 与 acceptance[0].evidence 明确记录实际答复；artifacts=[]；
+   completedSteps 记录提问及接收答复；nextSteps=[]，然后结束。
+   ```
+
+2. dispatch CLI 已返回但工作轮次尚未完成时，用 `decisions list --format markdown` 找到问题，`decisions show DECISION_ID` 读取内容及版本。回读 `backend sync --run RUN_ID --assignment ASSIGNMENT_ID` 的 WAITING_DECISION/执行状态。此时尝试 collect 应被拒绝。保存请求 createdAt、发现时间和派工归属；不能把“CLI 有问题”记为“用户已看到”。
+3. 主会话实际向用户呈现该问题、所属任务/派工、alpha/beta 选项及无外部效果的说明。收到真实提问回执后，再执行 `decisions present --run RUN_ID --file -`，stdin 合并最新 show.requestFields 与 `{operationId:"唯一提问编号",actor:"PROJECT_CODEX",evidence:"真实主会话消息引用及所提问题"}`。不提前登记，不自动选择 alpha。
+4. 等待用户在主会话明确答复。重新 show 后，`decisions answer --run RUN_ID --file -` 合并当前 requestFields 与 `{operationId:"唯一答复编号",actor:"USER",explicitUserAnswer:true,evidence:"用户原话及消息引用",answer:{text:"用户实际答复"}}`。这些示例文本必须替换为真实内容；尚未得到答复时停止于本步骤并登记待用户参与。
+5. 查询同一问题直到精确回读为 RESOLVED，再 sync 原派工直至 SUCCEEDED/resultReady。核对结果仅含用户所选标记，原问题/答复/回传/完成条目一致；保存原请求 runtime 文件、用户消息引用和原结果的对应证据。以同一答复请求重放应只返回 replayed；不能产生第二次回传或第二个工作轮次。按当前版本提交不同 answer 应被拒绝或转入核查，不可改用另一派工。
+6. collect 保存结果，由主 Agent 逐项验收、backend close、assignment close；原正式任务的其他验收、用户参与、继承、发布和清理未完成时不标 DONE。正式成果只引用逻辑编号，机器回执留 runtime。
+
+恢复验收分别用独立受控派工/协议 fixture，保留每次原输入，不对真实用户重复制造相同问题：请求产生后断线；提问后更换协调 run 并 reconcile；答复保存后中断回传；服务代次变化且原请求失效；FOLLOWUP 回执丢失；停止/关闭期间拒绝新答复。每种场景均核对原问题及答复保留、旧绑定不误用、无自动默认同意、无新增重复轮次、关闭前占用不释放。主会话真实呈现与用户答复仍是独立必需证据。升级前未被旧短连接接收的问题无法凭空回补；若原服务不重放，应明确保留 UNKNOWN 和原线程恢复输入，由主 Agent 核查后决定收尾或新派工。
 
 检查点保存已完成步骤、下一步、精确输入、成果与原操作编号。外部操作先登记 PENDING，执行后保存结果；RESULT_UNKNOWN 只查询原操作，不重复调用。新检查点不能遗失既有操作编号，有未核查操作不能关闭派工或完成任务。
 

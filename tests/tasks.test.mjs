@@ -7,7 +7,8 @@ import path from 'node:path';
 import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
-import {mutate,readLedger,rebuild,audit,startRun,runtimeState} from '../tools/task-ledger.mjs';
+import {mutate,readLedger,rebuild,audit,startRun,runtimeState,configureCapabilities,updateBinding,location} from '../tools/task-ledger.mjs';
+import {persistDecisionMessage,drainDecisionInbox,listDecisions} from '../tools/task-decisions.mjs';
 import {installTaskSkill} from '../tools/task-skill.mjs';
 import {main as tasksMain} from '../tools/tasks.mjs';
 import {renderTasks} from '../tools/task-format.mjs';
@@ -17,6 +18,21 @@ const cli=fileURLToPath(new URL('../tools/tasks.mjs',import.meta.url));
 const spec=(extra={})=>({clarified:true,discussion:{approved:true,summary:'已讨论并同意修复筛选',feasibility:'已有可控测试输入，可验证',approvedRequirements:['修复并验证筛选']},type:'SYSTEM',title:'修复测试筛选',originalRequest:'发布任务：使筛选符合选择',goal:'筛选显示正确结果',scope:['通用筛选逻辑'],deliverables:['修复及验证结果'],acceptanceCriteria:['筛选结果正确','清空后恢复全部结果'],authorization:'仅测试夹具，不操作真实业务或模型',...extra});
 const req=extra=>({operationId:randomUUID(),actor:'FIXTURE',...extra});
 const cp=extra=>({summary:'已保存进展',completedSteps:['完成定位'],nextSteps:['验证'],inputs:['fixture@1'],artifacts:[],operations:[],...extra});
+
+test('coordinator notices an in-flight decision without a new query and persists discovery separately from presentation',async t=>{
+ const root=await fixture(t),owner=await run(t,root),taskId=(await mutate(root,'publish',req({task:spec()}))).taskId;
+ await configureCapabilities(root,owner.id,{delegation:true,closeVerified:true,agentCapacity:3,models:[{model:'gpt-5.6-sol',efforts:['xhigh']}]});
+ let task=(await readLedger(root)).tasks[taskId];
+ const scheduled=await mutate(root,'schedule',req({runId:owner.id,expectedVersions:{[taskId]:task.version},assignments:[{taskId,key:'notice',goal:'fixture notice',deliverables:['evidence'],acceptanceCriteria:['pass'],resources:[{kind:'OBJECT',key:'fixture-object',access:'WRITE'}],execution:{rationale:'fixture'}}]}));
+ const id=scheduled.assignments[0].id;
+ for(const action of ['dispatch','start']){task=(await readLedger(root)).tasks[taskId];await mutate(root,'assignment:'+action,req({runId:owner.id,taskId,assignmentId:id,expectedVersions:{[taskId]:task.version},expectedAssignmentVersion:task.assignments[0].version,...(action==='start'?{nativeThreadId:'notice-thread',workspaceEvidence:'fixture'}:{})}));}
+ const loc=await location(root),service={serviceId:'notice-service',generation:'notice-generation'};await mkdir(path.join(loc.runtime,'server'));await writeFile(path.join(loc.runtime,'server/server.json'),JSON.stringify(service));
+ await updateBinding(root,owner.id,id,b=>{b.backendServiceId=service.serviceId;b.backendCreation={threadId:'notice-thread',...service};b.backendRequest={operationId:'notice-work',turnId:'notice-turn',state:'RUNNING'};});
+ const notice=new Promise((resolve,reject)=>{let output='';const timer=setTimeout(()=>reject(Error('coordinator decision notification timeout')),5000);owner.child.stdout.on('data',chunk=>{output+=chunk.toString();for(const line of output.split('\n')){try{const e=JSON.parse(line);if(e.status==='DECISIONS_CHANGED'&&e.decisions.length){clearTimeout(timer);resolve(e);}}catch{}}});});
+ await persistDecisionMessage(root,service,'notice-connection',{id:1,method:'item/tool/requestUserInput',params:{threadId:'notice-thread',turnId:'notice-turn',itemId:'notice-item',isBlocking:true,questions:[{id:'notice',header:'fixture',question:'受控通知问题'}]}});await drainDecisionInbox(root);
+ const event=await notice,d=(await listDecisions(root))[0];assert.equal(event.decisions[0].decisionId,d.id);assert.equal(event.decisions[0].assignmentId,id);assert.equal(event.decisions[0].needsPresentation,true);assert.equal(d.presentations.length,0);
+ const files=await readdir(path.join(loc.runtime,'decision-channel/notices'));assert(files.length);const saved=JSON.parse(await readFile(path.join(loc.runtime,'decision-channel/notices',files.at(-1)),'utf8'));assert.equal(saved.runId,owner.id);assert(saved.detectedAt>=d.createdAt);
+});
 async function fixture(t) {
   assert(process.env.REVIEW_TASK_DIR,'测试必须通过受管执行器运行');
   const root=await mkdtemp(path.join(process.env.REVIEW_TASK_DIR,'tasks-'));

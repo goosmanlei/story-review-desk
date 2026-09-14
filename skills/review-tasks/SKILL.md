@@ -48,6 +48,26 @@ schedule 在一次事务内检查依赖、任务版本、资源和容量，记�
 
 `backend sync` 查询原轮次；调用回执丢失时按原编号核查，不换号重建或重跑。`backend collect --file -` 的 `{operationId}` 将已回读结构化成果登记为 DELIVERED。主 Agent 核验后 `assignment accept`。模型/强度由同一服务 model/list 实际支持项约束。
 
+## 执行中的用户决策
+
+`tasks run` 每秒检查未解决问题，变化时输出 `DECISIONS_CHANGED` 并在 runtime 保存发现时间与归属。主 Agent 读取这项通知后仍须实际向用户呈现；发现通知不等于提问回执。
+
+新版 `backend ensure/probe` 同时维护项目专属的持久决策接收器；工作线程的创建、轮次与恢复订阅使用该连接，派工 CLI 返回不会断开接收器。接收器独立于协调租约保存问题与通知；没有活跃主会话时只保存待办，不能声称用户已经看见。接收器属于当前项目服务，原进程或版本无法核验时保留现场，不连接公共或其他项目服务。
+
+每次派工后、heartbeat/checkpoint 和恢复前，主 Agent 查询 `decisions list --format markdown` 与 `decisions status`。未绑定消息或连接异常须先核查；不要只看轮次最终 JSON。已授权的普通实现选择由工作 Agent 自主处理；真正需要用户决定时，工作 Agent 在执行中调用注册的 `review_task_decision` 动态工具，提供稳定 key、问题、背景、选项及影响、建议、待决步骤和已完成工作。工具等待原请求的明确答复。宿主内建输入记为 INPUT，业务决定为 BUSINESS，命令、文件及权限审批为 APPROVAL；不支持的协议请求记录诊断并保留原消息，不能自动接受消除阻塞。`approvalPolicy: never` 不提供业务授权。
+
+主 Agent 集中转达尚未呈现的问题，说明正式任务原题、派工和问题编号、选项/建议、影响及暂停的步骤。使用主会话真实提问工具或直接与用户对话；CLI 输出不等于实际提问。实际呈现之后才用 `decisions present --run ID --file -` 保存消息引用及提问内容。相同未解决问题沿用原提问；协调会话更换不会重置呈现记录。需要提醒时明确是原问题，不制造第二个问题。
+
+答复前 `decisions show ID` 读取 `requestFields`，填写当前任务、派工、问题三层版本及不透明 bindingToken。`answer --run ID --file -` 接收这些字段、稳定 operationId、`actor:"USER"`、`explicitUserAnswer:true`、用户原话/消息引用 evidence 和结构化 answer。BUSINESS 使用 `{text}`；INPUT 使用 `{answers:{原问题ID:{answers:[...]}}}`；APPROVAL 使用原请求允许的单次 `{decision:"accept|decline|cancel"}`，权限请求使用 `{decision:"grant|deny"}`。审批前必须用 `show ID --runtime` 核对原始操作和权限并向用户说明；不能把业务选择当成命令授权。秘密输入、会话级授权、持久规则修改及不支持的请求保留诊断，由主会话在相应授权通路处理。
+
+答复先落账，再由持久连接对原协议请求 ID 回传。重复 operationId 只回读，冲突、错误归属或过期版本拒绝。保存但未发送的答复可 `decisions deliver --run ID --decision ID`；已有发送意图则不重发，即使发送结果未知或服务重放原请求。`serverRequest/resolved` 也可能代表清理请求，超时、默认项、轮次完成均不代表用户同意或答复送达。业务动态工具须匹配原条目及完整回传内容才确认；其他类型使用原请求和原操作核查证据收敛。
+
+派工 WAITING_DECISION 与普通 BLOCKED、执行 RUNNING、交回 DELIVERED 及正式 WAITING_REVIEW 分开。未解决问题不允许 collect、assignment result/accept 或 DONE；等待、空闲、断线和送达未知均保留未关闭 Agent、资源和正式任务占用，独立任务仍可按现有容量调度。正式任务可同时包含等待和执行中的不同派工，任务总状态仍为 RUNNING；通过 status/show 的派工附表、backend sync 和 decisions list 查看区别。
+
+恢复先核查旧协调者及原命令，`assignment reconcile` 接续归属，再在受管阶段 `backend recover` 订阅原线程并读取原轮次，不自动启动新轮。旧连接/服务代次的请求不可直接用于新连接；问题和用户答复都保留。原请求失效后，`decisions reconcile` 使用原操作证据确认 DELIVERED，或为原本采用 FOLLOWUP、上一轮成功且未交回/关闭的 INPUT/BUSINESS 派工登记 FOLLOWUP。随后 `decisions followup --run ID --decision ID --file -` 的 `{operationId}` 只携带已保存答复继续同一范围；未知、失败、活动轮次不另起一轮，失效审批不变成新轮次授权。已关闭或不满足 FOLLOWUP 条件的派工先收尾，再由主 Agent 创建新派工；不能复用旧答复为新请求自动授权。
+
+停止时先禁止新派工与新答复，保存检查点，`backend close` 核查原轮次、后台命令和线程卸载，再收敛相关决策为 CANCELLED 并 `assignment close`；不替用户填“同意/拒绝”。原问题、答复及未知送达历史保留。真实用户交互验收必须由主会话完成，按手册“真实决策往返验收”执行；模拟协议或 JSON 回读不替代真实呈现和用户明确答复，尚待用户参与时如实登记。
+
 不可变读资源携带精确版本，可并行；同一文件、重叠目录或业务对象的写占用串行，范围未知按独占处理。逻辑资源使用 `core/...`、`project/...` 或永久对象身份，不使用机器绝对路径。代码派工使用独立受管 worktree；命令用 `guard --assignment ID`。主 Agent 串行整合共享核心、写正式业务数据、提交推送和部署；共享核心命令再加 `--core`。保留业务 CAS 和外部授权核验。
 
 ## Goal、交回和关闭

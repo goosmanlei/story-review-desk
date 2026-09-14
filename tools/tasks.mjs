@@ -11,6 +11,9 @@ import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat
 import {installTaskSkill} from './task-skill.mjs';
 import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
 import {taskCapacity} from './task-capacity.mjs';
+import {decisionsAction} from './task-decision-cli.mjs';
+import {decisionChannelStatus,listDecisions,durableDecisionFile} from './task-decisions.mjs';
+import {decisionHash} from './task-decision-protocol.mjs';
 import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks} from './task-format.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
@@ -45,6 +48,16 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks backend verify-execution --run ID
                                     核验真实并行采样、成果验收和关闭
   tasks backend stop --run ID        只停止无未关闭派工或加载会话的专属服务
+  tasks decisions list [--history] [--format markdown]
+                                    执行中发现待决策问题；不需要活跃协调会话
+  tasks decisions show ID [--runtime] 读取原问题、当前版本和答复绑定；审批须核对 runtime 原操作
+  tasks decisions present|answer|reconcile --run ID --file -
+                                    登记主会话实际提问、用户明确答复、原操作核查
+  tasks decisions deliver --run ID --decision ID
+                                    只发送已保存且从未尝试发送的原答复；未知结果不重发
+  tasks decisions followup --run ID --decision ID --file -
+                                    已核查失效请求的同范围续办；只接受 {operationId}
+  tasks decisions status            查看持久连接、原请求和未绑定消息诊断
   tasks native probe|close           兼容别名；probe不接受公共socket或slots声明
 
   --project PATH                    默认当前项目根；不能使用源码 worktree 代替账本根
@@ -84,6 +97,18 @@ schedule: {runId,expectedVersions:{...},assignments:[{taskId,key,goal,deliverabl
   execution:{workClass:"LOOKUP|RESEARCH|IMPLEMENTATION|HIGH_RISK",rationale,longRunning:false},dependsOn:[],attemptOf}]}
 assignment: {runId,taskId,assignmentId,expectedVersions:{...},expectedAssignmentVersion,...}
 backend dispatch: {operationId,prompt,workspace,baseCommit}；collect: {operationId}；continue: {operationId,prompt}。
+decisions present/answer/reconcile 共同字段：{operationId,actor,runId,taskId,assignmentId,decisionId,
+  expectedVersions:{TASK_ID:版本},expectedAssignmentVersion,expectedDecisionVersion,bindingToken}。
+show 的 requestFields 提供当前字段；每次写入前重新读取，不能猜版本或换绑。
+present: {evidence:"主会话实际提问的消息引用及内容"}，必须先真正向用户呈现，再登记回执。
+answer: {actor:"USER",explicitUserAnswer:true,evidence:"用户原话及消息引用",answer:...}。
+BUSINESS: answer {text:"用户明确决定"}；INPUT: answer {answers:{原问题ID:{answers:["用户答复"]}}}；
+APPROVAL: answer {decision:"accept|decline|cancel"}；权限申请为 {decision:"grant|deny"}，只限原请求本轮。
+不接收秘密输入、会话授权或规则修改；原始权限与机器绑定只保存在 runtime。
+相同操作号重放仅回读；同号不同内容拒绝，已保存答复冲突拒绝。超时、默认值、resolved 通知都不是用户同意。
+reconcile: {resolution:"DELIVERED|FOLLOWUP",checkedOriginalOperation:true,evidence:"原操作/原轮次核查"}。
+先读取原线程，活动、失败未知、缺失原轮次不能 FOLLOWUP；审批失效不能作为续办授权。
+FOLLOWUP_READY 后才能 decisions followup；已关闭派工须关闭收尾并以新派工重新核对范围。
 assignment dispatch: {}，创建前保存尝试；start: {workspaceEvidence,workspace（本机路径仅存 runtime）,nativeThreadId（SubAgent 必填）}
 checkpoint: {checkpoint,goalStatus}; result: {checkpoint,result:{summary,artifacts:[],acceptance:[{criterion:0,evidence}]}}
 accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason};
@@ -96,6 +121,10 @@ next 保持未知资源的串行兼容，不能绕过上限；旧超限记录只
 
 状态：READY 待执行 / RUNNING 执行中 / BLOCKED 阻塞 / WAITING_REVIEW 待验收 /
 DONE 已完成 / CANCELLED 已取消 / MERGED 已合并。终态只读，变化另发任务。
+派工 WAITING_DECISION 表示存在未解决决定，保留任务/Agent/资源占用，不能 collect/accept/DONE。
+问题 OPEN/ANSWERED/DELIVERY_UNKNOWN/NEEDS_RECONCILIATION/FOLLOWUP_READY 均未解决。
+持久接收器独立于协调租约保存问题；主会话每个检查点查询 decisions list，合并转达，沿用已提问题。
+无活跃主会话不会自动弹出提问；恢复 run/reconcile/backend recover 后继续转达和核查。
 审计事件时间为 UTC，from 包含、to 不包含；对话默认展示 Asia/Shanghai。
 更多说明：review-software/docs/handbook/chapters/operations.md 的“正式任务管理”
 `;
@@ -105,12 +134,19 @@ async function keeper(project) {
   return processLock(path.join(loc.runtime,'executor.lock'),async()=>{
     const run=await startRun(project);
     console.log(JSON.stringify({status:'EXECUTOR_READY',runId:run.id,expiresAt:run.expiresAt,instruction:'保留此命令运行，在当前会话用 next 领取任务；每个阶段 checkpoint 并 heartbeat；完成后 stop。'}));
-    let stopping=false;
+    let stopping=false,decisionNotice=null;
     const stop=()=>{stopping=true;};
     for(const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s,stop);
     try {
       while(true) {
         const state=await runtimeState(project);
+        const decisions=await listDecisions(project),notice=decisionHash(decisions.map(d=>[d.id,d.status,d.needsPresentation]));
+        if(notice!==decisionNotice&&(decisions.length||decisionNotice)){
+          const event={status:'DECISIONS_CHANGED',runId:run.id,detectedAt:new Date().toISOString(),decisions:decisions.map(d=>({decisionId:d.id,taskId:d.taskId,assignmentId:d.assignmentId,kind:d.kind,status:d.status,question:d.question,needsPresentation:d.needsPresentation}))};
+          await durableDecisionFile(path.join(loc.runtime,'decision-channel/notices',run.id+'-'+Date.now()+'.json'),event);
+          console.log(JSON.stringify(event));
+        }
+        decisionNotice=notice;
         if(stopping||state.run?.stopRequested||Date.parse(state.run?.expiresAt)<=Date.now()) {
           try { await stopRun(project,run.id,{close:true}); break; }
           catch(e) { if(!e.message.includes('仍在运行')) throw e; }
@@ -199,7 +235,7 @@ async function nativeAction(project,action,v) {
 
 export async function main(argv=process.argv.slice(2)) {
   const sep=argv.indexOf('--'), command=sep<0?[]:argv.slice(sep+1);
-  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
+  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},decision:{type:'string'},history:{type:'boolean'},runtime:{type:'boolean'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
   const project=path.resolve(v.project||process.cwd()), action=p[0];
   if(v.help||!action||action==='help') return console.log(help);
   requireTask(!v.all||action==='list','--all 仅适用于 list');
@@ -212,6 +248,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='guard') return guarded(project,v.run,v.task,command,v.core,v.assignment);
   if(action==='native') return nativeAction(project,p[1],v);
   if(action==='backend')return backendAction(project,p[1],v,v.file?await inputFile(v.file):{});
+  if(action==='decisions')return decisionsAction(project,p[1],{...v,decision:v.decision||p[2]},v.file?await inputFile(v.file):{});
   if(action==='commit')return commitTaskRecords(project,await inputFile(v.file));
   if(action==='commit-status')return taskCommitStatus(project,v['operation-id']);
   requireTask(['json','markdown'].includes(v.format),'format 须为 json 或 markdown');
@@ -230,6 +267,8 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='status') {
     const runtime=await runtimeState(project),interrupted=Object.values(ledger.tasks).filter(t=>t.status==='RUNNING'&&(!runtime.runActive||(runtime.bindings.tasks[t.id]||t.runId)!==runtime.run?.id));
     runtime.taskCapacity=taskCapacity(ledger.tasks);
+    runtime.decisions=await listDecisions(project);
+    runtime.decisionChannel=await decisionChannelStatus(project);
     return v.format==='markdown'?renderStatus({...data,runtime},options):{...runtime,interrupted};
   }
   const mutation=action==='assignment'?`assignment:${p[1]}`:action;

@@ -3,22 +3,48 @@ import {nativeSocket} from './native-socket.mjs';
 
 // Transport connection only. Project service lifecycle belongs to task-server.
 // Never delete history, edit Codex databases, or infer closure from an idle turn.
-export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSocket}={}) {
-  const pending=new Map();let counter=0,closed=false;
+export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSocket,onRequest,onNotification,onDisconnect,onDiagnostic}={}) {
+  const pending=new Map(),serverPending=new Map();let counter=0,closed=false,events=Promise.resolve();
   const rejectAll=error=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error);}pending.clear();};
-  const transport=transportFactory({socket,timeoutMs,onFailure(error){closed=true;rejectAll(error);},onMessage(message){
-    if(!message||typeof message!=='object'||message.method)return;
+  const disconnected=error=>{if(closed)return;closed=true;rejectAll(error);enqueue(()=>onDisconnect?.(error));};
+  const enqueue=fn=>{events=events.then(fn).catch(error=>{onDiagnostic?.({code:'NATIVE_EVENT_FAILED',message:error.message});disconnected(error);transport.close();});};
+  const transport=transportFactory({socket,timeoutMs,onFailure:disconnected,onMessage(message){
+    if(!message||typeof message!=='object')return;
+    if(typeof message.method==='string'){
+      if(Object.hasOwn(message,'id')){
+        const prior=serverPending.get(message.id);
+        if(prior&&JSON.stringify(prior.message)!==JSON.stringify(message)){disconnected(Error('原生服务重复请求 ID 内容冲突'));transport.close();return;}
+        if(!prior)serverPending.set(message.id,{message,sent:false});
+        enqueue(async()=>{
+          if(onRequest)await onRequest(message);
+          else {onDiagnostic?.({code:'UNHANDLED_SERVER_REQUEST',method:message.method});await respond(message.id,null,{code:-32601,message:'This client does not handle '+message.method});}
+        });
+      }else {
+        if(message.method==='serverRequest/resolved'){
+          const prior=serverPending.get(message.params?.requestId);
+          if(prior?.message.params?.threadId===message.params.threadId)serverPending.delete(message.params.requestId);
+        }
+        enqueue(()=>onNotification?.(message));
+      }
+      return;
+    }
     const p=pending.get(message.id);if(!p)return;
     pending.delete(message.id);clearTimeout(p.timer);
     message.error?p.reject(Error(message.error.message||'原生 API 请求失败')):p.resolve(message.result);
   }});
+  const respond=async(id,result,error)=>{
+    const p=serverPending.get(id);
+    if(closed||!p||p.sent)throw Error('原生服务请求已失效或已发送；不得重发');
+    p.sent=true; // set before write: even a failed write may have reached server
+    await transport.send({id,...(error?{error}:{result})});
+  };
   const call=async(method,params={})=>{await transport.ready;return new Promise((resolve,reject)=>{
     if(closed)return reject(Error('原生连接已关闭'));
     const id=++counter,timer=setTimeout(()=>{pending.delete(id);reject(Error(`原生 API 超时：${method}`));},timeoutMs);
     pending.set(id,{resolve,reject,timer});
     transport.send({id,method,params}).catch(error=>{clearTimeout(timer);pending.delete(id);reject(error);});
   });};
-  return {socket:transport.socket,call,async initialize(){const info=await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});await transport.send({method:'initialized'});return info;},close(){closed=true;rejectAll(Error('原生连接已关闭'));transport.close();}};
+  return {socket:transport.socket,call,respond,flush:()=>events,hasRequest:id=>!closed&&serverPending.has(id)&&!serverPending.get(id).sent,async initialize(){const info=await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});await transport.send({method:'initialized'});return info;},close(){disconnected(Error('原生连接已关闭'));transport.close();}};
 }
 
 async function loadedThreads(client) {

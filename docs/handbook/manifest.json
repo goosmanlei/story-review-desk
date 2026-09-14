@@ -201,9 +201,15 @@
         "tools/native-socket.mjs",
         "tools/task-server.mjs",
         "tools/task-server-daemon.mjs",
-        "tools/task-backend.mjs"
+        "tools/task-backend.mjs",
+        "tools/task-decision-channel.mjs",
+        "tools/task-decision-cli.mjs",
+        "tools/task-decision-daemon.mjs",
+        "tools/task-decision-protocol.mjs",
+        "tools/task-decision-state.mjs",
+        "tools/task-decisions.mjs"
       ],
-      "sourceDigest": "3193050f0b42cd409f25a416e873743bfd5ff02f106e7d0bea18ebf18a31ab43"
+      "sourceDigest": "bb82a24f50ae470e7810821d097bc61f7f86899771bf9a47e8a587b3382835b8"
     },
     {
       "id": "instance",

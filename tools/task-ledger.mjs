@@ -7,6 +7,8 @@ import {processLock, processIdentity, processAlive} from './process-resources.mj
 import {assignmentMutation, assignmentOpen, assignmentUnknown} from './task-assignments.mjs';
 import {renderTasks,taskLabels,renderAssignments} from './task-format.mjs';
 import {taskCapacity,requireTaskCapacity} from './task-capacity.mjs';
+import {decisionMutation} from './task-decision-state.mjs';
+import {pendingDecisions} from './task-decision-protocol.mjs';
 
 export const states = ['READY','RUNNING','BLOCKED','WAITING_REVIEW','DONE','CANCELLED','MERGED'];
 export const labels = taskLabels;
@@ -120,7 +122,7 @@ function checkpoint(value, previous) {
   for(const old of previous?.operations||[]) requireTask(ids.has(old.id),'检查点不能丢弃已登记操作；保留编号及最终核查结果');
   return value;
 }
-const uncertain=t=>(t.checkpoint?.operations||[]).some(x=>['PENDING','RESULT_UNKNOWN'].includes(x.status)) || (t.assignments||[]).some(assignmentUnknown);
+const uncertain=t=>(t.checkpoint?.operations||[]).some(x=>['PENDING','RESULT_UNKNOWN'].includes(x.status)) || (t.assignments||[]).some(a=>assignmentUnknown(a)||pendingDecisions(a).length);
 function resultFor(t,result) {
   text(result?.summary,'result.summary'); text(result?.cleanup,'result.cleanup');
   list(result.artifacts||[],'result.artifacts',true);
@@ -283,12 +285,18 @@ export async function mutate(project,action,request) {
         if(request.tasks){t.batchId=request.operationId;t.batchKey=specs[i].key||String(i);}
       }
       result={status:'READY',taskIds:created.map(t=>t.id),...(created.length===1?{taskId:created[0].id}:{})};
+    } else if(action.startsWith('decision:')) {
+      requireTask(ledger.schemaVersion===2,'决策通路要求 v2 账本');
+      result=await decisionMutation({action,request,tasks,bindings,at,touch,
+        requireRun:options=>requireRun(loc,request.runId,options),service:await maybe(path.join(loc.runtime,'server/server.json'))});
+      if(!changed.size)return result;
     } else if(action==='schedule'||action.startsWith('assignment:')) {
       requireTask(ledger.schemaVersion===2,'派工要求 v2 账本；先停止执行并升级');
       const converging=['assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(action);
       const run=await requireRun(loc,request.runId,{converging});
       if(action==='schedule'&&run.policy?.stopAfterTaskId&&terminal.has(tasks[run.policy.stopAfterTaskId]?.status))return {status:'PAUSED_BY_POLICY',assignments:[],deferred:[]};
       result=await assignmentMutation({action,request,tasks,at,touch,get,bindings,checkpoint,complete,
+        decisionBlocked:async id=>{const {unappliedDecisionRequest}=await import('./task-decisions.mjs');return unappliedDecisionRequest(loc,bindings.assignments[id]?.nativeThreadId);},
         requireRun:()=>requireRun(loc,request.runId,{converging}),active:id=>activeActivity(loc,id),capabilities:run.capabilities,root:loc.root,
         idFor:s=>'A-'+digest(request.operationId+':'+s).slice(0,20)});
       if(!changed.size)return result;

@@ -1,5 +1,5 @@
 export const taskLabels={READY:'待执行',RUNNING:'执行中',BLOCKED:'阻塞',WAITING_REVIEW:'待验收',DONE:'已完成',CANCELLED:'已取消',MERGED:'已合并'};
-const assignmentLabels={RESERVED:'待启动',RUNNING:'执行中',DELIVERED:'已交回',ACCEPTED:'已验收',BLOCKED:'阻塞',CLOSED:'已关闭'};
+const assignmentLabels={RESERVED:'待启动',RUNNING:'执行中',WAITING_DECISION:'等待用户决定',DELIVERED:'已交回',ACCEPTED:'已验收',BLOCKED:'阻塞',CLOSED:'已关闭'};
 export const cell=value=>String(value??'—').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\\','&#92;').replaceAll('|','&#124;').replaceAll('`','&#96;').replaceAll('[','&#91;').replaceAll(']','&#93;').replaceAll('*','&#42;').replaceAll('_','&#95;').replace(/[\r\n\t]+/g,' ');
 const date=value=>{
   if(value===null||value==='')return '—';
@@ -30,7 +30,10 @@ export function renderStatus(data,options={}) {
   const activityCount=(runtime.activities||[]).filter(a=>a.live===true).length;
   const rows=[['执行者',runtime.runActive===null?'UNKNOWN（无法核验原执行者）':runtime.runActive?'当前会话执行中':'无活跃执行者'],['未关闭派工',open.length?`${open.length} 项`:'无'],['受管命令',(runtime.activities||[]).some(a=>a.live===null)?'UNKNOWN（存在无法核验的占用）':activityCount?`${activityCount} 项正在运行`:'无活跃命令'],['执行能力',runtime.run?.capabilities?.limitation||(runtime.run?.capabilities?.delegation?'SubAgent 自动调度':'主 Agent 执行')]];
   if(runtime.taskCapacity)rows.push(['正式任务占用',`${runtime.taskCapacity.occupied} / ${runtime.taskCapacity.limit} 项；可补入 ${runtime.taskCapacity.available} 项（仍须通过依赖、资源及执行能力检查）`]);
-  return renderTasks(data,options)+'\n\n'+table(['项目','当前情况'],rows.map(r=>r.map(cell)));
+  const decisions=(data.tasks||[]).flatMap(t=>(t.assignments||[]).flatMap(a=>(a.decisions||[]).filter(d=>!['RESOLVED','CANCELLED'].includes(d.status))));
+  rows.push(['待决策',decisions.length?`${decisions.length} 项；未关闭派工保留资源及容量。使用 decisions list 发现并集中转达`:'无']);
+  if(runtime.decisionChannel)rows.push(['决策连接',runtime.decisionChannel.status]);
+  return renderTasks(data,options)+'\n\n'+table(['项目','当前情况'],rows.map(r=>r.map(cell)))+renderAssignments(data.tasks||[]);
 }
 export function renderDetail(task) {
   const rows=[['任务编号',cell(task.id)],['任务内容',cell(task.title)],['状态',cell(status(task))],['类型',cell(task.type)],['优先级',cell(task.priority)],['发布时间',cell(date(task.publishedAt))],['首次开始',cell(date(task.startedAt))],['完成时间',cell(date(task.completedAt))],['目标',cell(task.goal)],['讨论结论',cell(task.discussion?.summary||'UNKNOWN（旧版未单独记录）')],['可行性',cell(task.discussion?.feasibility||'UNKNOWN（旧版未单独记录）')],['当前进展',cell(task.checkpoint?.summary||'—')],['阻塞',cell(task.blockReason||'—')],['依赖',cell(task.dependencies.join('、')||'—')],['结果',cell(task.result?.summary||'—')]];

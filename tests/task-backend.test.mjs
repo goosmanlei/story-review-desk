@@ -5,8 +5,10 @@ import {mkdtemp,mkdir,writeFile,rm,stat} from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {mutate,readLedger,readBindings,startRun,updateBinding,location} from '../tools/task-ledger.mjs';
-import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend} from '../tools/task-backend.mjs';
+import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend,restoreBackendReceipts} from '../tools/task-backend.mjs';
 import {closeNativeThread} from '../tools/task-native.mjs';
+import {decisionHash} from '../tools/task-decision-protocol.mjs';
+import {durableDecisionFile} from '../tools/task-decisions.mjs';
 
 const request=x=>({operationId:randomUUID(),actor:'BACKEND_FIXTURE',...x});
 const capabilities={
@@ -222,4 +224,22 @@ test('native close refuses a Goal that acknowledges pause but remains active',as
   throw Error('must not archive without verified pause');
  }};
  await assert.rejects(closeNativeThread(client,'t',null,{verifyOwnership:async()=>{}}),/Goal 尚未确认/);
+});
+
+test('persisted connection receipts recover lost thread and turn replies without making any RPC',async t=>{
+ const state=await fixture(t),binding=await bindThread(state),operationId='fixture-lost-dispatch';
+ await updateBinding(state.root,state.run.id,state.assignment.id,b=>{delete b.nativeThreadId;delete b.backendCreation;b.backendRequest={operationId,generation:'fixture-generation',state:'RESULT_UNKNOWN'};});
+ const save=async(method,result,extra={})=>{
+  const id=decisionHash({assignmentId:state.assignment.id,operationId,method});
+  await durableDecisionFile(path.join(binding.loc.runtime,'decision-channel/calls',id+'.json'),{assignmentId:state.assignment.id,operationId,method,state:'SUCCEEDED',serviceId:binding.serviceId,generation:'fixture-generation',params:method==='thread/start'?{cwd:binding.workspace}:{threadId:binding.threadId},result,at:new Date().toISOString(),completedAt:new Date().toISOString(),...extra});
+ };
+ await save('thread/start',{thread:{id:binding.threadId}},{state:'RESULT_UNKNOWN'});
+ await restoreBackendReceipts(state.root,state.run.id,state.assignment.id);assert.equal((await readBindings(binding.loc)).assignments[state.assignment.id].nativeThreadId,undefined);
+ await save('thread/start',{thread:{id:binding.threadId}});await save('turn/start',{turn:{id:'original-turn'}});
+ await restoreBackendReceipts(state.root,state.run.id,state.assignment.id);
+ const b=(await readBindings(binding.loc)).assignments[state.assignment.id];assert.equal(b.nativeThreadId,binding.threadId);assert.equal(b.backendCreation.serviceId,binding.serviceId);assert.equal(b.backendRequest.turnId,'original-turn');
+ await updateBinding(state.root,state.run.id,state.assignment.id,b=>{delete b.backendRequest.turnId;});
+ await save('turn/start',{turn:{id:'wrong-turn'}},{serviceId:'other-service'});
+ await assert.rejects(restoreBackendReceipts(state.root,state.run.id,state.assignment.id),/BACKEND_RECEIPT/);
+ assert.equal((await readBindings(binding.loc)).assignments[state.assignment.id].backendRequest.turnId,undefined);
 });

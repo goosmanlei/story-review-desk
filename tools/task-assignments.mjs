@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {realpath,lstat} from 'node:fs/promises';
 import {taskCapacity,taskCapacityReason,requireTaskCapacity} from './task-capacity.mjs';
+import {pendingDecisions} from './task-decision-protocol.mjs';
 
 // Logical reservations are durable. Native thread IDs, worktrees and leases live
 // in runtime bindings and are deliberately never copied into these records.
@@ -56,7 +57,7 @@ export function chooseExecution(spec, capabilities) {
 }
 
 export async function assignmentMutation(ctx) {
-  const {action,request,tasks,at,touch,get,requireRun,bindings,checkpoint,complete,active,capabilities,idFor,root}=ctx;
+  const {action,request,tasks,at,touch,get,requireRun,bindings,checkpoint,complete,active,capabilities,idFor,root,decisionBlocked}=ctx;
   await requireRun();
   const all=()=>Object.values(tasks).flatMap(t=>(t.assignments||[]).map(a=>({task:t,assignment:a})));
   const find=id=>all().find(x=>x.assignment.id===id);
@@ -106,6 +107,7 @@ export async function assignmentMutation(ctx) {
   demand(a,'派工不存在');demand(a.version===request.expectedAssignmentVersion,`派工版本冲突：当前为 ${a.version}`);
   demand(assignmentOpen(a),'已关闭派工只读；返工或新任务须重新调度新的 Agent');
   const binding=bindings.assignments[a.id] ||= {};
+  if(['assignment:result','assignment:accept'].includes(action))demand(!await decisionBlocked?.(a.id),'DECISION_INBOX：原服务请求尚未核查，不能验收');
   if(['assignment:dispatch','assignment:start'].includes(action)){
     requireTaskCapacity(tasks,t.id);
     const open=all().filter(x=>assignmentOpen(x.assignment));
@@ -127,7 +129,8 @@ export async function assignmentMutation(ctx) {
     }
     const cp=checkpoint(request.checkpoint,a.checkpoint);
     bump(t,a);a.checkpoint=cp;
-    if(!['DELIVERED','ACCEPTED'].includes(a.status)||assignmentUnknown(a))a.status='BLOCKED';
+    if(pendingDecisions(a).length){a.status='WAITING_DECISION';a.decisionResumeStatus='BLOCKED';}
+    else if(!['DELIVERED','ACCEPTED'].includes(a.status)||assignmentUnknown(a))a.status='BLOCKED';
     a.reconciliation=request.reconciliation;
     a.blockReason=assignmentUnknown(a)?'原操作结果仍未知；只查询原编号':'中断派工须核查并关闭；后续使用新 Agent';
     binding.runId=request.runId;bindings.tasks[t.id]=request.runId;
@@ -157,10 +160,11 @@ export async function assignmentMutation(ctx) {
       } else if(a.execution.mode==='SUBAGENT'&&a.resources.some(r=>r.access==='WRITE'&&['FILE','DIRECTORY','UNKNOWN'].includes(r.kind))) throw Error('代码写派工须指定受管 worktree');
       bump(t,a);a.status='RUNNING';a.startedAt=at;a.workspaceEvidence=request.workspaceEvidence;
     } else if(action==='assignment:checkpoint') {
-      demand(['RUNNING','BLOCKED'].includes(a.status),'此状态不能保存执行检查点');
+      demand(['RUNNING','BLOCKED','WAITING_DECISION'].includes(a.status),'此状态不能保存执行检查点');
       bump(t,a);a.checkpoint=checkpoint(request.checkpoint,a.checkpoint);
       if(request.goalStatus) {demand(['ACTIVE','COMPLETE','PAUSED','UNKNOWN','UNAVAILABLE'].includes(request.goalStatus),'Goal 状态无效');a.goalStatus=request.goalStatus;}
     } else if(action==='assignment:result') {
+      demand(!(a.decisions||[]).some(d=>d.status!=='RESOLVED'),'DECISION_PENDING：尚有未解决决策，不可交回完整成果');
       demand(['RUNNING','BLOCKED'].includes(a.status),'只接收已执行派工的结果');
       demand(!await active(a.id),'受管命令仍在运行');
       const cp=checkpoint(request.checkpoint,a.checkpoint);demand(!assignmentUnknown({checkpoint:cp}),'原操作结果尚未核查');
@@ -170,12 +174,14 @@ export async function assignmentMutation(ctx) {
       a.acceptanceCriteria.forEach((_,i)=>demand(request.result.acceptance.some(x=>x.criterion===i&&typeof x.evidence==='string'&&x.evidence.trim()),`派工验收项 ${i} 缺少证据`));
       bump(t,a);a.status='DELIVERED';a.deliveredAt=at;a.checkpoint=cp;a.result=request.result;
     } else if(action==='assignment:accept') {
+      demand(!(a.decisions||[]).some(d=>d.status!=='RESOLVED'),'DECISION_PENDING：尚有未解决决策，不可验收');
       demand(a.status==='DELIVERED','结果交回后由主 Agent 验收');nonempty(request.evidence,'主 Agent 验收证据');
       bump(t,a);a.status='ACCEPTED';a.acceptedAt=at;a.acceptanceEvidence=request.evidence;
     } else if(action==='assignment:close') {
+      demand(!pendingDecisions(a).length,'DECISION_PENDING：先停止原轮次并收敛决策请求');
       demand(!await active(a.id),'受管命令仍在运行');demand(!assignmentUnknown(a),'未知操作未核查，不能释放资源');
       demand(['ACCEPTED','CANCELLED','REPLACED'].includes(request.outcome),'关闭结果无效');
-      if(request.outcome==='ACCEPTED') demand(a.status==='ACCEPTED','完成的派工须先经过主 Agent 验收');
+      if(request.outcome==='ACCEPTED') {demand(a.status==='ACCEPTED','完成的派工须先经过主 Agent 验收');demand((a.decisions||[]).every(d=>d.status==='RESOLVED'),'DECISION_PENDING：取消的问题不能作为已验收成果关闭');}
       else nonempty(request.reason,'取消或替换原因');
       if(a.execution.mode==='SUBAGENT') {
         const receipt=binding.closureReceipt;
