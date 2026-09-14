@@ -166,9 +166,10 @@
         "web/app/material-browse-state.ts",
         "web/app/paged-production-data.ts",
         "server/presentation/production-material-query.mjs",
-        "web/presentation/spatial-placement.mjs"
+        "web/presentation/spatial-placement.mjs",
+        "web/app/material-entity-review.css"
       ],
-      "sourceDigest": "78b90fe1f367335a079a656df4d981daf3b43b06b7cea7c294f18798be51a9f1"
+      "sourceDigest": "54142e9d4fa2b910419ea4986180d1291bff5671f777d266e790ce0c8fee893f"
     },
     {
       "id": "development",

@@ -27,7 +27,6 @@
 .material-entity-review .material-stage-note{margin:.25rem 0 .25rem 8.55rem;font-size:.8rem;line-height:1.55;color:var(--material-muted)}
 
 .material-entity-body{display:grid;grid-template-columns:300px minmax(0,1fr);gap:1.2rem;align-items:start;min-width:0}
-.material-pending-usage{border:1px solid var(--material-line);padding:.75rem 1rem;margin:0 0 1rem;background:var(--material-paper);font-size:.875rem;line-height:1.6}.material-pending-usage>summary{cursor:pointer;color:var(--material-muted)}.material-pending-usage p{margin:.5rem 0}
 .material-entity-directory{position:sticky;top:5.2rem;display:flex;flex-direction:column;min-width:0;max-height:calc(100dvh - 6.3rem);padding:.85rem;border:1px solid var(--material-line);background:var(--material-paper)}
 .material-entity-directory>header{display:flex;align-items:center;justify-content:space-between;gap:.5rem;margin-bottom:.75rem}.material-entity-directory h3{font-size:1rem;font-weight:700;margin:0}.material-entity-directory>header>span{font-size:.8rem;color:var(--material-muted);white-space:nowrap}
 .material-entity-directory>input{width:100%;min-width:0;border:1px solid var(--material-line);background:transparent;padding:.5rem .65rem;font-size:.875rem;border-radius:3px;margin-bottom:.7rem}
