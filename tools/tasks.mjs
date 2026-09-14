@@ -15,6 +15,7 @@ import {decisionsAction} from './task-decision-cli.mjs';
 import {decisionChannelStatus,listDecisions,durableDecisionFile} from './task-decisions.mjs';
 import {decisionHash} from './task-decision-protocol.mjs';
 import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks} from './task-format.mjs';
+import {formatTaskTerminal} from './task-terminal-format.mjs';
 import {resolveTaskId,displayTaskId} from './task-numbering.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
@@ -63,7 +64,8 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
 
   --project PATH                    默认当前项目根；不能使用源码 worktree 代替账本根
   --file -                          从 stdin 读取 JSON，避免保存临时请求文件
-  --format json|markdown             list / show / status / audit；默认 JSON
+  --format json|markdown|text        list / show / status / audit；默认 JSON
+  --width 120                        text终端表格列宽；默认当前TTY宽度或120
   --sort published|priority|updated|completed
   --columns completed,progress,blocker,result  Markdown 附表可选列
 
@@ -75,6 +77,7 @@ Markdown 基础表固定七列：任务编号 / 任务标题 / 类别 / 状态 /
 类别和任务状态只显示合法英文原码，无效值显示 UNKNOWN；数量汇总使用同一口径。
 每个前置依赖在同一单元格内单独换行，保留完整展示号及顺序；无依赖显示—。
 精简短字段为完整正式标题留出更多响应式空间；GFM 不承诺精确列宽，不截断标题或用空格伪造列宽。
+已确认不渲染HTML单元格换行的终端使用 --format text；沿用同一七列结果，以真实续行呈现依赖。
 展示编号为 T-YYYYMMDD-NNN，日期按 Asia/Shanghai 原始发布时间，同日跨类型共用 001–999。
 编号终态不复用、重建不变化；每日超过 999 项整笔拒绝（TASK_NUMBER_LIMIT）。
 完整展示号与旧永久 ID 均可 show、list/audit --task、依赖、合并、派工和写入定位。
@@ -255,7 +258,7 @@ async function nativeAction(project,action,v) {
 
 export async function main(argv=process.argv.slice(2)) {
   const sep=argv.indexOf('--'), command=sep<0?[]:argv.slice(sep+1);
-  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},decision:{type:'string'},history:{type:'boolean'},runtime:{type:'boolean'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
+  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},decision:{type:'string'},history:{type:'boolean'},runtime:{type:'boolean'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},width:{type:'string'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
   const project=path.resolve(v.project||process.cwd()), action=p[0];
   if(v.help||!action||action==='help') return console.log(help);
   requireTask(!v.all||action==='list','--all 仅适用于 list');
@@ -271,7 +274,9 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='decisions')return decisionsAction(project,p[1],{...v,decision:v.decision||p[2]},v.file?await inputFile(v.file):{});
   if(action==='commit')return commitTaskRecords(project,await inputFile(v.file));
   if(action==='commit-status')return taskCommitStatus(project,v['operation-id']);
-  requireTask(['json','markdown'].includes(v.format),'format 须为 json 或 markdown');
+  requireTask(['json','markdown','text'].includes(v.format),'format 须为 json、markdown 或 text');
+  requireTask(v.width===undefined||v.format==='text','--width 仅适用于 --format text');
+  const output=value=>v.format==='text'?formatTaskTerminal(value,{width:v.width===undefined?(process.stdout.columns||120):Number(v.width)}):value;
   const ledger=await readLedger(project);
   const data=audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
   data.tasks=sortTasks(data.tasks,v.sort);
@@ -280,16 +285,16 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='list') {
     if(!v.all)data.tasks=data.tasks.filter(t=>['READY','RUNNING','BLOCKED','WAITING_REVIEW'].includes(t.status));
     data.scope+=' / '+(v.all?'全部任务（含终态）':'未完成任务');
-    return v.format==='markdown'?renderTasks(data,options):data.tasks;
+    return v.format!=='json'?output(renderTasks(data,options)):data.tasks;
   }
-  if(action==='show') {const task=ledger.tasks[resolveTaskId(ledger.tasks,p[1])];requireTask(task,'任务不存在');return v.format==='markdown'?renderDetail(task,options):task;}
-  if(action==='audit')return v.format==='markdown'?renderAudit(data,options):data;
+  if(action==='show') {const task=ledger.tasks[resolveTaskId(ledger.tasks,p[1])];requireTask(task,'任务不存在');return v.format!=='json'?output(renderDetail(task,options)):task;}
+  if(action==='audit')return v.format!=='json'?output(renderAudit(data,options)):data;
   if(action==='status') {
     const runtime=await runtimeState(project),interrupted=Object.values(ledger.tasks).filter(t=>t.status==='RUNNING'&&(!runtime.runActive||(runtime.bindings.tasks[t.id]||t.runId)!==runtime.run?.id));
     runtime.taskCapacity=taskCapacity(ledger.tasks);
     runtime.decisions=await listDecisions(project);
     runtime.decisionChannel=await decisionChannelStatus(project);
-    return v.format==='markdown'?renderStatus({...data,runtime},options):{...runtime,interrupted};
+    return v.format!=='json'?output(renderStatus({...data,runtime},options)):{...runtime,interrupted};
   }
   const mutation=action==='assignment'?`assignment:${p[1]}`:action;
   requireTask(['publish','upgrade','next','resume','checkpoint','transition','amend','merge','split','schedule','assignment:dispatch','assignment:start','assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(mutation),'未知命令；运行 tasks --help');

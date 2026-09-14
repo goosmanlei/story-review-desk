@@ -185,7 +185,7 @@
       "title": "开发与质检流程",
       "summary": "把实现、业务验证、界面验证、文档和发布作为一次完整交付。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "package.json",
         "tests/object-store.test.mjs",
@@ -194,7 +194,7 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "f3af8ed080251714b219664a69a3751f6bfcbf5e8d6882b4024206da643113ba"
+      "sourceDigest": "a7003b8858530a578528a8e48b3780d2d15e63d9ab0c8cc3718ffdf1165ee6ca"
     },
     {
       "id": "operations",
@@ -235,9 +235,10 @@
         "tools/task-numbering.mjs",
         "tools/app-service.mjs",
         "tools/execution-runtime.mjs",
-        "tools/project.mjs"
+        "tools/project.mjs",
+        "tools/task-terminal-format.mjs"
       ],
-      "sourceDigest": "1c4812f4477f81f595b696f55c185aff57dfc9e56855065266e69f657c9e1c5d"
+      "sourceDigest": "a6dfbb696cb21808abe77c33f1c18b9e81b8b5d4c1908f0d8193c1d4768d35fc"
     },
     {
       "id": "instance",
