@@ -1,4 +1,4 @@
-import stringWidth from 'string-width';
+import stringWidth from './vendor/terminal-width/string-width.mjs';
 
 const segments = new Intl.Segmenter(undefined, {granularity:'grapheme'});
 const entities = {amp:'&',lt:'<',gt:'>','#92':'\\','#124':'|','#96':'`','#91':'[','#93':']','#42':'*','#95':'_'};

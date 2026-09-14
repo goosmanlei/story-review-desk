@@ -367,6 +367,8 @@ list / status / audit / show 的 `--format json|markdown` 默认 JSON 保持接�
 
 当当前终端实际把 <br> 原样显示、无法实现单元格换行时，使用同一共享结果的终端适配：运行对应查询的 --format text，必要时指定 --width 120（40–400 列）；有真实 TTY 时默认读取其列宽，否则采用 120 列。把 CLI 输出原样放入 text 代码块；依赖用真实续行、每格一项，按中文、组合字符和 emoji 显示宽度对齐，完整标题和编号只在同格换行，不截短、不改值。窄窗口会增加同格续行，不能冒充横向空间充足。终端控制字符只作可见转义，原账本内容不变。Markdown 与 JSON 默认保持原契约；text 只是已确认宿主限制下的完整信息适配。该终端不再使用带可信 HTML 换行标记的 Markdown 表格交付。修复后原样呈现实际查询，回读用户对依赖续行及表格可读性的反馈。
 
+终端文字宽度所需的锁定 MIT 实现随 tools/vendor/terminal-width 安装，原始版本、源码 SHA 和许可证同目录保留。标准项目无需 node_modules 即可执行任务 CLI；隔离安装检查必须覆盖真实 CLI 的 text、JSON 与帮助入口。
+
 ```bash
 npm run tasks -- help
 npm run tasks -- list --format markdown

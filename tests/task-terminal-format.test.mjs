@@ -57,3 +57,32 @@ test('CLI text is an adapter of the same filtered, numbered shared result',async
   assert((await main(['status','--project',root,'--format','text'])).includes('执行者'));
   await assert.rejects(query('--format','markdown','--width','100'),/width/);
 });
+
+import {cp,mkdir} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import {execFileSync} from 'node:child_process';
+import path from 'node:path';
+import portableWidth from '../tools/vendor/terminal-width/string-width.mjs';
+test('carried width implementation agrees with pinned upstream across Unicode clusters',()=>{
+  for(const value of ['Latin 正式标题','Á ë','👩‍💻 🧑🏽‍🚀 🇨🇳','각 가','한글 ㄱ','ｶﾞ カナ あ','กํา क्षि','𠀀 〇 Ａ','1️⃣ 1⃣','\u200b\u2060\u0301','\x1b[31m红色\x1b[0m'])
+    assert.equal(portableWidth(value),stringWidth(value),JSON.stringify(value));
+});
+test('installed CLI runs without node_modules or source-checkout resolution',async t=>{
+  const project=await fixture(t);
+  const a=task('T-20260914-aaaaaaaaaaaa',base.publishedAt,{title:'独立项目完整标题',status:'READY'});
+  await legacy(project,[{tasks:[a]}]);
+  const software=path.join(project,'review-software');
+  const source=fileURLToPath(new URL('../',import.meta.url));
+  await mkdir(software,{recursive:true});
+  for(const dir of ['tools','server','web/presentation'])await cp(path.join(source,dir),path.join(software,dir),{recursive:true});
+  const cli=path.join(software,'tools/tasks.mjs');
+  const run=(...args)=>execFileSync(process.execPath,[cli,...args,'--project',project],{cwd:project,encoding:'utf8',env:{...process.env,NODE_PATH:''}});
+  const text=run('list','--format','text','--width','120');
+  assert(text.includes('独立项目完整标题'));
+  assert(text.includes('T-20260914-001'));
+  assert(run('show','T-20260914-001','--format','text').includes('独立项目完整标题'));
+  assert(run('status','--format','text').includes('执行者'));
+  assert(run('audit','--format','text').includes('独立项目完整标题'));
+  assert.equal(JSON.parse(run('list')).length,1);
+  assert(run('--help').includes('heartbeat'));
+});

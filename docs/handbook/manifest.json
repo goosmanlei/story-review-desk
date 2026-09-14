@@ -194,7 +194,7 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "a7003b8858530a578528a8e48b3780d2d15e63d9ab0c8cc3718ffdf1165ee6ca"
+      "sourceDigest": "742dfd381bf5f7bf55816598fe525bc9ddf4254d22875b3ceaa6f448a75ccf41"
     },
     {
       "id": "operations",
@@ -236,9 +236,16 @@
         "tools/app-service.mjs",
         "tools/execution-runtime.mjs",
         "tools/project.mjs",
-        "tools/task-terminal-format.mjs"
+        "tools/task-terminal-format.mjs",
+        "tools/vendor/terminal-width/string-width.mjs",
+        "tools/vendor/terminal-width/east-asian-width.mjs",
+        "tools/vendor/terminal-width/east-asian-lookup.mjs",
+        "tools/vendor/terminal-width/east-asian-lookup-data.mjs",
+        "tools/vendor/terminal-width/east-asian-utilities.mjs",
+        "tools/vendor/terminal-width/strip-ansi.mjs",
+        "tools/vendor/terminal-width/ansi-regex.mjs"
       ],
-      "sourceDigest": "a6dfbb696cb21808abe77c33f1c18b9e81b8b5d4c1908f0d8193c1d4768d35fc"
+      "sourceDigest": "172a74401080d73268bf475747f15325cd7097763af9c46f78b9ec7dcb3df4a7"
     },
     {
       "id": "instance",
