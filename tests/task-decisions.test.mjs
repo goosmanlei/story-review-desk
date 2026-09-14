@@ -8,7 +8,7 @@ import {decisionHash,encodeDecisionAnswer,pendingDecisions} from '../tools/task-
 import {decisionSnapshot,decisionVersions,listDecisions,persistDecisionMessage,drainDecisionInbox,deliverDecision,assertNoPendingDecisions,cancelAssignmentDecisions,readDecisionFile,durableDecisionFile} from '../tools/task-decisions.mjs';
 import {taskCapacity} from '../tools/task-capacity.mjs';
 import {main} from '../tools/tasks.mjs';
-import {runDecisionChannel,channelPaths,channelClient,callDecisionChannel} from '../tools/task-decision-channel.mjs';
+import {runDecisionChannel,channelPaths,channelClient,callDecisionChannel,stopDecisionChannel} from '../tools/task-decision-channel.mjs';
 import {decisionsAction} from '../tools/task-decision-cli.mjs';
 import {continueBackend,decisionFollowupPrompt,syncBackend} from '../tools/task-backend.mjs';
 
@@ -346,4 +346,19 @@ test('two concurrent FOLLOWUP intents cannot replace each other or start two tur
  assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(starts,1);
  const saved=(await readBindings(s.loc)).assignments[s.id];assert.equal(saved.backendHistory.length,1);assert.equal(saved.backendRequest.turnId,'sole-followup');
  const error=outcomes.find(r=>r.status==='rejected').reason;assert.match(error.message,/OPERATION_CHANGED|上一轮尚未确认成功/);
+});
+
+
+test('idle receiver maintenance allows an unbound main assignment while unclosed workers still block stop',async t=>{
+ const s=await fixture(t),p=await channelPaths(s.root),sourceDigest='isolated-stop-fixture';
+ const {spawn}=await import('node:child_process'),{once}=await import('node:events'),{processIdentity,processAlive}=await import('../tools/process-resources.mjs');
+ const daemon=path.join(p.directory,'code',sourceDigest,'tools/task-decision-daemon.mjs');await mkdir(path.dirname(daemon),{recursive:true});await writeFile(daemon,"process.stdout.write('ready');setInterval(()=>{},1000);\n");
+ const child=spawn(process.execPath,[daemon],{stdio:['ignore','pipe','pipe']});const closed=once(child,'close');t.after(async()=>{if(child.exitCode===null&&child.signalCode===null){child.kill();await closed;}});await once(child.stdout,'data');
+ const identity=processIdentity(child.pid);await durableDecisionFile(p.channelRecord,{serviceId:p.serviceId,root:p.root,process:identity,sourceDigest});
+ await assert.rejects(stopDecisionChannel(s.root),/DECISION_CHANNEL_BUSY/);assert.equal(processAlive(identity),true);
+ await updateBinding(s.root,s.run.id,s.id,b=>{b.closureReceipt={verified:true,nativeThreadId:s.threadId,history:'PRESERVED'};});
+ await assignmentChange(s,'close',{outcome:'CANCELLED',reason:'isolated worker fixture ended',cleanup:'fixture worker closure recorded'});
+ let task=(await readLedger(s.root)).tasks[s.taskId];const scheduled=await mutate(s.root,'schedule',req({runId:s.run.id,expectedVersions:{[s.taskId]:task.version},assignments:[{taskId:s.taskId,key:'maintenance-main',goal:'stop idle owned receiver',deliverables:['closed process'],acceptanceCriteria:['stopped'],resources:[{kind:'OBJECT',key:'maintenance',access:'WRITE'}],execution:{mode:'MAIN',rationale:'main owns the maintenance command'}}]}));
+ const main={...s,id:scheduled.assignments[0].id};await assignmentChange(main,'start',{workspaceEvidence:'isolated main maintenance'});
+ await stopDecisionChannel(s.root);await closed;assert.equal(processAlive(identity),false);assert.equal((await readLedger(s.root)).tasks[s.taskId].assignments.find(a=>a.id===main.id).status,'RUNNING');
 });

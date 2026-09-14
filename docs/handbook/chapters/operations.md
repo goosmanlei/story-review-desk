@@ -213,7 +213,7 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 
 `backend sync` 查询原轮次，`collect` 以 `{operationId}` 登记结构化结果，主 Agent 逐项 accept。长派工使用 FOLLOWUP：上一轮已确认成功且尚未交回时，`backend continue` 以新操作编号和同范围 prompt 继续原会话，保留全部原轮次。活动、失败未知或已关闭派工不允许续行。专属服务暂不声明 Goal 自动跨轮能力；原生 Goal 必须先独立验证，不能把选择 Ultra 当作已启用。
 
-完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
+完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭服务派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
 
 ### App Server Foundation
 
@@ -226,7 +226,7 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 | `verifyAppService(project)` | 联合核对进程/boot、命令、二进制、socket 和 RPC 配置，返回由调用方关闭的连接 |
 | `stopAppService(project, {assertIdle})` | 调用方先核查全部执行占用，再验证无加载线程，仅终止核验所属的子进程 |
 
-正式任务生命周期 CLI 仍经 guard + process；基础接口不代替调度、业务授权或任务验收。配置中的线程上界不代替最多 3 项正式任务、实际容量和资源互斥检查。supervisor 退出但子服务仍可核验时复用原服务，不再次启动实例。
+未绑定原生线程或服务的 MAIN 派工可执行空闲服务维护；未关闭子派工及任何原生服务绑定仍阻断接收器停止。正式任务生命周期 CLI 仍经 guard + process；基础接口不代替调度、业务授权或任务验收。配置中的线程上界不代替最多 3 项正式任务、实际容量和资源互斥检查。supervisor 退出但子服务仍可核验时复用原服务，不再次启动实例。
 
 标准 project create、installSourceOnly 和部署升级沿用固定提交的受管源码安装流程，一并交付服务模块、Skill 与手册，项目副本不维护补丁。接收器 ESM 依赖由 `decisionChannelSources` 一起打包，包含任务编号、基础服务和运行记录模块，必须在独立目录实际验证载入。运行中的旧接收器保留代码与连接到原派工收敛，不热替换。
 

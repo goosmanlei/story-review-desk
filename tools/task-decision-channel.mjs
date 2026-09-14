@@ -80,8 +80,10 @@ export async function ensureDecisionChannel(project) {
 export async function stopDecisionChannel(project) {
  const p=await channelPaths(project),record=await readDecisionFile(p.channelRecord);
  if(!record||!processAlive(record.process))return;
- const ledger=await readLedger(project);
- requireTask(!Object.values(ledger.tasks).some(t=>t.assignments?.some(a=>a.status!=='CLOSED')),'DECISION_CHANNEL_BUSY：仍有未关闭派工');
+ const ledger=await readLedger(project),bindings=await readBindings(p);
+ // A MAIN assignment with no native binding can own the maintenance command
+ // stopping this idle receiver. Subagents and any native binding still block.
+ requireTask(!Object.values(ledger.tasks).some(t=>t.assignments?.some(a=>a.status!=='CLOSED'&&(a.execution.mode==='SUBAGENT'||bindings.assignments[a.id]?.nativeThreadId||bindings.assignments[a.id]?.backendServiceId))),'DECISION_CHANNEL_BUSY：仍有未关闭服务派工');
  requireTask(record.serviceId===p.serviceId&&record.root===p.root,'DECISION_CHANNEL_IDENTITY');
  const command=execFileSync('ps',['-p',String(record.process.pid),'-o','command='],{encoding:'utf8'});
  requireTask(command.includes(path.join(p.directory,'code',record.sourceDigest,'tools/task-decision-daemon.mjs')),'DECISION_CHANNEL_PROCESS：原进程身份不符');
