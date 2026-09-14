@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {backendAction,assertBackendThread} from './task-backend.mjs';
 import {readFile, mkdir} from 'node:fs/promises';
 import {spawn, execFileSync} from 'node:child_process';
 import {parseArgs} from 'node:util';
@@ -159,12 +160,13 @@ async function nativeAction(project,action,v) {
   if(action==='probe') {
     requireTask(process.env.REVIEW_TASK_DIR,'原生探测须通过受管 process 阶段执行');
     const slots=Number(v.slots||0);requireTask(Number.isInteger(slots)&&slots>=0&&slots<=32,'slots 须为当前宿主实际可用的 Agent 槽位');
-    const capabilities=await probeNative({availableSlots:slots,probeRoot:process.env.REVIEW_TASK_DIR,socket:v.socket});
-    return configureCapabilities(project,v.run,{...capabilities,...(v.socket?{socket:v.socket}:{})});
+    requireTask(!v.socket,'专属服务socket由项目身份确定，不接管外部socket');
+    return backendAction(project,'probe',v);
   }
   const ledger=await readLedger(loc),task=Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===v.assignment));
   const a=task?.assignments.find(a=>a.id===v.assignment),bindings=await readBindings(loc),binding=bindings.assignments[v.assignment];
   requireTask(a?.execution.mode==='SUBAGENT'&&binding?.runId===v.run&&binding.nativeThreadId&&!binding.retiredAt,'只操作当前未关闭派工绑定的原生子 Agent');
+  if(binding.backendServiceId&&action==='close')return backendAction(project,'close',v);
   const client=connectNative({socket:binding.socket||run.capabilities.socket});
   try {
     await client.initialize();
@@ -201,6 +203,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='stop') return stopRun(project,v.run);
   if(action==='guard') return guarded(project,v.run,v.task,command,v.core,v.assignment);
   if(action==='native') return nativeAction(project,p[1],v);
+  if(action==='backend')return backendAction(project,p[1],v,v.file?await inputFile(v.file):{});
   if(action==='commit')return commitTaskRecords(project,await inputFile(v.file));
   if(action==='commit-status')return taskCommitStatus(project,v['operation-id']);
   requireTask(['json','markdown'].includes(v.format),'format 须为 json 或 markdown');
@@ -228,7 +231,7 @@ export async function main(argv=process.argv.slice(2)) {
     const a=ledger.tasks[request.taskId]?.assignments?.find(a=>a.id===request.assignmentId);
     if(a?.execution.mode==='SUBAGENT') {
       const loc=await location(project),run=await requireRun(loc,request.runId),binding=(await readBindings(loc)).assignments[request.assignmentId],client=connectNative({socket:binding?.socket||run.capabilities.socket});
-      try{await client.initialize();await assertNativeChild(client,request.nativeThreadId,binding?.parentThreadId||run.capabilities.parentThreadId);}finally{client.close();}
+      try{await client.initialize();if(binding?.backendServiceId)await assertBackendThread(project,request.assignmentId,request.nativeThreadId,client);else await assertNativeChild(client,request.nativeThreadId,binding?.parentThreadId||run.capabilities.parentThreadId);}finally{client.close();}
     }
   }
   return mutate(project,mutation,request);

@@ -18,7 +18,7 @@ export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSock
     pending.set(id,{resolve,reject,timer});
     transport.send({id,method,params}).catch(error=>{clearTimeout(timer);pending.delete(id);reject(error);});
   });};
-  return {socket:transport.socket,call,async initialize(){await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});await transport.send({method:'initialized'});},close(){closed=true;rejectAll(Error('原生连接已关闭'));transport.close();}};
+  return {socket:transport.socket,call,async initialize(){const info=await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});await transport.send({method:'initialized'});return info;},close(){closed=true;rejectAll(Error('原生连接已关闭'));transport.close();}};
 }
 
 async function loadedThreads(client) {
@@ -37,13 +37,32 @@ async function terminalsFor(client,threadId) {
   do {const page=await client.call('thread/backgroundTerminals/list',{threadId,limit:100,...(cursor?{cursor}:{})});result.push(...page.data);cursor=page.nextCursor;}while(cursor);
   return result;
 }
-export async function closeNativeThread(client,threadId,parentThreadId,{probe=false}={}) {
+export async function nativeTurns(client,threadId,{itemsView='notLoaded'}={}) {
+  const turns=[];let cursor;
+  try{
+    do{const page=await client.call('thread/turns/list',{threadId,limit:50,itemsView,...(cursor?{cursor}:{})});turns.push(...page.data);cursor=page.nextCursor;if(turns.length>500)throw Error('原生轮次超过有界读取范围');}while(cursor);
+    return turns;
+  }catch(error){
+    if(!/unknown|unsupported|not supported|thread\/turns\/list/i.test(error.message))throw error;
+    return (await client.call('thread/read',{threadId,includeTurns:true})).thread.turns||[];
+  }
+}
+export async function closeNativeThread(client,threadId,parentThreadId,{probe=false,verifyOwnership,activeTurnIds,resumeIfUnloaded=false}={}) {
   if(!threadId||threadId===parentThreadId)throw Error('只能关闭当前派工的独立子会话');
-  if(!probe)await assertNativeChild(client,threadId,parentThreadId);
+  if(!probe){if(verifyOwnership)await verifyOwnership();else await assertNativeChild(client,threadId,parentThreadId);}
   const goal=await client.call('thread/goal/get',{threadId});
   if(goal.goal && !['complete','paused'].includes(goal.goal.status)) await client.call('thread/goal/set',{threadId,status:'paused'});
-  const current=await client.call('thread/read',{threadId,includeTurns:true});
-  for(const turn of current.thread.turns||[]) if(turn.status==='inProgress') await client.call('turn/interrupt',{threadId,turnId:turn.id});
+  let current=await client.call('thread/read',{threadId,includeTurns:false});
+  if(current.thread.status?.type==='notLoaded'&&(probe||resumeIfUnloaded)){
+    await client.call('thread/resume',{threadId,cwd:current.thread.cwd,approvalPolicy:'never'});
+    current=await client.call('thread/read',{threadId,includeTurns:false});
+  }
+  if(current.thread.status?.type==='active'){
+    const turns=activeTurnIds?.length?activeTurnIds:(await nativeTurns(client,threadId)).filter(t=>t.status==='inProgress').map(t=>t.id);
+    if(!turns.length)throw Error('活动轮次身份未知，不能确认关闭');
+    for(const turnId of turns)await client.call('turn/interrupt',{threadId,turnId});
+    for(let i=0;i<50;i++){const status=(await client.call('thread/read',{threadId,includeTurns:false})).thread.status?.type;if(status!=='active')break;if(i===49)throw Error('活动轮次尚未确认停止');await new Promise(r=>setTimeout(r,100));}
+  }
   for(const terminal of await terminalsFor(client,threadId)) {
     if(!terminal.processId)throw Error('原生后台命令身份未知，不能清理');
     await client.call('thread/backgroundTerminals/terminate',{threadId,processId:terminal.processId});
