@@ -84,7 +84,7 @@ export async function probeTaskServer(project){
  const record=await ensureTaskServer(project),v=await verifyTaskServer(project);let probeId;
  try{
   const models=await v.client.call('model/list',{}),loaded=await v.client.call('thread/loaded/list',{limit:100});
-  const thread=await v.client.call('thread/start',{cwd:v.paths.directory,ephemeral:false});probeId=thread.thread.id;
+  const thread=await v.client.call('thread/start',{cwd:v.paths.directory,ephemeral:false,historyMode:'legacy'});probeId=thread.thread.id;
   const closure=await closeNativeThread(v.client,probeId,null,{probe:true});
   const cpu=os.availableParallelism(),memory=os.totalmem(),configured=v.config.config.agents?.max_concurrent_threads_per_session??v.config.config.agents?.max_threads;
   requireTask(Number.isInteger(configured)&&configured>0,'SERVER_CAPACITY：服务未返回已配置执行上限');
