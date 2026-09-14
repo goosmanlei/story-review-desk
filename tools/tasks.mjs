@@ -11,7 +11,7 @@ import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat
 import {installTaskSkill} from './task-skill.mjs';
 import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
 import {taskCapacity} from './task-capacity.mjs';
-import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks,projectLinkBase} from './task-format.mjs';
+import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks} from './task-format.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
 export const help=`tasks — 正式任务管理（不接收未澄清想法）
@@ -219,7 +219,7 @@ export async function main(argv=process.argv.slice(2)) {
   const data=audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
   data.tasks=sortTasks(data.tasks,v.sort);
   data.scope=[v.task?'任务 '+v.task:null,v.status||null,v.type||null].filter(Boolean).join(' / ')||'当前项目';
-  const options={linkBase:projectLinkBase(project),sort:v.sort,columns:v.columns?.split(',')||[]};
+  const options={sort:v.sort,columns:v.columns?.split(',')||[]};
   if(action==='list') {
     if(!v.all)data.tasks=data.tasks.filter(t=>['READY','RUNNING','BLOCKED','WAITING_REVIEW'].includes(t.status));
     data.scope+=' / '+(v.all?'全部任务（含终态）':'未完成任务');

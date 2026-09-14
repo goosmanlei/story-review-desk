@@ -4,12 +4,15 @@ import {mkdtemp,mkdir,readFile,writeFile,readdir,rm,symlink} from 'node:fs/promi
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
 import path from 'node:path';
+import {createRequire} from 'node:module';
 import {fileURLToPath} from 'node:url';
 import {randomUUID} from 'node:crypto';
 import {mutate,readLedger,rebuild,audit,startRun,runtimeState} from '../tools/task-ledger.mjs';
 import {installTaskSkill} from '../tools/task-skill.mjs';
 import {main as tasksMain} from '../tools/tasks.mjs';
+import {renderTasks} from '../tools/task-format.mjs';
 
+const require=createRequire(import.meta.url),MarkdownIt=require('markdown-it');
 const cli=fileURLToPath(new URL('../tools/tasks.mjs',import.meta.url));
 const spec=(extra={})=>({clarified:true,discussion:{approved:true,summary:'已讨论并同意修复筛选',feasibility:'已有可控测试输入，可验证',approvedRequirements:['修复并验证筛选']},type:'SYSTEM',title:'修复测试筛选',originalRequest:'发布任务：使筛选符合选择',goal:'筛选显示正确结果',scope:['通用筛选逻辑'],deliverables:['修复及验证结果'],acceptanceCriteria:['筛选结果正确','清空后恢复全部结果'],authorization:'仅测试夹具，不操作真实业务或模型',...extra});
 const req=extra=>({operationId:randomUUID(),actor:'FIXTURE',...extra});
@@ -58,14 +61,40 @@ test('list defaults to every unfinished state; all/filter/empty outputs preserve
  assert.deepEqual(new Set(pending.map(t=>t.status)),new Set(['READY','RUNNING','BLOCKED','WAITING_REVIEW']));assert.equal(pending.length,4);assert.equal(all.length,8);assert.equal(new Set(all.map(t=>t.status)).size,7);
  assert.deepEqual(await query('--status','DONE'),[]);assert.deepEqual((await query('--all','--status','DONE')).map(t=>t.id),[done.taskId]);
  assert.deepEqual((await query('--type','CREATIVE')).map(t=>t.id),[blocked.taskId]);assert.deepEqual(await query('--task',done.taskId),[]);assert.deepEqual((await query('--all','--task',done.taskId)).map(t=>t.id),[done.taskId]);
- const tableIds=md=>[...md.matchAll(/^\| \[(T-[^\]]+)\]/gm)].map(m=>m[1]);
+ const tableIds=md=>[...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(m=>m[1]);
  for(const flags of [[],['--all'],['--status','DONE'],['--all','--status','DONE'],['--type','CREATIVE'],['--all','--type','SYSTEM']]){
-  const rows=await query(...flags),md=await query(...flags,'--format','markdown');assert.deepEqual(tableIds(md),rows.map(t=>t.id));assert.match(md,/\| 任务编号 \| 任务标题 \| 类别 \| 状态 \| 优先级 \| 发布时间 \| 前置依赖 \|/);assert(md.includes(`共 ${rows.length} 项任务`));for(const row of rows)assert(md.includes('| '+row.title+' |'));
+  const rows=await query(...flags),md=await query(...flags,'--format','markdown');assert.deepEqual(tableIds(md),rows.map(t=>t.id));assert.match(md,/\| 任务编号 \| 任务标题 \| 类别 \| 状态 \| 优先级 \| 发布时间 \| 前置依赖 \|/);assert(md.includes(`共 ${rows.length} 项任务`));assert.doesNotMatch(md,/\]\(<|tasks\/items|\.md>/);for(const row of rows)assert(md.includes('| '+row.title+' |'));
  }
  assert.equal((await tasksMain(['show',done.taskId,'--project',root])).status,'DONE');assert.equal((await tasksMain(['audit','--project',root])).tasks.length,8);assert.equal((await tasksMain(['status','--project',root])).run.id,runner.id);
+ const userViews=await Promise.all([
+  tasksMain(['show',done.taskId,'--project',root,'--format','markdown']),
+  tasksMain(['audit','--project',root,'--format','markdown']),
+  tasksMain(['status','--project',root,'--format','markdown'])
+ ]);
+ for(const md of userViews)assert.doesNotMatch(md,/\[[^\]]+\]\(|tasks\/items|\.md>|\/Users\//);
+ assert.match(userViews[0],new RegExp(`\\| 任务编号 \\| ${done.taskId} \\|`));
  assert.equal((await readLedger(root)).head,before.head);assert.equal((await readLedger(root)).sequence,before.sequence);
  for(const task of pending)await change(root,'transition',task.id,{runId:runner.id,status:'CANCELLED',reason:'终态空列表夹具'});
  assert.deepEqual(await query(),[]);const empty=await query('--format','markdown');assert.match(empty,/共 0 项任务/);assert.match(empty,/\| 任务编号 \|/);assert.equal((await query('--all')).length,8);
+});
+
+test('shared task renderer keeps a seven-column table after Markdown rendering without exposing task-card paths',()=>{
+ const tasks=[
+  {id:'T-20260914-000000000001',title:'前置任务甲',type:'SYSTEM',status:'DONE',priority:3,publishedAt:'2026-09-14T00:00:01.000Z',dependencies:[]},
+  {id:'T-20260914-000000000002',title:'前置任务乙',type:'CREATIVE',status:'BLOCKED',priority:1,publishedAt:'2026-09-14T00:00:02.000Z',dependencies:[]},
+  {id:'T-20260914-000000000003',title:'包含完整正式事实且足以触发显示层单元格换行的长任务标题',type:'SYSTEM',status:'WAITING_REVIEW',priority:2,publishedAt:'2026-09-14T00:00:03.000Z',dependencies:['T-20260914-000000000001','T-20260914-000000000002']}
+ ];
+ const md=renderTasks({tasks,asOf:'2026-09-14T01:02:03.000Z',scope:'代表性数据'}),lines=md.split('\n').filter(line=>line.startsWith('| '));
+ assert.equal(lines.length,5);for(const line of lines)assert.equal(line.split(' | ').length,7);
+ assert.deepEqual([...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(match=>match[1]),tasks.map(task=>task.id));
+ assert.match(md,/包含完整正式事实且足以触发显示层单元格换行的长任务标题/);
+ assert.match(md,/T-20260914-000000000001、T-20260914-000000000002/);
+ assert.match(md,/阻塞（BLOCKED）1、待验收（WAITING_REVIEW）1、已完成（DONE）1/);
+ assert.doesNotMatch(md,/\[[^\]]+\]\(|tasks\/items|\.md>|\/Users\//);
+ const html=new MarkdownIt({html:false,linkify:false}).render(md),bodyRows=[...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1);
+ assert.match(html,/<table>/);assert.equal((html.match(/<th>/g)||[]).length,7);assert.equal(bodyRows.length,3);
+ for(const row of bodyRows)assert.equal((row[1].match(/<td>/g)||[]).length,7);
+ assert.doesNotMatch(html,/<a\s|tasks\/items|\/Users\//);
 });
 
 test('unclarified ideas produce no task files or audit events',async t=>{
