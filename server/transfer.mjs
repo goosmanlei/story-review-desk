@@ -1,4 +1,5 @@
 import {validateStoredSoundOwnership} from './settings/sound-ownership.mjs';
+import {validateStoredMaterialUsageScope} from './materials/usage-scopes.mjs';
 import { createReadStream } from "node:fs";
 import { readFile, open, lstat } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -191,6 +192,8 @@ export async function importRecords(
       for(const row of references){validateReferenceContent(row.kind,row.content);await validateReferenceTargets(tx,row.kind,row.content,undefined,{historicalImport:true});}
       const soundHistory=(await tx.query("SELECT r.id,r.content FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='NOTE' AND r.content->>'role'='SOUND_OWNERSHIP'")).rows;
       for(const row of soundHistory)await validateStoredSoundOwnership(tx,row.id,row.content);
+      const usageHistory=(await tx.query("SELECT r.id,r.content,p.content AS previous FROM revisions r JOIN objects o ON o.id=r.object_id LEFT JOIN revisions p ON p.id=r.previous_id WHERE o.kind='NOTE' AND (r.content->>'role'='MATERIAL_USAGE_SCOPE_V1' OR p.content->>'role'='MATERIAL_USAGE_SCOPE_V1')")).rows;
+      for(const row of usageHistory)await validateStoredMaterialUsageScope(tx,row.id,row.content,row.previous);
       await tx.query("UPDATE project SET title=$1", [manifest.title]);
       const result = {
         operationId,

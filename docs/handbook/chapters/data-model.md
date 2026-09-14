@@ -114,3 +114,9 @@ SPACE 可以是永久 SPACE 对象，或类型为 LOCATION 的永久 ENTITY。�
 执行者每项核验：迁移前记录源版本、资源闭包、保留对象与 preservationHash；按证据建立明确/UNKNOWN 清单；提交后查原操作结果，回读源历史状态和绑定；再次读取 inventory 并比较 preservationHash；按 owner/resource/source 检索，核对 exactReferences；按原修订回读资源、候选和实际输入，确认媒体版本/SHA 与冻结依赖未变。与其他整理任务共享永久对象时，逐项对照其对象及修订，CAS 冲突后重读，避免重复处理。
 
 回归入口为 `tests/sound-ownership.test.mjs` 与 `tests/entity-types.test.mjs`。声音测试使用内存事务协议模拟，覆盖保存、CAS、幂等、回滚、导入兼容和读取投影，不连接实例数据库或生成模型。正式继承验收仍需执行隔离 PostgreSQL 集成、实际项目逐项回读及页面验证。
+
+## 素材按范围松散关联
+
+`MATERIAL_USAGE_SCOPE_V1` NOTE 表示一个永久素材族与一个 PROJECT、EPISODE、SCENE 或 SHOT 范围的用途。每条 NOTE 可独立修改、归档与回读原修订，同族可同时关联多集、多场和多镜。PROJECT 直接使用实例永久身份；其他范围及可选路径绑定精确对象修订、所见版本和实际方向的修订关系。
+
+单范围和多父关系不生成范围组合；缺少完整上级路径时保留 UNKNOWN。用途正文可以保留来源精确修订，但 `dependencies` 始终为空，不成为正式输入。保存动作、字段和只读迁移预览见[接口契约](interfaces.md#素材松散用途接口)。

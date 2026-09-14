@@ -1,4 +1,5 @@
 import {guardSpatialPlacementSave,guardSpatialPlacementAction,SPATIAL_PLACEMENT_CATALOG_LOCK} from './settings/spatial-placement.mjs';
+import {guardMaterialUsageScopeSave,guardMaterialUsageScopeAction,materialUsageScopeLinks,materialUsageScopeLockIds,isMaterialUsageScope,MATERIAL_USAGE_SCOPE_EDIT_ROLE,MATERIAL_USAGE_SCOPE_ROLE} from './materials/usage-scopes.mjs';
 import {MATERIAL_OVERALL,validateOverallCommand} from './materials/overall-review.mjs';
 import {referenceDependencies,normalizeReferenceInputs} from './materials/references.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
@@ -107,7 +108,8 @@ async function save(tx, command, context) {
   const previous = old?.draft_revision_id || old?.adopted_revision_id || null;
   const oldContent = previous ? (await tx.query('SELECT content FROM revisions WHERE id=$1',[previous])).rows[0]?.content : null;
   await guardSpatialPlacementSave(tx,command,kind,oldContent);
-  if (!old && !content.reviewSpec) {
+  await guardMaterialUsageScopeSave(tx,command,kind,oldContent,context);
+  if (!old && !content.reviewSpec && !isMaterialUsageScope(content) && content.role!==MATERIAL_USAGE_SCOPE_EDIT_ROLE) {
     const configuration = (
       await tx.query(
         "SELECT version,content FROM configurations WHERE scope='system'",
@@ -152,6 +154,7 @@ async function save(tx, command, context) {
       : []);
   if(kind==='NOTE'&&content.role==='MATERIAL_OCCURRENCE')links=[...links.filter(l=>!['SCENE','REQUIREMENT'].includes(l.role)),{id:content.sceneId,role:'SCENE'},{id:content.reference.requirementId,role:'REQUIREMENT'}];
   if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')links=soundOwnershipLinks(content);
+  if(kind==='NOTE'&&isMaterialUsageScope(content))links=materialUsageScopeLinks(content);
   validateLinks(links);
   for (const link of links) {
     const target = (
@@ -197,10 +200,11 @@ async function save(tx, command, context) {
       "输入依据职责无效",
     );
     const revision = (
-      await tx.query("SELECT object_id,sha256 FROM revisions WHERE id=$1", [
+      await tx.query("SELECT object_id,sha256,content->>'role' AS role FROM revisions WHERE id=$1", [
         identity(dependency.revisionId),
       ])
     ).rows[0];
+    check(![MATERIAL_USAGE_SCOPE_ROLE,MATERIAL_USAGE_SCOPE_EDIT_ROLE].includes(revision?.role),'USAGE_SCOPE_ISOLATION','松散用途不能作为正式输入依赖',409);
     check(
       revision && (!dependency.sha256 || revision.sha256 === dependency.sha256),
       "INPUT_REVISION_CONFLICT",
@@ -348,6 +352,7 @@ async function submit(tx, command) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
   await guardSpatialPlacementAction(tx,object);
+  await guardMaterialUsageScopeAction(tx,object,command);
   check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     ["DRAFT", "CHANGES_REQUESTED"].includes(object.state) &&
@@ -376,6 +381,7 @@ async function submit(tx, command) {
 async function archive(tx, command, context) {
   const object=await current(tx,command);
   await guardSpatialPlacementAction(tx,object);
+  await guardMaterialUsageScopeAction(tx,object,command,context);
   check(object&&['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT','NOTE'].includes(object.kind),'ARCHIVE_KIND','此对象不能通过登记删除操作退出目录',409);
   check(context.actor.kind!=='ASSISTANT','EXPLICIT_ARCHIVE_REQUIRED','AI 不能退出正式对象',403);
   const head=(await tx.query('SELECT content FROM revisions WHERE id=$1',[object.draft_revision_id||object.adopted_revision_id])).rows[0]?.content;
@@ -389,6 +395,7 @@ async function review(tx, command, context) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
   await guardSpatialPlacementAction(tx,object);
+  await guardMaterialUsageScopeAction(tx,object,command);
   check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     context.actor.kind !== "ASSISTANT" && command.explicit === true,
@@ -809,6 +816,7 @@ export async function execute(pool, request) {
         .flatMap((c) => [
           c.id,
           c.content?.target?.objectId,
+          ...materialUsageScopeLockIds(c),
           ...(c.content?.role==='SOUND_OWNERSHIP'?[c.content.source?.objectId,...(c.content.resources||[]).map(r=>r.objectId)]:[]),
           ...(c.type==='sound.retire'?[...(c.bindingIds||[]),...(c.retainedObjectIds||[])]:[]),
           ...(c.links || []).map((x) => x.id),
@@ -897,11 +905,12 @@ export async function execute(pool, request) {
             await save(tx, command, {
               actor,
               operationId: request.operationId,
+              runtimeEpoch: request.runtimeEpoch,
             }),
           );
         else if (command.type === "submit")
           results.push(await submit(tx, command));
-        else if(command.type==='archive')results.push(await archive(tx,command,{actor,operationId:request.operationId}));
+        else if(command.type==='archive')results.push(await archive(tx,command,{actor,operationId:request.operationId,runtimeEpoch:request.runtimeEpoch}));
         else if(command.type==='sound.retire')results.push(await retireSoundEntity(tx,command,{actor,operationId:request.operationId,soundMigration:request.commands.length===1&&request.commands[0].type==='workspace.change'&&request.commands[0].workspace==='sound-ownership'&&request.commands[0].input?.action==='migrate'}));
         else if(command.type==='assert'){await current(tx,command);results.push({id:command.id,version:command.expectedVersion});}
         else if(command.type==='configuration.assert') {

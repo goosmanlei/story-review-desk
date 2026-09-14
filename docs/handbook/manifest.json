@@ -48,7 +48,7 @@
         "server/project/service.mjs",
         "server/shared/entity-types.mjs"
       ],
-      "sourceDigest": "0f059bfae535495d540ea9c3b7d8ab79fb9af3c5ef553bcfca045fed6f31a5e1"
+      "sourceDigest": "b6f1c01108c3ac6975b06254249214d542f485cc47d2c52b8b181c95cc9e8c13"
     },
     {
       "id": "data-model",
@@ -61,9 +61,10 @@
         "server/repository.mjs",
         "server/transport-contract.mjs",
         "server/settings/sound-ownership.mjs",
-        "server/transfer.mjs"
+        "server/transfer.mjs",
+        "server/materials/usage-scopes.mjs"
       ],
-      "sourceDigest": "f507e3d285065d39288320195549ff9e80a72b9e450736571019f959ce933c7a"
+      "sourceDigest": "89b57585bc522d04036d8739793f1c1033247e8577a4058505dd55b0ad0e4ad7"
     },
     {
       "id": "versions",
@@ -80,7 +81,7 @@
         "server/production/spatial-views.mjs",
         "server/settings/spatial-placement.mjs"
       ],
-      "sourceDigest": "be35d64b5bf1117c0d594845987ef49d5339e7646c3eeb000393ab0ee2bc0ced"
+      "sourceDigest": "81e9a41a83dae94a0c9041688e624054d680e6de9172fdb7573ef5ef350c1a38"
     },
     {
       "id": "layers",
@@ -116,9 +117,11 @@
         "web/app/spatial-placement.css",
         "web/app/free-canvas.tsx",
         "web/app/relationship-canvas.tsx",
-        "web/presentation/spatial-placement.mjs"
+        "web/presentation/spatial-placement.mjs",
+        "web/app/story-relations-editor.tsx",
+        "web/presentation/domain-model.d.mts"
       ],
-      "sourceDigest": "0d5f46dd41ea17995f8355d34068e91bbbf2b22517e93a7cee37af8a3f2ae2fa"
+      "sourceDigest": "d461de4fa0e7271fc0aad36ceb7e89fe8e4ff11a8c68f1b548aeb41dd4856f23"
     },
     {
       "id": "interfaces",
@@ -133,9 +136,13 @@
         "server/documentation.mjs",
         "server/settings/spatial-placement.mjs",
         "server/workspace-actions.mjs",
-        "tests/spatial-placement.integration.mjs"
+        "tests/spatial-placement.integration.mjs",
+        "server/materials/usage-scopes.mjs",
+        "web/presentation/material-usage-scope-model.d.mts",
+        "tests/entity-attributes.test.mjs",
+        "tests/material-usage-scopes.test.mjs"
       ],
-      "sourceDigest": "4a584c45ef433d5aa2cbb85c18c661bba38d61031544eb5781f12c6e7f7e1e4c"
+      "sourceDigest": "66a47074c9337f4005540d5f22dc6461f36aa4187699ba9375f38263b016266a"
     },
     {
       "id": "collaboration",
@@ -171,7 +178,7 @@
         "web/app/production-material-catalog.tsx",
         "web/app/production-material-catalog.css"
       ],
-      "sourceDigest": "0164ee29d5c36dab9e780b1af59c08fab5a4afcdc045a837aa4c1293c795141f"
+      "sourceDigest": "5b1a971477218fe0fe8d41a8c18cdf6191892cf83e867aed3b4eec158188acd9"
     },
     {
       "id": "development",

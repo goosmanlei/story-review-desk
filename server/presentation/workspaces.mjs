@@ -1,4 +1,5 @@
 import {spatialPlacementWorkspace} from '../settings/spatial-placement.mjs';
+import {materialUsageScopeWorkspace,materialUsageScopeCatalog,materialUsageScopeMigrationPreview} from '../materials/usage-scopes.mjs';
 import {currentDomainTypes,retiredEntityType} from '../shared/entity-types.mjs';
 import {soundOwnershipWorkspace,soundMigrationInventory,soundOwnershipProjection} from '../settings/sound-ownership.mjs';
 import {materialReviewFocus} from '../materials/review-focus.mjs';
@@ -58,6 +59,9 @@ export async function workspaceRead(tx, path, params) {
   let result;
   if(name==='sound-ownership')result=await soundOwnershipWorkspace(unit,{...Object.fromEntries(params),query:params.get('q')||'',...(params.has('resourceId')?{resourceIds:params.getAll('resourceId')}:{}),...(params.has('limit')?{limit:Number(params.get('limit'))}:{}),...(params.has('offset')?{offset:Number(params.get('offset'))}:{})});
   else if(name==='sound-ownership/inventory')result=await soundMigrationInventory(tx,params.get('sourceId'));
+  else if(name==='material-usage-scopes')result=await materialUsageScopeWorkspace(unit,Object.fromEntries(params));
+  else if(name==='material-usage-scopes/catalog')result=await materialUsageScopeCatalog(unit);
+  else if(name==='material-usage-scopes/migration-preview')result=await materialUsageScopeMigrationPreview(unit,Object.fromEntries(params));
   else if(name==='integrity')result=await businessIntegrity(tx);
   else if(name==='profile')result=await unit.profile();
   else if(name==='settings')result={profile:await unit.profile(),revisionId:hash(unit.configurationVersions)};

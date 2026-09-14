@@ -1,9 +1,10 @@
 import {validateReferenceContent,validateReferenceTargets} from '../materials/references.mjs';
 import { check } from "../shared/contracts.mjs";
-import {retiredEntityType} from '../shared/entity-types.mjs';
+import {retiredEntityType,validateEntityAttributes} from '../shared/entity-types.mjs';
 export const kinds = ["ENTITY", "STATE", "REPRESENTATION", "RELATION", "SPACE"];
 export function validate(kind, content) {
   validateReferenceContent(kind,content);
+  if(kind==='ENTITY')validateEntityAttributes(content);
   if(kind==='ENTITY')check(!retiredEntityType(content.type),'ENTITY_TYPE_RETIRED','该主体类型已退役，请使用当前有效类型');
   if (kind === "ENTITY")
     check(

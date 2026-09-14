@@ -1,7 +1,7 @@
 import { hash, check } from '../shared/contracts.mjs';
 import { summaries, objectDetail } from '../repository.mjs';
 import { configurationDefaults, modelArrayKeys, productionGraphDefaults } from './defaults.mjs';
-import {currentDomainTypes,currentSystemEntityTypes} from '../shared/entity-types.mjs';
+import {currentDomainTypes,currentSystemEntityTypes,entityAttributes} from '../shared/entity-types.mjs';
 
 // A request-local view of object revisions. These structures are UI projections,
 // never another store or a published whole-story snapshot.
@@ -77,6 +77,6 @@ export class PresentationRead {
 
 export const idsFor = (row, role) => (row.links || []).filter(l => l.role === role).map(l => l.id);
 export const idFor = (row, role) => idsFor(row, role)[0] || null;
-export const present = row => ({ ...row.content, id: row.id, title: row.title, displayId: row.displayId, revisionId: row.revisionId, objectVersion: row.version, revisionSha256: row.sha256 });
+export const present = row => ({ ...row.content, ...(row.kind==='ENTITY'?entityAttributes(row.content):{}), id: row.id, title: row.title, displayId: row.displayId, revisionId: row.revisionId, objectVersion: row.version, revisionSha256: row.sha256 });
 export const stateLabel = state => ({ DRAFT:'PENDING_REVIEW', SUBMITTED:'PENDING_REVIEW', ADOPTED:'RELEASED', CHANGES_REQUESTED:'REVISION_REQUIRED', DISABLED:'DO_NOT_USE', ARCHIVED:'HISTORICAL' })[state] || 'UNKNOWN';
 export function paragraphs(text, prefix = 'paragraph') { return String(text || '').split(/\n\s*\n/).filter(Boolean).map((value, i) => ({ id: prefix + '-' + (i + 1), type: /^#{1,6} /.test(value) ? 'heading' : 'paragraph', text: value.replace(/^#{1,6} /, ''), level: value.match(/^#+/)?.[0].length || 0 })); }

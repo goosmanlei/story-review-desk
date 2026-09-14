@@ -1,9 +1,11 @@
 import {check} from '../shared/contracts.mjs';
+import {validateMaterialUsageScopeContent,validateMaterialUsageScopeTargets} from './usage-scopes.mjs';
 import {validateSoundOwnershipContent,validateSoundOwnershipTargets,soundOwnershipDependencies} from '../settings/sound-ownership.mjs';
 
 const sha = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 /** Business references are identities; filenames never supply a missing binding. */
 export function validateReferenceContent(kind, content) {
+  if(kind==='NOTE')validateMaterialUsageScopeContent(content);
   if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')validateSoundOwnershipContent(content);
   if(['SPACE','NOTE'].includes(kind)&&content.role==='SPATIAL_VIEW'){
     check(content.sceneId&&content.viewId&&['DRAFT','PUBLISHED'].includes(content.status),'SPATIAL_REFERENCE','局部空间必须绑定永久场与视图身份');
@@ -31,6 +33,7 @@ export function validateReferenceContent(kind, content) {
 }
 
 export async function validateReferenceTargets(tx, kind, content, previous, options={}) {
+  if(kind==='NOTE')await validateMaterialUsageScopeTargets(tx,content,previous,options);
   if(kind==='NOTE')await validateSoundOwnershipTargets(tx,content,previous,options);
   if(['SPACE','NOTE'].includes(kind)&&content.role==='SPATIAL_VIEW'){
     check(!previous||previous.role!=='SPATIAL_VIEW'||previous.sceneId===content.sceneId&&previous.viewId===content.viewId,'SPATIAL_IDENTITY','局部视图不能换绑永久场或视图身份',409);
