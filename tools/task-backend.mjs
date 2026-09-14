@@ -4,12 +4,13 @@ import {execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {atomic} from './io.mjs';
-import {processLock} from './process-resources.mjs';
+import {processLock,phaseRecords,requiredPhase} from './process-resources.mjs';
 import {location,readLedger,readBindings,requireRun,requireTask,mutate,updateBinding,configureCapabilities} from './task-ledger.mjs';
 import {ensureTaskServer,verifyTaskServer,probeTaskServer,stopTaskServer} from './task-server.mjs';
 import {closeNativeThread,nativeTurns} from './task-native.mjs';
 
-const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
+const canonical=x=>Array.isArray(x)?x.map(canonical):x&&typeof x==='object'?Object.fromEntries(Object.keys(x).sort().map(k=>[k,canonical(x[k])])):x;
+export const requestFingerprint=x=>createHash('sha256').update(JSON.stringify(canonical(x))).digest('hex');
 const schema={type:'object',additionalProperties:false,required:['summary','artifacts','acceptance','completedSteps','nextSteps'],properties:{summary:{type:'string'},artifacts:{type:'array',items:{type:'string'}},acceptance:{type:'array',items:{type:'object',additionalProperties:false,required:['criterion','evidence'],properties:{criterion:{type:'integer'},evidence:{type:'string'}}}},completedSteps:{type:'array',items:{type:'string'}},nextSteps:{type:'array',items:{type:'string'}}}};
 const normalizeCwd=cwd=>cwd?.startsWith('file:')?fileURLToPath(cwd):cwd;
 async function assigned(project,runId,assignmentId,{converging=false}={}){
@@ -27,6 +28,7 @@ export async function assertBackendThread(project,assignmentId,threadId,client,{
  const loc=await location(project),binding=(await readBindings(loc)).assignments[assignmentId],service=JSON.parse(await readFile(path.join(loc.runtime,'server/server.json'),'utf8'));
  requireTask(binding?.backendServiceId===service.serviceId&&binding.nativeThreadId===threadId&&binding.backendCreation?.threadId===threadId&&binding.backendCreation?.serviceId===service.serviceId,'BACKEND_OWNERSHIP：缺少本项目服务创建回执');
  const read=await client.call('thread/read',{threadId,includeTurns:false});
+ requireTask(read.thread.id===threadId,'BACKEND_THREAD_ID：服务返回了不同会话');
  requireTask(path.resolve(normalizeCwd(read.thread.cwd))===binding.workspace,'BACKEND_WORKSPACE：会话与派工工作区不符');
  if(!allowUnloaded){const loaded=await client.call('thread/loaded/list',{limit:100});requireTask(loaded.data.includes(threadId)&&read.thread.status?.type!=='notLoaded','BACKEND_NOT_LOADED：须在同一专属服务恢复原派工');}
  return read.thread;
@@ -34,6 +36,9 @@ export async function assertBackendThread(project,assignmentId,threadId,client,{
 async function checkedWorkspace(s,workspace,baseCommit){
  requireTask(typeof workspace==='string'&&/^[a-f0-9]{40}$/.test(baseCommit||''),'BACKEND_WORKTREE：需要工作区和精确基准提交');
  const actual=await realpath(workspace);requireTask(actual.startsWith(path.join(s.loc.root,'.process')+path.sep),'BACKEND_WORKTREE：必须使用项目受管worktree');
+ const registered=(await phaseRecords(s.loc.root,s.task.id)).flatMap(({record})=>record.projectId===s.loc.projectId?record.resources:[]).filter(r=>r.kind==='path'&&r.state!=='REMOVED'&&(actual===r.path||actual.startsWith(r.path+path.sep)));
+ let owned=false;for(const r of registered){const st=await lstat(r.path);if(st.isDirectory()&&!st.isSymbolicLink()&&st.dev===r.dev&&st.ino===r.ino)owned=true;}
+ requireTask(owned,'BACKEND_WORKTREE：目录尚未登记到本正式任务受管资源');
  requireTask((await lstat(path.join(actual,'.git'))).isFile(),'BACKEND_WORKTREE：不接受共享源码目录');
  const machine=JSON.parse(await readFile(path.join(s.loc.root,'instance/runtime/machine.json'),'utf8'));
  const git=(root,...args)=>execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim();
@@ -44,8 +49,8 @@ async function checkedWorkspace(s,workspace,baseCommit){
 export async function dispatchBackend(project,runId,assignmentId,request){
  const s=await assigned(project,runId,assignmentId);
  requireTask(typeof request.operationId==='string'&&/^[A-Za-z0-9._-]+$/.test(request.operationId)&&typeof request.prompt==='string'&&request.prompt.trim(),'BACKEND_REQUEST：需要唯一操作号及明确工作要求');
- const fingerprint=hash(request),prior=s.binding.backendRequest;
- if(prior){requireTask(prior.operationId===request.operationId&&prior.hash===fingerprint,'BACKEND_REPLAY：已有原调用，不能换号重复创建；先sync核查');return syncBackend(project,runId,assignmentId);}
+ const fingerprint=requestFingerprint(request),prior=s.binding.backendRequest;
+ if(prior){requireTask(prior.operationId===request.operationId&&(prior.hash===fingerprint||prior.hash===createHash('sha256').update(JSON.stringify(request)).digest('hex')),'BACKEND_REPLAY：已有原调用，不能换号重复创建；先sync核查');return syncBackend(project,runId,assignmentId);}
  requireTask(s.assignment.status==='RESERVED'&&!s.binding.spawnAttemptAt,'BACKEND_DISPATCH：只能启动未尝试过的派工');
  const workspace=await checkedWorkspace(s,request.workspace,request.baseCommit);
  requireTask(s.run.capabilities.backend==='PROJECT_APP_SERVER','BACKEND_PROBE：先核验专属服务能力');
@@ -64,6 +69,7 @@ export async function dispatchBackend(project,runId,assignmentId,request){
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.state='TURN_STARTING';});
   const turn=await v.client.call('turn/start',{threadId,input:[{type:'text',text:request.prompt}],model:s.assignment.execution.model,effort:s.assignment.execution.effort,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'},outputSchema:schema});
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.state='RUNNING';b.backendRequest.turnId=turn.turn.id;b.backendRequest.startedAt=new Date().toISOString();});
+  await observeParallel(project,v).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));
   return {assignmentId,serviceId:v.record.serviceId,nativeThreadId:threadId,turnId:turn.turn.id,status:'RUNNING',model:s.assignment.execution.model,effort:s.assignment.execution.effort};
  }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest){b.backendRequest.error=error.message;b.backendRequest.state='RESULT_UNKNOWN';}});throw error;}finally{v.client.close();}
 }
@@ -76,11 +82,14 @@ export async function syncBackend(project,runId,assignmentId){
   if(state.thread.status?.type==='active')return {assignmentId,status:'RUNNING',nativeThreadId:state.thread.id,turnId:s.binding.backendRequest.turnId};
   const turns=await nativeTurns(v.client,s.binding.nativeThreadId);
   let turn=turns.find(t=>t.id===s.binding.backendRequest.turnId);
-  if(!turn&&!s.binding.backendRequest.turnId){requireTask(turns.length<=1,'BACKEND_TURN_AMBIGUOUS：缺失回执且存在多个轮次');turn=turns[0];}
+  if(!turn&&!s.binding.backendRequest.turnId){const previous=new Set((s.binding.backendHistory||[]).map(r=>r.turnId));const candidates=turns.filter(t=>!previous.has(t.id));requireTask(candidates.length<=1,'BACKEND_TURN_AMBIGUOUS：缺失回执且存在多个轮次');turn=candidates[0];}
   if(!turn)return {assignmentId,status:'RESULT_UNKNOWN',reason:'未发现原轮次，不自动重新执行'};
   const status=turn.status==='completed'?'SUCCEEDED':['failed','interrupted'].includes(turn.status)?'FAILED':'RUNNING';
   let items=turn.items||[];
-  if(status==='SUCCEEDED'&&!items.length){let cursor;do{const page=await v.client.call('thread/items/list',{threadId:s.binding.nativeThreadId,turnId:turn.id,limit:30,...(cursor?{cursor}:{})});items.push(...page.data);cursor=page.nextCursor;if(items.length>5000)throw Error('BACKEND_RESULT_LIMIT：结果条目超过读取范围');}while(cursor);}
+  if(status==='SUCCEEDED'&&!items.length){
+   try{let cursor;do{const page=await v.client.call('thread/items/list',{threadId:s.binding.nativeThreadId,turnId:turn.id,limit:30,...(cursor?{cursor}:{})});items.push(...page.data);cursor=page.nextCursor;if(items.length>5000)throw Error('BACKEND_RESULT_LIMIT：结果条目超过读取范围');}while(cursor);}
+   catch(error){if(!/unknown|unsupported|not supported/i.test(error.message))throw error;const history=await v.client.call('thread/read',{threadId:s.binding.nativeThreadId,includeTurns:true});items=history.thread.turns?.find(t=>t.id===turn.id)?.items||[];}
+  }
   const final=items.filter(i=>i.type==='agentMessage').at(-1)?.text;let result;
   if(status==='SUCCEEDED'){try{result=JSON.parse(final);}catch{result=null;}}
   await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.turnId=turn.id;b.backendRequest.state=status;b.backendRequest.nativeStatus=turn.status;b.backendRequest.error=turn.error||null;if(status!=='RUNNING')b.backendRequest.completedAt ||= new Date().toISOString();});
@@ -99,6 +108,7 @@ export async function closeBackend(project,runId,assignmentId){
  const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.nativeThreadId,'BACKEND_THREAD：原会话身份未知');
  const v=await verifyTaskServer(project);
  try{
+  if(s.binding.closureReceipt){const thread=await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true});requireTask(thread.status?.type==='notLoaded','BACKEND_CLOSURE_DRIFT：已关闭会话重新加载，保留占用先核查');return {assignmentId,status:'NATIVE_CLOSED',history:'PRESERVED',replayed:true};}
   const receipt=await closeNativeThread(v.client,s.binding.nativeThreadId,null,{resumeIfUnloaded:true,activeTurnIds:s.binding.backendRequest.turnId?[s.binding.backendRequest.turnId]:[],verifyOwnership:()=>assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true})});
   await updateBinding(project,runId,assignmentId,b=>{b.closureReceipt=receipt;});
   return {assignmentId,status:'NATIVE_CLOSED',history:'PRESERVED'};
@@ -106,6 +116,7 @@ export async function closeBackend(project,runId,assignmentId){
 }
 export async function recoverBackend(project,runId,assignmentId){
  const s=await assigned(project,runId,assignmentId,{converging:true});requireTask(s.binding.backendCreation?.threadId===s.binding.nativeThreadId,'BACKEND_RECOVERY：缺少原创建回执');
+ requireTask(!s.binding.closureReceipt,'BACKEND_CLOSED：已核验关闭的派工不得重新加载');
  await ensureTaskServer(project);const v=await verifyTaskServer(project);
  try{
   const thread=await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client,{allowUnloaded:true});
@@ -115,13 +126,61 @@ export async function recoverBackend(project,runId,assignmentId){
  }finally{v.client.close();}
  return syncBackend(project,runId,assignmentId);
 }
+async function observeParallel(project,v){
+ const loc=await location(project),bindings=await readBindings(loc),ledger=await readLedger(loc),results=[];
+ for(const a of Object.values(ledger.tasks).flatMap(t=>t.assignments||[])){
+  const b=bindings.assignments[a.id];if(a.status!=='RUNNING'||b?.backendServiceId!==v.record.serviceId||!b.backendRequest?.turnId)continue;
+  const thread=await assertBackendThread(project,a.id,b.nativeThreadId,v.client,{allowUnloaded:true});
+  if(thread.status?.type==='active')results.push({assignmentId:a.id,status:'RUNNING',nativeThreadId:b.nativeThreadId,turnId:b.backendRequest.turnId});
+ }
+ if(results.length>=2)await atomic(path.join(loc.runtime,'parallel-validation-sample.json'),{checkedAt:new Date().toISOString(),serviceId:v.record.serviceId,results});
+}
+export async function verifyExecution(project,runId){
+ const loc=await location(project),run=await requireRun(loc,runId),ledger=await readLedger(loc),bindings=await readBindings(loc);
+ const sample=JSON.parse(await readFile(path.join(loc.runtime,'parallel-validation-sample.json'),'utf8')),v=await verifyTaskServer(project);
+ try{
+  requireTask(sample.serviceId===v.record.serviceId&&sample.results.length>=2&&new Set(sample.results.map(r=>r.assignmentId)).size===sample.results.length,'BACKEND_EVIDENCE：缺少不同派工实际执行重叠采样');
+  for(const r of sample.results){
+   const a=Object.values(ledger.tasks).flatMap(t=>t.assignments||[]).find(a=>a.id===r.assignmentId),b=bindings.assignments[r.assignmentId];
+   requireTask(a?.status==='CLOSED'&&a.outcome==='ACCEPTED'&&b?.backendServiceId===sample.serviceId&&b.nativeThreadId===r.nativeThreadId&&b.backendRequest?.turnId===r.turnId&&b.closureReceipt?.verified,'BACKEND_EVIDENCE：结果未验收关闭或身份不符');
+   requireTask(b.backendRequest.state==='SUCCEEDED'&&Date.parse(b.backendRequest.startedAt)<=Date.parse(sample.checkedAt)&&Date.parse(b.backendRequest.completedAt)>=Date.parse(sample.checkedAt),'BACKEND_EVIDENCE：原轮次未覆盖采样时刻');
+   const t=await assertBackendThread(project,a.id,b.nativeThreadId,v.client,{allowUnloaded:true});requireTask(t.status?.type==='notLoaded','BACKEND_EVIDENCE：会话仍加载');
+   const saved=JSON.parse(await readFile(path.join(loc.runtime,'backend-results',a.id+'.json'),'utf8'));requireTask(saved.status==='SUCCEEDED'&&saved.turnId===r.turnId&&saved.result,'BACKEND_EVIDENCE：成果未保存');
+  }
+  const proof={checkedAt:new Date().toISOString(),overlapAt:sample.checkedAt,assignmentIds:sample.results.map(r=>r.assignmentId),serviceId:v.record.serviceId,history:'PRESERVED'};
+  await atomic(path.join(loc.runtime,'server/execution-proof.json'),proof);
+  return configureCapabilities(project,runId,{...run.capabilities,executionVerified:true,executionProof:proof,limitation:'专属服务真实软件派工、并行重叠、成果验收及关闭已核验；长任务使用FOLLOWUP'});
+ }finally{v.client.close();}
+}
+export async function continueBackend(project,runId,assignmentId,request){
+ const s=await assigned(project,runId,assignmentId);
+ requireTask(['RUNNING','BLOCKED'].includes(s.assignment.status)&&s.assignment.execution.goalMode==='FOLLOWUP'&&!s.binding.closureReceipt,'BACKEND_FOLLOWUP：仅继续未交回、未关闭的同一长派工');
+ requireTask(typeof request.operationId==='string'&&/^[A-Za-z0-9._-]+$/.test(request.operationId)&&typeof request.prompt==='string'&&request.prompt.trim(),'BACKEND_REQUEST：需要唯一操作号及范围内续办要求');
+ const fingerprint=requestFingerprint(request);
+ if(s.binding.backendRequest.operationId===request.operationId){requireTask(s.binding.backendRequest.hash===fingerprint,'BACKEND_REPLAY：同号内容不符');return syncBackend(project,runId,assignmentId);}
+ requireTask(!s.binding.backendHistory?.some(r=>r.operationId===request.operationId),'BACKEND_REPLAY：此操作已在历史中；查询原结果，不重复执行');
+ const status=await syncBackend(project,runId,assignmentId);
+ requireTask(status.status==='SUCCEEDED','BACKEND_FOLLOWUP：上一轮尚未确认成功；先恢复核查');
+ const v=await verifyTaskServer(project);
+ try{
+  await assertBackendThread(project,assignmentId,s.binding.nativeThreadId,v.client);
+  await updateBinding(project,runId,assignmentId,b=>{b.backendHistory||=[];b.backendHistory.push(b.backendRequest);b.backendRequest={operationId:request.operationId,hash:fingerprint,prompt:request.prompt,baseCommit:b.backendRequest.baseCommit,state:'TURN_STARTING',createdAt:new Date().toISOString()};});
+  const turn=await v.client.call('turn/start',{threadId:s.binding.nativeThreadId,input:[{type:'text',text:request.prompt}],model:s.assignment.execution.model,effort:s.assignment.execution.effort,approvalPolicy:'never',sandboxPolicy:{type:'dangerFullAccess'},outputSchema:schema});
+  await updateBinding(project,runId,assignmentId,b=>{b.backendRequest.turnId=turn.turn.id;b.backendRequest.startedAt=new Date().toISOString();b.backendRequest.state='RUNNING';});
+  await observeParallel(project,v).catch(error=>atomic(path.join(v.paths.runtime,'parallel-observation-error.json'),{checkedAt:new Date().toISOString(),error:error.message}));return {assignmentId,status:'RUNNING',turnId:turn.turn.id,nativeThreadId:s.binding.nativeThreadId};
+ }catch(error){await updateBinding(project,runId,assignmentId,b=>{if(b.backendRequest.operationId===request.operationId){b.backendRequest.state='RESULT_UNKNOWN';b.backendRequest.error=error.message;}});throw error;}finally{v.client.close();}
+}
 export async function backendAction(project,action,values,input={}){
- const loc=await location(project);await requireRun(loc,values.run,{converging:['sync','collect','close','recover','stop'].includes(action)});
+ const loc=await location(project);
+ if(['ensure','probe','recover','stop'].includes(action)){const phase=await requiredPhase(project);requireTask(phase&&(await phase.context()).root===loc.root,'服务生命周期须通过本项目受管process阶段执行');}
+ await requireRun(loc,values.run,{converging:['sync','collect','close','recover','stop'].includes(action)});
  if(action==='ensure')return ensureTaskServer(project);
  if(action==='probe'){const capability=await probeTaskServer(project);return configureCapabilities(project,values.run,capability);}
  if(action==='stop')return stopTaskServer(project);
+ if(action==='verify-execution')return verifyExecution(project,values.run);
  requireTask(values.assignment,'BACKEND_ASSIGNMENT：需要派工编号');
  return processLock(path.join(loc.runtime,'backend-'+values.assignment+'.lock'),async()=>{
+  if(action==='continue')return continueBackend(project,values.run,values.assignment,input);
   if(action==='dispatch')return dispatchBackend(project,values.run,values.assignment,input);
   if(action==='sync')return syncBackend(project,values.run,values.assignment);
   if(action==='collect')return collectBackend(project,values.run,values.assignment,input.operationId);

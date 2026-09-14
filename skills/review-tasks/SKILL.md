@@ -27,7 +27,7 @@ SYSTEM 首先改通用《审阅台》核心，再验证《九头案》继承；C
 
 项目最多同时占用 3 个不同正式任务。主 Agent 执行的任务、预留派工以及仍有未关闭派工的任务均计入；同一任务的辅助派工不重复增加任务数，但仍逐个占用实际 Agent 槽位。交回、空闲和 Agent 关闭结果未知不释放占用；最后派工关闭后，仍须完成父任务收尾。`TASK_CAPACITY` 表示正式任务上限，`MAIN_CAPACITY`／`AGENT_CAPACITY` 表示实际执行能力不足；旧超限记录只收敛核查和关闭，不继续启动。
 
-每次完成任务收尾并释放空位后，主 Agent 自动重新检查 READY 待办、依赖和此前 deferred 候选，按优先级重新 `schedule` 补入；不等用户再次启动。仍未满足依赖或资源冲突的任务继续等待。实际能力不足时降低执行并行度并说明原因；关闭未验证时主 Agent 串行，不把逻辑预留或受控测试描述成真实多 Agent 并行。`next` 保留未知资源的串行兼容，不绕过上限。
+每次完成任务收尾并释放空位后，主 Agent 自动重新检查 READY 待办、依赖和此前 deferred 候选，按优先级重新 `schedule` 补入；不等用户再次启动。用户指定某项完成后暂停时，用 `policy --run ID --file -` 保存 `{stopAfterTaskId:"任务编号"}`；该任务进入终态后 `next` / `schedule` 返回 `PAUSED_BY_POLICY`，收敛资源并停止协调运行，等待新指令。仍未满足依赖或资源冲突的任务继续等待。实际能力不足时降低执行并行度并说明原因；关闭未验证时主 Agent 串行，不把逻辑预留或受控测试描述成真实多 Agent 并行。`next` 保留未知资源的串行兼容，不绕过上限。
 
 本 Skill 明确授权按任务需要启动 SubAgent，并自动选择模型与强度；不以 Ultra 为开关。主 Agent 保持用户选择的模型和强度。所有派工由主 Agent 统一发起，子 Agent 不再自行扩队。实际并发槽位以本轮宿主为准，包含其他未关闭 Agent；不可把固定建议数当可用数量。
 
@@ -38,23 +38,27 @@ SYSTEM 首先改通用《审阅台》核心，再验证《九头案》继承；C
 | 常规实现、测试、修复 | gpt-5.6-sol | xhigh |
 | 架构、高风险、争议核验 | gpt-6-astra | max |
 
-先在受管阶段执行 `native probe --run ID --slots N`，核验当前主会话确实属于连接的原生服务、可用模型及关闭回读。Unix socket 使用 WebSocket，不向字节代理发送 JSONL。父线程必须同时出现在 loaded/list 且 read 回读为已加载；仅能读取历史时返回 CURRENT_SESSION_NOT_OWNED，不能据此放开派工。独立 TUI 需在原会话结束后通过 `codex --remote unix://` 连接已有服务续办，不热接管活动会话。未证明能关闭 Agent 时主 Agent 串行推进，明确报告限制，不能先派工再把 idle 当已销毁。不另起模型守护进程，不改 Codex 内部数据库，不使用 thread/delete。原生探测失败不阻止主 Agent 完成正式任务。
+正式任务使用项目专属 App Server。先经受管阶段执行 `backend probe --run ID`：按项目身份自动启动缺失服务或复用健康实例，核对 PID/出生时间、二进制 SHA/版本、专属 socket 身份和 RPC 隔离配置。启动锁防重复创建；未知 socket、服务归属或启动结果保留现场并报具体故障。不操作公共 daemon、其他项目或交互会话。机器绑定及服务状态仅存 runtime，不改 Codex 内部数据库，不使用 thread/delete。
+
+Unix socket 采用 WebSocket Upgrade 和消息帧；proxy 只转发字节，不能发送 JSONL。`native probe` 是兼容别名，不接受公共 socket 或 slots 声明。能力记录区分关闭探测、真实执行及并行验证：配置上限、CPU/内存给出项目可用容量上界，减去全部未关闭子派工计算剩余槽位；空线程关闭不证明真实软件并行。未验证关闭时主 Agent 执行。至少两项真实派工的活动采样、已保存成果、验收及关闭通过 `backend verify-execution` 核验后，才报告真实并行已生效。
 
 有可靠关闭能力时，主 Agent 为跨正式任务或同一任务的独立部分准备 `schedule` 候选，声明目标、交付物、逐项验收、资源及选择理由。自动使用表中策略，争议或质量不足时升级；超出宿主可用模型/强度时选择实际支持的配置并解释，不能声称切换已发生。返工使用新的派工和新的 Agent，记录 attemptOf 及新选择理由。
 
-schedule 在一次事务内检查依赖、任务版本、资源和容量，先记录派工意图；仅对已选中的派工执行 `assignment dispatch`，再调用原生 spawn。保留回执后 `assignment start` 将原生线程身份和工作区写入 runtime。spawn 回复丢失先核查原派工，不能盲目重发；reconcile 可补记原线程身份，明确未创建时须记录 noAgentCreated 和 noAgentEvidence。每个 Agent 只绑定一项派工，负责人和辅助 Agent 都分别登记，逻辑派工不必再创建正式任务。
+schedule 在一次事务内检查依赖、任务版本、资源和容量，记录派工意图。为选中派工登记独立受管 worktree，再调用 `backend dispatch --run ID --assignment ID --file -`，请求 `{operationId,prompt,workspace,baseCommit}`。后端在同一已核验服务保存创建意图、线程创建回执、精确工作区和 turn 身份，再启动工作。每个执行会话只绑定一项派工；这些是专属服务创建的工作会话，与交互会话原生 spawn 的子 Agent 分别归属，不要求原生父子字段相同。
+
+`backend sync` 查询原轮次；调用回执丢失时按原编号核查，不换号重建或重跑。`backend collect --file -` 的 `{operationId}` 将已回读结构化成果登记为 DELIVERED。主 Agent 核验后 `assignment accept`。模型/强度由同一服务 model/list 实际支持项约束。
 
 不可变读资源携带精确版本，可并行；同一文件、重叠目录或业务对象的写占用串行，范围未知按独占处理。逻辑资源使用 `core/...`、`project/...` 或永久对象身份，不使用机器绝对路径。代码派工使用独立受管 worktree；命令用 `guard --assignment ID`。主 Agent 串行整合共享核心、写正式业务数据、提交推送和部署；共享核心命令再加 `--core`。保留业务 CAS 和外部授权核验。
 
 ## Goal、交回和关闭
 
-长派工负责人优先使用独立原生 Goal，目标是向主 Agent 交回可验收产物。启用前须在隔离派工实测子 Goal 独立、自动跨轮续行和父会话暂停回读，并用 `native verify-goal` 登记本轮验证；只在提示中写 `/goal` 不算启用。尚未验证 Goal 但可以关闭 Agent 时用 FOLLOWUP，允许在同一未完成派工内继续；短查找或复核使用普通派工。Goal 完成不等于正式任务 DONE。
+专属服务长派工使用 FOLLOWUP，短工作使用普通单轮派工。上一轮已确认成功、尚未交回且未关闭时，`backend continue --file -` 接受 `{operationId,prompt}` 在原会话继续同一范围；保存原轮次历史，结果未知或活动轮次不再启动。新任务和返工使用新派工、新 Agent。专属服务暂不声明自动 Goal 能力；旧原生 Goal 仅在隔离、自动跨轮和父端暂停回读均验证后使用。Goal 完成不等于正式任务 DONE。
 
 派工每个阶段保存 completedSteps、nextSteps、精确输入、成果及原操作编号。外部操作先登记 PENDING，结果保存 SUCCEEDED/FAILED；RESULT_UNKNOWN 先查询原编号，不重复调用，不丢弃原操作。交回结果用 `assignment result`，主 Agent 逐项核验后 `accept`。
 
-Agent 完成、取消或被替换后立即收尾：先保存结果/检查点，再 `native close` 暂停 Goal、停止活动 turn、核查后台命令、归档并验证卸载，同时保留 Codex 聊天历史。随后 `assignment close` 保存关闭及清理证据。相关辅助 Agent 同样关闭，不保留空闲 Agent 池，不给已结束 Agent followup 新工作。关闭失败或原操作未知时保留占用和恢复输入；依赖无关且资源独立的任务可以继续。
+Agent 完成、取消或被替换后立即收尾：先保存结果/检查点，再 `backend close`（`native close` 兼容）暂停并回读 Goal、停止活动 turn、核查后台命令、归档并验证卸载，同时保留 Codex 聊天历史。随后 `assignment close` 保存关闭及清理证据。相关辅助 Agent 同样关闭，不保留空闲 Agent 池，不给已结束 Agent followup 新工作。关闭失败或原操作未知时保留占用和恢复输入；依赖无关且资源独立的任务可以继续。
 
-新会话从 status、事件、派工和成果恢复，核查旧协调进程、原生 Agent、进程、工作区、版本及操作。旧执行未明确结束时不接管受影响资源。用 `assignment reconcile` 保存核查，收敛并关闭旧派工，再以新 Agent 续办；旧串行任务仍可 resume。恢复不能仅凭 Markdown、旧对话或租约过期。用户要求停止时先停止新派工，收敛所有子 Goal、Agent 和命令，保存检查点，再 stop 协调运行。
+新会话从 status、事件、派工和成果恢复，核查旧协调进程、原生 Agent、进程、工作区、版本及操作。旧执行未明确结束时不接管受影响资源。用 `assignment reconcile` 保存核查；`backend recover` 只恢复本项目创建回执对应的原线程，不创建新轮次。服务缺失可重启所属实例，恢复后先查询原结果；已核验关闭的会话不重新加载。核查后收敛旧派工；返工使用新 Agent，旧串行任务仍可 resume。恢复不能仅凭 Markdown、旧对话或租约过期。用户要求停止时先停止新派工，收敛所有子 Goal、Agent 和命令，保存检查点，再 stop 协调运行。
 
 正式任务 DONE 前必须逐项验收、接受成果、关闭所有相关 Agent 并完成 `cleanup:finish`、`cleanup:check`、`cleanup:complete`。SYSTEM 核验测试、核心与私库提交推送、本地与可达 VPS 部署；CREATIVE 按约定成果验收，DONE 不代作故事正式采用。未完成的人工验收使用 WAITING_REVIEW，未知和跳过如实记录。成果整合或恢复引用解除前不清理 worktree。
 

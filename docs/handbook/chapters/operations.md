@@ -174,9 +174,9 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 | READ | 必须提供精确不可变版本，可与其他不可变读取并行 |
 | UNKNOWN | 无法确认范围，独占全部派工资源 |
 
-路径大小写按保守冲突处理，拒绝绝对路径、父目录跳转及非规范别名。资源占用持续到派工 CLOSED；交回或空闲不能释放占用。阻塞且命令已结束的主 Agent 派工保留受影响资源，无关资源可以继续。代码派工使用独立受管 Git worktree；原生线程启动回执保存到 runtime，再开始工作。
+路径大小写按保守冲突处理，拒绝绝对路径、父目录跳转及非规范别名。资源占用持续到派工 CLOSED；交回或空闲不能释放占用。阻塞且命令已结束的主 Agent 派工保留受影响资源，无关资源可以继续。代码派工使用独立受管 Git worktree；专属服务创建与启动轮次回执保存到 runtime，再开始工作。
 
-每项派工依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED。先 schedule 和 assignment dispatch，再调用原生 spawn；缺失回复先 reconcile 原调用，禁止盲目重发。一次 Agent 只绑定一项派工，负责人和辅助 Agent 分别登记，主 Agent 统一控制容量。已关闭派工不再改动；重派创建新编号及新 Agent。
+每项派工依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED。先 schedule，再 backend dispatch 由同一专属服务创建会话并启动轮次；缺失回复先 sync/recover 原调用，禁止盲目重发。一次 Agent 只绑定一项派工，负责人和辅助 Agent 分别登记，主 Agent 统一控制容量。已关闭派工不再改动；重派创建新编号及新 Agent。
 
 `guard --assignment ID` 使用派工独立命令锁和进程记录，允许无冲突命令并行；开始命令时在账本锁内重新核查状态。共享核心整合、正式业务保存、提交推送和部署由主 Agent 串行完成，共享核心命令加 `--core` 锁定真实 Git common directory。guard 不代替业务 CAS，也不约束绕过协议的其他会话。旧 `next` 保留串行兼容，有未收敛派工时不跨过它领取新任务。
 
@@ -189,25 +189,25 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 | 普通实现、测试、修复 | gpt-5.6-sol | xhigh |
 | 架构、高风险、争议核验 | gpt-6-astra | max |
 
-选择必须属于本次原生 model/list 支持的模型和强度，并保存理由；升级和返工通过新派工保留选择历史。并发容量以本次宿主可用槽位为准，已交回但尚未关闭的 Agent 仍计入占用。原生工具最终执行 spawn，CLI 本身不另开模型守护进程。
+选择必须属于专属服务 model/list 支持的模型和强度，并保存理由。主 Agent 保持用户配置；工作会话通过项目专属 App Server 创建，不依赖交互 TUI 是否属于公共 App Server，也不自动转移原生 spawn 的 Agent。
 
-`native probe` 只连接已有 Codex App Server。Unix socket 使用 WebSocket HTTP Upgrade 与消息帧；`codex app-server proxy` 仅转发字节，不能直接向它发送 JSONL。默认连接当前 Codex home 下的 `app-server-control/app-server-control.sock`，可用 `--socket` 显式指定已有服务。
+`backend ensure` / `backend probe` 在受管阶段自动启动或复用本项目服务。服务身份由实例 ID 与规范项目根派生；短 Unix socket 位于当前 Codex home 的 app-server-control，使用项目专属名称。运行记录位于 instance/runtime/task-execution/server，包含进程出生时间、启动参数、二进制 SHA/版本、socket inode、隔离 sqlite_home 和代次。启动锁排斥重复实例；健康服务必须通过进程、socket 与 RPC 联合核验。未知 socket、无法证明归属或原启动结果未知时保留现场，不接管公共服务、其他项目服务或用户交互会话。
 
-探测先核对父线程永久身份、`thread/loaded/list` 与 `thread/read` 活动状态。另一进程能读取同一 Codex home 的历史，不证明它持有当前主会话。父线程未加载时返回 `CURRENT_SESSION_NOT_OWNED`，不创建探测线程、不声明关闭能力或可用槽位。独立 TUI 须在原会话结束后，以 `codex --remote unix://`（自定义服务使用 `unix://绝对路径`）连接已有服务并续办；不能用 `thread/resume` 热接管仍有活动 writer 的主会话。
+Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字节转发，不接收 JSONL。initialize、协议、权限、服务缺失和 RPC 超时分别保留诊断；不能把失败简写成 0 槽位。`native probe` 保留兼容入口，拒绝手填 slots 和外部 socket。关闭探测使用持久命名的 legacy 历史会话；针对尚未支持条目分页的版本，读取原完整轮次作为兼容回退，不丢失结果。
 
-归属验证通过后，在受管目录创建空探测线程、归档并回读。只有从 loaded/list 消失且 thread/read 为 notLoaded，并保留历史时才认为关闭得到验证。`--slots` 必须来自当前宿主实际空闲槽位，不能由可读历史线程数推算。连接、父线程映射、API 或关闭回读失败均降级主 Agent；不能把 idle、interrupt 或单一 archive 成功回执当销毁。探测回执只在当前本机运行有效。
+能力分为 closeVerified（空线程关闭）、executionVerified（真实派工并行及关闭）和 goalVerified。CPU/内存及 RPC 配置上限给出 agentCapacity，减去所有未关闭子派工得到 availableSlots；服务配置只是受验证的上界，不是实际并行证明。派工交回或 idle 仍占用；`backend verify-execution` 核对至少两项实际活动采样、原轮次身份、成果保存、主 Agent 验收与关闭。最多 3 个不同正式任务仍独立核算；同任务辅助派工占 Agent 槽位。
 
-长派工的 Goal 目标是交回可验收结果，短辅助工作可不用 Goal。原生 Goal 在隔离子派工实测后启用：verify-goal 检查独立线程及活动 Goal，观察不发送 turn/followup 时出现新轮次，随后由父端暂停并回读，核查父 Goal 目标、状态和预算没有改变。观察失败也暂停探测 Goal；不能仅用两个旧轮次、提示文本中的 /goal 或账户开启 goals 作为证明。未验证时长派工使用 FOLLOWUP，仅在同一未完成派工内继续。
+代码派工需独立、干净且登记到该正式任务的受管 worktree，与本项目核心 Git common directory 和精确 baseCommit 一致。`backend dispatch --run ID --assignment ID --file -` 请求为 `{operationId,prompt,workspace,baseCommit}`。创建意图、创建回执和 turn/start 前后状态分别持久保存；原编号同请求重放仅查询，改变请求或创建结果未知不重复调用。服务创建回执、线程 ID、工作区和 loaded 状态共同证明执行归属；能读取磁盘历史只证明历史可读。
 
-交回结果先 assignment result，再由主 Agent accept。Agent 完成、取消或替换后先持久保存结果/检查点，再 native close：暂停 Goal、停止活动 turn、精确停止其后台命令、归档及核查卸载，保留聊天历史；不调用 thread/delete。最后 assignment close 保存关闭和清理证据。所有相关 Agent 都要关闭，后续派工重新启动，不能建立空闲 Agent 池。
+`backend sync` 查询原轮次，`collect` 以 `{operationId}` 登记结构化结果，主 Agent 逐项 accept。长派工使用 FOLLOWUP：上一轮已确认成功且尚未交回时，`backend continue` 以新操作编号和同范围 prompt 继续原会话，保留全部原轮次。活动、失败未知或已关闭派工不允许续行。专属服务暂不声明 Goal 自动跨轮能力；原生 Goal 必须先独立验证，不能把选择 Ultra 当作已启用。
 
-关闭失败或原调用未知时保留派工占用和恢复输入；已确认未创建 Agent 的失败调用可以用 reconcile 记录 noAgentCreated 和原调用证据，再关闭派工。正式任务不能因为某个子 Goal 完成就自动 DONE。
+完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
 
 ### 检查点、恢复与完成
 
 检查点保存已完成步骤、下一步、精确输入、成果与原操作编号。外部操作先登记 PENDING，执行后保存结果；RESULT_UNKNOWN 只查询原操作，不重复调用。新检查点不能遗失既有操作编号，有未核查操作不能关闭派工或完成任务。
 
-跨会话恢复先核查旧协调进程、Agent、命令、工作区、版本和原操作，再 assignment reconcile。原生身份可补记原回执，不能换绑为新线程；原线程父身份在 runtime 保留，供新会话按原归属关闭。核查及关闭旧派工后，以新派工、新 Agent 继续；旧串行任务仍支持 resume。用户停止时先停止新派工、保存状态，收敛 Goal/Agent/命令，再 stop；停止请求后仅允许检查点、结果及关闭等收尾写入。
+跨会话恢复先核查旧协调进程、Agent、命令、工作区、版本和原操作，再 assignment reconcile。服务创建及轮次身份可补记原回执，不能换绑为新线程。`backend recover` 可启动缺失的所属服务，只恢复原创建回执对应的线程，再读取原结果，不发送新 turn；已确认关闭的派工不重新加载。活跃 writer 或无法验证的归属阻断接管；核查收敛后，返工用新派工、新 Agent，旧串行任务仍支持 resume。用户指定某项完成后暂停时，先以 `policy --run ID --file -` 保存 `{stopAfterTaskId}`；该任务进入终态后 next/schedule 返回 PAUSED_BY_POLICY，不再自动补位。用户停止时先停止新派工、保存状态，收敛 Goal/Agent/命令，再 stop；停止请求后仅允许检查点、结果及关闭等收尾写入。
 
 | 正式状态 | 含义 |
 | --- | --- |
@@ -257,3 +257,5 @@ npm run tasks -- rebuild
 日志最多七天且不超过 100 MiB。未知执行结果保留恢复输入，不按普通日志清除。临时资源默认上限 64 GiB，并保留至少 8 GiB 可用空间。
 
 本机 assistant 配置指向宿主 Codex 与 Python 可执行程序，沿用宿主登录；外部 production.command 是显式的命令参数数组，输入通过 JSON 标准输入传入，输出必须位于受管阶段。配置和凭据不因文档阅读而改变。
+
+部署排空仍阻断活动任务和未核查的结果未知操作。内置只读 Codex 建议若已具有同实例唯一受管进程结束回执、无活动子进程，原恢复目录身份完整且本机只读执行器配置自该请求启动前未改变，可在保留原 RESULT_UNKNOWN 操作和恢复输入的前提下发布；部署回执逐项保存该证明。此判断仅释放已结束只读建议的运行占用，不改变结果状态、不重发模型请求，不适用于素材生成、媒体处理或其他未知外部执行。

@@ -30,7 +30,7 @@
         "web/app/runtime-request-boundary.tsx",
         "web/app/client-storage.ts"
       ],
-      "sourceDigest": "24d8f7f1bf5f5458ffa9f12add7dab47b212db9bb340d47e8287c2fb979c0073"
+      "sourceDigest": "329ed3cee6e87753e3d9c3d79fcf48e0f1404c88223325fc9d2a0f91f7194b3b"
     },
     {
       "id": "domains",
@@ -198,9 +198,12 @@
         "tools/task-native.mjs",
         "tools/task-git.mjs",
         "tools/task-capacity.mjs",
-        "tools/native-socket.mjs"
+        "tools/native-socket.mjs",
+        "tools/task-server.mjs",
+        "tools/task-server-daemon.mjs",
+        "tools/task-backend.mjs"
       ],
-      "sourceDigest": "78d9a3af5f0e1218386efc9612fdae6f127b6d2d08bee376a3c9449145bb4d10"
+      "sourceDigest": "eb68e3974ac10a72a25f5966455014090b8d45062d5cc3eb046b939eba702e68"
     },
     {
       "id": "instance",

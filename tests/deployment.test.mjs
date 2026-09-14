@@ -11,6 +11,7 @@ import {
 import { createProject } from "../tools/project.mjs";
 import {
   resolveSource,
+  endedSuggestionProof,
   snapshotSource,
   installSoftware,
   verifyInstalledSoftware,
@@ -162,4 +163,25 @@ test("remote transport verifies stream order, partial recovery, and edited-input
   assert.throws(execute, error => error.status === 37);
   await writeFile(path.join(base, "unpacked/z/first"), "X".repeat(500000));
   assert.throws(execute, error => error.status === 1 && String(error.stderr).includes("modified transport file"));
+});
+
+test('deploy only releases ended built-in read-only suggestions and preserves unknown operation state',async()=>{
+ const outer=await requiredPhase(process.cwd()),base=path.join((await outer.read()).resources[0].path,'drain-proof');
+ await mkdir(path.join(base,'instance/runtime'),{recursive:true});
+ await atomic(path.join(base,'instance/instance.json'),{id:'drain-fixture'});
+ await atomic(path.join(base,'instance/runtime/process-policy.json'),{schemaVersion:'1.0',enabled:true,projectId:'drain-fixture',host:'fixture',maxTemporaryBytes:1024**3,reserveBytes:0,registry:'instance/runtime/process',workspace:'.process/stages',parentTasks:'.process/tasks'});
+ await atomic(path.join(base,'instance/runtime/machine.json'),{assistant:{provider:'codex'}});
+ const job={id:'suggestion-fixture',kind:'AI_SUGGEST',status:'RESULT_UNKNOWN',provider_request_id:'fixture-thread/fixture-turn',lease_until:null};
+ const {hash}=await import('../server/shared/contracts.mjs');
+ const task='job-'+hash(job.id).slice(0,24),directory=path.join(base,'.process/stages',task,'phase');
+ await mkdir(directory,{recursive:true});
+ const {lstat}=await import('node:fs/promises'),st=await lstat(directory),records=path.join(base,'instance/runtime/process',task);
+ await mkdir(records,{recursive:true});
+ const record={schemaVersion:'1.0',kind:'PROCESS_PHASE',projectId:'drain-fixture',taskId:task,phaseId:'phase',status:'CLEANED',outcome:'RESULT_UNKNOWN',startedAt:new Date(Date.now()+1000).toISOString(),finishedAt:new Date(Date.now()+2000).toISOString(),resources:[{kind:'path',path:directory,state:'RETAINED',dev:st.dev,ino:st.ino}]};
+ await atomic(path.join(records,'phase.json'),record);
+ const original=JSON.stringify(job);assert.equal((await endedSuggestionProof(base,job)).recoveryRetained,true);assert.equal(JSON.stringify(job),original);
+ for(const change of [{kind:'GENERATE'},{lease_until:new Date().toISOString()},{provider_request_id:null}])assert.equal(await endedSuggestionProof(base,{...job,...change}),null);
+ await atomic(path.join(records,'phase.json'),{...record,status:'RUNNING'});assert.equal(await endedSuggestionProof(base,job),null);
+ await atomic(path.join(records,'phase.json'),{...record,projectId:'foreign'});assert.equal(await endedSuggestionProof(base,job),null);
+ await atomic(path.join(records,'phase.json'),record);await atomic(path.join(base,'instance/runtime/machine.json'),{assistant:{provider:'external'}});assert.equal(await endedSuggestionProof(base,job),null);
 });

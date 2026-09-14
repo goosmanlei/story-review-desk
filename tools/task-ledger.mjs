@@ -161,6 +161,14 @@ export async function updateBinding(project,runId,assignmentId,callback) {
 export async function configureCapabilities(project,runId,capabilities) {
   return withRuntime(project,async loc=>{const run=await requireRun(loc,runId);run.capabilities=capabilities;await atomic(path.join(loc.runtime,'run.json'),run);return capabilities;});
 }
+export async function setRunPolicy(project,runId,policy){
+  return withRuntime(project,async loc=>{
+    const run=await requireRun(loc,runId),ledger=await readLedger(loc);
+    requireTask(policy&&Object.keys(policy).every(k=>k==='stopAfterTaskId'),'执行策略只接受stopAfterTaskId');
+    requireTask(ledger.tasks[policy.stopAfterTaskId],'停止边界须引用现有正式任务');
+    run.policy={stopAfterTaskId:policy.stopAfterTaskId};await atomic(path.join(loc.runtime,'run.json'),run);return run.policy;
+  });
+}
 export async function withRuntime(project,callback) {
   const loc=await location(project); await directory(loc.runtime);
   return processLock(path.join(loc.runtime,'ledger.lock'),()=>callback(loc));
@@ -279,12 +287,14 @@ export async function mutate(project,action,request) {
       requireTask(ledger.schemaVersion===2,'派工要求 v2 账本；先停止执行并升级');
       const converging=['assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(action);
       const run=await requireRun(loc,request.runId,{converging});
+      if(action==='schedule'&&run.policy?.stopAfterTaskId&&terminal.has(tasks[run.policy.stopAfterTaskId]?.status))return {status:'PAUSED_BY_POLICY',assignments:[],deferred:[]};
       result=await assignmentMutation({action,request,tasks,at,touch,get,bindings,checkpoint,complete,
         requireRun:()=>requireRun(loc,request.runId,{converging}),active:id=>activeActivity(loc,id),capabilities:run.capabilities,root:loc.root,
         idFor:s=>'A-'+digest(request.operationId+':'+s).slice(0,20)});
       if(!changed.size)return result;
     } else if(action==='next') {
-      await requireRun(loc,request.runId);
+      const run=await requireRun(loc,request.runId);
+      if(run.policy?.stopAfterTaskId&&terminal.has(tasks[run.policy.stopAfterTaskId]?.status))return {status:'PAUSED_BY_POLICY'};
       requireTaskCapacity(tasks);
       const unfinished=Object.values(tasks).filter(t=>t.status==='RUNNING');
       if(unfinished.length) return {status:unfinished.every(t=>owner(t)===request.runId)?'CURRENT_TASK':'RECOVERY_REQUIRED',tasks:unfinished,capacity:taskCapacity(tasks)};

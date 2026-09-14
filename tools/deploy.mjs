@@ -336,7 +336,7 @@ export async function main(argv = process.argv.slice(2)) {
             maintenanceRelease = built.release;
             targetReceipt.stage = "DRAINING";
             await save();
-            await maintenance(root, id, {
+            targetReceipt.drainProof = await maintenance(root, id, {
               enabled: true,
               release: built.release,
             });

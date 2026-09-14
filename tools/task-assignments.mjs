@@ -90,7 +90,7 @@ export async function assignmentMutation(ctx) {
       else if (Object.values(tasks).some(x=>x.status==='RUNNING'&&!x.assignments?.length)) reason='LEGACY_EXCLUSIVE';
       else if (taskCapacityReason(tasks,t.id)) reason='TASK_CAPACITY';
       else if (execution.mode==='MAIN' && open.some(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED')) reason='MAIN_CAPACITY';
-      else if (execution.mode==='SUBAGENT' && open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length >= Math.max(0,capabilities.availableSlots || 0)) reason='AGENT_CAPACITY';
+      else if (execution.mode==='SUBAGENT' && open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length >= Math.max(0,capabilities.agentCapacity??capabilities.availableSlots??0)) reason='AGENT_CAPACITY';
       if (reason) {deferred.push({taskId:t.id,key:s.key,reason});continue;}
       const id=idFor(t.id+':'+s.key), a={id,key:s.key,taskId:t.id,version:1,status:'RESERVED',goal:s.goal,
         deliverables:s.deliverables,acceptanceCriteria:s.acceptanceCriteria,resources:rs,execution,
@@ -109,7 +109,7 @@ export async function assignmentMutation(ctx) {
   if(['assignment:dispatch','assignment:start'].includes(action)){
     requireTaskCapacity(tasks,t.id);
     const open=all().filter(x=>assignmentOpen(x.assignment));
-    if(a.execution.mode==='SUBAGENT')demand(capabilities.delegation&&capabilities.closeVerified&&open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length<=Math.max(0,capabilities.availableSlots||0),'AGENT_CAPACITY：当前原生能力或槽位不足；保留原派工，先核查收尾');
+    if(a.execution.mode==='SUBAGENT')demand(capabilities.delegation&&capabilities.closeVerified&&open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length<=Math.max(0,capabilities.agentCapacity??capabilities.availableSlots??0),'AGENT_CAPACITY：当前原生能力或槽位不足；保留原派工，先核查收尾');
     else demand(open.filter(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED').length<=1,'MAIN_CAPACITY：主 Agent 只能串行执行');
   }
   if(action==='assignment:reconcile') {

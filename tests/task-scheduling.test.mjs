@@ -7,6 +7,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {randomUUID,createHash} from 'node:crypto';
 import {mutate,readLedger,startRun,stopRun,runtimeState,updateBinding,configureCapabilities,activity} from '../tools/task-ledger.mjs';
+import {setRunPolicy} from '../tools/task-ledger.mjs';
 import {taskCapacity} from '../tools/task-capacity.mjs';
 import {resources,conflicts,chooseExecution} from '../tools/task-assignments.mjs';
 import {main} from '../tools/tasks.mjs';
@@ -270,4 +271,15 @@ test('native Goal verification observes new automatic turn and parent pause, nev
   const client=nativeFixture({continueGoal:true});assert.equal((await verifyGoalProbe(client,{childThreadId:'child',parentThreadId:'parent',firstTurnId:'turn1',timeoutMs:100,pollMs:1})).goalVerified,true);
   assert(!client.calls.some(x=>['turn/start','turn/steer'].includes(x.method)));
   await assert.rejects(verifyGoalProbe(nativeFixture(),{childThreadId:'child',parentThreadId:'parent',firstTurnId:'turn1',timeoutMs:5,pollMs:1}),/未观察/);
+});
+
+test('an explicit stop-after policy blocks refill after the selected task finishes',async t=>{
+ const root=await fixture(t),a=await publish(root),b=await publish(root),run=await startRun(root,{capabilities:caps});
+ await setRunPolicy(root,run.id,{stopAfterTaskId:a.taskId});
+ const worker=(await schedule(root,run.id,[candidate(a.taskId,'a',{execution:{mode:'MAIN',rationale:'policy fixture'}})])).assignments[0];
+ await started(root,run.id,worker);await accepted(root,run.id,worker);await closed(root,run.id,worker);
+ await change(root,'transition',a.taskId,null,run.id,{status:'DONE',reason:'完成并暂停',result:{summary:'已验收',artifacts:[],cleanup:'fixture已清理',acceptance:[{criterion:0,evidence:'通过'}]}});
+ assert.equal((await schedule(root,run.id,[candidate(b.taskId,'b')])).status,'PAUSED_BY_POLICY');
+ assert.equal((await mutate(root,'next',req({runId:run.id}))).status,'PAUSED_BY_POLICY');
+ assert.equal((await readLedger(root)).tasks[b.taskId].status,'READY');
 });

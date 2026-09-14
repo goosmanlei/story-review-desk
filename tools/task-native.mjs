@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {nativeSocket} from './native-socket.mjs';
 
-// Connect only to an existing Codex server. Never start a separate daemon,
-// delete history, edit Codex's database, or infer closure from an idle turn.
+// Transport connection only. Project service lifecycle belongs to task-server.
+// Never delete history, edit Codex databases, or infer closure from an idle turn.
 export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSocket}={}) {
   const pending=new Map();let counter=0,closed=false;
   const rejectAll=error=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error);}pending.clear();};
@@ -68,6 +68,8 @@ export async function closeNativeThread(client,threadId,parentThreadId,{probe=fa
     await client.call('thread/backgroundTerminals/terminate',{threadId,processId:terminal.processId});
   }
   if((await terminalsFor(client,threadId)).length)throw Error('原生后台命令尚未确认结束');
+  const goalReadback=await client.call('thread/goal/get',{threadId});
+  if(goalReadback.goal&&!['complete','paused'].includes(goalReadback.goal.status))throw Error('原生 Goal 尚未确认暂停或完成');
   if((await loadedThreads(client)).includes(threadId))await client.call('thread/archive',{threadId});
   const loaded=await loadedThreads(client);
   const readback=await client.call('thread/read',{threadId,includeTurns:false});

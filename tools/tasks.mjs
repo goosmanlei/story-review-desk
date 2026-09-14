@@ -7,7 +7,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {once} from 'node:events';
 import {processLock,processIdentity} from './process-resources.mjs';
-import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities} from './task-ledger.mjs';
+import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities,setRunPolicy} from './task-ledger.mjs';
 import {installTaskSkill} from './task-skill.mjs';
 import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
 import {taskCapacity} from './task-capacity.mjs';
@@ -35,11 +35,17 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks schedule --file -            原子选择无冲突派工；支持跨正式任务
                                     最多占用 3 个正式任务；主 Agent、预留和未关闭派工计入
   tasks assignment dispatch|start|checkpoint|result|accept|close|reconcile --file -
-  tasks native probe --run ID --slots N [--socket PATH]
-                                    在受管阶段验证同一原生服务；失败降级主 Agent
-  tasks native close --run ID --assignment ID
-                                    暂停 Goal、停止 turn、归档并核验卸载，保留历史
-  tasks native goal|verify-goal --run ID --assignment ID --file -
+  tasks policy --run ID --file -     设置 {stopAfterTaskId}，该任务终态后暂停补位
+  tasks backend ensure|probe --run ID
+                                    在受管阶段启动/复用并核验项目专属服务
+  tasks backend dispatch|continue --run ID --assignment ID --file -
+                                    同一服务创建工作会话或继续未完成长派工
+  tasks backend sync|recover|collect|close --run ID --assignment ID [--file -]
+                                    查询原轮次、恢复、保存结果及核验关闭
+  tasks backend verify-execution --run ID
+                                    核验真实并行采样、成果验收和关闭
+  tasks backend stop --run ID        只停止无未关闭派工或加载会话的专属服务
+  tasks native probe|close           兼容别名；probe不接受公共socket或slots声明
 
   --project PATH                    默认当前项目根；不能使用源码 worktree 代替账本根
   --file -                          从 stdin 读取 JSON，避免保存临时请求文件
@@ -77,11 +83,12 @@ schedule: {runId,expectedVersions:{...},assignments:[{taskId,key,goal,deliverabl
   acceptanceCriteria:[...],resources:[{kind:"FILE|DIRECTORY|OBJECT|UNKNOWN",key:"core/tools/x.mjs",access:"WRITE|READ",version}],
   execution:{workClass:"LOOKUP|RESEARCH|IMPLEMENTATION|HIGH_RISK",rationale,longRunning:false},dependsOn:[],attemptOf}]}
 assignment: {runId,taskId,assignmentId,expectedVersions:{...},expectedAssignmentVersion,...}
-dispatch: {}，spawn 前保存尝试；start: {workspaceEvidence,workspace（本机路径仅存 runtime）,nativeThreadId（SubAgent 必填）}
+backend dispatch: {operationId,prompt,workspace,baseCommit}；collect: {operationId}；continue: {operationId,prompt}。
+assignment dispatch: {}，创建前保存尝试；start: {workspaceEvidence,workspace（本机路径仅存 runtime）,nativeThreadId（SubAgent 必填）}
 checkpoint: {checkpoint,goalStatus}; result: {checkpoint,result:{summary,artifacts:[],acceptance:[{criterion:0,evidence}]}}
 accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason};
 reconcile: {checkpoint,reconciliation:{processes,workspace,versions,operations,agent}}。
-长派工原生 Goal 须先经隔离/自动跨轮/父端停止验证；否则 FOLLOWUP。未验证关闭则主 Agent 执行。
+专属服务长派工使用 FOLLOWUP；backend continue 只续办同一未交回派工。未验证关闭则主 Agent 执行。
 TASK_CAPACITY 表示项目已占用 3 个不同任务；同任务辅助派工只增加 Agent 占用。
 MAIN_CAPACITY / AGENT_CAPACITY 仍按实际能力限制执行。交回或空闲不释放占用，
 收尾关闭并完成任务后，协调者重新 schedule 按依赖和优先级补入待办。
@@ -159,7 +166,7 @@ async function nativeAction(project,action,v) {
   const loc=await location(project),run=await requireRun(loc,v.run,{converging:action==='close'});
   if(action==='probe') {
     requireTask(process.env.REVIEW_TASK_DIR,'原生探测须通过受管 process 阶段执行');
-    const slots=Number(v.slots||0);requireTask(Number.isInteger(slots)&&slots>=0&&slots<=32,'slots 须为当前宿主实际可用的 Agent 槽位');
+    requireTask(v.slots===undefined,'slots 不接受人工声明；使用专属服务实际能力核验');
     requireTask(!v.socket,'专属服务socket由项目身份确定，不接管外部socket');
     return backendAction(project,'probe',v);
   }
@@ -201,6 +208,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='run') return keeper(project);
   if(action==='heartbeat') return heartbeat(project,v.run);
   if(action==='stop') return stopRun(project,v.run);
+  if(action==='policy')return setRunPolicy(project,v.run,await inputFile(v.file));
   if(action==='guard') return guarded(project,v.run,v.task,command,v.core,v.assignment);
   if(action==='native') return nativeAction(project,p[1],v);
   if(action==='backend')return backendAction(project,p[1],v,v.file?await inputFile(v.file):{});

@@ -32,6 +32,7 @@ import {
 import { activeRelease, startService, stopService } from "./service.mjs";
 import {
   phaseRecords,
+  processAlive,
   readProcessConfig,
   ProcessPhase,
 } from "./process-resources.mjs";
@@ -278,6 +279,25 @@ export async function databaseConnection(root, release) {
   });
 }
 
+// A completed read-only suggestion may keep an unknown answer without owning a
+// running writer. Preserve its operation and recovery directory across deploy.
+export async function endedSuggestionProof(root,job){
+  if(job.kind!=='AI_SUGGEST'||job.status!=='RESULT_UNKNOWN'||job.lease_until||!job.provider_request_id)return null;
+  const instance=await json(path.join(root,'instance/instance.json'));
+  const machineFile=path.join(root,'instance/runtime/machine.json'),machine=await json(machineFile);
+  if(machine.assistant?.provider!=='codex')return null;
+  const records=await phaseRecords(root,'job-'+hash(job.id).slice(0,24));
+  if(records.length!==1)return null;
+  const {record}=records[0];
+  if(!record.startedAt||(await lstat(machineFile)).mtimeMs>Date.parse(record.startedAt))return null;
+  if(record.projectId!==instance.id||record.status!=='CLEANED'||record.outcome!=='RESULT_UNKNOWN'||!record.finishedAt||processAlive(record.child)||record.failures?.length)return null;
+  const resource=record.resources.find(r=>r.kind==='path'&&r.state==='RETAINED');
+  if(!resource||!resource.path.startsWith(path.join(root,'.process')+path.sep))return null;
+  const stat=await lstat(resource.path).catch(()=>null);
+  if(!stat?.isDirectory()||stat.isSymbolicLink()||stat.dev!==resource.dev||stat.ino!==resource.ino)return null;
+  return {operationId:job.id,kind:job.kind,status:'RESULT_UNKNOWN',reason:'READ_ONLY_PROVIDER_EXITED',recoveryRetained:true,finishedAt:record.finishedAt};
+}
+
 export async function maintenance(
   root,
   operationId,
@@ -306,14 +326,17 @@ export async function maintenance(
       for (;;) {
         const jobs = (
           await pool.query(
-            "SELECT id,status FROM operations WHERE status IN ('QUEUED','RUNNING','RESULT_UNKNOWN') LIMIT 101",
+            "SELECT id,kind,status,lease_until,provider_request_id FROM operations WHERE status IN ('QUEUED','RUNNING','RESULT_UNKNOWN') ORDER BY id LIMIT 101",
           )
         ).rows;
-        requireValue(
-          !jobs.some((x) => x.status === "RESULT_UNKNOWN"),
-          "存在结果未知的操作；先按原操作编号核查",
-        );
-        if (!jobs.length) break;
+        requireValue(jobs.length<101,'待核查操作过多；保留原服务并逐项核查');
+        const retained=[];
+        for(const job of jobs.filter(j=>j.status==='RESULT_UNKNOWN')){
+          const proof=await endedSuggestionProof(root,job);
+          requireValue(proof,'存在结果未知的操作；先按原操作编号核查：'+job.id);
+          retained.push(proof);
+        }
+        if (!jobs.some(j=>j.status!=='RESULT_UNKNOWN')) return {retainedUnknown:retained};
         requireValue(
           Date.now() < deadline,
           "工作器尚未结束；保留原服务，稍后按原部署续作",

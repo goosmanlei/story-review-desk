@@ -60,7 +60,8 @@ export async function ensureTaskServer(project,{binary='codex',connect=connectNa
   await copyFile(fileURLToPath(new URL('./task-server-daemon.mjs',import.meta.url)),daemon);
   const args=['app-server','--listen','unix://'+p.socket,'-c','sqlite_home='+JSON.stringify(sqliteHome),'-c','agents.max_threads=3'];
   await atomic(launch,{root:p.root,record:p.record,identity,binary:resolved,args,log:path.join(p.directory,'server.log')});
-  const child=spawn(process.execPath,[daemon,launch],{cwd:p.root,detached:true,stdio:'ignore'});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
+  const env={...process.env};for(const key of ['REVIEW_PROCESS_CONTEXT','REVIEW_TASK_ID','REVIEW_TASK_DIR','TMPDIR','TMP','TEMP','TEST_TMPDIR','XDG_CACHE_HOME','npm_config_cache','CODEX_THREAD_ID','CODEX_SESSION_ID'])delete env[key];
+  const child=spawn(process.execPath,[daemon,launch],{cwd:p.root,env,detached:true,stdio:'ignore'});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
   let failure;
   for(let i=0;i<50;i++){await wait(200);record=await read(p.record);if(record?.generation!==generation)continue;if(record.status==='STOPPED')throw Error('SERVER_START_FAILED：专属服务退出 '+record.exitCode);
    try{const verified=await verifyTaskServer(project,{connect});verified.client.close();record={...record,socketIdentity:verified.socketIdentity,verifiedAt:new Date().toISOString(),status:'READY'};await atomic(p.record,record);return {...record,reused:false};}catch(e){failure=e;if(!['ENOENT'].includes(e.code)&&!e.message.includes('SERVER_NOT_RUNNING'))break;}
@@ -90,6 +91,7 @@ export async function probeTaskServer(project){
   const cpu=os.availableParallelism(),memory=os.totalmem(),configured=v.config.config.agents?.max_concurrent_threads_per_session??v.config.config.agents?.max_threads;
   requireTask(Number.isInteger(configured)&&configured>0,'SERVER_CAPACITY：服务未返回已配置执行上限');
   const availableSlots=Math.min(3,configured,cpu,Math.max(1,Math.floor(memory/(2*1024**3))));
-  return {checkedAt:new Date().toISOString(),backend:'PROJECT_APP_SERVER',backendServiceId:record.serviceId,backendGeneration:record.generation,socket:record.socket,delegation:true,closeVerified:true,goalVerified:false,executionVerified:false,availableSlots,capacityEvidence:{configured,cpu,totalMemoryBytes:memory,limit:3,loadedThreads:loaded.data.length},models:models.data.map(m=>({model:m.model||m.id,efforts:m.supportedReasoningEfforts.map(e=>e.reasoningEffort)})),closureProbe:closure,limitation:'专属服务及空线程关闭已核验；真实软件派工与并行重叠须独立验收，长任务使用FOLLOWUP'};
+  const ledger=await readLedger(v.paths),occupied=Object.values(ledger.tasks).flatMap(t=>t.assignments||[]).filter(a=>a.status!=='CLOSED'&&a.execution.mode==='SUBAGENT').length;
+  return {checkedAt:new Date().toISOString(),backend:'PROJECT_APP_SERVER',backendServiceId:record.serviceId,backendGeneration:record.generation,socket:record.socket,delegation:true,closeVerified:true,goalVerified:false,executionVerified:false,agentCapacity:availableSlots,occupiedAgentSlots:occupied,availableSlots:Math.max(0,availableSlots-occupied),capacityEvidence:{configuredPerSession:configured,cpu,totalMemoryBytes:memory,projectLimit:3,loadedThreads:loaded.data.length},models:models.data.map(m=>({model:m.model||m.id,efforts:m.supportedReasoningEfforts.map(e=>e.reasoningEffort)})),closureProbe:closure,limitation:'专属服务及空线程关闭已核验；真实软件派工与并行重叠须独立验收，长任务使用FOLLOWUP'};
  }catch(error){throw Error('SERVER_PROBE_FAILED：'+error.message+(probeId?'；保留探测会话 '+probeId:''));}finally{v.client.close();}
 }
