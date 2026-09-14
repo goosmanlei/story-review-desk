@@ -38,7 +38,7 @@ SYSTEM 首先改通用《审阅台》核心，再验证《九头案》继承；C
 | 常规实现、测试、修复 | gpt-5.6-sol | xhigh |
 | 架构、高风险、争议核验 | gpt-6-astra | max |
 
-先在受管阶段执行 `native probe --run ID --slots N`，核验当前主会话确实属于连接的原生服务、可用模型及关闭回读。未证明能关闭 Agent 时主 Agent 串行推进，明确报告限制，不能先派工再把 idle 当已销毁。不另起模型守护进程，不改 Codex 内部数据库，不使用 thread/delete。原生探测失败不阻止主 Agent 完成正式任务。
+先在受管阶段执行 `native probe --run ID --slots N`，核验当前主会话确实属于连接的原生服务、可用模型及关闭回读。Unix socket 使用 WebSocket，不向字节代理发送 JSONL。父线程必须同时出现在 loaded/list 且 read 回读为已加载；仅能读取历史时返回 CURRENT_SESSION_NOT_OWNED，不能据此放开派工。独立 TUI 需在原会话结束后通过 `codex --remote unix://` 连接已有服务续办，不热接管活动会话。未证明能关闭 Agent 时主 Agent 串行推进，明确报告限制，不能先派工再把 idle 当已销毁。不另起模型守护进程，不改 Codex 内部数据库，不使用 thread/delete。原生探测失败不阻止主 Agent 完成正式任务。
 
 有可靠关闭能力时，主 Agent 为跨正式任务或同一任务的独立部分准备 `schedule` 候选，声明目标、交付物、逐项验收、资源及选择理由。自动使用表中策略，争议或质量不足时升级；超出宿主可用模型/强度时选择实际支持的配置并解释，不能声称切换已发生。返工使用新的派工和新的 Agent，记录 attemptOf 及新选择理由。
 

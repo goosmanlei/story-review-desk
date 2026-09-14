@@ -1,29 +1,24 @@
-import {spawn} from 'node:child_process';
-import {createInterface} from 'node:readline';
 import {randomUUID} from 'node:crypto';
+import {nativeSocket} from './native-socket.mjs';
 
 // Connect only to an existing Codex server. Never start a separate daemon,
 // delete history, edit Codex's database, or infer closure from an idle turn.
-export function connectNative({binary='codex',socket,timeoutMs=8000}={}) {
-  const child=spawn(binary,['app-server','proxy',...(socket?['--sock',socket]:[])],{stdio:['pipe','pipe','pipe']});
+export function connectNative({socket,timeoutMs=8000,transportFactory=nativeSocket}={}) {
   const pending=new Map();let counter=0,closed=false;
-  child.stderr.resume();
   const rejectAll=error=>{for(const p of pending.values()){clearTimeout(p.timer);p.reject(error);}pending.clear();};
-  child.on('error',rejectAll);child.on('exit',()=>rejectAll(Error('原生 App Server 连接已结束')));
-  const lines=createInterface({input:child.stdout});
-  lines.on('line',line=>{
-    let message;try{message=JSON.parse(line);}catch{return;}
+  const transport=transportFactory({socket,timeoutMs,onFailure(error){closed=true;rejectAll(error);},onMessage(message){
+    if(!message||typeof message!=='object'||message.method)return;
     const p=pending.get(message.id);if(!p)return;
     pending.delete(message.id);clearTimeout(p.timer);
     message.error?p.reject(Error(message.error.message||'原生 API 请求失败')):p.resolve(message.result);
-  });
-  const call=(method,params={})=>new Promise((resolve,reject)=>{
+  }});
+  const call=async(method,params={})=>{await transport.ready;return new Promise((resolve,reject)=>{
     if(closed)return reject(Error('原生连接已关闭'));
     const id=++counter,timer=setTimeout(()=>{pending.delete(id);reject(Error(`原生 API 超时：${method}`));},timeoutMs);
     pending.set(id,{resolve,reject,timer});
-    child.stdin.write(JSON.stringify({id,method,params})+'\n',error=>{if(error){clearTimeout(timer);pending.delete(id);reject(error);}});
-  });
-  return {call,async initialize(){await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});child.stdin.write(JSON.stringify({method:'initialized'})+'\n');},close(){closed=true;rejectAll(Error('原生连接已关闭'));lines.close();child.stdin.end();child.kill();}};
+    transport.send({id,method,params}).catch(error=>{clearTimeout(timer);pending.delete(id);reject(error);});
+  });};
+  return {socket:transport.socket,call,async initialize(){await call('initialize',{clientInfo:{name:'review_tasks',version:'2'},capabilities:{experimentalApi:true}});await transport.send({method:'initialized'});},close(){closed=true;rejectAll(Error('原生连接已关闭'));transport.close();}};
 }
 
 async function loadedThreads(client) {
@@ -69,6 +64,12 @@ export async function probeNative({parentThreadId=process.env.CODEX_THREAD_ID,av
     await client.initialize();
     const parent=await client.call('thread/read',{threadId:parentThreadId,includeTurns:false});
     if(parent.thread.id!==parentThreadId)throw Error('App Server 未映射当前主会话');
+    // A different daemon can read this thread's history from the same Codex home.
+    // Only its live owner can verify/close the children created by this session.
+    const loaded=await loadedThreads(client);
+    base.parentStatus=parent.thread.status?.type||'UNKNOWN';
+    base.parentLoaded=loaded.includes(parentThreadId);
+    if(!base.parentLoaded||!base.parentStatus||base.parentStatus==='UNKNOWN'||base.parentStatus==='notLoaded')throw Error('CURRENT_SESSION_NOT_OWNED：此 App Server 只读取当前会话历史，未持有活动主会话；请在当前会话结束后以 codex --remote unix:// 对接该服务续办，不能热接管活动 TUI');
     const models=await client.call('model/list');
     base.models=models.data.map(m=>({model:m.model||m.id,efforts:m.supportedReasoningEfforts.map(e=>e.reasoningEffort)}));
     const probe=await client.call('thread/start',{cwd:probeRoot,ephemeral:false});probeId=probe.thread.id;

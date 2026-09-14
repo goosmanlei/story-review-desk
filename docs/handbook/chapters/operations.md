@@ -191,7 +191,11 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 
 选择必须属于本次原生 model/list 支持的模型和强度，并保存理由；升级和返工通过新派工保留选择历史。并发容量以本次宿主可用槽位为准，已交回但尚未关闭的 Agent 仍计入占用。原生工具最终执行 spawn，CLI 本身不另开模型守护进程。
 
-`native probe` 只连接已有 Codex App Server，先确认当前父线程映射，再在受管目录创建空探测线程、归档并回读。只有从 loaded/list 消失且 thread/read 为 notLoaded，并保留历史时才认为关闭得到验证。连接、父线程映射、API 或关闭回读失败均降级主 Agent；不能把 idle、interrupt 或单一 archive 成功回执当销毁。探测回执只在当前本机运行有效。
+`native probe` 只连接已有 Codex App Server。Unix socket 使用 WebSocket HTTP Upgrade 与消息帧；`codex app-server proxy` 仅转发字节，不能直接向它发送 JSONL。默认连接当前 Codex home 下的 `app-server-control/app-server-control.sock`，可用 `--socket` 显式指定已有服务。
+
+探测先核对父线程永久身份、`thread/loaded/list` 与 `thread/read` 活动状态。另一进程能读取同一 Codex home 的历史，不证明它持有当前主会话。父线程未加载时返回 `CURRENT_SESSION_NOT_OWNED`，不创建探测线程、不声明关闭能力或可用槽位。独立 TUI 须在原会话结束后，以 `codex --remote unix://`（自定义服务使用 `unix://绝对路径`）连接已有服务并续办；不能用 `thread/resume` 热接管仍有活动 writer 的主会话。
+
+归属验证通过后，在受管目录创建空探测线程、归档并回读。只有从 loaded/list 消失且 thread/read 为 notLoaded，并保留历史时才认为关闭得到验证。`--slots` 必须来自当前宿主实际空闲槽位，不能由可读历史线程数推算。连接、父线程映射、API 或关闭回读失败均降级主 Agent；不能把 idle、interrupt 或单一 archive 成功回执当销毁。探测回执只在当前本机运行有效。
 
 长派工的 Goal 目标是交回可验收结果，短辅助工作可不用 Goal。原生 Goal 在隔离子派工实测后启用：verify-goal 检查独立线程及活动 Goal，观察不发送 turn/followup 时出现新轮次，随后由父端暂停并回读，核查父 Goal 目标、状态和预算没有改变。观察失败也暂停探测 Goal；不能仅用两个旧轮次、提示文本中的 /goal 或账户开启 goals 作为证明。未验证时长派工使用 FOLLOWUP，仅在同一未完成派工内继续。
 

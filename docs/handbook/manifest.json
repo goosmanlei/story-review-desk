@@ -196,9 +196,10 @@
         "tools/task-format.mjs",
         "tools/task-native.mjs",
         "tools/task-git.mjs",
-        "tools/task-capacity.mjs"
+        "tools/task-capacity.mjs",
+        "tools/native-socket.mjs"
       ],
-      "sourceDigest": "ead582ea10337fe2e60540bda4941893069d7a09165d27d250e1ec33e40fd64d"
+      "sourceDigest": "a601284ee447f633531181e5e05fa11525ad0542ebca20c1d742f893835c7304"
     },
     {
       "id": "instance",
