@@ -9,12 +9,29 @@ import {createHash,randomUUID} from 'node:crypto';
 const hash=value=>createHash('sha256').update(value).digest('hex');
 const demand=(ok,message)=>{if(!ok)throw Error(message);};
 let boot,host;
-export function bootIdentity() {
- if(!boot){
-  const value=process.platform==='linux'?readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim():process.platform==='darwin'?execFileSync('sysctl',['-n','kern.boottime'],{encoding:'utf8'}).trim():null;
-  demand(value,'EXECUTION_BOOT_UNKNOWN：无法核验机器启动身份');boot=hash(value);
+export function detectBootIdentity({platform=process.platform,read=readFileSync,exec=execFileSync}={}) {
+ let value,bootSource;
+ try {
+  if(platform==='linux'){value=read('/proc/sys/kernel/random/boot_id','utf8').trim();bootSource='linux-boot-id-v1';}
+  else if(platform==='darwin'){value=exec('sysctl',['-n','kern.bootsessionuuid'],{encoding:'utf8'}).trim().toUpperCase();bootSource='darwin-boot-session-uuid-v1';}
+ } catch {throw Error('EXECUTION_BOOT_UNKNOWN：无法读取稳定机器启动身份');}
+ demand(typeof value==='string'&&/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(value),'EXECUTION_BOOT_UNKNOWN：缺少有效机器启动 UUID');
+ return {bootId:hash(value),bootSource};
+}
+export function bootStamp() {boot||=detectBootIdentity();return {...boot};}
+export function bootIdentity() {return bootStamp().bootId;}
+// Old macOS records hashed kern.boottime, whose microseconds can change during
+// the same boot. A mismatch is uncertainty, never proof of process death.
+export function compareBootIdentity(previous,{current=bootStamp(),platform=process.platform,legacyId}={}) {
+ if(typeof previous?.bootId!=='string'||!previous.bootId)return 'UNKNOWN';
+ if(previous.bootSource===current.bootSource)return previous.bootId===current.bootId?'SAME':'DIFFERENT';
+ if(previous.bootSource)return 'UNKNOWN';
+ if(platform==='linux'&&current.bootSource==='linux-boot-id-v1')return previous.bootId===current.bootId?'SAME':'DIFFERENT';
+ if(platform==='darwin'&&current.bootSource==='darwin-boot-session-uuid-v1'){
+  try {const legacy=legacyId??hash(execFileSync('sysctl',['-n','kern.boottime'],{encoding:'utf8'}).trim());return previous.bootId===legacy?'SAME':'UNKNOWN';}
+  catch{return 'UNKNOWN';}
  }
- return boot;
+ return 'UNKNOWN';
 }
 export function machineIdentity() {
  if(!host){

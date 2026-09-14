@@ -5,7 +5,7 @@ import {readFile,mkdir,lstat,realpath,unlink,copyFile} from 'node:fs/promises';
 import {createHash,randomUUID} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {plainDirectory} from './io.mjs';
-import {durableExecutionFile as atomic,readExecutionFile as read,executionLocation as location,bindExecutionScope,bootIdentity} from './execution-runtime.mjs';
+import {durableExecutionFile as atomic,readExecutionFile as read,executionLocation as location,bindExecutionScope,bootStamp,compareBootIdentity} from './execution-runtime.mjs';
 const requireTask=(ok,message)=>{if(!ok)throw Error(message);};
 import {processLock,processAlive,processIdentity} from './process-resources.mjs';
 import {connectNative} from './task-native.mjs';
@@ -19,10 +19,17 @@ export async function serverPaths(project){
  await mkdir(socketDirectory,{recursive:true,mode:0o700});await plainDirectory(socketDirectory);
  return {...loc,directory,record:path.join(directory,'server.json'),socket:path.join(socketDirectory,'review-'+key+'.sock'),serviceId:'review-tasks-'+key};
 }
-export async function verifyAppService(project,{connect=connectNative}={}){
+async function verifyService(project,{connect=connectNative,legacyRecovery=false}={}){
  const p=await serverPaths(project),record=await read(p.record);
  requireTask(record&&record.projectId===p.projectId&&record.root===p.root&&record.serviceId===p.serviceId&&record.socket===p.socket,'SERVER_IDENTITY：缺少本项目服务绑定');
- requireTask(processAlive(record.process),'SERVER_NOT_RUNNING：专属服务未运行');
+ let recoveryIdentity;
+ try {requireTask(processAlive(record.process),'SERVER_NOT_RUNNING：专属服务未运行');}
+ catch(error) {
+  if(!legacyRecovery||process.platform!=='darwin'||record.process?.birthSource||record.process?.bootSource||!error.message.startsWith('EXECUTION_BOOT_UNKNOWN'))throw error;
+  const current=processIdentity(record.process.pid,{includeLegacy:true});
+  requireTask(current&&current.legacyBirth===record.process.birth&&record.socketIdentity,'SERVER_RECOVERY_IDENTITY：原显示身份或 socket 回执无法匹配，保留现场');
+  recoveryIdentity={bootComparison:'UNKNOWN',originalProcess:record.process,observedProcess:current,observedAt:new Date().toISOString()};
+ }
  const stat=await lstat(p.socket);requireTask(stat.isSocket()&&!stat.isSymbolicLink(),'SERVER_SOCKET：专属socket无效');
  requireTask(!record.socketIdentity||record.socketIdentity.dev===stat.dev&&record.socketIdentity.ino===stat.ino,'SERVER_SOCKET_IDENTITY：socket已被替换');
  const command=execFileSync('ps',['-p',String(record.process.pid),'-o','command='],{encoding:'utf8'});
@@ -33,8 +40,44 @@ export async function verifyAppService(project,{connect=connectNative}={}){
   const info=await client.initialize();requireTask(info.userAgent?.includes('/'+record.version+' '),'SERVER_VERSION：RPC版本与所登记进程不符');
   const config=await client.call('config/read',{includeLayers:false});
   requireTask(config.config?.sqlite_home===record.sqliteHome,'SERVER_CONFIGURATION：RPC未返回本项目隔离状态目录');
-  return {paths:p,record,client,info,config,socketIdentity:{dev:stat.dev,ino:stat.ino}};
+  if(recoveryIdentity)requireTask(processAlive(recoveryIdentity.observedProcess),'SERVER_RECOVERY_IDENTITY：核查期间进程身份变化');
+  return {paths:p,record,client,info,config,socketIdentity:{dev:stat.dev,ino:stat.ino},...(recoveryIdentity?{recoveryIdentity}:{})};
  }catch(e){client.close();throw e;}
+}
+export async function verifyAppService(project,{connect=connectNative}={}){
+ return verifyService(project,{connect});
+}
+// A legacy boottime mismatch cannot establish process death or authorize a
+// replacement service. This separate, restricted connection can only inspect
+// and close explicitly named, already owned threads in the observed service.
+// It never upgrades the historical boot claim or writes a new process binding.
+export async function verifyAppServiceRecovery(project,{threads,connect=connectNative}={}) {
+ requireTask(Array.isArray(threads)&&threads.length>0&&threads.length<=3,'SERVER_RECOVERY_SCOPE：需要精确原线程范围');
+ const p=await serverPaths(project),scope=new Map();
+ for(const row of threads){
+  requireTask(typeof row.threadId==='string'&&row.threadId&&typeof row.turnId==='string'&&row.turnId&&typeof row.workspace==='string'&&path.isAbsolute(row.workspace)&&row.workspace.startsWith(path.join(p.root,'.process')+path.sep)&&!scope.has(row.threadId),'SERVER_RECOVERY_SCOPE：原线程、轮次或工作区范围无效');
+  scope.set(row.threadId,row);
+ }
+ const v=await verifyService(project,{connect,legacyRecovery:true}),raw=v.client;
+ const observed=v.recoveryIdentity?.observedProcess||v.record.process;
+ const readOnly=new Set(['thread/read','thread/turns/list','thread/items/list','thread/goal/get','thread/backgroundTerminals/list']);
+ const terminals=new Map();
+ const call=async(method,params={})=>{
+  requireTask(processAlive(observed),'SERVER_RECOVERY_IDENTITY：观察到的进程已结束');
+  const st=await lstat(p.socket);requireTask(st.isSocket()&&st.dev===v.socketIdentity.dev&&st.ino===v.socketIdentity.ino,'SERVER_SOCKET_IDENTITY：恢复期间 socket 改变');
+  if(method==='thread/loaded/list')return raw.call(method,params);
+  const row=scope.get(params.threadId);requireTask(row,'SERVER_RECOVERY_SCOPE：不能操作范围外线程');
+  const only=(...keys)=>Object.keys(params).every(key=>keys.includes(key));
+  const allowed=readOnly.has(method)||method==='thread/archive'&&only('threadId')||method==='thread/resume'&&only('threadId','cwd','excludeTurns','approvalPolicy')&&params.cwd===row.workspace&&params.excludeTurns===true&&params.approvalPolicy==='never'||method==='thread/goal/set'&&only('threadId','status')&&params.status==='paused'||method==='turn/interrupt'&&only('threadId','turnId')&&params.turnId===row.turnId||method==='thread/backgroundTerminals/terminate'&&only('threadId','processId')&&terminals.get(row.threadId)?.has(params.processId);
+  requireTask(allowed,'SERVER_RECOVERY_METHOD：恢复连接只可核查与关闭原执行，禁止新派工和答复');
+  const result=await raw.call(method,params);
+  if(method==='thread/backgroundTerminals/list'){
+   if(!params.cursor)terminals.set(row.threadId,new Set());
+   for(const terminal of result.data||[])if(terminal.processId)terminals.get(row.threadId)?.add(terminal.processId);
+  }
+  return result;
+ };
+ return {...v,client:{call,flush:()=>raw.flush(),close:()=>raw.close()},recoveryScope:threads};
 }
 export async function ensureAppService(project,{binary='codex',connect=connectNative}={}){
  const p=await serverPaths(project);
@@ -44,12 +87,12 @@ export async function ensureAppService(project,{binary='codex',connect=connectNa
   if(record?.status==='STARTING'&&!record.supervisor){
    const receipt=await read(path.join(p.directory,'launch-process.json'));
    if(receipt?.generation===record.generation&&receipt.process){record={...record,supervisor:receipt.process};await atomic(p.record,record);}
-   else requireTask(record.bootId&&record.bootId!==bootIdentity(),'SERVER_START_UNKNOWN：原启动回执未知，禁止重复启动');
+   else requireTask(compareBootIdentity(record)==='DIFFERENT','SERVER_START_UNKNOWN：原启动回执未知，禁止重复启动');
   }
   // The supervisor may have spawned its child just before losing both
   // receipts. Its death in this boot does not prove the child never ran.
   if(record&&!record.process&&['STARTING','LISTENING'].includes(record.status)&&!processAlive(record.supervisor))
-   requireTask(record.bootId&&record.bootId!==bootIdentity(),'SERVER_START_UNKNOWN：原子进程创建结果未知，禁止重复启动');
+   requireTask(compareBootIdentity(record)==='DIFFERENT','SERVER_START_UNKNOWN：原子进程创建结果未知，禁止重复启动');
   if(record&&processAlive(record.supervisor)||record&&processAlive(record.process)){
    if(!record.process&&processAlive(record.supervisor)){
     requireTask(record.projectId===p.projectId&&record.root===p.root&&record.socket===p.socket,'SERVER_IDENTITY：启动恢复绑定不符');
@@ -66,10 +109,11 @@ export async function ensureAppService(project,{binary='codex',connect=connectNa
   requireTask(/^\d+\.\d+\.\d+/.test(version),'SERVER_VERSION：无法识别Codex版本');
   if(record){requireTask(record.root===p.root&&record.projectId===p.projectId&&record.serviceId===p.serviceId,'SERVER_IDENTITY：不能接管其他实例记录');await atomic(path.join(p.directory,'generations',record.generation+'.json'),record);}
   const generation=randomUUID(),sqliteHome=path.join(p.directory,'state');await mkdir(sqliteHome,{recursive:true,mode:0o700});
-  const identity={schemaVersion:2,bootId:bootIdentity(),serviceId:p.serviceId,projectId:p.projectId,root:p.root,generation,socket:p.socket,binary:resolved,binarySha256:hash(await readFile(resolved)),version,sqliteHome,retention:'项目专属长期执行服务；不包含未关闭Agent池'};
+  const identity={schemaVersion:2,...bootStamp(),serviceId:p.serviceId,projectId:p.projectId,root:p.root,generation,socket:p.socket,binary:resolved,binarySha256:hash(await readFile(resolved)),version,sqliteHome,retention:'项目专属长期执行服务；不包含未关闭Agent池'};
   const daemon=path.join(p.directory,'daemon.mjs'),launch=path.join(p.directory,'launch.json');
   await copyFile(fileURLToPath(new URL('./task-server-daemon.mjs',import.meta.url)),daemon);
   await copyFile(fileURLToPath(new URL('./execution-runtime.mjs',import.meta.url)),path.join(p.directory,'execution-runtime.mjs'));
+  await copyFile(fileURLToPath(new URL('./process-identity.mjs',import.meta.url)),path.join(p.directory,'process-identity.mjs'));
   const args=['app-server','--listen','unix://'+p.socket,'-c','sqlite_home='+JSON.stringify(sqliteHome),'-c','agents.max_threads=3'];
   await atomic(launch,{root:p.root,record:p.record,identity,binary:resolved,args,log:path.join(p.directory,'server.log')});
   // Intent precedes spawn. An absent PID is never evidence that spawn did not run.

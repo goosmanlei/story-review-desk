@@ -185,7 +185,7 @@
       "title": "开发与质检流程",
       "summary": "把实现、业务验证、界面验证、文档和发布作为一次完整交付。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-14",
+      "reviewedAt": "2026-09-15",
       "sources": [
         "package.json",
         "tests/object-store.test.mjs",
@@ -194,14 +194,14 @@
         "web/next.config.mjs",
         "tests/handbook-standalone.integration.mjs"
       ],
-      "sourceDigest": "742dfd381bf5f7bf55816598fe525bc9ddf4254d22875b3ceaa6f448a75ccf41"
+      "sourceDigest": "dc8ad76a8c6f6de314fd768d446946651d021e6569daa9492fdc5f4ea1ca3377"
     },
     {
       "id": "operations",
       "title": "部署、数据与运行维护",
       "summary": "理解固定提交、母本与演示、项目包、配置、恢复和精确清理。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-14",
+      "reviewedAt": "2026-09-15",
       "sources": [
         "tools/deploy.mjs",
         "tools/deployment.mjs",
@@ -235,6 +235,7 @@
         "tools/task-numbering.mjs",
         "tools/app-service.mjs",
         "tools/execution-runtime.mjs",
+        "tools/process-identity.mjs",
         "tools/project.mjs",
         "tools/task-terminal-format.mjs",
         "tools/vendor/terminal-width/string-width.mjs",
@@ -243,9 +244,14 @@
         "tools/vendor/terminal-width/east-asian-lookup-data.mjs",
         "tools/vendor/terminal-width/east-asian-utilities.mjs",
         "tools/vendor/terminal-width/strip-ansi.mjs",
-        "tools/vendor/terminal-width/ansi-regex.mjs"
+        "tools/vendor/terminal-width/ansi-regex.mjs",
+        "tools/task-pause.mjs",
+        "tools/task-pause-state.mjs",
+        "tools/process.mjs",
+        "tests/task-pause-cli.test.mjs",
+        "tests/task-decisions.test.mjs"
       ],
-      "sourceDigest": "93ca329c50592bf3db2da217bcaca6c96654c07493dcce0a1314fc67242d675d"
+      "sourceDigest": "806b9cae8be6ca25550574db4288ec01f5997a4534ef184f1a163be2d6c00984"
     },
     {
       "id": "instance",

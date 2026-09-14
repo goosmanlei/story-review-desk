@@ -105,8 +105,8 @@ test('shared task renderer keeps a seven-column table after Markdown rendering w
  assert.equal(lines.length,5);for(const line of lines)assert.equal(line.split(' | ').length,7);
  assert.deepEqual([...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(match=>match[1]),tasks.map(task=>task.displayId));
  assert.match(md,/包含完整正式事实且足以触发显示层单元格换行的长任务标题/);
- assert.match(md,/T-20260914-001、T-20260914-002/);
- assert.match(md,/阻塞（BLOCKED）1、待验收（WAITING_REVIEW）1、已完成（DONE）1/);
+ assert.match(md,/T-20260914-001<br>T-20260914-002/);
+ assert.match(md,/BLOCKED 1、WAITING_REVIEW 1、DONE 1/);
  assert.doesNotMatch(md,/\[[^\]]+\]\(|tasks\/items|\.md>|\/Users\//);
  const html=new MarkdownIt({html:false,linkify:false}).render(md),bodyRows=[...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1);
  assert.match(html,/<table>/);assert.equal((html.match(/<th>/g)||[]).length,7);assert.equal(bodyRows.length,3);

@@ -234,7 +234,7 @@ test("a killed runner is reclaimed after its child exits; live phases and reused
   assert.equal((await phaseRecords(root))[0].record.status, "CLEANED");
   assert(processAlive(processIdentity()));
   assert.equal(
-    processAlive({ ...processIdentity(), birth: "another process" }),
+    processAlive({ ...processIdentity(), birthId: "another process" }),
     false,
   );
 });
@@ -311,4 +311,21 @@ test('process lock accepts an acknowledgement split across stdout chunks',async(
  const outer=await requiredPhase(process.cwd());assert(outer);const root=(await outer.read()).resources[0].path,wrapper=path.join(root,'chunked-lock.py');
  await writeFile(wrapper,"#!/usr/bin/env python3\nimport sys,time\nsys.stdout.write('LOC');sys.stdout.flush();time.sleep(.05);sys.stdout.write('KED\\n');sys.stdout.flush();sys.stdin.read()\n");await chmod(wrapper,0o700);
  let called=0;assert.equal(await processLock(path.join(root,'chunked-lock'),async()=>{called++;return 'locked';},wrapper),'locked');assert.equal(called,1);
+});
+
+test('unknown live owners preserve scratch and do not abort independent sweep tasks',async t=>{
+  const root=await fixture(t),unknown=await beginPhase(root,'unknown-owner','build'),independent=await beginPhase(root,'independent','build');
+  const kept=await unknown.directory(path.join(root,'output/keep')),removed=await independent.directory(path.join(root,'output/remove'));
+  for(const {file,record} of await phaseRecords(root)) {
+    if(record.taskId==='unknown-owner')record.owner={pid:process.pid,birth:'legacy timezone mismatch',bootId:record.owner.bootId,bootSource:record.owner.bootSource};
+    else record.owner={...record.owner,birthId:record.owner.birthId+'9'};
+    await writeFile(file,JSON.stringify(record));
+  }
+  await assert.rejects(unknown.finish(),/EXECUTION_PROCESS_UNKNOWN/);
+  assert(await exists(kept));
+  const result=await sweepProcessTasks(root);
+  assert.equal(result.status,'CLEANUP_REQUIRED');
+  assert.match(result.results.find(x=>x.taskId==='unknown-owner').error,/EXECUTION_PROCESS_UNKNOWN/);
+  assert.equal(result.results.find(x=>x.taskId==='independent').status,'CLEANED');
+  assert(await exists(kept));assert.equal(await exists(removed),false);
 });

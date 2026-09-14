@@ -8,7 +8,7 @@ import {randomUUID} from 'node:crypto';
 import {chmod,lstat,mkdir,mkdtemp,readFile,rm,symlink,writeFile} from 'node:fs/promises';
 import {ensureTaskServer,serverPaths,verifyTaskServer} from '../tools/task-server.mjs';
 import {processAlive,processIdentity} from '../tools/process-resources.mjs';
-import {stopAppService} from '../tools/app-service.mjs';
+import {stopAppService,verifyAppServiceRecovery} from '../tools/app-service.mjs';
 import {bootIdentity,durableExecutionFile} from '../tools/execution-runtime.mjs';
 
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -122,6 +122,14 @@ test('unknown socket, aliased control path and ambiguous recovery are preserved 
   await assert.rejects(serverPaths(root),/符号链接|EEXIST/);
 });
 
+test('legacy macOS startup hash drift cannot authorize another server launch',{concurrency:false,skip:process.platform!=='darwin'},async t=>{
+ const f=await fixture(t),root=await f.project({name:'legacy-starting'}),p=await serverPaths(root);
+ const original={schemaVersion:2,serviceId:p.serviceId,projectId:p.projectId,root:p.root,generation:randomUUID(),socket:p.socket,status:'STARTING',bootId:'controlled-legacy-boottime-hash',binary:'/fixture/must-not-start',sqliteHome:path.join(p.directory,'state')};
+ await durableExecutionFile(p.record,original);const bytes=await readFile(p.record,'utf8');
+ await assert.rejects(ensureTaskServer(root,{binary:'/fixture/must-not-start',connect:()=>{throw Error('must not connect');}}),/SERVER_START_UNKNOWN/);
+ assert.equal(await readFile(p.record,'utf8'),bytes);await assert.rejects(readFile(path.join(root,'fixture-starts.json')),missing);
+});
+
 test('isolated fake App Server starts once, reuses, and reconciles its recorded child',{concurrency:false},async t=>{
   const f=await fixture(t),root=await f.project({name:'lifecycle'});process.chdir(root);process.env.CODEX_HOME='codex-home';await mkdir('codex-home',{mode:0o700});
   const paths=await serverPaths(root),binary=await fakeBinary(root),connect=fakeConnect(paths);
@@ -195,4 +203,38 @@ test('orphaned service stays unique and a lost child creation receipt remains UN
  await durableExecutionFile(paths.record,{...original,status:'STARTING',process:null});
  await assert.rejects(ensureTaskServer(root,{binary,connect}),/SERVER_START_UNKNOWN/);
  assert.equal(await readFile(path.join(root,'fixture-starts.json'),'utf8'),before);
+});
+
+test('legacy live recovery preserves UNKNOWN and only converges exact original threads',{concurrency:false,skip:process.platform!=='darwin'},async t=>{
+ const f=await fixture(t),root=await f.project({name:'legacy-live'});process.chdir(root);await mkdir('codex-home');
+ const paths=await serverPaths(root),binary=await fakeBinary(root),base=fakeConnect(paths),original=await ensureTaskServer(root,{binary,connect:base});
+ const live=processIdentity(original.process.pid,{includeLegacy:true});
+ const legacy={...original,process:{pid:live.pid,birth:live.legacyBirth,bootId:'earlier-boottime-drift'}};
+ await durableExecutionFile(paths.record,legacy);const bytes=await readFile(paths.record,'utf8');
+ const scope={threadId:'original-thread',turnId:'original-turn',workspace:path.join(root,'.process/shared/original')},calls=[];
+ const connect=options=>{const client=base(options);return {...client,async flush(){},async call(method,params){
+  if(method==='config/read')return client.call(method,params);
+  calls.push({method,params});return method==='thread/backgroundTerminals/list'?{data:[{processId:'owned-terminal'}]}:{};
+ }};};
+ let v;
+ try {
+  await assert.rejects(verifyTaskServer(root,{connect}),/EXECUTION_BOOT_UNKNOWN/);
+  v=await verifyAppServiceRecovery(root,{threads:[scope],connect});
+  assert.equal(v.recoveryIdentity.bootComparison,'UNKNOWN');assert.equal(processAlive(v.recoveryIdentity.observedProcess),true);
+  await v.client.call('thread/read',{threadId:scope.threadId,includeTurns:false});
+  for(const [method,params] of [
+   ['turn/start',{threadId:scope.threadId}],['thread/start',{cwd:scope.workspace}],
+   ['thread/read',{threadId:'foreign'}],['turn/interrupt',{threadId:scope.threadId,turnId:'foreign'}],
+   ['thread/resume',{threadId:scope.threadId,cwd:scope.workspace,excludeTurns:true,approvalPolicy:'never',env:{EXTRA:'value'}}],
+   ['thread/goal/set',{threadId:scope.threadId,status:'complete'}],
+   ['thread/backgroundTerminals/terminate',{threadId:scope.threadId,processId:'unseen'}],
+  ])await assert.rejects(v.client.call(method,params),/SERVER_RECOVERY_SCOPE|SERVER_RECOVERY_METHOD/);
+  assert.equal(calls.length,1,'rejected operations never reach the service');
+  await v.client.call('thread/backgroundTerminals/list',{threadId:scope.threadId});
+  await v.client.call('thread/backgroundTerminals/terminate',{threadId:scope.threadId,processId:'owned-terminal'});
+  await v.client.call('turn/interrupt',{threadId:scope.threadId,turnId:scope.turnId});
+  await v.client.call('thread/archive',{threadId:scope.threadId});
+  assert.equal(await readFile(paths.record,'utf8'),bytes,'recovery does not relabel the old boot or overwrite its identity');
+  assert.equal(JSON.parse(await readFile(path.join(root,'fixture-starts.json'),'utf8')),1);
+ } finally {v?.client.close();await durableExecutionFile(paths.record,original);}
 });

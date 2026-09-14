@@ -166,7 +166,7 @@ export async function assignmentMutation(ctx) {
       } else if(a.execution.mode==='SUBAGENT'&&a.resources.some(r=>r.access==='WRITE'&&['FILE','DIRECTORY','UNKNOWN'].includes(r.kind))) throw Error('代码写派工须指定受管 worktree');
       bump(t,a);a.status='RUNNING';a.startedAt=at;a.workspaceEvidence=request.workspaceEvidence;
     } else if(action==='assignment:checkpoint') {
-      demand(['RUNNING','BLOCKED','WAITING_DECISION'].includes(a.status),'此状态不能保存执行检查点');
+      demand(['RUNNING','BLOCKED','WAITING_DECISION'].includes(a.status)||ctx.pausing&&['RESERVED','DELIVERED','ACCEPTED'].includes(a.status),'此状态不能保存执行检查点');
       bump(t,a);a.checkpoint=checkpoint(request.checkpoint,a.checkpoint);
       if(request.goalStatus) {demand(['ACTIVE','COMPLETE','PAUSED','UNKNOWN','UNAVAILABLE'].includes(request.goalStatus),'Goal 状态无效');a.goalStatus=request.goalStatus;}
     } else if(action==='assignment:result') {

@@ -36,6 +36,7 @@ export function renderStatus(data,options={}) {
   const runtime=data.runtime||{},open=(data.tasks||[]).flatMap(t=>(t.assignments||[]).filter(a=>a.status!=='CLOSED'));
   const activityCount=(runtime.activities||[]).filter(a=>a.live===true).length;
   const rows=[['执行者',runtime.runActive===null?'UNKNOWN（无法核验原执行者）':runtime.runActive?'当前会话执行中':'无活跃执行者'],['未关闭派工',open.length?`${open.length} 项`:'无'],['受管命令',(runtime.activities||[]).some(a=>a.live===null)?'UNKNOWN（存在无法核验的占用）':activityCount?`${activityCount} 项正在运行`:'无活跃命令'],['执行能力',runtime.run?.capabilities?.limitation||(runtime.run?.capabilities?.delegation?'SubAgent 自动调度':'主 Agent 执行')]];
+  if(runtime.pause)rows.unshift(['执行暂停',runtime.pause.status==='PAUSED'?'PAUSED（停止及 checkpoint 已核验；资源与待决问题保留）':runtime.pause.status==='RESUMED'?'RESUMED（从 checkpoint 续办）':runtime.pause.status+'：'+(runtime.pause.issues||[]).map(i=>i.reason).join('；')]);
   if(runtime.taskCapacity)rows.push(['正式任务占用',`${runtime.taskCapacity.occupied} / ${runtime.taskCapacity.limit} 项；可补入 ${runtime.taskCapacity.available} 项（仍须通过依赖、资源及执行能力检查）`]);
   const decisions=(data.tasks||[]).flatMap(t=>(t.assignments||[]).flatMap(a=>(a.decisions||[]).filter(d=>!['RESOLVED','CANCELLED'].includes(d.status))));
   rows.push(['待决策',decisions.length?`${decisions.length} 项；未关闭派工保留资源及容量。使用 decisions list 发现并集中转达`:'无']);

@@ -14,6 +14,7 @@ import {
   checkProcessTask,
   trimProcessLogs,
   processLock,
+  formalAdmission,
 } from "./process-resources.mjs";
 import { atomic, plainDirectory } from "./io.mjs";
 
@@ -81,9 +82,11 @@ export async function runPhase({
   };
   try {
     await owned.budget();
+    const phaseEnv=await owned.environment();
+    await owned.startChild(async()=>{
     child = spawn(command[0], command.slice(1), {
       cwd: root,
-      env: { ...env, ...(await owned.environment()) },
+      env: { ...env, ...phaseEnv },
       detached: true,
       stdio: ["inherit", "pipe", "pipe"],
     });
@@ -105,7 +108,8 @@ export async function runPhase({
       handlers.set(s, handler);
       process.on(s, handler);
     }
-    if (child.pid) await owned.childStarted(child.pid);
+    return child;
+    });
     let checking = false;
     timer = setInterval(async () => {
       if (checking) return;
@@ -138,7 +142,7 @@ export async function runPhase({
     : code === 0 && !failure
       ? "SUCCEEDED"
       : "FAILED";
-  const receipt = await owned.finish({ outcome });
+  const receipt = await owned.finish({outcome});
   if (receipt.status !== "CLEANUP_REQUIRED")
     await releaseConsumer(root, task, phase);
   // Persist only exit diagnostics, never arbitrary command output or arguments
@@ -170,11 +174,11 @@ export async function runPhase({
 }
 
 export async function startProcessPhase(root, task, phase) {
-  return parentTask(root, task, async (file, previous) => {
+  return formalAdmission(root,task,()=>parentTask(root, task, async (file, previous) => {
     if (previous && previous.status !== "OPEN") throw Error("Parent task is closed; use a new task identity");
     if (file && !previous) await atomic(file, { schemaVersion: "1.0", taskId: task, status: "OPEN", startedAt: new Date().toISOString() });
     return beginPhase(root, task, phase);
-  });
+  }));
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -199,23 +203,12 @@ export async function main(argv = process.argv.slice(2)) {
     root = path.resolve(values.root || process.cwd());
   if (action === "run") {
     if (!command.length) throw Error("A process command is required");
-    const owned = await parentTask(root, values.task, async (file, previous) => {
-      if (previous && previous.status !== "OPEN")
-        throw Error("Parent task is closed; use a new task identity");
-      if (file && !previous)
-        await atomic(file, {
-          schemaVersion: "1.0",
-          taskId: values.task,
-          status: "OPEN",
-          startedAt: new Date().toISOString(),
-        });
-      return beginPhase(root, values.task, values.phase);
-    });
+    const owned = await startProcessPhase(root,values.task,values.phase);
     return runPhase({ root, task: values.task, phase: values.phase, command, owned });
   }
   if (action === "sweep") return sweepProcessTasks(root);
   if (action === "finish")
-    return parentTask(root, values.task, async (file, previous) => {
+    return formalAdmission(root, values.task, () => parentTask(root, values.task, async (file, previous) => {
       const result = await finishProcessTask(root, values.task);
       if (file && previous && result.status === "CLEANED")
         await atomic(file, {
@@ -224,7 +217,7 @@ export async function main(argv = process.argv.slice(2)) {
           finishedAt: new Date().toISOString(),
         });
       return result;
-    });
+    }), { converging: true });
   if (action === "check") return checkProcessTask(root, values.task);
   const phase = await openPhase(
     JSON.parse(process.env.REVIEW_PROCESS_CONTEXT || "null"),

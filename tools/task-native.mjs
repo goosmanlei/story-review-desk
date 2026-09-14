@@ -111,6 +111,40 @@ export async function closeNativeThread(client,threadId,parentThreadId,{probe=fa
   return {id:randomUUID(),nativeThreadId:threadId,verified:true,history:'PRESERVED',verifiedAt:new Date().toISOString()};
 }
 
+// A pause receipt is recoverable and never a closure receipt. The supplied
+// once() persists each stopping intent before sending; retries only observe.
+export async function pauseNativeThread(client,threadId,{verifyOwnership,once,stoppedEvidence,saveStopped,turnId}={}) {
+  await verifyOwnership();
+  const read=async()=>{const r=await client.call('thread/read',{threadId,includeTurns:false});if(r.thread.id!==threadId)throw Error('PAUSE_THREAD_ID');return r.thread;};
+  let thread=await read();
+  if(thread.status?.type==='notLoaded'&&!stoppedEvidence){
+    await once('thread/resume',{threadId,cwd:thread.cwd,approvalPolicy:'never',excludeTurns:true});thread=await read();
+  }
+  if(thread.status?.type!=='notLoaded'){
+    if(!['idle','active'].includes(thread.status?.type))throw Error('PAUSE_THREAD_UNKNOWN');
+    const goal=await client.call('thread/goal/get',{threadId});
+    if(goal.goal&&!['paused','complete'].includes(goal.goal.status))await once('thread/goal/set',{threadId,status:'paused'});
+    if(thread.status.type==='active'){
+      const active=(await nativeTurns(client,threadId)).filter(t=>t.status==='inProgress');
+      if(!turnId||active.length!==1||active[0].id!==turnId)throw Error('PAUSE_TURN_UNKNOWN：活动轮次与原操作不符');
+      await once('turn/interrupt',{threadId,turnId});
+    }
+    for(const terminal of await terminalsFor(client,threadId)){
+      if(!terminal.processId)throw Error('PAUSE_TERMINAL_UNKNOWN');
+      await once('thread/backgroundTerminals/terminate',{threadId,processId:terminal.processId});
+    }
+    thread=await read();
+    if(thread.status?.type!=='idle'||(await terminalsFor(client,threadId)).length)throw Error('PAUSING：原轮次或后台命令尚未停止');
+    const goalReadback=await client.call('thread/goal/get',{threadId});
+    if(goalReadback.goal&&!['paused','complete'].includes(goalReadback.goal.status))throw Error('PAUSE_GOAL_UNKNOWN');
+    stoppedEvidence={nativeThreadId:threadId,turnId,goal:goalReadback.goal?.status||'NONE',terminals:[],status:'idle',at:new Date().toISOString()};
+    await saveStopped(stoppedEvidence);
+    await once('thread/archive',{threadId});
+  }
+  if(!stoppedEvidence||stoppedEvidence.nativeThreadId!==threadId||(await loadedThreads(client)).includes(threadId)||(await read()).status?.type!=='notLoaded')throw Error('PAUSE_UNLOAD_UNVERIFIED');
+  return {nativeThreadId:threadId,verified:true,history:'PRESERVED',recoverable:true,stoppedEvidence,verifiedAt:new Date().toISOString()};
+}
+
 export async function probeNative({parentThreadId=process.env.CODEX_THREAD_ID,availableSlots=0,probeRoot,clientFactory=connectNative,...options}={}) {
   const base={checkedAt:new Date().toISOString(),parentThreadId:parentThreadId||null,delegation:false,closeVerified:false,goalVerified:false,availableSlots:0,models:[]};
   if(!parentThreadId||!probeRoot)return {...base,limitation:'缺少当前原生会话身份或受管探测目录，主 Agent 执行'};

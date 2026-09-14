@@ -224,6 +224,7 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 | `serverPaths(project)` | 显式标准项目根；验证本机范围，返回实例私有路径和服务身份 |
 | `ensureAppService(project)` | 启动锁内复用健康服务，或重建可证明已退出的所属服务；原启动未知时停止 |
 | `verifyAppService(project)` | 联合核对进程/boot、命令、二进制、socket 和 RPC 配置，返回由调用方关闭的连接 |
+| `verifyAppServiceRecovery(project, {threads})` | 旧 macOS boot 无法比对时，核验存活原进程、精确原线程/轮次及工作区后提供受限核查和关闭连接；不改写旧身份，不允许新派工或答复 |
 | `stopAppService(project, {assertIdle})` | 调用方先核查全部执行占用，再验证无加载线程，仅终止核验所属的子进程 |
 
 未绑定原生线程或服务的 MAIN 派工可执行空闲服务维护；未关闭子派工及任何原生服务绑定仍阻断接收器停止。正式任务生命周期 CLI 仍经 guard + process；基础接口不代替调度、业务授权或任务验收。配置中的线程上界不代替最多 3 项正式任务、实际容量和资源互斥检查。supervisor 退出但子服务仍可核验时复用原服务，不再次启动实例。
@@ -262,6 +263,10 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 | 请求重复到达或并发 FOLLOWUP | 原调用锁和持久意图防重复发送；成功复用回执，UNKNOWN 先对账；新续办还须原操作状态 CAS |
 
 同一 boot 内缺失 supervisor/子进程回执，不代表创建从未发生，不能只凭旧 PID 消失再启动。重启证明只说明旧进程不再存在，不能说明原工作是否完成。无法核验结果时保持 UNKNOWN、原编号与输入，阻断自动重试。
+
+启动身份使用内核 boot UUID，进程身份使用 macOS 内核出生时间或 Linux `/proc` 启动 tick；`ps` 的本地化时间只用于核对旧记录。来源不同、旧 macOS `kern.boottime` 散列变化或进程探测失败保持 UNKNOWN，不能据此清理、接管或断言机器重启。逐任务清理隔离 UNKNOWN 并保留该任务资源，其他任务仍可核查，Web 与工作器不会因清理身份未知而退出。
+
+受限旧服务恢复只能用于调用方显式列出的原线程、原轮次和项目受管工作区。连接同时核查进程出生信息、命令中的二进制与状态目录、二进制 SHA、socket 身份、RPC 版本与隔离配置；观察到的新内核进程身份单独保存，不把旧 boot UNKNOWN 写成 SAME。仅允许读取指定线程、必要的原线程恢复订阅、暂停 Goal、停止精确原轮次和已观察到的后台进程、归档并验证卸载；禁止创建线程、新工作轮次、代填决策和访问其他会话。完整新派工仍通过正常身份核验。
 
 keeper 关闭循环遇到 `PROCESS_LOCK_BUSY` 时保留 executor 锁，输出 `EXECUTOR_LOCK_BUSY` 并重新核查，不延长租约。guard 在租约失效时照常拒绝执行；`PROCESS_LOCK_UNAVAILABLE` 等故障保留诊断。不能删除内核锁文件、更改绑定或手动延长资格绕过闸门。
 
@@ -337,9 +342,66 @@ keeper 关闭循环遇到 `PROCESS_LOCK_BUSY` 时保留 executor 锁，输出 `E
 
 恢复验收分别用独立受控派工/协议 fixture，保留每次原输入，不对真实用户重复制造相同问题：请求产生后断线；提问后更换协调 run 并 reconcile；答复保存后中断回传；服务代次变化且原请求失效；FOLLOWUP 回执丢失；停止/关闭期间拒绝新答复。每种场景均核对原问题及答复保留、旧绑定不误用、无自动默认同意、无新增重复轮次、关闭前占用不释放。主会话真实呈现与用户答复仍是独立必需证据。升级前未被旧短连接接收的问题无法凭空回补；若原服务不重放，应明确保留 UNKNOWN 和原线程恢复输入，由主 Agent 核查后决定收尾或新派工。
 
+#### 最近安全检查点暂停
+
+`tasks pause --run ID` 面向当前协调运行及其主任务和相关派工，不等待整项正式任务完成。暂停是执行子状态，正式任务的 READY/RUNNING/WAITING_REVIEW 等业务状态不因此改写。`pause status` 和 `status` 单独展示执行暂停事实；审计主表继续沿用七列业务状态。
+
+| 执行子状态 | 已有事实 | 允许继续的动作 |
+| --- | --- | --- |
+| PAUSING | 持久执行闸门已落盘；检查点或实际停止仍未完成 | 保存协作 checkpoint、查询原操作、停止核验 |
+| PAUSE_UNVERIFIED | 原执行、回执、版本、工作区或后台命令存在未知事实 | 核查原编号及修复检查点；资源和占用保留 |
+| PAUSED | 各方 checkpoint 已回读；Agent/Goal/turn、后台终端和登记的受管进程均停止 | 保留成果和未完成派工，等待 task run |
+| RESUMED | 新协调运行核查原执行、原操作和恢复输入后接续归属 | 读取 CHECKPOINT_READY，从 nextSteps 继续；待决问题照常等待 |
+
+暂停闸门和 schedule、guard spawn、process CLI 的阶段登记/spawn、持久接收器的实际 turn/start 发出共用 ledger.lock。原调用已发出但尚无回执时仍按原操作处理，不生成第二次执行。backend 派工锁收敛在途创建/轮次；停请求先保存唯一意图，重入不重发 turn/interrupt、后台终端终止、archive 或暂停恢复调用。回执丢失时只查询原线程/轮次；仍活跃、归属不明或结果未知不能据空闲时间释放资源。
+
+暂停 checkpoint 是主协调者与工作 Agent 的协作协议。命令无法读取主 Agent 尚未落盘的思考，也不把旧 Markdown 或进程退出当成已保存工作。`pause` 返回 pauseId 和 targets；主协调者先停止推进新步骤，为每个 task 和未关闭 assignment 分别执行：
+
+```text
+tasks pause checkpoint --run RUN_ID --file -
+{
+  "operationId": "本次稳定检查点编号",
+  "actor": "PROJECT_CODEX",
+  "pauseId": "pause 返回的编号",
+  "taskId": "原任务编号",
+  "assignmentId": "保存子派工时填写，主任务省略",
+  "expectedVersions": {"原任务编号": 当前版本},
+  "expectedAssignmentVersion": 当前派工版本,
+  "quiescent": true,
+  "evidence": "最近已落盘边界与不再推进新步骤的真实证据",
+  "checkpoint": {
+    "summary": "当前可恢复状态",
+    "completedSteps": ["已经完成且不得重复的步骤"],
+    "nextSteps": ["下一步"],
+    "inputs": ["精确输入与版本"],
+    "artifacts": ["已保存成果引用"],
+    "operations": [{"id":"原操作编号","kind":"原操作种类","status":"PENDING"}]
+  },
+  "workspace": {"path":"显式工作区","baseCommit":"完整 Git 基准提交","files":["相对恢复文件"]}
+}
+```
+
+示例中的值须换成当前事实，主任务不发送 assignmentId/expectedAssignmentVersion。五个 checkpoint 数组全部必填，inputs 非空；已有 completedSteps、inputs、artifacts 和操作编号不能丢弃。`quiescent:true` 确认可中断边界，不是 Agent 停止回执、用户回答、生成授权或整项任务完成声明。Git 工作区须提供完整 SHA，文件清单包含全部已修改、未跟踪及需要核查的恢复文件。目录设备/inode、规范路径、Git common-dir/HEAD/diff 摘要、明确文件的 SHA、原 prompt、线程/轮次/操作和决策绑定只保存在本机 runtime；长期账本继续保存逻辑步骤、版本和成果引用。
+
+没有各方 checkpoint 时保持 PAUSING，只封住新执行入口，不发送破坏性停止。协调者无法核实的未保存工作不得补写成已完成；应保留原执行，由所属 Agent/协调者保存可知边界。外部调用尚未收敛时保留 PENDING/RESULT_UNKNOWN。全部边界保存后调用 `pause verify --run ID`，必要时反复只读核验原停止意图。命令先保留相关阶段恢复目录，再停止已登记 runner/子进程和专属服务中的原派工，最终在锁内回读检查点、原操作和工作区，持久保存整体 snapshot 后才报告 PAUSED。任何未核查事实都显示其原因，不能显示已暂停。
+
+`instance/runtime/task-execution/pause.json` 保存当前周期与闸门；`pauses/<id>/checkpoints/` 保存协作回执，`rpc/`、`stops/` 保存唯一停止意图，`checkpoint.json` 保存整体恢复快照与摘要。bindings 中的 pauseReceipt 标明可恢复，独立于禁止 recover 的 closureReceipt。暂停不取消问题、不删除答复、不关闭逻辑派工、不释放资源/任务容量；原正式关闭事实也不能转成可恢复暂停。进程阶段的恢复目录标记 RETAINED，普通 finish 不删除其成果，整合与恢复引用解除后由主协调者精确处置。
+
+#### 同会话与跨会话续办
+
+再次 `tasks run` 自动发现暂停周期。原 run 即使租约过期仍存活时拒绝接管；新 run 核对本机/项目/原协调身份，CAS 接续原任务及派工的收敛归属，核查原工作区、精确版本、文件 SHA、原线程状态及操作。暂停中断或原调用未知时维持闸门，先补存 checkpoint/核查原结果；不能换号重建工作 Agent。检查通过输出 CHECKPOINT_READY，包含 completedSteps、nextSteps、原成果及待决问题/答复。主协调者使用这些事实继续工作，CLI 不自动重放后台命令或原模型调用。
+
+未完成子派工的 `backend continue --file -` 可仅提供 `{operationId}`。后端自动使用保存的暂停输入，恢复同一未结束线程并启动一个可对账的新续办操作，保留原操作及全部轮次历史；它不是给已经正式结束的 Agent 分配新工作。新轮次回执丢失只查本次续办编号。已交回、已验收、正式关闭或原结果未核查的派工不能借此继续工作。
+
+未答问题继续等用户实际答复。原请求失效、原轮次已停止且有明确保存、从未回传的 BUSINESS/INPUT 答复时，暂停续办可核查后携带这些答复；已有发送意图或未知送达先查原回传，APPROVAL 失效不能成为新授权。暂停和新协调会话均不制造提问回执，不默认同意，不覆盖旧答复。
+
+当前受控验证覆盖主任务受管命令及后台子进程、并行子派工、缺 checkpoint、重复请求、停止回执丢失、PENDING/RESULT_UNKNOWN、旧 run 存活、工作区漂移、同/新协调运行续办、决策保留及正式关闭边界。fake RPC 不代替真实 App Server、主会话协作和实际项目固定版本继承验收。CLI 与底层 `beginPhase` 共用账本锁中的暂停检查；阶段保存正式任务身份，`ProcessPhase.startChild` 在同一临界区检查、启动并登记子进程，直接 `finish` 也保留暂停恢复输入。锁顺序为账本、父任务、阶段；收敛清理不授权嵌套的新执行。外部宿主未登记执行不在 CLI 的可枚举范围，所属执行器必须提供精确停止身份，未知保持占用。服务/boot 的恢复身份算法沿用通用运行时协议，不能仅凭旧 PID 或租约过期接管。
+
+主协调者最终在独立验证实例执行最小现场验收：安装整合后的固定核心版本并核对 Skill/CLI/手册；登记一项只写测试标记的主任务与两个独立派工；保存第一步及原操作并启动有界受管命令；从其执行会话 pause、保存各方 checkpoint、verify，现场确认所有原轮次和后台进程停止且文件保留；退出原 run 后分别在同会话和新会话 task run，从下一步续办并核对原调用计数、问题和答复未改变；完成结果验收、正式关闭以及精确清理。真实用户呈现/答复、当前项目继承、部署与正式任务 DONE 由主协调者另行验收，本段受控验证不提供这些事实。
+
 检查点保存已完成步骤、下一步、精确输入、成果与原操作编号。外部操作先登记 PENDING，执行后保存结果；RESULT_UNKNOWN 只查询原操作，不重复调用。新检查点不能遗失既有操作编号，有未核查操作不能关闭派工或完成任务。
 
-跨会话恢复先核查旧协调进程、Agent、命令、工作区、版本和原操作，再 assignment reconcile。服务创建及轮次身份可补记原回执，不能换绑为新线程。`backend recover` 可启动缺失的所属服务，只恢复原创建回执对应的线程，再读取原结果，不发送新 turn；已确认关闭的派工不重新加载。活跃 writer 或无法验证的归属阻断接管；核查收敛后，返工用新派工、新 Agent，旧串行任务仍支持 resume。用户指定某项完成后暂停时，先以 `policy --run ID --file -` 保存 `{stopAfterTaskId}`；该任务进入终态后 next/schedule 返回 PAUSED_BY_POLICY，不再自动补位。用户停止时先停止新派工、保存状态，收敛 Goal/Agent/命令，再 stop；停止请求后仅允许检查点、结果及关闭等收尾写入。
+普通异常中断的跨会话恢复先核查旧协调进程、Agent、命令、工作区、版本和原操作，再 assignment reconcile；已保存暂停使用上面的专用续办协议。服务创建及轮次身份可补记原回执，不能换绑为新线程。`backend recover` 可启动缺失的所属服务，只恢复原创建回执对应的线程，再读取原结果，不发送新 turn；恢复调用已发送则查询原线程，不自动重复恢复，已确认关闭的派工不重新加载。活跃 writer 或无法验证的归属阻断接管；核查收敛后，返工用新派工、新 Agent，旧串行任务仍支持 resume。用户指定某项完成后暂停时，先以 `policy --run ID --file -` 保存 `{stopAfterTaskId}`；该任务进入终态后 next/schedule 返回 PAUSED_BY_POLICY，不再自动补位。明确结束执行时先停止新派工、保存状态，收敛 Goal/Agent/命令，再 stop；停止请求后仅允许检查点、结果及关闭等收尾写入。
 
 | 正式状态 | 含义 |
 | --- | --- |

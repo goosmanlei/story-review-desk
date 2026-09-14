@@ -66,9 +66,25 @@ schedule 在一次事务内检查依赖、任务版本、资源和容量，记�
 
 恢复先核查旧协调者及原命令，`assignment reconcile` 接续归属，再在受管阶段 `backend recover` 订阅原线程并读取原轮次，不自动启动新轮。旧连接/服务代次的请求不可直接用于新连接；问题和用户答复都保留。原请求失效后，`decisions reconcile` 使用原操作证据确认 DELIVERED，或为原本采用 FOLLOWUP、上一轮成功且未交回/关闭的 INPUT/BUSINESS 派工登记 FOLLOWUP。随后 `decisions followup --run ID --decision ID --file -` 的 `{operationId}` 只携带已保存答复继续同一范围；未知、失败、活动轮次不另起一轮，失效审批不变成新轮次授权。已关闭或不满足 FOLLOWUP 条件的派工先收尾，再由主 Agent 创建新派工；不能复用旧答复为新请求自动授权。
 
-停止时先禁止新派工与新答复，保存检查点，`backend close` 核查原轮次、后台命令和线程卸载，再收敛相关决策为 CANCELLED 并 `assignment close`；不替用户填“同意/拒绝”。原问题、答复及未知送达历史保留。真实用户交互验收必须由主会话完成，按手册“真实决策往返验收”执行；模拟协议或 JSON 回读不替代真实呈现和用户明确答复，尚待用户参与时如实登记。
+正式结束或取消时先禁止新派工与新答复，保存检查点，`backend close` 核查原轮次、后台命令和线程卸载，再收敛相关决策为 CANCELLED 并 `assignment close`；不替用户填“同意/拒绝”。需要后续继续同一工作时使用下述 `pause` 协议，保留未解决问题和原答复。真实用户交互验收必须由主会话完成，按手册“真实决策往返验收”执行；模拟协议或 JSON 回读不替代真实呈现和用户明确答复，尚待用户参与时如实登记。
 
 不可变读资源携带精确版本，可并行；同一文件、重叠目录或业务对象的写占用串行，范围未知按独占处理。逻辑资源使用 `core/...`、`project/...` 或永久对象身份，不使用机器绝对路径。代码派工使用独立受管 worktree；命令用 `guard --assignment ID`。主 Agent 串行整合共享核心、写正式业务数据、提交推送和部署；共享核心命令再加 `--core`。保留业务 CAS 和外部授权核验。
+
+## 最近安全检查点暂停与续办
+
+用户要求暂停当前执行时立即调用 `tasks pause --run ID`。它在调度共用锁内保存持久闸门，拒绝新派工、新受管阶段、新命令和新轮次；不会等待整个正式任务完成。正式任务状态保持原业务含义，通过 `pause status` 和 `status` 的执行暂停字段区分 PAUSING、PAUSED、PAUSE_UNVERIFIED、RESUMED。
+
+暂停使用协作 checkpoint：CLI 无法读取主 Agent 尚未落盘的思考。主协调者停止推进新步骤，为暂停回读中的每项 task 和未关闭 assignment，调用 `pause checkpoint --run ID --file -`。请求包含稳定 operationId、actor、pauseId、taskId、可选 assignmentId、当前任务/派工版本、`quiescent:true`、真实保存边界的 evidence、完整 checkpoint，以及 `workspace:{path,baseCommit,files:[相对恢复文件]}`。checkpoint 必须包含 completedSteps、nextSteps、inputs、artifacts、operations 五个数组；inputs 明确精确输入及版本，保留全部原操作编号、已完成步骤和已有成果。Git 工作区必须提供完整基准提交和全部已修改/未跟踪恢复文件。工作区路径、目录身份、文件 SHA 和原执行身份仅进入 runtime。
+
+`quiescent:true` 仅确认最新已保存边界允许中断，不能代替用户决策、实际 Agent 停止或完成验收。未取得各方 checkpoint 时只封住入口并显示 PAUSING，保留活动执行事实，不发送破坏性中断。由所属协调者保存其可知的当前状态；无法核实的思考、结果和外部操作不得补写成已完成。运行中的外部操作先保存原 PENDING/RESULT_UNKNOWN，后续只查原编号。
+
+保存后执行 `pause verify --run ID`，命令保留相关受管阶段目录，停止并回读原 Agent/Goal/turn、后台终端、受管 runner 及其已登记子进程。停止 RPC 先存唯一意图，丢失回执后不重发；只从原状态判断是否停止。全部停止及检查点回读通过才显示 PAUSED，任一未知显示 PAUSE_UNVERIFIED 并保留资源/容量。重复 pause/verify 沿用原周期。暂停回执 recoverable 与 closureReceipt 分开，暂停不调用决策取消，不释放 worktree，不形成空闲 Agent 池。
+
+同会话或新会话再次执行 `tasks run`，自动发现暂停任务，核查旧协调进程、工作区身份、基准、恢复文件及原操作，CAS 接续原任务/派工归属。旧 run 存活、文件漂移、结果未知或暂停中断时只开放收敛核查，不启动新工作。CHECKPOINT_READY 回读原 completedSteps、nextSteps 和问题/答复；主协调者从 nextSteps 继续，CLI 不自动重放后台命令或模型调用。原未完成子派工可用 `backend continue --run ID --assignment ID --file -` 的 `{operationId}`，由保存的 checkpoint 构造同范围输入，在原线程启动一个有新操作号的续办轮次；重复编号只查询原结果。正式关闭或已交回派工仍须验收收尾，不复用为新工作。
+
+未答问题继续等真实用户答复。原请求已失效且原轮次已核查停止时，已保存、从未回传的 BUSINESS/INPUT 答复可随同一暂停派工的 checkpoint 续办；已有发送意图或送达未知先核查原回传，失效 APPROVAL 不作为新轮次授权。恢复不制造提问回执、用户回答或默认同意。
+
+阶段恢复目录标记为 RETAINED，父任务 finish 不删除这些输入。协调者在整合验收、解除精确恢复引用后再处理保留资源。guard 会传递正式任务身份，process CLI 在登记与 spawn 两处检查闸门；直接调用底层资源 API、外部宿主启动的未登记命令不能由 CLI 凭空枚举，必须由所属执行器提供停止证据。受控测试与真实 App Server、项目继承及实际主会话协作验收分别报告。
 
 ## Goal、交回和关闭
 
@@ -86,7 +102,7 @@ schedule 在一次事务内检查依赖、任务版本、资源和容量，记�
 
 Agent 完成、取消或被替换后立即收尾：先保存结果/检查点，再 `backend close`（`native close` 兼容）暂停并回读 Goal、停止活动 turn、核查后台命令、归档并验证卸载，同时保留 Codex 聊天历史。随后 `assignment close` 保存关闭及清理证据。相关辅助 Agent 同样关闭，不保留空闲 Agent 池，不给已结束 Agent followup 新工作。关闭失败或原操作未知时保留占用和恢复输入；依赖无关且资源独立的任务可以继续。
 
-新会话从 status、事件、派工和成果恢复，核查旧协调进程、原生 Agent、进程、工作区、版本及操作。旧执行未明确结束时不接管受影响资源。用 `assignment reconcile` 保存核查；`backend recover` 只恢复本项目创建回执对应的原线程，不创建新轮次。服务缺失可重启所属实例，恢复后先查询原结果；已核验关闭的会话不重新加载。核查后收敛旧派工；返工使用新 Agent，旧串行任务仍可 resume。恢复不能仅凭 Markdown、旧对话或租约过期。用户要求停止时先停止新派工，收敛所有子 Goal、Agent 和命令，保存检查点，再 stop 协调运行。
+新会话从 status、事件、派工和成果恢复，核查旧协调进程、原生 Agent、进程、工作区、版本及操作。旧执行未明确结束时不接管受影响资源。普通异常中断用 `assignment reconcile` 保存核查；已保存暂停使用上面的 `tasks run` 专用续办协议。`backend recover` 只恢复本项目创建回执对应的原线程，不创建新轮次；恢复调用已发送时先查原线程，不自动重试。服务缺失可重启所属实例，恢复后先查询原结果；已核验关闭的会话不重新加载。核查后收敛旧派工；返工使用新 Agent，旧串行任务仍可 resume。恢复不能仅凭 Markdown、旧对话或租约过期。
 
 正式任务 DONE 前必须逐项验收、接受成果、关闭所有相关 Agent 并完成 `cleanup:finish`、`cleanup:check`、`cleanup:complete`。SYSTEM 核验测试、核心与私库提交推送、本地与可达 VPS 部署；CREATIVE 按约定成果验收，DONE 不代作故事正式采用。未完成的人工验收使用 WAITING_REVIEW，未知和跳过如实记录。成果整合或恢复引用解除前不清理 worktree。
 

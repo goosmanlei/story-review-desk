@@ -1,9 +1,9 @@
 // Standalone supervisor copied into project runtime, so worktrees can be retired.
 import {readFile,open} from 'node:fs/promises';
-import {spawn,execFileSync} from 'node:child_process';
-import {bootIdentity,durableExecutionFile} from './execution-runtime.mjs';
+import {spawn} from 'node:child_process';
+import {durableExecutionFile} from './execution-runtime.mjs';
+import {processIdentity as identity} from './process-identity.mjs';
 const file=process.argv[2],spec=JSON.parse(await readFile(file,'utf8'));
-const identity=pid=>({pid,bootId:bootIdentity(),birth:execFileSync('ps',['-p',String(pid),'-o','lstart='],{encoding:'utf8'}).trim()});
 let saving=Promise.resolve();
 const save=value=>{saving=saving.then(()=>durableExecutionFile(spec.record,value));return saving;};
 let record={...spec.identity,supervisor:identity(process.pid),status:'STARTING',startedAt:new Date().toISOString()};

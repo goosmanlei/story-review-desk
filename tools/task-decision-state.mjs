@@ -112,7 +112,7 @@ export async function decisionMutation({action,request,tasks,bindings,at,touch,r
   p.deliveryAttemptedAt=at;p.deliveryOperationId=d.answer.operationId;d.status='DELIVERY_UNKNOWN';d.delivery={status:'RESULT_UNKNOWN',attemptedAt:at};
  }else if(action==='decision:followup-start'){
   demand(d.status==='FOLLOWUP_READY'&&d.answer&&p.protocolState!=='PENDING','DECISION_FOLLOWUP：尚未核查原请求和已保存答复');
-  demand(a.execution.goalMode==='FOLLOWUP'&&b.backendRequest?.operationId===request.followupOperationId&&b.backendRequest.state==='TURN_STARTING','DECISION_FOLLOWUP：缺少同范围续办意图');
+  demand((a.execution.goalMode==='FOLLOWUP'||b.pauseReceipt?.verified&&b.backendRequest?.pauseId===b.pauseReceipt.pauseId)&&b.backendRequest?.operationId===request.followupOperationId&&b.backendRequest.state==='TURN_STARTING','DECISION_FOLLOWUP：缺少同范围续办意图');
   p.followupOperationId=request.followupOperationId;d.status='DELIVERY_UNKNOWN';d.delivery={status:'RESULT_UNKNOWN',attemptedAt:at,mode:'FOLLOWUP'};
  }else if(action==='decision:followup-confirm'){
   demand(p.followupOperationId===request.followupOperationId&&b.backendRequest?.operationId===request.followupOperationId&&b.backendRequest.turnId&&['RUNNING','SUCCEEDED'].includes(b.backendRequest.state),'DECISION_FOLLOWUP：尚无原续办回执');
@@ -123,7 +123,7 @@ export async function decisionMutation({action,request,tasks,bindings,at,touch,r
   demand(d.answer&&p.protocolState!=='PENDING','DECISION_RECOVERY：须有原用户答复并先核查失效请求');
   demand(request.checkedOriginalOperation===true,'DECISION_RECOVERY：必须核查原操作');
   if(request.resolution==='DELIVERED'){d.status='RESOLVED';d.delivery={status:'CONFIRMED_BY_RECONCILIATION',confirmedAt:at,evidence:request.evidence};}
-  else {demand(a.execution.goalMode==='FOLLOWUP'&&['BUSINESS','INPUT'].includes(d.kind),'DECISION_FOLLOWUP：只续办原有 FOLLOWUP 派工的业务决定或输入，失效审批不得继承');d.status='FOLLOWUP_READY';d.recoveryEvidence=request.evidence;}
+  else {demand((a.execution.goalMode==='FOLLOWUP'||b.pauseReceipt?.verified&&b.pauseReceipt.recoverable)&&['BUSINESS','INPUT'].includes(d.kind),'DECISION_FOLLOWUP：只续办原有 FOLLOWUP 或已核验暂停派工的业务决定或输入，失效审批不得继承');d.status='FOLLOWUP_READY';d.recoveryEvidence=request.evidence;}
  }else throw Error('DECISION_ACTION：未知决策操作');
  bump(t,a,d);
  return {taskId:t.id,assignmentId:a.id,decisionId:d.id,status:d.status};

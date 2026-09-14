@@ -3,7 +3,7 @@ import os from 'node:os';
 import {createHash, randomUUID} from 'node:crypto';
 import {mkdir, readFile, readdir, lstat, open, link, unlink, realpath} from 'node:fs/promises';
 import {plainDirectory} from './io.mjs';
-import {durableExecutionFile as atomic,executionLocation,bindExecutionScope,bootIdentity} from './execution-runtime.mjs';
+import {durableExecutionFile as atomic,executionLocation,bindExecutionScope,compareBootIdentity} from './execution-runtime.mjs';
 import {processLock, processIdentity, processAlive} from './process-resources.mjs';
 import {assignmentMutation, assignmentOpen, assignmentUnknown} from './task-assignments.mjs';
 import {renderTasks,taskLabels,renderAssignments,formatTaskDate,sortTasks} from './task-format.mjs';
@@ -11,6 +11,7 @@ import {replayTaskNumbers,nextTaskDisplayId,resolveTaskId,displayTaskId,normaliz
 import {taskCapacity,requireTaskCapacity} from './task-capacity.mjs';
 import {decisionMutation} from './task-decision-state.mjs';
 import {pendingDecisions} from './task-decision-protocol.mjs';
+import {readPause,pauseBlocks} from './task-pause-state.mjs';
 
 export const states = ['READY','RUNNING','BLOCKED','WAITING_REVIEW','DONE','CANCELLED','MERGED'];
 export const labels = taskLabels;
@@ -149,13 +150,15 @@ async function activeActivity(loc,assignmentId) {
 export async function requireRun(loc,id,{converging=false}={}) {
   identity(id);
   const run=await maybe(path.join(loc.runtime,'run.json'));
+  if(!converging)requireTask(!pauseBlocks(await readPause(loc)),'PAUSE_EXECUTION_BLOCKED：暂停或恢复核查期间禁止新派工、新命令及新轮次');
   requireTask(run?.id===id && run.host===os.hostname() && run.root===loc.root && run.projectId===loc.projectId && !run.closedAt && (converging||!run.stopRequested&&Date.parse(run.expiresAt)>Date.now()) && processAlive(run.owner),'执行资格失效；先核查原执行者并重新启动，不能继续写入');
   return run;
 }
 export async function runtimeState(project) {
   const loc=await location(project);
   const run=await maybe(path.join(loc.runtime,'run.json'));
-  return {run,runActive:run&&(run.host!==os.hostname()||run.root!==loc.root||run.projectId!==loc.projectId)?null:!!(run&&!run.closedAt&&!run.stopRequested&&processAlive(run.owner)&&Date.parse(run.expiresAt)>Date.now()),activity:await maybe(path.join(loc.runtime,'activity.json')),activities:(await activities(loc)).map(a=>({...a,live:a.host===os.hostname()&&a.root===loc.root?!!(processAlive(a.owner)||processAlive(a.child)):null})),bindings:await readBindings(loc)};
+  const pause=await readPause(loc);
+  return {run,pause,executionStatus:pauseBlocks(pause)?pause.status:run?.closedAt?'STOPPED':'RUNNING',runActive:run&&(run.host!==os.hostname()||run.root!==loc.root||run.projectId!==loc.projectId)?null:!!(run&&!run.closedAt&&!run.stopRequested&&!pauseBlocks(pause)&&processAlive(run.owner)&&Date.parse(run.expiresAt)>Date.now()),activity:await maybe(path.join(loc.runtime,'activity.json')),activities:(await activities(loc)).map(a=>({...a,live:a.host===os.hostname()&&a.root===loc.root?!!(processAlive(a.owner)||processAlive(a.child)):null})),bindings:await readBindings(loc)};
 }
 export async function readBindings(loc) {return await maybe(path.join(loc.runtime,'bindings.json')) || {tasks:{},assignments:{}};}
 export async function updateBinding(project,runId,assignmentId,callback) {
@@ -181,6 +184,8 @@ export async function startRun(project,{capabilities}={}) {
   return withRuntime(project,async loc=>{
     requireTask(!(await readLedger(loc)).pendingUpgrade,'先重放原 upgrade 操作完成协议升级');
     const old=await maybe(path.join(loc.runtime,'run.json'));
+    const pause=await readPause(loc);
+    if(pauseBlocks(pause)&&old)requireTask(!processAlive(old.owner),'PAUSE_OLD_RUN_ALIVE：旧协调进程仍存活，不能接管暂停任务');
     if(old)requireTask(old.root===loc.root&&old.projectId===loc.projectId&&old.host===os.hostname(),'旧执行记录属于其他机器或目录；不能复制执行资格');
     if(old&&!old.closedAt) {
       requireTask(Number.isInteger(old.owner?.pid)&&old.owner.pid>0&&typeof old.owner.birth==='string'&&old.owner.birth,'RECOVERY_OWNER_UNKNOWN：缺少原协调者身份，不能按租约接管');
@@ -193,7 +198,8 @@ export async function startRun(project,{capabilities}={}) {
       }
     }
     if(old)await atomic(path.join(loc.runtime,'runs',old.id+'.json'),{...old,supersededAt:timestamp()});
-    const run={id:randomUUID(),previousRunId:old?.id||null,recoveryKind:old?(old.owner?.bootId&&old.owner.bootId!==bootIdentity()?'MACHINE_RESTART':'COORDINATOR_EXIT'):null,root:loc.root,host:os.hostname(),projectId:loc.projectId,owner:processIdentity(),startedAt:timestamp(),expiresAt:new Date(Date.now()+600000).toISOString(),capabilities:capabilities||{delegation:false,closeVerified:false,goalVerified:false,availableSlots:0,limitation:'本次执行尚未验证原生关闭能力'}};
+    const run={id:randomUUID(),previousRunId:old?.id||null,recoveryKind:old?(compareBootIdentity(old.owner)==='DIFFERENT'?'MACHINE_RESTART':'COORDINATOR_EXIT'):null,root:loc.root,host:os.hostname(),projectId:loc.projectId,owner:processIdentity(),startedAt:timestamp(),expiresAt:new Date(Date.now()+600000).toISOString(),capabilities:capabilities||{delegation:false,closeVerified:false,goalVerified:false,availableSlots:0,limitation:'本次执行尚未验证原生关闭能力'}};
+    if(pauseBlocks(pause)){run.pauseId=pause.id;run.stopRequested=true;run.recoveryKind='PAUSE_CHECKPOINT';}
     await atomic(path.join(loc.runtime,'runs',run.id+'.json'),run);
     await atomic(path.join(loc.runtime,'run.json'),run); return run;
   });
@@ -211,14 +217,16 @@ export async function stopRun(project,id,{close=false}={}) {
     if(close) {
       requireTask(!await activeActivity(loc),'受管命令仍在运行');
       const ledger=await readLedger(loc),bindings=await readBindings(loc);
-      requireTask(!Object.values(ledger.tasks).some(t=>t.assignments?.some(a=>a.execution.mode==='SUBAGENT'&&assignmentOpen(a)&&bindings.assignments[a.id]?.runId===id)),'原生 Agent 仍在运行或未核查关闭');
+      const pause=await readPause(loc);
+      requireTask(!Object.values(ledger.tasks).some(t=>t.assignments?.some(a=>a.execution.mode==='SUBAGENT'&&assignmentOpen(a)&&bindings.assignments[a.id]?.runId===id&&!(pause?.status==='PAUSED'&&bindings.assignments[a.id]?.pauseReceipt?.pauseId===pause.id&&bindings.assignments[a.id].pauseReceipt.verified))),'原生 Agent 仍在运行或未核查关闭');
+      if(pauseBlocks(pause))requireTask(pause.status==='PAUSED','PAUSING：检查点或停止核验未完成，协调运行保留');
       run.closedAt=timestamp();
     }
     else run.stopRequested=true;
     await atomic(path.join(loc.runtime,'run.json'),run); return {runId:id,closedAt:run.closedAt,stopRequested:run.stopRequested};
   });
 }
-export async function activity(project,id,owner,child=null,assignmentId=null,taskId=null) {
+export async function activity(project,id,owner,child=null,assignmentId=null,taskId=null,launch) {
   return withRuntime(project,async loc=>{
     await requireRun(loc,id);
     const ledger=await readLedger(loc),bindings=await readBindings(loc);
@@ -231,7 +239,10 @@ export async function activity(project,id,owner,child=null,assignmentId=null,tas
       requireTask(a?.status==='RUNNING'&&bindings.assignments[assignmentId]?.runId===id,'派工已失去执行资格');
       await directory(path.join(loc.runtime,'activities'));
     } else if(taskId) requireTask(ledger.tasks[taskId]?.status==='RUNNING'&&(bindings.tasks[taskId]||ledger.tasks[taskId].runId)===id,'任务已失去执行资格');
-    await atomic(path.join(loc.runtime,assignmentId?`activities/${assignmentId}.json`:'activity.json'),{runId:id,assignmentId,root:loc.root,host:os.hostname(),owner,child});
+    const file=path.join(loc.runtime,assignmentId?`activities/${assignmentId}.json`:'activity.json');
+    const record={runId:id,assignmentId,taskId,root:loc.root,host:os.hostname(),owner,child};
+    await atomic(file,record);
+    if(launch){const result=launch();record.child=result?.pid?processIdentity(result.pid):null;await atomic(file,record);return result;}
   });
 }
 export async function clearActivity(project,id,assignmentId=null) {
@@ -263,6 +274,7 @@ export async function mutate(project,action,request) {
       requireTask(old.requestHash===hash,'同一操作编号不能用于不同请求');
       return replay();
     }
+    if(['checkpoint','assignment:checkpoint'].includes(action))requireTask((await readPause(loc))?.status!=='PAUSED','PAUSE_CHECKPOINT_FROZEN：已验证暂停的检查点只读；先核查续办');
     if(action==='publish') {
       requireTask(!(request.task&&request.tasks),'task 与 tasks 不能同时提供');
       const specs=request.tasks||[request.task];requireTask(Array.isArray(specs)&&specs.length>0&&specs.length<=50,'每次发布 1–50 个已讨论任务');
@@ -311,7 +323,7 @@ export async function mutate(project,action,request) {
       const converging=['assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(action);
       const run=await requireRun(loc,request.runId,{converging});
       if(action==='schedule'&&run.policy?.stopAfterTaskId&&terminal.has(tasks[run.policy.stopAfterTaskId]?.status))return {status:'PAUSED_BY_POLICY',assignments:[],deferred:[]};
-      result=await assignmentMutation({action,request,tasks,at,touch,get,bindings,checkpoint,complete,
+      result=await assignmentMutation({action,request,tasks,at,touch,get,bindings,checkpoint,complete,pausing:pauseBlocks(await readPause(loc)),
         decisionBlocked:async id=>{const {unappliedDecisionRequest}=await import('./task-decisions.mjs');return unappliedDecisionRequest(loc,bindings.assignments[id]?.nativeThreadId);},
         requireRun:()=>requireRun(loc,request.runId,{converging}),reconcileOwner:async binding=>{
           requireTask(!request.expectedRunId||request.expectedRunId===binding.runId,'RECOVERY_CAS：派工原协调运行已改变');
@@ -338,7 +350,7 @@ export async function mutate(project,action,request) {
       result={taskId:t.id,status:t.status};
     } else if(action==='checkpoint') {
       const t=get(request.taskId);
-      if(t.status==='BLOCKED'&&!t.children?.length) await requireRun(loc,request.runId); else await owned(t);
+      await requireRun(loc,request.runId,{converging:true});requireTask(['RUNNING','BLOCKED','WAITING_REVIEW'].includes(t.status)&&owner(t)===request.runId,'检查点须属于当前协调运行');
       touch(t); t.checkpoint=checkpoint(request.checkpoint,t.checkpoint);
       result={taskId:t.id,status:t.status};
     } else if(action==='resume') {

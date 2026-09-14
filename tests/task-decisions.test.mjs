@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import {randomUUID} from 'node:crypto';
+import {spawn} from 'node:child_process';
 import {mkdtemp,mkdir,writeFile,readFile,rm,lstat} from 'node:fs/promises';
 import {mutate,location,readLedger,readBindings,startRun,updateBinding,stopRun} from '../tools/task-ledger.mjs';
 import {decisionHash,encodeDecisionAnswer,pendingDecisions} from '../tools/task-decision-protocol.mjs';
@@ -11,6 +12,8 @@ import {main} from '../tools/tasks.mjs';
 import {runDecisionChannel,channelPaths,channelClient,callDecisionChannel,stopDecisionChannel} from '../tools/task-decision-channel.mjs';
 import {decisionsAction} from '../tools/task-decision-cli.mjs';
 import {continueBackend,decisionFollowupPrompt,syncBackend} from '../tools/task-backend.mjs';
+import {requestPause} from '../tools/task-pause.mjs';
+import {processLock,processIdentity,processAlive} from '../tools/process-resources.mjs';
 
 const req=x=>({operationId:randomUUID(),actor:'DECISION_FIXTURE',...x});
 const capabilities={backend:'PROJECT_APP_SERVER',delegation:true,closeVerified:true,agentCapacity:3,availableSlots:3,models:[{model:'gpt-5.6-sol',efforts:['xhigh']}]};
@@ -114,7 +117,14 @@ test('native input and permission approvals keep original shapes and reject defa
 
 test('no coordinator, coordinator change and early turn notifications retain questions and presentation identity',async t=>{
  const s=await fixture(t),runFile=path.join(s.loc.runtime,'run.json');
- const old=JSON.parse(await readFile(runFile,'utf8'));await writeFile(runFile,JSON.stringify({...old,owner:{pid:process.pid,birth:'not-the-live-owner'}}));
+ const old=JSON.parse(await readFile(runFile,'utf8'));
+ // A different display string on a live PID is uncertainty, not process exit.
+ // Observe and retire a real fixture process before transferring ownership.
+ const child=spawn(process.execPath,['-e','process.stdin.resume()'],{stdio:['pipe','ignore','ignore']});
+ const closed=new Promise((resolve,reject)=>{child.once('close',resolve);child.once('error',reject);});
+ let owner;try{owner=processIdentity(child.pid);}finally{child.stdin.end();await closed;}
+ assert(owner);assert.equal(processAlive(owner),false);
+ await writeFile(runFile,JSON.stringify({...old,owner}));
  const m=message(s),file=await persistDecisionMessage(s.root,s.service,'connection-a',m);
  await updateFixtureTurn(s,null);await drainDecisionInbox(s.root);assert.equal((await readDecisionFile(file)).state,'NEEDS_RECONCILIATION');
  await signal(s,'serverRequest/resolved',{threadId:s.threadId,requestId:77});
@@ -195,6 +205,33 @@ test('persistent receiver discovers a question after the dispatch client leaves,
  assert.equal((await decisionSnapshot(s.root,d.id)).decision.status,'RESOLVED');
  native.close();await runner;
  assert.equal((await readDecisionFile(paths.channelRecord)).status,'FAILED');assert.equal(stopped,true);
+});
+
+test('pause wins while turn/start waits for its original call lock; receiver sends no late turn',async t=>{
+ const s=await fixture(t),previousCwd=process.cwd(),previousConfig=process.env.CODEX_HOME;
+ process.chdir(s.root);process.env.CODEX_HOME='fixture-pause-home';await mkdir('fixture-pause-home');
+ let native,runner,starts=0;
+ t.after(async()=>{native?.close();await runner;process.chdir(previousCwd);if(previousConfig===undefined)delete process.env.CODEX_HOME;else process.env.CODEX_HOME=previousConfig;});
+ const p=await channelPaths(s.root);s.service.serviceId=p.serviceId;
+ await writeFile(path.join(s.loc.runtime,'server/server.json'),JSON.stringify(s.service));
+ await updateBinding(s.root,s.run.id,s.id,b=>{b.backendServiceId=p.serviceId;b.backendCreation.serviceId=p.serviceId;b.backendRequest.state='TURN_STARTING';delete b.backendRequest.turnId;});
+ runner=runDecisionChannel({id:randomUUID(),root:s.root,...s.service,sourceDigest:'fixture',socket:p.channelSocket},{handleSignals:false,verifyServer:async(project,{connect})=>{
+  native=connect({socket:'/fixture/never-a-real-server',transportFactory:h=>({ready:Promise.resolve(),close(){},async send(m){
+   if(m.method==='initialized')return;
+   if(m.method==='initialize'){h.onMessage({id:m.id,result:{userAgent:'fixture'}});return;}
+   if(m.method==='turn/start'){starts++;h.onMessage({id:m.id,result:{turn:{id:s.turnId}}});return;}
+   throw Error('unexpected fixture RPC '+m.method);
+  }})});await native.initialize();return {record:s.service,client:native};
+ }});
+ for(let i=0;i<100;i++){if((await readDecisionFile(p.channelRecord))?.status==='READY')break;await new Promise(r=>setTimeout(r,20));}
+ const operationId=(await readBindings(s.loc)).assignments[s.id].backendRequest.operationId;
+ const file=path.join(p.directory,'calls',decisionHash({assignmentId:s.id,operationId,method:'turn/start'})+'.json');await mkdir(path.dirname(file),{recursive:true});
+ let pending;
+ await processLock(file+'.lock',async()=>{
+  pending=channelClient(s.root,s.run.id,s.id).call('turn/start',{threadId:s.threadId,input:[{type:'text',text:'must not execute'}]}).then(value=>({value}),error=>({error}));
+  await new Promise(r=>setTimeout(r,100));await requestPause(s.root,s.run.id);
+ });
+ const result=await pending;assert.match(result.error?.message||'',/PAUSE_EXECUTION_BLOCKED/);assert.equal(starts,0);assert.equal(await readDecisionFile(file),null);
 });
 
 test('waiting workers retain their resources while independent work can still be scheduled',async t=>{
@@ -345,7 +382,7 @@ test('two concurrent FOLLOWUP intents cannot replace each other or start two tur
  const outcomes=await Promise.allSettled(['one','two'].map(id=>continueBackend(s.root,s.run.id,s.id,{operationId:'competing-'+id,prompt:'same bounded next step'},{verifyServer})));
  assert.equal(outcomes.filter(r=>r.status==='fulfilled').length,1);assert.equal(starts,1);
  const saved=(await readBindings(s.loc)).assignments[s.id];assert.equal(saved.backendHistory.length,1);assert.equal(saved.backendRequest.turnId,'sole-followup');
- const error=outcomes.find(r=>r.status==='rejected').reason;assert.match(error.message,/OPERATION_CHANGED|上一轮尚未确认成功/);
+ const error=outcomes.find(r=>r.status==='rejected').reason;assert.match(error.message,/OPERATION_CHANGED|FOLLOWUP_ACTIVE|上一轮尚未确认成功/);
 });
 
 

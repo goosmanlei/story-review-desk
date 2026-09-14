@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {readFile,readdir,mkdir,open,rename,lstat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
-import {location,readLedger,readBindings,mutate,requireTask} from './task-ledger.mjs';
+import {location,readLedger,readBindings,mutate,requireTask,withRuntime,requireRun} from './task-ledger.mjs';
 import {decisionHash,decisionPending,pendingDecisions} from './task-decision-protocol.mjs';
 import {cell,table} from './task-format.mjs';
 import {resolveTaskId} from './task-numbering.mjs';
@@ -120,6 +120,14 @@ export async function deliverDecision(project,runId,decisionId,{client,connectio
  requireTask(s.wire.serviceId===service.serviceId&&s.wire.generation===service.generation&&s.wire.connectionId===connectionId&&client.hasRequest(s.wire.requestId),'DECISION_CONNECTION：原协议请求或连接已失效；保留答复先核查');
  const intent=await mutate(project,'decision:sending',{operationId:'dc-send-'+decisionHash({decisionId,operationId:s.decision.answer.operationId}),actor:'PROJECT_CODEX',runId,...decisionVersions(s),connectionId});
  if(intent.replayed)return {decisionId,status:'DELIVERY_UNKNOWN',sent:false};
- try{await client.respond(s.wire.requestId,s.wire.response);return {decisionId,status:'DELIVERY_UNKNOWN',sent:true,reason:'写入连接不等于送达；等待原工具回读或核查'};}
+ try{
+  await withRuntime(project,async loc=>{
+   await requireRun(loc,runId);
+   const binding=(await readBindings(loc)).assignments[s.assignment.id];
+   requireTask(binding?.runId===runId&&binding.backendRequest?.turnId===s.wire.turnId&&!binding.closureReceipt,'DECISION_BINDING：实际发送前原执行已改变');
+   await client.respond(s.wire.requestId,s.wire.response);
+  });
+  return {decisionId,status:'DELIVERY_UNKNOWN',sent:true,reason:'写入连接不等于送达；等待原工具回读或核查'};
+ }
  catch(error){return {decisionId,status:'DELIVERY_UNKNOWN',sent:false,error:error.message};}
 }

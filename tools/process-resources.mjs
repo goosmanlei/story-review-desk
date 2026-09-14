@@ -14,7 +14,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import path from "node:path";
-import { bootIdentity } from "./execution-runtime.mjs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { processIdentity, processAlive } from "./process-identity.mjs";
+import { readPause, pauseBlocks } from "./task-pause-state.mjs";
+export { processIdentity, processAlive } from "./process-identity.mjs";
 
 const missing = (e) => e.code === "ENOENT";
 const json = async (p) => JSON.parse(await readFile(p, "utf8"));
@@ -26,6 +29,31 @@ const exists = async (p) =>
     }),
   );
 const contains = (a, b) => b === a || b.startsWith(a + path.sep);
+const admissionContext = new AsyncLocalStorage();
+
+// Phase registration, child launch and pause use the same ledger lock. Reentry
+// is limited to this awaited admission, so a delayed callback cannot reuse a
+// lock that has already been released. Lock order is ledger, parent, phase.
+export async function formalAdmission(root, task, callback, { converging = false } = {}) {
+  const absolute = await realpath(root);
+  if (!await exists(path.join(absolute, "instance/instance.json"))) return callback(null, null);
+  const { withRuntime, readLedger, requireTask } = await import("./task-ledger.mjs");
+  const admit = async (loc) => {
+    const ledger = await readLedger(loc);
+    const known = ledger.tasks[process.env.REVIEW_TASK_FORMAL_ID] || ledger.tasks[task] ||
+      Object.values(ledger.tasks).find((t) => t.displayId === task);
+    const pause = await readPause(loc);
+    if (known && !converging) requireTask(!pauseBlocks(pause), "PAUSE_EXECUTION_BLOCKED：禁止新受管阶段或后台命令");
+    return callback(known && pauseBlocks(pause) ? pause : null, known?.id);
+  };
+  const current = admissionContext.getStore();
+  if (current?.active && current.root === absolute) return admit(current.loc);
+  return withRuntime(absolute, async (loc) => {
+    const context = { root: absolute, loc, active: true };
+    try { return await admissionContext.run(context, () => admit(loc)); }
+    finally { context.active = false; }
+  });
+}
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const id = (value) => {
   if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,100}$/.test(value || ""))
@@ -39,27 +67,6 @@ const run = (bin, args) =>
     timeout: 60000,
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
-export function processIdentity(pid = process.pid) {
-  try {
-    const match = run("ps", [
-      "-p",
-      String(pid),
-      "-o",
-      "lstart=",
-      "-o",
-      "stat=",
-    ]).match(/^(.+?)\s+(\S+)$/);
-    return !match || match[2].includes("Z") ? null : { pid, birth: match[1], bootId: bootIdentity() };
-  } catch (e) {
-    if (e.status === 1) return null;
-    throw e;
-  }
-}
-export function processAlive(owner) {
-  if (owner?.bootId && owner.bootId !== bootIdentity()) return false;
-  const now = owner && processIdentity(owner.pid);
-  return Boolean(now?.birth && now.birth === owner.birth);
-}
 async function atomic(p, value) {
   const tmp = p + "." + randomUUID() + ".tmp";
   try {
@@ -247,6 +254,7 @@ async function protectedPath(config, absolute) {
   }
 }
 export async function beginPhase(root, task, phase, { consumers = [] } = {}) {
+  return formalAdmission(root, task, async (_pause, formalTaskId) => {
   const config = await readProcessConfig(root),
     loc = locations(config, task, phase);
   await plain(loc.directory, { create: true });
@@ -263,6 +271,7 @@ export async function beginPhase(root, task, phase, { consumers = [] } = {}) {
       schemaVersion: "1.0",
       kind: "PROCESS_PHASE",
       taskId: task,
+      ...(formalTaskId ? { formalTaskId } : {}),
       phaseId: phase,
       projectId: config.projectId,
       host: config.host,
@@ -283,6 +292,7 @@ export async function beginPhase(root, task, phase, { consumers = [] } = {}) {
     });
     await atomic(loc.file, record);
     return new ProcessPhase(config, loc.file, record.token);
+  });
   });
 }
 export async function openPhase(context) {
@@ -410,6 +420,15 @@ export class ProcessPhase {
   async childStarted(pid) {
     return this.update((r) => {
       r.child = processIdentity(pid);
+    });
+  }
+  async startChild(callback) {
+    const record = await this.read();
+    return formalAdmission(this.config.root, record.formalTaskId || record.taskId, async () => {
+      await this.assertRunning();
+      const child = await callback();
+      if (child?.pid) await this.childStarted(child.pid);
+      return child;
     });
   }
   async childEnded() {
@@ -629,16 +648,27 @@ export class ProcessPhase {
     return usage;
   }
   async finish({ outcome = "SUCCEEDED", recover = false } = {}) {
-    return this.update(async (record) => {
+    const current = await this.read();
+    return formalAdmission(this.config.root, current.formalTaskId || current.taskId, (pause) =>
+    this.update(async (record) => {
       if (record.status === "CLEANED") return record;
       if (
-        record.owner.pid !== process.pid &&
         processAlive(record.owner) &&
+        record.owner.pid !== process.pid &&
         record.status === "RUNNING"
       )
         throw Error("Cannot clean a live process owned by another runner");
       if (processAlive(record.child))
         throw Error("Process child is still running");
+      if (pause) {
+        record.pauseRetention ||= { pauseId: pause.id, reason: "原阶段检查点恢复输入，验收整合前保留" };
+        for (const resource of record.resources) {
+          if (resource.kind === "path" && !["REMOVED", "RETAINED"].includes(resource.state)) {
+            resource.state = "RETAINED";
+            resource.reason = "pause " + pause.id + " checkpoint recovery";
+          }
+        }
+      }
       record.outcome = outcome;
       record.status = "CLEANING";
       await atomic(this.file, record);
@@ -682,7 +712,7 @@ export class ProcessPhase {
       record.finishedAt = new Date().toISOString();
       record.failures = failures;
       return record;
-    });
+    }), { converging: true });
   }
   async remove(record, resource) {
     if (resource.kind === "path") {
@@ -888,12 +918,12 @@ export async function sweepProcessTasks(root) {
   for (const { file, record } of await phaseRecords(root)) {
     if (
       record.status === "CLEANED" ||
-      processAlive(record.owner) ||
       seen.has(record.taskId)
     )
       continue;
     seen.add(record.taskId);
     try {
+      if (processAlive(record.owner)) continue;
       const rows = await phaseRecords(root, record.taskId);
       if (
         rows.some(

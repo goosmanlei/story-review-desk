@@ -18,6 +18,8 @@ import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks} from './tas
 import {formatTaskTerminal} from './task-terminal-format.mjs';
 import {resolveTaskId,displayTaskId} from './task-numbering.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
+import {pauseAction,resumePausedRun} from './task-pause.mjs';
+import {pauseBlocks} from './task-pause-state.mjs';
 
 export const help=`tasks — 正式任务管理（不接收未澄清想法）
 
@@ -32,6 +34,11 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
   tasks commit-status --operation-id ID  只读核查原管理提交和 Git 证据
   tasks status                      查看执行占用及中断任务
   tasks run                         在当前会话保持执行资格；不会自行调用模型
+                                    自动发现暂停 checkpoint，核查原执行、版本和操作后接续归属
+  tasks pause --run RUN_ID           立即禁止新派工/命令/轮次；尝试在已保存边界安全暂停
+  tasks pause checkpoint --run ID --file -  协调者保存每项任务及未关闭派工的可中断检查点
+  tasks pause verify --run ID        核查 Agent、turn、后台进程停止及 checkpoint 落盘
+  tasks pause status                回读 PAUSING / PAUSED / PAUSE_UNVERIFIED；未知保留占用
   tasks heartbeat --run RUN_ID       延长执行租约（10 分钟）
   tasks stop --run RUN_ID            请求停止领取和执行
   tasks guard --run RUN_ID --task ID [--assignment ID] [--core] -- COMMAND
@@ -110,6 +117,15 @@ schedule: {runId,expectedVersions:{...},assignments:[{taskId,key,goal,deliverabl
   execution:{workClass:"LOOKUP|RESEARCH|IMPLEMENTATION|HIGH_RISK",rationale,longRunning:false},dependsOn:[],attemptOf}]}
 assignment: {runId,taskId,assignmentId,expectedVersions:{...},expectedAssignmentVersion,...}
 backend dispatch: {operationId,prompt,workspace,baseCommit}；collect: {operationId}；continue: {operationId,prompt}。
+pause checkpoint: {operationId,actor,pauseId,taskId,assignmentId?,expectedVersions,
+  expectedAssignmentVersion?,quiescent:true,evidence,checkpoint,workspace:{path,baseCommit?,files:[相对文件]}}。
+每个主任务和未关闭派工均须保存；checkpoint 五个数组全部必填，inputs 写明精确输入及版本。
+代码工作区提供完整基准 SHA 和全部已改/未跟踪恢复文件；机器身份仅存 runtime。
+quiescent 表示协调者已保存最近可中断边界，不再推进新步骤；命令不能读取尚未落盘的思考。
+缺检查点只封住入口，保留 PAUSING，不发送破坏性停止。重复 pause/verify 只核查原停止意图。
+PAUSED 保留资源、原操作、待决问题和已有答复，不构成正式关闭、用户答复或新授权。
+后续 run 回读 CHECKPOINT_READY 的 nextSteps；从已验证暂停续办时 backend continue 可只传 {operationId}，
+沿用原线程和保存的 checkpoint 输入。未解决问题、未知原操作和已关闭派工不能启动续办轮次。
 decisions present/answer/reconcile 共同字段：{operationId,actor,runId,taskId,assignmentId,decisionId,
   expectedVersions:{TASK_ID:版本},expectedAssignmentVersion,expectedDecisionVersion,bindingToken}。
 show 的 requestFields 提供当前字段；每次写入前重新读取，不能猜版本或换绑。
@@ -147,7 +163,12 @@ async function keeper(project) {
   const loc=await location(project); await mkdir(loc.runtime,{recursive:true,mode:0o700});
   return processLock(path.join(loc.runtime,'executor.lock'),async()=>{
     const run=await startRun(project);
-    console.log(JSON.stringify({status:'EXECUTOR_READY',runId:run.id,expiresAt:run.expiresAt,instruction:'保留此命令运行，在当前会话用 next 领取任务；每个阶段 checkpoint 并 heartbeat；完成后 stop。'}));
+    if(run.pauseId){
+      try {console.log(JSON.stringify(await resumePausedRun(project,run.id)));}
+      catch(error){console.log(JSON.stringify({status:'PAUSE_UNVERIFIED',runId:run.id,error:error.message,instruction:'保留占用并核查原操作；不会自动重复执行'}));}
+    }
+    const ready=await runtimeState(project);
+    console.log(JSON.stringify({status:ready.runActive?'EXECUTOR_READY':'EXECUTOR_CONVERGING',runId:run.id,expiresAt:run.expiresAt,instruction:ready.runActive?'保留此命令运行，在当前会话用 next 领取任务；每个阶段 checkpoint 并 heartbeat；完成后 stop。':'暂停恢复仍待核查；仅保存 checkpoint、查询原操作及停止核验，禁止新执行。'}));
     let stopping=false,decisionNotice=null;
     const stop=()=>{stopping=true;};
     for(const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s,stop);
@@ -162,6 +183,11 @@ async function keeper(project) {
           console.log(JSON.stringify(event));
         }
         decisionNotice=notice;
+        if(pauseBlocks(state.pause)) {
+          if(state.pause.status==='PAUSED'&&state.pause.verifiedByRunId===run.id){await stopRun(project,run.id,{close:true});break;}
+          if(stopping)break;
+          await new Promise(r=>setTimeout(r,1000));continue;
+        }
         if(stopping||state.run?.stopRequested||Date.parse(state.run?.expiresAt)<=Date.now()) {
           try { await stopRun(project,run.id,{close:true}); break; }
           catch(e) { if(!e.message.includes('仍在运行')) throw e; }
@@ -191,15 +217,17 @@ async function guarded(project,runId,taskId,command,core,assignmentId) {
     requireTask(!taskId||task?.id===taskId,'guard 派工与任务编号不符');
     requireTask(task?.status==='RUNNING'&&(bindings.tasks[task.id]||task.runId)===runId,'guard 只能执行当前会话已领取的任务');
     requireTask(assignmentId||!task.assignments?.length,'已派工任务必须指定 --assignment');
-    const owner=processIdentity(); await activity(project,runId,owner,null,assignmentId,task.id);
+    const owner=processIdentity();
     let child, timer, terminating, failure;
     const stop=signal=>{ if(child?.pid) {try{process.kill(-child.pid,signal);}catch(e){if(e.code!=='ESRCH')throw e;} if(!terminating){terminating=setTimeout(()=>{try{process.kill(-child.pid,'SIGKILL');}catch{}},10000);terminating.unref();}} };
     const handlers=new Map(['SIGINT','SIGTERM','SIGHUP'].map(s=>[s,()=>stop(s)]));
     try {
-      child=spawn(command[0],command.slice(1),{cwd:bindings.assignments[assignmentId]?.workspace||loc.root,env:process.env,stdio:'inherit',detached:true});
-      const done=once(child,'close');
-      if(child.pid) await activity(project,runId,owner,processIdentity(child.pid),assignmentId,task.id);
       for(const [s,h] of handlers) process.on(s,h);
+      let done;
+      child=await activity(project,runId,owner,null,assignmentId,task.id,()=>{
+        const started=spawn(command[0],command.slice(1),{cwd:bindings.assignments[assignmentId]?.workspace||loc.root,env:{...process.env,REVIEW_TASK_RUN_ID:runId,REVIEW_TASK_FORMAL_ID:task.id,REVIEW_TASK_ASSIGNMENT_ID:assignmentId||''},stdio:'inherit',detached:true});
+        done=once(started,'close');child=started;return started;
+      });
       let busy=false;
       timer=setInterval(async()=>{if(busy)return;busy=true;try{await heartbeat(project,runId);}catch(e){failure=e.message;stop('SIGTERM');}finally{busy=false;}},15000);
       const [code,signal]=await done;
@@ -265,6 +293,7 @@ export async function main(argv=process.argv.slice(2)) {
   if(action==='install') return installTaskSkill(project,path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'));
   if(['init','rebuild'].includes(action)) return rebuild(project);
   if(action==='run') return keeper(project);
+  if(action==='pause')return pauseAction(project,p[1],v.run,v.file?await inputFile(v.file):{});
   if(action==='heartbeat') return heartbeat(project,v.run);
   if(action==='stop') return stopRun(project,v.run);
   if(action==='policy')return setRunPolicy(project,v.run,await inputFile(v.file));
