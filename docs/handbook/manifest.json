@@ -121,7 +121,7 @@
         "web/app/story-relations-editor.tsx",
         "web/presentation/domain-model.d.mts"
       ],
-      "sourceDigest": "d461de4fa0e7271fc0aad36ceb7e89fe8e4ff11a8c68f1b548aeb41dd4856f23"
+      "sourceDigest": "c3acfa1a8d93c464ddf04d9a29639c26e6821a855f6bf8204d301a96da06cdaf"
     },
     {
       "id": "interfaces",

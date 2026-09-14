@@ -182,7 +182,6 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
  useEffect(()=>{if(episode&&scene&&!selectionError)navigation.rememberScene(episode.episodeUid,scene.sceneId);},[episode?.episodeUid,scene?.sceneId,selectionError,cacheScope]);
  const readingKey=JSON.stringify([cacheScope,gate?.id,episode?.episodeUid,scene?.sceneId||'']);
  const contentReading=usePreparationReading(readingKey,Boolean(state&&definition),navigation);
- const directoryReading=usePreparationReading(cacheScope+':directory',Boolean(state&&definition),navigation);
  const checkButtons=(checks:typeof stageGates)=><div className="preparation-check-list">{checks.map(g=><button type="button" key={g.id} data-production-check={g.id} disabled={Boolean(selectionError)} aria-pressed={g.id===gate?.id} onClick={()=>chooseCheck(stage.id,g.id)}><strong>{g.label}</strong>{g.purpose&&<span>{g.purpose}</span>}</button>)}</div>;
  if(!state||!definition)return <section className="production-preparation-loading" aria-busy={!error&&!configurationError}><p role={error||configurationError?'alert':'status'}>{error||configurationError||'正在读取制作准备与集场上下文…'}</p>{(error||configurationError)&&<button onClick={()=>setAttempt(value=>value+1)}>重新完整读取</button>}</section>;
  return <section className="production-preparation production-flow-workspace creator-production-workspace" aria-label="场景上下文的全剧制作">
@@ -194,14 +193,14 @@ export function ProductionPreparationWorkspace({workflow,initialPhaseId,initialG
   {state?.stale&&<p className="workflow-warning" role="alert">候选或正文依据已变化。保留原稿供对照，不能自动换绑、编辑或转交。</p>}
   {!state&&!error&&<p role="status">正在读取制作准备与集场上下文…</p>}
   <div className="preparation-stage-layout">
-   <aside className="preparation-scene-directory" ref={directoryReading.pane} tabIndex={0} aria-label={episodeMode?'制作分集目录':'制作集场目录'}>
+   <aside className="preparation-scene-directory" tabIndex={0} aria-label={episodeMode?'制作分集目录':'制作集场目录'}>
     <header><strong>{episodeMode?'分集目录':'集 · 场目录'}</strong><small>{episodes.length} 集{!episodeMode?' · '+scenes.length+' 场':''}</small></header>
-    <div ref={directoryReading.body}><nav aria-label={episodeMode?'制作上下文分集':'制作上下文集场'}>{episodes.map(ep=>{
+    <div><nav aria-label={episodeMode?'制作上下文分集':'制作上下文集场'}>{episodes.map(ep=>{
      const open=navigation.expanded[ep.episodeUid]??ep.episodeUid===episode?.episodeUid,children=scenes.filter(s=>s.episodeUid===ep.episodeUid&&ep.sceneIds.includes(s.sceneId));
      return <section className="preparation-directory-episode" key={ep.episodeUid}>
       <div className="preparation-directory-episode-row" data-current-episode={ep.episodeUid===episode?.episodeUid||undefined}>
        {!episodeMode&&<button type="button" className="preparation-directory-toggle" data-preparation-toggle={ep.episodeUid} aria-label={(open?'收起':'展开')+' '+ep.displayId+' '+ep.title} aria-expanded={open} aria-controls={'preparation-scenes-'+ep.episodeUid} onClick={()=>navigation.setExpanded(ep.episodeUid,!open)}>{open?'▾':'▸'}</button>}
-       <button type="button" data-preparation-episode={ep.episodeUid} aria-pressed={ep.episodeUid===episode?.episodeUid} onClick={()=>chooseEpisode(ep.episodeUid)}><b>{ep.displayId}</b><span>{ep.title}</span></button>
+       <button type="button" data-preparation-episode={ep.episodeUid} aria-pressed={episodeMode?ep.episodeUid===episode?.episodeUid:undefined} aria-current={!episodeMode&&ep.episodeUid===episode?.episodeUid?'location':undefined} aria-expanded={episodeMode?undefined:open} aria-controls={episodeMode?undefined:'preparation-scenes-'+ep.episodeUid} onClick={()=>episodeMode?chooseEpisode(ep.episodeUid):navigation.setExpanded(ep.episodeUid,!open)}><b>{ep.displayId}</b><span>{ep.title}</span></button>
       </div>
       {!episodeMode&&<div className="preparation-directory-scenes" id={'preparation-scenes-'+ep.episodeUid} hidden={!open}>{children.map(s=><button type="button" key={s.sceneId} data-preparation-scene={s.sceneId} aria-current={scene?.sceneId===s.sceneId?'location':undefined} onClick={()=>chooseScene(s.sceneId)}><b>{s.displayId}</b><span>{(!state?.stale?state?.candidate?.scenes.find(c=>c.id===s.sceneId)?.title:undefined)||String(s.sourceSummary?.title||'场准备')}</span></button>)}{!children.length&&<p>此集尚无可定位的场准备。</p>}</div>}
      </section>;
