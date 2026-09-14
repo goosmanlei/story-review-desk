@@ -230,7 +230,12 @@ test('all audit surfaces share seven fixed columns, exact title, category, depen
   const one=renderTasks(data),two=renderTasks({...data,asOf:'2026-09-14T17:00:00Z'});
   assert.equal(one.split('\n').slice(2).join('\n'),two.split('\n').slice(2).join('\n'));
   for(const output of [one,renderStatus(data),renderAudit(data),await main(['list','--project',root,'--format','markdown'])]) {
-    assert(output.includes(header));assert(output.includes('不变 &#124; 标题 &lt;x&gt; &#91;y&#93;'));assert(output.includes('内容创作（CREATIVE）'));assert(output.includes(ledger.tasks[a.taskId].displayId));assert(!output.includes('.md>'));assert(!output.includes('tasks/items/'));
+    assert(output.includes(header));assert(output.includes('不变 &#124; 标题 &lt;x&gt; &#91;y&#93;'));
+    const creativeRow=output.split('\n').find(line=>line.startsWith(`| ${ledger.tasks[b.taskId].displayId} |`));
+    assert(creativeRow);
+    const fields=creativeRow.slice(2,-2).split(' | ');
+    assert.equal(fields.length,7);assert.equal(fields[2],'CREATIVE');assert.equal(fields[6],ledger.tasks[a.taskId].displayId);
+    assert(!output.includes('.md>'));assert(!output.includes('tasks/items/'));
   }
   assert(renderDetail(ledger.tasks[b.taskId],{tasks:ledger.tasks}).includes(ledger.tasks[a.taskId].displayId));
   const empty=renderTasks({tasks:[],asOf:'2026-09-13T17:00:00Z'});assert(empty.includes('2026-09-14 01:00:00'));assert(empty.includes('共 0 项'));assert(empty.includes(header));

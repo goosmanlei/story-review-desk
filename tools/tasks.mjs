@@ -71,6 +71,10 @@ list 默认范围：READY / RUNNING / BLOCKED / WAITING_REVIEW；
 --all 才纳入 DONE / CANCELLED / MERGED。--status / --type / --task 与范围取交集，
 例如 list --status DONE 返回空，list --all --status DONE 查询已完成。
 JSON 与 Markdown 同范围；show / status / audit 保持原查询语义。
+Markdown 基础表固定七列：任务编号 / 任务标题 / 类别 / 状态 / 优先级 / 发布时间 / 前置依赖。
+类别和任务状态只显示合法英文原码，无效值显示 UNKNOWN；数量汇总使用同一口径。
+每个前置依赖在同一单元格内单独换行，保留完整展示号及顺序；无依赖显示—。
+精简短字段为完整正式标题留出更多响应式空间；GFM 不承诺精确列宽，不截断标题或用空格伪造列宽。
 展示编号为 T-YYYYMMDD-NNN，日期按 Asia/Shanghai 原始发布时间，同日跨类型共用 001–999。
 编号终态不复用、重建不变化；每日超过 999 项整笔拒绝（TASK_NUMBER_LIMIT）。
 完整展示号与旧永久 ID 均可 show、list/audit --task、依赖、合并、派工和写入定位。
@@ -126,8 +130,8 @@ MAIN_CAPACITY / AGENT_CAPACITY 仍按实际能力限制执行。交回或空闲�
 收尾关闭并完成任务后，协调者重新 schedule 按依赖和优先级补入待办。
 next 保持未知资源的串行兼容，不能绕过上限；旧超限记录只允许 reconcile/close/收尾。
 
-状态：READY 待执行 / RUNNING 执行中 / BLOCKED 阻塞 / WAITING_REVIEW 待验收 /
-DONE 已完成 / CANCELLED 已取消 / MERGED 已合并。终态只读，变化另发任务。
+任务状态原码：READY / RUNNING / BLOCKED / WAITING_REVIEW /
+DONE / CANCELLED / MERGED。终态只读，变化另发任务。
 派工 WAITING_DECISION 表示存在未解决决定，保留任务/Agent/资源占用，不能 collect/accept/DONE。
 问题 OPEN/ANSWERED/DELIVERY_UNKNOWN/NEEDS_RECONCILIATION/FOLLOWUP_READY 均未解决。
 持久接收器独立于协调租约保存问题；主会话每个检查点查询 decisions list，合并转达，沿用已提问题。
