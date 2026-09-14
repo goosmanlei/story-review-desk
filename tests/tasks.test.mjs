@@ -38,7 +38,8 @@ async function fixture(t) {
   assert(process.env.REVIEW_TASK_DIR,'测试必须通过受管执行器运行');
   const root=await mkdtemp(path.join(process.env.REVIEW_TASK_DIR,'tasks-'));
   await mkdir(path.join(root,'instance/runtime'),{recursive:true});
-  await writeFile(path.join(root,'instance/instance.json'),JSON.stringify({id:randomUUID()}));
+  const projectId=randomUUID();
+  await writeFile(path.join(root,'instance/instance.json'),JSON.stringify({id:projectId}));
   await writeFile(path.join(root,'package.json'),JSON.stringify({scripts:{}}));
   t.after(()=>rm(root,{recursive:true,force:true}));return root;
 }
@@ -60,10 +61,26 @@ async function call(root,action,body) {
   const [code]=await done;if(code)throw Error(err);return JSON.parse(out);
 }
 const publish=(root,s=spec())=>mutate(root,'publish',req({task:s}));
-const next=(root,runId)=>mutate(root,'next',req({runId}));
-async function change(root,action,id,extra) {const t=(await readLedger(root)).tasks[id];return mutate(root,action,req({taskId:id,expectedVersions:{[id]:t.version},...extra}));}
+async function next(root,runId){
+  const choice=await mutate(root,'next',req({runId}));if(choice.status!=='WORKER_REQUIRED')return choice;
+  const task=(await readLedger(root)).tasks[choice.taskId];
+  const [a]=(await mutate(root,'schedule',req({runId,expectedVersions:{[task.id]:task.version},assignments:[{taskId:task.id,key:'worker',goal:task.goal,deliverables:task.deliverables,acceptanceCriteria:task.acceptanceCriteria,resources:[{kind:'OBJECT',key:task.id,access:'WRITE'}],execution:{mode:'MAIN',rationale:'隔离 v3 WORKER fixture'}}]}))).assignments;
+  assert(a);await nodeChange(root,runId,task.id,'assignment:start',{workspaceEvidence:'隔离对象资源'});
+  return {taskId:task.id,assignmentId:a.id,status:'RUNNING'};
+}
+async function nodeChange(root,runId,id,action,extra={}){const t=(await readLedger(root)).tasks[id],a=t.assignments.find(a=>a.status!=='CLOSED');return mutate(root,action,req({runId,taskId:id,assignmentId:a.id,expectedVersions:{[id]:t.version},expectedAssignmentVersion:a.version,...extra}));}
+async function cancelWorker(root,id,runId){if((await readLedger(root)).tasks[id].assignments?.some(a=>a.status!=='CLOSED'))await nodeChange(root,runId,id,'assignment:close',{outcome:'CANCELLED',reason:'夹具停止原工作',cleanup:'无残留'});}
+async function change(root,action,id,extra) {
+  if(action==='transition'&&['WAITING_REVIEW','CANCELLED'].includes(extra.status))await cancelWorker(root,id,extra.runId);
+  const t=(await readLedger(root)).tasks[id];return mutate(root,action,req({taskId:id,expectedVersions:{[id]:t.version},...extra}));
+}
 async function finish(root,id,runId) {
   const t=(await readLedger(root)).tasks[id];
+  if(t.assignments?.some(a=>a.status!=='CLOSED')){
+    await nodeChange(root,runId,id,'assignment:result',{checkpoint:t.checkpoint||cp(),result:{summary:'原 WORKER 交回',artifacts:['fixture:result'],acceptance:t.acceptanceCriteria.map((_,criterion)=>({criterion,evidence:'fixture passed'}))}});
+    await nodeChange(root,runId,id,'assignment:accept',{evidence:'主协调者核查原结果'});
+    await nodeChange(root,runId,id,'assignment:close',{outcome:'ACCEPTED',cleanup:'无残留'});
+  }
   return change(root,'transition',id,{runId,status:'DONE',reason:'通过验收',result:{summary:'完成',artifacts:['fixture:result'],cleanup:'夹具临时资源已回收',acceptance:t.acceptanceCriteria.map((_,i)=>({criterion:i,evidence:'fixture check passed'}))}});
 }
 
@@ -71,7 +88,7 @@ test('list defaults to every unfinished state; all/filter/empty outputs preserve
  const root=await fixture(t),runner=await run(t,root),done=await publish(root,spec({title:'完成任务'}));await next(root,runner.id);await finish(root,done.taskId,runner.id);
  const cancelled=await publish(root,spec({title:'取消任务'}));await change(root,'transition',cancelled.taskId,{status:'CANCELLED',reason:'夹具取消'});
  const waiting=await publish(root,spec({title:'待验收任务'}));await next(root,runner.id);await change(root,'transition',waiting.taskId,{runId:runner.id,status:'WAITING_REVIEW',reason:'等待验收'});
- const blocked=await publish(root,spec({title:'阻塞创作任务',type:'CREATIVE'}));await next(root,runner.id);await change(root,'transition',blocked.taskId,{runId:runner.id,status:'BLOCKED',reason:'夹具阻塞'});
+ const blocked=await publish(root,spec({title:'阻塞创作任务',type:'CREATIVE'}));await next(root,runner.id);await cancelWorker(root,blocked.taskId,runner.id);await change(root,'transition',blocked.taskId,{runId:runner.id,status:'BLOCKED',reason:'夹具阻塞'});
  const a=await publish(root,spec({title:'合并来源甲'})),b=await publish(root,spec({title:'合并来源乙'}));await mutate(root,'merge',req({taskIds:[a.taskId,b.taskId],expectedVersions:{[a.taskId]:1,[b.taskId]:1},title:'待执行合并目标',reason:'合并夹具'}));
  const active=await publish(root,spec({title:'执行中任务',priority:0}));await next(root,runner.id);
  const before=await readLedger(root),query=(...args)=>tasksMain(['list','--project',root,...args]),pending=await query(),all=await query('--all');
@@ -115,7 +132,7 @@ test('shared task renderer keeps a seven-column table after Markdown rendering w
 });
 
 test('unclarified ideas produce no task files or audit events',async t=>{
-  const root=await fixture(t);
+  const root=await fixture(t,{legacy:false});
   await assert.rejects(publish(root,spec({clarified:false})),/未澄清/);
   await assert.rejects(publish(root,spec({acceptanceCriteria:[]})),/非空数组/);
   await assert.rejects(readFile(path.join(root,'tasks/project.json')),e=>e.code==='ENOENT');
@@ -133,11 +150,12 @@ test('concurrent CLI publications are durable and a replay does not duplicate',a
   assert.equal((await readLedger(root)).sequence,9);
 });
 
-test('single executor, atomic next and publication while a task is running',async t=>{
+test('single executor, read-only next candidates and publication while a WORKER is running',async t=>{
   const root=await fixture(t), runner=await run(t,root), a=await publish(root);
   await assert.rejects(startRun(root),/已有执行/);
   const picked=await Promise.all([call(root,'next',req({runId:runner.id})),call(root,'next',req({runId:runner.id}))]);
-  assert.deepEqual(picked.map(x=>x.status).sort(),['CURRENT_TASK','RUNNING']);
+  assert.deepEqual(picked.map(x=>x.status),['WORKER_REQUIRED','WORKER_REQUIRED']);
+  assert.equal((await readLedger(root)).tasks[a.taskId].status,'READY');await next(root,runner.id);
   const b=await publish(root,spec({title:'执行中新增',priority:0}));
   assert.equal((await next(root,runner.id)).tasks[0].id,a.taskId);
   await finish(root,a.taskId,runner.id);
@@ -186,10 +204,12 @@ test('interrupted external result is reconciled in a new process without re-exec
   const two=await run(t,root);assert.equal((await next(root,two.id)).status,'RECOVERY_REQUIRED');
   await assert.rejects(change(root,'checkpoint',a.taskId,{runId:one.id,checkpoint:pending}),/资格失效/);
   const recovery={processes:'原进程已退出',workspace:'已检查 fixture',versions:'fixture@1 未改变',operations:'external-1 原结果文件证明成功'};
-  await change(root,'resume',a.taskId,{runId:two.id,reconciliation:recovery,checkpoint:cp({operations:[{id:'external-1',kind:'FIXTURE',status:'SUCCEEDED',evidence:'external-result = executed once'}]})});
+  const reconciled=cp({operations:[{id:'external-1',kind:'FIXTURE',status:'SUCCEEDED',evidence:'external-result = executed once'}]});
+  await nodeChange(root,two.id,a.taskId,'assignment:reconcile',{reconciliation:{...recovery,agent:'原 MAIN 节点未重启'},checkpoint:reconciled});
+  await change(root,'checkpoint',a.taskId,{runId:two.id,checkpoint:reconciled});
   await finish(root,a.taskId,two.id);assert.equal(await readFile(marker,'utf8'),'executed once');
   const report=audit(await readLedger(root),{taskId:a.taskId});
-  assert(report.events.some(e=>e.action==='resume'));assert(report.tasks[0].completedAt);
+  assert(report.events.some(e=>e.action==='assignment:reconcile'));assert(report.tasks[0].completedAt);
 });
 
 test('unknown external result blocks only its task and cannot be dropped or completed',async t=>{
@@ -200,24 +220,25 @@ test('unknown external result blocks only its task and cannot be dropped or comp
   await assert.rejects(finish(root,a.taskId,one.id),/未核查/);
   const exited=once(one.child,'close');one.child.kill('SIGKILL');await exited;
   const two=await run(t,root);
-  const r=await change(root,'resume',a.taskId,{runId:two.id,reconciliation:{processes:'已退出',workspace:'已核查',versions:'未变',operations:'服务暂不可查，结果未知'},checkpoint:pending});
+  const r=await nodeChange(root,two.id,a.taskId,'assignment:reconcile',{reconciliation:{processes:'已退出',workspace:'已核查',versions:'未变',operations:'服务暂不可查，结果未知',agent:'原 MAIN 节点保留'},checkpoint:pending});
   assert.equal(r.status,'BLOCKED');
+  await change(root,'transition',a.taskId,{runId:two.id,status:'BLOCKED',reason:'保留未知原结果'});
   const b=await publish(root);assert.equal((await next(root,two.id)).taskId,b.taskId);
-  await assert.rejects(change(root,'transition',a.taskId,{status:'READY',reason:'try again'}),/未知/);
+  await assert.rejects(change(root,'transition',a.taskId,{status:'READY',reason:'try again'}),/未知|先验收并关闭/);
 });
 
-test('guard registers a live command and prevents takeover after keeper death',async t=>{
-  const root=await fixture(t), a=await publish(root), one=await run(t,root);await next(root,one.id);
-  const child=spawn(process.execPath,[cli,'guard','--project',root,'--run',one.id,'--task',a.taskId,'--',process.execPath,'-e','setTimeout(()=>{},30000)'],{stdio:['ignore','pipe','pipe']});
+test('guard preserves a bound WORKER command across coordinator death and requires exact recovery',async t=>{
+  const root=await fixture(t), a=await publish(root), one=await run(t,root),worker=await next(root,one.id);
+  const child=spawn(process.execPath,[cli,'guard','--project',root,'--run',one.id,'--task',a.taskId,'--assignment',worker.assignmentId,'--',process.execPath,'-e','setTimeout(()=>{},30000)'],{stdio:['ignore','pipe','pipe']});
   let observed;
-  for(let i=0;i<100;i++){observed=(await runtimeState(root)).activity;if(observed?.child)break;await new Promise(r=>setTimeout(r,30));}
+  for(let i=0;i<100;i++){observed=(await runtimeState(root)).activities.find(x=>x.assignmentId===worker.assignmentId);if(observed?.child)break;await new Promise(r=>setTimeout(r,30));}
   assert(observed?.child);
   await assert.rejects(finish(root,a.taskId,one.id),/命令仍在运行/);
   t.after(async()=>{try{process.kill(-observed.child.pid,'SIGKILL');}catch{}if(child.exitCode===null&&child.signalCode===null){const done=once(child,'close');child.kill('SIGKILL');await done;}});
   const exited=once(one.child,'close');one.child.kill('SIGKILL');await exited;
-  await assert.rejects(startRun(root),/原执行命令仍在运行/);
+  const two=await run(t,root);assert.equal((await next(root,two.id)).status,'RECOVERY_REQUIRED');assert.equal(processAlive(observed.child),true);
   const ended=once(child,'close');process.kill(-observed.child.pid,'SIGTERM');await ended;
-  const two=await run(t,root);assert.equal((await next(root,two.id)).status,'RECOVERY_REQUIRED');
+  assert.equal((await next(root,two.id)).status,'RECOVERY_REQUIRED');
 });
 
 test('ledger detects tampering, rejects changed instance and rebuilds stale views',async t=>{

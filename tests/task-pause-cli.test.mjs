@@ -40,7 +40,14 @@ async function change(f,action,assignmentId,extra={}){
 async function save(f,p,assignmentId,checkpoint=cp()){
   const task=(await readLedger(f.root)).tasks[f.taskId],a=task.assignments?.find(a=>a.id===assignmentId);
   const input=req({pauseId:p.id,taskId:f.taskId,assignmentId,expectedVersions:{[task.id]:task.version},expectedAssignmentVersion:a?.version,quiescent:true,evidence:'fixture coordinator explicitly saved its safe boundary',checkpoint,workspace:{path:f.root,files:['artifact.txt']}});
-  return savePauseCheckpoint(f.root,f.run.id,input);
+  const result=await savePauseCheckpoint(f.root,f.run.id,input);
+  if(!assignmentId&&f.mainAssignmentId)await save(f,p,f.mainAssignmentId,checkpoint);
+  return result;
+}
+async function mainWorker(f){
+  const task=(await readLedger(f.root)).tasks[f.taskId];
+  const a=(await mutate(f.root,'schedule',req({runId:f.run.id,expectedVersions:{[task.id]:task.version},assignments:[{taskId:task.id,key:'main-worker',goal:'fixture',deliverables:['artifact'],acceptanceCriteria:['fixture'],resources:[{kind:'UNKNOWN',key:'*',access:'WRITE'}],execution:{mode:'MAIN',rationale:'v3 Main 执行节点夹具'}}]}))).assignments[0];
+  await change(f,'assignment:start',a.id,{workspaceEvidence:'隔离受管工作区'});f.mainAssignmentId=a.id;return a;
 }
 async function deadRun(f){
   const run=JSON.parse(await readFile(path.join(f.loc.runtime,'run.json')));
@@ -51,7 +58,8 @@ async function deadRun(f){
 }
 async function worker(f,key='worker'){
   const task=(await readLedger(f.root)).tasks[f.taskId];
-  const a=(await mutate(f.root,'schedule',req({runId:f.run.id,expectedVersions:{[task.id]:task.version},assignments:[{taskId:task.id,key,goal:'fixture',deliverables:['artifact'],acceptanceCriteria:['fixture'],resources:[{kind:'OBJECT',key,access:'READ',version:'1'}],execution:{rationale:'fixture'}}]}))).assignments[0];
+  const parent=task.assignments?.find(a=>a.status!=='CLOSED'),binding=parent?(await readBindings(f.loc)).assignments[parent.id]:null;
+  const a=(await mutate(f.root,parent?'assignment:schedule':'schedule',req({runId:f.run.id,taskId:task.id,...(parent?{parentAssignmentId:parent.id,authority:{assignmentId:parent.id,executionToken:binding.executionAuthority.token}}:{}),expectedVersions:{[task.id]:task.version},assignments:[{taskId:task.id,key,goal:'fixture',deliverables:['artifact'],acceptanceCriteria:['fixture'],resources:[{kind:'OBJECT',key:'shared-read-input',access:'READ',version:'1'}],execution:{rationale:'fixture'}}]}))).assignments[0];
   await change(f,'assignment:dispatch',a.id);
   await change(f,'assignment:start',a.id,{nativeThreadId:'thread-'+key,workspaceEvidence:'fixture object read'});
   const serviceId='fixture-service',generation='fixture-generation',turnId='turn-'+key;
@@ -95,7 +103,7 @@ test('pause fences scheduling and phases immediately, missing checkpoints cannot
 });
 
 test('direct phases retain recovery input and convergence never admits new work after pause',async t=>{
-  const f=await fixture(t);f.run=await startRun(f.root);await mutate(f.root,'next',req({runId:f.run.id}));
+  const f=await fixture(t);f.run=await startRun(f.root);await mainWorker(f);
   // Both direct and parent-task entry points work before pause; their nested
   // admissions must not deadlock on the same ledger lock.
   const direct=await beginPhase(f.root,f.taskId,'direct'),nested=await startProcessPhase(f.root,f.taskId,'nested');
@@ -112,7 +120,7 @@ test('direct phases retain recovery input and convergence never admits new work 
 });
 
 test('child launch is registered before concurrent pause acquires admission',async t=>{
-  const f=await fixture(t);f.run=await startRun(f.root);await mutate(f.root,'next',req({runId:f.run.id}));
+  const f=await fixture(t);f.run=await startRun(f.root);await mainWorker(f);
   const phase=await beginPhase(f.root,f.taskId,'launch');
   let enter,release,child,closed;
   const entered=new Promise(r=>{enter=r;}),gate=new Promise(r=>{release=r;});
@@ -134,7 +142,7 @@ test('child launch is registered before concurrent pause acquires admission',asy
   }
 });
 
-test('parallel workers pause at saved checkpoints; lost interrupt/archive replies are observed and never resent',async t=>{
+test('a WORKER and descendant pause at saved checkpoints; lost interrupt/archive replies are observed and never resent',async t=>{
   const f=await fixture(t);f.run=await startRun(f.root,{capabilities:caps});const workers=[await worker(f,'one'),await worker(f,'two')],a=adapters(f,workers);
   const p=await requestPause(f.root,f.run.id);await save(f,p);for(const w of workers)await save(f,p,w.id);
   workers[0].state.lost='turn/interrupt';workers[1].state.lost='thread/archive';
@@ -156,7 +164,7 @@ test('parallel workers pause at saved checkpoints; lost interrupt/archive replie
 });
 
 test('unknown original operations retain reservations and interrupted pause resumes only convergence; checkpoint cannot lose results',async t=>{
-  const f=await fixture(t);f.run=await startRun(f.root);await mutate(f.root,'next',req({runId:f.run.id}));
+  const f=await fixture(t);f.run=await startRun(f.root);await mainWorker(f);
   const p=await requestPause(f.root,f.run.id);await save(f,p,undefined,cp([{id:'original-side-effect',kind:'EXTERNAL',status:'RESULT_UNKNOWN'}]));
   let paused=await verifyPause(f.root,f.run.id);assert.equal(paused.status,'PAUSE_UNVERIFIED');assert(paused.issues.some(i=>i.code==='OPERATION_UNVERIFIED'));
   await deadRun(f);f.run=await startRun(f.root);assert.equal((await resumePausedRun(f.root,f.run.id)).status,'PAUSE_UNVERIFIED');
@@ -251,8 +259,8 @@ async function keeper(t,f){
 }
 
 test('real CLI main command and its background process stop before PAUSED; same/new CLI sessions discover checkpoint without rerunning',async t=>{
-  const f=await fixture(t),k=await keeper(t,f);await mutate(f.root,'next',req({runId:f.run.id}));
-  const command=launch(t,[cli,'guard','--project',f.root,'--run',f.run.id,'--task',f.taskId,'--',process.execPath,processCli,'run','--root',f.root,'--task',f.taskId,'--phase','main-command','--',process.execPath,'-e',"const {spawn}=require('node:child_process'); const fs=require('node:fs');fs.writeFileSync(process.env.REVIEW_TASK_DIR+'/saved-result.txt','kept');spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log('command-started');setInterval(()=>{},1000)"]);
+  const f=await fixture(t),k=await keeper(t,f);await mainWorker(f);
+  const command=launch(t,[cli,'guard','--project',f.root,'--run',f.run.id,'--task',f.taskId,'--assignment',f.mainAssignmentId,'--',process.execPath,processCli,'run','--root',f.root,'--task',f.taskId,'--phase','main-command','--',process.execPath,'-e',"const {spawn}=require('node:child_process'); const fs=require('node:fs');fs.writeFileSync(process.env.REVIEW_TASK_DIR+'/saved-result.txt','kept');spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log('command-started');setInterval(()=>{},1000)"]);
   await until(()=>command.output.includes('command-started'));
   const originalChild=await until(async()=>{const phases=await phaseRecords(f.root,f.taskId);return phases[0]?.record.child;});
   const pauseCommand=launch(t,[cli,'pause','--project',f.root,'--run',f.run.id]);const first=await pauseCommand.done;assert.equal(first.code,0,first.output);assert.match(first.output,/PAUSING/);assert(processAlive(originalChild));
@@ -270,7 +278,7 @@ test('real CLI main command and its background process stop before PAUSED; same/
 });
 
 test('a fresh CLI run after interrupted pause advertises convergence only and keeps admissions fenced',async t=>{
-  const f=await fixture(t),original=await keeper(t,f);await mutate(f.root,'next',req({runId:f.run.id}));
+  const f=await fixture(t),original=await keeper(t,f);await mainWorker(f);
   const p=await requestPause(f.root,f.run.id);original.child.kill('SIGTERM');await original.done;
   const next=launch(t,[cli,'run','--project',f.root]);await until(()=>next.output.includes('EXECUTOR_CONVERGING'));
   assert(!next.output.includes('EXECUTOR_READY'));assert.match(next.output,/PAUSING/);

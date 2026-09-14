@@ -48,7 +48,7 @@ class Store {
     if(q==='SELECT 1 FROM objects WHERE id=$1')return rows(this.data.objects.filter(r=>r.id===args[0]).map(()=>({exists:1})));
     if(q==='SELECT version FROM objects WHERE id=$1')return rows(this.data.objects.filter(r=>r.id===args[0]).map(r=>({version:r.version})));
     if(q==='SELECT content FROM revisions WHERE id=$1')return rows(this.data.revisions.filter(r=>r.id===args[0]).map(r=>({content:r.content})));
-    if(q==='SELECT object_id,sha256 FROM revisions WHERE id=$1')return rows(this.data.revisions.filter(r=>r.id===args[0]));
+    if(q==='SELECT object_id,sha256 FROM revisions WHERE id=$1'||q==="SELECT object_id,sha256,content->>'role' AS role FROM revisions WHERE id=$1")return rows(this.data.revisions.filter(r=>r.id===args[0]).map(r=>({...r,role:r.content?.role||null})));
     if(q.startsWith('SELECT version,content FROM configurations'))return rows(this.data.configurations.filter(r=>r.scope===(args[0]||'system')));
     if(q.startsWith('INSERT INTO configurations')){this.data.configurations=[{scope:args[0],version:args[1],content:args[2]}];return rows();}
     if(q.startsWith('SELECT member_id AS id,role'))return rows(this.data.revision_memberships.filter(r=>r.revision_id===args[0]).map(r=>({id:r.member_id,role:r.role})));

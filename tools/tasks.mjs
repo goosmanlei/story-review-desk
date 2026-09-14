@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import {runAttach} from './task-attach.mjs';
 import {backendAction,assertBackendThread} from './task-backend.mjs';
 import {readFile, mkdir} from 'node:fs/promises';
 import {spawn, execFileSync} from 'node:child_process';
@@ -7,7 +8,7 @@ import {pathToFileURL,fileURLToPath} from 'node:url';
 import path from 'node:path';
 import {once} from 'node:events';
 import {processLock,processIdentity} from './process-resources.mjs';
-import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,requireRun,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities,setRunPolicy} from './task-ledger.mjs';
+import {location,readLedger,mutate,rebuild,audit,runtimeState,startRun,heartbeat,stopRun,detachRun,requireRun,requireAssignmentAuthority,activity,clearActivity,requireTask,readBindings,updateBinding,configureCapabilities,setRunPolicy} from './task-ledger.mjs';
 import {installTaskSkill} from './task-skill.mjs';
 import {commitTaskRecords,taskCommitStatus} from './task-git.mjs';
 import {taskCapacity} from './task-capacity.mjs';
@@ -25,8 +26,10 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
 
   tasks install                     安装/更新项目 Skill 与 npm 入口
   tasks init | rebuild              初始化空账本或从事件重建 Markdown 视图
-  tasks upgrade --file -             无活跃执行时升级至 v2；保留旧事件
+  tasks upgrade --file -             无活跃执行或已核验安全暂停时升级至 v3；保留旧事件
   tasks list [--all]                 默认列出未完成任务；--all 包含全部终态历史
+  tasks attach TASK_ID [--assignment ID] [--read-only]
+                                    查看执行树、选择节点观察或对话；Ctrl+C 仅断开观察
   tasks show TASK_ID                 读取单项权威任务记录
   tasks audit [--task ID] [--from ISO] [--to ISO] [--status STATE] [--type SYSTEM|CREATIVE]
   tasks audit --operation-id ID      核查管理操作是否已落账
@@ -45,8 +48,8 @@ export const help=`tasks — 正式任务管理（不接收未澄清想法）
                                     校验领取资格并登记执行进程；--core 串行共享核心操作
   tasks publish|next|resume|checkpoint|transition|amend|merge|split --file request.json
   tasks schedule --file -            原子选择无冲突派工；支持跨正式任务
-                                    最多占用 3 个正式任务；主 Agent、预留和未关闭派工计入
-  tasks assignment dispatch|start|checkpoint|result|accept|close|reconcile --file -
+                                    最多并行 3 个正式任务；每任务一个 WORKER，子节点不占正式任务槽位
+  tasks assignment schedule|dispatch|start|checkpoint|result|accept|close|reconcile --file -
   tasks policy --run ID --file -     设置 {stopAfterTaskId}，该任务终态后暂停补位
   tasks backend ensure|probe --run ID
                                     在受管阶段启动/复用并核验项目专属服务
@@ -101,7 +104,8 @@ publish 也接受 tasks:[{key:"a",...},{key:"b",dependencies:["@a"],...}]；
 commit: {operationId,actor,publishOperationId}，包含当前完整前序链与必要视图；
 仅本地 commit，不 push、不启动执行器、不随其他状态变化自动提交。
 失败不撤销发布，先 commit-status 查原编号，再用相同请求补交；不重新 publish。
-next: {runId}，自动领取；返回 CURRENT_TASK / RECOVERY_REQUIRED / NO_EXECUTABLE_TASK 时不创建事件。
+next: {runId}；v3 只返回 WORKER_REQUIRED 及容量内候选，不领取、不改状态、不启动执行，由 Main 组装完整候选后 schedule。
+v1/v2 自动领取是旧程序的历史行为；v3 软件对旧账本只读查询并允许安全收敛，新派工须先 upgrade。
 其他单任务写入：{taskId,expectedVersions:{"TASK_ID":当前版本},...}
 checkpoint: {runId,checkpoint:{summary,completedSteps:[],nextSteps:[],inputs:[],artifacts:[],
   operations:[{id,kind,status:"PENDING|SUCCEEDED|FAILED|RESULT_UNKNOWN|CANCELLED",evidence}]}}
@@ -144,10 +148,10 @@ accept: {evidence}; close: {outcome:"ACCEPTED|CANCELLED|REPLACED",cleanup,reason
 reconcile: {checkpoint,expectedRunId?:"原协调运行编号",reconciliation:{processes,workspace,versions,operations,agent}}。
 跨协调运行核查已保存的原运行身份，旧进程未明确失效时拒绝；expectedRunId 与任务/派工版本共同核验归属。
 专属服务长派工使用 FOLLOWUP；backend continue 只续办同一未交回派工。未验证关闭则主 Agent 执行。
-TASK_CAPACITY 表示项目已占用 3 个不同任务；同任务辅助派工只增加 Agent 占用。
-MAIN_CAPACITY / AGENT_CAPACITY 仍按实际能力限制执行。交回或空闲不释放占用，
+TASK_CAPACITY 固定表示项目已占用 3 个不同正式任务；每任务一个根 WORKER，同任务 SUBAGENT 不增加这 3 个任务槽位。
+MAIN_CAPACITY 表示当前未验证委派/关闭能力而需 Main 串行；v3 只在显式 capacityScope:"GLOBAL" 证据下使用 AGENT_CAPACITY。每会话子线程上限不是 App Server 全局容量。交回或空闲不释放占用，
 收尾关闭并完成任务后，协调者重新 schedule 按依赖和优先级补入待办。
-next 保持未知资源的串行兼容，不能绕过上限；旧超限记录只允许 reconcile/close/收尾。
+旧超限记录只允许 reconcile/close/收尾，不能用 next 绕过上限。
 
 任务状态原码：READY / RUNNING / BLOCKED / WAITING_REVIEW /
 DONE / CANCELLED / MERGED。终态只读，变化另发任务。
@@ -168,7 +172,7 @@ async function keeper(project) {
       catch(error){console.log(JSON.stringify({status:'PAUSE_UNVERIFIED',runId:run.id,error:error.message,instruction:'保留占用并核查原操作；不会自动重复执行'}));}
     }
     const ready=await runtimeState(project);
-    console.log(JSON.stringify({status:ready.runActive?'EXECUTOR_READY':'EXECUTOR_CONVERGING',runId:run.id,expiresAt:run.expiresAt,instruction:ready.runActive?'保留此命令运行，在当前会话用 next 领取任务；每个阶段 checkpoint 并 heartbeat；完成后 stop。':'暂停恢复仍待核查；仅保存 checkpoint、查询原操作及停止核验，禁止新执行。'}));
+    console.log(JSON.stringify({status:ready.runActive&&!ready.convergenceOnly?'EXECUTOR_READY':'EXECUTOR_CONVERGING',runId:run.id,expiresAt:run.expiresAt,instruction:ready.convergenceOnly?'旧账本只允许查询及原工作收敛；已验证 PAUSED 快照保持不变，新执行前先退出协调运行并安全 upgrade。':ready.runActive?'当前对话是 Main 协调者：用 next 查看候选、schedule 派出最多 3 项正式任务的 WORKER；WORKER 自主管理后代。每阶段 checkpoint/heartbeat。v3 退出本命令保留原工作，任务暂停请用 pause。':'暂停恢复仍待核查；仅保存 checkpoint、查询原操作及停止核验，禁止新执行。'}));
     let stopping=false,decisionNotice=null;
     const stop=()=>{stopping=true;};
     for(const s of ['SIGINT','SIGTERM','SIGHUP']) process.on(s,stop);
@@ -188,6 +192,7 @@ async function keeper(project) {
           if(stopping)break;
           await new Promise(r=>setTimeout(r,1000));continue;
         }
+        if((stopping||Date.parse(state.run?.expiresAt)<=Date.now())&&!state.run?.stopRequested&&(await readLedger(loc)).schemaVersion===3){await detachRun(project,run.id);return {status:'COORDINATOR_DETACHED',runId:run.id,instruction:'已保存执行归属；原 WORKER 与后代保留原范围，下一次 tasks run 接续协调。'};}
         if(stopping||state.run?.stopRequested||Date.parse(state.run?.expiresAt)<=Date.now()) {
           try { await stopRun(project,run.id,{close:true}); break; }
           catch(e) { if(!e.message.includes('仍在运行')) throw e; }
@@ -210,8 +215,10 @@ async function guarded(project,runId,taskId,command,core,assignmentId) {
   const loc=await location(project);
   requireTask(!assignmentId||/^[A-Za-z0-9._-]+$/.test(assignmentId),'派工编号无效');
   const execute=()=>processLock(path.join(loc.runtime,assignmentId?`activity-${assignmentId}.lock`:'activity.lock'),async()=>{
-    await requireRun(loc,runId);
     const ledger=await readLedger(loc), bindings=await readBindings(loc);
+    const binding=bindings.assignments[assignmentId],authority=ledger.schemaVersion===3&&binding?.executionAuthority?.activatedAt?{assignmentId,executionToken:binding.executionAuthority.token}:undefined;
+    if(authority){requireTask(!runId||runId===binding.runId,'ASSIGNMENT_RUN：指定协调归属已改变');runId=binding.runId;await requireAssignmentAuthority(loc,{runId,assignmentId,authority});}
+    else await requireRun(loc,runId);
     taskId=resolveTaskId(ledger.tasks,taskId);
     const task=assignmentId?Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)):ledger.tasks[taskId];
     requireTask(!taskId||task?.id===taskId,'guard 派工与任务编号不符');
@@ -227,9 +234,9 @@ async function guarded(project,runId,taskId,command,core,assignmentId) {
       child=await activity(project,runId,owner,null,assignmentId,task.id,()=>{
         const started=spawn(command[0],command.slice(1),{cwd:bindings.assignments[assignmentId]?.workspace||loc.root,env:{...process.env,REVIEW_TASK_RUN_ID:runId,REVIEW_TASK_FORMAL_ID:task.id,REVIEW_TASK_ASSIGNMENT_ID:assignmentId||''},stdio:'inherit',detached:true});
         done=once(started,'close');child=started;return started;
-      });
+      },{authority});
       let busy=false;
-      timer=setInterval(async()=>{if(busy)return;busy=true;try{await heartbeat(project,runId);}catch(e){failure=e.message;stop('SIGTERM');}finally{busy=false;}},15000);
+      timer=setInterval(async()=>{if(busy)return;busy=true;try{if(authority)await requireAssignmentAuthority(loc,{runId,assignmentId,authority});else await heartbeat(project,runId);}catch(e){failure=e.message;stop('SIGTERM');}finally{busy=false;}},15000);
       const [code,signal]=await done;
       return {status:code===0&&!failure?'COMMAND_SUCCEEDED':'COMMAND_FAILED',exitCode:code|| (signal||failure?1:0),signal,error:failure};
     } finally {
@@ -286,12 +293,13 @@ async function nativeAction(project,action,v) {
 
 export async function main(argv=process.argv.slice(2)) {
   const sep=argv.indexOf('--'), command=sep<0?[]:argv.slice(sep+1);
-  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},decision:{type:'string'},history:{type:'boolean'},runtime:{type:'boolean'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},width:{type:'string'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
+  const {values:v,positionals:p}=parseArgs({args:sep<0?argv:argv.slice(0,sep),allowPositionals:true,options:{project:{type:'string'},file:{type:'string'},run:{type:'string'},task:{type:'string'},assignment:{type:'string'},decision:{type:'string'},history:{type:'boolean'},'read-only':{type:'boolean'},runtime:{type:'boolean'},core:{type:'boolean'},all:{type:'boolean'},from:{type:'string'},to:{type:'string'},status:{type:'string'},type:{type:'string'},format:{type:'string',default:'json'},width:{type:'string'},sort:{type:'string',default:'published'},columns:{type:'string'},socket:{type:'string'},slots:{type:'string'},'operation-id':{type:'string'},help:{type:'boolean'}}});
   const project=path.resolve(v.project||process.cwd()), action=p[0];
   if(v.help||!action||action==='help') return console.log(help);
   requireTask(!v.all||action==='list','--all 仅适用于 list');
   if(action==='install') return installTaskSkill(project,path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'));
   if(['init','rebuild'].includes(action)) return rebuild(project);
+  if(action==='attach'){requireTask(p[1]&&p.length===2,'ATTACH_TASK：用法 tasks attach TASK_ID');return runAttach(project,p[1],{assignment:v.assignment,readOnly:v['read-only']});}
   if(action==='run') return keeper(project);
   if(action==='pause')return pauseAction(project,p[1],v.run,v.file?await inputFile(v.file):{});
   if(action==='heartbeat') return heartbeat(project,v.run);

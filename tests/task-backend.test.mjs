@@ -6,10 +6,12 @@ import {execFileSync} from 'node:child_process';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {mutate,readLedger,readBindings,startRun,updateBinding,location} from '../tools/task-ledger.mjs';
-import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend,restoreBackendReceipts,syncBackend} from '../tools/task-backend.mjs';
+import {assertBackendThread,closeBackend,dispatchBackend,recoverBackend,requestFingerprint,continueBackend,restoreBackendReceipts,syncBackend,sendBackend} from '../tools/task-backend.mjs';
 import {closeNativeThread} from '../tools/task-native.mjs';
 import {decisionHash} from '../tools/task-decision-protocol.mjs';
 import {durableDecisionFile} from '../tools/task-decisions.mjs';
+import {openAttachClient} from '../tools/task-attach-service.mjs';
+import {createTaskObserver} from '../tools/task-observation.mjs';
 
 const request=x=>({operationId:randomUUID(),actor:'BACKEND_FIXTURE',...x});
 const capabilities={
@@ -35,6 +37,69 @@ const taskSpec={
   acceptanceCriteria:['契约通过'],
   authorization:'仅隔离测试，不连接项目服务或业务数据库',
 };
+
+async function messageFixture(t,{idle=false,loseReply=false}={}) {
+ const s=await fixture(t);await assignmentChange(s,'assignment:dispatch');const b=await bindThread(s);
+ await writeFile(path.join(b.workspace,'.git'),'fixture worktree identity');
+ await assignmentChange(s,'assignment:start',{nativeThreadId:b.threadId,workspace:b.workspace,workspaceEvidence:'isolated fixture'});
+ let turnId='message-original',running=!idle;const calls=[];
+ const final=JSON.stringify({summary:'fixture result',artifacts:[],acceptance:[{criterion:0,evidence:'fixture'}],completedSteps:[],nextSteps:['original unfinished scope']});
+ await updateBinding(s.root,s.run.id,s.assignment.id,value=>{value.backendRequest={operationId:'message-work',turnId,state:running?'RUNNING':'SUCCEEDED',generation:'fixture-generation',baseCommit:'a'.repeat(40)};});
+ const client={close(){},async flush(){},async call(method,params,options){
+  calls.push({method,params,options});
+  if(method==='thread/read')return {thread:{id:b.threadId,cwd:b.workspace,status:{type:running?'active':'idle'}}};
+  if(method==='thread/loaded/list')return {data:[b.threadId]};
+  if(method==='thread/turns/list')return {data:[{id:turnId,status:running?'inProgress':'completed',items:running?[]:[{id:'final',type:'agentMessage',text:final}]}]};
+  if(method==='turn/steer'){assert.equal(params.expectedTurnId,turnId);if(loseReply)throw Error('lost original reply');return {turnId};}
+  if(method==='turn/start'){assert(!running);running=true;turnId='message-continued';return {turn:{id:turnId}};}
+  throw Error('unexpected RPC '+method);
+ }};
+ const binding=(await readBindings(b.loc)).assignments[s.assignment.id],authority={assignmentId:s.assignment.id,executionToken:binding.executionAuthority.token};
+ const runFile=path.join(b.loc.runtime,'run.json'),run=JSON.parse(await readFile(runFile,'utf8'));run.expiresAt='2000-01-01T00:00:00.000Z';await writeFile(runFile,JSON.stringify(run));
+ return {...s,...b,calls,authority,verifyServer:async()=>({record:{serviceId:b.serviceId,generation:'fixture-generation'},client})};
+}
+
+test('attach steer survives coordinator lease expiry, serializes terminals and never starts another turn',async t=>{
+ const s=await messageFixture(t),options={authority:s.authority,verifyServer:s.verifyServer};
+ const messages=[{operationId:'terminal-a',actor:'USER',text:'保留中文输入 A'},{operationId:'terminal-b',actor:'USER',text:'继续原范围 B'}];
+ const results=await Promise.all(messages.map(r=>sendBackend(s.root,s.run.id,s.assignment.id,r,options)));
+ assert(results.every(r=>r.status==='SENT'));
+ assert.equal(s.calls.filter(c=>c.method==='turn/steer').length,2);assert(!s.calls.some(c=>c.method==='turn/start'||c.method==='thread/start'||c.method==='thread/resume'));
+ await sendBackend(s.root,s.run.id,s.assignment.id,messages[0],options);assert.equal(s.calls.filter(c=>c.method==='turn/steer').length,2);
+ await assert.rejects(sendBackend(s.root,s.run.id,s.assignment.id,{...messages[0],text:'changed'},options),/INTERVENTION_REPLAY/);
+ const ledger=await readLedger(s.root);assert.equal(ledger.tasks[s.taskId].assignments[0].interventions.length,2);assert(!JSON.stringify(ledger.events).includes(s.authority.executionToken));
+});
+
+test('idle attach message immediately continues the same unfinished node exactly once',async t=>{
+ const s=await messageFixture(t,{idle:true}),r={operationId:'idle-message',actor:'USER',text:'检查原范围的第二步'},options={authority:s.authority,verifyServer:s.verifyServer};
+ assert.equal((await sendBackend(s.root,s.run.id,s.assignment.id,r,options)).method,'CONTINUE');
+ assert.equal(s.calls.filter(c=>c.method==='turn/start').length,1);assert(!s.calls.some(c=>c.method==='thread/start'||c.method==='thread/resume'));
+ await sendBackend(s.root,s.run.id,s.assignment.id,r,options);assert.equal(s.calls.filter(c=>c.method==='turn/start').length,1);
+ const b=(await readBindings(s.loc)).assignments[s.assignment.id];assert.equal(b.nativeThreadId,s.threadId);assert.equal(b.backendHistory[0].operationId,'message-work');assert.equal(b.backendRequest.operationId,'idle-message-turn');
+});
+
+test('unknown intervention keeps original intent occupied and cannot be bypassed with another message id',async t=>{
+ const s=await messageFixture(t,{loseReply:true}),r={operationId:'uncertain',actor:'USER',text:'one message'},options={authority:s.authority,verifyServer:s.verifyServer};
+ assert.equal((await sendBackend(s.root,s.run.id,s.assignment.id,r,options)).status,'RESULT_UNKNOWN');
+ await sendBackend(s.root,s.run.id,s.assignment.id,r,options);
+ await assert.rejects(sendBackend(s.root,s.run.id,s.assignment.id,{...r,operationId:'different'},options),/INTERVENTION_UNKNOWN/);
+ assert.equal(s.calls.filter(c=>c.method==='turn/steer').length,1);
+});
+
+test('attach observation is read-only, returns visible tool output, redacts authority and never acquires a lease',async t=>{
+ const s=await messageFixture(t),before=await readFile(path.join(s.loc.runtime,'run.json'),'utf8'),sequence=(await readLedger(s.root)).sequence,calls=[];
+ const client=await openAttachClient(s.root,s.taskId,{channel:async(_project,request)=>{calls.push(request);return {nodes:[{id:s.assignment.id,nativeStatus:'active',cursor:1,messages:[{id:'output',type:'commandExecution',text:'command\n完整中文输出\nexit 0'}]}]};}});
+ const snapshot=await client.snapshot();assert(snapshot.nodes[0].canSend);assert.match(snapshot.nodes[0].messages[0].text,/完整中文输出/);assert(!JSON.stringify(snapshot).includes(s.authority.executionToken));
+ await client.close();assert(calls.every(r=>r.action==='observe'));assert.equal(await readFile(path.join(s.loc.runtime,'run.json'),'utf8'),before);assert.equal((await readLedger(s.root)).sequence,sequence);
+});
+
+test('visible streaming observer updates existing items and excludes private reasoning',()=>{
+ const observer=createTaskObserver(),send=(method,params)=>observer.observe({method,params:{threadId:'thread',turnId:'turn',...params}});
+ send('item/agentMessage/delta',{itemId:'a',delta:'中'});const first=observer.page('thread');assert.equal(first.messages[0].text,'中');
+ send('item/agentMessage/delta',{itemId:'a',delta:'文'});send('item/reasoning/textDelta',{itemId:'secret',delta:'private'});send('item/completed',{item:{id:'secret2',type:'reasoning',text:'private'}});
+ const second=observer.page('thread',first.cursor);assert.equal(second.messages.length,1);assert.equal(second.messages[0].id,first.messages[0].id);assert.equal(second.messages[0].text,'中文');
+ send('item/completed',{item:{id:'a',type:'agentMessage',text:'中文终稿'}});assert.equal(observer.page('thread',second.cursor).messages[0].text,'中文终稿');assert(!JSON.stringify(observer.page('thread')).includes('private'));
+});
 
 async function fixture(t) {
   assert(process.env.REVIEW_TASK_DIR,'测试必须由受管 process 提供 REVIEW_TASK_DIR');
@@ -147,7 +212,7 @@ test('backend dispatch preserves the original request and never recreates an unk
   assert.equal(saved.nativeThreadId,undefined);
 
   await updateBinding(state.root,state.run.id,state.assignment.id,b=>{b.runId='foreign-run';});
-  await assert.rejects(dispatchBackend(state.root,state.run.id,state.assignment.id,original),/BACKEND_RUN/);
+  await assert.rejects(dispatchBackend(state.root,state.run.id,state.assignment.id,original),/BACKEND_RUN|ASSIGNMENT_RUN/);
 });
 
 test('native close verifies ownership, resumes only for cleanup, interrupts the original turn and preserves history',async()=>{
@@ -313,9 +378,9 @@ test('result collection uses original operation CAS and cannot accept a concurre
  await assignmentChange(s,'assignment:start',{nativeThreadId:b.threadId,workspace:b.workspace,workspaceEvidence:'isolated fixture'});
  const extra={expectedBackendOperationId:'completed-original',checkpoint:{summary:'original completion',operations:[{id:'completed-original',kind:'FIXTURE',status:'SUCCEEDED',evidence:'read original turn'}]},result:{summary:'collected',artifacts:[],acceptance:[{criterion:0,evidence:'original result'}]}};
  await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={operationId:'concurrent-followup',state:'RUNNING'};});
- await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED/);
+ await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED|RESULT_UNKNOWN/);
  await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest={operationId:'completed-original',state:'RESULT_UNKNOWN'};});
- await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED/);
+ await assert.rejects(assignmentChange(s,'assignment:result',extra),/BACKEND_OPERATION_CHANGED|RESULT_UNKNOWN/);
  await updateBinding(s.root,s.run.id,s.assignment.id,b=>{b.backendRequest.state='SUCCEEDED';});
  await assignmentChange(s,'assignment:result',extra);
  assert.equal((await readLedger(s.root)).tasks[s.taskId].assignments[0].status,'DELIVERED');
@@ -323,9 +388,9 @@ test('result collection uses original operation CAS and cannot accept a concurre
 
 
 test('tracking running work refreshes overlap evidence after dispatch initially observes an idle peer',async t=>{
- const s=await fixture(t),current=(await readLedger(s.root)).tasks[s.taskId];
- const scheduled=await mutate(s.root,'schedule',request({runId:s.run.id,expectedVersions:{[s.taskId]:current.version},assignments:[{taskId:s.taskId,key:'peer',goal:'independent overlap fixture',deliverables:['evidence'],acceptanceCriteria:['overlap'],resources:[{kind:'FILE',key:'core/tests/independent-peer.mjs',access:'WRITE'}],execution:{rationale:'independent fixture'}}]}));
- const peer={...s,assignment:scheduled.assignments[0]},states=[s,peer],threads={};
+ const s=await fixture(t),published=await mutate(s.root,'publish',request({task:{...taskSpec,title:'independent formal peer'}})),current=(await readLedger(s.root)).tasks[published.taskId];
+ const scheduled=await mutate(s.root,'schedule',request({runId:s.run.id,expectedVersions:{[current.id]:current.version},assignments:[{taskId:current.id,key:'peer',goal:'independent overlap fixture',deliverables:['evidence'],acceptanceCriteria:['overlap'],resources:[{kind:'FILE',key:'core/tests/independent-peer.mjs',access:'WRITE'}],execution:{rationale:'independent fixture'}}]}));
+ const peer={...s,taskId:current.id,assignment:scheduled.assignments[0]},states=[s,peer],threads={};
  for(const [i,state]of states.entries()){
   await assignmentChange(state,'assignment:dispatch');
   const binding=await bindThread(state,{threadId:'overlap-thread-'+i,workspace:path.join(s.root,'.process','peer-'+i)});

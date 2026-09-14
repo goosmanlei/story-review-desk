@@ -72,7 +72,7 @@ test('v1 upgrade preserves immutable bytes and refuses an active executor',async
   const original=await readFile(legacyFile);
   await writeFile(path.join(root,'tasks/project.json'),JSON.stringify({schemaVersion:1,projectId:instance.id}));
   const run=await startRun(root);await assert.rejects(mutate(root,'upgrade',req({})),/停止活跃/);await stopRun(root,run.id,{close:true});
-  assert.equal((await mutate(root,'upgrade',req({}))).schemaVersion,2);
+  assert.equal((await mutate(root,'upgrade',req({}))).schemaVersion,3);
   assert.deepEqual(await readFile(legacyFile),original);
   const files=await readdir(path.join(root,'tasks/events')),file=path.join(root,'tasks/events',files[0]),before=await readFile(file);
   await publish(root);assert.deepEqual(await readFile(file),before);
@@ -107,7 +107,7 @@ test('a fresh coordinator recovers delivered work without replaying its operatio
 
 test('atomic scheduling respects resource overlap, priority, dependencies and slots across tasks',async t=>{
   const root=await fixture(t),a=await publish(root),b=await publish(root),c=await publish(root,{dependencies:[a.taskId]}),d=await publish(root);
-  const run=await startRun(root,{capabilities:{...caps,availableSlots:2}});
+  const run=await startRun(root,{capabilities:{...caps,capacityScope:'GLOBAL',agentCapacity:2,availableSlots:2}});
   const result=await schedule(root,run.id,[candidate(a.taskId,'a',{resources:[{kind:'DIRECTORY',key:'core/src',access:'WRITE'}]}),candidate(b.taskId,'b',{resources:[{kind:'FILE',key:'core/src/a.mjs',access:'WRITE'}]}),candidate(c.taskId,'c'),candidate(d.taskId,'d')]);
   assert.equal(result.assignments.length,2);assert.deepEqual(result.deferred.map(x=>x.reason),['RESOURCE_CONFLICT','DEPENDENCY']);
   const fifth=await publish(root);assert.equal((await schedule(root,run.id,[candidate(fifth.taskId,'e')])).deferred[0].reason,'AGENT_CAPACITY');
@@ -120,7 +120,7 @@ test('project task capacity is three unique identities including main, helpers a
  const run=await startRun(root,{capabilities:{...caps,availableSlots:8}});
  const first=await schedule(root,run.id,ids.map((id,i)=>candidate(id,'task-'+i,{execution:{rationale:'受控能力夹具',...(i===0?{mode:'MAIN'}:{})}})));
  assert.equal(first.assignments.length,3);assert.equal(first.deferred[0].reason,'TASK_CAPACITY');assert.equal(first.capacity.occupied,3);assert.equal(first.capacity.available,0);
- const extra=(await schedule(root,run.id,[candidate(ids[1],'auxiliary')])).assignments[0];assert(extra);assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3);
+ const extra=await schedule(root,run.id,[candidate(ids[1],'auxiliary')]);assert.equal(extra.deferred[0].reason,'WORKER_EXISTS');assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3);
  const mainTask=first.assignments.find(a=>a.taskId===ids[0]);await started(root,run.id,mainTask);await accepted(root,run.id,mainTask);
  assert.equal((await schedule(root,run.id,[candidate(ids[3],'fourth')])).deferred[0].reason,'TASK_CAPACITY');
  await closed(root,run.id,mainTask);assert.equal(taskCapacity((await readLedger(root)).tasks).occupied,3,'parent still needs formal completion');
@@ -133,9 +133,9 @@ test('project task capacity is three unique identities including main, helpers a
 
 test('agent capacity and unverified closure lower actual execution without inventing parallel agents',async t=>{
  const root=await fixture(t),ids=[];for(let i=0;i<4;i++)ids.push((await publish(root)).taskId);
- const run=await startRun(root,{capabilities:{...caps,availableSlots:1}}),one=await schedule(root,run.id,ids.map((id,i)=>candidate(id,'agent-'+i)));
+ const run=await startRun(root,{capabilities:{...caps,capacityScope:'GLOBAL',agentCapacity:1,availableSlots:1}}),one=await schedule(root,run.id,ids.map((id,i)=>candidate(id,'agent-'+i)));
  assert.equal(one.assignments.length,1);assert(one.deferred.every(d=>d.reason==='AGENT_CAPACITY'));
- await configureCapabilities(root,run.id,{...caps,availableSlots:0});await assert.rejects(change(root,'assignment:dispatch',ids[0],one.assignments[0].id,run.id),/AGENT_CAPACITY/);
+ await configureCapabilities(root,run.id,{...caps,capacityScope:'GLOBAL',agentCapacity:0,availableSlots:0});await assert.rejects(change(root,'assignment:dispatch',ids[0],one.assignments[0].id,run.id),/AGENT_CAPACITY/);
  const serialRoot=await fixture(t),a=await publish(serialRoot),b=await publish(serialRoot),serial=await startRun(serialRoot,{capabilities:{delegation:false,closeVerified:false,availableSlots:0,limitation:'fixture close unavailable'}});
  const result=await schedule(serialRoot,serial.id,[candidate(a.taskId,'a'),candidate(b.taskId,'b')]);assert.equal(result.assignments.length,1);assert.equal(result.assignments[0].execution.mode,'MAIN');assert.equal(result.deferred[0].reason,'MAIN_CAPACITY');assert.match(result.assignments[0].execution.limitation,/close unavailable/);
 });
@@ -306,6 +306,6 @@ test('coordinator exit preserves the running worker identity, original checkpoin
  await mutate(root,'assignment:reconcile',request);assert((await mutate(root,'assignment:reconcile',request)).replayed);
  const current=(await runtimeState(root)).bindings.assignments[a.id];
  assert.equal(current.nativeThreadId,'native-'+a.id);assert.equal(current.backendRequest.turnId,'same-turn');assert.equal(current.backendRequest.operationId,'still-running-operation');assert.equal(current.ownershipHistory.length,1);
- const conflict=await schedule(root,next.id,[candidate(formal.taskId,'duplicate',{resources:a.resources})]);assert.equal(conflict.assignments.length,0);assert.equal(conflict.deferred[0].reason,'RESOURCE_CONFLICT');
+ const conflict=await schedule(root,next.id,[candidate(formal.taskId,'duplicate',{resources:a.resources})]);assert.equal(conflict.assignments.length,0);assert.equal(conflict.deferred[0].reason,'WORKER_EXISTS');
  assert.equal((await readLedger(root)).tasks[a.taskId].assignments.length,1);
 });

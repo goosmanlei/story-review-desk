@@ -1734,18 +1734,18 @@
   },
   {
     "id": "tasks",
-    "title": "正式任务从澄清到完成",
-    "description": "讨论后批量发布；资源互斥派工，验收并关闭 Agent 后完成；固定七列表格审计。",
+    "title": "正式任务从明确触发到完成",
+      "description": "明确要求才发布或执行；Main 协调至多三项任务，每项 WORKER 自主管理受管后代，Main 分离后原节点继续。",
     "nodes": [
       {
         "id": "clarify",
-        "label": "当场讨论",
+        "label": "明确触发与澄清",
         "domain": "collaboration",
         "col": 0,
         "row": 0,
         "lines": [
-          "目标、范围、可行性、验收",
-          "未成熟部分不落盘"
+          "发布/add、执行或管理",
+          "普通对话与查询不入账"
         ]
       },
       {
@@ -1761,46 +1761,46 @@
       },
       {
         "id": "run",
-        "label": "统一调度",
+        "label": "Main 协调",
         "domain": "production",
         "col": 2,
         "row": 0,
         "lines": [
-          "模型、资源、槽位核查",
-          "专属服务创建、执行与关闭"
+            "next 只列候选，schedule 派工",
+            "至多三项与串行收尾"
         ]
       },
       {
         "id": "audit",
-        "label": "固定表格审计",
+        "label": "查询与 attach",
         "domain": "settings",
         "col": 0,
         "row": 1,
         "lines": [
-          "七列、正式标题、类别与依赖",
-          "北京时间、成果与关闭证据"
+          "七列表格或完整任务树",
+          "明确节点消息、决定单独答复"
         ]
       },
       {
         "id": "done",
-        "label": "验收、关闭与清理",
+        "label": "WORKER 执行树",
         "domain": "materials",
         "col": 1,
         "row": 1,
         "lines": [
-          "交回、主 Agent 验收",
-          "关闭执行并保留聊天历史"
+            "每任务一个根 WORKER",
+            "节点权限与 Main 租约分离"
         ]
       },
       {
         "id": "resume",
-        "label": "检查点与恢复",
+        "label": "检查点与收敛",
         "domain": "story",
         "col": 2,
         "row": 1,
         "lines": [
-          "原操作与 Agent 核查",
-          "按原轮次恢复，不重复调用"
+            "Main 分离后原工作继续",
+            "核对回执后从原检查点续管"
         ]
       }
     ],
@@ -1808,27 +1808,27 @@
       {
         "from": "clarify",
         "to": "ready",
-        "label": "澄清完成"
+        "label": "发布认可"
       },
       {
         "from": "ready",
         "to": "run",
-        "label": "依赖与资源可执行"
+        "label": "明确启动执行"
       },
       {
         "from": "run",
-        "to": "resume",
-        "label": "阶段保存"
-      },
-      {
-        "from": "resume",
         "to": "done",
-        "label": "逐项验收与关闭"
+        "label": "分配根 WORKER"
       },
       {
         "from": "done",
+        "to": "resume",
+        "label": "保存与验收"
+      },
+      {
+        "from": "resume",
         "to": "audit",
-        "label": "追加记录"
+        "label": "保留历史"
       }
     ]
   }

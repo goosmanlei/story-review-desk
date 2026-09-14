@@ -123,13 +123,13 @@ save、export、restore 与网页共用后台维护接口；verify 是不写数�
 
 ## 正式任务管理
 
-项目 Codex 使用 `$review-tasks` 讨论、发布、执行、续办和审计正式任务。主会话维护协调运行和账本，网页及业务工作器不自动执行此队列。任务管理可在网页停机时使用；故事对象与创作结果仍通过原业务 API 保存。调度不依赖 Ultra 开关，主 Agent 保持用户选定模型与强度。
+项目 Codex 使用 `$review-tasks` 发布、执行、续办和管理正式任务。普通对话、需求梳理、代码实现和创作讨论默认不写正式账本；只有用户明确要求发布/add、执行/续办，或暂停、关闭、合并、拆解、调整优先级等正式任务动作时，才进入对应流程。讨论或开发任务管理软件本身也不自触发入账。list、status、show、audit 只是查询，不创建任务、不取得执行资格。主会话 Main 维护协调运行和账本，网页及业务工作器不自动执行此队列。任务管理可在网页停机时使用；故事对象与创作结果仍通过原业务 API 保存。调度不依赖 Ultra 开关，Main 保持用户选定模型与强度。
 
-![正式任务从澄清到完成](../assets/tasks.svg)
+![正式任务从明确触发到完成](../assets/tasks.svg)
 
 ### 讨论与批量发布
 
-发布默认先讨论目标、范围、交付物、验收、可行性和授权，用户认可讨论结论后立即正式入案，不再重复确认。本轮已经认可的结论直接沿用。未澄清想法不生成编号、文件、草稿或事件，也不跨会话恢复；正式任务遇到障碍则记录阻塞，不能丢弃。
+用户明确要求发布或 add 后，先讨论目标、范围、交付物、验收、可行性和授权；用户认可讨论结论后立即正式入案，不再重复确认。本轮已经认可的结论直接沿用。发布讨论中的 `ok`／“发布”只批准已澄清任务入案，不等于实施授权。未澄清想法不生成编号、文件、草稿或事件，也不跨会话恢复；正式任务遇到障碍则记录阻塞，不能丢弃。
 
 一次输入可以按目标、依赖和修改范围拆成多项任务或合并相关问题，不固定一次一个。每项保存原始请求、discussion.summary、feasibility、approvedRequirements 和明确授权，避免拆分遗漏。未知可行性可以成为用户认可的独立调查任务。SYSTEM 先维护通用核心并验证项目继承，CREATIVE 只在所属故事项目内按精确授权推进。
 
@@ -159,7 +159,7 @@ Codex 在发布成功后先 `audit --operation-id 原发布编号 --format markd
 
 ### 账本、版本与运行资格
 
-`tasks/project.json` 绑定故事实例及协议版本。v2 CLI 可回放 v1/v2 事件；已有 v1 账本须在没有活跃执行者、命令和未关闭派工时显式 upgrade。旧事件及编号不改写，旧 CLI 读取 v2 绑定即拒绝，不能降级写入。新项目直接使用 v2。
+`tasks/project.json` 绑定故事实例及协议版本。v3 CLI 可回放 v1/v2/v3 事件，并以推导角色展示没有执行树字段的旧节点；v1/v2 账本和节点可继续 list/show/audit 及只读 attach。新派工、节点介入和其他 v3 写入前必须显式 upgrade。通常这要求没有活跃执行者、命令和开放派工；只有已完成全量 PAUSED 核验的旧现场可保留开放节点升级：暂停必须有已验证时间且无 issues，完整快照哈希匹配，任务及节点 checkpoint、workspace 文件与 SHA、原运行绑定、线程/操作和 Agent 停止回执逐项不变，且快照内无活命令。PAUSED 字段、租约过期或进程退出单独都不足以开放例外。升级不改写旧事件、编号、节点身份或暂停快照；中断时保留 pendingUpgrade 并以原 operationId 恢复。旧节点不会因升级自动获得 v3 执行权限，仍只读 attach，由 Main 核对原执行并收敛。旧 CLI 读取 v3 绑定即拒绝，不能降级写入。新项目直接使用 v3。
 
 `tasks/events` 是追加式 JSON 事务账本，包含操作编号、请求指纹、操作者、时间、前序摘要和完整任务版本。发布、批量发布、调度、合并、拆解和父项汇总均原子生效。写入短暂独占锁并校验 expectedVersions；同号同请求返回原结果，不同请求拒绝。任务编号、正式 title、原话及已认可范围在原案中长期稳定，改目标须讨论并新建任务。
 
@@ -167,17 +167,23 @@ Codex 在发布成功后先 `audit --operation-id 原发布编号 --format markd
 
 日常 `tasks list` 默认只列 READY、RUNNING、BLOCKED、WAITING_REVIEW。明确指定 `--all` 才纳入 DONE、CANCELLED、MERGED；状态、类别、任务筛选与该范围取交集，所以 `list --status DONE` 为空，而 `list --all --status DONE` 返回匹配的完成历史。JSON 与 Markdown 共用同一集合、发布时间排序和固定七列；空 Markdown 列表仍显示表头和 0 项。此默认范围只影响 list，show、status、audit 及完整历史阅读视图保持原语义。
 
-每个项目只有一个 `run` 协调运行，10 分钟租约，阶段间 heartbeat，guard 内自动续租。旧协调进程仍活跃时不接管。协调进程死去而原命令仍运行时，仅在原命令具有可核验派工及完整资源占用时允许新协调者推进无关任务；未知归属或旧串行命令仍阻断接管。运行身份不能复用。
+每个项目只有一个 `run` 协调运行，10 分钟租约，Main 在阶段间 heartbeat。legacy guard 随 Main 自动续租；v3 `guard --assignment` 改为持续核对原节点权限，Main 主动分离后不为该命令续 Main 租约。旧协调进程仍活跃时不接管。协调进程死去而原命令仍运行时，仅在原命令具有可核验派工及完整资源占用时允许新协调者推进无关任务；未知归属或旧串行命令仍阻断接管。运行身份不能复用。
 
 ### 调度与资源占用
 
-主 Agent 准备 schedule 候选，包含所属正式任务、稳定派工 key、目标、交付物、验收、资源、模型选择理由、前置派工以及重派时的 attemptOf。调度事务按正式依赖、优先级（0 最高，默认 2）、发布时间、编号检查候选，原子保留可执行派工，返回其余项目的等待原因。同一正式任务可有多个独立派工，跨任务同样可以并行；派工本身不必再成为正式任务。
+Main 准备 schedule 候选，包含所属正式任务、稳定派工 key、目标、交付物、验收、资源、模型选择理由、前置派工以及重派时的 attemptOf。调度事务按正式依赖、优先级（0 最高，默认 2）、发布时间、编号检查候选，原子保留可执行的根 WORKER，返回其余项目的等待原因。同一正式任务同时只有一个开放根 WORKER；它可在自己的任务和资源范围内通过受管工具建立 SUBAGENT 后代树，执行节点本身不再成为正式任务。
 
-项目同时占用的正式任务最多 3 项，按不同任务 ID 计数：RUNNING 主任务、预留及任何未关闭派工都保留占用。同任务多个辅助派工只占一个任务位，实际 Agent 容量仍逐项计算。结果交回、空闲、BLOCKED 或关闭结果未知不会提前释放其派工；最后派工关闭后，RUNNING 父任务仍须完成收尾并转入相应状态才释放任务位。任务占用与实际同时工作的 Agent 数分别报告，预留记录不证明原生执行已经发生。
+v3 的 `next` 在有 READY 工作时返回 `WORKER_REQUIRED` 及当前容量内的候选，不修改任务状态，也不代表已 claim、已创建 WORKER 或已执行。Main 根据当前范围、资源、验收和宿主能力组装 schedule 候选；只有 schedule 事务成功后才形成根 WORKER 意图。
 
-schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记共用任务上限检查。满额候选返回 `TASK_CAPACITY`；主 Agent 或子 Agent 容量不足仍返回 `MAIN_CAPACITY`／`AGENT_CAPACITY`，启动前复核当前能力变化。status 在执行附表展示任务占用、上限和可补入数，依赖及资源检查仍独立适用。旧版本留下超限占用时，允许 reconcile、关闭及收尾，拒绝继续领取、续办执行和启动命令；原事件不改写。
+项目同时占用的正式任务最多 3 项，按不同任务 ID 计数：Main 正在处理、预留 WORKER 及任何未关闭执行树都保留占用。同一任务的整棵 WORKER/SUBAGENT 树只占一个正式任务位，但每个活跃节点仍逐项消耗实际宿主容量。WORKER 可按需要自主派生任意深度后代，业务层不设置固定数量上限；CPU、内存、服务槽位、工作区、资源冲突和关闭能力仍限制实际并发。结果交回、空闲、BLOCKED 或关闭结果未知不会提前释放；全部后代和根 WORKER 关闭后，RUNNING 父任务仍须完成收尾并转入相应状态才释放任务位。任务占用与实际同时工作的 Agent 数分别报告，预留记录不证明原生执行已经发生。
 
-空位释放后，已获启动授权的主 Agent 重新检查 READY 待办和 deferred 候选，按依赖、优先级补入，无需用户重复启动。协调运行不自行调用原生模型；原生 Agent 关闭能力未验证时按现有规则由主 Agent 串行推进，不能为了达到 3 项而虚构槽位或放松关闭核验。共享核心整合、正式业务写入、提交推送和部署继续串行。
+schedule、dispatch/start、resume 与 guard 的原子活动登记共用任务上限检查；`next` 只在同一上限内列出候选。满额候选返回 `TASK_CAPACITY`；Main 或执行树节点的宿主容量不足仍返回 `MAIN_CAPACITY`／`AGENT_CAPACITY`，启动前复核当前能力变化。status 在执行附表展示任务占用、上限和可补入数，依赖及资源检查仍独立适用。旧版本留下超限占用时，允许 reconcile、关闭及收尾，拒绝继续领取、续办执行和启动命令；原事件不改写。
+
+空位释放后，已获启动授权的 Main 重新检查 READY 待办和 deferred 候选，按依赖、优先级补入，无需用户重复启动。协调运行不自行调用原生模型；原生 Agent 关闭能力未验证时按现有规则由 Main 串行推进，不能为了达到 3 项而虚构槽位或放松关闭核验。共享核心整合、正式业务写入、提交推送和部署继续由 Main 串行完成。
+
+v3 为每个已启动节点在本机 runtime 保存定界执行权限；它只能操作自身或原后代、不能扩大正式任务或资源范围，也不进入长期任务事件。Main 的 `tasks run` 在可处理的 SIGINT/SIGTERM/SIGHUP 或租约到期时，若未进入 stop/pause，会在账本锁内执行 `detachRun`，保存已核验交接回执后退出。原 WORKER、后代及以 `guard --assignment` 运行的命令仍可在原节点权限内继续；Main 离线不自动验收、关闭、补位或 DONE。
+
+下一次用户明确启动 `tasks run` 时，新 Main 核对原 detach 回执，在同一锁内把开放任务树的协调归属接续到新 run，保留原线程、轮次、检查点、操作和资源占用。这项主动交接不新建 WORKER，不重发原请求。暴力退出、原身份不足、显式 stop 及暂停不得套用 detach 回执，仍按各自的现场核查、收敛或 checkpoint 协议处理。
 
 | 资源 | 规则 |
 | --- | --- |
@@ -186,11 +192,13 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 | READ | 必须提供精确不可变版本，可与其他不可变读取并行 |
 | UNKNOWN | 无法确认范围，独占全部派工资源 |
 
-路径大小写按保守冲突处理，拒绝绝对路径、父目录跳转及非规范别名。资源占用持续到派工 CLOSED；交回或空闲不能释放占用。阻塞且命令已结束的主 Agent 派工保留受影响资源，无关资源可以继续。代码派工使用独立受管 Git worktree；专属服务创建与启动轮次回执保存到 runtime，再开始工作。
+路径大小写按保守冲突处理，拒绝绝对路径、父目录跳转及非规范别名。资源占用持续到执行节点 CLOSED；交回或空闲不能释放占用。阻塞且命令已结束的节点仍保留受影响资源，无关资源可以继续。代码派工使用独立受管 Git worktree；专属服务创建与启动轮次回执保存到 runtime，再开始工作。
 
-每项派工依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED，有未解决用户决定时进入 WAITING_DECISION。先 schedule，再 backend dispatch 由同一专属服务创建会话并启动轮次；缺失回复先 sync/recover 原调用，禁止盲目重发。一次 Agent 只绑定一项派工，负责人和辅助 Agent 分别登记，主 Agent 统一控制容量。已关闭派工不再改动；重派创建新编号及新 Agent。
+每个执行节点依次记录 RESERVED、dispatch 尝试、RUNNING、DELIVERED、ACCEPTED、CLOSED，遇到中断可进入 BLOCKED，有未解决用户决定时进入 WAITING_DECISION。Main 先 schedule 根 WORKER，再由同一专属服务 backend dispatch 创建会话并启动轮次。WORKER/SUBAGENT 仅通过 `review_task_agent_spawn/send/read/wait/accept/close` 操作自己的后代；服务从当前线程绑定推导 task、父节点、根 WORKER、工作区和执行授权，不接受工作 Agent 自报身份或权限。spawn 的稳定 key 和原操作结果可重放核查，缺失回复先查询，禁止换 key 盲目重建。
 
-`guard --assignment ID` 使用派工独立命令锁和进程记录，允许无冲突命令并行；开始命令时在账本锁内重新核查状态。共享核心整合、正式业务保存、提交推送和部署由主 Agent 串行完成，共享核心命令加 `--core` 锁定真实 Git common directory。guard 不代替业务 CAS，也不约束绕过协议的其他会话。旧 `next` 保留串行兼容，有未收敛派工时不跨过它领取新任务。
+子节点资源必须完全落在父节点资源内。父节点把资源委派给开放后代后，不得同时访问冲突范围；READ 仍须精确不可变版本，UNKNOWN 仍独占。后代只能读取和管理自己的子树，不能操作祖先、同级或其他正式任务；后代全部验收或取消并关闭后，父节点才可提交最终结果。一次 Agent 只绑定执行树中的一个节点，已关闭节点不再复用；重派创建新编号及新 Agent。
+
+`guard --assignment ID` 使用派工独立命令锁和进程记录，允许无冲突命令并行；开始命令时在账本锁内重新核查状态。共享核心整合、正式业务保存、提交推送和部署由 Main 串行完成，共享核心命令加 `--core` 锁定真实 Git common directory。guard 不代替业务 CAS，也不约束绕过协议的其他会话。v1/v2 `next` 自动领取只是旧程序历史行为；当前 v3 对旧账本只读或收敛，升级后的 `next` 仅列候选，不领取新任务。
 
 ### 模型、Goal 与 Agent 关闭
 
@@ -201,23 +209,23 @@ schedule、dispatch/start、串行 next、resume 与 guard 的原子活动登记
 | 普通实现、测试、修复 | gpt-5.6-sol | xhigh |
 | 架构、高风险、争议核验 | gpt-6-astra | max |
 
-选择必须属于专属服务 model/list 支持的模型和强度，并保存理由。主 Agent 保持用户配置；工作会话通过项目专属 App Server 创建，不依赖交互 TUI 是否属于公共 App Server，也不自动转移原生 spawn 的 Agent。
+选择必须属于专属服务 model/list 支持的模型和强度，并保存理由。Main 保持用户配置；WORKER 和 SUBAGENT 会话通过项目专属 App Server 创建，不依赖交互 TUI 是否属于公共 App Server，也不自动转移原生 spawn 的 Agent。工作 Agent 的动态工具只允许操作当前任务内自己的后代树，不能借工具调用取得 Main 或其他任务的执行权限。
 
 `backend ensure` / `backend probe` 在受管阶段自动启动或复用本项目服务。服务身份由实例 ID 与规范项目根派生；短 Unix socket 位于当前 Codex home 的 app-server-control，使用项目专属名称。运行记录位于 instance/runtime/task-execution/server，包含进程出生时间、启动参数、二进制 SHA/版本、socket inode、隔离 sqlite_home 和代次。启动锁排斥重复实例；健康服务必须通过进程、socket 与 RPC 联合核验。未知 socket、无法证明归属或原启动结果未知时保留现场，不接管公共服务、其他项目服务或用户交互会话。
 
 Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字节转发，不接收 JSONL。initialize、协议、权限、服务缺失和 RPC 超时分别保留诊断；不能把失败简写成 0 槽位。`native probe` 保留兼容入口，拒绝手填 slots 和外部 socket。关闭探测使用持久命名的 legacy 历史会话；针对尚未支持条目分页的版本，读取原完整轮次作为兼容回退，不丢失结果。
 
-能力分为 closeVerified（空线程关闭）、executionVerified（真实派工并行及关闭）和 goalVerified。CPU/内存及 RPC 配置上限给出 agentCapacity，减去所有未关闭子派工得到 availableSlots；服务配置只是受验证的上界，不是实际并行证明。派工交回或 idle 仍占用；`backend verify-execution` 核对至少两项实际活动采样、原轮次身份、成果保存、主 Agent 验收与关闭。最多 3 个不同正式任务仍独立核算；同任务辅助派工占 Agent 槽位。
+能力分为 closeVerified（空线程关闭）、executionVerified（真实派工并行及关闭）和 goalVerified。App Server 的 `agents.max_threads` / `agents.max_concurrent_threads_per_session` 是每个会话的原生子线程槽位，primary 会话本身不计入；探测回执因此标记 `capacityScope:"PER_SESSION"`。这些配置不是项目专属 App Server 的全局线程上限，不能通过减去全项目未关闭 WORKER/SUBAGENT 得出 availableSlots。v3 只在能力证据显式为 `capacityScope:"GLOBAL"` 时，才使用其 `agentCapacity` 对全部开放 SUBAGENT 添加 `AGENT_CAPACITY` 限制。CPU/内存、资源冲突、工作区和关闭能力仍决定实际并发，最多 3 个不同正式任务的业务上限独立核算。空线程关闭不证明真实软件并行；明确执行的原生验收应覆盖 3 个 WORKER 重叠、同任务受管后代使活跃节点超过 3，以及结果保存、Main 验收和关闭。
 
 代码派工需独立、干净且登记到该正式任务的受管 worktree，与本项目核心 Git common directory 和精确 baseCommit 一致。`backend dispatch --run ID --assignment ID --file -` 请求为 `{operationId,prompt,workspace,baseCommit}`。创建意图、创建回执和 turn/start 前后状态分别持久保存；原编号同请求重放仅查询，改变请求或创建结果未知不重复调用。服务创建回执、线程 ID、工作区和 loaded 状态共同证明执行归属；能读取磁盘历史只证明历史可读。
 
-`backend sync` 查询原轮次，`collect` 以 `{operationId}` 登记结构化结果，主 Agent 逐项 accept。长派工使用 FOLLOWUP：上一轮已确认成功且尚未交回时，`backend continue` 以新操作编号和同范围 prompt 继续原会话，保留全部原轮次。活动、失败未知或已关闭派工不允许续行。专属服务暂不声明 Goal 自动跨轮能力；原生 Goal 必须先独立验证，不能把选择 Ultra 当作已启用。
+`backend sync` 查询原轮次，`collect` 以 `{operationId}` 登记结构化结果，父 WORKER 逐项验收后关闭后代，Main 验收根 WORKER。长派工使用 FOLLOWUP：上一轮已确认成功且尚未交回时，`backend continue` 以新操作编号和同范围 prompt 继续原会话，保留全部原轮次。活动、失败未知或已关闭节点不允许续行。专属服务暂不声明 Goal 自动跨轮能力；原生 Goal 必须先独立验证，不能把选择 Ultra 当作已启用。
 
-完成、取消或替换时先保存结果/检查点，再 `backend close`（native close 兼容）：暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；失败保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭服务派工和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
+完成、取消或替换时从叶节点向根节点收敛：先保存结果/检查点并完成父节点验收，再 `backend close`（native close 兼容）暂停并回读 Goal、停止原活动 turn、精确终止并回读后台命令，归档并核验 loaded/list 消失和 read 为 notLoaded。保留聊天历史，不调用 thread/delete。最后 assignment close 保存验收及清理证据；有开放后代、未知原操作或关闭失败时保留容量，不留空闲 Agent 池。`backend stop` 只有在无未关闭服务节点和加载会话时停止本项目 supervisor/子进程，核对退出，保留恢复状态及历史。
 
 ### App Server Foundation
 
-通用核心 `tools/app-service.mjs` 统一维护专属服务生命周期和身份核验，`tools/execution-runtime.mjs` 提供本机范围绑定、boot 身份及持久写入。正式任务通过 `task-backend.mjs` 接入，`task-server.mjs` 保留兼容入口和容量、关闭探测策略。服务层不读取正式任务内容，不依赖故事名称、某项任务或固定机器路径；实例 ID 与规范项目根派生的身份和既有 runtime 地址在升级后保持稳定。
+通用核心 `tools/app-service.mjs` 统一维护专属服务生命周期和身份核验，`tools/execution-runtime.mjs` 提供本机范围绑定、boot 身份及持久写入。正式任务通过 `task-backend.mjs` 接入，`task-server.mjs` 保留兼容入口和容量、关闭探测策略；`task-tree.mjs`、`task-execution-scope.mjs` 与 `task-agent-tools.mjs` 约束执行树和节点权限，`task-interventions.mjs` 与 attach 服务保存人工介入。服务层不依赖故事名称、某项固定任务或固定机器路径；实例 ID 与规范项目根派生的身份和既有 runtime 地址在升级后保持稳定。
 
 | 基础接口 | 调用契约 |
 | --- | --- |
@@ -229,7 +237,7 @@ Unix socket 使用 WebSocket HTTP Upgrade 与有界消息帧；proxy 只是字�
 
 未绑定原生线程或服务的 MAIN 派工可执行空闲服务维护；未关闭子派工及任何原生服务绑定仍阻断接收器停止。正式任务生命周期 CLI 仍经 guard + process；基础接口不代替调度、业务授权或任务验收。配置中的线程上界不代替最多 3 项正式任务、实际容量和资源互斥检查。supervisor 退出但子服务仍可核验时复用原服务，不再次启动实例。
 
-标准 project create、installSourceOnly 和部署升级沿用固定提交的受管源码安装流程，一并交付服务模块、Skill 与手册，项目副本不维护补丁。接收器 ESM 依赖由 `decisionChannelSources` 一起打包，包含任务编号、基础服务和运行记录模块，必须在独立目录实际验证载入。运行中的旧接收器保留代码与连接到原派工收敛，不热替换。
+标准 project create、installSourceOnly 和部署升级沿用固定提交的受管源码安装流程，一并交付执行树、工作 Agent 工具、人工介入、attach 终端与服务、Skill 和手册，项目副本不维护补丁。接收器 ESM 依赖由受管源码清单一起打包，包含任务编号、基础服务、运行记录和执行权限模块，必须在独立目录实际验证载入。运行中的旧接收器保留代码与连接到原执行树收敛，不热替换；v1/v2 账本安全升级前只开放旧节点的只读观察。
 
 `instance/runtime/task-execution` 的记录仅属于本机：
 
@@ -315,6 +323,16 @@ keeper 关闭循环遇到 `PROCESS_LOCK_BUSY` 时保留 executor 锁，输出 `E
 停止协调执行后禁止新答复和新工作，仍允许保存检查点、核查及关闭。`backend close` 先中断原轮次、停止并核对后台命令、归档并验证卸载，再取消关联决策，最后 assignment close；关闭失败保留占用。不通过发送“拒绝”替代真实停止核验，也不把 CANCELLED 包装为验收成功。
 
 协议字段已于 2026-09-14 使用本机 `codex-cli 0.154.0 app-server generate-json-schema --experimental` 核对，包括输入、审批、DynamicToolSpec、动态工具完成条目和请求清理通知。请求清理与动态工具回传的语义参考 [OpenAI App Server 官方说明](https://learn.chatgpt.com/docs/app-server)。当前验证包含持久收件、并行归属、版本/重放、协调更换、断线/重启、发送未知、FOLLOWUP 及容量/关闭的受控测试；真实用户呈现与明确答复必须另行执行，不能用 fixture 结果替代。
+
+#### Attach 任务树观察与人工介入
+
+`tasks attach TASK_ID` 打开一个项目专属观察连接，不要求 Main 当前在线。初始概览只展示任务状态、检查点与结果摘要、待决问题，以及根 WORKER 到全部 SUBAGENT 后代的完整树，不把所有节点历史一次倾倒。输入编号或 `/agent NODE` 聚焦节点后，首次进入输出该节点的完整可见内容，再只追加公开 agent message 和工具事件更新。`/agents`、`/back` 返回概览时停止该节点的流式输出，保留已读缓存；再次进入只补显离开期间的更新，不重发全历史。`--assignment NODE` 可直接聚焦。同一消息 ID 的流式文本增长或完成态替换仍会以更新显示。隐藏推理不进入 attach 快照。
+
+打开连接、轮询、选择节点或读历史都不会启动模型轮次。聚焦后的普通文本是对该节点的明确介入：原轮次活动时调用原轮次 steer；节点已 idle、原轮次结果明确且仍可续办时，在同一任务、资源和授权范围内登记新介入并启动后续轮次。消息先以唯一 operationId 保存原意图和回执；`syncBackend` / `reconcileBackendMessages` 仅在原持久 RPC 成功回执精确匹配消息、节点、服务、线程与轮次后收敛为 SENT，否则保留 RESULT_UNKNOWN 并禁止重发。PAUSED、已关闭、未加载且不可恢复、旧 v1/v2 只读节点、执行身份或发送结果 UNKNOWN 均拒绝输入并给出原因。
+
+待决问题与普通消息使用分开的交互状态。用户输入 `/decision ID` 后，终端通过 decision show 回读当前问题、版本和 APPROVAL 原始请求，明确展示后才构造 `presentedEvidence`；BUSINESS、INPUT、APPROVAL 分别保持原结构。未进入决定界面的聊天文本不会被解释成回答、授权或批准。`--read-only` 禁止消息和决定写入；非 TTY 只输出一次确定性只读快照。
+
+终端刷新采用追加输出并恢复当前草稿，括号粘贴保留中文和多行文本，只有随后 Enter 才发送。`/detach`、Ctrl+C、Ctrl+D、连接关闭只卸载当前 observer，不 interrupt、close 或删除任何工作节点；多个 observer 可同时读取，读取游标只在各自连接期客户端内保存。宿主历史页不受支持但原连接仍可读时，observer 显示降级原因，仅继续提供该连接接收器保留的可见事件及当前输出。原连接不可用时，只读回退核对原派工创建、服务、线程、轮次及对应成功回执，只从项目原持久收件箱显示已完成的公开条目；它不启动或恢复服务、线程、轮次和租约，不另存 transcript，也不包含未保存的流式增量。无法核对恢复回执的新接收器通知标记 PARTIAL_UNVERIFIED 并略过；身份整体不成立时标记 UNVERIFIED 且不显示节点历史。此时连接保持 UNAVAILABLE、节点 `canSend:false`，不能把 VERIFIED 的保留完成通知解释成完整轮次历史。Main 不在线时，v3 节点按原执行权限继续，介入回执、节点输出、决定、结果和检查点继续持久化；attach 不代替跨任务调度、父级验收、正式关闭或 DONE。下一次用户明确启动正式任务管理时，Main 从原任务树、原操作和最近检查点续管。
 
 #### 真实决策往返验收
 

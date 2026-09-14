@@ -3,6 +3,8 @@ import path from 'node:path';
 import {realpath,lstat} from 'node:fs/promises';
 import {taskCapacity,taskCapacityReason,requireTaskCapacity} from './task-capacity.mjs';
 import {pendingDecisions} from './task-decision-protocol.mjs';
+import {resources,conflicts,resourcesWithin,assignmentRole,assignmentNodes,findAssignment,assignmentAncestors,assignmentDescendants} from './task-tree.mjs';
+export {resources,conflicts} from './task-tree.mjs';
 
 // Logical reservations are durable. Native thread IDs, worktrees and leases live
 // in runtime bindings and are deliberately never copied into these records.
@@ -16,30 +18,7 @@ export const modelPolicy = {
   HIGH_RISK: {model:'gpt-6-astra', effort:'max'},
 };
 export const assignmentOpen = a => a.status !== 'CLOSED';
-export const assignmentUnknown = a => (a.checkpoint?.operations || []).some(o => ['PENDING','RESULT_UNKNOWN'].includes(o.status));
-
-export function resources(value) {
-  if (!value?.length) return [{kind:'UNKNOWN', key:'*', access:'WRITE'}];
-  demand(Array.isArray(value) && value.length <= 200, 'resources 须为有界数组');
-  return value.map(r => {
-    demand(['FILE','DIRECTORY','OBJECT','UNKNOWN'].includes(r.kind), '资源种类无效');
-    demand(['READ','WRITE'].includes(r.access), '资源访问方式无效');
-    if (r.kind === 'UNKNOWN') return {kind:'UNKNOWN',key:'*',access:'WRITE'};
-    nonempty(r.key, 'resource.key');
-    demand(!path.posix.isAbsolute(r.key) && !r.key.includes('\\') && !r.key.split('/').some(x=>['..','.',''].includes(x)), '资源必须使用规范逻辑身份，不能使用机器绝对路径');
-    if (r.access === 'READ') nonempty(r.version, '不可变读取的精确版本');
-    return {kind:r.kind,key:r.key,access:r.access,...(r.access==='READ'?{version:r.version}:{})};
-  });
-}
-export function conflicts(left, right) {
-  return left.some(a => right.some(b => {
-    if (a.kind === 'UNKNOWN' || b.kind === 'UNKNOWN') return true;
-    if (a.access === 'READ' && b.access === 'READ') return false;
-    if ((a.kind==='OBJECT') !== (b.kind==='OBJECT')) return false;
-    const x=a.key.toLowerCase(), y=b.key.toLowerCase();
-    return x===y || a.kind==='DIRECTORY'&&y.startsWith(x+'/') || b.kind==='DIRECTORY'&&x.startsWith(y+'/');
-  }));
-}
+export const assignmentUnknown = a => (a.checkpoint?.operations || []).some(o => ['PENDING','RESULT_UNKNOWN'].includes(o.status))||(a.interventions||[]).some(i=>['PENDING','RESULT_UNKNOWN'].includes(i.status));
 
 export function chooseExecution(spec, capabilities) {
   nonempty(spec?.rationale, '模型与强度选择理由');
@@ -60,21 +39,34 @@ export function chooseExecution(spec, capabilities) {
 export async function assignmentMutation(ctx) {
   const {action,request,tasks,at,touch,get,requireRun,bindings,checkpoint,complete,active,capabilities,idFor,root,decisionBlocked}=ctx;
   await requireRun();
-  const all=()=>Object.values(tasks).flatMap(t=>(t.assignments||[]).map(a=>({task:t,assignment:a})));
-  const find=id=>all().find(x=>x.assignment.id===id);
-  const owner=a=>demand(bindings.assignments[a.id]?.runId===request.runId,'派工不属于当前执行会话；先核查恢复');
+  const v3=ctx.schemaVersion>=3;
+  const all=()=>assignmentNodes(tasks);
+  const find=id=>findAssignment(tasks,id);
+  const owner=a=>demand(ctx.executionAuthority||bindings.assignments[a.id]?.runId===request.runId,'派工不属于当前执行会话；先核查恢复');
+  const hostLimit=()=>v3?capabilities.capacityScope==='GLOBAL'?capabilities.agentCapacity:null:capabilities.agentCapacity??capabilities.availableSlots??0;
+  const hostFull=open=>hostLimit()!==null&&open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length>=Math.max(0,hostLimit());
   const bump=(t,a)=>{touch(t);a.version++;a.updatedAt=at;};
-  if (action === 'schedule') {
+  if (action === 'schedule'||action==='assignment:schedule') {
+    const child=action==='assignment:schedule';
+    demand(!child||v3,'子执行树要求 v3 账本');
+    const parent=child?find(request.parentAssignmentId)?.assignment:null;
+    if(child){
+      demand(parent&&parent.taskId===request.taskId,'ASSIGNMENT_PARENT_SCOPE：父节点须属于指定正式任务');
+      demand(request.authority?.assignmentId===parent.id&&ctx.executionAuthority,'EXECUTION_AUTHORITY：子派工必须使用原父节点执行授权');
+      demand(parent.status==='RUNNING'&&!assignmentUnknown(parent)&&!pendingDecisions(parent).length&&!await decisionBlocked?.(parent.id),'ASSIGNMENT_PARENT_BLOCKED：父节点未处于可派工状态');
+    }
     demand(Array.isArray(request.assignments) && request.assignments.length && request.assignments.length<=50, 'schedule 须提供 1–50 项候选派工');
     const seen=new Set();
     const candidates=request.assignments.map(s=>{
-      const t=get(s.taskId); nonempty(s.key,'assignment.key');
+      const t=get(s.taskId||request.taskId); nonempty(s.key,'assignment.key');
+      if(v3)demand(child?(!s.role||s.role==='SUBAGENT')&&(!s.parentAssignmentId||s.parentAssignmentId===parent.id)&&t.id===parent.taskId:(!s.role||s.role==='WORKER')&&!s.parentAssignmentId,'ASSIGNMENT_PARENT_SCOPE：协调者只调度 WORKER，子节点只由原父节点派工');
       demand(/^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$/.test(s.key),'派工 key 无效');
       const k=t.id+':'+s.key;demand(!seen.has(k),'候选派工 key 重复');seen.add(k);
       nonempty(s.goal,'assignment.goal');strings(s.deliverables,'assignment.deliverables');strings(s.acceptanceCriteria,'assignment.acceptanceCriteria');
       const rs=resources(s.resources), execution=chooseExecution(s.execution,capabilities);
+      if(child){demand(resourcesWithin(rs,parent.resources),'RESOURCE_SCOPE：子节点超出父节点资源范围');demand(execution.mode==='SUBAGENT','HOST_CAPABILITY：子节点需要已验证的原生创建和关闭能力');}
       demand(Array.isArray(s.dependsOn||[]),'派工依赖须为数组');
-      for(const d of s.dependsOn||[]) demand(find(d),'派工依赖不存在');
+      for(const d of s.dependsOn||[]){demand(find(d),'派工依赖不存在');if(child)demand(find(d).task.id===t.id,'ASSIGNMENT_PARENT_SCOPE：子节点依赖须属于同一正式任务');}
       if(s.attemptOf) demand(find(s.attemptOf)?.task.id===t.id && find(s.attemptOf).assignment.status==='CLOSED','重派必须引用本任务已关闭的派工');
       demand(!(t.assignments||[]).some(a=>a.key===s.key && assignmentOpen(a)), '同一派工尚未关闭，不能重复调度');
       return {s,t,rs,execution};
@@ -85,21 +77,25 @@ export async function assignmentMutation(ctx) {
       const open=all().filter(x=>assignmentOpen(x.assignment));
       if (!['READY','RUNNING'].includes(t.status) || t.children?.length) reason='TASK_NOT_EXECUTABLE';
       else if (!t.dependencies.every(d=>complete(tasks,d))) reason='DEPENDENCY';
-      else if (t.status==='RUNNING' && bindings.tasks[t.id]!==request.runId) reason='RECOVERY_REQUIRED';
+      else if (v3&&!child&&(t.assignments||[]).some(a=>assignmentOpen(a)&&assignmentRole(a)==='WORKER')) reason='WORKER_EXISTS';
+      else if (!child&&t.status==='RUNNING' && bindings.tasks[t.id]!==request.runId) reason='RECOVERY_REQUIRED';
       else if ((t.checkpoint?.operations||[]).some(o=>['PENDING','RESULT_UNKNOWN'].includes(o.status))) reason='RESULT_UNKNOWN';
       else if ((s.dependsOn||[]).some(d=>{const a=find(d).assignment;return a.status!=='CLOSED'||a.outcome!=='ACCEPTED';})) reason='ASSIGNMENT_DEPENDENCY';
-      else if (open.some(x=>conflicts(rs,x.assignment.resources))) reason='RESOURCE_CONFLICT';
+      else if (open.some(x=>!(child&&[parent,...assignmentAncestors(tasks,parent.id)].some(a=>a.id===x.assignment.id))&&conflicts(rs,x.assignment.resources))) reason='RESOURCE_CONFLICT';
+      else if (child&&(await Promise.all([parent,...assignmentAncestors(tasks,parent.id)].map(a=>ctx.resourceActive?.(a.id,rs)))).some(Boolean)) reason='ANCESTOR_RESOURCE_ACTIVE';
       else if (Object.values(tasks).some(x=>x.status==='RUNNING'&&!x.assignments?.length)) reason='LEGACY_EXCLUSIVE';
       else if (taskCapacityReason(tasks,t.id)) reason='TASK_CAPACITY';
       else if (execution.mode==='MAIN' && open.some(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED')) reason='MAIN_CAPACITY';
-      else if (execution.mode==='SUBAGENT' && open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length >= Math.max(0,capabilities.agentCapacity??capabilities.availableSlots??0)) reason='AGENT_CAPACITY';
+      else if (execution.mode==='SUBAGENT' && hostFull(open)) reason='AGENT_CAPACITY';
       if (reason) {deferred.push({taskId:t.id,key:s.key,reason});continue;}
-      const id=idFor(t.id+':'+s.key), a={id,key:s.key,taskId:t.id,version:1,status:'RESERVED',goal:s.goal,
+      const id=idFor(t.id+':'+s.key), a={id,key:s.key,taskId:t.id,...(v3?{role:child?'SUBAGENT':'WORKER',parentAssignmentId:parent?.id||null,rootAssignmentId:parent?.rootAssignmentId||parent?.id||id}:{}),version:1,status:'RESERVED',goal:s.goal,
         deliverables:s.deliverables,acceptanceCriteria:s.acceptanceCriteria,resources:rs,execution,
         dependsOn:s.dependsOn||[],attemptOf:s.attemptOf||null,createdAt:at,updatedAt:at,startedAt:null,
         deliveredAt:null,acceptedAt:null,closedAt:null,checkpoint:null,result:null};
       touch(t);t.assignments ||= [];t.assignments.push(a);t.status='RUNNING';t.startedAt ||= at;t.blockReason=null;
-      delete t.runId;bindings.tasks[t.id]=request.runId;bindings.assignments[id]={runId:request.runId,originRunId:request.runId,dispatchIntentAt:at};
+      const runId=child?bindings.assignments[parent.id].runId:request.runId;
+      delete t.runId;if(!child)bindings.tasks[t.id]=runId;bindings.assignments[id]={runId,originRunId:runId,dispatchIntentAt:at};
+      if(v3)ctx.issueAuthority(a,bindings.assignments[id],capabilities);
       selected.push(a);
     }
     return {status:selected.length?'SCHEDULED':'NO_EXECUTABLE_ASSIGNMENT',assignments:selected,deferred,capacity:taskCapacity(tasks)};
@@ -108,11 +104,20 @@ export async function assignmentMutation(ctx) {
   demand(a,'派工不存在');demand(a.version===request.expectedAssignmentVersion,`派工版本冲突：当前为 ${a.version}`);
   demand(assignmentOpen(a),'已关闭派工只读；返工或新任务须重新调度新的 Agent');
   const binding=bindings.assignments[a.id] ||= {};
-  if(['assignment:result','assignment:accept'].includes(action))demand(!await decisionBlocked?.(a.id),'DECISION_INBOX：原服务请求尚未核查，不能验收');
+  if(['assignment:result','assignment:accept','assignment:close'].includes(action)){
+    const descendants=assignmentDescendants(tasks,a.id);
+    demand(!descendants.some(assignmentOpen),'ASSIGNMENT_DESCENDANTS_OPEN：须先收敛并关闭全部后代，父节点不能提前交回、验收或释放资源');
+    demand(!descendants.some(x=>assignmentUnknown(x)||pendingDecisions(x).length),'ASSIGNMENT_DESCENDANTS_PENDING：后代仍有未知结果或待决事项');
+    for(const node of [a,...descendants]){
+      demand(!(node.interventions||[]).some(i=>['PENDING','RESULT_UNKNOWN'].includes(i.status)),'INTERVENTION_PENDING：介入结果尚未核查，不能交回、验收或关闭');
+      demand(!ctx.runtimeUnknown?.(node.id),'RESULT_UNKNOWN：原节点操作或介入结果尚未核查，不能交回、验收或关闭');
+      demand(!await decisionBlocked?.(node.id),'DECISION_INBOX：原服务请求尚未核查，不能验收或关闭');
+    }
+  }
   if(['assignment:dispatch','assignment:start'].includes(action)){
     requireTaskCapacity(tasks,t.id);
     const open=all().filter(x=>assignmentOpen(x.assignment));
-    if(a.execution.mode==='SUBAGENT')demand(capabilities.delegation&&capabilities.closeVerified&&open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length<=Math.max(0,capabilities.agentCapacity??capabilities.availableSlots??0),'AGENT_CAPACITY：当前原生能力或槽位不足；保留原派工，先核查收尾');
+    if(a.execution.mode==='SUBAGENT')demand(capabilities.delegation&&capabilities.closeVerified&&(hostLimit()===null||open.filter(x=>x.assignment.execution.mode==='SUBAGENT').length<=Math.max(0,hostLimit())),'AGENT_CAPACITY：当前原生能力或槽位不足；保留原派工，先核查收尾');
     else demand(open.filter(x=>x.assignment.execution.mode==='MAIN'&&x.assignment.status!=='BLOCKED').length<=1,'MAIN_CAPACITY：主 Agent 只能串行执行');
   }
   if(action==='assignment:reconcile') {
@@ -144,7 +149,7 @@ export async function assignmentMutation(ctx) {
     owner(a);
     if(action==='assignment:dispatch') {
       demand(a.status==='RESERVED'&&!binding.spawnAttemptAt&&a.execution.mode==='SUBAGENT','只能对尚未尝试启动的子 Agent 派工登记一次 dispatch');
-      bump(t,a);a.dispatchAttemptAt=at;binding.spawnAttemptAt=at;binding.parentThreadId=capabilities.parentThreadId;binding.socket=capabilities.socket;
+      bump(t,a);a.dispatchAttemptAt=at;binding.spawnAttemptAt=at;binding.parentThreadId=a.parentAssignmentId?bindings.assignments[a.parentAssignmentId]?.nativeThreadId:capabilities.parentThreadId;binding.socket=capabilities.socket;
     } else if(action==='assignment:start') {
       demand(a.status==='RESERVED','派工只能启动一次；缺失回执先 reconcile');
       nonempty(request.workspaceEvidence,'工作区隔离核查');
@@ -165,6 +170,7 @@ export async function assignmentMutation(ctx) {
         binding.workspace=workspace;
       } else if(a.execution.mode==='SUBAGENT'&&a.resources.some(r=>r.access==='WRITE'&&['FILE','DIRECTORY','UNKNOWN'].includes(r.kind))) throw Error('代码写派工须指定受管 worktree');
       bump(t,a);a.status='RUNNING';a.startedAt=at;a.workspaceEvidence=request.workspaceEvidence;
+      if(binding.executionAuthority)binding.executionAuthority.activatedAt=at;
     } else if(action==='assignment:checkpoint') {
       demand(['RUNNING','BLOCKED','WAITING_DECISION'].includes(a.status)||ctx.pausing&&['RESERVED','DELIVERED','ACCEPTED'].includes(a.status),'此状态不能保存执行检查点');
       bump(t,a);a.checkpoint=checkpoint(request.checkpoint,a.checkpoint);
@@ -181,6 +187,7 @@ export async function assignmentMutation(ctx) {
       a.acceptanceCriteria.forEach((_,i)=>demand(request.result.acceptance.some(x=>x.criterion===i&&typeof x.evidence==='string'&&x.evidence.trim()),`派工验收项 ${i} 缺少证据`));
       bump(t,a);a.status='DELIVERED';a.deliveredAt=at;a.checkpoint=cp;a.result=request.result;
     } else if(action==='assignment:accept') {
+      demand(!ctx.executionAuthority||request.authority.assignmentId!==a.id,'ASSIGNMENT_SELF_ACCEPT：节点不能验收自身成果，须由父节点或主协调者验收');
       demand(!(a.decisions||[]).some(d=>d.status!=='RESOLVED'),'DECISION_PENDING：尚有未解决决策，不可验收');
       demand(a.status==='DELIVERED','结果交回后由主 Agent 验收');nonempty(request.evidence,'主 Agent 验收证据');
       bump(t,a);a.status='ACCEPTED';a.acceptedAt=at;a.acceptanceEvidence=request.evidence;
@@ -197,7 +204,7 @@ export async function assignmentMutation(ctx) {
       nonempty(request.cleanup,'派工清理或已转交恢复资源的证据');
       bump(t,a);a.status='CLOSED';a.closedAt=at;a.outcome=request.outcome;a.cleanup=request.cleanup;
       a.closure={agent:binding.nativeThreadId?'CLOSED':'NOT_APPLICABLE',goal:'STOPPED',processes:'STOPPED',history:'PRESERVED',verifiedAt:at};
-      binding.retiredAt=at;
+      binding.retiredAt=at;if(binding.executionAuthority)binding.executionAuthority.revokedAt=at;
     } else throw Error('未知派工操作');
   }
   return {taskId:t.id,assignmentId:a.id,status:a.status,assignment:a};

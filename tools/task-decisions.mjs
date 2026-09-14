@@ -1,7 +1,7 @@
 import path from 'node:path';
 import {readFile,readdir,mkdir,open,rename,lstat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
-import {location,readLedger,readBindings,mutate,requireTask,withRuntime,requireRun} from './task-ledger.mjs';
+import {location,readLedger,readBindings,mutate,requireTask,withRuntime,requireRun,requireAssignmentAuthority} from './task-ledger.mjs';
 import {decisionHash,decisionPending,pendingDecisions} from './task-decision-protocol.mjs';
 import {cell,table} from './task-format.mjs';
 import {resolveTaskId} from './task-numbering.mjs';
@@ -95,12 +95,12 @@ export async function unappliedDecisionRequest(loc,threadId) {
  for(const name of files.filter(f=>/^[a-f0-9]{64}\.json$/.test(f))){const e=await readDecisionFile(path.join(directory,name));if(e.state!=='APPLIED'&&Object.hasOwn(e.message,'id')&&(e.message.params?.threadId||e.message.params?.conversationId)===threadId)return true;}
  return false;
 }
-export async function cancelAssignmentDecisions(project,runId,assignmentId) {
+export async function cancelAssignmentDecisions(project,runId,assignmentId,{authority}={}) {
  const ledger=await readLedger(project),task=Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)),a=task.assignments.find(a=>a.id===assignmentId);
  const loc=await location(project),b=(await readBindings(loc)).assignments[assignmentId];
  requireTask(b?.closureReceipt?.verified,'DECISION_CLOSE：先核查原会话关闭');
  let result;
- if(pendingDecisions(a).length)result=await mutate(project,'decision:cancel',{operationId:'dc-close-'+randomUUID(),actor:'PROJECT_CODEX',runId,taskId:task.id,assignmentId,expectedVersions:{[task.id]:task.version},expectedAssignmentVersion:a.version,evidence:'backend close 已核查原轮次停止、后台命令结束及原线程卸载；保留问题、用户答复及未知回传历史'});
+ if(pendingDecisions(a).length)result=await mutate(project,'decision:cancel',{operationId:'dc-close-'+randomUUID(),actor:'PROJECT_CODEX',runId,authority,taskId:task.id,assignmentId,expectedVersions:{[task.id]:task.version},expectedAssignmentVersion:a.version,evidence:'backend close 已核查原轮次停止、后台命令结束及原线程卸载；保留问题、用户答复及未知回传历史'});
  const directory=path.join(loc.runtime,'decision-channel/inbox'),files=await readdir(directory).catch(e=>{if(e.code==='ENOENT')return [];throw e;});
  for(const name of files.filter(f=>/^[a-f0-9]{64}\.json$/.test(f))){const file=path.join(directory,name),e=await readDecisionFile(file);if(e.state!=='APPLIED'&&(e.message.params?.threadId||e.message.params?.conversationId)===b.nativeThreadId)await durableDecisionFile(file,{...e,state:'APPLIED',resolution:'CANCELLED_AFTER_VERIFIED_CLOSE',closedAt:new Date().toISOString()});}
  return result;
@@ -108,7 +108,7 @@ export async function cancelAssignmentDecisions(project,runId,assignmentId) {
 
 // Called only by the persistent connection owner. No send is retried: even
 // crash between intent persistence and write is an unknown delivery to inspect.
-export async function deliverDecision(project,runId,decisionId,{client,connectionId,service}) {
+export async function deliverDecision(project,runId,decisionId,{client,connectionId,service,authority}) {
  await client.flush?.();await drainDecisionInbox(project);
  const s=await decisionSnapshot(project,decisionId);
  requireTask(s.binding?.runId===runId,'DECISION_RUN：先核查当前协调归属');
@@ -118,11 +118,11 @@ export async function deliverDecision(project,runId,decisionId,{client,connectio
  }
  if(s.wire?.deliveryAttemptedAt||s.decision.status!=='ANSWERED')return {decisionId,status:s.decision.status,sent:false,reason:'只核查原答复，不重发'};
  requireTask(s.wire.serviceId===service.serviceId&&s.wire.generation===service.generation&&s.wire.connectionId===connectionId&&client.hasRequest(s.wire.requestId),'DECISION_CONNECTION：原协议请求或连接已失效；保留答复先核查');
- const intent=await mutate(project,'decision:sending',{operationId:'dc-send-'+decisionHash({decisionId,operationId:s.decision.answer.operationId}),actor:'PROJECT_CODEX',runId,...decisionVersions(s),connectionId});
+ const intent=await mutate(project,'decision:sending',{operationId:'dc-send-'+decisionHash({decisionId,operationId:s.decision.answer.operationId}),actor:'PROJECT_CODEX',runId,authority,...decisionVersions(s),connectionId});
  if(intent.replayed)return {decisionId,status:'DELIVERY_UNKNOWN',sent:false};
  try{
   await withRuntime(project,async loc=>{
-   await requireRun(loc,runId);
+   await requireAssignmentAuthority(loc,{runId,assignmentId:s.assignment.id,authority});
    const binding=(await readBindings(loc)).assignments[s.assignment.id];
    requireTask(binding?.runId===runId&&binding.backendRequest?.turnId===s.wire.turnId&&!binding.closureReceipt,'DECISION_BINDING：实际发送前原执行已改变');
    await client.respond(s.wire.requestId,s.wire.response);

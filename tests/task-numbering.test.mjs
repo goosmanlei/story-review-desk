@@ -29,7 +29,7 @@ test('new CLI publications use Shanghai midnight, share both types, and reset to
   assert.deepEqual(second.tasks[1].dependencies,[second.taskIds[0]]);
 });
 
-test('legacy mapping uses first publication instants and event order, pins in the next event, and leaves bytes, IDs and references intact',async t=>{
+test('legacy mapping uses first publication instants and event order, pins at upgrade, and leaves bytes, IDs and references intact',async t=>{
   const root=await fixture(t),same='2026-09-13T17:00:00.000Z';
   const late=task(id(1),'2026-09-14T01:00:00.000Z'),early=task(id(9),same),tie=task(id(2),same,{dependencies:[early.id],references:[early.id,'fixture:original']}),yesterday=task(id(3),'2026-09-13T15:59:59.999Z');
   const done={...late,version:2,status:'DONE',updatedAt:at,completedAt:at};
@@ -39,9 +39,11 @@ test('legacy mapping uses first publication instants and event order, pins in th
   await rebuild(root);const views=projectionFiles(await readLedger(root));await rebuild(root);
   assert.deepEqual(projectionFiles(await readLedger(root)),views);assert.deepEqual(await eventBytes(root),bytes);
   const report=audit(initial,{taskId:late.id});assert.equal(report.events[0].changes[0].displayId,expected[late.id]);assert.equal(report.events[0].changes[0].status,'READY');
+  await mutate(root,'upgrade',request({}));
+  assert.equal((await readLedger(root)).events.at(-1).taskNumbering.allocations.length,4);
   await mutate(root,'amend',request({taskId:expected[tie.id],expectedVersions:{[expected[tie.id]]:1},changes:{priority:1},reason:'固定映射'}));
   let ledger=await readLedger(root);
-  assert.equal(ledger.events.at(-1).taskNumbering.allocations.length,4);
+  assert.equal(ledger.events.at(-1).taskNumbering.allocations.length,0);
   assert.equal(ledger.tasks[early.id].version,1,'映射固定不改其他任务版本');
   assert.deepEqual(ledger.tasks[tie.id].dependencies,[early.id]);assert.deepEqual(ledger.tasks[tie.id].references,[early.id,'fixture:original']);
   // A clock correction after mapping was fixed cannot reorder historical numbers.
@@ -53,7 +55,7 @@ test('legacy mapping uses first publication instants and event order, pins in th
   assert.equal((await main(['show',expected[late.id],'--project',root])).id,late.id);
 });
 
-test('legacy operations replay with old IDs and equivalent aliases after migration, including a v1 publication without discussion',async t=>{
+test('legacy operations replay with old IDs and equivalent aliases before upgrade, including a v1 publication without discussion',async t=>{
   const root=await fixture(t),a=task(id(1),at),b=task(id(2),at,{dependencies:[a.id]});
   const publication=request({task:spec({discussion:undefined})});
   const amendment=request({taskId:b.id,expectedVersions:{[b.id]:1},changes:{priority:0,dependencies:[a.id]},reason:'旧请求'});
@@ -63,7 +65,7 @@ test('legacy operations replay with old IDs and equivalent aliases after migrati
   const alias={...amendment,taskId:'T-20260914-002',expectedVersions:{'T-20260914-002':1},changes:{priority:0,dependencies:['T-20260914-001']}};
   for(const r of [amendment,alias])assert.equal((await mutate(root,'amend',r)).replayed,true);
   await assert.rejects(mutate(root,'amend',{...alias,changes:{priority:1}}),/同一操作/);
-  await assert.rejects(mutate(root,'amend',{...alias,operationId:'new-stale'}),/版本冲突/);
+  await assert.rejects(mutate(root,'amend',{...alias,operationId:'new-stale'}),/TASK_UPGRADE_REQUIRED/);
   assert.deepEqual(await eventBytes(root),before);
 });
 
@@ -90,9 +92,13 @@ test('aliases normalize only structured references before CAS and hashing; confl
 });
 
 test('terminal changes, filters, sorting and all rendered surfaces preserve display numbers and seven columns',async t=>{
-  const root=await fixture(t),published=await call(root,['publish'],{body:request({tasks:[spec({key:'done'}),spec({key:'cancel'}),spec({key:'dependent',type:'CREATIVE',dependencies:['@done']})]}),at}),[a,b,c]=published.tasks;
-  const run=await startRun(root);await mutate(root,'next',request({runId:run.id}));
-  await mutate(root,'transition',request({runId:run.id,taskId:a.displayId,expectedVersions:{[a.id]:2},status:'DONE',reason:'fixture',result:{summary:'已完成',cleanup:'受管夹具',artifacts:[],acceptance:[{criterion:0,evidence:'pass'},{criterion:1,evidence:'pass'}]}}));
+  const root=await fixture(t);const published=await call(root,['publish'],{body:request({tasks:[spec({key:'done'}),spec({key:'cancel'}),spec({key:'dependent',type:'CREATIVE',dependencies:['@done']})]}),at}),[a,b,c]=published.tasks;
+  const run=await startRun(root),node=(await mutate(root,'schedule',request({runId:run.id,expectedVersions:{[a.id]:1},assignments:[{...candidate(a.id),execution:{mode:'MAIN',rationale:'编号 fixture'}}]}))).assignments[0];
+  const change=async(action,extra)=>{const task=(await readLedger(root)).tasks[a.id],assignment=task.assignments[0];return mutate(root,action,request({runId:run.id,taskId:a.displayId,assignmentId:node.id,expectedVersions:{[a.id]:task.version},expectedAssignmentVersion:assignment.version,...extra}));};
+  await change('assignment:start',{workspaceEvidence:'隔离对象'});
+  await change('assignment:result',{checkpoint:{summary:'fixture',operations:[]},result:{summary:'已完成',artifacts:[],acceptance:[{criterion:0,evidence:'pass'}]}});
+  await change('assignment:accept',{evidence:'fixture核验'});await change('assignment:close',{outcome:'ACCEPTED',cleanup:'无残留'});
+  await change('transition',{status:'DONE',reason:'fixture',result:{summary:'已完成',cleanup:'受管夹具',artifacts:[],acceptance:[{criterion:0,evidence:'pass'},{criterion:1,evidence:'pass'}]}});
   await mutate(root,'transition',request({taskId:b.displayId,expectedVersions:{[b.displayId]:1},status:'CANCELLED',reason:'fixture'}));
   const d=(await call(root,['publish'],{body:request({task:spec()}),at})).tasks[0];assert.equal(d.displayId,'T-20260914-004');
   const ledger=await readLedger(root),before=numberMap(ledger),query=(...args)=>main([...args,'--project',root]);
@@ -136,6 +142,7 @@ test('simultaneous batches and duplicate operations allocate once in append orde
 test('the 999 limit is explicit and atomic for publish, batch, merge and split, including concurrent final-slot claims',async t=>{
   const root=await fixture(t),tasks=Array.from({length:998},(_,i)=>task(id(i+1),at));
   await legacy(root,Array.from({length:20},(_,i)=>({tasks:tasks.slice(i*50,(i+1)*50)})));
+  await mutate(root,'upgrade',request({}));
   const before=await eventBytes(root),head=(await readLedger(root)).head;
   await assert.rejects(call(root,['publish'],{body:request({tasks:[spec({key:'a'}),spec({key:'b',dependencies:['@a']})]}),at}),/TASK_NUMBER_LIMIT.*999/);
   await assert.rejects(call(root,['split'],{body:request({taskId:'T-20260914-001',expectedVersions:{'T-20260914-001':1},reason:'超限拆解',children:[{title:'a',goal:'a',criterionIndexes:[0]},{title:'b',goal:'b',criterionIndexes:[1]}]}),at}),/TASK_NUMBER_LIMIT/);

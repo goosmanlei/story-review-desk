@@ -220,6 +220,12 @@ export async function verifyPause(project,runId,{pauseAgent=pauseBackend,syncAge
 export async function resumePausedRun(project,runId,{syncAgent=syncBackend,pauseAgent=pauseBackend}={}) {
   const loc=await location(project),p=await readPause(loc);
   if(!pauseBlocks(p))return {status:'NO_PAUSED_TASK'};
+  const ledger=await readLedger(loc);
+  // Preserve the exact legacy snapshot and ownership for a safe upgrade.
+  // Merely inspecting/resuming a paused v1/v2 ledger cannot consume that
+  // migration boundary or authorize another model turn under the old schema.
+  if(ledger.schemaVersion<3)return {status:'UPGRADE_REQUIRED',schemaVersion:ledger.schemaVersion,pauseId:p.id,pauseStatus:p.status,
+    instruction:'保留原暂停快照和绑定；先核查完整 PAUSED 并升级账本。旧节点只能由 Main 核查收敛，不能启动新轮次。'};
   return processLock(path.join(loc.runtime,'pause-verify.lock'),async()=>{
     const run=await requireRun(loc,runId,{converging:true});
     requireTask(run.id!==p.runId,'PAUSE_OLD_RUN_ALIVE：原协调运行退出后再 task run');

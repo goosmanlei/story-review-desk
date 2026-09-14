@@ -13,12 +13,24 @@ import {runDecisionChannel,channelPaths,channelClient,callDecisionChannel,stopDe
 import {decisionsAction} from '../tools/task-decision-cli.mjs';
 import {continueBackend,decisionFollowupPrompt,syncBackend} from '../tools/task-backend.mjs';
 import {requestPause} from '../tools/task-pause.mjs';
+import {openAttachClient} from '../tools/task-attach-service.mjs';
 import {processLock,processIdentity,processAlive} from '../tools/process-resources.mjs';
 
 const req=x=>({operationId:randomUUID(),actor:'DECISION_FIXTURE',...x});
 const capabilities={backend:'PROJECT_APP_SERVER',delegation:true,closeVerified:true,agentCapacity:3,availableSlots:3,models:[{model:'gpt-5.6-sol',efforts:['xhigh']}]};
 const spec={clarified:true,type:'SYSTEM',title:'决策通路受控测试',originalRequest:'仅模拟协议，不代答真实用户',goal:'验证原请求往返',scope:['fixture'],deliverables:['结果'],acceptanceCriteria:['验证成功'],authorization:'仅模拟，无业务、模型或公共服务操作',discussion:{approved:true,summary:'fixture',feasibility:'fixture',approvedRequirements:['fixture']}};
 const cp={summary:'受控检查点',completedSteps:['保存原步骤'],nextSteps:['核查'],inputs:['fixture@1'],artifacts:[],operations:[]};
+test('focused attach decision records an explicit answer after coordinator lease expiry without starting a turn',async t=>{
+ const s=await fixture(t),decision=await receive(s),file=path.join(s.loc.runtime,'run.json');
+ const run=JSON.parse(await readFile(file,'utf8'));run.expiresAt='2000-01-01T00:00:00.000Z';await writeFile(file,JSON.stringify(run));
+ const calls=[],client=await openAttachClient(s.root,s.taskId,{channel:async(_project,r)=>{calls.push(r);return {status:'DELIVERY_UNKNOWN'};}});
+ await assert.rejects(client.answer({decisionId:decision.id,answer:{text:'alpha'},operationId:'attach-answer-one',presentedEvidence:'未展示'}),/DECISION_PRESENTATION/);
+ await client.showDecision(decision.id);
+ const reply=await client.answer({decisionId:decision.id,answer:{text:'alpha'},operationId:'attach-answer-one',presentedEvidence:'fixture 中实际展示原问题及选项'});
+ assert.equal(reply.status,'ANSWERED');assert.deepEqual(calls.map(c=>c.action),['deliver']);
+ const saved=await decisionSnapshot(s.root,decision.id);assert.equal(saved.decision.answer.value.text,'alpha');assert.equal(saved.decision.presentations.length,1);assert.equal((await readLedger(s.root)).tasks[s.taskId].assignments[0].interventions,undefined);
+ await client.close();
+});
 async function fixture(t,{count=1}={}) {
  assert(process.env.REVIEW_TASK_DIR,'测试须经受管 process');
  const root=await mkdtemp(path.join(process.env.REVIEW_TASK_DIR,'decisions-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -131,7 +143,7 @@ test('no coordinator, coordinator change and early turn notifications retain que
  await updateFixtureTurn(s,s.turnId);await drainDecisionInbox(s.root);
  let d=(await listDecisions(s.root))[0];assert.equal(d.status,'NEEDS_RECONCILIATION');assert.equal(d.answer,null);
  const next=await startRun(s.root,{capabilities});
- await assert.rejects(decide({...s,run:next},d.id,'present',{evidence:'must reconcile first'}),/DECISION_RUN/);
+ await assert.rejects(decide({...s,run:next},d.id,'present',{evidence:'must reconcile first'}),/DECISION_RUN|ASSIGNMENT_RUN/);
  await assignmentChange({...s,run:next},'reconcile',{checkpoint:cp,reconciliation:{processes:'fixture ended',workspace:'unchanged',versions:'checked',operations:'checked',agent:'original remains'}});
  await decide({...s,run:next},d.id,'present',{evidence:'fixture 新主会话真正提问'});
  const replayed=await decide({...s,run:next},d.id,'present',{evidence:'same prompt must not be asked again'});assert.equal(replayed.alreadyPresented,true);

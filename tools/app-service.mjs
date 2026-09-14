@@ -12,11 +12,11 @@ import {connectNative} from './task-native.mjs';
 
 const hash=x=>createHash('sha256').update(x).digest('hex');
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
-export async function serverPaths(project){
+export async function serverPaths(project,{readOnly=false}={}){
  const loc=await location(project),directory=path.join(loc.runtime,'server');
- await mkdir(directory,{recursive:true,mode:0o700});await plainDirectory(directory);await bindExecutionScope(loc);
+ if(!readOnly){await mkdir(directory,{recursive:true,mode:0o700});await plainDirectory(directory);await bindExecutionScope(loc);}
  const key=hash(loc.projectId+'\n'+loc.root).slice(0,20),socketDirectory=path.join(process.env.CODEX_HOME||path.join(os.homedir(),'.codex'),'app-server-control');
- await mkdir(socketDirectory,{recursive:true,mode:0o700});await plainDirectory(socketDirectory);
+ if(!readOnly){await mkdir(socketDirectory,{recursive:true,mode:0o700});await plainDirectory(socketDirectory);}
  return {...loc,directory,record:path.join(directory,'server.json'),socket:path.join(socketDirectory,'review-'+key+'.sock'),serviceId:'review-tasks-'+key};
 }
 async function verifyService(project,{connect=connectNative,legacyRecovery=false}={}){
@@ -47,12 +47,21 @@ async function verifyService(project,{connect=connectNative,legacyRecovery=false
 export async function verifyAppService(project,{connect=connectNative}={}){
  return verifyService(project,{connect});
 }
+async function awaitOriginalService(project,connect) {
+ let failure;
+ for(let i=0;i<250;i++){
+  try{return await verifyAppService(project,{connect});}
+  catch(error){failure=error;if(error.code!=='ENOENT'&&!error.message.includes('SERVER_NOT_RUNNING'))throw error;}
+  await wait(200);
+ }
+ throw failure;
+}
 // A legacy boottime mismatch cannot establish process death or authorize a
 // replacement service. This separate, restricted connection can only inspect
 // and close explicitly named, already owned threads in the observed service.
 // It never upgrades the historical boot claim or writes a new process binding.
 export async function verifyAppServiceRecovery(project,{threads,connect=connectNative}={}) {
- requireTask(Array.isArray(threads)&&threads.length>0&&threads.length<=3,'SERVER_RECOVERY_SCOPE：需要精确原线程范围');
+ requireTask(Array.isArray(threads)&&threads.length>0,'SERVER_RECOVERY_SCOPE：需要精确原线程范围');
  const p=await serverPaths(project),scope=new Map();
  for(const row of threads){
   requireTask(typeof row.threadId==='string'&&row.threadId&&typeof row.turnId==='string'&&row.turnId&&typeof row.workspace==='string'&&path.isAbsolute(row.workspace)&&row.workspace.startsWith(path.join(p.root,'.process')+path.sep)&&!scope.has(row.threadId),'SERVER_RECOVERY_SCOPE：原线程、轮次或工作区范围无效');
@@ -100,7 +109,7 @@ export async function ensureAppService(project,{binary='codex',connect=connectNa
     requireTask(children.length===1,'SERVER_START_UNKNOWN：无法唯一核查原启动进程，禁止重复启动');
     record={...record,process:processIdentity(Number(children[0][1])),reconciledAt:new Date().toISOString()};await atomic(p.record,record);
    }
-   const verified=await verifyAppService(project,{connect});verified.client.close();record={...record,socketIdentity:verified.socketIdentity,status:'READY'};await atomic(p.record,record);return {...record,reused:true};
+   const verified=await awaitOriginalService(project,connect);verified.client.close();record={...record,socketIdentity:verified.socketIdentity,status:'READY'};await atomic(p.record,record);return {...record,reused:true};
   }
   const socket=await lstat(p.socket).catch(e=>{if(e.code==='ENOENT')return null;throw e;});
   if(socket){requireTask(record?.socketIdentity&&record.serviceId===p.serviceId&&record.root===p.root&&record.socketIdentity.dev===socket.dev&&record.socketIdentity.ino===socket.ino&&!processAlive(record.process)&&!processAlive(record.supervisor),'SERVER_SOCKET_OCCUPIED：未知socket占用，保留现场');await unlink(p.socket);}
@@ -114,7 +123,7 @@ export async function ensureAppService(project,{binary='codex',connect=connectNa
   await copyFile(fileURLToPath(new URL('./task-server-daemon.mjs',import.meta.url)),daemon);
   await copyFile(fileURLToPath(new URL('./execution-runtime.mjs',import.meta.url)),path.join(p.directory,'execution-runtime.mjs'));
   await copyFile(fileURLToPath(new URL('./process-identity.mjs',import.meta.url)),path.join(p.directory,'process-identity.mjs'));
-  const args=['app-server','--listen','unix://'+p.socket,'-c','sqlite_home='+JSON.stringify(sqliteHome),'-c','agents.max_threads=3'];
+  const args=['app-server','--listen','unix://'+p.socket,'-c','sqlite_home='+JSON.stringify(sqliteHome)];
   await atomic(launch,{root:p.root,record:p.record,identity,binary:resolved,args,log:path.join(p.directory,'server.log')});
   // Intent precedes spawn. An absent PID is never evidence that spawn did not run.
   await atomic(p.record,{...identity,status:'STARTING',launchOwner:processIdentity(),startedAt:new Date().toISOString()});
@@ -122,7 +131,7 @@ export async function ensureAppService(project,{binary='codex',connect=connectNa
   const child=spawn(process.execPath,[daemon,launch],{cwd:p.root,env,detached:true,stdio:'ignore'});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();
   await atomic(path.join(p.directory,'launch-process.json'),{generation,process:processIdentity(child.pid)});
   let failure;
-  for(let i=0;i<50;i++){await wait(200);record=await read(p.record);if(record?.generation!==generation)continue;if(record.status==='STOPPED')throw Error('SERVER_START_FAILED：专属服务退出 '+record.exitCode);
+  for(let i=0;i<250;i++){await wait(200);record=await read(p.record);if(record?.generation!==generation)continue;if(record.status==='STOPPED')throw Error('SERVER_START_FAILED：专属服务退出 '+record.exitCode);
    try{const verified=await verifyAppService(project,{connect});verified.client.close();record={...record,socketIdentity:verified.socketIdentity,verifiedAt:new Date().toISOString(),status:'READY'};await atomic(p.record,record);return {...record,reused:false};}catch(e){failure=e;if(!['ENOENT'].includes(e.code)&&!e.message.includes('SERVER_NOT_RUNNING'))break;}
   }
   throw Error('SERVER_START_FAILED：'+(failure?.message||'未取得可验证服务回执')+'；保留本项目启动记录，不启动第二个实例');

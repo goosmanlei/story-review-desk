@@ -37,12 +37,13 @@ const admissionContext = new AsyncLocalStorage();
 export async function formalAdmission(root, task, callback, { converging = false } = {}) {
   const absolute = await realpath(root);
   if (!await exists(path.join(absolute, "instance/instance.json"))) return callback(null, null);
-  const { withRuntime, readLedger, requireTask } = await import("./task-ledger.mjs");
+  const { withRuntime, readLedger, requireTask, requireTaskWriteSchema } = await import("./task-ledger.mjs");
   const admit = async (loc) => {
     const ledger = await readLedger(loc);
     const known = ledger.tasks[process.env.REVIEW_TASK_FORMAL_ID] || ledger.tasks[task] ||
       Object.values(ledger.tasks).find((t) => t.displayId === task);
     const pause = await readPause(loc);
+    if (known && !converging) requireTaskWriteSchema(ledger, 'execution');
     if (known && !converging) requireTask(!pauseBlocks(pause), "PAUSE_EXECUTION_BLOCKED：禁止新受管阶段或后台命令");
     return callback(known && pauseBlocks(pause) ? pause : null, known?.id);
   };
