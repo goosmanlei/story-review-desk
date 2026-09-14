@@ -1,3 +1,4 @@
+import {planSpatialPlacementChange} from './settings/spatial-placement.mjs';
 import {materialReviewFocus} from './materials/review-focus.mjs';
 import {MATERIAL_OVERALL,validateOverallInput} from './materials/overall-review.mjs';
 import {planEntityComment} from './settings/comments.mjs';
@@ -300,6 +301,7 @@ export async function planWorkspaceChange(tx, command, context) {
     return {commands:[{type:'configuration.save',scope:'project',expectedVersion:unit.configurationVersions.project||0,content:project},{type:'configuration.save',scope:'system',expectedVersion:unit.configurationVersions.system||0,content:system}],response:results=>({revisionId:hash(Object.fromEntries(results.map(r=>[r.scope,r.version])))})};
   }
   if(command.workspace==='domain-workspaces')return domainAction(tx,body);
+  if(command.workspace==='spatial-settings/placements')return planSpatialPlacementChange(tx,body,context);
   if(command.workspace==='sound-ownership')return planSoundOwnershipMigration(tx,body);
   if(command.workspace==='relations')return relationsAction(tx,body);
   if(['configuration','configuration/preview','configuration/publish'].includes(command.workspace))return configurationAction(tx,command.workspace,body);

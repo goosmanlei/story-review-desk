@@ -1,5 +1,7 @@
 'use client';
 import {useState} from 'react';
+import {SpatialPlacementPanel} from './spatial-placement-panel';
+import type {SpatialPlacementWorkspace} from '../presentation/spatial-placement.mjs';
 import type {DomainGraph,DomainEntity,DomainConfiguration} from '../presentation/domain-model.mjs';
 import type {EntityBusinessFacts} from '../presentation/domain-reading.mjs';
 import type {SpatialEvidence} from '../presentation/domain-workspaces.mjs';
@@ -9,11 +11,12 @@ import {visibleText} from './review-semantics';
 import {entityCanvasIcon} from './entity-canvas-appearance';
 import {spatialMapBackground} from './spatial-map-backdrop';
 const facts={F:'来源事实',A:'改编提案',L:'制作锁定',U:'依据待核'};
-export function StorySettingsCanvas({entities,graph,configuration,businessFacts,statusLabels,spatial,view,selectedId,onSelect,onSelectRelation,viewportKey}:{statusLabels?:Record<string,string>;entities:DomainEntity[];graph:DomainGraph;configuration:DomainConfiguration;businessFacts?:Record<string,EntityBusinessFacts>;spatial:SpatialEvidence|null;view:'subjects'|'space';selectedId?:string;onSelect:(id:string)=>void;onSelectRelation:(id:string)=>void;viewportKey:string}){
+export function StorySettingsCanvas({entities,graph,configuration,businessFacts,statusLabels,spatial,spatialPlacements,view,selectedId,onSelect,onSelectRelation,viewportKey}:{statusLabels?:Record<string,string>;entities:DomainEntity[];graph:DomainGraph;configuration:DomainConfiguration;businessFacts?:Record<string,EntityBusinessFacts>;spatial:SpatialEvidence|null;spatialPlacements?:SpatialPlacementWorkspace;view:'subjects'|'space';selectedId?:string;onSelect:(id:string)=>void;onSelectRelation:(id:string)=>void;viewportKey:string}){
  if(view==='subjects')return <SubjectRelationships statusLabels={statusLabels} key={viewportKey+':'+entities.map(entity=>entity.id).join('|')} entities={entities} graph={graph} configuration={configuration} businessFacts={businessFacts} viewportKey={viewportKey} onOpenNode={onSelect}/>;
  const edges=graph.relations.filter(relation=>relation.from.kind==='ENTITY'&&relation.to.kind==='ENTITY'&&!relation.historicalOnly).map(relation=>({id:relation.id,from:relation.from.id,to:relation.to.id,label:visibleText(relation.label),directed:configuration.relationTypes.find(type=>type.id===relation.type)?.directed,uncertain:relation.status!=='CONFIRMED'}));
  const occupied:Array<{x:number;y:number}>=[];
- const unplaced=entities.filter(entity=>{const position=spatial?.locations?.find(location=>location.id===entity.id)?.pos;return !position||position.length!==2||!position.every(Number.isFinite);});
+ const visiblePending=new Set(spatialPlacements?.pendingOverlays.map(v=>v.targetEntityId)||[]);
+ const unplaced=entities.filter(entity=>!visiblePending.has(entity.id)).filter(entity=>{const position=spatial?.locations?.find(location=>location.id===entity.id)?.pos;return !position||position.length!==2||!position.every(Number.isFinite);});
  const nodes:CanvasNode[]=entities.flatMap(entity=>{
   const common={id:entity.id,label:visibleText(entity.name),group:configuration.entityTypes.find(type=>type.id===entity.type)?.label||'待分类主体',detail:[facts[entity.authority],statusLabels?.[entity.id]].filter(Boolean).join(' · '),icon:entityCanvasIcon(entity.type),tone:canvasTone(entity.type)};
   if(view!=='space')return [common];
@@ -28,8 +31,8 @@ export function StorySettingsCanvas({entities,graph,configuration,businessFacts,
  });
  return <section className={`settings-canvas-main ${view==='space'?'is-spatial':''}`}>
   <div className="settings-canvas-legend"><strong className="settings-compass">{spatial?.orientation==='北上东右'?'↑ 北　　东 →':`方向 UNKNOWN · ${spatial?.orientation||'未登记'}`}</strong></div>
-  <RelationshipCanvas nodes={nodes} edges={edges} selectedId={selectedId} onSelect={onSelect} onSelectEdge={onSelectRelation} label="全局空间与地点" viewportKey={viewportKey} height="min(82dvh, 940px)" background={spatialMapBackground(spatial)} showGroups={false} showReadableList={false} notice="制作拓扑 · 地点锚点、片区与门向来自已发布基线；未登记的街巷连接和路线保持待核。"/>
-  {view==='space'&&unplaced.length>0&&<section className="settings-unplaced-locations" aria-label="位置待核地点"><h3>位置待核 · 不放入地图</h3><p>UNKNOWN：未登记全局位置，不按名称或剧情顺序推定方位。</p><div>{unplaced.map(entity=><button type="button" key={entity.id} onClick={()=>onSelect(entity.id)}><CanvasSymbol kind="place"/>{visibleText(entity.name)}<small>位置未知 · {statusLabels?.[entity.id]||'状态待核'}</small></button>)}</div></section>}
+  <RelationshipCanvas nodes={nodes} edges={edges} selectedId={selectedId} onSelect={onSelect} onSelectEdge={onSelectRelation} label="全局空间与地点" viewportKey={viewportKey} height="min(82dvh, 940px)" background={spatialMapBackground(spatial)} supplement={<SpatialPlacementPanel value={spatialPlacements} names={Object.fromEntries(entities.map(e=>[e.id,visibleText(e.name)]))} onSelect={onSelect}/>} showGroups={false} showReadableList={false} notice="制作拓扑 · 地点锚点、片区与门向来自已发布基线；未登记的街巷连接和路线保持待核。"/>
+  {view==='space'&&unplaced.length>0&&<section className="settings-unplaced-locations" aria-label="位置待核地点"><h3>尚无当前提案的地点</h3><p>UNKNOWN：未登记全局位置，不按名称或剧情顺序推定方位。</p><div>{unplaced.map(entity=><button type="button" key={entity.id} onClick={()=>onSelect(entity.id)}><CanvasSymbol kind="place"/>{visibleText(entity.name)}<small>位置未知 · {statusLabels?.[entity.id]||'状态待核'}</small></button>)}</div></section>}
  </section>;
 }
 

@@ -166,13 +166,15 @@ export async function relationshipGraph(tx, { owner, offset = 0 } = {}) {
   };
 }
 
-export async function spatialBaseline(tx) {
+export async function spatialBaseline(tx, {allowUnavailable = false, requireAdopted = false} = {}) {
+  try {
   // Spatial specifications are registered domain sources, independent of filenames.
   const rows = (
     await tx.query(
-      `SELECT o.id,r.id AS "revisionId",s.logical_path AS "logicalPath",s.original_sha256 AS sha256,s.content_bytes AS bytes
-    FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) JOIN source_documents s ON s.revision_id=r.id
-    WHERE r.content->>'role'='SPATIAL_SPECIFICATION' ORDER BY o.updated_at DESC,o.id LIMIT 2`,
+      `SELECT o.id,o.version AS "expectedVersion",o.state,o.historical,o.adopted_revision_id AS "adoptedRevisionId",r.id AS "revisionId",r.sha256 AS "revisionSha256",r.content,
+      s.logical_path AS "logicalPath",s.original_sha256 AS sha256,s.original_sha256 AS "sourceSha256",s.content_bytes AS bytes
+    FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) LEFT JOIN source_documents s ON s.revision_id=r.id
+    WHERE o.kind='SOURCE' AND o.state NOT IN ('DISABLED','ARCHIVED') AND r.content->>'role'='SPATIAL_SPECIFICATION' ORDER BY o.updated_at DESC,o.id LIMIT 2`,
       [],
     )
   ).rows;
@@ -184,8 +186,13 @@ export async function spatialBaseline(tx) {
       sourceBinding: null,
       specification: null,
     };
+  // SOURCE.historical is an origin/history label, not retirement. A unique
+  // selected source can remain authoritative with that label; pending NOTE saves
+  // additionally require the selected revision to be its effective adopted head.
+  check(!requireAdopted || row.state==='ADOPTED' && row.adoptedRevisionId===row.revisionId,
+    'SPATIAL_SOURCE_NOT_ADOPTED','当前空间来源须有有效的精确采用头',409);
   check(
-    row.bytes.byteLength <= 8 * 1024 * 1024 && hash(row.bytes) === row.sha256,
+    Buffer.isBuffer(row.bytes) && row.bytes.byteLength <= 8 * 1024 * 1024 && hash(row.bytes) === row.sha256 && hash(row.content)===row.revisionSha256,
     "SOURCE_HASH",
     "空间来源字节与登记 SHA 不符",
     409,
@@ -196,6 +203,10 @@ export async function spatialBaseline(tx) {
   } catch {
     check(false, "SPATIAL_FORMAT", "空间来源不是有效的结构化资料", 409);
   }
-  const { bytes, ...sourceBinding } = row;
+  const { bytes, content, ...sourceBinding } = row;
   return { status: "AVAILABLE", sourceBinding, specification };
+  } catch(error) {
+    if(!allowUnavailable || !['SPATIAL_AMBIGUOUS','SOURCE_HASH','SPATIAL_FORMAT','SPATIAL_SOURCE_NOT_ADOPTED'].includes(error.code)) throw error;
+    return {status:error.code==='SPATIAL_AMBIGUOUS'?'AMBIGUOUS':'INVALID',sourceBinding:null,specification:null,issues:[{code:error.code,message:error.message}]};
+  }
 }

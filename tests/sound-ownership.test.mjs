@@ -65,6 +65,8 @@ class Store {
     if(q.startsWith('INSERT INTO asset_media')||q.startsWith('INSERT INTO rights('))return rows();
     if(q.startsWith('INSERT INTO provenance')&&q.includes('retired-entity-configuration')){this.data.provenance.push({id:args[0],kind:'retired-entity-configuration',original_id:args[1],original_sha256:args[2],content:args[3]});return rows();}
     if(q.startsWith('INSERT INTO provenance')){this.data.provenance.push({id:args[0],object_id:args[1],revision_id:args[2],kind:'sound-ownership-migration',original_id:args[3],original_sha256:args[4],content:args[5]});return rows();}
+    if(q === "SELECT 1 FROM objects WHERE id=ANY($1::text[]) AND kind='SOURCE' LIMIT 1")return rows(this.data.objects.filter(o=>args[0].includes(o.id)&&o.kind==='SOURCE').slice(0,1).map(()=>({exists:1})));
+    if(q === "SELECT 1 FROM revisions WHERE object_id=$1 AND content->>'role'=$2 LIMIT 1")return rows(this.data.revisions.filter(r=>r.object_id===args[0]&&r.content.role===args[1]).slice(0,1).map(()=>({exists:1})));
     throw new Error('Unhandled SQL: '+q);
   }
 }

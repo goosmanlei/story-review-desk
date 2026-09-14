@@ -77,9 +77,10 @@
         "server/production/input-locks.mjs",
         "server/materials/references.mjs",
         "server/materials/usage-reviews.mjs",
-        "server/production/spatial-views.mjs"
+        "server/production/spatial-views.mjs",
+        "server/settings/spatial-placement.mjs"
       ],
-      "sourceDigest": "3591e1f9de82b2a058694198515bf70d80f150a432e9c7cf963ddb9e49dbf84c"
+      "sourceDigest": "be35d64b5bf1117c0d594845987ef49d5339e7646c3eeb000393ab0ee2bc0ced"
     },
     {
       "id": "layers",
@@ -110,9 +111,14 @@
         "web/app/workspace-read-boundary.tsx",
         "web/app/production-workbench.tsx",
         "web/app/sound-ownership.tsx",
-        "web/app/sound-ownership.css"
+        "web/app/sound-ownership.css",
+        "web/app/spatial-placement-panel.tsx",
+        "web/app/spatial-placement.css",
+        "web/app/free-canvas.tsx",
+        "web/app/relationship-canvas.tsx",
+        "web/presentation/spatial-placement.mjs"
       ],
-      "sourceDigest": "a1c15ab72383f2317f373946048fc051393535e16300504784acf704081d28f9"
+      "sourceDigest": "0d5f46dd41ea17995f8355d34068e91bbbf2b22517e93a7cee37af8a3f2ae2fa"
     },
     {
       "id": "interfaces",
@@ -124,9 +130,12 @@
         "server/api.mjs",
         "server/commands.mjs",
         "scripts/review.mjs",
-        "server/documentation.mjs"
+        "server/documentation.mjs",
+        "server/settings/spatial-placement.mjs",
+        "server/workspace-actions.mjs",
+        "tests/spatial-placement.integration.mjs"
       ],
-      "sourceDigest": "522c1e12044a7268301ccec4b12f2f357d9bb9c92f23a042f0891b3a9a454a91"
+      "sourceDigest": "4a584c45ef433d5aa2cbb85c18c661bba38d61031544eb5781f12c6e7f7e1e4c"
     },
     {
       "id": "collaboration",
@@ -156,9 +165,10 @@
         "web/app/material-catalog-panel.ts",
         "web/app/material-browse-state.ts",
         "web/app/paged-production-data.ts",
-        "server/presentation/production-material-query.mjs"
+        "server/presentation/production-material-query.mjs",
+        "web/presentation/spatial-placement.mjs"
       ],
-      "sourceDigest": "93e4e8fccd6f644fa7b8bd64c95b87053bd235c4ee2948a8733fbb71a2355e0a"
+      "sourceDigest": "78b90fe1f367335a079a656df4d981daf3b43b06b7cea7c294f18798be51a9f1"
     },
     {
       "id": "development",
@@ -224,9 +234,10 @@
       "reviewedAt": "2026-09-14",
       "sources": [
         "server/workspaces.mjs",
-        "server/repository.mjs"
+        "server/repository.mjs",
+        "server/settings/spatial-placement.mjs"
       ],
-      "sourceDigest": "488aec008b253dae6806bb2dcc1e8bcecc3ce6e7e4866ec6ed7f9b4e39ee9d79"
+      "sourceDigest": "4e9fb6ed190b0f9cbfd5e21c9db14f86a56d4c590adbe6453409b9208d5260d6"
     },
     {
       "id": "reference",

@@ -1,0 +1,7 @@
+.spatial-placement-panel{padding:18px;border-top:2px dashed var(--line-strong,#b6aa95);background:var(--paper-soft,#f5f0e7);color:var(--ink,#302d28)}
+.spatial-placement-panel h3{margin:0 0 8px;font-size:17px}.spatial-placement-panel p{line-height:1.65;font-size:13px}
+.spatial-placement-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:12px;margin:14px 0}
+.spatial-placement-cards article{min-width:0;padding:14px;border:1px dashed var(--line-strong,#b6aa95);border-radius:5px;background:var(--paper-bright,#fffdf8);box-shadow:none;overflow-wrap:anywhere}
+.spatial-placement-cards strong{display:block;font-size:16px}.placement-status{display:block;margin-top:8px;font-size:12px;color:#785d31}.placement-warning{font-weight:600;color:#9b493f}
+.spatial-placement-panel button{padding:8px 10px;max-width:100%;white-space:normal;min-height:40px}.spatial-placement-panel details{margin-top:12px;font-size:13px}.spatial-placement-panel summary{cursor:pointer;line-height:1.6}.spatial-placement-panel pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px}
+.spatial-placement-history{border-top:1px solid var(--line,#d3cab9);padding-top:12px}

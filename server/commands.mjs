@@ -1,3 +1,4 @@
+import {guardSpatialPlacementSave,guardSpatialPlacementAction,SPATIAL_PLACEMENT_CATALOG_LOCK} from './settings/spatial-placement.mjs';
 import {MATERIAL_OVERALL,validateOverallCommand} from './materials/overall-review.mjs';
 import {referenceDependencies,normalizeReferenceInputs} from './materials/references.mjs';
 import { mutationGate } from "./runtime-gate.mjs";
@@ -103,6 +104,9 @@ async function save(tx, command, context) {
   check(!old?.historical, 'HISTORICAL_READ_ONLY', '历史对象只读，请另建当前记录', 409);
   let content = { ...objectValue(command.content) };
   if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')check(context.actor.kind!=='ASSISTANT','EXPLICIT_SOUND_OWNERSHIP_REQUIRED','声音归属需要人工核对永久目标',403);
+  const previous = old?.draft_revision_id || old?.adopted_revision_id || null;
+  const oldContent = previous ? (await tx.query('SELECT content FROM revisions WHERE id=$1',[previous])).rows[0]?.content : null;
+  await guardSpatialPlacementSave(tx,command,kind,oldContent);
   if (!old && !content.reviewSpec) {
     const configuration = (
       await tx.query(
@@ -133,14 +137,6 @@ async function save(tx, command, context) {
     "TITLE_REQUIRED",
     "请填写标题",
   );
-  const previous = old?.draft_revision_id || old?.adopted_revision_id || null;
-  const oldContent = previous
-      ? (
-          await tx.query("SELECT content FROM revisions WHERE id=$1", [
-            previous,
-          ])
-        ).rows[0]?.content
-      : null;
   if (module.validateTarget) {
     await module.validateTarget(tx, kind, content, oldContent);
   }
@@ -351,6 +347,7 @@ async function save(tx, command, context) {
 async function submit(tx, command) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
+  await guardSpatialPlacementAction(tx,object);
   check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     ["DRAFT", "CHANGES_REQUESTED"].includes(object.state) &&
@@ -378,6 +375,7 @@ async function submit(tx, command) {
 }
 async function archive(tx, command, context) {
   const object=await current(tx,command);
+  await guardSpatialPlacementAction(tx,object);
   check(object&&['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT','NOTE'].includes(object.kind),'ARCHIVE_KIND','此对象不能通过登记删除操作退出目录',409);
   check(context.actor.kind!=='ASSISTANT','EXPLICIT_ARCHIVE_REQUIRED','AI 不能退出正式对象',403);
   const head=(await tx.query('SELECT content FROM revisions WHERE id=$1',[object.draft_revision_id||object.adopted_revision_id])).rows[0]?.content;
@@ -390,6 +388,7 @@ async function archive(tx, command, context) {
 async function review(tx, command, context) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
+  await guardSpatialPlacementAction(tx,object);
   check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     context.actor.kind !== "ASSISTANT" && command.explicit === true,
@@ -800,11 +799,11 @@ export async function execute(pool, request) {
     );
     await tx.query("SAVEPOINT commands");
     try {
-      let commands=request.commands, presentation, validateAfterLock;
+      let commands=request.commands, presentation, validateAfterLock, additionalLockIds=[];
       if(commands.some(c=>c.type==='workspace.change')) {
         check(commands.length===1,'WORKSPACE_TRANSACTION','工作区动作必须独立提交');
         const planned=await planWorkspaceChange(tx,commands[0],request);
-        commands=planned.commands;presentation=planned.response;validateAfterLock=planned.validateAfterLock;
+        commands=planned.commands;presentation=planned.response;validateAfterLock=planned.validateAfterLock;additionalLockIds=planned.lockIds||[];
       }
       const requested = commands
         .flatMap((c) => [
@@ -849,8 +848,13 @@ export async function execute(pool, request) {
           [requested, dependencyIds],
         )
       ).rows;
+      // Serialize current SOURCE selection with the placement planner, including
+      // source creation and generic submit/review/archive paths.
+      if(commands.some(c=>c.kind==='SOURCE') || (await tx.query("SELECT 1 FROM objects WHERE id=ANY($1::text[]) AND kind='SOURCE' LIMIT 1",[requested])).rowCount)
+        additionalLockIds.push(SPATIAL_PLACEMENT_CATALOG_LOCK);
       const ids = [
         ...new Set([
+          ...additionalLockIds,
           ...requested,
           ...related.map((r) => r.id),
           ...commands

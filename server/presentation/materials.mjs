@@ -1,3 +1,4 @@
+import {spatialPlacementWorkspace} from '../settings/spatial-placement.mjs';
 import {soundOwnershipProjection,soundResourceScope,legacySoundSources} from '../settings/sound-ownership.mjs';
 import {retiredEntityType} from '../shared/entity-types.mjs';
 import {spatialCatalog} from '../production/spatial-views.mjs';
@@ -126,9 +127,10 @@ export async function domainWorkspace(unit, owner = 'SETTINGS') {
     const rowOwner = row.kind === 'ENTITY' || row.kind === 'RELATION' && record.from.kind === 'ENTITY' && record.to.kind === 'ENTITY' ? 'SETTINGS' : 'MATERIAL';
     ownership[collection + ':' + row.id] = { owner: rowOwner, reason: '由登记对象类型和精确关联确定维护入口', recordHash: hash(record), expectedVersion: row.version, revisionId: row.revisionId, state:row.state, adoptedRevisionId:row.adoptedRevisionId };
   }
-  const baseline = await spatialBaseline(unit.tx);
-  const spec = baseline.specification,catalog=await spatialCatalog(unit);
+  const baseline = await spatialBaseline(unit.tx,{allowUnavailable:true});
+  const spec = baseline.specification,catalog=spec?await spatialCatalog(unit):{locations:[]};
   const spatial = spec ? { version: spec.version, orientation: spec.orientation, sourceRef: baseline.sourceBinding.logicalPath, sourceSha256: baseline.sourceBinding.sha256, locations: catalog.locations, locationPackages: catalog.locations.map(value=>({...value,locationId:value.id})), mapCards: [], sceneRouteLocks: spec.scene_route_locks || [] } : null;
+  const spatialPlacements = await spatialPlacementWorkspace(unit,{spatial});
   const material = await assets(unit);
   const businessFacts = {}, locationVisuals = {};
   for (const entity of graph.entities) {
@@ -143,7 +145,7 @@ export async function domainWorkspace(unit, owner = 'SETTINGS') {
   const savedDraft=await workspaceDraft(unit.tx,'domain:'+owner);
   const retiredDraftChanges=(savedDraft?.content.changes||[]).filter(change=>change.collection==='entities'&&retiredEntityType(change.value?.type));
   const activeDraft=savedDraft?{...savedDraft.content,changes:(savedDraft.content.changes||[]).filter(change=>!retiredDraftChanges.includes(change))}:null;
-  return { owner, soundOwnership, legacySoundSources:legacySources, retiredDraftChanges, snapshotId: await unit.namespace(), releaseId: unit.version(), revisionId: unit.version(), readOnly: false, graph, ownership, configuration: (await unit.configuration()).domain, spatial, businessFacts, locationVisuals,
+  return { owner, soundOwnership, legacySoundSources:legacySources, retiredDraftChanges, snapshotId: await unit.namespace(), releaseId: unit.version(), revisionId: unit.version(), readOnly: false, graph, ownership, configuration: (await unit.configuration()).domain, spatial, spatialPlacements, businessFacts, locationVisuals,
     materialGraph: {families:material.assetFamilies.map(f=>({id:f.id,label:f.label,kind:f.kind,currentVersionRef:f.currentVersionRef,adoptedVersionRef:f.adoptedVersionRef})),versions:material.assetVersions.map(v=>({id:v.id,revisionId:v.revisionId,label:v.label,familyId:v.familyId,sha256:v.sha256,preview:v.preview,mediaKind:v.mediaKind,outputState:v.outputState,lifecycleState:v.lifecycleState,canFlowDownstream:v.canFlowDownstream,flowBlockReasons:v.flowBlockReasons}))},
     requirements: requirements.map(r => ({ ...Object.fromEntries(Object.entries(r).filter(([k])=>!['configurationBinding','reviewSpec','storyBasis','evidence','sourceBindings','domainContext','structureCardRefs'].includes(k))), scopeBindings: [], entityRef: r.entityRef || graph.representations.find(rep => rep.requirementIds.includes(r.id))?.entityId, representationRef: r.representationRef || graph.representations.find(rep => rep.requirementIds.includes(r.id))?.id })),
     context: { candidateRevisionId: (await unit.rows(['STORY']))[0]?.revisionId || null, currentEpisodePlanRevisionId: null }, counts: Object.fromEntries(Object.entries(graph).filter(([,v]) => Array.isArray(v)).map(([k,v]) => [k,v.length])), uncertainCount: soundOwnership.filter(b=>b.resolution==='UNKNOWN').length, draft: savedDraft?.content.status==='DRAFT'?{...activeDraft,revisionId:savedDraft.revisionId}:null, draftHeadRevisionId: savedDraft?.revisionId||null, legacyDrafts: [],

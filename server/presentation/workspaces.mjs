@@ -1,3 +1,4 @@
+import {spatialPlacementWorkspace} from '../settings/spatial-placement.mjs';
 import {currentDomainTypes,retiredEntityType} from '../shared/entity-types.mjs';
 import {soundOwnershipWorkspace,soundMigrationInventory,soundOwnershipProjection} from '../settings/sound-ownership.mjs';
 import {materialReviewFocus} from '../materials/review-focus.mjs';
@@ -118,7 +119,8 @@ export async function workspaceRead(tx, path, params) {
   }
   else if(['views/production','views/materials'].includes(name))result=await productionPage(unit,params,name==='views/materials');
   else if(name==='workflow'||name==='action-queue'){const workflow=await workflowWorkspace(unit);result=name==='workflow'?workflow:workflow.queue;}
-  else if(name==='spatial-settings'){const value=await spatialBaseline(tx);result={...value,snapshotId:await unit.namespace()};}
+  else if(name==='spatial-settings/placements')result=await spatialPlacementWorkspace(unit);
+  else if(name==='spatial-settings'){const value=await spatialBaseline(tx,{allowUnavailable:true});result={...value,snapshotId:await unit.namespace()};}
   else if(name==='sources')result=await sourceCatalog(unit);
   else if(name==='documents'){const id=params.get('id')||params.get('documentId');check(id,'DOCUMENT_ID','请选择资料');result=await sourceText(unit,id,params.get('revisionId')||undefined);}
   else if(name==='operations/snapshot')result={snapshotId:await unit.namespace(),mutationEtag:await unit.namespace(),stateProjection:params.get('summary')?undefined:await operationalProjection(unit,params.get('familyId')),reviews:params.get('summary')?undefined:{events:await reviewHistory(unit,{id:params.get('familyId'),limit:params.has('familyId')?100:5000})}};

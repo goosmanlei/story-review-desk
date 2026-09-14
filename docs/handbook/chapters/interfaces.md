@@ -60,3 +60,11 @@
 review CLI 自动绑定实例运行期，调用相同 HTTP 接口。命令文件只是请求输入，不允许直接修改 PostgreSQL 或正式媒体。网页工作区同样经事务规划器落到所属业务服务；模型工具只能读取允许的上下文，建议应用再走正式事务。
 
 常用入口为 `npm run review -- --help`，接口示例的来源版本和参数必须在实际执行前重新核对。
+
+## 待确认空间位置接口
+
+`GET workspaces/spatial-settings/placements` 返回当前依据、NOTE 版本与草稿头、待确认显示项及陈旧或冲突记录。`POST workspaces/spatial-settings/placements` 接收 `{action:"save", drafts:[...]}`；等价事务使用 `workspace.change` 和同名工作区。继续遵循本章的运行期与 operationId 契约。
+
+每项 draft 提供 `noteId`、`expectedVersion`、`expectedDraftRevisionId`、`title` 和严格的 `content`。内容含永久地点与空间 SOURCE 的 id/revisionId/sha256/expectedVersion、独立的原始来源 `sourceSha256`、精确或 UNKNOWN 的场依据、`PENDING_CONFIRMATION` 状态、`CANVAS_ONLY` 槽位和待核说明。修订内容 SHA 与原始来源字节 SHA 不能互换，审阅元数据由服务放在提案正文之外。
+
+每批 1–100 项，NOTE 与地点不得重复。规划器核对唯一有效采用 SOURCE，并在稳定加锁后重新核对全部依据、NOTE 草稿头与当前提案唯一性；SOURCE 目录变更也参与同一锁。失败整批回滚，成功只追加 NOTE 草稿。编辑不能换绑原依据。旧 NOTE 用 `objects/:id?revisionId=...` 精确回读；结果未知先查 `operations/:id`。
