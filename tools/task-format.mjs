@@ -1,18 +1,23 @@
+import {displayTaskId,compareTaskPublication} from './task-numbering.mjs';
+
 export const taskLabels={READY:'待执行',RUNNING:'执行中',BLOCKED:'阻塞',WAITING_REVIEW:'待验收',DONE:'已完成',CANCELLED:'已取消',MERGED:'已合并'};
 const assignmentLabels={RESERVED:'待启动',RUNNING:'执行中',WAITING_DECISION:'等待用户决定',DELIVERED:'已交回',ACCEPTED:'已验收',BLOCKED:'阻塞',CLOSED:'已关闭'};
 export const cell=value=>String(value??'—').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\\','&#92;').replaceAll('|','&#124;').replaceAll('`','&#96;').replaceAll('[','&#91;').replaceAll(']','&#93;').replaceAll('*','&#42;').replaceAll('_','&#95;').replace(/[\r\n\t]+/g,' ');
-const date=value=>{
+export const formatTaskDate=value=>{
   if(value===null||value==='')return '—';
   if(!value||Number.isNaN(Date.parse(value)))return 'UNKNOWN';
   return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Shanghai',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}).format(new Date(value));
 };
+const date=formatTaskDate;
+const taskIndex=tasks=>Array.isArray(tasks)?Object.fromEntries(tasks.map(t=>[t.id,t])):tasks||{};
 export function table(headers,rows) {return ['| '+headers.map(cell).join(' | ')+' |','| '+headers.map(()=>'---').join(' | ')+' |',...rows.map(r=>'| '+r.join(' | ')+' |')].join('\n');}
 const status=t=>`${taskLabels[t.status]||'UNKNOWN'}（${t.status||'UNKNOWN'}）`;
 export function sortTasks(tasks,sort='published') {
   if(!['published','priority','updated','completed'].includes(sort))throw Error('排序须为 published、priority、updated 或 completed');
-  return [...tasks].sort((a,b)=>(sort==='priority'?a.priority-b.priority:sort==='updated'?(b.updatedAt||'').localeCompare(a.updatedAt||''):sort==='completed'?(b.completedAt||'').localeCompare(a.completedAt||''):0)||a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
+  return [...tasks].sort((a,b)=>(sort==='priority'?a.priority-b.priority:sort==='updated'?(b.updatedAt||'').localeCompare(a.updatedAt||''):sort==='completed'?(b.completedAt||'').localeCompare(a.completedAt||''):0)||compareTaskPublication(a,b));
 }
-export function renderTasks(data,{sort='published',columns=[]}={}) {
+export function renderTasks(data,{sort='published',columns=[],tasks=data.tasks}={}) {
+  const index=taskIndex(tasks),display=id=>displayTaskId(index,id);
   const rows=sortTasks(data.tasks||[],sort),asOf=date(data.asOf),counts={};
   for(const t of rows)counts[t.status]=(counts[t.status]||0)+1;
   const distribution=Object.keys(taskLabels).filter(s=>counts[s]).map(s=>`${taskLabels[s]}（${s}）${counts[s]}`).join('、')||'无任务';
@@ -21,8 +26,8 @@ export function renderTasks(data,{sort='published',columns=[]}={}) {
   if(columns.some(c=>!extras[c]))throw Error('未知任务表格列');
   const headers=['任务编号','任务标题','类别','状态','优先级','发布时间','前置依赖'];
   const types={SYSTEM:'系统优化（SYSTEM）',CREATIVE:'内容创作（CREATIVE）'};
-  const main=table(headers,rows.map(t=>[cell(t.id),cell(t.title),cell(types[t.type]||'UNKNOWN'),cell(status(t)),cell(t.priority),cell(date(t.publishedAt)),(t.dependencies||[]).map(cell).join('、')||'—']));
-  const detail=columns.length?'\n\n'+table(['任务编号',...columns.map(c=>extras[c][0])],rows.map(t=>[cell(t.id),...columns.map(c=>cell(extras[c][1](t)))])):'';
+  const main=table(headers,rows.map(t=>[cell(t.displayId||display(t.id)),cell(t.title),cell(types[t.type]||'UNKNOWN'),cell(status(t)),cell(t.priority),cell(date(t.publishedAt)),(t.dependencies||[]).map(id=>cell(display(id))).join('、')||'—']));
+  const detail=columns.length?'\n\n'+table(['任务编号',...columns.map(c=>extras[c][0])],rows.map(t=>[cell(t.displayId||display(t.id)),...columns.map(c=>cell(extras[c][1](t)))])):'';
   return intro+'\n\n'+main+detail;
 }
 export function renderStatus(data,options={}) {
@@ -35,15 +40,17 @@ export function renderStatus(data,options={}) {
   if(runtime.decisionChannel)rows.push(['决策连接',runtime.decisionChannel.status]);
   return renderTasks(data,options)+'\n\n'+table(['项目','当前情况'],rows.map(r=>r.map(cell)))+renderAssignments(data.tasks||[]);
 }
-export function renderDetail(task) {
-  const rows=[['任务编号',cell(task.id)],['任务内容',cell(task.title)],['状态',cell(status(task))],['类型',cell(task.type)],['优先级',cell(task.priority)],['发布时间',cell(date(task.publishedAt))],['首次开始',cell(date(task.startedAt))],['完成时间',cell(date(task.completedAt))],['目标',cell(task.goal)],['讨论结论',cell(task.discussion?.summary||'UNKNOWN（旧版未单独记录）')],['可行性',cell(task.discussion?.feasibility||'UNKNOWN（旧版未单独记录）')],['当前进展',cell(task.checkpoint?.summary||'—')],['阻塞',cell(task.blockReason||'—')],['依赖',cell(task.dependencies.join('、')||'—')],['结果',cell(task.result?.summary||'—')]];
+export function renderDetail(task,{tasks=[task]}={}) {
+  const index=taskIndex(tasks);
+  const rows=[['任务编号',cell(task.displayId||task.id)],['任务内容',cell(task.title)],['状态',cell(status(task))],['类型',cell(task.type)],['优先级',cell(task.priority)],['发布时间',cell(date(task.publishedAt))],['首次开始',cell(date(task.startedAt))],['完成时间',cell(date(task.completedAt))],['目标',cell(task.goal)],['讨论结论',cell(task.discussion?.summary||'UNKNOWN（旧版未单独记录）')],['可行性',cell(task.discussion?.feasibility||'UNKNOWN（旧版未单独记录）')],['当前进展',cell(task.checkpoint?.summary||'—')],['阻塞',cell(task.blockReason||'—')],['依赖',cell(task.dependencies.map(id=>displayTaskId(index,id)).join('、')||'—')],['结果',cell(task.result?.summary||'—')]];
   return table(['字段','内容'],rows.map(([key,value])=>[cell(key),value]))+renderAssignments([task]);
 }
 export function renderAssignments(tasks) {
-  const rows=tasks.flatMap(t=>(t.assignments||[]).map(a=>[cell(a.id),cell(t.id),cell(`${assignmentLabels[a.status]||'UNKNOWN'}（${a.status}）`),cell(`${a.execution.model} / ${a.execution.effort}`),cell(`${a.execution.goalMode} / ${a.execution.goalMode==='NATIVE'&&a.closure?'STOPPED':a.goalStatus||(a.execution.goalMode==='NATIVE'&&a.startedAt?'UNKNOWN':'—')}`),cell(a.closure?.agent||'尚未关闭')]));
+  const rows=tasks.flatMap(t=>(t.assignments||[]).map(a=>[cell(a.id),cell(t.displayId||t.id),cell(`${assignmentLabels[a.status]||'UNKNOWN'}（${a.status}）`),cell(`${a.execution.model} / ${a.execution.effort}`),cell(`${a.execution.goalMode} / ${a.execution.goalMode==='NATIVE'&&a.closure?'STOPPED':a.goalStatus||(a.execution.goalMode==='NATIVE'&&a.startedAt?'UNKNOWN':'—')}`),cell(a.closure?.agent||'尚未关闭')]));
   return rows.length?'\n\n'+table(['派工编号','所属任务','状态','模型 / 强度','Goal','Agent 关闭'],rows):'';
 }
 export function renderAudit(data,options={}) {
-  const rows=(data.events||[]).map(e=>[cell(e.sequence),cell(date(e.at)),cell(e.action),cell(e.changes?.map(t=>t.id).join('、')||'—'),cell(e.reason||'—')]);
+  const index=taskIndex(options.tasks||data.tasks);
+  const rows=(data.events||[]).map(e=>[cell(e.sequence),cell(date(e.at)),cell(e.action),cell(e.changes?.map(t=>t.displayId||displayTaskId(index,t.id)).join('、')||'—'),cell(e.reason||'—')]);
   return renderTasks(data,options)+renderAssignments(data.tasks||[])+'\n\n'+table(['序号','时间（北京时间）','操作','相关任务','说明'],rows);
 }

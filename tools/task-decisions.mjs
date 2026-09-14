@@ -4,6 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {location,readLedger,readBindings,mutate,requireTask} from './task-ledger.mjs';
 import {decisionHash,decisionPending,pendingDecisions} from './task-decision-protocol.mjs';
 import {cell,table} from './task-format.mjs';
+import {resolveTaskId} from './task-numbering.mjs';
 import {processAlive} from './process-resources.mjs';
 
 // These are recovery inputs, not disposable logs. Sync both file and directory
@@ -28,14 +29,15 @@ export async function decisionSnapshot(project,decisionId) {
 export const decisionVersions=s=>({taskId:s.task.id,assignmentId:s.assignment.id,decisionId:s.decision.id,expectedVersions:{[s.task.id]:s.task.version},expectedAssignmentVersion:s.assignment.version,expectedDecisionVersion:s.decision.version,bindingToken:s.decision.bindingToken});
 export async function listDecisions(project,{taskId,assignmentId,includeHistory=false}={}) {
  const ledger=await readLedger(project),items=[];
+ taskId=resolveTaskId(ledger.tasks,taskId);
  for(const task of Object.values(ledger.tasks))for(const assignment of task.assignments||[])for(const d of assignment.decisions||[]){
   if(taskId&&taskId!==task.id||assignmentId&&assignmentId!==assignment.id||!includeHistory&&!decisionPending(d))continue;
-  items.push({...d,taskTitle:task.title,taskVersion:task.version,assignmentVersion:assignment.version,needsPresentation:!d.presentations.length&&decisionPending(d)});
+  items.push({...d,taskDisplayId:task.displayId,taskTitle:task.title,taskVersion:task.version,assignmentVersion:assignment.version,needsPresentation:!d.presentations.length&&decisionPending(d)});
  }
  return items.sort((a,b)=>a.createdAt.localeCompare(b.createdAt)||a.id.localeCompare(b.id));
 }
 export function renderDecisions(items) {
- const rows=items.map(d=>[d.id,d.taskId+' '+d.taskTitle,d.assignmentId,d.kind,d.status,d.question,d.options.map(o=>o.label+'：'+o.description).join('；')||'自由文本',d.recommendation,d.presentations.length?'已转达；沿用原问题':'待主会话提问'].map(cell));
+ const rows=items.map(d=>[d.id,(d.taskDisplayId||d.taskId)+' '+d.taskTitle,d.assignmentId,d.kind,d.status,d.question,d.options.map(o=>o.label+'：'+o.description).join('；')||'自由文本',d.recommendation,d.presentations.length?'已转达；沿用原问题':'待主会话提问'].map(cell));
  return table(['问题编号','正式任务','派工','类型','状态','问题','选项及影响','建议','转达'],rows);
 }
 

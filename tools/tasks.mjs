@@ -15,6 +15,7 @@ import {decisionsAction} from './task-decision-cli.mjs';
 import {decisionChannelStatus,listDecisions,durableDecisionFile} from './task-decisions.mjs';
 import {decisionHash} from './task-decision-protocol.mjs';
 import {renderTasks,renderStatus,renderDetail,renderAudit,sortTasks} from './task-format.mjs';
+import {resolveTaskId,displayTaskId} from './task-numbering.mjs';
 import {probeNative,connectNative,closeNativeThread,verifyGoalProbe,assertNativeChild} from './task-native.mjs';
 
 export const help=`tasks — 正式任务管理（不接收未澄清想法）
@@ -70,6 +71,11 @@ list 默认范围：READY / RUNNING / BLOCKED / WAITING_REVIEW；
 --all 才纳入 DONE / CANCELLED / MERGED。--status / --type / --task 与范围取交集，
 例如 list --status DONE 返回空，list --all --status DONE 查询已完成。
 JSON 与 Markdown 同范围；show / status / audit 保持原查询语义。
+展示编号为 T-YYYYMMDD-NNN，日期按 Asia/Shanghai 原始发布时间，同日跨类型共用 001–999。
+编号终态不复用、重建不变化；每日超过 999 项整笔拒绝（TASK_NUMBER_LIMIT）。
+完整展示号与旧永久 ID 均可 show、list/audit --task、依赖、合并、派工和写入定位。
+JSON id/taskId/依赖保持永久身份，task.displayId 提供展示号；expectedVersions 可用任一编号作键。
+同一任务的新旧键版本冲突须拒绝；别名在锁内解析后核对幂等与版本，不能绕过 CAS。
 
 写入共同字段：operationId（重发原编号）、actor（如 USER / PROJECT_CODEX）。
 publish: {task:{clarified:true,type:"SYSTEM",title,originalRequest,goal,scope:[...],
@@ -165,7 +171,9 @@ async function guarded(project,runId,taskId,command,core,assignmentId) {
   const execute=()=>processLock(path.join(loc.runtime,assignmentId?`activity-${assignmentId}.lock`:'activity.lock'),async()=>{
     await requireRun(loc,runId);
     const ledger=await readLedger(loc), bindings=await readBindings(loc);
+    taskId=resolveTaskId(ledger.tasks,taskId);
     const task=assignmentId?Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)):ledger.tasks[taskId];
+    requireTask(!taskId||task?.id===taskId,'guard 派工与任务编号不符');
     requireTask(task?.status==='RUNNING'&&(bindings.tasks[task.id]||task.runId)===runId,'guard 只能执行当前会话已领取的任务');
     requireTask(assignmentId||!task.assignments?.length,'已派工任务必须指定 --assignment');
     const owner=processIdentity(); await activity(project,runId,owner,null,assignmentId,task.id);
@@ -255,14 +263,14 @@ export async function main(argv=process.argv.slice(2)) {
   const ledger=await readLedger(project);
   const data=audit(ledger,{taskId:v.task,status:v.status,type:v.type,from:v.from,to:v.to,operationId:v['operation-id']});
   data.tasks=sortTasks(data.tasks,v.sort);
-  data.scope=[v.task?'任务 '+v.task:null,v.status||null,v.type||null].filter(Boolean).join(' / ')||'当前项目';
-  const options={sort:v.sort,columns:v.columns?.split(',')||[]};
+  data.scope=[v.task?'任务 '+displayTaskId(ledger.tasks,resolveTaskId(ledger.tasks,v.task)):null,v.status||null,v.type||null].filter(Boolean).join(' / ')||'当前项目';
+  const options={sort:v.sort,columns:v.columns?.split(',')||[],tasks:ledger.tasks};
   if(action==='list') {
     if(!v.all)data.tasks=data.tasks.filter(t=>['READY','RUNNING','BLOCKED','WAITING_REVIEW'].includes(t.status));
     data.scope+=' / '+(v.all?'全部任务（含终态）':'未完成任务');
     return v.format==='markdown'?renderTasks(data,options):data.tasks;
   }
-  if(action==='show') {requireTask(ledger.tasks[p[1]],'任务不存在');return v.format==='markdown'?renderDetail(ledger.tasks[p[1]],options):ledger.tasks[p[1]];}
+  if(action==='show') {const task=ledger.tasks[resolveTaskId(ledger.tasks,p[1])];requireTask(task,'任务不存在');return v.format==='markdown'?renderDetail(task,options):task;}
   if(action==='audit')return v.format==='markdown'?renderAudit(data,options):data;
   if(action==='status') {
     const runtime=await runtimeState(project),interrupted=Object.values(ledger.tasks).filter(t=>t.status==='RUNNING'&&(!runtime.runActive||(runtime.bindings.tasks[t.id]||t.runId)!==runtime.run?.id));
@@ -274,8 +282,10 @@ export async function main(argv=process.argv.slice(2)) {
   const mutation=action==='assignment'?`assignment:${p[1]}`:action;
   requireTask(['publish','upgrade','next','resume','checkpoint','transition','amend','merge','split','schedule','assignment:dispatch','assignment:start','assignment:checkpoint','assignment:result','assignment:accept','assignment:close','assignment:reconcile'].includes(mutation),'未知命令；运行 tasks --help');
   const request=await inputFile(v.file);
-  if(mutation==='assignment:start'||mutation==='assignment:reconcile'&&request.nativeThreadId) {
-    const a=ledger.tasks[request.taskId]?.assignments?.find(a=>a.id===request.assignmentId);
+  // Durable replays must reach the ledger hash check without reopening a closed
+  // native thread. A conflicting reuse still fails in mutate before any effect.
+  if(!ledger.events.some(e=>e.operationId===request.operationId)&&(mutation==='assignment:start'||mutation==='assignment:reconcile'&&request.nativeThreadId)) {
+    const a=ledger.tasks[resolveTaskId(ledger.tasks,request.taskId)]?.assignments?.find(a=>a.id===request.assignmentId);
     if(a?.execution.mode==='SUBAGENT') {
       const loc=await location(project),run=await requireRun(loc,request.runId),binding=(await readBindings(loc)).assignments[request.assignmentId],client=connectNative({socket:binding?.socket||run.capabilities.socket});
       try{await client.initialize();if(binding?.backendServiceId)await assertBackendThread(project,request.assignmentId,request.nativeThreadId,client);else await assertNativeChild(client,request.nativeThreadId,binding?.parentThreadId||run.capabilities.parentThreadId);}finally{client.close();}

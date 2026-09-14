@@ -14,7 +14,7 @@ import {durableDecisionFile,readDecisionFile,persistDecisionMessage,drainDecisio
 
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
-const sources=['task-decision-daemon.mjs','task-decision-channel.mjs','task-decisions.mjs','task-decision-state.mjs','task-decision-protocol.mjs','task-native.mjs','native-socket.mjs','task-ledger.mjs','task-assignments.mjs','task-capacity.mjs','task-format.mjs','task-server.mjs','task-server-daemon.mjs','process-resources.mjs','io.mjs'].map(f=>'tools/'+f).concat('server/transport-contract.mjs');
+export const decisionChannelSources=Object.freeze(['task-decision-daemon.mjs','task-decision-channel.mjs','task-decisions.mjs','task-decision-state.mjs','task-decision-protocol.mjs','task-native.mjs','native-socket.mjs','task-ledger.mjs','task-numbering.mjs','task-assignments.mjs','task-capacity.mjs','task-format.mjs','task-server.mjs','task-server-daemon.mjs','process-resources.mjs','io.mjs'].map(f=>'tools/'+f).concat('server/transport-contract.mjs'));
 const rpcMethods=new Set(['thread/start','thread/resume','thread/name/set','thread/read','thread/loaded/list','thread/turns/list','thread/items/list','thread/goal/get','thread/goal/set','thread/backgroundTerminals/list','thread/backgroundTerminals/terminate','thread/archive','turn/start','turn/interrupt']);
 export async function channelPaths(project) {
  const p=await serverPaths(project),directory=path.join(p.runtime,'decision-channel');
@@ -43,7 +43,7 @@ export async function ensureDecisionChannel(project) {
  const p=await channelPaths(project);
  return processLock(path.join(p.directory,'startup.lock'),async()=>{
   const v=await verifyTaskServer(project);v.client.close();
-  const content=await Promise.all(sources.map(async name=>[name,await readFile(path.join(sourceRoot,name),'utf8')]));
+  const content=await Promise.all(decisionChannelSources.map(async name=>[name,await readFile(path.join(sourceRoot,name),'utf8')]));
   const sourceDigest=decisionHash(content.map(([name,data])=>[name,decisionHash(data)]));
   let previous=await readDecisionFile(p.channelRecord);
   if(previous&&!previous.process){const launchOwner=await readDecisionFile(path.join(p.directory,'launch-process.json'));if(launchOwner?.id===previous.id&&launchOwner.process)previous={...previous,process:launchOwner.process};}

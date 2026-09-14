@@ -211,9 +211,10 @@
         "tools/task-decision-daemon.mjs",
         "tools/task-decision-protocol.mjs",
         "tools/task-decision-state.mjs",
-        "tools/task-decisions.mjs"
+        "tools/task-decisions.mjs",
+        "tools/task-numbering.mjs"
       ],
-      "sourceDigest": "6b680f778e8a043ce54bfee7b90cacadc7d29327548c452d36ba32c98cbe88b0"
+      "sourceDigest": "150c9fa56ca156befe3b7f7846b665f66e32204839e1038daa5d73b44da12580"
     },
     {
       "id": "instance",

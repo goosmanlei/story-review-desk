@@ -79,7 +79,7 @@ test('list defaults to every unfinished state; all/filter/empty outputs preserve
  assert.deepEqual((await query('--type','CREATIVE')).map(t=>t.id),[blocked.taskId]);assert.deepEqual(await query('--task',done.taskId),[]);assert.deepEqual((await query('--all','--task',done.taskId)).map(t=>t.id),[done.taskId]);
  const tableIds=md=>[...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(m=>m[1]);
  for(const flags of [[],['--all'],['--status','DONE'],['--all','--status','DONE'],['--type','CREATIVE'],['--all','--type','SYSTEM']]){
-  const rows=await query(...flags),md=await query(...flags,'--format','markdown');assert.deepEqual(tableIds(md),rows.map(t=>t.id));assert.match(md,/\| 任务编号 \| 任务标题 \| 类别 \| 状态 \| 优先级 \| 发布时间 \| 前置依赖 \|/);assert(md.includes(`共 ${rows.length} 项任务`));assert.doesNotMatch(md,/\]\(<|tasks\/items|\.md>/);for(const row of rows)assert(md.includes('| '+row.title+' |'));
+  const rows=await query(...flags),md=await query(...flags,'--format','markdown');assert.deepEqual(tableIds(md),rows.map(t=>t.displayId));assert.match(md,/\| 任务编号 \| 任务标题 \| 类别 \| 状态 \| 优先级 \| 发布时间 \| 前置依赖 \|/);assert(md.includes(`共 ${rows.length} 项任务`));assert.doesNotMatch(md,/\]\(<|tasks\/items|\.md>/);for(const row of rows)assert(md.includes('| '+row.title+' |'));
  }
  assert.equal((await tasksMain(['show',done.taskId,'--project',root])).status,'DONE');assert.equal((await tasksMain(['audit','--project',root])).tasks.length,8);assert.equal((await tasksMain(['status','--project',root])).run.id,runner.id);
  const userViews=await Promise.all([
@@ -88,7 +88,7 @@ test('list defaults to every unfinished state; all/filter/empty outputs preserve
   tasksMain(['status','--project',root,'--format','markdown'])
  ]);
  for(const md of userViews)assert.doesNotMatch(md,/\[[^\]]+\]\(|tasks\/items|\.md>|\/Users\//);
- assert.match(userViews[0],new RegExp(`\\| 任务编号 \\| ${done.taskId} \\|`));
+ assert.match(userViews[0],new RegExp(`\\| 任务编号 \\| ${before.tasks[done.taskId].displayId} \\|`));
  assert.equal((await readLedger(root)).head,before.head);assert.equal((await readLedger(root)).sequence,before.sequence);
  for(const task of pending)await change(root,'transition',task.id,{runId:runner.id,status:'CANCELLED',reason:'终态空列表夹具'});
  assert.deepEqual(await query(),[]);const empty=await query('--format','markdown');assert.match(empty,/共 0 项任务/);assert.match(empty,/\| 任务编号 \|/);assert.equal((await query('--all')).length,8);
@@ -96,15 +96,15 @@ test('list defaults to every unfinished state; all/filter/empty outputs preserve
 
 test('shared task renderer keeps a seven-column table after Markdown rendering without exposing task-card paths',()=>{
  const tasks=[
-  {id:'T-20260914-000000000001',title:'前置任务甲',type:'SYSTEM',status:'DONE',priority:3,publishedAt:'2026-09-14T00:00:01.000Z',dependencies:[]},
-  {id:'T-20260914-000000000002',title:'前置任务乙',type:'CREATIVE',status:'BLOCKED',priority:1,publishedAt:'2026-09-14T00:00:02.000Z',dependencies:[]},
-  {id:'T-20260914-000000000003',title:'包含完整正式事实且足以触发显示层单元格换行的长任务标题',type:'SYSTEM',status:'WAITING_REVIEW',priority:2,publishedAt:'2026-09-14T00:00:03.000Z',dependencies:['T-20260914-000000000001','T-20260914-000000000002']}
+  {id:'T-20260914-000000000001',displayId:'T-20260914-001',title:'前置任务甲',type:'SYSTEM',status:'DONE',priority:3,publishedAt:'2026-09-14T00:00:01.000Z',dependencies:[]},
+  {id:'T-20260914-000000000002',displayId:'T-20260914-002',title:'前置任务乙',type:'CREATIVE',status:'BLOCKED',priority:1,publishedAt:'2026-09-14T00:00:02.000Z',dependencies:[]},
+  {id:'T-20260914-000000000003',displayId:'T-20260914-003',title:'包含完整正式事实且足以触发显示层单元格换行的长任务标题',type:'SYSTEM',status:'WAITING_REVIEW',priority:2,publishedAt:'2026-09-14T00:00:03.000Z',dependencies:['T-20260914-000000000001','T-20260914-000000000002']}
  ];
  const md=renderTasks({tasks,asOf:'2026-09-14T01:02:03.000Z',scope:'代表性数据'}),lines=md.split('\n').filter(line=>line.startsWith('| '));
  assert.equal(lines.length,5);for(const line of lines)assert.equal(line.split(' | ').length,7);
- assert.deepEqual([...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(match=>match[1]),tasks.map(task=>task.id));
+ assert.deepEqual([...md.matchAll(/^\| (T-[^ |]+) \|/gm)].map(match=>match[1]),tasks.map(task=>task.displayId));
  assert.match(md,/包含完整正式事实且足以触发显示层单元格换行的长任务标题/);
- assert.match(md,/T-20260914-000000000001、T-20260914-000000000002/);
+ assert.match(md,/T-20260914-001、T-20260914-002/);
  assert.match(md,/阻塞（BLOCKED）1、待验收（WAITING_REVIEW）1、已完成（DONE）1/);
  assert.doesNotMatch(md,/\[[^\]]+\]\(|tasks\/items|\.md>|\/Users\//);
  const html=new MarkdownIt({html:false,linkify:false}).render(md),bodyRows=[...html.matchAll(/<tr>([\s\S]*?)<\/tr>/g)].slice(1);

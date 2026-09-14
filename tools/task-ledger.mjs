@@ -5,7 +5,8 @@ import {mkdir, readFile, readdir, lstat, open, link, unlink, realpath} from 'nod
 import {atomic, plainDirectory} from './io.mjs';
 import {processLock, processIdentity, processAlive} from './process-resources.mjs';
 import {assignmentMutation, assignmentOpen, assignmentUnknown} from './task-assignments.mjs';
-import {renderTasks,taskLabels,renderAssignments} from './task-format.mjs';
+import {renderTasks,taskLabels,renderAssignments,formatTaskDate,sortTasks} from './task-format.mjs';
+import {replayTaskNumbers,nextTaskDisplayId,resolveTaskId,displayTaskId,normalizeTaskRequest,numberedResult,compareTaskPublication} from './task-numbering.mjs';
 import {taskCapacity,requireTaskCapacity} from './task-capacity.mjs';
 import {decisionMutation} from './task-decision-state.mjs';
 import {pendingDecisions} from './task-decision-protocol.mjs';
@@ -55,7 +56,7 @@ export async function readLedger(project) {
   if(binding) requireTask([1,2].includes(binding.schemaVersion) && binding.projectId===loc.projectId,'任务账本属于其他实例或版本；请升级 CLI');
   let names;
   try { await plainDirectory(loc.events); names=await readdir(loc.events); }
-  catch(e) { if(e.code==='ENOENT') return {...loc,schemaVersion:binding?.schemaVersion||2,tasks:{},events:[],sequence:0,head:null}; throw e; }
+  catch(e) { if(e.code==='ENOENT') return {...loc,schemaVersion:binding?.schemaVersion||2,tasks:{},events:[],sequence:0,head:null,numbering:replayTaskNumbers([])}; throw e; }
   requireTask(binding,'任务账本缺少实例绑定');
   const events=[], tasks={}, operations=new Set(); let head=null;
   for(const name of names.sort()) {
@@ -70,7 +71,9 @@ export async function readLedger(project) {
     }
     operations.add(e.operationId); events.push(e); head=hash;
   }
-  return {...loc,schemaVersion:binding.schemaVersion,pendingUpgrade:binding.pendingUpgrade,tasks,events,head,sequence:events.length};
+  const numbering=replayTaskNumbers(events);
+  for(const [id,task] of Object.entries(tasks))tasks[id]={...task,displayId:numbering.displayIds[id]};
+  return {...loc,schemaVersion:binding.schemaVersion,pendingUpgrade:binding.pendingUpgrade,tasks,events,head,sequence:events.length,numbering};
 }
 
 async function initialize(loc,version=2) {
@@ -167,8 +170,9 @@ export async function setRunPolicy(project,runId,policy){
   return withRuntime(project,async loc=>{
     const run=await requireRun(loc,runId),ledger=await readLedger(loc);
     requireTask(policy&&Object.keys(policy).every(k=>k==='stopAfterTaskId'),'执行策略只接受stopAfterTaskId');
-    requireTask(ledger.tasks[policy.stopAfterTaskId],'停止边界须引用现有正式任务');
-    run.policy={stopAfterTaskId:policy.stopAfterTaskId};await atomic(path.join(loc.runtime,'run.json'),run);return run.policy;
+    const taskId=resolveTaskId(ledger.tasks,policy.stopAfterTaskId);
+    requireTask(ledger.tasks[taskId],'停止边界须引用现有正式任务');
+    run.policy={stopAfterTaskId:taskId};await atomic(path.join(loc.runtime,'run.json'),run);return run.policy;
   });
 }
 export async function withRuntime(project,callback) {
@@ -217,10 +221,12 @@ export async function activity(project,id,owner,child=null,assignmentId=null,tas
   return withRuntime(project,async loc=>{
     await requireRun(loc,id);
     const ledger=await readLedger(loc),bindings=await readBindings(loc);
+    taskId=resolveTaskId(ledger.tasks,taskId);
     requireTaskCapacity(ledger.tasks);
     if(assignmentId) {
       identity(assignmentId);
       const task=Object.values(ledger.tasks).find(t=>t.assignments?.some(a=>a.id===assignmentId)),a=task?.assignments.find(a=>a.id===assignmentId);
+      requireTask(!taskId||task?.id===taskId,'派工与任务编号不符');
       requireTask(a?.status==='RUNNING'&&bindings.assignments[assignmentId]?.runId===id,'派工已失去执行资格');
       await directory(path.join(loc.runtime,'activities'));
     } else if(taskId) requireTask(ledger.tasks[taskId]?.status==='RUNNING'&&(bindings.tasks[taskId]||ledger.tasks[taskId].runId)===id,'任务已失去执行资格');
@@ -239,18 +245,27 @@ export async function clearActivity(project,id,assignmentId=null) {
 export async function mutate(project,action,request) {
   identity(request.operationId);
   text(request.actor,'actor');
-  if(action==='publish') {
-    requireTask(!(request.task&&request.tasks),'task 与 tasks 不能同时提供');
-    const specs=request.tasks||[request.task];requireTask(Array.isArray(specs)&&specs.length>0&&specs.length<=50,'每次发布 1–50 个已讨论任务');
-    specs.forEach(s=>validateSpec(s,{discussionRequired:true,batch:true})); // No files/events for rejected ideas.
-  }
-  const hash=digest({action,request});
+  const originalRequest=request,originalHash=digest({action,request});
   return withRuntime(project,async loc=>{
     const ledger=await readLedger(loc), old=ledger.events.find(e=>e.operationId===request.operationId);
+    // Exact old requests must still replay even after their task becomes terminal
+    // or its expectedVersion becomes stale. Alias-only retries compare using the
+    // same permanent identities as the original request.
+    const replay=async()=>{
+      if(action==='upgrade'&&ledger.pendingUpgrade?.operationId===request.operationId)await atomic(path.join(loc.root,'tasks/project.json'),{schemaVersion:2,projectId:loc.projectId});
+      return {...numberedResult(old.result,ledger.tasks),replayed:true};
+    };
+    if(old?.requestHash===originalHash)return replay();
+    request=normalizeTaskRequest(ledger.tasks,originalRequest);
+    const hash=digest({action,request});
     if(old) {
       requireTask(old.requestHash===hash,'同一操作编号不能用于不同请求');
-      if(action==='upgrade'&&ledger.pendingUpgrade?.operationId===request.operationId)await atomic(path.join(loc.root,'tasks/project.json'),{schemaVersion:2,projectId:loc.projectId});
-      return {...old.result,replayed:true};
+      return replay();
+    }
+    if(action==='publish') {
+      requireTask(!(request.task&&request.tasks),'task 与 tasks 不能同时提供');
+      const specs=request.tasks||[request.task];requireTask(Array.isArray(specs)&&specs.length>0&&specs.length<=50,'每次发布 1–50 个已讨论任务');
+      specs.forEach(s=>validateSpec(s,{discussionRequired:true,batch:true}));
     }
     requireTask(!ledger.pendingUpgrade||action==='upgrade','先重放原 upgrade 操作完成协议升级');
     const tasks=structuredClone(ledger.tasks), changed=new Set(), at=timestamp(),bindings=await readBindings(loc);
@@ -259,7 +274,7 @@ export async function mutate(project,action,request) {
     const create=(spec,suffix='')=>{
       const id='T-'+at.slice(0,10).replaceAll('-','')+'-'+digest(request.operationId+suffix).slice(0,12);
       requireTask(!tasks[id],'任务编号冲突');
-      const t={...validateSpec(spec,{batch:action==='publish'}),id,projectId:loc.projectId,version:1,status:'READY',publishedAt:at,updatedAt:at,startedAt:null,completedAt:null,checkpoint:null,result:null};
+      const t={...validateSpec(spec,{batch:action==='publish'}),id,displayId:nextTaskDisplayId(tasks,at),projectId:loc.projectId,version:1,status:'READY',publishedAt:at,updatedAt:at,startedAt:null,completedAt:null,checkpoint:null,result:null};
       tasks[id]=t; changed.add(id); return t;
     };
     const owner=t=>bindings.tasks[t.id]||t.runId;
@@ -308,7 +323,7 @@ export async function mutate(project,action,request) {
       if(unfinished.length) return {status:unfinished.every(t=>owner(t)===request.runId)?'CURRENT_TASK':'RECOVERY_REQUIRED',tasks:unfinished,capacity:taskCapacity(tasks)};
       requireTask(!Object.values(tasks).some(t=>t.assignments?.some(assignmentOpen)),'仍有未关闭派工，不能使用串行 next');
       requireTask(!await activeActivity(loc),'原执行命令仍在运行，不能领取新任务');
-      const candidates=Object.values(tasks).filter(t=>t.status==='READY' && !t.children?.length && t.dependencies.every(d=>complete(tasks,d))).sort((a,b)=>a.priority-b.priority||a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
+      const candidates=Object.values(tasks).filter(t=>t.status==='READY' && !t.children?.length && t.dependencies.every(d=>complete(tasks,d))).sort((a,b)=>a.priority-b.priority||compareTaskPublication(a,b));
       const t=candidates[0];
       if(!t) return {status:'NO_EXECUTABLE_TASK',remaining:Object.values(tasks).filter(t=>!terminal.has(t.status))};
       requireTaskCapacity(tasks,t.id);
@@ -401,22 +416,24 @@ export async function mutate(project,action,request) {
     // Bind ownership before publishing intent. A crash leaves at most an unused
     // binding, never a dispatched task without a durable identity to reconcile.
     await atomic(path.join(loc.runtime,'bindings.json'),bindings);
-    await append(loc,{schemaVersion:action==='upgrade'?2:ledger.schemaVersion,projectId:loc.projectId,sequence:ledger.sequence+1,previousHash:ledger.head,operationId:request.operationId,requestHash:hash,action,actor:request.actor,reason:request.reason||null,at,tasks:result.tasks,result});
+    const persisted=new Set(ledger.numbering.persistedIds);
+    const taskNumbering={version:1,allocations:Object.values(tasks).filter(t=>!persisted.has(t.id)).map(t=>({taskId:t.id,displayId:t.displayId}))};
+    await append(loc,{schemaVersion:action==='upgrade'?2:ledger.schemaVersion,projectId:loc.projectId,sequence:ledger.sequence+1,previousHash:ledger.head,operationId:request.operationId,requestHash:hash,action,actor:request.actor,reason:request.reason||null,at,taskNumbering,tasks:result.tasks,result});
     if(action==='upgrade')await atomic(path.join(loc.root,'tasks/project.json'),{schemaVersion:2,projectId:loc.projectId});
     try { await projections({...loc,tasks,asOf:at}); } catch(e) { result.projectionWarning=`账本已提交；运行 rebuild 重建视图：${e.message}`; }
     return result;
   });
 }
 
-const safeText=s=>String(s??'').replaceAll('|','\\|').replaceAll('\n',' ');
 export function projectionFiles(ledger) {
   const files={};
-  const rows=Object.values(ledger.tasks).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
+  const rows=sortTasks(Object.values(ledger.tasks));
+  const display=id=>displayTaskId(ledger.tasks,id);
   for(const t of rows) {
-    const body=[`# ${t.title}`,'',`编号：${t.id} · 类型：${t.type} · 状态：${labels[t.status]} · 版本：${t.version}`,'',`发布时间：${t.publishedAt}\n\n开始时间：${t.startedAt||'尚未开始'}\n\n完成时间：${t.completedAt||'尚未完成'}`,'','## 正式要求','',t.goal,'','用户原话：\n\n'+t.originalRequest,'','范围：\n\n'+t.scope.map(x=>'- '+x).join('\n'),'','交付物：\n\n'+t.deliverables.map(x=>'- '+x).join('\n'),'','验收标准：\n\n'+t.acceptanceCriteria.map((x,i)=>`${i+1}. ${x}`).join('\n'),'','授权边界：\n\n'+t.authorization,'',`依赖：${t.dependencies.join(', ')||'无'}\n\n关系：${[t.parentId,...(t.children||[]),t.mergedInto,...(t.sources||[])].filter(Boolean).join(', ')||'无'}`,'','## 当前进展','',t.blockReason||'',t.checkpoint?.summary||'尚无执行检查点','',...(t.checkpoint?.completedSteps||[]).map(x=>'- 已完成：'+x),...(t.checkpoint?.nextSteps||[]).map(x=>'- 下一步：'+x),'','## 结果','',t.result?.summary||'尚未完成','',...(t.result?.acceptance||[]).map(x=>`- 验收 ${x.criterion+1}：${x.evidence}`),...(t.result?.artifacts||[]).map(x=>'- 成果：'+x),t.result?'\n清理：'+t.result.cleanup:'','', '此文件由追加式任务账本生成；通过 tasks CLI 修改。',''].join('\n');
+    const body=[`# ${t.title}`,'',`编号：${t.displayId||t.id} · 类型：${t.type} · 状态：${labels[t.status]} · 版本：${t.version}`,'',`发布时间：${formatTaskDate(t.publishedAt)}（北京时间）\n\n开始时间：${formatTaskDate(t.startedAt)}\n\n完成时间：${formatTaskDate(t.completedAt)}`,'','## 正式要求','',t.goal,'','用户原话：\n\n'+t.originalRequest,'','范围：\n\n'+t.scope.map(x=>'- '+x).join('\n'),'','交付物：\n\n'+t.deliverables.map(x=>'- '+x).join('\n'),'','验收标准：\n\n'+t.acceptanceCriteria.map((x,i)=>`${i+1}. ${x}`).join('\n'),'','授权边界：\n\n'+t.authorization,'',`依赖：${t.dependencies.map(display).join(', ')||'无'}\n\n关系：${[t.parentId,...(t.children||[]),t.mergedInto,...(t.sources||[])].filter(Boolean).map(display).join(', ')||'无'}`,'','## 当前进展','',t.blockReason||'',t.checkpoint?.summary||'尚无执行检查点','',...(t.checkpoint?.completedSteps||[]).map(x=>'- 已完成：'+x),...(t.checkpoint?.nextSteps||[]).map(x=>'- 下一步：'+x),'','## 结果','',t.result?.summary||'尚未完成','',...(t.result?.acceptance||[]).map(x=>`- 验收 ${x.criterion+1}：${x.evidence}`),...(t.result?.artifacts||[]).map(x=>'- 成果：'+x),t.result?'\n清理：'+t.result.cleanup:'','', '此文件由追加式任务账本生成；通过 tasks CLI 修改。',''].join('\n');
     files['tasks/items/'+t.id+'.md']=(body+(t.discussion?'\n讨论结论：'+t.discussion.summary+'\n\n可行性：'+t.discussion.feasibility+'\n':'')+renderAssignments([t])).trimEnd()+'\n';
   }
-  files['tasks/README.md']='# 正式任务\n\n'+renderTasks({tasks:rows,asOf:ledger.asOf||ledger.events?.at(-1)?.at||'1970-01-01T00:00:00.000Z'},{linkBase:'items'})+'\n\n此视图由追加式事件生成；通过 tasks CLI 修改。\n';
+  files['tasks/README.md']='# 正式任务\n\n'+renderTasks({tasks:rows,asOf:ledger.asOf||ledger.events?.at(-1)?.at||'1970-01-01T00:00:00.000Z'},{tasks:ledger.tasks})+'\n\n此视图由追加式事件生成；通过 tasks CLI 修改。\n';
   return files;
 }
 export async function projections(ledger) {
@@ -430,12 +447,13 @@ export async function projections(ledger) {
 }
 export async function rebuild(project) { return withRuntime(project,async loc=>{await initialize(loc); const ledger=await readLedger(loc); await projections(ledger); return {status:'REBUILT',tasks:Object.keys(ledger.tasks).length};}); }
 export function audit(ledger,{taskId,status,type,from,to,operationId}={}) {
+  taskId=resolveTaskId(ledger.tasks,taskId);
   if(status) requireTask(states.includes(status),'状态筛选无效');
   if(type) requireTask(['SYSTEM','CREATIVE'].includes(type),'类型筛选无效');
   for(const x of [from,to].filter(Boolean)) requireTask(!Number.isNaN(Date.parse(x)),'时间筛选无效；使用带时区的 ISO 时间');
   const match=t=>(!taskId||t.id===taskId)&&(!status||t.status===status)&&(!type||t.type===type);
   if(from&&to)requireTask(Date.parse(from)<Date.parse(to),'时间窗口起点须早于终点');
-  const selected=Object.values(ledger.tasks).filter(match).sort((a,b)=>a.publishedAt.localeCompare(b.publishedAt)||a.id.localeCompare(b.id));
+  const selected=sortTasks(Object.values(ledger.tasks).filter(match));
   const ids=new Set(selected.map(t=>t.id));
-  return {projectId:ledger.projectId,asOf:timestamp(),sequence:ledger.sequence,head:ledger.head,tasks:selected,events:ledger.events.filter(e=>(!operationId||e.operationId===operationId)&&(!from||e.at>=new Date(from).toISOString())&&(!to||e.at<new Date(to).toISOString())&&(!(taskId||status||type)||e.tasks.some(t=>ids.has(t.id)))).map(({sequence,at,action,actor,reason,operationId,tasks})=>({sequence,at,action,actor,reason,operationId,changes:tasks.filter(t=>ids.has(t.id))}))};
+  return {projectId:ledger.projectId,asOf:timestamp(),sequence:ledger.sequence,head:ledger.head,tasks:selected,events:ledger.events.filter(e=>(!operationId||e.operationId===operationId)&&(!from||e.at>=new Date(from).toISOString())&&(!to||e.at<new Date(to).toISOString())&&(!(taskId||status||type)||e.tasks.some(t=>ids.has(t.id)))).map(({sequence,at,action,actor,reason,operationId,tasks})=>({sequence,at,action,actor,reason,operationId,changes:tasks.filter(t=>ids.has(t.id)).map(t=>({...t,displayId:ledger.tasks[t.id].displayId}))}))};
 }

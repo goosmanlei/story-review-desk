@@ -1,3 +1,4 @@
+import {compareTaskPublication} from './task-numbering.mjs';
 import path from 'node:path';
 import {realpath,lstat} from 'node:fs/promises';
 import {taskCapacity,taskCapacityReason,requireTaskCapacity} from './task-capacity.mjs';
@@ -77,7 +78,7 @@ export async function assignmentMutation(ctx) {
       if(s.attemptOf) demand(find(s.attemptOf)?.task.id===t.id && find(s.attemptOf).assignment.status==='CLOSED','重派必须引用本任务已关闭的派工');
       demand(!(t.assignments||[]).some(a=>a.key===s.key && assignmentOpen(a)), '同一派工尚未关闭，不能重复调度');
       return {s,t,rs,execution};
-    }).sort((a,b)=>a.t.priority-b.t.priority||a.t.publishedAt.localeCompare(b.t.publishedAt)||a.t.id.localeCompare(b.t.id)||a.s.key.localeCompare(b.s.key));
+    }).sort((a,b)=>a.t.priority-b.t.priority||compareTaskPublication(a.t,b.t)||a.s.key.localeCompare(b.s.key));
     const selected=[], deferred=[];
     for (const {s,t,rs,execution} of candidates) {
       let reason=null;

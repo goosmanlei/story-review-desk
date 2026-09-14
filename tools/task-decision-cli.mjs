@@ -1,11 +1,12 @@
 import {randomUUID} from 'node:crypto';
-import {location,mutate,requireRun,requireTask,updateBinding} from './task-ledger.mjs';
+import {location,readLedger,mutate,requireRun,requireTask,updateBinding} from './task-ledger.mjs';
 import {listDecisions,renderDecisions,decisionSnapshot,decisionVersions,decisionChannelStatus} from './task-decisions.mjs';
 import {callDecisionChannel} from './task-decision-channel.mjs';
 import {backendAction,assertBackendThread,decisionFollowupPrompt} from './task-backend.mjs';
 import {verifyTaskServer} from './task-server.mjs';
 import {nativeTurns} from './task-native.mjs';
 import {pendingDecisions} from './task-decision-protocol.mjs';
+import {resolveTaskId} from './task-numbering.mjs';
 
 export async function decisionsAction(project,action,values,input={}) {
  if(action==='list'){
@@ -15,11 +16,14 @@ export async function decisionsAction(project,action,values,input={}) {
  if(action==='status')return decisionChannelStatus(project);
  if(action==='show'){
   const s=await decisionSnapshot(project,values.decision);
-  return {decision:s.decision,taskTitle:s.task.title,requestFields:decisionVersions(s),...(values.runtime?{runtime:s.wire}:{}),instruction:'先在主会话实际提问，再 present 保存提问证据。用户明确回答后，actor USER、explicitUserAnswer true，通过 answer 保存并尝试原请求回传。'};
+  return {decision:s.decision,taskDisplayId:s.task.displayId,taskTitle:s.task.title,requestFields:decisionVersions(s),...(values.runtime?{runtime:s.wire}:{}),instruction:'先在主会话实际提问，再 present 保存提问证据。用户明确回答后，actor USER、explicitUserAnswer true，通过 answer 保存并尝试原请求回传。'};
  }
  const runId=values.run||input.runId,loc=await location(project);
- await requireRun(loc,runId,{converging:action==='reconcile'});
  requireTask(!input.runId||input.runId===runId,'DECISION_RUN：执行会话不符');
+ // Reading an already recorded answer never needs a live callback or lease and
+ // must not attempt delivery again. The ledger still verifies the full request.
+ if(['present','answer','reconcile'].includes(action)&&(await readLedger(loc)).events.some(e=>e.operationId===input.operationId))return mutate(project,'decision:'+action,{...input,runId});
+ await requireRun(loc,runId,{converging:action==='reconcile'});
  if(action==='deliver')return callDecisionChannel(project,{action:'deliver',runId,decisionId:values.decision||input.decisionId});
  if(action==='followup'){
   const s=await decisionSnapshot(project,values.decision||input.decisionId);
@@ -32,7 +36,7 @@ export async function decisionsAction(project,action,values,input={}) {
  const request={...input,runId};
  if(action==='reconcile'){
   const s=await decisionSnapshot(project,input.decisionId);
-  requireTask(input.taskId===s.task.id&&input.assignmentId===s.assignment.id&&s.binding.runId===runId,'DECISION_BINDING：先核对问题归属');
+  requireTask(resolveTaskId({[s.task.id]:s.task},input.taskId)===s.task.id&&input.assignmentId===s.assignment.id&&s.binding.runId===runId,'DECISION_BINDING：先核对问题归属');
   requireTask(s.decision.answer&&s.wire.protocolState!=='PENDING','DECISION_RECOVERY：原请求仍待答或没有用户答复');
   if(input.resolution==='FOLLOWUP')requireTask(['BUSINESS','INPUT'].includes(s.decision.kind),'DECISION_APPROVAL_EXPIRED：失效审批不得变成新轮次授权；关闭后按新请求核查');
   else requireTask(s.wire.deliveryAttemptedAt||s.wire.followupOperationId,'DECISION_DELIVERY：从未尝试回传，不能声明送达');
