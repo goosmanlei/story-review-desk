@@ -14,8 +14,9 @@ assert.ok(first&&location,'controlled fixture requires one subject and one locat
 const second={...first,id:'entity-reference-missing',name:'信息待补主体',aliases:[],description:'用于验证缺失参考信息的受控主体',authority:'U',evidence:[]};
 const sourceRevision='source-revision-controlled',sourceSha='a'.repeat(64),draftRevision='settings-draft-controlled',adoptedRevision='entity-adopted-controlled',scopeRevision='scope-revision-controlled';
 const draftFirst={...first,aliases:['受控别名'],authority:'F',dimensions:{subjectDimension:'主体维度值'},scope:[{scopeType:'SCENE',scopeId:'scene-reference-controlled',revisionId:scopeRevision}],evidence:[{sourceId:'source-controlled',revisionId:sourceRevision,sha256:sourceSha,quote:'受控来源引文可直接审阅。',locator:'受控资料第 3 段'}]};
-const locationWithDimensions={...location,dimensions:{locationDimension:'空间维度值'}};
-controlled.graph.entities=[...controlled.graph.entities.filter(entity=>entity.id!==first.id&&entity.id!==second.id&&entity.id!==location.id),first,second,locationWithDimensions];
+const locationWithDimensions={...location,aliases:['空间别名'],dimensions:{locationDimension:'空间维度值'},scope:[{scopeType:'SCENE',scopeId:'scene-space-controlled',revisionId:'space-scope-revision'}],evidence:[{quote:'受控空间来源引文',locator:'空间资料第 2 段',sourceId:'space-source-controlled',revisionId:sourceRevision,sha256:sourceSha}]};
+const secondLocation={...location,id:'location-reference-second',name:'第二空间',description:'另一空间的受控说明',aliases:[],scope:[],evidence:[],dimensions:{}};
+controlled.graph.entities=[...controlled.graph.entities.filter(entity=>entity.id!==first.id&&entity.id!==second.id&&entity.id!==location.id),first,second,locationWithDimensions,secondLocation];
 controlled.graph.relations=[...controlled.graph.relations.filter(relation=>relation.id!=='relation-reference-controlled'),{id:'relation-reference-controlled',type:controlled.configuration.relationTypes[0]?.id||'REFERENCE',from:{kind:'ENTITY',id:first.id},to:{kind:'ENTITY',id:second.id},label:'受控相邻关系',purpose:'验证主体卡切换',inherit:[],exclude:[],scope:[],authority:'A',evidence:[],status:'CONFIRMED'}];
 controlled.ownership['entities:'+first.id]={...(controlled.ownership['entities:'+first.id]||{}),owner:'SETTINGS',reason:'受控登记说明',recordHash:'record-first-controlled',revisionId:'entity-current-controlled',state:'ADOPTED',adoptedRevisionId:adoptedRevision};
 controlled.ownership['entities:'+second.id]={owner:'SETTINGS',reason:'',recordHash:'record-second-controlled',state:'DRAFT',adoptedRevisionId:null};
@@ -89,10 +90,16 @@ try{
  await page.getByRole('region',{name:'位置待核地点'}).getByRole('button',{name:new RegExp(location.name)}).click();
  const locationDialog=page.getByRole('dialog'),locationReadable=locationDialog.getByRole('region',{name:'主体与素材局部关系',exact:true}).locator('details.board-readable-list');
  await locationReadable.waitFor();
- assert.equal(await locationReadable.evaluate(element=>element.open),false,'space card keeps its previous collapsed list behavior');
- assert.equal(await locationDialog.getByRole('region',{name:'当前审阅参考',exact:true}).count(),0,'subject reference layout does not alter space cards');
- await locationDialog.locator('details.settings-evidence').locator('summary').click();
- assert.ok((await locationDialog.locator('details.settings-evidence').innerText()).includes('空间维度值'),'space card retains its original dimensions');
+ assert.equal(await locationReadable.evaluate(element=>element.open),true,'space relationship list opens initially');
+ const spaceReference=locationDialog.getByRole('region',{name:'当前审阅参考',exact:true}),spaceText=await spaceReference.innerText();
+ for(const text of ['空间别名','空间维度值','scene-space-controlled','space-scope-revision','受控空间来源引文','空间资料第 2 段'])assert.ok(spaceText.includes(text),'space direct reference includes '+text);
+ assert.equal(await spaceReference.locator('details').evaluate(e=>e.open),false,'space technical trace stays collapsed');
+ await locationReadable.locator('summary').click();assert.equal(await locationReadable.evaluate(e=>e.open),false);
+ await locationReadable.locator('summary').click();assert.equal(await locationReadable.evaluate(e=>e.open),true);
+ await locationDialog.getByRole('button',{name:'关闭对象详情',exact:true}).click();
+ await page.getByRole('region',{name:'位置待核地点'}).getByRole('button',{name:new RegExp(secondLocation.name)}).click();
+ const nextSpace=page.getByRole('dialog');assert.equal(await nextSpace.locator('details.board-readable-list').evaluate(e=>e.open),true,'switch space starts expanded');
+ const nextSpaceText=await nextSpace.getByRole('region',{name:'当前审阅参考',exact:true}).innerText();assert.ok(nextSpaceText.includes('来源依据尚未登记。'));assert.equal(nextSpaceText.includes('受控空间来源引文'),false,'switch space does not leak previous evidence');
  await locationDialog.getByRole('button',{name:'关闭对象详情',exact:true}).click();
 
  await page.goto(base+'/?view=settings&settingsRelation=relation-reference-controlled');
@@ -107,5 +114,5 @@ try{
 
  assert.deepEqual(writes,[]);
  assert.deepEqual(errors,[]);
- console.log(JSON.stringify({status:'PASS',checks:['subject list default open through explicit property','manual collapse and reopen','entity switch resets list','direct aliases authority precise scope revisions dimensions and evidence','missing fields explicit','technical trace collapsed with raw IDs and SHA','entity and relationship deep link close and history','unsaved comment retained','space card dimensions and collapsed list unchanged','zero business POST']}));
+ console.log(JSON.stringify({status:'PASS',checks:['subject list default open through explicit property','manual collapse and reopen','entity switch resets list','direct aliases authority precise scope revisions dimensions and evidence','missing fields explicit','technical trace collapsed with raw IDs and SHA','entity and relationship deep link close and history','unsaved comment retained','space card direct references, collapse/reopen and switch reset','zero business POST']}));
 }finally{await browser.close();}

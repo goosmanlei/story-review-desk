@@ -108,7 +108,7 @@
         "web/app/workspace-read-boundary.tsx",
         "web/app/production-workbench.tsx"
       ],
-      "sourceDigest": "36602621d0ec9b731a2691349ff5d037b509a40b21205a12ff7724c3f8a02b86"
+      "sourceDigest": "de2e0cdcf3f998cb1527968d5aba377f1d9548e597bc51e4b0d2fd47a0078cd4"
     },
     {
       "id": "interfaces",
@@ -154,7 +154,7 @@
         "web/app/paged-production-data.ts",
         "server/presentation/production-material-query.mjs"
       ],
-      "sourceDigest": "d46b98471b0d859d0d527b6a33882465d304826cff0e77b8356e562e4cb79c22"
+      "sourceDigest": "b84517ae4d7cdb15ea74eb9ee51487dc2e2d5cd8a644bff780fae0b16979ba2b"
     },
     {
       "id": "development",
