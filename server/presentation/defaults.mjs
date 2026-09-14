@@ -20,10 +20,6 @@ export const configurationDefaults = {
         "label": "道具"
       },
       {
-        "id": "SOUND",
-        "label": "声音主题"
-      },
-      {
         "id": "STYLE",
         "label": "风格"
       },

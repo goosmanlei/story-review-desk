@@ -37,7 +37,7 @@
       "title": "领域划分与职责",
       "summary": "按业务责任划分六个领域，页面入口可以组合多个领域。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/modules.mjs",
         "server/story/service.mjs",
@@ -48,20 +48,22 @@
         "server/project/service.mjs",
         "server/shared/entity-types.mjs"
       ],
-      "sourceDigest": "1da859effccc73cab2327c4ab10dc1b5724fc37e7e0d0a8f7a86881fe6c1d55d"
+      "sourceDigest": "0f059bfae535495d540ea9c3b7d8ab79fb9af3c5ef553bcfca045fed6f31a5e1"
     },
     {
       "id": "data-model",
       "title": "数据实体与关系",
       "summary": "从永久身份出发，理解关系表、丰富正文、原件和证据如何共同保存事实。",
       "part": "通用主册",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/schema.sql",
         "server/repository.mjs",
-        "server/transport-contract.mjs"
+        "server/transport-contract.mjs",
+        "server/settings/sound-ownership.mjs",
+        "server/transfer.mjs"
       ],
-      "sourceDigest": "b4ea00787ff195471efd9966faf6a76ccf3427b18fbce65137201ffe1a42006d"
+      "sourceDigest": "f507e3d285065d39288320195549ff9e80a72b9e450736571019f959ce933c7a"
     },
     {
       "id": "versions",
@@ -77,7 +79,7 @@
         "server/materials/usage-reviews.mjs",
         "server/production/spatial-views.mjs"
       ],
-      "sourceDigest": "aff17922d5542cd42e26d38f10bf9c9a4f959b1536f6c4835dc02d32e49d4076"
+      "sourceDigest": "3591e1f9de82b2a058694198515bf70d80f150a432e9c7cf963ddb9e49dbf84c"
     },
     {
       "id": "layers",
@@ -106,9 +108,11 @@
         "web/app/preparation-navigation.tsx",
         "web/app/preparation-workspace.css",
         "web/app/workspace-read-boundary.tsx",
-        "web/app/production-workbench.tsx"
+        "web/app/production-workbench.tsx",
+        "web/app/sound-ownership.tsx",
+        "web/app/sound-ownership.css"
       ],
-      "sourceDigest": "de2e0cdcf3f998cb1527968d5aba377f1d9548e597bc51e4b0d2fd47a0078cd4"
+      "sourceDigest": "1d55af5187f08ceecc96346a862014fd23feae9ee558d87d64affc857dc54859"
     },
     {
       "id": "interfaces",
@@ -122,7 +126,7 @@
         "scripts/review.mjs",
         "server/documentation.mjs"
       ],
-      "sourceDigest": "062829d6aad3c8643627fcce3cac22630b756494c81ab8b7187d410a309c5565"
+      "sourceDigest": "522c1e12044a7268301ccec4b12f2f357d9bb9c92f23a042f0891b3a9a454a91"
     },
     {
       "id": "collaboration",
@@ -154,7 +158,7 @@
         "web/app/paged-production-data.ts",
         "server/presentation/production-material-query.mjs"
       ],
-      "sourceDigest": "b84517ae4d7cdb15ea74eb9ee51487dc2e2d5cd8a644bff780fae0b16979ba2b"
+      "sourceDigest": "93e4e8fccd6f644fa7b8bd64c95b87053bd235c4ee2948a8733fbb71a2355e0a"
     },
     {
       "id": "development",
@@ -209,32 +213,32 @@
         "tools/task-decision-state.mjs",
         "tools/task-decisions.mjs"
       ],
-      "sourceDigest": "bb82a24f50ae470e7810821d097bc61f7f86899771bf9a47e8a587b3382835b8"
+      "sourceDigest": "6b680f778e8a043ce54bfee7b90cacadc7d29327548c452d36ba32c98cbe88b0"
     },
     {
       "id": "instance",
       "title": "当前项目实例册",
       "summary": "从本项目的真实对象出发，查看同一修订中的依据、关系和判断。",
       "part": "当前项目",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/workspaces.mjs",
         "server/repository.mjs"
       ],
-      "sourceDigest": "872fcdf770b52c87d73c28aa795e8eeb310f1f3ba0dcb17edd72ddd55f4ca657"
+      "sourceDigest": "488aec008b253dae6806bb2dcc1e8bcecc3ce6e7e4866ec6ed7f9b4e39ee9d79"
     },
     {
       "id": "reference",
       "title": "术语、实现索引与设计决策",
       "summary": "查阅完整实体／接口覆盖、关键取舍、维护方式和能力边界。",
       "part": "查阅附录",
-      "reviewedAt": "2026-09-13",
+      "reviewedAt": "2026-09-14",
       "sources": [
         "server/schema.sql",
         "server/modules.mjs",
         "server/api.mjs"
       ],
-      "sourceDigest": "dc3c82a1fc3e1760e7ecd85c33216f919f51acd37bea0cdad8d2f76f717d4e65"
+      "sourceDigest": "1d04885846934ba93b142fd97b3ff4b90a394604bf991eb473e31374d3168a8a"
     }
   ],
   "coverage": {

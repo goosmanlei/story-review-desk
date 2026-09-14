@@ -1,3 +1,5 @@
+import {soundOwnershipProjection,soundResourceScope,legacySoundSources} from '../settings/sound-ownership.mjs';
+import {retiredEntityType} from '../shared/entity-types.mjs';
 import {spatialCatalog} from '../production/spatial-views.mjs';
 import { present, idsFor, idFor, stateLabel } from './read-unit.mjs';
 import { spatialBaseline } from '../workspaces.mjs';
@@ -18,6 +20,7 @@ export function realizedOutput(row, versions) {
 export async function materialRows(unit, { requirementId, ids, summary=false } = {}) {
   const rows = await unit.rows(['REQUIREMENT'], { ids: requirementId ? [requirementId] : ids, ...(summary?{fields:['title','requirementClass','mediaKind','mediaType','category','reuseScope','storyApplicability','acceptanceProfile','requirementHash','cardSpec']}:{} ) });
   const occurrences = await materialOccurrences(unit,{requirementIds:rows.map(r=>r.id)});
+  const soundBindings = await soundOwnershipProjection(unit,{resourceIds:rows.map(r=>r.id)});
   const direct=(await unit.tx.query(`SELECT q.owner_id AS requirement_id,a.id AS version_id,f.object_id AS family_id
     FROM memberships q JOIN material_families f ON f.object_id=q.member_id
     JOIN objects a ON a.id=f.adopted_asset_id AND a.state='ADOPTED'
@@ -39,20 +42,23 @@ export async function materialRows(unit, { requirementId, ids, summary=false } =
     WHERE n.kind='NOTE' AND n.state NOT IN ('DISABLED','ARCHIVED','CHANGES_REQUESTED') AND r.content->>'role'='MATERIAL_USAGE_REVIEW'`)).rows;
   const usageInputs=usages.length?(await unit.tx.query("SELECT consumer_revision_id,dependency_revision_id FROM dependencies WHERE consumer_revision_id=ANY($1::text[]) AND purpose='DEFINITION'",[usages.map(u=>u.revision_id)])).rows:[];
   const bindingFor=(row)=>usages.filter(u=>u.content.target.requirementId===row.id).map(u=>{const eligible=!u.stale&&u.source_eligible&&usageInputs.some(d=>d.consumer_revision_id===u.revision_id&&d.dependency_revision_id===row.revisionId);return {...u.content.target,usageId:u.id,eventId:u.event_id,usageRevisionId:u.revision_id,usageContextHash:u.content.basisHash,reviewSpecHash:u.content.reviewSpec.hash,eligible,reasons:eligible?[]:['用途依据、原版本采用状态或媒体已改变']};});
-  return rows.map(row => ({
+  return rows.map(row => {const sound = soundResourceScope(soundBindings,row.id);return ({
+    ...sound,
     requirementClass: 'REQUIRED', mediaKind: row.content.mediaType || 'UNKNOWN', category: '', reuseScope: 'PROJECT', storyBasis: {}, storyApplicability: {}, acceptanceCriteria: [], acceptanceProfile: '',
     currentShotIds: [], historicalShotIds: [], shotIds: [], episodeIds: [], episodeUids: [], structureCardRefs: [], consumerWorkItemRefs: [], coverageReasons: [], coveredByFamilyRefs: [], coveredByVersionRefs: [], coverageSatisfied: false, bindingStale: false,
-    ...present(row), ...(row.content.configurationBinding?{configurationBinding:Object.fromEntries(Object.entries(row.content.configurationBinding).filter(([key])=>key!=='workflow'))}:{}), sceneIds: [...new Set([...idsFor(row, 'SCENE'),...occurrences.scenes.filter(s=>s.references.some(r=>r.requirementId===row.id)).map(s=>s.sceneId)])], assetFamilyRefs: idsFor(row, 'FAMILY'), entityRef: idFor(row, 'ENTITY'), representationRef: idFor(row, 'REPRESENTATION'),
+    ...present(row), ...sound, bindingStale:sound.soundOwnershipStale, ...(row.content.configurationBinding?{configurationBinding:Object.fromEntries(Object.entries(row.content.configurationBinding).filter(([key])=>key!=='workflow'))}:{}), sceneIds: [...new Set([...sound.soundSceneIds,...idsFor(row, 'SCENE'),...occurrences.scenes.filter(s=>s.references.some(r=>r.requirementId===row.id)).map(s=>s.sceneId)])], assetFamilyRefs: idsFor(row, 'FAMILY'), entityRef: idFor(row, 'ENTITY'), representationRef: idFor(row, 'REPRESENTATION'),
     requirementHash: row.content.requirementHash || row.sha256,
     ...(row.content.reviewSpec?{reviewSpec:{...row.content.reviewSpec,hash:row.content.reviewSpec.hash||hash(row.content.reviewSpec)}}:{}),
-    episodeUids: [...new Set([...(row.content.episodeUids || []), ...occurrences.scenes.filter(s => s.references.some(r => r.requirementId === row.id)).map(s => s.episodeUid).filter(Boolean)])],
+    shotIds:[...new Set([...idsFor(row,'SHOT'),...sound.soundShotIds])],episodeIds:[...new Set([...(row.content.episodeIds||[]),...idsFor(row,'EPISODE'),...sound.soundEpisodeIds])],
+    episodeUids: [...new Set([...sound.soundEpisodeIds,...(row.content.episodeUids || []), ...occurrences.scenes.filter(s => s.references.some(r => r.requirementId === row.id)).map(s => s.episodeUid).filter(Boolean)])],
     materialUsageBindings:bindingFor(row),coverageSatisfied:direct.some(d=>d.requirement_id===row.id)||bindingFor(row).some(b=>b.eligible),coveredByFamilyRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.family_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.familyId)])],coveredByVersionRefs:[...new Set([...direct.filter(d=>d.requirement_id===row.id).map(d=>d.version_id),...bindingFor(row).filter(b=>b.eligible).map(b=>b.versionId)])],
-  }));
+  });});
 }
 
 export async function assets(unit, familyIds, {summary=false}={}) {
   const families = await unit.rows(['MATERIAL'], { ids: familyIds,...(summary?{fields:['label','kind','mediaKind','subtype','executionDefinitionRef']}:{} ) });
   const allowed = new Set(families.map(f => f.id)),selected=[...allowed];
+  const soundBindings = await soundOwnershipProjection(unit,{resourceIds:selected});
   const relationships = (await unit.tx.query('SELECT object_id AS id,family_id AS "familyId",parent_asset_id AS "parentAssetId" FROM asset_versions WHERE family_id=ANY($1::text[])',[selected])).rows;
   const rows=await unit.rows(['ASSET'],{historical:true,ids:relationships.map(r=>r.id),...(summary?{fields:['label','mediaKind','historyRole','expectedOutputId','basis']}:{} )});
   const expectedIds=(await unit.tx.query("SELECT owner_id FROM memberships WHERE role='FAMILY' AND member_id=ANY($1::text[])",[selected])).rows.map(r=>r.owner_id);
@@ -82,17 +88,21 @@ export async function assets(unit, familyIds, {summary=false}={}) {
     }];
   });
   return { assetVersions: versions, assetFamilies: families.map(row => {
+    const sound=soundResourceScope(soundBindings,row.id);
     const owned = versions.filter(v => v.familyId === row.id).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt))||a.id.localeCompare(b.id)), adoptedId = adopted.find(f => f.id === row.id)?.adoptedAssetId;
     const outputs=expectations.filter(o=>idFor(o,'FAMILY')===row.id),planned=outputs.filter(o=>realizedOutput(o,owned).expectationState==='PLANNED').sort((a,b)=>new Date(b.updatedAt)-new Date(a.updatedAt))[0];
-    return { ...present(row), label: row.content.label || row.title, kind: row.content.kind || owned[0]?.mediaKind || 'UNKNOWN', versionRefs: owned.map(v => v.id), currentVersionRef: adoptedId || owned.filter(v => v.historyRole !== 'HISTORICAL').at(-1)?.id || owned.at(-1)?.id || null,
+    return { ...present(row), ...sound, label: row.content.label || row.title, kind: row.content.kind || owned[0]?.mediaKind || 'UNKNOWN', versionRefs: owned.map(v => v.id), currentVersionRef: adoptedId || owned.filter(v => v.historyRole !== 'HISTORICAL').at(-1)?.id || owned.at(-1)?.id || null,
       expectedOutputRefs:outputs.map(o=>o.id),nextExpectedOutputId:planned?.id||null,currentExpectedOutputId:adoptedId?null:planned?.id||null,
-      adoptedVersionRef: adoptedId || null, currentVersionId: adoptedId || null, sceneIds: idsFor(row,'SCENE'), shotIds: idsFor(row,'SHOT'), episodeIds: row.content.episodeIds || [], usedByRefs: row.content.usedByRefs || [], flowBlockReasons: row.content.flowBlockReasons || [],
+      adoptedVersionRef: adoptedId || null, currentVersionId: adoptedId || null, sceneIds: [...new Set([...idsFor(row,'SCENE'),...sound.soundSceneIds])], shotIds: [...new Set([...idsFor(row,'SHOT'),...sound.soundShotIds])], episodeIds: [...new Set([...(row.content.episodeIds||[]),...sound.soundEpisodeIds])], usedByRefs: row.content.usedByRefs || [], flowBlockReasons: row.content.flowBlockReasons || [],
     };
   }) };
 }
 
 export async function domainWorkspace(unit, owner = 'SETTINGS') {
-  const rows = await unit.rows(['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT']);
+  const allRows = await unit.rows(['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT']);
+  const rows = allRows.filter(row=>row.kind!=='ENTITY'||!retiredEntityType(row.content.type));
+  const soundOwnership=await soundOwnershipProjection(unit);
+  const legacySources=await legacySoundSources(unit.tx);
   const relations = (await unit.tx.query('SELECT object_id AS id,from_id AS "fromId",to_id AS "toId" FROM entity_relations')).rows;
   const kindById = new Map(rows.map(r => [r.id, r.kind]));
   const graph = { schemaVersion: '1.0', entities: [], states: [], representations: [], relations: [], requirements: [] };
@@ -101,7 +111,7 @@ export async function domainWorkspace(unit, owner = 'SETTINGS') {
   for (const row of rows) {
     const collection = collectionByKind[row.kind];
     const editable=present(row);for(const key of ['configurationBinding','reviewSpec','storyBasis'])delete editable[key];
-    const record = { aliases: [], evidence: [], scope: [], dimensions: {}, authority: 'U', ...editable };
+    const record = { ...soundResourceScope(soundOwnership,row.id), aliases: [], evidence: [], scope: [], dimensions: {}, authority: 'U', ...editable };
     if (row.kind === 'ENTITY') { record.name = row.content.name || row.title; record.type = row.content.type || 'UNRESOLVED'; record.description ||= ''; }
     if (['STATE','REPRESENTATION'].includes(row.kind)) { record.entityId = idFor(row,'ENTITY'); record.stateId = idFor(row,'STATE'); record.label = row.content.label || row.title; }
     if (row.kind === 'REPRESENTATION') { record.requirementIds = idsFor(row,'REQUIREMENT'); record.assetFamilyIds = idsFor(row,'FAMILY'); }
@@ -131,10 +141,12 @@ export async function domainWorkspace(unit, owner = 'SETTINGS') {
   }
   const requirements = await materialRows(unit);
   const savedDraft=await workspaceDraft(unit.tx,'domain:'+owner);
-  return { owner, snapshotId: await unit.namespace(), releaseId: unit.version(), revisionId: unit.version(), readOnly: false, graph, ownership, configuration: (await unit.configuration()).domain, spatial, businessFacts, locationVisuals,
+  const retiredDraftChanges=(savedDraft?.content.changes||[]).filter(change=>change.collection==='entities'&&retiredEntityType(change.value?.type));
+  const activeDraft=savedDraft?{...savedDraft.content,changes:(savedDraft.content.changes||[]).filter(change=>!retiredDraftChanges.includes(change))}:null;
+  return { owner, soundOwnership, legacySoundSources:legacySources, retiredDraftChanges, snapshotId: await unit.namespace(), releaseId: unit.version(), revisionId: unit.version(), readOnly: false, graph, ownership, configuration: (await unit.configuration()).domain, spatial, businessFacts, locationVisuals,
     materialGraph: {families:material.assetFamilies.map(f=>({id:f.id,label:f.label,kind:f.kind,currentVersionRef:f.currentVersionRef,adoptedVersionRef:f.adoptedVersionRef})),versions:material.assetVersions.map(v=>({id:v.id,revisionId:v.revisionId,label:v.label,familyId:v.familyId,sha256:v.sha256,preview:v.preview,mediaKind:v.mediaKind,outputState:v.outputState,lifecycleState:v.lifecycleState,canFlowDownstream:v.canFlowDownstream,flowBlockReasons:v.flowBlockReasons}))},
     requirements: requirements.map(r => ({ ...Object.fromEntries(Object.entries(r).filter(([k])=>!['configurationBinding','reviewSpec','storyBasis','evidence','sourceBindings','domainContext','structureCardRefs'].includes(k))), scopeBindings: [], entityRef: r.entityRef || graph.representations.find(rep => rep.requirementIds.includes(r.id))?.entityId, representationRef: r.representationRef || graph.representations.find(rep => rep.requirementIds.includes(r.id))?.id })),
-    context: { candidateRevisionId: (await unit.rows(['STORY']))[0]?.revisionId || null, currentEpisodePlanRevisionId: null }, counts: Object.fromEntries(Object.entries(graph).filter(([,v]) => Array.isArray(v)).map(([k,v]) => [k,v.length])), uncertainCount: 0, draft: savedDraft?.content.status==='DRAFT'?{...savedDraft.content,revisionId:savedDraft.revisionId}:null, draftHeadRevisionId: savedDraft?.revisionId||null, legacyDrafts: [],
+    context: { candidateRevisionId: (await unit.rows(['STORY']))[0]?.revisionId || null, currentEpisodePlanRevisionId: null }, counts: Object.fromEntries(Object.entries(graph).filter(([,v]) => Array.isArray(v)).map(([k,v]) => [k,v.length])), uncertainCount: soundOwnership.filter(b=>b.resolution==='UNKNOWN').length, draft: savedDraft?.content.status==='DRAFT'?{...activeDraft,revisionId:savedDraft.revisionId}:null, draftHeadRevisionId: savedDraft?.revisionId||null, legacyDrafts: [],
   };
 }
 
@@ -142,7 +154,7 @@ export async function materialDirectory(unit, compact=false) {
   const workspace = await domainWorkspace(unit, 'MATERIAL');
   const bindings = workspace.requirements.map(r => {
     const representation = workspace.graph.representations.find(rep => rep.id === r.representationRef || rep.requirementIds.includes(r.id));
-    return { requirementId: r.id, entityId: r.entityRef || representation?.entityId || 'UNASSIGNED', stateId: representation?.stateId || 'BASE', representationId: representation?.id, reviewFocus: { points: r.acceptanceCriteria.map(label => ({ label })) } };
+    return { requirementId: r.id, ...soundResourceScope(workspace.soundOwnership,r.id), entityId: r.entityRef || representation?.entityId || 'UNASSIGNED', stateId: representation?.stateId || 'BASE', representationId: representation?.id, reviewFocus: { points: r.acceptanceCriteria.map(label => ({ label })) } };
   });
-  return { snapshotId: workspace.snapshotId, releaseId: workspace.releaseId, revisionId: workspace.revisionId, ...(compact?{}:{graph: workspace.graph}), bindings, staleIds: [] };
+  return { snapshotId: workspace.snapshotId, releaseId: workspace.releaseId, revisionId: workspace.revisionId, soundOwnership:workspace.soundOwnership, legacySoundSources:workspace.legacySoundSources, ...(compact?{}:{graph: workspace.graph}), bindings, staleIds: [] };
 }

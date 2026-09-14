@@ -8,6 +8,7 @@ import {SpatialShotViewEditor} from './spatial-shot-view-editor';
 import {managementMutation,readManagementResponse} from './system-management-client';
 import {useManagementDraftGuard} from './management-draft-guard';
 import './shot-production-workspace.css';
+import {SoundOwnershipScope} from './sound-ownership';
 type Input={requirementId:string;familyId:string;versionId:string;sha256:string;purpose?:string};
 type Shot={shotId:string;keyframeStrategy:{mode:string;reason:string;intermediateFrameCount:number};dialogueLines:Array<{id:string;text:string;speakerEntityId:string|null;purpose:string;performance:string}>;inputs:Input[];previsInputs?:Input[];visualRequirementIds?:string[];space:Record<string,string>;handles:{headFrames:number;tailFrames:number};videoBranch:string};
 type Content={schemaVersion:string;stagePolicy?:string;sceneId:string;shotPlanRevisionId:string;shotPlanHash:string;shots:Shot[]};
@@ -59,8 +60,9 @@ function ShotProductionWorkspaceBody({sceneId,gateId,shotId}:WorkspaceProps){
  if(!state)return <section className="shot-production-workspace"><p role={error?'alert':'status'}>{error||'正在读取本场镜头制作…'}</p></section>;
  const editing=['SHOT_PLAN_INPUT_LOCK','STORYBOARD_DIALOGUE'].includes(gateId)&&!state.readOnly;
  const previs=draft?.schemaVersion==='2.0'&&draft.stagePolicy==='PREVIS_FIRST_V1';
- return <section className="shot-production-workspace" aria-label="镜头制作设置">
-  <header><h3>本场镜头制作</h3><span>{state.readiness.readyCount} / {state.readiness.shotCount??'待定'} 镜头已具备视频生成素材</span><button disabled={busy||nestedDirty||(dirty&&!uncertain)} onClick={()=>{if(uncertain)void inspectUnconfirmed();else reload();}}>{uncertain?'重读制作计划与任务':'刷新状态'}</button></header>
+	 return <section className="shot-production-workspace" aria-label="镜头制作设置">
+	  <header><h3>本场镜头制作</h3><span>{state.readiness.readyCount} / {state.readiness.shotCount??'待定'} 镜头已具备视频生成素材</span><button disabled={busy||nestedDirty||(dirty&&!uncertain)} onClick={()=>{if(uncertain)void inspectUnconfirmed();else reload();}}>{uncertain?'重读制作计划与任务':'刷新状态'}</button></header>
+	  {shotId&&<SoundOwnershipScope owners={[{kind:'SHOT',id:shotId,label:'本镜'}]} label="本镜声音归属"/>}
   {editing&&<SpatialShotViewEditor sceneId={sceneId} onDirtyChange={setNestedDirty}/>}
   {error&&<p role="alert">{error}</p>}{state.blockers.map(reason=><p key={reason}>{reason}</p>)}
   {!state.readOnly&&((state as Workspace&{manifestTargets?:Array<{workItemId:string;shotId:string|null;gateId:string;label:string}>}).manifestTargets||[]).filter(t=>t.gateId===gateId&&(!shotId||t.shotId===shotId||!t.shotId)).map(t=><button key={t.workItemId} disabled={busy||nestedDirty||dirty||Boolean(uncertain)} onClick={()=>void manifestAction(t.workItemId)}>准备{t.label}清单</button>)}

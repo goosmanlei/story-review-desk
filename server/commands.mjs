@@ -13,9 +13,10 @@ import {
   ReviewError,
 } from "./shared/contracts.mjs";
 import { objectDetail } from "./repository.mjs";
-import { validateConfiguration } from "./project/service.mjs";
+import { validateConfiguration,preserveRetiredEntityConfiguration } from "./project/service.mjs";
 import { planWorkspaceChange } from './workspace-actions.mjs';
 import {planStoryEdit} from './story/editing.mjs';
+import {retireSoundEntity,soundOwnershipLinks} from './settings/sound-ownership.mjs';
 
 async function invalidate(
   tx,
@@ -99,7 +100,9 @@ async function save(tx, command, context) {
     "实际素材不可覆盖，请登记新版本",
     409,
   );
+  check(!old?.historical, 'HISTORICAL_READ_ONLY', '历史对象只读，请另建当前记录', 409);
   let content = { ...objectValue(command.content) };
+  if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')check(context.actor.kind!=='ASSISTANT','EXPLICIT_SOUND_OWNERSHIP_REQUIRED','声音归属需要人工核对永久目标',403);
   if (!old && !content.reviewSpec) {
     const configuration = (
       await tx.query(
@@ -152,6 +155,7 @@ async function save(tx, command, context) {
         ).rows
       : []);
   if(kind==='NOTE'&&content.role==='MATERIAL_OCCURRENCE')links=[...links.filter(l=>!['SCENE','REQUIREMENT'].includes(l.role)),{id:content.sceneId,role:'SCENE'},{id:content.reference.requirementId,role:'REQUIREMENT'}];
+  if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')links=soundOwnershipLinks(content);
   validateLinks(links);
   for (const link of links) {
     const target = (
@@ -347,6 +351,7 @@ async function save(tx, command, context) {
 async function submit(tx, command) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
+  check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     ["DRAFT", "CHANGES_REQUESTED"].includes(object.state) &&
       object.draft_revision_id,
@@ -375,6 +380,8 @@ async function archive(tx, command, context) {
   const object=await current(tx,command);
   check(object&&['ENTITY','STATE','REPRESENTATION','RELATION','REQUIREMENT','NOTE'].includes(object.kind),'ARCHIVE_KIND','此对象不能通过登记删除操作退出目录',409);
   check(context.actor.kind!=='ASSISTANT','EXPLICIT_ARCHIVE_REQUIRED','AI 不能退出正式对象',403);
+  const head=(await tx.query('SELECT content FROM revisions WHERE id=$1',[object.draft_revision_id||object.adopted_revision_id])).rows[0]?.content;
+  check(!(object.kind==='ENTITY'&&head?.type==='SOUND')&&head?.role!=='SOUND_OWNERSHIP','SOUND_MIGRATION_REQUIRED','声音主体与归属记录不能通过普通归档丢失迁移依据',409);
   const consumers=await tx.query('SELECT m.owner_id FROM memberships m JOIN objects o ON o.id=m.owner_id WHERE m.member_id=$1 AND NOT o.historical AND o.id<>$1 LIMIT 1',[object.id]);
   check(!consumers.rowCount,'OBJECT_REFERENCED','此对象仍被使用，请先处理精确引用',409);
   await tx.query("UPDATE objects SET state='ARCHIVED',historical=true,version=version+1,updated_at=now() WHERE id=$1",[object.id]);
@@ -383,6 +390,7 @@ async function archive(tx, command, context) {
 async function review(tx, command, context) {
   const object = await current(tx, command);
   check(object, "NOT_FOUND", "对象不存在", 404);
+  check(!object.historical, "HISTORICAL_READ_ONLY", "历史对象只读", 409);
   check(
     context.actor.kind !== "ASSISTANT" && command.explicit === true,
     "EXPLICIT_REVIEW_REQUIRED",
@@ -547,7 +555,7 @@ async function configuration(tx, command) {
   expectedVersion(command.expectedVersion);
   const old = (
     await tx.query(
-      "SELECT version FROM configurations WHERE scope=$1 FOR UPDATE",
+      "SELECT version,content FROM configurations WHERE scope=$1 FOR UPDATE",
       [command.scope],
     )
   ).rows[0];
@@ -557,6 +565,7 @@ async function configuration(tx, command) {
     "配置已改变",
     409,
   );
+  if(old)await preserveRetiredEntityConfiguration(tx,{scope:command.scope,...old});
   await tx.query(
     "INSERT INTO configurations(scope,version,content) VALUES($1,$2,$3) ON CONFLICT(scope) DO UPDATE SET version=EXCLUDED.version,content=EXCLUDED.content",
     [command.scope, command.expectedVersion + 1, content],
@@ -801,6 +810,8 @@ export async function execute(pool, request) {
         .flatMap((c) => [
           c.id,
           c.content?.target?.objectId,
+          ...(c.content?.role==='SOUND_OWNERSHIP'?[c.content.source?.objectId,...(c.content.resources||[]).map(r=>r.objectId)]:[]),
+          ...(c.type==='sound.retire'?[...(c.bindingIds||[]),...(c.retainedObjectIds||[])]:[]),
           ...(c.links || []).map((x) => x.id),
           ...(c.content?.sourceBindings||[]).map(s=>s.objectId),
           ...(c.content?.inputBindings||c.content?.upload?.items||[]).flatMap(i=>[i.familyId||i.assetFamilyRef,i.versionId||i.assetVersionRef]),
@@ -887,6 +898,7 @@ export async function execute(pool, request) {
         else if (command.type === "submit")
           results.push(await submit(tx, command));
         else if(command.type==='archive')results.push(await archive(tx,command,{actor,operationId:request.operationId}));
+        else if(command.type==='sound.retire')results.push(await retireSoundEntity(tx,command,{actor,operationId:request.operationId,soundMigration:request.commands.length===1&&request.commands[0].type==='workspace.change'&&request.commands[0].workspace==='sound-ownership'&&request.commands[0].input?.action==='migrate'}));
         else if(command.type==='assert'){await current(tx,command);results.push({id:command.id,version:command.expectedVersion});}
         else if(command.type==='configuration.assert') {
           const value=(await tx.query('SELECT version FROM configurations WHERE scope=$1 FOR UPDATE',[command.scope])).rows[0];

@@ -1,7 +1,7 @@
-import { check, objectValue } from "../shared/contracts.mjs";
+import { check, hash, objectValue } from "../shared/contracts.mjs";
 import { validateLibrary } from '../library/contract.mjs';
 import {validateReferenceContent,validateReferenceTargets} from '../materials/references.mjs';
-import {retiredEntityType} from '../shared/entity-types.mjs';
+import {retiredEntityType,currentSystemEntityTypes} from '../shared/entity-types.mjs';
 export const kinds = ["GUIDANCE", "NOTE"];
 export function validate(kind, content) {
   validateReferenceContent(kind,content);
@@ -65,7 +65,13 @@ export function validateConfiguration(scope, content, {historicalImport=false}={
     }
   }
   visit(content);
-  if(!historicalImport&&scope==='system'&&content.entityTypes?.entityTypes)check(content.entityTypes.entityTypes.every(type=>!retiredEntityType(type.id)),'ENTITY_TYPE_RETIRED','系统配置不能重新启用已退役主体类型');
+  if(scope==='system'&&content.entityTypes!==undefined){
+    objectValue(content.entityTypes,'entityTypes');
+    if(content.entityTypes.entityTypes!==undefined){
+      check(Array.isArray(content.entityTypes.entityTypes)&&content.entityTypes.entityTypes.every(type=>type&&typeof type.id==='string'),'CONFIGURATION_LIST','主体类型须为身份列表');
+      if(!historicalImport)check(content.entityTypes.entityTypes.every(type=>!retiredEntityType(type.id)),'ENTITY_TYPE_RETIRED','系统配置不能重新启用已退役主体类型');
+    }
+  }
   if (scope === 'project' && content.reviewLibrary !== undefined) validateLibrary(content.reviewLibrary);
   if (scope === "system" && content.limits) {
     for (const [key, maximum] of Object.entries({
@@ -81,4 +87,26 @@ export function validateConfiguration(scope, content, {historicalImport=false}={
         );
   }
   return content;
+}
+
+// Configuration is mutable; imported revisions are not. Preserve the exact
+// legacy configuration as provenance before dropping retired choices.
+export async function preserveRetiredEntityConfiguration(tx,row) {
+  if(row.scope!=='system')return false;
+  const content=currentSystemEntityTypes(row.content);
+  if(hash(content)===hash(row.content))return false;
+  const original=hash(row);
+  await tx.query("INSERT INTO provenance(id,kind,original_id,original_sha256,content) VALUES($1,'retired-entity-configuration',$2,$3,$4) ON CONFLICT(kind,original_id) DO NOTHING",['retired_config_'+original,original,hash(row.content),row]);
+  return true;
+}
+
+export async function retireImportedEntityConfiguration(tx,row) {
+  if(!await preserveRetiredEntityConfiguration(tx,row))return false;
+  await tx.query('UPDATE configurations SET content=$1,version=version+1 WHERE scope=$2',[currentSystemEntityTypes(row.content),row.scope]);
+  return true;
+}
+export function presentConfiguration(row) {
+  if(row.scope!=='system')return row;
+  const content=currentSystemEntityTypes(row.content);
+  return {...row,content,...(hash(content)!==hash(row.content)?{retiredEntityTypes:row.content.entityTypes.entityTypes.filter(type=>retiredEntityType(type.id)).map(type=>type.id),storedContentHash:hash(row.content)}:{})};
 }

@@ -1,3 +1,5 @@
+import {currentDomainTypes,retiredEntityType} from '../shared/entity-types.mjs';
+import {soundOwnershipWorkspace,soundMigrationInventory,soundOwnershipProjection} from '../settings/sound-ownership.mjs';
 import {materialReviewFocus} from '../materials/review-focus.mjs';
 import {entityComments} from '../settings/comments.mjs';
 import {feedbackWorkspace} from '../story/feedback.mjs';
@@ -33,7 +35,8 @@ export async function configurationWorkspace(unit) {
   const configuration = await unit.configuration();
   const rows = await unit.rows(['STORY','EPISODE','SCENE','REQUIREMENT','SHOT_DESIGN']);
   const bindings = rows.filter(r=>r.content.reviewSpec).map(r=>({key:r.id,title:r.title,kind:r.kind,profileId:r.content.reviewSpec.id||'unknown',profileLabel:r.content.reviewSpec.label,reviewSpecHash:hash(r.content.reviewSpec),configurationHash:hash(configuration)}));
-  const draft=await workspaceDraft(unit.tx,'configuration');
+  const saved=await workspaceDraft(unit.tx,'configuration');
+  const draft=saved?{...saved,content:{...saved.content,...(saved.content.configuration?{configuration:{...saved.content.configuration,domain:currentDomainTypes(saved.content.configuration.domain)}}:{})}}:null;
   return {snapshotId:await unit.namespace(),releaseId:hash(unit.configurationVersions),revisionId:hash(unit.configurationVersions),sha256:hash(configuration),configuration,defaults:configurationDefaults,bindings,boundStandards:rows.map(r=>r.content.reviewSpec).filter(Boolean),history:[],initialized:true,readOnly:false,draft:draft?{...draft.content,revisionId:draft.revisionId,published:draft.content.status==='PUBLISHED'}:null,trialAvailable:false};
 }
 export async function operationalProjection(unit,familyId) {
@@ -52,7 +55,9 @@ export async function operationalProjection(unit,familyId) {
 export async function workspaceRead(tx, path, params) {
   const unit = new PresentationRead(tx), name=path.join('/');
   let result;
-  if(name==='integrity')result=await businessIntegrity(tx);
+  if(name==='sound-ownership')result=await soundOwnershipWorkspace(unit,{...Object.fromEntries(params),query:params.get('q')||'',...(params.has('resourceId')?{resourceIds:params.getAll('resourceId')}:{}),...(params.has('limit')?{limit:Number(params.get('limit'))}:{}),...(params.has('offset')?{offset:Number(params.get('offset'))}:{})});
+  else if(name==='sound-ownership/inventory')result=await soundMigrationInventory(tx,params.get('sourceId'));
+  else if(name==='integrity')result=await businessIntegrity(tx);
   else if(name==='profile')result=await unit.profile();
   else if(name==='settings')result={profile:await unit.profile(),revisionId:hash(unit.configurationVersions)};
   else if(name==='views/material-catalog')result=await materialCatalog(unit);
@@ -84,8 +89,9 @@ export async function workspaceRead(tx, path, params) {
   else if(name==='domain-workspaces')result=await domainWorkspace(unit,params.get('owner')||'SETTINGS');
   else if(name==='relations'){
     const state=await domainWorkspace(unit,'SETTINGS'),draft=await workspaceDraft(tx,'relations'),graph=structuredClone(state.graph);
-    if(draft?.content.status==='DRAFT')for(const change of draft.content.changes||[]){const rows=graph[change.collection],index=rows.findIndex(r=>r.id===change.id);if(change.value===null){if(index>=0)rows.splice(index,1);}else if(index>=0)rows[index]=change.value;else rows.push(change.value);}
-    result={...state,draftHeadRevisionId:draft?.revisionId||null,draft:draft?.content.status==='DRAFT'?{revisionId:draft.revisionId,content:graph,changes:draft.content.changes}:null};
+    if(draft?.content.status==='DRAFT')for(const change of draft.content.changes||[]){if(change.collection==='entities'&&retiredEntityType(change.value?.type))continue;const rows=graph[change.collection],index=rows.findIndex(r=>r.id===change.id);if(change.value===null){if(index>=0)rows.splice(index,1);}else if(index>=0)rows[index]=change.value;else rows.push(change.value);}
+    const retired=(draft?.content.changes||[]).filter(change=>change.collection==='entities'&&retiredEntityType(change.value?.type));
+    result={...state,retiredDraftChanges:[...(state.retiredDraftChanges||[]),...retired],draftHeadRevisionId:draft?.revisionId||null,draft:draft?.content.status==='DRAFT'?{revisionId:draft.revisionId,content:graph,changes:(draft.content.changes||[]).filter(change=>!retired.includes(change))}:null};
   }
   else if(name==='material-directory')result=await materialDirectory(unit,params.get('detail')==='summary');
   else if(name==='material-production')result=(await materialProductionWorkspace(unit,Object.fromEntries(params))).value;
@@ -126,5 +132,6 @@ export async function workspaceRead(tx, path, params) {
   }
   else if(path[0]==='recipes'&&path.length===2){const row=await unit.detail(path[1],params.get('revisionId')||undefined);check(row.kind==='CALL','CALL_REQUIRED','所选对象不是调用定义',404);result={recipe:await presentRecipe(row,unit)};}
   else check(false,'WORKSPACE_NOT_FOUND','工作区接口不存在：'+name,404);
+  if(['production-preparation','episode-production','shot-production','spatial-shot-view','spatial-settings'].includes(name))result.soundOwnership=await soundOwnershipProjection(unit,{...(params.get('sceneId')?{ownerId:params.get('sceneId')}:{})});
   return unit.finish(result);
 }

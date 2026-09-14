@@ -1,7 +1,7 @@
 import { hash, check } from '../shared/contracts.mjs';
 import { summaries, objectDetail } from '../repository.mjs';
 import { configurationDefaults, modelArrayKeys, productionGraphDefaults } from './defaults.mjs';
-import {currentDomainTypes} from '../shared/entity-types.mjs';
+import {currentDomainTypes,currentSystemEntityTypes} from '../shared/entity-types.mjs';
 
 // A request-local view of object revisions. These structures are UI projections,
 // never another store or a published whole-story snapshot.
@@ -37,7 +37,7 @@ export class PresentationRead {
     this.configurationVersions = Object.fromEntries(rows.map(r => [r.scope, r.version]));
     const system = rows.find(r => r.scope === 'system')?.content || {}, project = rows.find(r => r.scope === 'project')?.content || {};
     const defaults = structuredClone(configurationDefaults);
-    this.projectConfiguration = project; this.systemConfiguration = system;
+    this.projectConfiguration = project; this.systemConfiguration = currentSystemEntityTypes(system);
     this.config = {
       ...defaults,
       template: system.template || defaults.template,

@@ -1,8 +1,10 @@
 import {check} from '../shared/contracts.mjs';
+import {validateSoundOwnershipContent,validateSoundOwnershipTargets,soundOwnershipDependencies} from '../settings/sound-ownership.mjs';
 
 const sha = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 /** Business references are identities; filenames never supply a missing binding. */
 export function validateReferenceContent(kind, content) {
+  if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')validateSoundOwnershipContent(content);
   if(['SPACE','NOTE'].includes(kind)&&content.role==='SPATIAL_VIEW'){
     check(content.sceneId&&content.viewId&&['DRAFT','PUBLISHED'].includes(content.status),'SPATIAL_REFERENCE','局部空间必须绑定永久场与视图身份');
     if(content.status==='PUBLISHED')check(content.view?.sceneBinding?.sceneId===content.sceneId&&content.view.viewId===content.viewId&&content.view.base?.id&&content.view.base.revisionId&&sha(content.view.base.sha256),'SPATIAL_REFERENCE','已发布空间缺少精确正文与空间规格');
@@ -28,7 +30,8 @@ export function validateReferenceContent(kind, content) {
     check(source.objectId && source.revisionId, 'SOURCE_REFERENCE', '来源必须绑定对象和修订');
 }
 
-export async function validateReferenceTargets(tx, kind, content, previous) {
+export async function validateReferenceTargets(tx, kind, content, previous, options={}) {
+  if(kind==='NOTE')await validateSoundOwnershipTargets(tx,content,previous,options);
   if(['SPACE','NOTE'].includes(kind)&&content.role==='SPATIAL_VIEW'){
     check(!previous||previous.role!=='SPATIAL_VIEW'||previous.sceneId===content.sceneId&&previous.viewId===content.viewId,'SPATIAL_IDENTITY','局部视图不能换绑永久场或视图身份',409);
     const scene=(await tx.query('SELECT kind FROM objects WHERE id=$1',[content.sceneId])).rows[0];
@@ -79,6 +82,7 @@ export async function normalizeReferenceInputs(tx,kind,content){
 }
 
 export async function referenceDependencies(tx,kind,content){
+  if(kind==='NOTE'&&content.role==='SOUND_OWNERSHIP')return soundOwnershipDependencies(content);
   if(['SPACE','NOTE'].includes(kind)&&content.role==='SPATIAL_VIEW'&&content.status==='PUBLISHED')return [{revisionId:content.view.sceneBinding.sceneRevisionId,purpose:'CONTENT'},{revisionId:content.view.base.revisionId,purpose:'DESIGN'}];
   if(kind==='NOTE'&&content.role==='MATERIAL_OCCURRENCE')return [
     {revisionId:content.reference.sourceSceneRevisionId,purpose:'CONTENT'},

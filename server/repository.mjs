@@ -1,3 +1,4 @@
+import {soundResourceOwnerSql} from './settings/sound-ownership.mjs';
 import { check, identity } from "./shared/contracts.mjs";
 import { transaction } from "./db.mjs";
 import { workChains, workStateSql } from "./shared/workflow.mjs";
@@ -72,7 +73,7 @@ export async function catalog(
     );
   if (entity)
     where.push(
-      `(EXISTS(SELECT 1 FROM memberships m WHERE m.owner_id IN(o.id,fo.id) AND m.member_id=${bind(entity)}) OR (r.content #> '{domainContext,entityIds}') ? $${values.length} OR (fr.content #> '{domainContext,entityIds}') ? $${values.length})`,
+      `(EXISTS(SELECT 1 FROM memberships m WHERE m.owner_id IN(o.id,fo.id) AND m.member_id=${bind(entity)}) OR (r.content #> '{domainContext,entityIds}') ? $${values.length} OR (fr.content #> '{domainContext,entityIds}') ? $${values.length} OR ${soundResourceOwnerSql('o.id,fo.id','$'+values.length)})`,
     );
   const activity =
     "COALESCE(r.content->>'activityRole',fr.content->>'activityRole',r.content->>'productionLane',fr.content->>'productionLane','')";
@@ -104,14 +105,14 @@ export async function catalog(
     "SEARCH_RANGE",
     "搜索词不能超过 300 字",
   );
-  if (!historical) where.push("NOT o.historical");
+  if (!historical) where.push("NOT o.historical", "NOT(o.kind='ENTITY' AND upper(trim(COALESCE(r.content->>'type','')))=ANY(ARRAY['SOUND','ORGANIZATION']))");
   if (query)
     where.push(
       `(o.title ILIKE ${bind("%" + query.replace(/[\\%_]/g, "\\$&") + "%")} OR o.display_id ILIKE $${values.length} OR (o.kind IN ('SCENE','EPISODE') AND (r.content->>'text' ILIKE $${values.length} OR r.content->>'blocks' ILIKE $${values.length} OR r.content->>'coreAdvance' ILIKE $${values.length})))`,
     );
   if (owner)
     where.push(
-      `(EXISTS(SELECT 1 FROM memberships m WHERE m.owner_id IN(o.id,fo.id) AND m.member_id=${bind(owner)}) OR EXISTS(SELECT 1 FROM episode_scenes es WHERE es.scene_id=o.id AND es.episode_id=$${values.length}) OR EXISTS(SELECT 1 FROM memberships m JOIN episode_scenes es ON es.scene_id=m.member_id WHERE m.owner_id IN(o.id,fo.id) AND m.role='SCENE' AND es.episode_id=$${values.length}))`,
+      `(EXISTS(SELECT 1 FROM memberships m WHERE m.owner_id IN(o.id,fo.id) AND m.member_id=${bind(owner)}) OR EXISTS(SELECT 1 FROM episode_scenes es WHERE es.scene_id=o.id AND es.episode_id=$${values.length}) OR EXISTS(SELECT 1 FROM memberships m JOIN episode_scenes es ON es.scene_id=m.member_id WHERE m.owner_id IN(o.id,fo.id) AND m.role='SCENE' AND es.episode_id=$${values.length}) OR ${soundResourceOwnerSql('o.id,fo.id','$'+values.length)})`,
     );
   const filter = where.length ? "WHERE " + where.join(" AND ") : "";
   const total = Number(

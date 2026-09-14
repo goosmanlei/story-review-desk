@@ -1,3 +1,4 @@
+import {presentConfiguration} from './project/service.mjs';
 import {documentationResponse} from './documentation.mjs';
 import {prepareManifestRender} from './production/manifests.mjs';
 import { readLibrary } from './library/service.mjs';
@@ -385,7 +386,7 @@ export async function dispatch(request) {
           await pool.query(
             "SELECT scope,version,content FROM configurations ORDER BY scope",
           )
-        ).rows,
+        ).rows.map(presentConfiguration),
       });
     if (method === "GET" && route[0] === "operations" && route[1])
       return json(await operation(pool, route[1]));

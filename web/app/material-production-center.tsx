@@ -54,6 +54,7 @@ import { publicRef, visibleText } from './review-semantics';
 import { useRuntimeMode } from './runtime-mode';
 import { useAssistantFocus } from './assistant/context-provider';
 import {waitForOperation} from './operation-client';
+import {SoundOwnershipList} from './sound-ownership';
 
 export type MaterialCenterViewState = {
   search: string;
@@ -822,7 +823,8 @@ function BasicMaterialProductionCenter({ model: summaryModel, snapshotId, catalo
     : !selectedRequirement ? <section className="material-info-card is-empty"><p className="v6-empty-note">选择一项素材，查看固定产物区、Review、生产资料、用途与版本血缘。</p></section>
     : <article className="material-info-card" data-material-info-id={publicRef(selectedRequirement.id)} data-family-id={selectedFamily?.id || ''}>
       <header className="material-info-header"><span>{selectedMediaLabel} · {selectedClassification?.businessCategoryPrimary} / {selectedClassification?.businessCategorySecondary}</span>{currentProductionTarget?<MaterialProgressBadge stage={selectedCreatorStage?.creatorStage||'INITIAL'}/>:<span>历史需求</span>}</header>
-      {!currentProductionTarget&&<section className="material-production-materials" aria-label="素材需求替代关系" role={selectedRequirement.currentDisposition==='INVALID_REPLACEMENT'?'alert':'status'}><h3>{selectedRequirement.currentDisposition==='REPLACED'?'原综合需求，已拆分':'素材替代关系暂不可用'}</h3><p>保留这项原需求、原版本和审阅历史；不计当前需求完成度，不在这里建立新候选或编辑新用途。</p>{replacement?.replacedByRequirementId&&<a href={runtimePath(materialRequirementLink(replacement.replacedByRequirementId))}>查看新的整套需求</a>}{replacement?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>}
+	      {!currentProductionTarget&&<section className="material-production-materials" aria-label="素材需求替代关系" role={selectedRequirement.currentDisposition==='INVALID_REPLACEMENT'?'alert':'status'}><h3>{selectedRequirement.currentDisposition==='REPLACED'?'原综合需求，已拆分':'素材替代关系暂不可用'}</h3><p>保留这项原需求、原版本和审阅历史；不计当前需求完成度，不在这里建立新候选或编辑新用途。</p>{replacement?.replacedByRequirementId&&<a href={runtimePath(materialRequirementLink(replacement.replacedByRequirementId))}>查看新的整套需求</a>}{replacement?.reasons.map(reason=><p key={reason}>{visibleText(reason)}</p>)}</section>}
+	      <SoundOwnershipList bindings={[...(selectedRequirement.soundOwnership||[]),...(selectedFamily?.soundOwnership||[])]} heading="素材声音归属" label="素材声音归属"/>
       {currentProductionTarget&&!!selectedCreatorStage?.creatorStageReasons.length && <section className="material-blocking-explanation" aria-label="当前素材阻断说明">
         <header><div><small>BLOCKING REASON</small><h3>为什么现在被阻断</h3></div><span>{selectedCreatorStage.creatorStageShortReason || '原因待补齐'}</span></header>
         <div>

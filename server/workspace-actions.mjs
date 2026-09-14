@@ -24,12 +24,13 @@ import { idFor,idsFor } from './presentation/read-unit.mjs';
 import { canonicalShotDesign } from '../web/presentation/shot-design-contract.mjs';
 import {animaticWorkspace} from './presentation/animatics.mjs';
 import {validateAnimaticTimeline,animaticMediaBindings} from './production/animatic-model.mjs';
+import {planSoundOwnershipMigration} from './settings/sound-ownership.mjs';
 
 import {planSpatialViewChange} from './production/spatial-views.mjs';
 import {planShotSettingsChange} from './production/shot-settings.mjs';
 
 const collectionKinds = { entities:'ENTITY', states:'STATE', representations:'REPRESENTATION', relations:'RELATION', requirements:'REQUIREMENT' };
-const projectionFields = ['revisionId','objectVersion','revisionSha256','displayId'];
+const projectionFields = ['revisionId','objectVersion','revisionSha256','displayId','soundOwnership','soundOwnerIds','soundSpaceIds','soundStoryIds','soundEpisodeIds','soundSceneIds','soundShotIds','soundOwnershipPending','soundOwnershipStale'];
 function authored(value) { const content={...value}; for(const key of projectionFields) delete content[key]; return content; }
 function draftSave(name, old, content) {
   return { type:'save', id:'workspace-draft:'+name, kind:'NOTE', title:'工作区草稿 · '+name, expectedVersion:old?.version||0, content:{ workspace:name, ...content } };
@@ -299,6 +300,7 @@ export async function planWorkspaceChange(tx, command, context) {
     return {commands:[{type:'configuration.save',scope:'project',expectedVersion:unit.configurationVersions.project||0,content:project},{type:'configuration.save',scope:'system',expectedVersion:unit.configurationVersions.system||0,content:system}],response:results=>({revisionId:hash(Object.fromEntries(results.map(r=>[r.scope,r.version])))})};
   }
   if(command.workspace==='domain-workspaces')return domainAction(tx,body);
+  if(command.workspace==='sound-ownership')return planSoundOwnershipMigration(tx,body);
   if(command.workspace==='relations')return relationsAction(tx,body);
   if(['configuration','configuration/preview','configuration/publish'].includes(command.workspace))return configurationAction(tx,command.workspace,body);
   if(command.workspace==='script-comments')return commentAction(tx,body);

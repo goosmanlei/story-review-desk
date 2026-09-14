@@ -1,3 +1,4 @@
+import {soundOwnershipBindings} from './settings/sound-ownership.mjs';
 import { check, hash } from "./shared/contracts.mjs";
 import { objectDetail, summaries } from "./repository.mjs";
 
@@ -105,7 +106,9 @@ export async function objectContext(tx, id, { revisionId } = {}) {
     if (!requested.get(r.revisionId)) delete r.objectVersion;
     return r;
   });
+  const soundOwnership=(await soundOwnershipBindings(tx,{objectId:id})).filter(b=>[b.source,b.target,...b.resources].some(ref=>ref?.objectId===id&&ref.revisionId===selected));
   return {
+    soundOwnership,
     object,
     objectId: id,
     revisionId: selected,
@@ -136,7 +139,7 @@ export async function facets(tx, kind) {
     COALESCE(r.content->>'businessCategoryPrimaryName',fr.content->>'businessCategoryPrimaryName',r.content->>'type',r.content->>'category',r.content->>'subtype',fr.content->>'type',fr.content->>'category','未分类') AS label,
     COALESCE(r.content->>'mediaType',r.content->>'mediaKind',r.content->>'kind',fr.content->>'mediaType',fr.content->>'mediaKind',fr.content->>'kind','') AS "mediaType",
     COALESCE(r.content->>'activityRole',fr.content->>'activityRole',r.content->>'productionLane',fr.content->>'productionLane','') AS lane,count(*)::integer AS count
-    FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) LEFT JOIN asset_versions av ON av.object_id=o.id LEFT JOIN objects f ON f.id=av.family_id LEFT JOIN revisions fr ON fr.id=COALESCE(f.draft_revision_id,f.adopted_revision_id) WHERE o.kind=$1 AND NOT o.historical GROUP BY 1,2,3,4 ORDER BY count(*) DESC LIMIT 200`,
+    FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) LEFT JOIN asset_versions av ON av.object_id=o.id LEFT JOIN objects f ON f.id=av.family_id LEFT JOIN revisions fr ON fr.id=COALESCE(f.draft_revision_id,f.adopted_revision_id) WHERE o.kind=$1 AND NOT o.historical AND NOT(o.kind='ENTITY' AND upper(trim(COALESCE(r.content->>'type','')))=ANY(ARRAY['SOUND','ORGANIZATION'])) GROUP BY 1,2,3,4 ORDER BY count(*) DESC LIMIT 200`,
       [kind],
     )
   ).rows;

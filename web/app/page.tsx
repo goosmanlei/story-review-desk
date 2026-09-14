@@ -53,6 +53,7 @@ import {
   type PagedProductionWindow,
   type UiScopeType,
 } from './paged-production-data';
+import {SoundOwnershipScope,type SoundOwner} from './sound-ownership';
 
 const AdaptationAuditWorkbench = dynamic(
   () => import('./adaptation-audit').then((module) => module.AdaptationAuditWorkbench),
@@ -947,6 +948,7 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
     openingHook: {class: 'A' as const, text: episode.openingHook, evidenceRefs: []}, coreAdvance: {class: 'A' as const, text: episode.coreAdvance, evidenceRefs: []}, endingCliffhanger: {class: 'A' as const, text: episode.endingCliffhanger, evidenceRefs: []},
   }));
   const selectedEpisodeDecision = episodeDecisions.find((item) => item.episodeId === episodeId || item.episodeUid === episodeId) ?? episodeDecisions[0];
+  const storySoundOwners:SoundOwner[]=storyView==='story-structure'?[{kind:'STORY',id:instance.episodePlanId,label:'本剧'}]:storyView==='logic'&&selectedEpisodeDecision?[{kind:'EPISODE',id:selectedEpisodeDecision.episodeUid,label:'本集'}]:storyView==='audit'&&auditSceneId?[{kind:'SCENE',id:auditSceneId,label:'本场'}]:[];
   const selectedEpisodeIndex = episodeDecisions.findIndex((item) => item.episodeUid === selectedEpisodeDecision?.episodeUid);
   const previousEpisodeDecision = selectedEpisodeIndex > 0 ? episodeDecisions[selectedEpisodeIndex - 1] : null;
   const nextEpisodeDecision = episodeDecisions[selectedEpisodeIndex + 1] || null;
@@ -2871,7 +2873,8 @@ function ReviewApp({ reviewData, pagedProduction, onNeedProduction }: { reviewDa
             window.requestAnimationFrame(() => window.requestAnimationFrame(() => document.getElementById(nextTabId)?.focus()));
           }}
         >{label}</button>)}</div></StoryWorkspaceHeading>
-        {storyInstruction[storyView==='audit'?'logic':storyView] && <p className="story-instruction">{storyInstruction[storyView==='audit'?'logic':storyView]}</p>}
+	        {storyInstruction[storyView==='audit'?'logic':storyView] && <p className="story-instruction">{storyInstruction[storyView==='audit'?'logic':storyView]}</p>}
+	        <SoundOwnershipScope owners={storySoundOwners} label={storySoundOwners[0]?storySoundOwners[0].label+'声音归属':'当前声音归属'}/>
 
         <div id="story-mode-panel" role="tabpanel" aria-labelledby={`story-tab-${storyView === 'audit' ? 'logic' : storyView}`}>
 

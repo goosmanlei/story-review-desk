@@ -1,3 +1,4 @@
+import {validateStoredSoundOwnership} from './settings/sound-ownership.mjs';
 import { createReadStream } from "node:fs";
 import { readFile, open, lstat } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -5,7 +6,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { check, hash, canonical } from "./shared/contracts.mjs";
 import { transaction } from "./db.mjs";
-import { validateConfiguration } from "./project/service.mjs";
+import { validateConfiguration,retireImportedEntityConfiguration } from "./project/service.mjs";
 import { moduleFor } from "./modules.mjs";
 import {validateReferenceContent,validateReferenceTargets} from './materials/references.mjs';
 
@@ -183,8 +184,13 @@ export async function importRecords(
       await tx.query("SET CONSTRAINTS ALL IMMEDIATE");
       // JSON references need the same checks as commands after every target has
       // been imported. A failed reference rolls back the entire import.
+      // Retire only mutable configuration. Preserve imported source bytes and all
+      // object revisions; legacy SOUND records remain accessible for explicit migration.
+      for(const row of (await tx.query('SELECT scope,version,content FROM configurations')).rows)await retireImportedEntityConfiguration(tx,row);
       const references=(await tx.query(`SELECT o.kind,r.content FROM objects o JOIN revisions r ON r.id=COALESCE(o.draft_revision_id,o.adopted_revision_id) WHERE NOT o.historical`)).rows;
-      for(const row of references){validateReferenceContent(row.kind,row.content);await validateReferenceTargets(tx,row.kind,row.content);}
+      for(const row of references){validateReferenceContent(row.kind,row.content);await validateReferenceTargets(tx,row.kind,row.content,undefined,{historicalImport:true});}
+      const soundHistory=(await tx.query("SELECT r.id,r.content FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='NOTE' AND r.content->>'role'='SOUND_OWNERSHIP'")).rows;
+      for(const row of soundHistory)await validateStoredSoundOwnership(tx,row.id,row.content);
       await tx.query("UPDATE project SET title=$1", [manifest.title]);
       const result = {
         operationId,

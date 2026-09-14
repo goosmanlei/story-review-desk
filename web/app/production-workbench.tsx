@@ -30,6 +30,7 @@ import { useAssistantFocus } from './assistant/context-provider';
 import { useProjectAssistantDraftTargets } from './assistant/project-draft-adapters';
 import {runtimePath} from './runtime-path';
 import type { EpisodeReviewDossier } from './story-review-types';
+import type {SoundOwnershipBinding} from './sound-ownership';
 
 type ReviewClaim = { class: 'A' | 'F' | 'L' | 'U'; text: string; evidenceRefs: string[] };
 
@@ -139,6 +140,9 @@ export type CharacterCardSpec =
     };
 
 export type MaterialRequirement = {
+  soundOwnership?:SoundOwnershipBinding[];
+  soundOwnershipPending?:boolean;
+  soundOwnershipStale?:boolean;
   replaces?: {requirementId:string;requirementHash:string};
   currentDisposition?: import('../presentation/material-requirement-disposition.mjs').RequirementDisposition['kind'];
   requirementReplacement?: {protocol:'MATERIAL_REQUIREMENT_REPLACEMENT_V1';status:'VALID'|'INVALID';replaces:{requirementId:string;requirementHash:string}|null;replacedByRequirementId:string|null;reasons:string[]};
@@ -454,6 +458,9 @@ export type V7AssetVersion = LifecycleProjection & {
 };
 
 export type V7AssetFamily = LifecycleProjection & {
+  soundOwnership?:SoundOwnershipBinding[];
+  soundOwnershipPending?:boolean;
+  soundOwnershipStale?:boolean;
   id: string;
   materialProductionPlanId?: string;
   label: string;
