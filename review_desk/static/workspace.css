@@ -153,3 +153,22 @@ button { border-radius: 0; }
 @media(max-width:1200px) { .story-workspace-heading { grid-template-columns: 1fr; } }
 @media(max-width:700px) { .workspace-content { width: calc(100% - 24px); }.workspace-topbar { padding-inline: 14px; }.search-box { width: 140px; }#comments-toggle { right: 12px; bottom: 12px; }.workspace-footer { display: block; }.workspace-footer p { margin-top: 12px; text-align: left; }.configuration-layout { grid-template-columns: 1fr; }.configuration-sections { display: flex; overflow-x: auto; }.configuration-sections button { white-space: nowrap; border-bottom: 0; border-right: 1px solid var(--desk-line); }.config-page form { grid-template-columns: 1fr; }.config-page .config-field:has(textarea) { grid-column: auto; }.current-lanes,.current-steps,.current-board { grid-template-columns: 1fr; }.current-step { border-right: 0; border-bottom: 1px solid var(--desk-line); } }
 @media(max-width:700px) { .text-reader { min-height: 0; grid-template-rows: auto auto; }.text-reader-index { max-height: none; }.source-reader-main { min-height: 0; }.config-choice-field { grid-column: auto; } }
+
+/* Keep the compilation desk in the viewport after the page reaches the top bar.
+   Its index and manuscript scroll independently; switching a source never moves the page. */
+@media(min-width:701px) {
+  #story-workspace { padding-bottom: 0; }
+  .workspace-main:has(#story-workspace:not([hidden])) .workspace-footer { display: none; }
+  #story-workspace .text-reader { position: sticky; top: 70px; height: calc(100dvh - 70px); min-height: 0; overflow: hidden; }
+  #story-workspace .text-reader-index { min-height: 0; overflow: hidden; }
+  #story-workspace .text-reader-index #source-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  #story-workspace .source-reader-main { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  #story-workspace .text-reader-head { flex: 0 0 auto; }
+  #story-workspace .text-reader-scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+}
+
+@media(max-width:700px) {
+  #story-workspace .text-reader-index { max-height: min(44dvh, 360px); min-height: 0; overflow: hidden; }
+  #story-workspace .text-reader-index #source-list { display: block; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  #story-workspace .source-button { min-width: 0; width: 100%; }
+}
