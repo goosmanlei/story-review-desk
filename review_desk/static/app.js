@@ -214,9 +214,9 @@ function renderDocument(){
   text.addEventListener('mouseup',scheduleSelection);text.addEventListener('keyup',scheduleSelection);
 }
 
-function chooseSource(id,keepScroll=false,updateUrl=true){
+function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
   state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;
-  if(state.current?.group)state.expandedGroups.add(state.current.group);
+  if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   $('#selection-action').hidden=true;
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
   renderSources();renderDocument();renderComments();if(!keepScroll)window.scrollTo(0,0);
@@ -313,7 +313,7 @@ async function init(){try{
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;
   renderStageLabel();
   const initialUrl=new URL(location.href);
-  chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false);
+  chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
   switchWorkspace(initialUrl.searchParams.get('workspace')||'current',false);
   $('#brand-home').onclick=()=>location.assign('/');
   $('#reader-comments').onclick=openPanel;
