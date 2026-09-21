@@ -63,4 +63,4 @@ def migrate(scope, saved_schema_version, body):
 
 def catalog():
     return {"schema_version": SCHEMA_VERSION, "scopes": FIELDS,
-            "local": {"api_key": "OPENAI_API_KEY, never exported", "port": "serve --port, never exported"}}
+            "local": {"api_key": "OPENAI_API_KEY, never exported", "public_entry": "REVIEW_PUBLIC_ENTRY, never exported"}}
