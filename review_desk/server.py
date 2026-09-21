@@ -71,7 +71,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(store.context())
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/app.js", "/style.css", "/polish.css"):
+        if path in ("/app.js", "/style.css", "/polish.css", "/workspace.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]

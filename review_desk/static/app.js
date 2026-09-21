@@ -1,4 +1,4 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources'};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT'};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
@@ -12,45 +12,111 @@ function link(label,url,parent){const a=el('a',null,label);a.href=url;a.target='
 
 function renderSources(){
   const nav=$('#source-list');nav.replaceChildren();
-  for(const source of state.sources){
+  const filtered=state.sources.filter(source=>!state.query||[source.title,source.origin,source.version_type,...source.blocks.map(block=>block.text)].join('\n').toLocaleLowerCase().includes(state.query));
+  for(const source of filtered){
     const button=el('button','source-button'+(source.id===state.current?.id?' active':''));button.type='button';
     nodeText('small',null,source.version_type,button);nodeText('strong',null,source.title,button);nodeText('span','sub',source.origin,button);
     button.addEventListener('click',()=>chooseSource(source.id));nav.append(button);
   }
-  $('#source-count').textContent=`${state.sources.length} 份资料`;
+  if(!filtered.length)nodeText('p','source-no-results','未找到匹配的资料。',nav);
+  $('#source-count').textContent=state.query?`${filtered.length} / ${state.sources.length} 份资料`:`${state.sources.length} 份资料`;
 }
 
 function renderWorkspaceNav(){
   const nav=$('#workspace-nav');nav.replaceChildren();
   const enabled=state.configurations.values.SYSTEM.body.enabled_workspaces;
-  const groups=[['当前工作',['current']],['故事创作',['story.sources','story.outline','story.script']],['故事设定',['settings.workspace']],['素材管理',['materials.workspace']],['全剧制作',['production.workspace']],['系统管理',['project.configuration']]];
-  for(const [title,ids] of groups){nodeText('div','nav-group',title,nav);
-    for(const id of ids){const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace.implemented&&enabled.includes(id),button=el('button','workspace-button'+(state.workspace===id?' active':''),workspace.label+(active?'':workspace.implemented?' · 已停用':' · 待开放'));
-      button.type='button';button.disabled=!active;button.onclick=()=>switchWorkspace(id);nav.append(button)}}
+  const sections=[
+    ['current','当前工作','当前','全剧状态与当下可开展工作'],
+    ['story.sources','故事创作','故事','来源资料、故事结构与叙事拆解'],
+    ['settings.workspace','故事设定','设定','主体、空间与实体关系'],
+    ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
+    ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
+    ['project.configuration','系统管理','管理','系统配置、数据与运行']
+  ];
+  for(const [id,title,index,description] of sections){
+    const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented&&enabled.includes(id);
+    const button=el('button','workspace-button'+(state.workspace===id?' active':'')+(active?'':' planned'));button.type='button';
+    button.setAttribute('aria-current',state.workspace===id?'page':'false');
+    nodeText('span','nav-index',index,button);const labels=el('span','nav-labels');nodeText('b',null,title,labels);nodeText('small',null,active?description:`${description} · 待开放`,labels);button.append(labels);
+    button.onclick=()=>switchWorkspace(id);nav.append(button);
+  }
 }
 
 function switchWorkspace(id){
-  if(!state.configurations.values.SYSTEM.body.enabled_workspaces.includes(id))id='project.configuration';
+  if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
-  $('#source-section').hidden=!source;$('#source-view').hidden=!source;$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
+  $('#story-workspace').hidden=!source;$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
+  $('#placeholder-view').hidden=source||id==='project.configuration'||id==='current';
   $('#comments-toggle').hidden=!source;closePanel();
+  $('#source-search').hidden=!source;$('#source-count').hidden=!source;
+  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'current':['当前工作','当']};
+  $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='current')renderCurrent();
+  if(!source&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
   const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url);
 }
 
-function renderCurrent(){const root=$('#current-view');root.replaceChildren();const article=el('article','document');
+function renderPlaceholder(id){
+  const root=$('#placeholder-view');root.replaceChildren();const workspace=state.framework.workspaces.find(item=>item.id===id);
+  const heading=el('header','placeholder-heading');nodeText('p',null,'STORY REVIEW DESK / WORKSPACE',heading);
+  nodeText('h1',null,workspace.label,heading);root.append(heading);
+  const card=el('section','placeholder-card');nodeText('small',null,'整体创作流程 · 已规划',card);
+  nodeText('h2',null,'这个工作区将在后续阶段开放',card);
+  nodeText('p',null,'当前故事实例处于资料采编阶段。此入口保留在完整系统框架中；尚未实现的创作、设定或制作功能不会假装可用，也不会产生隐含业务数据。',card);
+  const button=nodeText('button','primary','返回来源资料',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
+}
+
+function renderCurrent(){const root=$('#current-view');root.replaceChildren();
   const stage=state.framework.stages.find(s=>s.id===state.configurations.values.PROJECT.body.current_stage);
-  nodeText('div','overline','CURRENT WORK / 当前工作',article);nodeText('h2',null,stage.label,article);
-  nodeText('p','intro',stage.workspace==='story.sources'?'本阶段收录并审阅《李寄斩蛇》原始资料。后续故事梗概、剧本、设定、素材与制作沿同一系统逐步开放。':'此阶段已在整体框架中规划，功能尚未开放；现可继续查阅原始资料和调整项目配置。',article);
-  const btn=nodeText('button','primary','进入资料采编',article);btn.onclick=()=>switchWorkspace('story.sources');root.append(article)}
+  const open=state.comments.filter(comment=>comment.status==='OPEN').length;
+  const heading=el('header','current-heading');nodeText('h1',null,'当前工作',heading);
+  nodeText('p',null,'选择工作链与阶段，查看当前实例真实可推进的对象。',heading);root.append(heading);
+  const lanes=el('div','current-lanes');
+  for(const [index,title,detail,count,ready] of [
+    ['01','故事 → 剧本','来源、结构与剧本创作',`${state.sources.length} 份资料 · ${open} 条待处理评论`,true],
+    ['02','剧本 → 素材','设定与素材生产','后续阶段开放',false],
+    ['03','剧本 + 素材 → 全剧制作','分集与逐场制作','后续阶段开放',false]]){
+    const card=el('section','current-lane'+(ready?' active':''));nodeText('small',null,`${index} · ${ready?'正在推进':'已规划'}`,card);
+    nodeText('h2',null,title,card);nodeText('p',null,detail,card);nodeText('span',null,count,card);lanes.append(card)
+  }root.append(lanes);
+  const steps=el('div','current-steps');
+  for(const [index,title,detail,ready] of [['01','原始资料审阅',`${state.sources.length} 份版本 · ${open} 条待处理评论`,true],['02','故事结构','待后续任务开放',false],['03','叙事拆解与剧本','待后续任务开放',false]]){
+    const card=el('section','current-step'+(ready?' active':''));nodeText('small',null,index,card);nodeText('b',null,title,card);nodeText('span',null,detail,card);steps.append(card)
+  }root.append(steps);
+  const board=el('div','current-board'),status=el('aside','current-status');nodeText('small',null,'所选阶段',status);
+  nodeText('h2',null,stage?.label||'故事采编',status);nodeText('p',null,'当前资料、素材与评论均按本故事实例独立保存；页面仅依据已登记数据统计。',status);
+  nodeText('strong',null,`${state.sources.length} 份已登记资料`,status);nodeText('strong',null,`${open} 条待处理评论`,status);
+  const action=nodeText('button',null,'打开本阶段工作区 →',status);action.type='button';action.onclick=()=>switchWorkspace('story.sources');board.append(status);
+  const queue=el('section','current-queue');nodeText('small',null,'本阶段的对象与行动',queue);
+  nodeText('h2',null,'现在看什么，接下来做什么',queue);
+  for(const source of state.sources){const card=el('article','current-item');nodeText('small',null,source.version_type,card);
+    nodeText('h3',null,source.title,card);nodeText('p',null,source.origin,card);
+    const button=nodeText('button',null,'打开来源资料 →',card);button.type='button';button.onclick=()=>{switchWorkspace('story.sources');chooseSource(source.id)};queue.append(card)
+  }board.append(queue);root.append(board)
+}
 
 function renderConfigurations(){
-  const root=$('#configuration-view');root.replaceChildren();const article=el('article','document config-page');
-  nodeText('div','overline','SYSTEM MANAGEMENT / 系统管理',article);nodeText('h2',null,'系统配置',article);
-  nodeText('p','intro','系统级与故事实例级配置分开保存、记录版本，并随业务数据导出。运行密钥仅从本机环境读取，不进入公开仓库。',article);
+  const root=$('#configuration-view');root.replaceChildren();
+  const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
+  nodeText('p',null,'当前故事实例 · 系统、项目与本机配置分层管理',header);root.append(header);
+  const tabs=el('nav','management-tabs');tabs.setAttribute('aria-label','系统管理模块');
+  for(const [label,ready] of [['使用与初始化',false],['系统配置',true],['数据与运行',false],['系统架构',false]]){
+    const button=nodeText('button',ready?'active':'',ready?label:`${label} · 待开放`,tabs);button.type='button';button.disabled=!ready;
+    button.setAttribute('aria-current',ready?'page':'false');
+  }root.append(tabs);
+  const layout=el('div','configuration-layout'),sections=el('nav','configuration-sections');sections.setAttribute('aria-label','系统配置分组');
+  const article=el('article','config-page');
+  const showSection=()=>{for(const section of article.querySelectorAll('[data-config-section]'))section.hidden=section.dataset.configSection!==state.configSection;
+    for(const button of sections.querySelectorAll('button'))button.classList.toggle('active',button.dataset.section===state.configSection)};
+  for(const [id,label] of [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['LOCAL','本机运行']]){
+    const button=nodeText('button',null,label,sections);button.type='button';button.dataset.section=id;button.onclick=()=>{state.configSection=id;showSection()};
+  }
+  layout.append(sections,article);root.append(layout);
   const data=state.configurations;
   for(const scope of ['SYSTEM','PROJECT']){const record=data.values[scope],section=el('section','config-section');
-    nodeText('h3','section-title',scope==='SYSTEM'?'系统级配置':'项目级配置',section);
+    section.dataset.configSection=scope;
+    nodeText('h2','section-title',scope==='SYSTEM'?'系统与 AI 配置':'故事项目配置',section);
+    nodeText('p','config-explanation',scope==='SYSTEM'?'系统功能和 AI 能力的通用选项，随版本演进。':'当前故事实例的创作阶段与背景，仅影响本实例。',section);
     nodeText('p','config-version',`配置版本 ${record.version} · Schema ${record.schema_version}`,section);
     const fields=data.catalog.scopes[scope],form=el('form');form.dataset.scope=scope;
     for(const [key,spec] of Object.entries(fields)){const label=el('label','config-field');nodeText('span',null,spec.label,label);
@@ -64,7 +130,9 @@ function renderConfigurations(){
       catch(error){toast(error.message)}};
     section.append(form);article.append(section)}
   const local=el('section','config-section');nodeText('h3','section-title','本机运行配置',local);
-  nodeText('p',null,`公开入口：${data.local.public_entry||'未设置（当前为直连服务）'}；AI 密钥：${data.local.ai_key_configured?'已配置':'未配置'}。此状态只显示，不会导出密钥。`,local);article.append(local);root.append(article)
+  local.dataset.configSection='LOCAL';
+  nodeText('p','config-explanation','运行状态只在本机可见，凭据不会随故事数据公开同步。',local);
+  nodeText('p',null,`公开入口：${data.local.public_entry||'未设置（当前为直连服务）'}；AI 密钥：${data.local.ai_key_configured?'已配置':'未配置'}。此状态只显示，不会导出密钥。`,local);article.append(local);showSection()
 }
 
 function blockMarks(source,block,index){
@@ -97,6 +165,9 @@ function renderBlock(source,block,index){
 
 function renderDocument(){
   const source=state.current,root=$('#source-view');root.replaceChildren();if(!source)return;
+  $('#reader-kind').textContent=source.version_type;
+  $('#reader-head-title').textContent=source.title;
+  $('#reader-head-detail').textContent=`${source.origin} · 采集于 ${source.collected_at}`;
   const doc=el('article','document');nodeText('div','overline','SOURCE DOCUMENT / 资料原文',doc);
   nodeText('h2',null,source.title,doc);nodeText('span','type-pill',source.version_type,doc);
   const meta=el('div','source-meta');
@@ -205,7 +276,11 @@ async function init(){try{
   const [instance,sources,comments,framework,configurations]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations')]);
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources;state.comments=comments;state.framework=framework;state.configurations=configurations;
   chooseSource(new URL(location.href).searchParams.get('source')||sources[0]?.id,true);
-  switchWorkspace(new URL(location.href).searchParams.get('workspace')==='project.configuration'?'project.configuration':new URL(location.href).searchParams.get('workspace')==='current'?'current':'story.sources');
+  switchWorkspace(new URL(location.href).searchParams.get('workspace')||'story.sources');
+  $('#brand-home').onclick=()=>switchWorkspace('current');
+  $('#reader-comments').onclick=openPanel;
+  $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources()};
+  $('#source-search').onkeydown=event=>{if(event.key==='Enter'){const first=$('#source-list .source-button');if(first){event.preventDefault();first.click()}}};
   $('#comments-toggle').onclick=()=>$('#comment-panel').hidden?openPanel():closePanel();$('#comments-close').onclick=closePanel;
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};
   window.addEventListener('focus',()=>refreshComments().catch(()=>{}));
