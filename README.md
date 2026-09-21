@@ -1,6 +1,6 @@
 # Story Review Desk
 
-独立、可复用的故事创作审阅台。系统代码与后续系统迭代只在本仓库；每个故事仓库保存实例配置、业务数据与素材。V1 服务端为 Python 标准库 HTTP + SQLite。整体系统框架从第一版确立，当前只开放故事采编与系统配置，其他创作环节逐步迭代，见 [架构说明](docs/architecture.md)。
+独立、可复用的故事创作审阅台。系统代码与后续系统迭代只在本仓库；每个故事仓库保存实例配置、业务数据与素材。服务端为 Python 标准库 HTTP + SQLite。整体框架已开放故事采编、故事结构阅读与系统配置，其他创作环节逐步迭代，见 [架构说明](docs/architecture.md)。
 
 ## 启动一个故事实例
 
@@ -30,7 +30,7 @@ PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo objects
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
 ```
 
-`comments` 输出评论、对象类型与精确修订、原文圈选 `anchor.quote`、所在正文块；资料评论另含资料标题/链接。Codex 可直接读 JSON，或 `GET /api/comments/context`。`GET /api/sources`、`GET /api/comments?source_id=...`、`GET /api/framework`、`GET /api/configurations` 供浏览器和工具读取。提交资料评论 `POST /api/comments`：`{source_id,anchor,body,id?}`；通用对象评论改用 `{target_object_id,target_revision_id,anchor,body,id?}`，目标修订的 `body` 或 `blocks` 文本须与锚点匹配。`anchor` 包含 `block_id,end_block_id,start,end,quote`，位置按 Unicode 字符计数，跨段 quote 以换行连接，服务端核对与不可变修订一致。修改 `PATCH /api/comments/{id}`：`{action:"EDIT"|"CLOSE"|"REOPEN",expected_version,body?}`，并发版本错误返回 409。评论有审计事件；重试相同创建 ID/内容幂等。配置可在页面或 `PATCH /api/configurations/SYSTEM|PROJECT` 保存：`{expected_version,updates:{...}}`；CLI 使用 `config-set SCOPE updates.json --expected-version N`。
+`comments` 输出评论、对象类型与精确修订、原文圈选 `anchor.quote`、所在正文块；资料评论另含资料标题/链接。Codex 可直接读 JSON，或 `GET /api/comments/context`。`GET /api/sources`、`GET /api/comments?source_id=...`、`GET /api/framework`、`GET /api/configurations` 供浏览器和工具读取。提交资料评论 `POST /api/comments`：`{source_id,anchor,body,id?}`；通用对象评论改用 `{target_object_id,target_revision_id,anchor,body,id?}`。文字锚点包含 `block_id,end_block_id,start,end,quote`，位置按 Unicode 字符计数，跨段 quote 以换行连接，服务端核对与不可变修订一致。图像和图示的整图、归一化多边形区域以及结构整体意见也使用同一接口；完整数据格式、方向选择、结构稿导入、改稿审阅和剧本交接见[故事结构接口说明](docs/story-structure.md)。修改 `PATCH /api/comments/{id}`：`{action:"EDIT"|"CLOSE"|"REOPEN",expected_version,body?}`，并发版本错误返回 409。评论有审计事件；重试相同创建 ID/内容幂等。配置可在页面或 `PATCH /api/configurations/SYSTEM|PROJECT` 保存：`{expected_version,updates:{...}}`；CLI 使用 `config-set SCOPE updates.json --expected-version N`。
 
 导出写入实例 `export/materials.json`、`comments.json`、`objects.json`、`configurations.json`、`manifest.json`，清单对每个文件和被引用素材存 SHA-256。故事仓库公开同步操作：
 
@@ -42,7 +42,7 @@ git commit -m "Sync story review data"
 git push origin main
 ```
 
-同步前审阅全部评论：公开仓库意味着评论正文公开。凭据、数据库、浏览器草稿和日志只留本机。恢复只允许空实例，先验证清单、素材 SHA、评论锚点、对象修订、精确依赖与配置，失败不写入目标。未来创作稿使用对象账本时会被同一导出协议覆盖。
+同步前审阅全部评论：公开仓库意味着评论正文公开。凭据、数据库、浏览器草稿和日志只留本机。恢复只允许空实例，先验证清单、素材 SHA、评论锚点、对象修订、精确依赖与配置，失败不写入目标。故事结构选择、修订、评论、确认和图文资产沿用同一导出协议。
 
 ## 旧版交互核对
 

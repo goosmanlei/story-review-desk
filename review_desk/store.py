@@ -287,8 +287,12 @@ class Store:
             self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (new_object_revision, source_id, 1, canonical({"source_revision": new_source_revision}), now()))
         return new_source_revision
 
-    def comments(self, source_id=None):
-        if source_id:
+    def comments(self, source_id=None, target_object_id=None, target_revision_id=None):
+        if target_revision_id:
+            rows = self.db.execute("SELECT * FROM comments WHERE target_object_id=? AND target_revision_id=? ORDER BY created_at,id", (target_object_id, target_revision_id))
+        elif target_object_id:
+            rows = self.db.execute("SELECT * FROM comments WHERE target_object_id=? ORDER BY created_at,id", (target_object_id,))
+        elif source_id:
             rows = self.db.execute("SELECT * FROM comments WHERE source_id=? ORDER BY created_at,id", (source_id,))
         else:
             rows = self.db.execute("SELECT * FROM comments ORDER BY source_id,created_at,id")
@@ -344,15 +348,51 @@ class Store:
             raise ValueError("unknown object or mismatched revision")
         payload = json.loads(revision["payload"])
         if obj["kind"] == "SOURCE":
-            source = self.validate_anchor(object_id, anchor)
+            source = self.source(object_id)
             if payload.get("source_revision") != digest(canonical(source).encode()):
                 raise Conflict("source revision differs from anchored object revision")
-            return {"object": dict(obj), "revision": dict(revision), "blocks": source["blocks"], "source": source}
-        blocks = payload.get("blocks")
+            blocks, visuals = source["blocks"], source.get("assets", [])
+        elif obj["kind"] == "STORY" and object_id == "story-structure":
+            blocks = [block for section in payload["sections"] for block in ([{"id": "heading-" + section["id"], "text": section["title"]}] + section["blocks"])]
+            visuals = [visual for section in payload["sections"] for visual in section.get("visuals", [])]
+            source = None
+        else:
+            blocks, visuals, source = payload.get("blocks"), [], None
         if blocks is None and isinstance(payload.get("body"), str):
             blocks = [{"id": "body", "text": payload["body"]}]
-        self._validate_blocks(blocks, anchor)
-        return {"object": dict(obj), "revision": dict(revision), "blocks": blocks, "source": None}
+        if not isinstance(anchor, dict):
+            raise ValueError("invalid anchor")
+        kind = anchor.get("type", "text")
+        if kind == "text":
+            self._validate_blocks(blocks, anchor)
+        elif kind == "global":
+            if obj["kind"] != "STORY" or object_id != "story-structure" or set(anchor) != {"type"}:
+                raise ValueError("invalid global anchor")
+        elif kind in ("visual", "region"):
+            visual = next((v for v in visuals if v.get("id", v.get("file")) == anchor.get("visual_id")), None)
+            if not visual or anchor.get("asset_file") != visual.get("file"):
+                raise Conflict("visual asset reference differs from target revision")
+            if not (self.db_path.parent.parent / "export" / "assets" / visual["file"]).is_file():
+                raise Conflict("referenced visual asset is missing")
+            if kind == "region":
+                points = anchor.get("points")
+                if not isinstance(points, list) or not 3 <= len(points) <= 260 or any(
+                    not isinstance(point, dict) or any(type(point.get(axis)) not in (int, float) or not 0 <= point[axis] <= 1 for axis in ("x", "y")) for point in points
+                ):
+                    raise ValueError("invalid normalized region")
+                area = abs(sum(points[i]["x"] * points[(i + 1) % len(points)]["y"] - points[(i + 1) % len(points)]["x"] * points[i]["y"] for i in range(len(points)))) / 2
+                if area < 0.00001:
+                    raise ValueError("empty visual region")
+        else:
+            raise ValueError("unknown anchor type")
+        return {"object": dict(obj), "revision": dict(revision), "blocks": blocks, "visuals": visuals, "source": source}
+
+    def anchor_state(self, object_id, revision_id, anchor):
+        try:
+            self.validate_target(object_id, revision_id, anchor)
+            return {"valid": True}
+        except (ValueError, Conflict, KeyError, TypeError) as exc:
+            return {"valid": False, "reason": str(exc)}
 
     def create_comment(self, value):
         import uuid
@@ -395,12 +435,11 @@ class Store:
             body = str(body or "").strip()
             if not body:
                 raise ValueError("empty comment")
-            self.validate_target(current["target_object_id"], current["target_revision_id"], current["anchor"])
+            # Historical comments remain editable even if an external asset was lost.
             status = "OPEN"
         elif action == "CLOSE" and current["status"] == "OPEN":
             body, status = current["body"], "CLOSED"
         elif action == "REOPEN" and current["status"] == "CLOSED":
-            self.validate_target(current["target_object_id"], current["target_revision_id"], current["anchor"])
             body, status = current["body"], "OPEN"
         else:
             raise Conflict("action does not match current status")
@@ -416,12 +455,18 @@ class Store:
     def context(self):
         results = []
         for comment in self.comments():
+            state = self.anchor_state(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])
+            if not state["valid"]:
+                results.append({**comment, "anchor_state": state})
+                continue
             target = self.validate_target(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])
             source, blocks = target["source"], target["blocks"]
-            index = next(i for i, b in enumerate(blocks) if b["id"] == comment["anchor"]["block_id"])
+            index = next((i for i, b in enumerate(blocks) if b["id"] == comment["anchor"].get("block_id")), None)
             results.append({**comment, "object_kind": target["object"]["kind"],
                             "source_title": source["title"] if source else None,
                             "source_url": source["source_url"] if source else None,
                             "source_revision": digest(canonical(source).encode()) if source else None,
-                            "block_text": blocks[index]["text"]})
+                            "block_text": blocks[index]["text"] if index is not None else None,
+                            "visual": next((v for v in target["visuals"] if v.get("id", v.get("file")) == comment["anchor"].get("visual_id")), None),
+                            "anchor_state": state})
         return results

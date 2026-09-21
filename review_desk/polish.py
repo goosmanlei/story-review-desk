@@ -8,11 +8,39 @@ from .framework import stage
 from .store import canonical, digest
 
 
-def build_context(store, source_id, anchor, draft):
-    source = store.validate_anchor(source_id, anchor)
+def build_context(store, source_id, anchor, draft, target_object_id=None, target_revision_id=None):
     draft = str(draft or "").strip()
     if not 1 <= len(draft) <= 2000:
         raise ValueError("comment draft must be 1-2000 characters")
+    if target_object_id == "story-structure":
+        target = store.validate_target(target_object_id, target_revision_id, anchor)
+        from .structure import revision_record
+        revision = revision_record(store, target_revision_id)
+        selection = revision_record(store, revision["payload"]["direction_selection_revision"])
+        source = store.source(selection["payload"]["source_id"])
+        project = store.configuration("PROJECT")
+        system = store.configuration("SYSTEM")
+        current_stage = stage(project["body"]["current_stage"])
+        blocks = target["blocks"]
+        index = next((i for i, block in enumerate(blocks) if block["id"] == anchor.get("block_id")), 0)
+        visual = next((v for v in target["visuals"] if v["id"] == anchor.get("visual_id")), None)
+        source_text = "\n".join(b["text"] for b in source["blocks"])
+        context = {"creative_stage": current_stage, "project_configuration_version": project["version"],
+                   "story_background": project["body"]["story_background"], "creative_background": project["body"]["creative_background"],
+                   "target_medium": project["body"]["target_medium"], "audience": project["body"]["audience"], "style": project["body"]["style"],
+                   "selected_source_id": source["id"], "selected_quote": anchor.get("quote", ""),
+                   "neighbor_blocks": blocks[max(0, index - 1):index + 3],
+                   "source_documents": [{"id": source["id"], "title": source["title"], "version_type": source["version_type"], "origin": source["origin"], "source_url": source["source_url"], "revision": selection["payload"]["source_revision"], "text": source_text[:system["body"]["ai_context_max_chars"]], "truncated": len(source_text) > system["body"]["ai_context_max_chars"]}],
+                   "structure_revision": target_revision_id, "structure_title": revision["payload"]["title"],
+                   "visual": visual, "region_points": anchor.get("points"), "comment_draft": draft}
+        return {"context": context, "context_sha256": digest(canonical(context).encode()),
+                "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
+                "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
+    source_object = next((item for item in store.objects() if item["id"] == source_id), None)
+    if not source_object:
+        raise ValueError("unknown source")
+    target = store.validate_target(source_id, source_object["current_revision"], anchor)
+    source = target["source"]
     project = store.configuration("PROJECT")
     system = store.configuration("SYSTEM")
     current_stage = stage(project["body"]["current_stage"])
@@ -29,14 +57,16 @@ def build_context(store, source_id, anchor, draft):
                           "revision": digest(canonical(item).encode()), "text": excerpt,
                           "truncated": len(excerpt) < len(entire)})
     blocks = source["blocks"]
-    index = next(i for i, block in enumerate(blocks) if block["id"] == anchor["block_id"])
+    index = next((i for i, block in enumerate(blocks) if block["id"] == anchor.get("block_id")), 0)
     neighbors = blocks[max(0, index - 1):min(len(blocks), index + 3)]
     context = {"creative_stage": current_stage, "project_configuration_version": project["version"],
                "story_background": project["body"]["story_background"],
                "creative_background": project["body"]["creative_background"],
                "target_medium": project["body"]["target_medium"], "audience": project["body"]["audience"],
                "style": project["body"]["style"], "selected_source_id": source_id,
-               "selected_quote": anchor["quote"], "neighbor_blocks": neighbors,
+               "selected_quote": anchor.get("quote", ""), "neighbor_blocks": neighbors,
+               "visual": next((v for v in target["visuals"] if v.get("id", v.get("file")) == anchor.get("visual_id")), None),
+               "region_points": anchor.get("points"),
                "source_documents": documents, "comment_draft": draft}
     return {"context": context, "context_sha256": digest(canonical(context).encode()),
             "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],

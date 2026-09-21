@@ -1,10 +1,14 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set()};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),structure:null,structureRevision:null,drawMode:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
-const draftKey=()=>state.anchor?`review-draft:${state.current.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const isStructure=()=>state.workspace==='story.outline';
+const draftKey=()=>state.anchor?`review-draft:${isStructure()?state.structureRevision:state.current.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:c.source_id===state.current?.id);
+const anchorLabel=a=>a.type==='global'?'整篇结构稿':a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
+const renderActiveReader=()=>isStructure()?renderStructureReader():renderDocument();
 const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
@@ -64,15 +68,17 @@ function renderStageLabel(){const current=state.configurations.values.PROJECT.bo
 
 function switchWorkspace(id,updateUrl=true){
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
+  if(state.workspace!==id){state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null}
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
-  $('#story-workspace').hidden=!source;$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
+  $('#story-workspace').hidden=!source;$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
   $('#placeholder-view').hidden=source||id==='project.configuration'||id==='current';
-  $('#comments-toggle').hidden=!source;closePanel();
+  $('#comments-toggle').hidden=!(source||id==='story.outline');closePanel();
   $('#source-search').hidden=!source;$('#source-count').hidden=!source;
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'current':['当前工作','当']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
-  if(id==='project.configuration')renderConfigurations();if(id==='current')renderCurrent();
-  if(!source&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
+  if(id==='project.configuration')renderConfigurations();if(id==='current')renderCurrent();if(id==='story.outline'){renderStructureReader();renderComments()}
+  if(source)renderComments();
+  if(!source&&id!=='story.outline'&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url)}
   if(updateUrl)window.scrollTo(0,0);
 }
@@ -101,7 +107,7 @@ function renderCurrent(){const root=$('#current-view');root.replaceChildren();
     nodeText('h2',null,title,card);nodeText('p',null,detail,card);nodeText('span',null,count,card);lanes.append(card)
   }root.append(lanes);
   const steps=el('div','current-steps');
-  for(const [index,title,detail,ready] of [['01','原始资料审阅',`${state.sources.length} 份版本 · ${open} 条待处理评论`,true],['02','故事结构','待后续任务开放',false],['03','叙事拆解与剧本','待后续任务开放',false]]){
+  for(const [index,title,detail,ready] of [['01','原始资料审阅',`${state.sources.length} 份版本 · ${open} 条待处理评论`,true],['02','故事结构',state.structure?.current_revision?`${state.structure.revisions.length} 稿 · 可继续审阅`:'等待选择改编方向',true],['03','叙事拆解与剧本','待后续任务开放',false]]){
     const card=el('section','current-step'+(ready?' active':''));nodeText('small',null,index,card);nodeText('b',null,title,card);nodeText('span',null,detail,card);steps.append(card)
   }root.append(steps);
   const board=el('div','current-board'),status=el('aside','current-status');nodeText('small',null,'所选阶段',status);
@@ -209,9 +215,10 @@ function renderDocument(){
   const text=el('section','source-text');text.id='source-text';text.setAttribute('aria-label','资料正文');
   source.blocks.forEach((block,index)=>text.append(renderBlock(source,block,index)));doc.append(text);
   if(source.assets.length){nodeText('h3','section-title','图片与出处',doc);const gallery=el('section','image-grid');
-    for(const asset of source.assets){const figure=el('figure'),img=el('img');img.src=`/assets/${encodeURIComponent(asset.file)}`;img.alt=asset.alt||asset.title;figure.append(img);
-      const caption=el('figcaption');nodeText('strong',null,asset.title,caption);caption.append(document.createElement('br'));nodeText('span',null,asset.note+' ',caption);link('图片来源／制作依据 ↗',asset.source_url,caption);figure.append(caption);gallery.append(figure)}doc.append(gallery)}
+    for(const asset of source.assets){const figure=renderStructureVisual({id:asset.file,file:asset.file,title:asset.title,kind:'image',alt:asset.alt||asset.title,description:asset.note||''});
+      if(asset.source_url)link('图片来源／制作依据 ↗',asset.source_url,figure.querySelector('figcaption'));gallery.append(figure)}doc.append(gallery)}
   root.append(doc);
+  paintStructureRegions();
   text.addEventListener('mouseup',scheduleSelection);text.addEventListener('keyup',scheduleSelection);
 }
 
@@ -246,12 +253,12 @@ function setPanelOpen(open){
 function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
 function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
-function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;getSelection()?.removeAllRanges();$('#selection-action').hidden=true;openPanel();renderDocument();renderComments();$('#comment-editor-text')?.focus()}
+function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;getSelection()?.removeAllRanges();$('#selection-action').hidden=true;openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
-  nodeText('q',null,comment.anchor.quote,card);nodeText('p',null,comment.body,card);
+  nodeText('q',null,anchorLabel(comment.anchor),card);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   const actions=el('div','card-actions');
   const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=()=>locateComment(comment);
   if(comment.status==='OPEN'){
@@ -262,21 +269,24 @@ function commentCard(comment){
 }
 
 function renderComments(){
-  if(!state.current)return;const body=$('#comment-body');body.replaceChildren();
-  const own=state.comments.filter(c=>c.source_id===state.current.id),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
-  $('#open-count').textContent=`${open.length} 待处理`;$('#comments-toggle').textContent=`查看评论 · ${open.length}`;
-  nodeText('p','comment-help','选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
-  if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,state.anchor.quote,editor);
+  if(!isStructure()&&!state.current)return;const body=$('#comment-body');body.replaceChildren();
+  const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
+  $('#open-count').textContent=`${open.length} 待处理`;
+  const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
+  $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史待决 ${older}`:`查看评论 · ${open.length}`;
+  nodeText('p','comment-help',isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
+  if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=!textarea.value.trim()});editor.append(textarea);
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;
-    const cancel=nodeText('button',null,'收起草稿',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderDocument();renderComments();toast('草稿已留在本机，重新圈选同一原文可继续编辑')};editor.append(actions);
+    const cancel=nodeText('button',null,'收起草稿',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderActiveReader();renderComments();toast('草稿已留在本机，重新圈选同一内容可继续编辑')};editor.append(actions);
     if(state.preview){const basis=el('details','context-preview');basis.open=true;const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
       nodeText('p',null,`载体：${context.target_medium}；受众：${context.audience}；风格：${context.style}`,basis);
       nodeText('p',null,`当前圈选：${context.selected_quote}；上下文段落：${context.neighbor_blocks.map(b=>b.text).join(' / ')}`,basis);
+      if(context.visual)nodeText('p',null,`图像／图示：${context.visual.title} · ${context.visual.file}；圈选点：${context.region_points?JSON.stringify(context.region_points):'整图'}`,basis);
       for(const doc of context.source_documents){const row=el('p');nodeText('strong',null,`${doc.title} · ${doc.version_type} · ${doc.truncated?'节选':'全文'}：`,row);nodeText('span',null,doc.text,row);basis.append(row)}
       nodeText('small',null,`上下文 SHA-256：${state.preview.context_sha256}`,basis);editor.append(basis)}
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
@@ -288,12 +298,12 @@ function renderComments(){
   if(state.historyOpen){for(const comment of closed.slice(0,state.historyLimit))body.append(commentCard(comment));if(closed.length>state.historyLimit){const more=nodeText('button','secondary','显示更多',body);more.onclick=()=>{state.historyLimit+=20;renderComments()}}}
 }
 
-async function refreshComments(){state.comments=await api('/api/comments');renderDocument();renderComments()}
+async function refreshComments(){state.comments=await api('/api/comments');renderActiveReader();renderComments()}
 async function saveComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
   try{
     if(state.editing){const c=state.comments.find(x=>x.id===state.editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
-    else{await api('/api/comments',{method:'POST',body:JSON.stringify({id:crypto.randomUUID(),source_id:state.current.id,anchor:state.anchor,body:text})})}
+    else{await api('/api/comments',{method:'POST',body:JSON.stringify(isStructure()?{id:crypto.randomUUID(),target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{id:crypto.randomUUID(),source_id:state.current.id,anchor:state.anchor,body:text})})}
     localStorage.removeItem(draftKey());
     state.anchor=null;state.editing=null;state.suggestion=null;await refreshComments();toast('评论已保存');
   }catch(error){toast(error.message)}
@@ -301,22 +311,22 @@ async function saveComment(){
 async function polishComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
   const button=$('[data-polish]');button.disabled=true;
-  try{const request={source_id:state.current.id,anchor:state.anchor,body:text};
+  try{const request=isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{source_id:state.current.id,anchor:state.anchor,body:text};
     state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
     const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({...request,expected_context_sha256:state.preview.context_sha256})});
     state.suggestion=result.suggestion;renderComments();toast('润色建议已生成，原草稿未修改')}
   catch(error){renderComments();toast(error.message)}
 }
 async function previewPolish(){const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  try{state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify({source_id:state.current.id,anchor:state.anchor,body:text})});renderComments();$('#comment-editor-text').value=text;toast('已列出 AI 将参考的资料与创作上下文')}
+  try{state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{source_id:state.current.id,anchor:state.anchor,body:text})});renderComments();$('#comment-editor-text').value=text;toast('已列出 AI 将参考的资料与创作上下文')}
   catch(error){toast(error.message)}}
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
-function selectComment(id){state.selected=id;openPanel();renderDocument();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
-function locateComment(comment){state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));block?.scrollIntoView({behavior:'smooth',block:'center'});block?.focus?.()}
+function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
+function locateComment(comment){if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!isStructure())switchWorkspace('story.outline');state.structureRevision=comment.target_revision_id;state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}target.scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));if(!block){toast('原引用已失效；评论仍保留');return}block.scrollIntoView({behavior:'smooth',block:'center'})}
 
 async function init(){try{
-  const [instance,sources,comments,framework,configurations]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations')]);
-  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;
+  const [instance,sources,comments,framework,configurations,structure]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure')]);
+  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;state.structure=structure;state.structureRevision=structure.current_revision;
   renderStageLabel();
   const initialUrl=new URL(location.href);
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
@@ -333,7 +343,7 @@ async function init(){try{
   });
   document.addEventListener('pointerdown',event=>{
     const panel=$('#comment-panel');
-    if(panel.hidden||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#reader-comments').contains(event.target))return;
+    if(panel.hidden||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#reader-comments').contains(event.target)||$('#structure-comments')?.contains(event.target))return;
     closePanel();
   });
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};

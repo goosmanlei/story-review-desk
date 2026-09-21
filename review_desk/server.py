@@ -8,6 +8,7 @@ from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
 from .polish import build_context, suggest
 from .store import Conflict, Store
+from .structure import select_direction, snapshot, confirm_structure, review_context, script_input
 
 
 class ReviewServer(HTTPServer):
@@ -63,12 +64,22 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/configurations":
             return self._json({"catalog": configuration_catalog(), "values": store.configurations()})
         if path == "/api/comments":
-            return self._json(store.comments(query.get("source_id", [None])[0]))
+            comments = store.comments(query.get("source_id", [None])[0], query.get("target_object_id", [None])[0], query.get("target_revision_id", [None])[0])
+            return self._json([{**comment, "anchor_state": store.anchor_state(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])} for comment in comments])
         if path == "/api/comments/context":
             return self._json(store.context())
+        if path == "/api/story-structure":
+            return self._json(snapshot(store))
+        if path == "/api/story-structure/review-context":
+            return self._json(review_context(store))
+        if path == "/api/story-structure/script-input":
+            try:
+                return self._json(script_input(store))
+            except ValueError as exc:
+                return self._json({"error": str(exc)}, 404)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/app.js", "/style.css", "/polish.css", "/workspace.css"):
+        if path in ("/app.js", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -90,12 +101,24 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path in ("/api/story-structure/select-direction", "/api/story-structure/confirm"):
+            try:
+                value = self._input()
+                if self.path.endswith("select-direction"):
+                    result = select_direction(self.server.store, value.get("source_id"), value.get("expected_version"))
+                else:
+                    result = confirm_structure(self.server.store, value.get("revision_id"), value.get("reviewer"), value.get("note", ""))
+                return self._json(result, 201)
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if self.path == "/api/comments":
             return self._write("CREATE")
         if self.path in ("/api/comments/polish", "/api/comments/polish-context"):
             try:
                 value = self._input()
-                preview = build_context(self.server.store, value.get("source_id"), value.get("anchor"), value.get("body"))
+                preview = build_context(self.server.store, value.get("source_id"), value.get("anchor"), value.get("body"), value.get("target_object_id"), value.get("target_revision_id"))
                 if self.path.endswith("polish-context"):
                     return self._json(preview)
                 if value.get("expected_context_sha256") != preview["context_sha256"]:
