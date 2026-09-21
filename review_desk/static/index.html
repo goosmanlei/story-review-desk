@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>原始资料审阅台</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/polish.css">
+</head>
+<body>
+  <header class="topbar"><div class="brand"><span class="seal">寄</span><div><small>STORY REVIEW DESK / 原始资料</small><h1 id="instance-title">加载中…</h1></div></div><div class="top-actions"><span id="source-count"></span><button id="comments-toggle" type="button">查看评论</button></div></header>
+  <div class="layout">
+    <aside class="sidebar" aria-label="资料列表"><div class="sidebar-head"><small>资料库</small><h2>不同版本，同一故事</h2><p>左侧选择资料，右侧阅读完整文本。圈选原文即可写下审阅意见。</p></div><nav id="source-list" aria-label="资料"></nav><div class="sidebar-foot">本机独立实例 · 资料与评论可导出恢复</div></aside>
+    <main id="reader" tabindex="-1"><div id="source-view" aria-live="polite"></div></main>
+  </div>
+  <button id="selection-action" type="button" hidden>＋ 添加评论</button>
+  <aside id="comment-panel" class="comment-panel" aria-label="文字评论" hidden>
+    <header><div><small>原文关联意见</small><h2>文字评论 <span id="open-count"></span></h2></div><button id="comments-close" aria-label="收起评论" type="button">×</button></header>
+    <div id="comment-body"></div>
+  </aside>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
