@@ -3,6 +3,7 @@ import json
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .configuration import SCHEMA_VERSION, defaults, migrate, validate
 from .framework import DOMAINS
@@ -196,6 +197,19 @@ class Store:
             raise ValueError("block ids must be unique and text non-empty")
         if not isinstance(document.get("assets"), list):
             raise ValueError("assets must be a list")
+        def public_link(value):
+            return isinstance(value, str) and urlsplit(value).scheme == "https" and bool(urlsplit(value).netloc)
+        if not public_link(document["source_url"]):
+            raise ValueError("source URL must be HTTPS")
+        media = document.get("media")
+        if media is not None and (not isinstance(media, dict) or media.get("kind") not in ("audio", "video")
+                                  or not public_link(media.get("url")) or not isinstance(media.get("label"), str)
+                                  or not isinstance(media.get("note"), str)):
+            raise ValueError("invalid external media")
+        references = document.get("references", [])
+        if not isinstance(references, list) or any(not isinstance(ref, dict) or not isinstance(ref.get("label"), str)
+                                                   or not public_link(ref.get("url")) for ref in references):
+            raise ValueError("invalid source references")
         revision = digest(canonical(document).encode())
         existing = self.db.execute("SELECT revision FROM sources WHERE id=?", (document["id"],)).fetchone()
         if existing and existing[0] != revision:

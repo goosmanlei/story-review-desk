@@ -27,7 +27,7 @@ function renderWorkspaceNav(){
   const enabled=state.configurations.values.SYSTEM.body.enabled_workspaces;
   const sections=[
     ['current','当前工作','当前','全剧状态与当下可开展工作'],
-    ['story.sources','故事创作','故事','来源资料、故事结构与叙事拆解'],
+    ['story.sources','故事创作','故事','故事采编、故事结构与叙事拆解'],
     ['settings.workspace','故事设定','设定','主体、空间与实体关系'],
     ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
     ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
@@ -47,7 +47,7 @@ function renderStageLabel(){const current=state.configurations.values.PROJECT.bo
   $('#sidebar-current-stage').textContent=`当前阶段 · ${stage?.label||current}`;
 }
 
-function switchWorkspace(id){
+function switchWorkspace(id,updateUrl=true){
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
   $('#story-workspace').hidden=!source;$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
@@ -58,7 +58,8 @@ function switchWorkspace(id){
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='current')renderCurrent();
   if(!source&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
-  const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url);
+  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url)}
+  if(updateUrl)window.scrollTo(0,0);
 }
 
 function renderPlaceholder(id){
@@ -68,7 +69,7 @@ function renderPlaceholder(id){
   const card=el('section','placeholder-card');nodeText('small',null,'整体创作流程 · 已规划',card);
   nodeText('h2',null,'这个工作区将在后续阶段开放',card);
   nodeText('p',null,'当前故事实例处于资料采编阶段。此入口保留在完整系统框架中；尚未实现的创作、设定或制作功能不会假装可用，也不会产生隐含业务数据。',card);
-  const button=nodeText('button','primary','返回来源资料',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
+  const button=nodeText('button','primary','返回故事采编',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
 }
 
 function renderCurrent(){const root=$('#current-view');root.replaceChildren();
@@ -96,7 +97,7 @@ function renderCurrent(){const root=$('#current-view');root.replaceChildren();
   nodeText('h2',null,'现在看什么，接下来做什么',queue);
   for(const source of state.sources){const card=el('article','current-item');nodeText('small',null,source.version_type,card);
     nodeText('h3',null,source.title,card);nodeText('p',null,source.origin,card);
-    const button=nodeText('button',null,'打开来源资料 →',card);button.type='button';button.onclick=()=>{switchWorkspace('story.sources');chooseSource(source.id)};queue.append(card)
+    const button=nodeText('button',null,'打开故事采编 →',card);button.type='button';button.onclick=()=>{switchWorkspace('story.sources');chooseSource(source.id)};queue.append(card)
   }board.append(queue);root.append(board)
 }
 
@@ -124,7 +125,15 @@ function renderConfigurations(){
     nodeText('p','config-explanation',scope==='SYSTEM'?'系统功能和 AI 能力的通用选项，随版本演进。':'当前故事实例的创作阶段与背景，仅影响本实例。',section);
     nodeText('p','config-version',`配置版本 ${record.version} · Schema ${record.schema_version}`,section);
     const fields=data.catalog.scopes[scope],form=el('form');form.dataset.scope=scope;
-    for(const [key,spec] of Object.entries(fields)){const label=el('label','config-field');nodeText('span',null,spec.label,label);
+    const effortOptions=data.catalog.model_efforts;let effortGroup;
+    const radioChoices=(group,key,choices,selected)=>{group.replaceChildren();nodeText('legend',null,fields[key].label,group);
+      const row=el('div','config-choice-row');for(const choice of choices){const label=el('label','config-choice');const input=el('input');input.type='radio';input.name=key;input.value=choice;input.checked=choice===selected;label.append(input,el('span',null,choice==='off'?'不适用':choice));row.append(label)}group.append(row)};
+    for(const [key,spec] of Object.entries(fields)){
+      if(spec.type==='model'||spec.type==='reasoning_effort'){const group=el('fieldset','config-choice-field');
+        radioChoices(group,key,spec.type==='model'?Object.keys(effortOptions):effortOptions[record.body.ai_polish_model],record.body[key]);
+        if(spec.type==='model')group.addEventListener('change',()=>{const model=form.elements.ai_polish_model.value,allowed=effortOptions[model];const current=form.elements.ai_polish_effort.value;radioChoices(effortGroup,'ai_polish_effort',allowed,allowed.includes(current)?current:allowed.includes('medium')?'medium':allowed[0])});
+        else effortGroup=group;form.append(group);continue}
+      const label=el('label','config-field');nodeText('span',null,spec.label,label);
       let input;if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
       else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=record.body[key]}
       else if(spec.type==='workspace_list'){input=el('textarea');input.rows=3;input.value=record.body[key].join('\n');nodeText('small',null,'每行一个已实现工作区 ID；系统配置不可停用。',label)}
@@ -177,7 +186,9 @@ function renderDocument(){
   nodeText('h2',null,source.title,doc);nodeText('span','type-pill',source.version_type,doc);
   const meta=el('div','source-meta');
   for(const [label,value] of [['出处',source.origin],['采集日期',source.collected_at],['版本说明',source.edition||'—']]){const item=el('div');nodeText('b',null,label,item);nodeText('span',null,value,item);meta.append(item)}
-  const item=el('div');nodeText('b',null,'原始链接',item);link('打开来源页面 ↗',source.source_url,item);meta.append(item);doc.append(meta);
+  const item=el('div');nodeText('b',null,'来源页面',item);link('打开来源页面 ↗',source.source_url,item);meta.append(item);doc.append(meta);
+  if(source.media){const media=el('section','source-media');nodeText('strong',null,'演出资料 · 第三方平台',media);link(source.media.label||'观看／收听演出 ↗',source.media.url,media);nodeText('p',null,source.media.note||'演出文件未复制到本实例。',media);doc.append(media)}
+  if(source.references?.length){const refs=el('section','source-references');nodeText('strong',null,'旁证与补充链接',refs);for(const reference of source.references){const row=el('p');link(reference.label,reference.url,row);refs.append(row)}doc.append(refs)}
   nodeText('p','intro',source.notes,doc);nodeText('h3','section-title',source.text_heading||'完整文本',doc);
   const text=el('section','source-text');text.id='source-text';text.setAttribute('aria-label','资料正文');
   source.blocks.forEach((block,index)=>text.append(renderBlock(source,block,index)));doc.append(text);
@@ -188,11 +199,11 @@ function renderDocument(){
   text.addEventListener('mouseup',scheduleSelection);text.addEventListener('keyup',scheduleSelection);
 }
 
-function chooseSource(id,keepScroll=false){
+function chooseSource(id,keepScroll=false,updateUrl=true){
   state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;
   $('#selection-action').hidden=true;
-  const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url);
-  renderSources();renderDocument();renderComments();if(!keepScroll)$('#reader').scrollTop=0;
+  if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
+  renderSources();renderDocument();renderComments();if(!keepScroll)window.scrollTo(0,0);
 }
 
 function closestBlock(node){const element=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return element?.closest('[data-block-id]')}
@@ -235,10 +246,10 @@ function renderComments(){
   nodeText('p','comment-help','选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,state.anchor.quote,editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
-    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=true});editor.append(textarea);
+    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=!textarea.value.trim()});editor.append(textarea);
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
-    const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!state.preview;polish.onclick=polishComment;
+    const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;
     const cancel=nodeText('button',null,'收起草稿',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderDocument();renderComments();toast('草稿已留在本机，重新圈选同一原文可继续编辑')};editor.append(actions);
     if(state.preview){const basis=el('details','context-preview');basis.open=true;const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
@@ -267,8 +278,12 @@ async function saveComment(){
 }
 async function polishComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  try{const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({source_id:state.current.id,anchor:state.anchor,body:text,expected_context_sha256:state.preview.context_sha256})});state.suggestion=result.suggestion;renderComments();$('#comment-editor-text').value=text;toast('润色建议已生成，原草稿未修改')}
-  catch(error){toast(error.message)}
+  const button=$('[data-polish]');button.disabled=true;
+  try{const request={source_id:state.current.id,anchor:state.anchor,body:text};
+    state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
+    const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({...request,expected_context_sha256:state.preview.context_sha256})});
+    state.suggestion=result.suggestion;renderComments();toast('润色建议已生成，原草稿未修改')}
+  catch(error){renderComments();toast(error.message)}
 }
 async function previewPolish(){const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
   try{state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify({source_id:state.current.id,anchor:state.anchor,body:text})});renderComments();$('#comment-editor-text').value=text;toast('已列出 AI 将参考的资料与创作上下文')}
@@ -279,11 +294,12 @@ function locateComment(comment){state.selected=comment.id;renderDocument();rende
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations')]);
-  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources;state.comments=comments;state.framework=framework;state.configurations=configurations;
+  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media));state.comments=comments;state.framework=framework;state.configurations=configurations;
   renderStageLabel();
-  chooseSource(new URL(location.href).searchParams.get('source')||sources[0]?.id,true);
-  switchWorkspace(new URL(location.href).searchParams.get('workspace')||'story.sources');
-  $('#brand-home').onclick=()=>switchWorkspace('current');
+  const initialUrl=new URL(location.href);
+  chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false);
+  switchWorkspace(initialUrl.searchParams.get('workspace')||'current',false);
+  $('#brand-home').onclick=()=>location.assign('/');
   $('#reader-comments').onclick=openPanel;
   $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources()};
   $('#source-search').onkeydown=event=>{if(event.key==='Enter'){const first=$('#source-list .source-button');if(first){event.preventDefault();first.click()}}};

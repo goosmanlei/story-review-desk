@@ -15,11 +15,11 @@ docker compose up -d --build
 
 已有 `.runtime/review.sqlite3` 时不要重复恢复。浏览器访问 `http://127.0.0.1:3000/`。`docker compose ps` 查看长期运行和健康状态；`docker compose restart` 重启，数据库通过实例目录绑定卷持久化。本机运行目录 `.runtime/` 不入库；此服务不提供网络鉴权，Nginx 仅绑定本机环回地址，不要改绑公网。若克隆的系统仓库不在故事仓库同级 `../story-review-desk`，构建时设置 `REVIEW_DESK_BUILD_CONTEXT=/实际系统仓库路径`。
 
-可选的“AI 润色修改意见”使用本机环境变量 `OPENAI_API_KEY`（启动 Compose 的 shell 中提供）；模型由“系统管理 → 系统配置”设置。先在页面查看将发送的故事背景、创作背景、创作阶段、原文上下文、各版本资料和草稿，确认后再调用 OpenAI Responses API，`store=false`。建议不会自动保存。未配置密钥时明确报错。凭据不得写进故事仓库。
+可选的“AI 润色修改意见”使用本机环境变量 `OPENAI_API_KEY`（启动 Compose 的 shell 中提供）。“系统管理 → 系统配置”提供平铺单选的模型与该模型支持的推理强度；选项按 [OpenAI 模型文档](https://developers.openai.com/api/docs/models)维护，具体可用性还取决于本机 API 密钥权限。新建或编辑评论时，有输入即可直接点击润色：系统先生成并核验包含故事背景、创作背景、阶段、原文上下文、各版本资料和草稿的参考快照，再调用 Responses API（`store=false`）；也可先单独点击“查看润色参考”。建议不会自动保存。未配置密钥时明确报错。凭据不得写进故事仓库。
 
 ## 数据访问与公开同步
 
-导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
+导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。外部演出可选 `media:{kind:"video"|"audio",url,label,note}`，旁证可选 `references:[{label,url}]`；外链需 HTTPS，文件不自动抓取或再分发。演出若无逐字稿，`blocks` 应明确写成元数据与审阅边界，不能伪装为演出全文。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
 
 ```bash
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo import-sources /path/to/new-sources.json

@@ -2,11 +2,21 @@
 
 from .framework import STAGES, WORKSPACES
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+# Curated Responses API choices, not an assertion that the local API key has access.
+MODEL_EFFORTS = {
+    "gpt-4.1-mini": ("off",),
+    "gpt-5.4-mini": ("none", "low", "medium", "high", "xhigh"),
+    "gpt-5.6-luna": ("none", "low", "medium", "high", "xhigh", "max"),
+    "gpt-5.6-terra": ("none", "low", "medium", "high", "xhigh", "max"),
+    "gpt-5.6-sol": ("none", "low", "medium", "high", "xhigh", "max"),
+}
 
 FIELDS = {
     "SYSTEM": {
-        "ai_polish_model": {"label": "评论润色模型", "type": "text", "default": "gpt-4.1-mini"},
+        "ai_polish_model": {"label": "评论润色模型", "type": "model", "default": "gpt-4.1-mini"},
+        "ai_polish_effort": {"label": "推理强度", "type": "reasoning_effort", "default": "off"},
         "ai_context_max_chars": {"label": "AI 参考上下文字数上限", "type": "integer", "default": 12000},
         "enabled_workspaces": {"label": "已启用工作区", "type": "workspace_list", "default": [w["id"] for w in WORKSPACES if w["implemented"]]},
     },
@@ -49,18 +59,26 @@ def validate(scope, body):
                 raise ValueError("unknown or duplicate enabled workspace")
             if "project.configuration" not in value:
                 raise ValueError("system configuration cannot disable itself")
+        elif spec["type"] == "model":
+            if value not in MODEL_EFFORTS:
+                raise ValueError("unsupported AI polish model")
+        elif spec["type"] == "reasoning_effort":
+            if value not in MODEL_EFFORTS.get(merged["ai_polish_model"], ()):
+                raise ValueError("reasoning effort unsupported by selected model")
     return merged
 
 
 def migrate(scope, saved_schema_version, body):
     if saved_schema_version > SCHEMA_VERSION:
         raise ValueError("configuration requires newer software")
-    if saved_schema_version != SCHEMA_VERSION:
-        # Every future version adds an explicit step here and an upgrade test.
+    if saved_schema_version == 1 and scope == "SYSTEM":
+        body = {**body, "ai_polish_effort": "off" if body.get("ai_polish_model", "gpt-4.1-mini") == "gpt-4.1-mini" else "medium"}
+    elif saved_schema_version not in (1, SCHEMA_VERSION):
         raise ValueError("no migration for configuration schema")
     return validate(scope, body)
 
 
 def catalog():
     return {"schema_version": SCHEMA_VERSION, "scopes": FIELDS,
+            "model_efforts": MODEL_EFFORTS,
             "local": {"api_key": "OPENAI_API_KEY, never exported", "public_entry": "REVIEW_PUBLIC_ENTRY, never exported"}}
