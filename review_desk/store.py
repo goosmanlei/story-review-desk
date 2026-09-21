@@ -197,15 +197,25 @@ class Store:
             raise ValueError("block ids must be unique and text non-empty")
         if not isinstance(document.get("assets"), list):
             raise ValueError("assets must be a list")
+        if document.get("group") not in (None, "folk-tales", "expansion-directions"):
+            raise ValueError("unknown source group")
+        if "order" in document and (type(document["order"]) is not int or document["order"] < 0):
+            raise ValueError("source order must be a non-negative integer")
         def public_link(value):
             return isinstance(value, str) and urlsplit(value).scheme == "https" and bool(urlsplit(value).netloc)
         if not public_link(document["source_url"]):
             raise ValueError("source URL must be HTTPS")
         media = document.get("media")
-        if media is not None and (not isinstance(media, dict) or media.get("kind") not in ("audio", "video")
-                                  or not public_link(media.get("url")) or not isinstance(media.get("label"), str)
-                                  or not isinstance(media.get("note"), str)):
-            raise ValueError("invalid external media")
+        if media is not None:
+            if not isinstance(media, dict) or media.get("kind") not in ("audio", "video") or not isinstance(media.get("label"), str) or not isinstance(media.get("note"), str):
+                raise ValueError("invalid media metadata")
+            filename = media.get("file")
+            if filename is not None and (not isinstance(filename, str) or not filename or filename.startswith(".") or filename != Path(filename).name or Path(filename).suffix.lower() not in ({".mp3", ".m4a", ".ogg"} if media["kind"] == "audio" else {".mp4", ".webm"})):
+                raise ValueError("invalid local media file")
+            if filename is None and not public_link(media.get("url")):
+                raise ValueError("media needs a local file or HTTPS URL")
+            if media.get("url") is not None and not public_link(media["url"]):
+                raise ValueError("invalid media URL")
         references = document.get("references", [])
         if not isinstance(references, list) or any(not isinstance(ref, dict) or not isinstance(ref.get("label"), str)
                                                    or not public_link(ref.get("url")) for ref in references):
@@ -219,6 +229,63 @@ class Store:
         if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (document["id"],)).fetchone():
             self._insert_object(document["id"], "SOURCE", {"source_revision": revision})
         return revision
+
+    def remove_sources(self, source_ids):
+        """Permanently remove explicitly named source records and their exclusive audit data."""
+        ids = tuple(source_ids)
+        if not ids or len(set(ids)) != len(ids) or any(not isinstance(value, str) or not value for value in ids):
+            raise ValueError("provide distinct, non-empty source ids")
+        present = {row[0] for row in self.db.execute("SELECT id FROM sources")}
+        if set(ids) - present:
+            raise ValueError("unknown source ids: " + ", ".join(sorted(set(ids) - present)))
+        marks = ",".join("?" for _ in ids)
+        external = self.db.execute(f"""SELECT d.from_revision,d.to_revision FROM dependencies d
+            JOIN revisions target ON target.id=d.to_revision
+            JOIN revisions origin ON origin.id=d.from_revision
+            WHERE target.object_id IN ({marks}) AND origin.object_id NOT IN ({marks})""", ids + ids).fetchall()
+        if external:
+            raise Conflict("source revisions are referenced by surviving objects")
+        with self.db:
+            self.db.execute(f"DELETE FROM comment_events WHERE comment_id IN (SELECT id FROM comments WHERE target_object_id IN ({marks}))", ids)
+            self.db.execute(f"DELETE FROM comments WHERE target_object_id IN ({marks})", ids)
+            self.db.execute(f"""DELETE FROM dependencies WHERE from_revision IN
+                (SELECT id FROM revisions WHERE object_id IN ({marks})) OR to_revision IN
+                (SELECT id FROM revisions WHERE object_id IN ({marks}))""", ids + ids)
+            self.db.execute(f"DELETE FROM revisions WHERE object_id IN ({marks})", ids)
+            self.db.execute(f"DELETE FROM objects WHERE id IN ({marks})", ids)
+            self.db.execute(f"DELETE FROM sources WHERE id IN ({marks})", ids)
+        return {"removed": list(ids), "remaining": len(self.sources())}
+
+    def replace_source_metadata(self, source_id, updates):
+        """Instance migration: replace metadata only, retaining the exact text blocks."""
+        allowed = {"assets", "edition", "notes", "origin", "source_url", "text_heading", "title", "version_type"}
+        if not isinstance(updates, dict) or not updates or set(updates) - allowed:
+            raise ValueError("only source metadata may be replaced")
+        original = self.source(source_id)
+        if original is None:
+            raise ValueError("unknown source")
+        if self.db.execute("SELECT 1 FROM comments WHERE target_object_id=?", (source_id,)).fetchone():
+            raise Conflict("cannot replace metadata of a commented source")
+        if self.db.execute("""SELECT 1 FROM dependencies d JOIN revisions r
+            ON r.id=d.to_revision OR r.id=d.from_revision WHERE r.object_id=?""", (source_id,)).fetchone():
+            raise Conflict("cannot replace metadata of a source with dependencies")
+        obj = self.db.execute("SELECT * FROM objects WHERE id=?", (source_id,)).fetchone()
+        revisions = self.db.execute("SELECT * FROM revisions WHERE object_id=?", (source_id,)).fetchall()
+        if obj["version"] != 1 or len(revisions) != 1:
+            raise Conflict("metadata replacement requires a single source revision")
+        document = {**original, **updates}
+        probe = Store(":memory:")
+        try:
+            new_source_revision = probe.put_source(document)
+        finally:
+            probe.close()
+        new_object_revision = digest(canonical({"object_id": source_id, "version": 1, "payload": {"source_revision": new_source_revision}}).encode())
+        with self.db:
+            self.db.execute("UPDATE sources SET document=?,revision=? WHERE id=?", (canonical(document), new_source_revision, source_id))
+            self.db.execute("DELETE FROM revisions WHERE object_id=?", (source_id,))
+            self.db.execute("UPDATE objects SET current_revision=?,updated_at=? WHERE id=?", (new_object_revision, now(), source_id))
+            self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (new_object_revision, source_id, 1, canonical({"source_revision": new_source_revision}), now()))
+        return new_source_revision
 
     def comments(self, source_id=None):
         if source_id:
