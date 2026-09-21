@@ -4,7 +4,7 @@ const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.cla
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
-const draftKey=()=>state.anchor?`review-draft:${state.current.id}:${JSON.stringify(state.anchor)}`:null;
+const draftKey=()=>state.anchor?`review-draft:${state.current.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
@@ -111,13 +111,13 @@ function renderComments(){
   $('#open-count').textContent=`${open.length} 待处理`;$('#comments-toggle').textContent=`查看评论 · ${open.length}`;
   nodeText('p','comment-help','选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,state.anchor.quote,editor);
-    const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':localStorage.getItem(draftKey())||'';
-    textarea.addEventListener('input',()=>{if(!state.editing)localStorage.setItem(draftKey(),textarea.value)});editor.append(textarea);
+    const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
+    textarea.addEventListener('input',()=>localStorage.setItem(draftKey(),textarea.value));editor.append(textarea);
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.onclick=polishComment;
-    const cancel=nodeText('button',null,'取消',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;renderDocument();renderComments()};editor.append(actions);
+    const cancel=nodeText('button',null,'取消',actions);cancel.onclick=()=>{localStorage.removeItem(draftKey());state.anchor=null;state.editing=null;state.suggestion=null;renderDocument();renderComments()};editor.append(actions);
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);
-      const apply=nodeText('button','secondary','采用到草稿',preview);apply.onclick=()=>{const accepted=state.suggestion;state.suggestion=null;renderComments();$('#comment-editor-text').value=accepted;if(!state.editing)localStorage.setItem(draftKey(),accepted)};editor.append(preview)}body.append(editor)}
+      const apply=nodeText('button','secondary','采用到草稿',preview);apply.onclick=()=>{const accepted=state.suggestion;state.suggestion=null;localStorage.setItem(draftKey(),accepted);renderComments()};editor.append(preview)}body.append(editor)}
   nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
   for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
@@ -130,7 +130,8 @@ async function saveComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
   try{
     if(state.editing){const c=state.comments.find(x=>x.id===state.editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
-    else{await api('/api/comments',{method:'POST',body:JSON.stringify({id:crypto.randomUUID(),source_id:state.current.id,anchor:state.anchor,body:text})});localStorage.removeItem(draftKey())}
+    else{await api('/api/comments',{method:'POST',body:JSON.stringify({id:crypto.randomUUID(),source_id:state.current.id,anchor:state.anchor,body:text})})}
+    localStorage.removeItem(draftKey());
     state.anchor=null;state.editing=null;state.suggestion=null;await refreshComments();toast('评论已保存');
   }catch(error){toast(error.message)}
 }
