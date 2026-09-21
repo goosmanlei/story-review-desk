@@ -4,7 +4,7 @@
 
 ## 方向与稿件版本
 
-1. 用户在故事结构页从故事采编的 `expansion-directions` 候选中选择方向。浏览器调用 `POST /api/story-structure/select-direction`，请求 `{"source_id":"...","expected_version":0}`。`expected_version` 是当前选择对象版本；重新选择须传最新版本。响应包含精确的选择修订。`GET /api/story-structure` 返回选择记录、来源资料、全部结构修订、当前修订、方向变更提示和确认记录。
+1. 故事采编和故事结构在同一“故事创作”页面的子页标签间切换。故事结构未选方向时，初始页直接列出 `expansion-directions` 候选的摘要，提供“回看全文”和“选用这个方向”；选择操作属于故事结构子页。浏览器调用 `POST /api/story-structure/select-direction`，请求 `{"source_id":"...","expected_version":0}`。`expected_version` 是当前选择对象版本；重新选择须传最新版本。响应包含精确的选择修订。`GET /api/story-structure` 返回选择记录、来源资料、全部结构修订、当前修订、方向变更提示和确认记录。
 2. Codex 读取 `structure-get`、`structure-review`，依据选定方向起草一份**完整**结构稿。方向未选定时不应为真实故事导入稿件。将图片或 SVG 图示放入故事实例的 `export/assets/`，在 JSON 中引用文件名。所有修订引用的资产都保留，导出清单逐一哈希。
 3. Codex 用 `structure-import file.json --expected-version N` 导入。初稿 `N=0`、`parent_revision=null`；调整稿 `N` 为当前结构对象版本、`parent_revision` 必须等于当前结构修订。调整稿须完整列出六章，不能只传 diff。方向选择修订必须是当前选择；方向变化后不能静默沿用旧选择。导入结果给出新结构修订 ID。
 4. 评论始终留在原修订。调整稿的 `responses` 单独写意见处理说明，关联原稿评论 ID；不会自动关闭意见。用户可切换版本审阅、点击处理说明定位原意见。新稿的评论从空白开始，历史待决数单列。
