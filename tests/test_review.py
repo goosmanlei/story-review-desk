@@ -9,6 +9,7 @@ from unittest.mock import patch
 from review_desk.bundle import export, restore
 from review_desk.store import Conflict, Store
 from review_desk.polish import build_context, suggest
+from review_desk.configuration import migrate
 
 
 SOURCE = {
@@ -112,6 +113,27 @@ class ReviewTest(unittest.TestCase):
         self.assertFalse(payload["store"])
         self.assertEqual(json.loads(payload["input"])["creative_background"], "首阶段只做故事采编")
         self.assertEqual(json.loads(payload["input"])["source_documents"][0]["source_url"], SOURCE["source_url"])
+        self.assertNotIn("reasoning", payload)
+        self.assertEqual(migrate("SYSTEM", 1, {"ai_polish_model": "gpt-4.1-mini"})["ai_polish_effort"], "off")
+        self.store.set_configuration("SYSTEM", {"ai_polish_model": "gpt-5.6-luna", "ai_polish_effort": "high"}, 0)
+        preview = build_context(self.store, "fixture", anchor, "请核对字词")
+        self.assertEqual((preview["model"], preview["reasoning_effort"]), ("gpt-5.6-luna", "high"))
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-local-key"}), patch("review_desk.polish.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as remote:
+            suggest(preview)
+        payload = json.loads(remote.call_args.args[0].data)
+        self.assertEqual(payload["reasoning"], {"effort": "high"})
+        self.assertEqual(payload["max_output_tokens"], 2048)
+        with self.assertRaisesRegex(ValueError, "unsupported"):
+            self.store.set_configuration("SYSTEM", {"ai_polish_model": "gpt-4.1-mini", "ai_polish_effort": "high"}, 1)
+
+    def test_external_performance_source(self):
+        source = {**SOURCE, "id": "performance", "assets": [],
+                  "media": {"kind": "video", "url": "https://example.org/watch", "label": "观看", "note": "第三方"},
+                  "references": [{"label": "旁证", "url": "https://example.org/report"}]}
+        self.store.put_source(source)
+        self.assertEqual(self.store.source("performance")["media"]["kind"], "video")
+        with self.assertRaisesRegex(ValueError, "external media"):
+            self.store.put_source({**source, "id": "bad", "media": {**source["media"], "url": "javascript:alert(1)"}})
 
     def test_legacy_comment_migration(self):
         old_path = self.root / "legacy.sqlite3"
