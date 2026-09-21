@@ -24,7 +24,6 @@ function renderSources(){
 
 function renderWorkspaceNav(){
   const nav=$('#workspace-nav');nav.replaceChildren();
-  const enabled=state.configurations.values.SYSTEM.body.enabled_workspaces;
   const sections=[
     ['current','当前工作','当前','全剧状态与当下可开展工作'],
     ['story.sources','故事创作','故事','故事采编、故事结构与叙事拆解'],
@@ -34,7 +33,7 @@ function renderWorkspaceNav(){
     ['project.configuration','系统管理','管理','系统配置、数据与运行']
   ];
   for(const [id,title,index,description] of sections){
-    const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented&&enabled.includes(id);
+    const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented;
     const button=el('button','workspace-button'+(state.workspace===id?' active':'')+(active?'':' planned'));button.type='button';
     button.setAttribute('aria-current',state.workspace===id?'page':'false');
     nodeText('span','nav-index',index,button);const labels=el('span','nav-labels');nodeText('b',null,title,labels);nodeText('small',null,active?description:`${description} · 待开放`,labels);button.append(labels);
@@ -104,7 +103,7 @@ function renderCurrent(){const root=$('#current-view');root.replaceChildren();
 function renderConfigurations(){
   const root=$('#configuration-view');root.replaceChildren();
   const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
-  nodeText('p',null,'当前故事实例 · 系统、项目与本机配置分层管理',header);root.append(header);
+  nodeText('p',null,'当前故事实例 · 系统与故事项目配置',header);root.append(header);
   const tabs=el('nav','management-tabs');tabs.setAttribute('aria-label','系统管理模块');
   for(const [label,ready] of [['使用与初始化',false],['系统配置',true],['数据与运行',false],['系统架构',false]]){
     const button=nodeText('button',ready?'active':'',ready?label:`${label} · 待开放`,tabs);button.type='button';button.disabled=!ready;
@@ -114,7 +113,7 @@ function renderConfigurations(){
   const article=el('article','config-page');
   const showSection=()=>{for(const section of article.querySelectorAll('[data-config-section]'))section.hidden=section.dataset.configSection!==state.configSection;
     for(const button of sections.querySelectorAll('button'))button.classList.toggle('active',button.dataset.section===state.configSection)};
-  for(const [id,label] of [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['LOCAL','本机运行']]){
+  for(const [id,label] of [['PROJECT','故事项目'],['SYSTEM','系统与 AI']]){
     const button=nodeText('button',null,label,sections);button.type='button';button.dataset.section=id;button.onclick=()=>{state.configSection=id;showSection()};
   }
   layout.append(sections,article);root.append(layout);
@@ -136,17 +135,14 @@ function renderConfigurations(){
       const label=el('label','config-field');nodeText('span',null,spec.label,label);
       let input;if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
       else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=record.body[key]}
-      else if(spec.type==='workspace_list'){input=el('textarea');input.rows=3;input.value=record.body[key].join('\n');nodeText('small',null,'每行一个已实现工作区 ID；系统配置不可停用。',label)}
       else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=record.body[key]}
+      if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
       input.name=key;label.append(input);form.append(label)}
-    const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);if(spec.type==='workspace_list')value=value.split('\n').map(x=>x.trim()).filter(Boolean);updates[key]=value}
+    const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);updates[key]=value}
       try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');renderConfigurations();renderWorkspaceNav();renderStageLabel();toast('配置已保存')}
       catch(error){toast(error.message)}};
     section.append(form);article.append(section)}
-  const local=el('section','config-section');nodeText('h3','section-title','本机运行配置',local);
-  local.dataset.configSection='LOCAL';
-  nodeText('p','config-explanation','运行状态只在本机可见，凭据不会随故事数据公开同步。',local);
-  nodeText('p',null,`公开入口：${data.local.public_entry||'未设置（当前为直连服务）'}；AI 密钥：${data.local.ai_key_configured?'已配置':'未配置'}。此状态只显示，不会导出密钥。`,local);article.append(local);showSection()
+  showSection()
 }
 
 function blockMarks(source,block,index){

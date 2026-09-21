@@ -1,8 +1,10 @@
 """Versioned public configuration schema; runtime secrets are never records."""
 
-from .framework import STAGES, WORKSPACES
+import re
 
-SCHEMA_VERSION = 2
+from .framework import STAGES
+
+SCHEMA_VERSION = 3
 
 # Curated Responses API choices, not an assertion that the local API key has access.
 MODEL_EFFORTS = {
@@ -17,8 +19,8 @@ FIELDS = {
     "SYSTEM": {
         "ai_polish_model": {"label": "评论润色模型", "type": "model", "default": "gpt-4.1-mini"},
         "ai_polish_effort": {"label": "推理强度", "type": "reasoning_effort", "default": "off"},
+        "ai_polish_api_key_env": {"label": "润色 API Key 环境变量名", "type": "env_name", "default": "OPENAI_API_KEY"},
         "ai_context_max_chars": {"label": "AI 参考上下文字数上限", "type": "integer", "default": 12000},
-        "enabled_workspaces": {"label": "已启用工作区", "type": "workspace_list", "default": [w["id"] for w in WORKSPACES if w["implemented"]]},
     },
     "PROJECT": {
         "current_stage": {"label": "当前创作阶段", "type": "stage", "default": "STORY_COMPILATION"},
@@ -50,15 +52,12 @@ def validate(scope, body):
         elif spec["type"] == "integer":
             if type(value) is not int or not 1000 <= value <= 30000:
                 raise ValueError("invalid AI context limit")
+        elif spec["type"] == "env_name":
+            if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", value):
+                raise ValueError("invalid API key environment variable name")
         elif spec["type"] == "stage":
             if value not in {stage["id"] for stage in STAGES}:
                 raise ValueError("unknown creative stage")
-        elif spec["type"] == "workspace_list":
-            known = {w["id"] for w in WORKSPACES if w["implemented"]}
-            if not isinstance(value, list) or any(not isinstance(v, str) for v in value) or len(set(value)) != len(value) or any(v not in known for v in value):
-                raise ValueError("unknown or duplicate enabled workspace")
-            if "project.configuration" not in value:
-                raise ValueError("system configuration cannot disable itself")
         elif spec["type"] == "model":
             if value not in MODEL_EFFORTS:
                 raise ValueError("unsupported AI polish model")
@@ -71,14 +70,15 @@ def validate(scope, body):
 def migrate(scope, saved_schema_version, body):
     if saved_schema_version > SCHEMA_VERSION:
         raise ValueError("configuration requires newer software")
-    if saved_schema_version == 1 and scope == "SYSTEM":
-        body = {**body, "ai_polish_effort": "off" if body.get("ai_polish_model", "gpt-4.1-mini") == "gpt-4.1-mini" else "medium"}
-    elif saved_schema_version not in (1, SCHEMA_VERSION):
+    if saved_schema_version not in (1, 2, SCHEMA_VERSION):
         raise ValueError("no migration for configuration schema")
+    if scope == "SYSTEM" and saved_schema_version < 3:
+        body = {key: value for key, value in body.items() if key != "enabled_workspaces"}
+        if saved_schema_version == 1:
+            body["ai_polish_effort"] = "off" if body.get("ai_polish_model", "gpt-4.1-mini") == "gpt-4.1-mini" else "medium"
     return validate(scope, body)
 
 
 def catalog():
     return {"schema_version": SCHEMA_VERSION, "scopes": FIELDS,
-            "model_efforts": MODEL_EFFORTS,
-            "local": {"api_key": "OPENAI_API_KEY, never exported", "public_entry": "REVIEW_PUBLIC_ENTRY, never exported"}}
+            "model_efforts": MODEL_EFFORTS}

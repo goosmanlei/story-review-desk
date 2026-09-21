@@ -39,13 +39,15 @@ def build_context(store, source_id, anchor, draft):
                "selected_quote": anchor["quote"], "neighbor_blocks": neighbors,
                "source_documents": documents, "comment_draft": draft}
     return {"context": context, "context_sha256": digest(canonical(context).encode()),
-            "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"], "saved": False}
+            "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
+            "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
 
 
 def suggest(preview):
-    key = os.environ.get("OPENAI_API_KEY")
+    env_name = preview["api_key_env_name"]
+    key = os.environ.get(env_name)
     if not key:
-        raise RuntimeError("AI 润色未配置：本机需设置 OPENAI_API_KEY")
+        raise RuntimeError(f"AI 润色未配置：服务容器需设置 {env_name}")
     effort = preview["reasoning_effort"]
     payload = {"model": preview["model"], "store": False, "max_output_tokens": 300 if effort in ("off", "none") else 2048,
                "instructions": "你是中文故事创作资料审阅意见的措辞助手。背景、阶段、原文上下文和不同版本资料只供理解原意见；输出必须严格限于改写用户评论草稿，不得新增事实、推断、注释建议、研究任务或创作要求。不要改变原意。UNKNOWN 不得补成结论。只输出一段建议正文，不加标题。",
