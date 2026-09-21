@@ -36,7 +36,7 @@ def export(store, export_dir):
               "objects.json": digest(framework_bytes), "configurations.json": digest(configuration_bytes)}
     for name in asset_names:
         hashes["assets/" + name] = digest((target / "assets" / name).read_bytes())
-    manifest = {"schema_version": 2, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 3, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     (target / "manifest.json").write_bytes(_bytes(manifest))
@@ -47,7 +47,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2):
+    if schema not in (1, 2, 3):
         raise ValueError("unsupported export schema")
     for name, expected in manifest["files"].items():
         path = target / name
@@ -59,8 +59,8 @@ def restore(store, export_dir):
             raise ValueError("export checksum mismatch: " + name)
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
-    framework = json.loads((target / "objects.json").read_text()) if schema == 2 else None
-    configurations = json.loads((target / "configurations.json").read_text()) if schema == 2 else None
+    framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
+    configurations = json.loads((target / "configurations.json").read_text()) if schema >= 2 else None
     if len(materials) != manifest["sources"] or len(comments["comments"]) != manifest["comments"] or len(comments["events"]) != manifest["events"]:
         raise ValueError("export count mismatch")
     if store.sources() or store.comments() or store.objects() or any(c["version"] for c in store.configurations().values()):
@@ -74,16 +74,12 @@ def restore(store, export_dir):
                 _safe_asset(asset["file"])
                 if "assets/" + asset["file"] not in manifest["files"]:
                     raise ValueError("unmanifested referenced asset")
-        for comment in comments["comments"]:
-            test.validate_anchor(comment["source_id"], comment["anchor"])
-            if comment["status"] not in ("OPEN", "CLOSED") or comment["version"] < 1:
-                raise ValueError("invalid comment status/version")
         comment_ids = {c["id"] for c in comments["comments"]}
         if len(comment_ids) != len(comments["comments"]):
             raise ValueError("duplicate comment id")
         if any(e["comment_id"] not in comment_ids for e in comments["events"]):
             raise ValueError("event with missing comment")
-        if schema == 2:
+        if schema >= 2:
             from .configuration import migrate
             if len(framework["objects"]) != manifest["objects"] or len(framework["revisions"]) != manifest["revisions"] or len(configurations["records"]) != manifest["configurations"]:
                 raise ValueError("framework export count mismatch")
@@ -113,28 +109,60 @@ def restore(store, export_dir):
                 migrate(record["scope"], record["schema_version"], json.loads(record["body"]))
             if any(event["scope"] not in ("SYSTEM", "PROJECT") for event in configurations["events"]):
                 raise ValueError("invalid configuration event")
+        else:
+            objects = {o["id"]: o for o in test.objects()}
+            revisions = {r["id"]: r for r in test.revisions()}
+        restored_comments = []
+        for comment in comments["comments"]:
+            object_id = comment.get("target_object_id") or comment.get("source_id")
+            obj = objects.get(object_id)
+            if not obj:
+                raise ValueError("comment with unknown target object")
+            revision_id = comment.get("target_revision_id") or obj["current_revision"]
+            revision = revisions.get(revision_id)
+            if not revision or revision["object_id"] != object_id:
+                raise ValueError("comment with mismatched target revision")
+            if obj["kind"] == "SOURCE":
+                if comment.get("source_id") != object_id:
+                    raise ValueError("source comment target mismatch")
+                test.validate_anchor(object_id, comment["anchor"])
+            else:
+                if comment.get("source_id") is not None:
+                    raise ValueError("non-source comment has source_id")
+                payload = json.loads(revision["payload"])
+                blocks = payload.get("blocks")
+                if blocks is None and isinstance(payload.get("body"), str):
+                    blocks = [{"id": "body", "text": payload["body"]}]
+                Store._validate_blocks(blocks, comment["anchor"])
+            if comment["status"] not in ("OPEN", "CLOSED") or type(comment["version"]) is not int or comment["version"] < 1:
+                raise ValueError("invalid comment status/version")
+            restored_comments.append({**comment, "target_object_id": object_id, "target_revision_id": revision_id})
         with store.db:
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))
-            for c in comments["comments"]:
-                store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?)", (c["id"], c["source_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
-            for e in comments["events"]:
-                store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))
-            if schema == 2:
+            if schema >= 2:
                 for obj in framework["objects"]:
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], obj["created_at"], obj["updated_at"]))
                 for revision in framework["revisions"]:
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], revision["created_at"]))
                 for dep in framework["dependencies"]:
                     store.db.execute("INSERT INTO dependencies VALUES (?,?,?)", (dep["from_revision"], dep["to_revision"], dep["role"]))
+            else:
+                from .store import now
+                for obj in test.objects():
+                    stamp = now()
+                    store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], stamp, stamp))
+                for revision in test.revisions():
+                    store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
+            for c in restored_comments:
+                store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
+            for e in comments["events"]:
+                store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))
+            if schema >= 2:
                 for record in configurations["records"]:
                     store.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?)", (record["scope"], record["schema_version"], record["version"], record["body"], record["updated_at"]))
                 for event in configurations["events"]:
                     store.db.execute("INSERT INTO configuration_events VALUES (?,?,?,?,?)", (event["id"], event["scope"], event["version"], event["body"], event["at"]))
-        if schema == 1:
-            # V1 packages predate the object ledger; create immutable envelopes.
-            for source in materials:
-                store._insert_object(source["id"], "SOURCE", {"source_revision": digest(canonical(source).encode())})
     finally:
         test.close()
     return manifest
