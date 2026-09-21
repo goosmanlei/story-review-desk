@@ -45,6 +45,7 @@ function renderStructureReader(){
   if(!state.structure)return;
   const status=$('#structure-status'),index=$('#structure-index'),reader=$('#structure-reader');status.replaceChildren();index.replaceChildren();reader.replaceChildren();
   const selection=state.structure.selection,active=structureRevision();
+  $('#structure-workspace .structure-layout').hidden=!active;
   if(!selection){
     const box=el('section','structure-empty');nodeText('h2',null,'先选择一个改编方向',box);nodeText('p',null,'方向由你在故事采编的三个候选中选择。选择后，Codex 才能据此导入结构初稿。',box);
     for(const source of state.sources.filter(s=>s.group==='expansion-directions')){
