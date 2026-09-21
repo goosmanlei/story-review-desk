@@ -42,6 +42,11 @@ function renderWorkspaceNav(){
   }
 }
 
+function renderStageLabel(){const current=state.configurations.values.PROJECT.body.current_stage;
+  const stage=state.framework.stages.find(item=>item.id===current);
+  $('#sidebar-current-stage').textContent=`当前阶段 · ${stage?.label||current}`;
+}
+
 function switchWorkspace(id){
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
@@ -126,7 +131,7 @@ function renderConfigurations(){
       else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=record.body[key]}
       input.name=key;label.append(input);form.append(label)}
     const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);if(spec.type==='workspace_list')value=value.split('\n').map(x=>x.trim()).filter(Boolean);updates[key]=value}
-      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');renderConfigurations();renderWorkspaceNav();toast('配置已保存')}
+      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');renderConfigurations();renderWorkspaceNav();renderStageLabel();toast('配置已保存')}
       catch(error){toast(error.message)}};
     section.append(form);article.append(section)}
   const local=el('section','config-section');nodeText('h3','section-title','本机运行配置',local);
@@ -275,6 +280,7 @@ function locateComment(comment){state.selected=comment.id;renderDocument();rende
 async function init(){try{
   const [instance,sources,comments,framework,configurations]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations')]);
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources;state.comments=comments;state.framework=framework;state.configurations=configurations;
+  renderStageLabel();
   chooseSource(new URL(location.href).searchParams.get('source')||sources[0]?.id,true);
   switchWorkspace(new URL(location.href).searchParams.get('workspace')||'story.sources');
   $('#brand-home').onclick=()=>switchWorkspace('current');
