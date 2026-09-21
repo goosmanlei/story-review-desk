@@ -1,5 +1,4 @@
 import json
-import os
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -62,9 +61,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/framework":
             return self._json(framework_catalog())
         if path == "/api/configurations":
-            return self._json({"catalog": configuration_catalog(), "values": store.configurations(),
-                               "local": {"ai_key_configured": bool(os.environ.get("OPENAI_API_KEY")),
-                                         "public_entry": os.environ.get("REVIEW_PUBLIC_ENTRY")}})
+            return self._json({"catalog": configuration_catalog(), "values": store.configurations()})
         if path == "/api/comments":
             return self._json(store.comments(query.get("source_id", [None])[0]))
         if path == "/api/comments/context":

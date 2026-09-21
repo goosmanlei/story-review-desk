@@ -9,7 +9,7 @@ from unittest.mock import patch
 from review_desk.bundle import export, restore
 from review_desk.store import Conflict, Store
 from review_desk.polish import build_context, suggest
-from review_desk.configuration import migrate
+from review_desk.configuration import catalog, migrate
 
 
 SOURCE = {
@@ -96,6 +96,12 @@ class ReviewTest(unittest.TestCase):
             self.store.set_configuration("PROJECT", {"style": "待定"}, 0)
         with self.assertRaises(ValueError):
             self.store.set_configuration("SYSTEM", {"enabled_workspaces": ["invalid"]}, 0)
+        with self.assertRaisesRegex(ValueError, "unknown configuration fields"):
+            self.store.set_configuration("SYSTEM", {"enabled_workspaces": ["current", "story.sources", "project.configuration"]}, 0)
+        self.assertNotIn("enabled_workspaces", catalog()["scopes"]["SYSTEM"])
+        self.assertNotIn("enabled_workspaces", self.store.configuration("SYSTEM")["body"])
+        self.assertNotIn("enabled_workspaces", migrate("SYSTEM", 2, {"ai_polish_model": "gpt-5.6-sol", "ai_polish_effort": "medium", "enabled_workspaces": ["project.configuration"]}))
+        self.assertEqual(migrate("SYSTEM", 2, {"enabled_workspaces": ["project.configuration"]})["ai_polish_api_key_env"], "OPENAI_API_KEY")
         anchor = {"block_id": "a", "end_block_id": "a", "start": 1, "end": 3, "quote": "乙𪎊"}
         preview = build_context(self.store, "fixture", anchor, "请核对字词")
         context = preview["context"]
@@ -125,6 +131,20 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(payload["max_output_tokens"], 2048)
         with self.assertRaisesRegex(ValueError, "unsupported"):
             self.store.set_configuration("SYSTEM", {"ai_polish_model": "gpt-4.1-mini", "ai_polish_effort": "high"}, 1)
+
+    def test_api_key_environment_name_not_secret(self):
+        with self.assertRaisesRegex(ValueError, "environment variable name"):
+            self.store.set_configuration("SYSTEM", {"ai_polish_api_key_env": "BAD-NAME"}, 0)
+        self.store.set_configuration("SYSTEM", {"ai_polish_api_key_env": "STORY_POLISH_API_KEY"}, 0)
+        anchor = {"block_id": "a", "end_block_id": "a", "start": 1, "end": 3, "quote": "乙𪎊"}
+        preview = build_context(self.store, "fixture", anchor, "核对")
+        self.assertEqual(preview["api_key_env_name"], "STORY_POLISH_API_KEY")
+        response = {"output": [{"content": [{"type": "output_text", "text": "建议"}]}]}
+        with patch.dict("os.environ", {"STORY_POLISH_API_KEY": "custom-secret"}), patch("review_desk.polish.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as remote:
+            suggest(preview)
+        self.assertEqual(remote.call_args.args[0].headers["Authorization"], "Bearer custom-secret")
+        self.assertNotIn("custom-secret", json.dumps(self.store.configurations()))
+        self.assertNotIn("custom-secret", json.dumps(self.store.configuration_events()))
 
     def test_external_performance_source(self):
         source = {**SOURCE, "id": "performance", "assets": [],
