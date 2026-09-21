@@ -64,7 +64,7 @@ function renderConfigurations(){
       catch(error){toast(error.message)}};
     section.append(form);article.append(section)}
   const local=el('section','config-section');nodeText('h3','section-title','本机运行配置',local);
-  nodeText('p',null,`Nginx 入口：127.0.0.1:${data.local.entry_port}；AI 密钥：${data.local.ai_key_configured?'已配置':'未配置'}。此状态只显示，不会导出密钥。`,local);article.append(local);root.append(article)
+  nodeText('p',null,`公开入口：${data.local.public_entry||'未设置（当前为直连服务）'}；AI 密钥：${data.local.ai_key_configured?'已配置':'未配置'}。此状态只显示，不会导出密钥。`,local);article.append(local);root.append(article)
 }
 
 function blockMarks(source,block,index){

@@ -63,7 +63,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(framework_catalog())
         if path == "/api/configurations":
             return self._json({"catalog": configuration_catalog(), "values": store.configurations(),
-                               "local": {"ai_key_configured": bool(os.environ.get("OPENAI_API_KEY")), "entry_port": 3000}})
+                               "local": {"ai_key_configured": bool(os.environ.get("OPENAI_API_KEY")),
+                                         "public_entry": os.environ.get("REVIEW_PUBLIC_ENTRY")}})
         if path == "/api/comments":
             return self._json(store.comments(query.get("source_id", [None])[0]))
         if path == "/api/comments/context":
