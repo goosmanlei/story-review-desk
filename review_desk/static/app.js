@@ -239,7 +239,7 @@ function renderComments(){
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!state.preview;polish.onclick=polishComment;
-    const cancel=nodeText('button',null,'取消',actions);cancel.onclick=()=>{localStorage.removeItem(draftKey());state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderDocument();renderComments()};editor.append(actions);
+    const cancel=nodeText('button',null,'收起草稿',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderDocument();renderComments();toast('草稿已留在本机，重新圈选同一原文可继续编辑')};editor.append(actions);
     if(state.preview){const basis=el('details','context-preview');basis.open=true;const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
       nodeText('p',null,`载体：${context.target_medium}；受众：${context.audience}；风格：${context.style}`,basis);
