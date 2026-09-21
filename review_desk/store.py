@@ -36,7 +36,9 @@ class Store:
           id TEXT PRIMARY KEY, document TEXT NOT NULL, revision TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS comments (
-          id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id),
+          id TEXT PRIMARY KEY, source_id TEXT REFERENCES sources(id),
+          target_object_id TEXT NOT NULL REFERENCES objects(id),
+          target_revision_id TEXT NOT NULL REFERENCES revisions(id),
           anchor TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
           version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
         );
@@ -71,6 +73,33 @@ class Store:
         for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
             if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
                 self._insert_object(row["id"], "SOURCE", {"source_revision": row["revision"]})
+        if "target_object_id" not in {row["name"] for row in self.db.execute("PRAGMA table_info(comments)")}:
+            self._migrate_comments()
+
+    def _migrate_comments(self):
+        """Add exact object/revision anchors while preserving old source comments/events."""
+        self.db.commit()
+        self.db.execute("PRAGMA foreign_keys=OFF")
+        try:
+            with self.db:
+                self.db.execute("""CREATE TABLE comments_v2 (
+                  id TEXT PRIMARY KEY, source_id TEXT REFERENCES sources(id),
+                  target_object_id TEXT NOT NULL REFERENCES objects(id),
+                  target_revision_id TEXT NOT NULL REFERENCES revisions(id),
+                  anchor TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL,
+                  version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )""")
+                self.db.execute("""INSERT INTO comments_v2
+                  SELECT c.id,c.source_id,c.source_id,o.current_revision,c.anchor,c.body,c.status,c.version,c.created_at,c.updated_at
+                  FROM comments c JOIN objects o ON o.id=c.source_id""")
+                if self.db.execute("SELECT COUNT(*) FROM comments_v2").fetchone()[0] != self.db.execute("SELECT COUNT(*) FROM comments").fetchone()[0]:
+                    raise ValueError("comment migration lost target objects")
+                self.db.execute("DROP TABLE comments")
+                self.db.execute("ALTER TABLE comments_v2 RENAME TO comments")
+        finally:
+            self.db.execute("PRAGMA foreign_keys=ON")
+        if self.db.execute("PRAGMA foreign_key_check").fetchone():
+            raise ValueError("comment migration foreign key failure")
 
     def _insert_object(self, object_id, kind, payload):
         stamp = now()
@@ -198,7 +227,13 @@ class Store:
         source = self.source(source_id)
         if not source:
             raise ValueError("unknown source")
-        blocks = source["blocks"]
+        self._validate_blocks(source["blocks"], anchor)
+        return source
+
+    @staticmethod
+    def _validate_blocks(blocks, anchor):
+        if not isinstance(blocks, list) or not blocks or not isinstance(anchor, dict):
+            raise ValueError("invalid text blocks or anchor")
         ids = [b["id"] for b in blocks]
         try:
             start_index = ids.index(anchor["block_id"])
@@ -218,24 +253,52 @@ class Store:
         pieces[-1] = pieces[-1][:end] if len(pieces) > 1 else first[start:end]
         quote = "\n".join(pieces)
         if not quote.strip() or quote != anchor.get("quote"):
-            raise Conflict("anchor quote differs from current source")
-        return source
+            raise Conflict("anchor quote differs from target revision")
+        return blocks
+
+    def validate_target(self, object_id, revision_id, anchor):
+        obj = self.db.execute("SELECT * FROM objects WHERE id=?", (object_id,)).fetchone()
+        revision = self.db.execute("SELECT * FROM revisions WHERE id=?", (revision_id,)).fetchone()
+        if not obj or not revision or revision["object_id"] != object_id:
+            raise ValueError("unknown object or mismatched revision")
+        payload = json.loads(revision["payload"])
+        if obj["kind"] == "SOURCE":
+            source = self.validate_anchor(object_id, anchor)
+            if payload.get("source_revision") != digest(canonical(source).encode()):
+                raise Conflict("source revision differs from anchored object revision")
+            return {"object": dict(obj), "revision": dict(revision), "blocks": source["blocks"], "source": source}
+        blocks = payload.get("blocks")
+        if blocks is None and isinstance(payload.get("body"), str):
+            blocks = [{"id": "body", "text": payload["body"]}]
+        self._validate_blocks(blocks, anchor)
+        return {"object": dict(obj), "revision": dict(revision), "blocks": blocks, "source": None}
 
     def create_comment(self, value):
         import uuid
         source_id, anchor, body = value.get("source_id"), value.get("anchor"), str(value.get("body", "")).strip()
         if not body:
             raise ValueError("empty comment")
-        self.validate_anchor(source_id, anchor)
+        object_id = value.get("target_object_id") or source_id
+        obj = self.db.execute("SELECT * FROM objects WHERE id=?", (object_id,)).fetchone()
+        if not obj:
+            raise ValueError("unknown target object")
+        revision_id = value.get("target_revision_id") or obj["current_revision"]
+        target = self.validate_target(object_id, revision_id, anchor)
+        if target["source"]:
+            if source_id and source_id != object_id:
+                raise ValueError("source_id must match SOURCE target")
+            source_id = object_id
+        elif source_id is not None:
+            raise ValueError("source_id is only valid for SOURCE targets")
         comment_id = value.get("id") or str(uuid.uuid4())
         existing = self.comment(comment_id)
         if existing:
-            if existing["source_id"] == source_id and existing["anchor"] == anchor and existing["body"] == body:
+            if existing["target_object_id"] == object_id and existing["target_revision_id"] == revision_id and existing["anchor"] == anchor and existing["body"] == body:
                 return existing
             raise Conflict("comment id already used")
         stamp = now()
         with self.db:
-            self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?)", (comment_id, source_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
+            self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, "CREATE", body, stamp))
         return self.comment(comment_id)
 
@@ -251,12 +314,12 @@ class Store:
             body = str(body or "").strip()
             if not body:
                 raise ValueError("empty comment")
-            self.validate_anchor(current["source_id"], current["anchor"])
+            self.validate_target(current["target_object_id"], current["target_revision_id"], current["anchor"])
             status = "OPEN"
         elif action == "CLOSE" and current["status"] == "OPEN":
             body, status = current["body"], "CLOSED"
         elif action == "REOPEN" and current["status"] == "CLOSED":
-            self.validate_anchor(current["source_id"], current["anchor"])
+            self.validate_target(current["target_object_id"], current["target_revision_id"], current["anchor"])
             body, status = current["body"], "OPEN"
         else:
             raise Conflict("action does not match current status")
@@ -272,9 +335,12 @@ class Store:
     def context(self):
         results = []
         for comment in self.comments():
-            source = self.source(comment["source_id"])
-            blocks = source["blocks"]
+            target = self.validate_target(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])
+            source, blocks = target["source"], target["blocks"]
             index = next(i for i, b in enumerate(blocks) if b["id"] == comment["anchor"]["block_id"])
-            results.append({**comment, "source_title": source["title"], "source_url": source["source_url"],
-                            "source_revision": digest(canonical(source).encode()), "block_text": blocks[index]["text"]})
+            results.append({**comment, "object_kind": target["object"]["kind"],
+                            "source_title": source["title"] if source else None,
+                            "source_url": source["source_url"] if source else None,
+                            "source_revision": digest(canonical(source).encode()) if source else None,
+                            "block_text": blocks[index]["text"]})
         return results

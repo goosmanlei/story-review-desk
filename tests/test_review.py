@@ -1,5 +1,6 @@
 import json
 import io
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,9 +56,13 @@ class ReviewTest(unittest.TestCase):
         self.store.create_comment({"id": "one", "source_id": "fixture", "anchor": anchor, "body": "保留"})
         self.store.set_configuration("PROJECT", {"story_background": "李寄一则，见已收录原文。", "creative_background": "漫剧故事采编阶段。"}, 0)
         source_revision = self.store.objects()[0]["current_revision"]
-        self.store.put_object("outline-1", "STORY", {"title": "待写"}, 0, [{"revision_id": source_revision, "role": "依据"}])
+        outline = self.store.put_object("outline-1", "STORY", {"title": "待写", "body": "甲乙丙"}, 0, [{"revision_id": source_revision, "role": "依据"}])
+        object_anchor = {"block_id": "body", "end_block_id": "body", "start": 1, "end": 3, "quote": "乙丙"}
+        self.store.create_comment({"id": "object-one", "target_object_id": "outline-1", "target_revision_id": outline["revision"], "anchor": object_anchor, "body": "核对故事稿"})
+        self.store.put_object("outline-1", "STORY", {"title": "第二版", "body": "甲丁戊"}, 1, [{"revision_id": source_revision, "role": "依据"}])
+        self.assertEqual(next(c for c in self.store.context() if c["id"] == "object-one")["block_text"], "甲乙丙")
         manifest = export(self.store, self.root / "export")
-        self.assertEqual((manifest["sources"], manifest["comments"], manifest["events"]), (1, 1, 1))
+        self.assertEqual((manifest["sources"], manifest["comments"], manifest["events"], manifest["schema_version"]), (1, 2, 2, 3))
         recovered = Store(self.root / "clean.sqlite3")
         try:
             restore(recovered, self.root / "export")
@@ -107,6 +112,29 @@ class ReviewTest(unittest.TestCase):
         self.assertFalse(payload["store"])
         self.assertEqual(json.loads(payload["input"])["creative_background"], "首阶段只做故事采编")
         self.assertEqual(json.loads(payload["input"])["source_documents"][0]["source_url"], SOURCE["source_url"])
+
+    def test_legacy_comment_migration(self):
+        old_path = self.root / "legacy.sqlite3"
+        old = sqlite3.connect(old_path)
+        old.executescript("""CREATE TABLE sources(id TEXT PRIMARY KEY,document TEXT NOT NULL,revision TEXT NOT NULL);
+        CREATE TABLE comments(id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),anchor TEXT NOT NULL,body TEXT NOT NULL,status TEXT NOT NULL,version INTEGER NOT NULL,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
+        CREATE TABLE comment_events(id INTEGER PRIMARY KEY AUTOINCREMENT,comment_id TEXT NOT NULL REFERENCES comments(id),action TEXT NOT NULL,body TEXT NOT NULL,at TEXT NOT NULL);""")
+        from review_desk.store import canonical, digest
+        old.execute("INSERT INTO sources VALUES (?,?,?)", (SOURCE["id"], canonical(SOURCE), digest(canonical(SOURCE).encode())))
+        anchor = {"block_id": "a", "end_block_id": "a", "start": 1, "end": 3, "quote": "乙𪎊"}
+        old.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?)", ("legacy", SOURCE["id"], canonical(anchor), "核对", "OPEN", 1, "2026-09-21", "2026-09-21"))
+        old.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", ("legacy", "CREATE", "核对", "2026-09-21"))
+        old.commit()
+        old.close()
+        upgraded = Store(old_path)
+        try:
+            comment = upgraded.comment("legacy")
+            self.assertEqual(comment["target_object_id"], SOURCE["id"])
+            self.assertEqual(len(upgraded.events()), 1)
+            self.assertEqual(upgraded.context()[0]["block_text"], SOURCE["blocks"][0]["text"])
+            self.assertEqual(upgraded.db.execute("PRAGMA foreign_key_check").fetchall(), [])
+        finally:
+            upgraded.close()
 
 
 if __name__ == "__main__":
