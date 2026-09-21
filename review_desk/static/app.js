@@ -10,8 +10,8 @@ const escapeSelector=value=>CSS.escape(value);
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
 function link(label,url,parent){const a=el('a',null,label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);return a}
 
-function renderSources(){
-  const nav=$('#source-list');nav.replaceChildren();
+function renderSources(preserveScroll=true){
+  const nav=$('#source-list'),scrollTop=preserveScroll?nav.scrollTop:0;nav.replaceChildren();
   const filtered=state.sources.filter(source=>!state.query||[source.title,source.origin,source.version_type,...source.blocks.map(block=>block.text)].join('\n').toLocaleLowerCase().includes(state.query));
   const addSource=(source,parent)=>{
     const button=el('button','source-button'+(source.id===state.current?.id?' active':''));button.type='button';
@@ -35,6 +35,7 @@ function renderSources(){
   for(const source of filtered.filter(item=>item.group&&!['folk-tales','expansion-directions'].includes(item.group)))addSource(source,nav);
   if(!filtered.length)nodeText('p','source-no-results','未找到匹配的资料。',nav);
   $('#source-count').textContent=state.query?`${filtered.length} / ${state.sources.length} 份资料`:`${state.sources.length} 份资料`;
+  nav.scrollTop=scrollTop;
 }
 
 function renderWorkspaceNav(){
@@ -219,7 +220,7 @@ function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
   if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   $('#selection-action').hidden=true;
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
-  renderSources();renderDocument();renderComments();if(!keepScroll)window.scrollTo(0,0);
+  renderSources();renderDocument();renderComments();if(!keepScroll)$('#source-view').scrollTop=0;
 }
 
 function closestBlock(node){const element=node.nodeType===Node.ELEMENT_NODE?node:node.parentElement;return element?.closest('[data-block-id]')}
@@ -317,7 +318,7 @@ async function init(){try{
   switchWorkspace(initialUrl.searchParams.get('workspace')||'current',false);
   $('#brand-home').onclick=()=>location.assign('/');
   $('#reader-comments').onclick=openPanel;
-  $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources()};
+  $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources(false)};
   $('#source-search').onkeydown=event=>{if(event.key==='Enter'){const first=$('#source-list .source-button');if(first){event.preventDefault();first.click()}}};
   $('#comments-toggle').onclick=()=>$('#comment-panel').hidden?openPanel():closePanel();$('#comments-close').onclick=closePanel;
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};
