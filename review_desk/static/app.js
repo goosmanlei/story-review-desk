@@ -68,10 +68,15 @@ function renderStageLabel(){const current=state.configurations.values.PROJECT.bo
 
 function switchWorkspace(id,updateUrl=true){
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
+  const previous=state.workspace,storyChild=id==='story.sources'||id==='story.outline';
   if(state.workspace!==id){state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null}
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
+  $('#story-creation-shell').hidden=!storyChild;
   $('#story-workspace').hidden=!source;$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
-  $('#placeholder-view').hidden=source||id==='project.configuration'||id==='current';
+  $('#placeholder-view').hidden=storyChild||id==='project.configuration'||id==='current';
+  for(const [tab,selected] of [['#open-story-sources',source],['#open-story-structure',id==='story.outline']]){
+    const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
+  }
   $('#comments-toggle').hidden=!(source||id==='story.outline');closePanel();
   $('#source-search').hidden=!source;$('#source-count').hidden=!source;
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'current':['当前工作','当']};
@@ -80,7 +85,7 @@ function switchWorkspace(id,updateUrl=true){
   if(source)renderComments();
   if(!source&&id!=='story.outline'&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url)}
-  if(updateUrl)window.scrollTo(0,0);
+  if(updateUrl&&!(storyChild&&['story.sources','story.outline'].includes(previous)))window.scrollTo(0,0);
 }
 
 function renderPlaceholder(id){
