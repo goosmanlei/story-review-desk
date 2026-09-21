@@ -1,2 +1,6 @@
 .suggestion{background:#fff;border:1px solid #d9cbb9;border-radius:7px;margin-top:12px;padding:12px}
 .suggestion p{font-size:13px;line-height:1.65;color:#555}
+.context-preview{margin-top:12px;padding:12px;border:1px solid #d9cbb9;border-radius:7px;background:#fff;max-height:270px;overflow:auto}
+.context-preview summary{cursor:pointer;font-weight:600;color:#785136;font-size:12px}
+.context-preview p{font-size:11px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;color:#555}
+.context-preview small{display:block;overflow-wrap:anywhere;letter-spacing:0;color:#888}

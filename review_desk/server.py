@@ -4,8 +4,10 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
-from urllib.request import Request, urlopen
 
+from .configuration import catalog as configuration_catalog
+from .framework import catalog as framework_catalog
+from .polish import build_context, suggest
 from .store import Conflict, Store
 
 
@@ -57,6 +59,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"id": self.server.config["id"], "title": self.server.config["title"]})
         if path == "/api/sources":
             return self._json(store.sources())
+        if path == "/api/framework":
+            return self._json(framework_catalog())
+        if path == "/api/configurations":
+            return self._json({"catalog": configuration_catalog(), "values": store.configurations(),
+                               "local": {"ai_key_configured": bool(os.environ.get("OPENAI_API_KEY")), "entry_port": 3000}})
         if path == "/api/comments":
             return self._json(store.comments(query.get("source_id", [None])[0]))
         if path == "/api/comments/context":
@@ -87,32 +94,19 @@ class ReviewHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/comments":
             return self._write("CREATE")
-        if self.path == "/api/comments/polish":
+        if self.path in ("/api/comments/polish", "/api/comments/polish-context"):
             try:
                 value = self._input()
-                self.server.store.validate_anchor(value.get("source_id"), value.get("anchor"))
-                draft = str(value.get("body", "")).strip()
-                if not draft or len(draft) > 2000:
-                    raise ValueError("comment draft must be 1-2000 characters")
-                key = os.environ.get("OPENAI_API_KEY")
-                if not key:
-                    return self._json({"error": "AI 润色未配置：本机需设置 OPENAI_API_KEY"}, 503)
-                payload = {
-                    "model": os.environ.get("REVIEW_POLISH_MODEL", "gpt-4.1-mini"),
-                    "store": False,
-                    "max_output_tokens": 180,
-                    "instructions": "你是中文资料审阅意见的措辞助手。只润色用户已有的评论，不新增史实、判断或任务，不改变原意。只输出一段建议正文，不加标题。",
-                    "input": f"原文圈选：{value['anchor']['quote']}\n原评论草稿：{draft}"
-                }
-                request = Request("https://api.openai.com/v1/responses", data=json.dumps(payload, ensure_ascii=False).encode(),
-                                  headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
-                with urlopen(request, timeout=30) as response:
-                    result = json.load(response)
-                suggestion = "".join(part.get("text", "") for item in result.get("output", [])
-                                     for part in item.get("content", []) if part.get("type") == "output_text").strip()
-                if not suggestion:
-                    raise ValueError("AI 润色未返回文本")
-                return self._json({"suggestion": suggestion, "saved": False})
+                preview = build_context(self.server.store, value.get("source_id"), value.get("anchor"), value.get("body"))
+                if self.path.endswith("polish-context"):
+                    return self._json(preview)
+                if value.get("expected_context_sha256") != preview["context_sha256"]:
+                    raise Conflict("AI 参考上下文已变化；请重新预览")
+                return self._json(suggest(preview))
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except RuntimeError as exc:
+                return self._json({"error": str(exc)}, 503)
             except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
                 return self._json({"error": str(exc)}, 400)
             except (HTTPError, URLError, TimeoutError):
@@ -120,6 +114,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def do_PATCH(self):
+        if self.path in ("/api/configurations/SYSTEM", "/api/configurations/PROJECT"):
+            try:
+                value = self._input()
+                return self._json(self.server.store.set_configuration(self.path.rsplit("/", 1)[1], value.get("updates"), value.get("expected_version")))
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if self.path.startswith("/api/comments/") and self.path[14:]:
             return self._write("CHANGE", self.path[14:])
         return self._json({"error": "not found"}, 404)

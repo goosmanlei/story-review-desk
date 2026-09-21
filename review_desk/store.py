@@ -4,6 +4,9 @@ import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .configuration import SCHEMA_VERSION, defaults, migrate, validate
+from .framework import DOMAINS
+
 
 def canonical(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -41,7 +44,107 @@ class Store:
           id INTEGER PRIMARY KEY AUTOINCREMENT, comment_id TEXT NOT NULL REFERENCES comments(id),
           action TEXT NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS objects (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL, current_revision TEXT NOT NULL,
+          version INTEGER NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS revisions (
+          id TEXT PRIMARY KEY, object_id TEXT NOT NULL REFERENCES objects(id),
+          version INTEGER NOT NULL, payload TEXT NOT NULL, created_at TEXT NOT NULL,
+          UNIQUE(object_id,version)
+        );
+        CREATE TABLE IF NOT EXISTS dependencies (
+          from_revision TEXT NOT NULL REFERENCES revisions(id),
+          to_revision TEXT NOT NULL REFERENCES revisions(id), role TEXT NOT NULL,
+          PRIMARY KEY(from_revision,to_revision,role)
+        );
+        CREATE TABLE IF NOT EXISTS configurations (
+          scope TEXT PRIMARY KEY, schema_version INTEGER NOT NULL, version INTEGER NOT NULL,
+          body TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS configuration_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
+          version INTEGER NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL
+        );
         """)
+        # Existing V1 instance databases are upgraded without rewriting source text.
+        for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
+            if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
+                self._insert_object(row["id"], "SOURCE", {"source_revision": row["revision"]})
+
+    def _insert_object(self, object_id, kind, payload):
+        stamp = now()
+        revision_id = digest(canonical({"object_id": object_id, "version": 1, "payload": payload}).encode())
+        with self.db:
+            self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, 1, stamp, stamp))
+            self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, 1, canonical(payload), stamp))
+        return revision_id
+
+    def objects(self):
+        return [dict(row) for row in self.db.execute("SELECT * FROM objects ORDER BY id")]
+
+    def revisions(self):
+        return [dict(row) for row in self.db.execute("SELECT * FROM revisions ORDER BY object_id,version")]
+
+    def dependencies(self):
+        return [dict(row) for row in self.db.execute("SELECT * FROM dependencies ORDER BY from_revision,to_revision,role")]
+
+    def put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        kinds = {item for domain in DOMAINS.values() for item in domain["kinds"]}
+        if kind == "SOURCE" or kind not in kinds or not isinstance(object_id, str) or not object_id or not isinstance(payload, dict):
+            raise ValueError("invalid object kind, id or payload; SOURCE uses put_source")
+        current = self.db.execute("SELECT * FROM objects WHERE id=?", (object_id,)).fetchone()
+        version = current["version"] if current else 0
+        if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
+            raise Conflict("object version or kind changed")
+        new_version = version + 1
+        revision_id = digest(canonical({"object_id": object_id, "version": new_version, "payload": payload}).encode())
+        refs = []
+        for ref in dependencies:
+            if not isinstance(ref, dict) or not isinstance(ref.get("role"), str) or not ref["role"]:
+                raise ValueError("invalid dependency")
+            target = self.db.execute("SELECT id FROM revisions WHERE id=?", (ref.get("revision_id"),)).fetchone()
+            if not target:
+                raise ValueError("unknown dependency revision")
+            refs.append((revision_id, target["id"], ref["role"]))
+        stamp = now()
+        with self.db:
+            if current:
+                self.db.execute("UPDATE objects SET current_revision=?,version=?,updated_at=? WHERE id=?", (revision_id, new_version, stamp, object_id))
+            else:
+                self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
+            self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, canonical(payload), stamp))
+            self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
+        return {"id": object_id, "kind": kind, "revision": revision_id, "version": new_version}
+
+    def configuration(self, scope):
+        if scope not in ("SYSTEM", "PROJECT"):
+            raise ValueError("unknown configuration scope")
+        row = self.db.execute("SELECT * FROM configurations WHERE scope=?", (scope,)).fetchone()
+        if not row:
+            return {"scope": scope, "schema_version": SCHEMA_VERSION, "version": 0, "body": defaults(scope), "updated_at": None}
+        result = dict(row)
+        result["body"] = migrate(scope, result["schema_version"], json.loads(result["body"]))
+        return result
+
+    def configurations(self):
+        return {scope: self.configuration(scope) for scope in ("SYSTEM", "PROJECT")}
+
+    def set_configuration(self, scope, updates, expected_version):
+        current = self.configuration(scope)
+        if type(expected_version) is not int or expected_version != current["version"]:
+            raise Conflict("configuration version changed; refresh before saving")
+        if not isinstance(updates, dict):
+            raise ValueError("configuration updates must be an object")
+        body = validate(scope, {**current["body"], **updates})
+        version, stamp = expected_version + 1, now()
+        with self.db:
+            self.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET schema_version=excluded.schema_version,version=excluded.version,body=excluded.body,updated_at=excluded.updated_at", (scope, SCHEMA_VERSION, version, canonical(body), stamp))
+            self.db.execute("INSERT INTO configuration_events(scope,version,body,at) VALUES (?,?,?,?)", (scope, version, canonical(body), stamp))
+        return self.configuration(scope)
+
+    def configuration_events(self):
+        return [dict(row) for row in self.db.execute("SELECT * FROM configuration_events ORDER BY id")]
 
     def close(self):
         self.db.close()
@@ -70,6 +173,8 @@ class Store:
             raise Conflict("source already exists with another revision; immutable source ids")
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO sources VALUES (?,?,?)", (document["id"], canonical(document), revision))
+        if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (document["id"],)).fetchone():
+            self._insert_object(document["id"], "SOURCE", {"source_revision": revision})
         return revision
 
     def comments(self, source_id=None):
