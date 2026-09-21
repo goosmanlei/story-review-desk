@@ -239,8 +239,13 @@ function selectedAnchor(){
 }
 function scheduleSelection(){setTimeout(()=>{const anchor=selectedAnchor(),button=$('#selection-action');if(!anchor){button.hidden=true;return}state.pending=anchor;const box=getSelection().getRangeAt(0).getBoundingClientRect();button.style.left=`${Math.max(8,Math.min(innerWidth-145,box.left+box.width/2-65))}px`;button.style.top=`${Math.max(8,box.top-43)}px`;button.hidden=false},0)}
 
-function openPanel(){const panel=$('#comment-panel');panel.hidden=false;$('#comments-toggle').setAttribute('aria-expanded','true')}
-function closePanel(){$('#comment-panel').hidden=true;$('#comments-toggle').setAttribute('aria-expanded','false')}
+function setPanelOpen(open){
+  $('#comment-panel').hidden=!open;
+  for(const trigger of ['#comments-toggle','#reader-comments'])$(trigger).setAttribute('aria-expanded',String(open));
+}
+function openPanel(){setPanelOpen(true)}
+function closePanel(){setPanelOpen(false)}
+function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
 function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;getSelection()?.removeAllRanges();$('#selection-action').hidden=true;openPanel();renderDocument();renderComments();$('#comment-editor-text')?.focus()}
 
 function commentCard(comment){
@@ -317,10 +322,20 @@ async function init(){try{
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
   switchWorkspace(initialUrl.searchParams.get('workspace')||'current',false);
   $('#brand-home').onclick=()=>location.assign('/');
-  $('#reader-comments').onclick=openPanel;
+  $('#reader-comments').onclick=togglePanel;
   $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources(false)};
   $('#source-search').onkeydown=event=>{if(event.key==='Enter'){const first=$('#source-list .source-button');if(first){event.preventDefault();first.click()}}};
-  $('#comments-toggle').onclick=()=>$('#comment-panel').hidden?openPanel():closePanel();$('#comments-close').onclick=closePanel;
+  $('#comments-toggle').onclick=togglePanel;$('#comments-close').onclick=closePanel;
+  document.addEventListener('keydown',event=>{
+    const panel=$('#comment-panel');if(event.key!=='Escape'||panel.hidden)return;
+    event.preventDefault();const focusInside=panel.contains(document.activeElement);closePanel();
+    if(focusInside)$('#comments-toggle').focus();
+  });
+  document.addEventListener('pointerdown',event=>{
+    const panel=$('#comment-panel');
+    if(panel.hidden||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#reader-comments').contains(event.target))return;
+    closePanel();
+  });
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};
   window.addEventListener('focus',()=>refreshComments().catch(()=>{}));
 }catch(error){$('#source-view').textContent=`加载失败：${error.message}`}}

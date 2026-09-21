@@ -24,7 +24,7 @@
           <p class="story-reader-guide">阅读本故事已登记的原始依据、派生整理与辅助资料。正文、出处、版本类型与素材来源分别核对。</p>
           <div class="text-reader">
             <aside id="source-section" class="text-reader-index"><header><small>SOURCE EVIDENCE</small><h2>故事采编</h2><p>不同版本的原始资料及整理说明</p></header><nav id="source-list" aria-label="资料"></nav><footer>选择左侧版本，核对正文、出处与图片；圈选原文可添加意见。</footer></aside>
-            <div class="source-reader-main"><header class="text-reader-head"><div><small id="reader-kind">SOURCE DOCUMENT</small><h2 id="reader-head-title">选择一份采编资料</h2><p id="reader-head-detail">原文与整理稿分别标注</p></div><button id="reader-comments" type="button">审阅意见 ↗</button></header><div id="source-view" class="text-reader-scroll" aria-live="polite"></div></div>
+            <div class="source-reader-main"><header class="text-reader-head"><div><small id="reader-kind">SOURCE DOCUMENT</small><h2 id="reader-head-title">选择一份采编资料</h2><p id="reader-head-detail">原文与整理稿分别标注</p></div><button id="reader-comments" type="button" aria-controls="comment-panel" aria-expanded="false">审阅意见 ↗</button></header><div id="source-view" class="text-reader-scroll" aria-live="polite"></div></div>
           </div>
         </section>
         <div id="configuration-view" class="workspace-view" hidden></div><div id="current-view" class="workspace-view" hidden></div><div id="placeholder-view" class="workspace-view" hidden></div>
@@ -32,7 +32,7 @@
       </div>
     </main>
   </div>
-  <button id="comments-toggle" type="button">查看评论</button>
+  <button id="comments-toggle" type="button" aria-controls="comment-panel" aria-expanded="false">查看评论</button>
   <button id="selection-action" type="button" hidden>＋ 添加评论</button>
   <aside id="comment-panel" class="comment-panel" aria-label="文字评论" hidden>
     <header><div><small>原文关联意见</small><h2>文字评论 <span id="open-count"></span></h2></div><button id="comments-close" aria-label="收起评论" type="button">×</button></header>
