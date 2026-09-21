@@ -22,7 +22,8 @@ def export(store, export_dir):
     framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
     configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                       "events": store.configuration_events()}
-    asset_names = sorted({_safe_asset(asset["file"]) for source in materials for asset in source["assets"]})
+    asset_names = sorted({_safe_asset(name) for source in materials for name in
+                          [*(asset["file"] for asset in source["assets"]), *([source["media"]["file"]] if (source.get("media") or {}).get("file") else [])]})
     for name in asset_names:
         if not (target / "assets" / name).is_file():
             raise ValueError("missing asset: " + name)
@@ -74,6 +75,8 @@ def restore(store, export_dir):
                 _safe_asset(asset["file"])
                 if "assets/" + asset["file"] not in manifest["files"]:
                     raise ValueError("unmanifested referenced asset")
+            if (source.get("media") or {}).get("file") and "assets/" + _safe_asset(source["media"]["file"]) not in manifest["files"]:
+                raise ValueError("unmanifested local media")
         comment_ids = {c["id"] for c in comments["comments"]}
         if len(comment_ids) != len(comments["comments"]):
             raise ValueError("duplicate comment id")

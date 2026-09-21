@@ -16,6 +16,8 @@ def main():
     serve.add_argument("--host", default="127.0.0.1")
     source = subs.add_parser("import-sources")
     source.add_argument("file", type=Path)
+    remove = subs.add_parser("remove-sources")
+    remove.add_argument("ids", nargs="+", help="exact source ids to remove with their exclusive comments and revisions")
     subs.add_parser("export")
     subs.add_parser("restore")
     subs.add_parser("comments")
@@ -46,6 +48,8 @@ def main():
             for document in data:
                 store.put_source(document)
             result = {"imported": len(data), "total": len(store.sources())}
+        elif args.command == "remove-sources":
+            result = store.remove_sources(args.ids)
         elif args.command == "export":
             result = export(store, root / "export")
         elif args.command == "restore":

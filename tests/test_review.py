@@ -49,6 +49,58 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(len(self.store.events()), 4)
         self.assertEqual(self.store.context()[0]["block_text"], "甲乙𪎊丁")
 
+    def test_remove_sources_cleans_exclusive_records_and_rejects_external_dependency(self):
+        second = {**SOURCE, "id": "keep", "assets": [], "blocks": [{"id": "body", "text": "保留正文"}], "group": "folk-tales", "order": 1}
+        self.store.put_source(second)
+        self.store.create_comment({"source_id": "fixture", "anchor": {"block_id": "a", "end_block_id": "a", "start": 0, "end": 2, "quote": "甲乙"}, "body": "删除此评论"})
+        target_revision = next(obj["current_revision"] for obj in self.store.objects() if obj["id"] == "fixture")
+        self.store.put_object("related", "STORY", {"body": "相关"}, dependencies=[{"revision_id": target_revision, "role": "依据"}])
+        with self.assertRaises(Conflict):
+            self.store.remove_sources(["fixture"])
+        self.assertEqual(len(self.store.comments()), 1)
+        with self.store.db:
+            self.store.db.execute("DELETE FROM dependencies WHERE to_revision=?", (target_revision,))
+        self.assertEqual(self.store.remove_sources(["fixture"])["remaining"], 1)
+        self.assertEqual([source["id"] for source in self.store.sources()], ["keep"])
+        self.assertEqual(self.store.comments(), [])
+        self.assertEqual(self.store.events(), [])
+        self.assertEqual([obj["id"] for obj in self.store.objects()], ["keep", "related"])
+        self.assertEqual(self.store.db.execute("PRAGMA foreign_key_check").fetchall(), [])
+
+    def test_replace_source_metadata_preserves_text_and_restore(self):
+        old = self.store.objects()[0]["current_revision"]
+        self.store.replace_source_metadata("fixture", {"assets": [], "notes": "更新元数据"})
+        self.assertEqual(self.store.source("fixture")["blocks"], SOURCE["blocks"])
+        self.assertEqual(self.store.source("fixture")["assets"], [])
+        self.assertNotEqual(self.store.objects()[0]["current_revision"], old)
+        self.assertEqual(len(self.store.revisions()), 1)
+        manifest = export(self.store, self.root / "export")
+        recovered = Store(self.root / "clean.sqlite3")
+        try:
+            restore(recovered, self.root / "export")
+            self.assertEqual(recovered.sources(), self.store.sources())
+            self.assertEqual(manifest["sources"], 1)
+        finally:
+            recovered.close()
+
+    def test_local_media_is_hashed_and_required_on_restore(self):
+        source = {**SOURCE, "id": "recording", "assets": [], "media": {"kind": "audio", "file": "recording.mp3", "label": "播讲", "note": "测试文件"}}
+        self.store.put_source(source)
+        asset = self.root / "export" / "assets" / "figure.svg"
+        asset.parent.mkdir(parents=True)
+        asset.write_text("<svg/>")
+        (asset.parent / "recording.mp3").write_bytes(b"test media bytes")
+        manifest = export(self.store, self.root / "export")
+        self.assertIn("assets/recording.mp3", manifest["files"])
+        (asset.parent / "recording.mp3").unlink()
+        empty = Store(self.root / "empty.sqlite3")
+        try:
+            with self.assertRaises(FileNotFoundError):
+                restore(empty, self.root / "export")
+            self.assertEqual(empty.sources(), [])
+        finally:
+            empty.close()
+
     def test_export_restore_and_integrity(self):
         asset = self.root / "export" / "assets" / "figure.svg"
         asset.parent.mkdir(parents=True)
@@ -152,7 +204,7 @@ class ReviewTest(unittest.TestCase):
                   "references": [{"label": "旁证", "url": "https://example.org/report"}]}
         self.store.put_source(source)
         self.assertEqual(self.store.source("performance")["media"]["kind"], "video")
-        with self.assertRaisesRegex(ValueError, "external media"):
+        with self.assertRaisesRegex(ValueError, "media needs a local file or HTTPS URL"):
             self.store.put_source({**source, "id": "bad", "media": {**source["media"], "url": "javascript:alert(1)"}})
 
     def test_legacy_comment_migration(self):

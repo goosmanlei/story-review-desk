@@ -79,6 +79,11 @@ button { border-radius: 0; }
 .source-button:hover { border-color: rgba(222,118,106,.55); background: #30322b; }.source-button.active { border-color: var(--desk-gold); background: var(--desk-gold); box-shadow: none; color: #261b18; }
 .source-button small { margin: 0 0 6px; color: #df766a; font: 700 10px/1.2 Arial,sans-serif; }.source-button.active small { color: #87372f; }
 .source-button strong { display: block; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.4; }.source-button .sub { display: block; margin-top: 6px; color: #9b9c94; font-size: 10px; line-height: 1.4; }.source-button.active .sub { color: #68564d; }
+.source-group { margin: 14px 0; border: 1px solid rgba(255,255,255,.16); }
+.source-group-toggle { width: 100%; min-height: 47px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border: 0; color: #f4e9d7; background: #34362e; text-align: left; font-size: 13px; cursor: pointer; }
+.source-group-toggle:hover { background: #414237; }.source-group-toggle small { flex: none; color: #d7ad84; font-size: 11px; }
+.source-group-items { padding: 9px 8px 1px 14px; border-left: 2px solid var(--desk-gold); }.source-group-items .source-button { min-height: 60px; padding: 10px; }
+.source-media audio,.source-media video { display: block; width: 100%; max-height: 520px; margin: 10px 0; }
 .text-reader-index footer { padding: 15px 17px; border-top: 1px solid rgba(255,255,255,.1); color: #8f9188; font-size: 11px; line-height: 1.5; }
 .source-reader-main { min-width: 0; }
 .text-reader-head { min-height: 104px; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 20px 24px; color: #f8f4e9; background: var(--desk-ink); }

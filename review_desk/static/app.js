@@ -1,4 +1,4 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT'};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set()};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
@@ -13,11 +13,26 @@ function link(label,url,parent){const a=el('a',null,label);a.href=url;a.target='
 function renderSources(){
   const nav=$('#source-list');nav.replaceChildren();
   const filtered=state.sources.filter(source=>!state.query||[source.title,source.origin,source.version_type,...source.blocks.map(block=>block.text)].join('\n').toLocaleLowerCase().includes(state.query));
-  for(const source of filtered){
+  const addSource=(source,parent)=>{
     const button=el('button','source-button'+(source.id===state.current?.id?' active':''));button.type='button';
+    button.dataset.sourceId=source.id;button.setAttribute('aria-current',source.id===state.current?.id?'true':'false');
     nodeText('small',null,source.version_type,button);nodeText('strong',null,source.title,button);nodeText('span','sub',source.origin,button);
-    button.addEventListener('click',()=>chooseSource(source.id));nav.append(button);
+    button.addEventListener('click',()=>chooseSource(source.id));parent.append(button);
+  };
+  for(const source of filtered.filter(item=>!item.group))addSource(source,nav);
+  for(const [id,label] of [['folk-tales','民间小故事'],['expansion-directions','扩写方向']]){
+    const items=filtered.filter(source=>source.group===id);
+    if(!items.length)continue;
+    const group=el('section','source-group'),header=el('button','source-group-toggle');header.type='button';
+    const open=state.expandedGroups.has(id);
+    header.setAttribute('aria-expanded',String(open));header.dataset.groupId=id;
+    nodeText('span',null,`${open?'▾':'▸'} ${label}`,header);nodeText('small',null,`${items.length} 项`,header);
+    header.onclick=()=>{if(state.expandedGroups.has(id))state.expandedGroups.delete(id);else state.expandedGroups.add(id);renderSources()};
+    group.append(header);
+    if(open){const children=el('div','source-group-items');for(const item of items)addSource(item,children);group.append(children)}
+    nav.append(group);
   }
+  for(const source of filtered.filter(item=>item.group&&!['folk-tales','expansion-directions'].includes(item.group)))addSource(source,nav);
   if(!filtered.length)nodeText('p','source-no-results','未找到匹配的资料。',nav);
   $('#source-count').textContent=state.query?`${filtered.length} / ${state.sources.length} 份资料`:`${state.sources.length} 份资料`;
 }
@@ -183,7 +198,11 @@ function renderDocument(){
   const meta=el('div','source-meta');
   for(const [label,value] of [['出处',source.origin],['采集日期',source.collected_at],['版本说明',source.edition||'—']]){const item=el('div');nodeText('b',null,label,item);nodeText('span',null,value,item);meta.append(item)}
   const item=el('div');nodeText('b',null,'来源页面',item);link('打开来源页面 ↗',source.source_url,item);meta.append(item);doc.append(meta);
-  if(source.media){const media=el('section','source-media');nodeText('strong',null,'演出资料 · 第三方平台',media);link(source.media.label||'观看／收听演出 ↗',source.media.url,media);nodeText('p',null,source.media.note||'演出文件未复制到本实例。',media);doc.append(media)}
+  if(source.media){const media=el('section','source-media');nodeText('strong',null,source.media.file?'演出资料 · 本实例媒体':'演出资料 · 第三方平台',media);
+    if(source.media.file){const url=`/assets/${encodeURIComponent(source.media.file)}`,player=el(source.media.kind==='video'?'video':'audio');player.controls=true;player.preload='metadata';player.src=url;if(source.media.kind==='video')player.playsInline=true;media.append(player);
+      const download=el('a',null,`下载${source.media.kind==='video'?'视频':'音频'} ↓`);download.href=url;download.download=source.media.file;media.append(download)}
+    if(source.media.url)link(source.media.label||'原始发布页面 ↗',source.media.url,media);
+    nodeText('p',null,source.media.note||'请核对演出元数据和整理文本。',media);doc.append(media)}
   if(source.references?.length){const refs=el('section','source-references');nodeText('strong',null,'旁证与补充链接',refs);for(const reference of source.references){const row=el('p');link(reference.label,reference.url,row);refs.append(row)}doc.append(refs)}
   nodeText('p','intro',source.notes,doc);nodeText('h3','section-title',source.text_heading||'完整文本',doc);
   const text=el('section','source-text');text.id='source-text';text.setAttribute('aria-label','资料正文');
@@ -197,6 +216,7 @@ function renderDocument(){
 
 function chooseSource(id,keepScroll=false,updateUrl=true){
   state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;
+  if(state.current?.group)state.expandedGroups.add(state.current.group);
   $('#selection-action').hidden=true;
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
   renderSources();renderDocument();renderComments();if(!keepScroll)window.scrollTo(0,0);
@@ -290,7 +310,7 @@ function locateComment(comment){state.selected=comment.id;renderDocument();rende
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations')]);
-  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media));state.comments=comments;state.framework=framework;state.configurations=configurations;
+  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;
   renderStageLabel();
   const initialUrl=new URL(location.href);
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false);
