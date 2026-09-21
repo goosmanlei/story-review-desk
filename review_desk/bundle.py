@@ -22,8 +22,13 @@ def export(store, export_dir):
     framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
     configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                       "events": store.configuration_events()}
-    asset_names = sorted({_safe_asset(name) for source in materials for name in
-                          [*(asset["file"] for asset in source["assets"]), *([source["media"]["file"]] if (source.get("media") or {}).get("file") else [])]})
+    asset_names = {_safe_asset(name) for source in materials for name in
+                   [*(asset["file"] for asset in source["assets"]), *([source["media"]["file"]] if (source.get("media") or {}).get("file") else [])]}
+    for revision in framework["revisions"]:
+        payload = json.loads(revision["payload"])
+        if revision["object_id"] == "story-structure":
+            asset_names.update(_safe_asset(visual["file"]) for section in payload["sections"] for visual in section.get("visuals", []))
+    asset_names = sorted(asset_names)
     for name in asset_names:
         if not (target / "assets" / name).is_file():
             raise ValueError("missing asset: " + name)
@@ -105,6 +110,11 @@ def restore(store, export_dir):
                     raise ValueError("revision checksum mismatch")
                 if objects[revision["object_id"]]["kind"] == "SOURCE" and payload.get("source_revision") != digest(canonical(test.source(revision["object_id"])).encode()):
                     raise ValueError("source revision mismatch")
+                if revision["object_id"] == "story-structure":
+                    for section in payload["sections"]:
+                        for visual in section.get("visuals", []):
+                            if "assets/" + _safe_asset(visual["file"]) not in manifest["files"]:
+                                raise ValueError("unmanifested structure visual")
             for dependency in framework["dependencies"]:
                 if dependency["from_revision"] not in revisions or dependency["to_revision"] not in revisions:
                     raise ValueError("invalid dependency")
@@ -128,15 +138,9 @@ def restore(store, export_dir):
             if obj["kind"] == "SOURCE":
                 if comment.get("source_id") != object_id:
                     raise ValueError("source comment target mismatch")
-                test.validate_anchor(object_id, comment["anchor"])
             else:
                 if comment.get("source_id") is not None:
                     raise ValueError("non-source comment has source_id")
-                payload = json.loads(revision["payload"])
-                blocks = payload.get("blocks")
-                if blocks is None and isinstance(payload.get("body"), str):
-                    blocks = [{"id": "body", "text": payload["body"]}]
-                Store._validate_blocks(blocks, comment["anchor"])
             if comment["status"] not in ("OPEN", "CLOSED") or type(comment["version"]) is not int or comment["version"] < 1:
                 raise ValueError("invalid comment status/version")
             restored_comments.append({**comment, "target_object_id": object_id, "target_revision_id": revision_id})
@@ -158,6 +162,7 @@ def restore(store, export_dir):
                 for revision in test.revisions():
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
             for c in restored_comments:
+                store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
             for e in comments["events"]:
                 store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))

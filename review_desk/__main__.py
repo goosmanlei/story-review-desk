@@ -5,6 +5,7 @@ from pathlib import Path
 from .bundle import export, restore
 from .server import ReviewServer
 from .store import Store
+from .structure import import_structure, snapshot, review_context, script_input
 
 
 def main():
@@ -21,6 +22,12 @@ def main():
     subs.add_parser("export")
     subs.add_parser("restore")
     subs.add_parser("comments")
+    subs.add_parser("structure-get")
+    subs.add_parser("structure-review")
+    subs.add_parser("script-input")
+    structure_import = subs.add_parser("structure-import")
+    structure_import.add_argument("file", type=Path, help="complete structure JSON document")
+    structure_import.add_argument("--expected-version", type=int, required=True)
     subs.add_parser("config-get")
     config_set = subs.add_parser("config-set")
     config_set.add_argument("scope", choices=("SYSTEM", "PROJECT"))
@@ -56,6 +63,14 @@ def main():
             result = restore(store, root / "export")
         elif args.command == "comments":
             result = store.context()
+        elif args.command == "structure-get":
+            result = snapshot(store)
+        elif args.command == "structure-review":
+            result = review_context(store)
+        elif args.command == "script-input":
+            result = script_input(store)
+        elif args.command == "structure-import":
+            result = import_structure(store, json.loads(args.file.read_text()), args.expected_version)
         elif args.command == "config-get":
             result = store.configurations()
         elif args.command == "config-set":

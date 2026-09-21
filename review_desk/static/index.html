@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="/style.css">
   <link rel="stylesheet" href="/polish.css">
   <link rel="stylesheet" href="/workspace.css">
+  <link rel="stylesheet" href="/structure.css">
 </head>
 <body>
   <div class="layout">
@@ -20,12 +21,17 @@
       <header class="workspace-topbar"><div class="view-context"><span id="view-symbol">故</span><div><small>当前视图</small><b id="view-title">故事创作</b></div></div><div class="top-actions"><label class="search-box"><span>⌕</span><input id="source-search" type="search" aria-label="搜索故事采编与正文" placeholder="搜索故事采编与正文"></label><span id="source-count"></span></div></header>
       <div class="workspace-content">
         <section id="story-workspace" class="workspace-view">
-          <header class="story-workspace-heading"><div><p>STORY → SCREENPLAY</p><h1>从来源核对、结构理解到分集与逐场成稿</h1></div><div class="story-mode-tabs" role="tablist" aria-label="故事创作方式"><button type="button" class="active" role="tab" aria-selected="true">故事采编</button><button type="button" role="tab" aria-selected="false" disabled>故事结构 · 待开放</button><button type="button" role="tab" aria-selected="false" disabled>叙事拆解 · 待开放</button></div></header>
+          <header class="story-workspace-heading"><div><p>STORY → SCREENPLAY</p><h1>从来源核对、结构理解到分集与逐场成稿</h1></div><div class="story-mode-tabs" role="tablist" aria-label="故事创作方式"><button type="button" class="active" role="tab" aria-selected="true">故事采编</button><button type="button" role="tab" aria-selected="false" id="open-story-structure">故事结构</button><button type="button" role="tab" aria-selected="false" disabled>叙事拆解 · 待开放</button></div></header>
           <p class="story-reader-guide">阅读本故事已登记的原始依据、派生整理与辅助资料。正文、出处、版本类型与素材来源分别核对。</p>
           <div class="text-reader">
             <aside id="source-section" class="text-reader-index"><header><small>SOURCE EVIDENCE</small><h2>故事采编</h2><p>不同版本的原始资料及整理说明</p></header><nav id="source-list" aria-label="资料"></nav><footer>选择左侧版本，核对正文、出处与图片；圈选原文可添加意见。</footer></aside>
             <div class="source-reader-main"><header class="text-reader-head"><div><small id="reader-kind">SOURCE DOCUMENT</small><h2 id="reader-head-title">选择一份采编资料</h2><p id="reader-head-detail">原文与整理稿分别标注</p></div><button id="reader-comments" type="button" aria-controls="comment-panel" aria-expanded="false">审阅意见 ↗</button></header><div id="source-view" class="text-reader-scroll" aria-live="polite"></div></div>
           </div>
+        </section>
+        <section id="structure-workspace" class="workspace-view" hidden>
+          <header class="structure-heading"><div><p>STORY STRUCTURE / 阅读与审阅</p><h1>故事结构</h1><span>承接已选改编方向，阅读完整结构稿并留下图文意见。</span></div><div class="structure-top-actions"><button type="button" id="back-to-sources">← 故事采编</button><button type="button" id="structure-comments" aria-controls="comment-panel">审阅意见</button></div></header>
+          <div id="structure-status"></div>
+          <div class="structure-layout"><nav id="structure-index" aria-label="结构稿章节"></nav><article id="structure-reader" aria-label="故事结构阅读稿"></article></div>
         </section>
         <div id="configuration-view" class="workspace-view" hidden></div><div id="current-view" class="workspace-view" hidden></div><div id="placeholder-view" class="workspace-view" hidden></div>
         <footer class="workspace-footer"><div><span class="footer-mark">阅</span><span><b>故事审阅台</b><small>故事创作与制作审阅</small></span></div><p>故事资料、创作配置与审阅意见以当前实例为准；本机运行凭据不会公开同步。</p></footer>
@@ -34,11 +40,12 @@
   </div>
   <button id="comments-toggle" type="button" aria-controls="comment-panel" aria-expanded="false">查看评论</button>
   <button id="selection-action" type="button" hidden>＋ 添加评论</button>
-  <aside id="comment-panel" class="comment-panel" aria-label="文字评论" hidden>
-    <header><div><small>原文关联意见</small><h2>文字评论 <span id="open-count"></span></h2></div><button id="comments-close" aria-label="收起评论" type="button">×</button></header>
+  <aside id="comment-panel" class="comment-panel" aria-label="审阅评论" hidden>
+    <header><div><small>关联原稿的意见</small><h2>审阅评论 <span id="open-count"></span></h2></div><button id="comments-close" aria-label="收起评论" type="button">×</button></header>
     <div id="comment-body"></div>
   </aside>
   <div id="toast" role="status" aria-live="polite"></div>
   <script src="/app.js" defer></script>
+  <script src="/structure.js" defer></script>
 </body>
 </html>
