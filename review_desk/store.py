@@ -287,6 +287,52 @@ class Store:
             self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (new_object_revision, source_id, 1, canonical({"source_revision": new_source_revision}), now()))
         return new_source_revision
 
+    def replace_source_content(self, document, expected_revision):
+        """Explicitly replace one unreferenced refinement in place, never comments.
+
+        This is deliberately not the normal immutable import operation. The
+        compare/check/replace sequence holds one SQLite write transaction.
+        """
+        if not isinstance(document, dict) or document.get("group") != "story-refinements":
+            raise ValueError("content replacement is limited to story refinements")
+        if not isinstance(expected_revision, str) or len(expected_revision) != 64:
+            raise ValueError("expected source revision is required")
+        probe = Store(":memory:")
+        try:
+            revision = probe.put_source(document)
+        finally:
+            probe.close()
+        source_id = document["id"]
+        payload = {"source_revision": revision}
+        object_revision = digest(canonical({"object_id": source_id, "version": 1, "payload": payload}).encode())
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            row = self.db.execute("SELECT * FROM sources WHERE id=?", (source_id,)).fetchone()
+            if not row:
+                raise ValueError("refinement does not exist")
+            original = json.loads(row["document"])
+            if original.get("group") != "story-refinements" or original.get("order") != document.get("order"):
+                raise ValueError("replacement must preserve refinement identity and menu order")
+            if row["revision"] == revision:
+                return {"id": source_id, "revision": revision, "changed": False}
+            if row["revision"] != expected_revision:
+                raise Conflict("source changed after authoring began")
+            if self.db.execute("SELECT 1 FROM comments WHERE target_object_id=? OR source_id=?", (source_id, source_id)).fetchone():
+                raise Conflict("cannot replace a commented refinement")
+            if self.db.execute("""SELECT 1 FROM dependencies d JOIN revisions r
+                ON r.id=d.from_revision OR r.id=d.to_revision WHERE r.object_id=?""", (source_id,)).fetchone():
+                raise Conflict("cannot replace a refinement with dependencies")
+            obj = self.db.execute("SELECT * FROM objects WHERE id=?", (source_id,)).fetchone()
+            revisions = self.db.execute("SELECT * FROM revisions WHERE object_id=?", (source_id,)).fetchall()
+            if not obj or obj["kind"] != "SOURCE" or obj["version"] != 1 or len(revisions) != 1 or revisions[0]["id"] != obj["current_revision"]:
+                raise Conflict("replacement requires a single SOURCE revision")
+            stamp = now()
+            self.db.execute("UPDATE sources SET document=?,revision=? WHERE id=?", (canonical(document), revision, source_id))
+            self.db.execute("DELETE FROM revisions WHERE object_id=?", (source_id,))
+            self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (object_revision, source_id, 1, canonical(payload), stamp))
+            self.db.execute("UPDATE objects SET current_revision=?,updated_at=? WHERE id=?", (object_revision, stamp, source_id))
+        return {"id": source_id, "revision": revision, "changed": True}
+
     def comments(self, source_id=None, target_object_id=None, target_revision_id=None):
         if target_revision_id:
             rows = self.db.execute("SELECT * FROM comments WHERE target_object_id=? AND target_revision_id=? ORDER BY created_at,id", (target_object_id, target_revision_id))
