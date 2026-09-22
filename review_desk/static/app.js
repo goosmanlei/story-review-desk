@@ -24,7 +24,7 @@ function renderSources(preserveScroll=true){
     button.addEventListener('click',()=>chooseSource(source.id));parent.append(button);
   };
   for(const source of filtered.filter(item=>!item.group))addSource(source,nav);
-  for(const [id,label] of [['folk-tales','民间小故事'],['expansion-directions','扩写方向']]){
+  for(const [id,label] of [['folk-tales','民间小故事'],['expansion-directions','扩写方向'],['story-refinements','故事精修']]){
     const items=filtered.filter(source=>source.group===id);
     if(!items.length)continue;
     const group=el('section','source-group'),header=el('button','source-group-toggle');header.type='button';
@@ -36,7 +36,7 @@ function renderSources(preserveScroll=true){
     if(open){const children=el('div','source-group-items');for(const item of items)addSource(item,children);group.append(children)}
     nav.append(group);
   }
-  for(const source of filtered.filter(item=>item.group&&!['folk-tales','expansion-directions'].includes(item.group)))addSource(source,nav);
+  for(const source of filtered.filter(item=>item.group&&!['folk-tales','expansion-directions','story-refinements'].includes(item.group)))addSource(source,nav);
   if(!filtered.length)nodeText('p','source-no-results','未找到匹配的资料。',nav);
   $('#source-count').textContent=state.query?`${filtered.length} / ${state.sources.length} 份资料`:`${state.sources.length} 份资料`;
   nav.scrollTop=scrollTop;

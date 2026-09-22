@@ -67,6 +67,17 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual([obj["id"] for obj in self.store.objects()], ["keep", "related"])
         self.assertEqual(self.store.db.execute("PRAGMA foreign_key_check").fetchall(), [])
 
+    def test_story_refinement_group_is_supported(self):
+        refinement = {
+            **SOURCE,
+            "id": "refinement-v1",
+            "title": "故事精修第一版",
+            "group": "story-refinements",
+            "order": 1,
+        }
+        self.store.put_source(refinement)
+        self.assertEqual(self.store.source("refinement-v1")["group"], "story-refinements")
+
     def test_replace_source_metadata_preserves_text_and_restore(self):
         old = self.store.objects()[0]["current_revision"]
         self.store.replace_source_metadata("fixture", {"assets": [], "notes": "更新元数据"})
