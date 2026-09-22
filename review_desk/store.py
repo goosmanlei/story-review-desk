@@ -197,7 +197,7 @@ class Store:
             raise ValueError("block ids must be unique and text non-empty")
         if not isinstance(document.get("assets"), list):
             raise ValueError("assets must be a list")
-        if document.get("group") not in (None, "folk-tales", "expansion-directions"):
+        if document.get("group") not in (None, "folk-tales", "expansion-directions", "story-refinements"):
             raise ValueError("unknown source group")
         if "order" in document and (type(document["order"]) is not int or document["order"] < 0):
             raise ValueError("source order must be a non-negative integer")
