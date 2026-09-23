@@ -1,4 +1,4 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),structure:null,structureRevision:null,drawMode:null};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),structure:null,structureRevision:null,drawMode:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
@@ -7,6 +7,7 @@ const toast=message=>{const node=$('#toast');node.textContent=message;node.class
 const isStructure=()=>state.workspace==='story.outline';
 const draftKey=()=>state.anchor?`review-draft:${isStructure()?state.structureRevision:state.current.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:c.source_id===state.current?.id);
+const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整篇结构稿':a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
 const renderActiveReader=()=>isStructure()?renderStructureReader():renderDocument();
 const escapeSelector=value=>CSS.escape(value);
@@ -180,6 +181,14 @@ function blockMarks(source,block,index){
     const start=index===first?a.start:0,end=index===last?a.end:chars(block.text).length;
     if(start<end)out.push({start,end,comment});
   }
+  const draft=newDraftAnchor();
+  if(draft&&draft.block_id){
+    const first=source.blocks.findIndex(b=>b.id===draft.block_id),last=source.blocks.findIndex(b=>b.id===draft.end_block_id);
+    if(first>=0&&last>=first&&index>=first&&index<=last){
+      const start=index===first?draft.start:0,end=index===last?draft.end:chars(block.text).length;
+      if(start<end)out.push({start,end,draft:true});
+    }
+  }
   return out;
 }
 
@@ -191,10 +200,11 @@ function renderBlock(source,block,index){
   for(let i=0;i<ordered.length-1;i++){
     const start=ordered[i],end=ordered[i+1],active=marks.filter(m=>m.start<=start&&m.end>=end);
     if(!active.length){p.append(document.createTextNode(letters.slice(start,end).join('')));continue}
-    const mark=el('span','comment-mark'+(active.every(m=>m.comment.status==='CLOSED')?' closed':'')+(active.some(m=>m.comment.id===state.selected)?' selected':''),letters.slice(start,end).join(''));
-    mark.dataset.commentIds=active.map(m=>m.comment.id).join(' ');
-    mark.title=active.map(m=>m.comment.body).join(' / ');
-    mark.addEventListener('click',()=>{if(!window.getSelection()?.isCollapsed)return;selectComment(active[0].comment.id)});
+    const comments=active.filter(m=>m.comment),draft=active.some(m=>m.draft);
+    const mark=el('span','comment-mark'+(comments.length&&comments.every(m=>m.comment.status==='CLOSED')?' closed':'')+(comments.some(m=>m.comment.id===state.selected)?' selected':'')+(draft?' draft-mark':''),letters.slice(start,end).join(''));
+    mark.dataset.commentIds=comments.map(m=>m.comment.id).join(' ');
+    mark.title=draft?'正在添加的评论范围':comments.map(m=>m.comment.body).join(' / ');
+    if(comments.length)mark.addEventListener('click',()=>{if(!window.getSelection()?.isCollapsed)return;selectComment(comments[0].comment.id)});
     p.append(mark);
   }
   return p;
@@ -228,7 +238,7 @@ function renderDocument(){
 }
 
 function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
-  state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;
+  state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;state.pending=null;
   if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   $('#selection-action').hidden=true;
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
@@ -258,7 +268,8 @@ function setPanelOpen(open){
 function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
 function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
-function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;getSelection()?.removeAllRanges();$('#selection-action').hidden=true;openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;getSelection()?.removeAllRanges();$('#selection-action').hidden=true;openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function abandonDraft(message){const key=draftKey();if(key)localStorage.removeItem(key);state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
 
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
@@ -282,12 +293,13 @@ function renderComments(){
   nodeText('p','comment-help',isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
-    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=!textarea.value.trim()});editor.append(textarea);
+    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=!textarea.value.trim()});editor.append(textarea);
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;
-    const cancel=nodeText('button',null,'收起草稿',actions);cancel.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;renderActiveReader();renderComments();toast('草稿已留在本机，重新圈选同一内容可继续编辑')};editor.append(actions);
-    if(state.preview){const basis=el('details','context-preview');basis.open=true;const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
+    const collapse=nodeText('button',null,'收起草稿',actions);collapse.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments();toast('草稿已留在本机，重新圈选同一内容可继续编辑')};
+    const cancel=nodeText('button','destructive',state.editing?'取消编辑':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'未保存的编辑已放弃':'本次未提交评论已取消');editor.append(actions);
+    if(state.preview){const basis=el('details','context-preview');basis.open=state.previewExpanded;basis.addEventListener('toggle',()=>{state.previewExpanded=basis.open});const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
       nodeText('p',null,`载体：${context.target_medium}；受众：${context.audience}；风格：${context.style}`,basis);
       nodeText('p',null,`当前圈选：${context.selected_quote}；上下文段落：${context.neighbor_blocks.map(b=>b.text).join(' / ')}`,basis);
@@ -310,20 +322,20 @@ async function saveComment(){
     if(state.editing){const c=state.comments.find(x=>x.id===state.editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
     else{await api('/api/comments',{method:'POST',body:JSON.stringify(isStructure()?{id:crypto.randomUUID(),target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{id:crypto.randomUUID(),source_id:state.current.id,anchor:state.anchor,body:text})})}
     localStorage.removeItem(draftKey());
-    state.anchor=null;state.editing=null;state.suggestion=null;await refreshComments();toast('评论已保存');
+    state.anchor=null;state.editing=null;state.suggestion=null;state.previewExpanded=false;await refreshComments();toast('评论已保存');
   }catch(error){toast(error.message)}
 }
 async function polishComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
   const button=$('[data-polish]');button.disabled=true;
   try{const request=isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{source_id:state.current.id,anchor:state.anchor,body:text};
-    state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
+    state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});state.previewExpanded=false;
     const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({...request,expected_context_sha256:state.preview.context_sha256})});
     state.suggestion=result.suggestion;renderComments();toast('润色建议已生成，原草稿未修改')}
   catch(error){renderComments();toast(error.message)}
 }
 async function previewPolish(){const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  try{state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{source_id:state.current.id,anchor:state.anchor,body:text})});renderComments();$('#comment-editor-text').value=text;toast('已列出 AI 将参考的资料与创作上下文')}
+  try{state.preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision,anchor:state.anchor,body:text}:{source_id:state.current.id,anchor:state.anchor,body:text})});state.previewExpanded=true;renderComments();$('#comment-editor-text').value=text;toast('已列出 AI 将参考的资料与创作上下文')}
   catch(error){toast(error.message)}}
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
 function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
