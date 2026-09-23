@@ -6,7 +6,6 @@ from .bundle import export, restore
 from .server import ReviewServer
 from .store import Store
 from .structure import import_structure, snapshot, review_context, script_input
-from . import writing
 
 
 def main():
@@ -21,7 +20,6 @@ def main():
     replace = subs.add_parser("replace-source-content", help="atomically replace one unreferenced refinement in place")
     replace.add_argument("file", type=Path, help="complete source document JSON object")
     replace.add_argument("--expected-revision", required=True)
-    writing.add_parser(subs)
     remove = subs.add_parser("remove-sources")
     remove.add_argument("ids", nargs="+", help="exact source ids to remove with their exclusive comments and revisions")
     subs.add_parser("export")
@@ -43,9 +41,6 @@ def main():
     args = parser.parse_args()
     root = args.instance.resolve()
     config = json.loads((root / "config" / "instance.json").read_text())
-    if args.command == "writing":
-        print(json.dumps(writing.run_cli(root, args), ensure_ascii=False, indent=2))
-        return
     if args.command == "serve":
         server = ReviewServer((args.host, args.port), root, config)
         print(f"{config['title']}: http://{args.host}:{args.port}/", flush=True)
