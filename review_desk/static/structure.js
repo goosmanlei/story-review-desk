@@ -12,11 +12,19 @@ function structureMarkParts(block,revision){
     if(first<0||last<first||index<first||index>last)continue;
     marks.push({start:index===first?a.start:0,end:index===last?a.end:letters.length,comment:c});
   }
+  const draft=newDraftAnchor();
+  if(draft?.type==='text'){
+    const first=blocks.findIndex(b=>b.id===draft.block_id),last=blocks.findIndex(b=>b.id===draft.end_block_id);
+    if(first>=0&&last>=first&&index>=first&&index<=last){
+      const start=index===first?draft.start:0,end=index===last?draft.end:letters.length;
+      if(start<end)marks.push({start,end,draft:true});
+    }
+  }
   const cuts=[...new Set([0,letters.length,...marks.flatMap(m=>[m.start,m.end])])].sort((a,b)=>a-b),fragment=document.createDocumentFragment();
   for(let i=0;i<cuts.length-1;i++){
     const start=cuts[i],end=cuts[i+1],active=marks.filter(m=>m.start<=start&&m.end>=end),text=letters.slice(start,end).join('');
     if(!active.length)fragment.append(document.createTextNode(text));
-    else{const mark=el('span','comment-mark'+(active.every(m=>m.comment.status==='CLOSED')?' closed':''),text);mark.title=active.map(m=>m.comment.body).join(' / ');mark.onclick=()=>{if(getSelection()?.isCollapsed)selectComment(active[0].comment.id)};fragment.append(mark)}
+    else{const comments=active.filter(m=>m.comment),draft=active.some(m=>m.draft);const mark=el('span','comment-mark'+(comments.length&&comments.every(m=>m.comment.status==='CLOSED')?' closed':'')+(draft?' draft-mark':''),text);mark.title=draft?'正在添加的评论范围':comments.map(m=>m.comment.body).join(' / ');if(comments.length)mark.onclick=()=>{if(getSelection()?.isCollapsed)selectComment(comments[0].comment.id)};fragment.append(mark)}
   }
   return fragment;
 }
@@ -24,10 +32,11 @@ function structureBlockElement(tag,block,revision){const node=el(tag,'structure-
 function drawPolygon(points,cls){const polygon=document.createElementNS('http://www.w3.org/2000/svg','polygon');polygon.setAttribute('points',points.map(p=>`${p.x*100},${p.y*100}`).join(' '));polygon.setAttribute('class',cls);return polygon}
 function paintStructureRegions(){
   document.querySelectorAll('.structure-visual-stage').forEach(stage=>{
-    const svg=stage.querySelector('svg');svg.replaceChildren();const visual=stage.dataset.visualId;
+    const svg=stage.querySelector('svg');svg.replaceChildren();const visual=stage.dataset.visualId,draft=newDraftAnchor();stage.classList.toggle('draft-visual',draft?.type==='visual'&&draft.visual_id===visual);
     for(const comment of activeComments().filter(c=>c.anchor.type==='region'&&c.anchor.visual_id===visual)){
       const polygon=drawPolygon(comment.anchor.points,'review-region'+(comment.status==='CLOSED'?' closed':''));polygon.onclick=()=>selectComment(comment.id);svg.append(polygon);
     }
+    if(draft?.type==='region'&&draft.visual_id===visual)svg.append(drawPolygon(draft.points,'review-region draft'));
     if(structureDrawing?.visual===visual)svg.append(drawPolygon(structureDrawing.points,'review-region drawing'));
   });
 }
