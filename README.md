@@ -52,6 +52,10 @@ git push origin main
 
 作者准备好完整正文后，可使用受控 `replace-source-content` 原地更新无评论、无依赖的故事精修条目；普通资料导入仍保持不可变语义。该接口不依赖写作引擎，不规定如何创作。具体命令与限制见[原地替换说明](docs/source-replacement.md)。逐片段写作、候选重读和私有检查点由故事项目自己的后台工具负责，本系统不提供 `writing` 命令组或过程页面。
 
+## 分集影视剧本
+
+故事创作的“剧本创作”采用“剧本版本 → 分集”两级目录，全文、场次与预计时长独立保存，复用采编评论及 AI 润色。完整版本通过 `screenplay-import` 或 `POST /api/screenplays` 原子发布；改稿使用新版本 ID，旧集与旧评论保留。导出、恢复沿用现有协议；发布不代表接受故事、结构或剧本，也不推进项目阶段。格式、接口和验收见[剧本说明](docs/screenplays.md)。
+
 ## 旧版交互核对
 
 旧审阅台仅作为产品交互参考，未复制其代码、表或故事数据。核对结果见 [docs/comment-checklist.md](docs/comment-checklist.md)。

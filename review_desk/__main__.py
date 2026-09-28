@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 
 from .bundle import export, restore
+from .screenplay import import_screenplay, snapshot as screenplay_snapshot, review_context as screenplay_review
 from .server import ReviewServer
 from .store import Store
 from .structure import import_structure, snapshot, review_context, script_input
@@ -28,6 +29,10 @@ def main():
     subs.add_parser("structure-get")
     subs.add_parser("structure-review")
     subs.add_parser("script-input")
+    subs.add_parser("screenplay-get")
+    subs.add_parser("screenplay-review")
+    screenplay_import = subs.add_parser("screenplay-import")
+    screenplay_import.add_argument("file", type=Path, help="complete immutable screenplay edition")
     structure_import = subs.add_parser("structure-import")
     structure_import.add_argument("file", type=Path, help="complete structure JSON document")
     structure_import.add_argument("--expected-version", type=int, required=True)
@@ -72,6 +77,12 @@ def main():
             result = snapshot(store)
         elif args.command == "structure-review":
             result = review_context(store)
+        elif args.command == "screenplay-get":
+            result = screenplay_snapshot(store)
+        elif args.command == "screenplay-review":
+            result = screenplay_review(store)
+        elif args.command == "screenplay-import":
+            result = import_screenplay(store, json.loads(args.file.read_text()))
         elif args.command == "script-input":
             result = script_input(store)
         elif args.command == "structure-import":
