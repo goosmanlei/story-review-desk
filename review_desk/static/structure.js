@@ -1,6 +1,42 @@
 /* Story structure reader. Review records use the shared comment panel and API in app.js. */
 const STRUCTURE_SECTIONS={theme:'方向与主题',characters:'人物塑造',relationships:'人物关系',spaces:'空间关系',storylines:'故事线',timeline:'时间线'};
 let structureDrawing=null;
+let structureIndexFrame=0,structureIndexObserver=null;
+function scheduleStructureIndex(){
+  if(structureIndexFrame)return;
+  structureIndexFrame=requestAnimationFrame(()=>{structureIndexFrame=0;syncStructureIndex()});
+}
+function syncStructureIndex(){
+  if(!isStructure())return;
+  const reader=$('#structure-reader'),index=$('#structure-index'),sections=[...reader.querySelectorAll('.structure-section')];
+  if(!sections.length)return;
+  const barBottom=$('.workspace-topbar').getBoundingClientRect().bottom,indexRect=index.getBoundingClientRect();
+  let readingTop=Math.max(0,barBottom)+20;
+  // The horizontal chapter menu also covers the manuscript on narrow screens.
+  const indexStyle=getComputedStyle(index);
+  if(indexStyle.display==='flex')readingTop=Math.max(readingTop,(parseFloat(indexStyle.top)||0)+indexRect.height+20);
+  reader.style.setProperty('--structure-scroll-offset',`${readingTop}px`);
+  let current=sections[0];
+  for(const section of sections){if(section.getBoundingClientRect().top<=readingTop+1)current=section;else break}
+  const page=document.scrollingElement;
+  if(page.scrollTop>0&&page.scrollTop+window.innerHeight>=page.scrollHeight-2)current=sections.at(-1);
+  for(const button of index.querySelectorAll('button')){
+    const active=button.getAttribute('aria-controls')===current.id,changed=active&&!button.classList.contains('active');
+    button.classList.toggle('active',active);
+    if(active)button.setAttribute('aria-current','location');else button.removeAttribute('aria-current');
+    if(changed&&index.scrollWidth>index.clientWidth){
+      const rect=button.getBoundingClientRect();
+      if(rect.left<indexRect.left)index.scrollLeft+=rect.left-indexRect.left;
+      else if(rect.right>indexRect.right)index.scrollLeft+=rect.right-indexRect.right;
+    }
+  }
+}
+function watchStructureIndex(){
+  structureIndexObserver?.disconnect();
+  structureIndexObserver=new ResizeObserver(scheduleStructureIndex);
+  for(const node of [$('#structure-reader'),$('#structure-index'),$('.workspace-topbar'),...document.querySelectorAll('.structure-section')])structureIndexObserver.observe(node);
+  scheduleStructureIndex();
+}
 function structureRevision(){return state.structure?.revisions.find(r=>r.id===state.structureRevision)||null}
 function structureBlocks(doc){return doc.sections.flatMap(s=>[{id:`heading-${s.id}`,text:s.title},...s.blocks])}
 function structureVisuals(doc){return doc.sections.flatMap(s=>s.visuals||[])}
@@ -24,7 +60,7 @@ function structureMarkParts(block,revision){
   for(let i=0;i<cuts.length-1;i++){
     const start=cuts[i],end=cuts[i+1],active=marks.filter(m=>m.start<=start&&m.end>=end),text=letters.slice(start,end).join('');
     if(!active.length)fragment.append(document.createTextNode(text));
-    else{const comments=active.filter(m=>m.comment),draft=active.some(m=>m.draft);const mark=el('span','comment-mark'+(comments.length&&comments.every(m=>m.comment.status==='CLOSED')?' closed':'')+(draft?' draft-mark':''),text);mark.title=draft?'正在添加的评论范围':comments.map(m=>m.comment.body).join(' / ');if(comments.length)mark.onclick=()=>{if(getSelection()?.isCollapsed)selectComment(comments[0].comment.id)};fragment.append(mark)}
+    else{const comments=active.filter(m=>m.comment),draft=active.some(m=>m.draft);const mark=el('span','comment-mark'+(comments.length&&comments.every(m=>m.comment.status==='CLOSED')?' closed':'')+(comments.some(m=>m.comment.id===state.selected)?' selected':'')+(draft?' draft-mark':''),text);mark.title=draft?'正在添加的评论范围':comments.map(m=>m.comment.body).join(' / ');if(comments.length)mark.onclick=()=>{if(getSelection()?.isCollapsed)selectComment(comments[0].comment.id)};fragment.append(mark)}
   }
   return fragment;
 }
@@ -40,22 +76,42 @@ function paintStructureRegions(){
     if(structureDrawing?.visual===visual)svg.append(drawPolygon(structureDrawing.points,'review-region drawing'));
   });
 }
-function renderStructureVisual(visual){
+function openStructureImage(visual,trigger){
+  if(state.drawMode||structureDrawing||document.querySelector('.structure-image-dialog'))return;
+  hideSelectionAction();
+  const dialog=el('dialog','structure-image-dialog');dialog.setAttribute('aria-labelledby','structure-image-title');
+  const toolbar=el('div','structure-image-toolbar'),title=nodeText('h2',null,visual.title,toolbar);title.id='structure-image-title';
+  const close=nodeText('button','structure-image-close','×',toolbar);close.type='button';close.setAttribute('aria-label','关闭放大图');close.title='关闭（Esc）';close.autofocus=true;close.onclick=()=>dialog.close();
+  const canvas=el('div','structure-image-canvas'),image=el('img');image.src=`/assets/${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;canvas.append(image);dialog.append(toolbar,canvas);
+  dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();dialog.close()}});
+  dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close()});
+  dialog.addEventListener('pointerdown',event=>event.stopPropagation());
+  dialog.addEventListener('close',()=>{document.body.classList.remove('structure-image-open');dialog.remove();if(trigger.isConnected)trigger.focus({preventScroll:true})},{once:true});
+  document.body.append(dialog);document.body.classList.add('structure-image-open');dialog.showModal();
+}
+function renderStructureVisual(visual,preview=false){
   const figure=el('figure','structure-figure'),head=el('div','structure-figure-head');
   nodeText('strong',null,visual.title,head);nodeText('span',null,visual.kind==='diagram'?'结构图':'图片',head);figure.append(head);
   const viewport=el('div','structure-visual-viewport'),stage=el('div','structure-visual-stage');stage.dataset.visualId=visual.id;
   const img=el('img');img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
+  if(preview){
+    img.classList.add('structure-image-trigger');img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
+    img.onclick=()=>openStructureImage(visual,img);
+    img.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openStructureImage(visual,img)}};
+  }
   const overlay=document.createElementNS('http://www.w3.org/2000/svg','svg');overlay.setAttribute('viewBox','0 0 100 100');overlay.setAttribute('preserveAspectRatio','none');overlay.classList.add('structure-overlay');stage.append(overlay);
   viewport.append(stage);figure.append(viewport);nodeText('figcaption',null,visual.description,figure);
   const actions=el('div','structure-visual-actions');const region=nodeText('button',null,'圈选评论',actions);region.type='button';region.onclick=()=>{state.drawMode=visual.id;document.querySelectorAll('.structure-visual-stage').forEach(s=>s.classList.toggle('drawing',s.dataset.visualId===visual.id));toast('在图上拖动圈选；按 Shift 可画矩形')};
   const whole=nodeText('button',null,'评论整图',actions);whole.type='button';whole.onclick=()=>startDraft({type:'visual',visual_id:visual.id,asset_file:visual.file});figure.append(actions);return figure;
 }
 function renderStructureReader(){
+  hideSelectionAction();
+  structureIndexObserver?.disconnect();
   if(!state.structure)return;
   const status=$('#structure-status'),index=$('#structure-index'),reader=$('#structure-reader');status.replaceChildren();index.replaceChildren();reader.replaceChildren();
   const selection=state.structure.selection,active=structureRevision();
   $('#structure-workspace .structure-layout').hidden=!active;
-  $('#structure-comments').hidden=!active;$('#comments-toggle').hidden=!active;
+  $('#comments-toggle').hidden=!active;
   if(!selection){
     const box=el('section','structure-start');nodeText('small',null,'第一步 · 选择结构稿依据',box);
     nodeText('h3',null,'选择一个扩写方向',box);
@@ -71,10 +127,6 @@ function renderStructureReader(){
     }
     box.append(choices);status.append(box);return;
   }
-  const basis=el('section','structure-basis');nodeText('small',null,'已选改编方向 · 精确资料修订',basis);nodeText('strong',null,structureSourceTitle(selection.payload.source_id),basis);
-  nodeText('code',null,selection.payload.source_revision.slice(0,16),basis);
-  const sourceButton=nodeText('button',null,'回看方向全文',basis);sourceButton.type='button';sourceButton.onclick=()=>{switchWorkspace('story.sources');chooseSource(selection.payload.source_id)};
-  const change=el('details');nodeText('summary',null,'重新选择方向',change);for(const source of state.sources.filter(s=>s.group==='expansion-directions')){const button=nodeText('button',null,source.title,change);button.type='button';button.onclick=()=>chooseStructureDirection(source.id)}basis.append(change);status.append(basis);
   if(state.structure.direction_changed){const alert=nodeText('p','structure-alert','所选方向已更新。当前结构稿仍引用原方向修订；请核对并导入针对新方向的完整结构稿。',status);alert.setAttribute('role','alert')}
   const versions=el('div','structure-versions');nodeText('span',null,'阅读版本：',versions);
   for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'',`第 ${revision.version} 稿`,versions);button.type='button';button.onclick=()=>{state.structureRevision=revision.id;state.anchor=null;state.selected=null;renderStructureReader();renderComments()}}
@@ -82,25 +134,22 @@ function renderStructureReader(){
   if(!active){nodeText('p','structure-empty','方向已选定。等待 Codex 通过 structure-import 导入完整图文结构初稿。',status);return}
   const doc=active.payload;
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}
-  const confirm=state.structure.confirmations.filter(c=>c.payload.structure_revision===active.id);
-  if(confirm.length){nodeText('p','structure-confirmed',`此稿已有 ${confirm.length} 条确认记录；剧本交接锁定具体稿件修订。`,status)}
   const basisSelection=state.structure.selection_history?.find(item=>item.id===doc.direction_selection_revision);
   const basisSource=basisSelection?.payload.source_id;
   const title=el('header','structure-document-head');nodeText('small',null,`STORY STRUCTURE · 第 ${active.version} 稿`,title);nodeText('h2',null,doc.title,title);nodeText('p',null,`本稿依据「${structureSourceTitle(basisSource||'来源未知')}」的修订 ${basisSelection?.payload.source_revision.slice(0,16)||'UNKNOWN'} · ${active.created_at}`,title);reader.append(title);
   for(const section of doc.sections){
-    const nav=nodeText('button',null,STRUCTURE_SECTIONS[section.id],index);nav.type='button';nav.onclick=()=>document.getElementById(`structure-section-${section.id}`)?.scrollIntoView({behavior:'smooth',block:'start'});
+    const nav=nodeText('button',null,STRUCTURE_SECTIONS[section.id],index);nav.type='button';nav.setAttribute('aria-controls',`structure-section-${section.id}`);nav.onclick=()=>document.getElementById(nav.getAttribute('aria-controls'))?.scrollIntoView({behavior:'smooth',block:'start'});
     const area=el('section','structure-section');area.id=`structure-section-${section.id}`;nodeText('small',null,STRUCTURE_SECTIONS[section.id].toUpperCase(),area);
     area.append(structureBlockElement('h2',{id:`heading-${section.id}`,text:section.title},active));
     for(const block of section.blocks)area.append(structureBlockElement('p',block,active));
-    for(const visual of section.visuals||[])area.append(renderStructureVisual(visual));reader.append(area);
+    for(const visual of section.visuals||[])area.append(renderStructureVisual(visual,true));reader.append(area);
   }
   const tail=el('section','structure-review-tail');nodeText('h2',null,'意见处理与版本记录',tail);
   if(doc.responses?.length){for(const item of doc.responses){const c=state.comments.find(c=>c.id===item.comment_id);const row=el('p');nodeText('b',null,c?`回应原稿意见：${c.body}`:`意见 ${item.comment_id}`,row);nodeText('span',null,item.explanation,row);if(c){const back=nodeText('button',null,'查看原稿意见',row);back.type='button';back.onclick=()=>locateComment(c)}tail.append(row)}}
   else nodeText('p',null,'本稿尚无关联意见处理说明。',tail);
   const allOpen=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN');nodeText('p',null,`待决意见 ${allOpen.length} 条；新稿不会自动关闭原稿意见。`,tail);
   const overall=nodeText('button',null,'添加整体意见',tail);overall.type='button';overall.onclick=()=>startDraft({type:'global'});
-  if(active.id===state.structure.current_revision&&!state.structure.direction_changed){const approve=nodeText('button','structure-confirm-button','确认此具体版本，供剧本创作',tail);approve.type='button';approve.onclick=()=>showStructureConfirmation(active)}
-  reader.append(tail);paintStructureRegions();reader.onmouseup=()=>setTimeout(captureStructureSelection,0);reader.onkeyup=()=>setTimeout(captureStructureSelection,0);
+  reader.append(tail);paintStructureRegions();watchStructureIndex();
 }
 async function chooseStructureDirection(id){
   const current=state.structure.selection;
@@ -115,26 +164,10 @@ async function chooseStructureDirection(id){
     catch(error){commit.disabled=false;toast(error.message)}
   };dialog.append(actions);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
 }
-function showStructureConfirmation(active){
-  const pending=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN').length;
-  const dialog=document.createElement('dialog');dialog.className='structure-confirm-dialog';
-  const heading=nodeText('h2',null,`确认第 ${active.version} 稿`,dialog);nodeText('p',null,`确认对象：${active.id}。当前仍有 ${pending} 条待决意见，会随确认记录保留。后续实质调整需要新稿再审阅。`,dialog);
-  const name=nodeText('input',null,undefined,dialog);name.placeholder='确认人姓名';name.setAttribute('aria-label','确认人姓名');
-  const note=nodeText('textarea',null,undefined,dialog);note.placeholder='确认说明（可选）';note.setAttribute('aria-label','确认说明');
-  const check=el('label');const checkbox=el('input');checkbox.type='checkbox';check.append(checkbox,document.createTextNode(' 我已审阅此具体版本及待决意见'));dialog.append(check);
-  const actions=el('div');const cancel=nodeText('button',null,'继续审阅',actions);cancel.onclick=()=>dialog.close();const commit=nodeText('button','primary','确认此稿',actions);commit.onclick=async()=>{if(!checkbox.checked||!name.value.trim())return toast('请填写确认人并勾选已审阅');try{await api('/api/story-structure/confirm',{method:'POST',body:JSON.stringify({revision_id:active.id,reviewer:name.value,note:note.value})});state.structure=await api('/api/story-structure');dialog.close();renderStructureReader();toast('具体结构版本已确认')}catch(error){toast(error.message)}};dialog.append(actions);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();heading.focus?.();
-}
-function captureStructureSelection(){
-  if(!isStructure()||state.drawMode)return;const selection=getSelection(),action=$('#selection-action');if(!selection||selection.isCollapsed||!selection.rangeCount){action.hidden=true;return}
-  const range=selection.getRangeAt(0),reader=$('#structure-reader'),nodes=[...reader.querySelectorAll('[data-structure-block]')];if(!reader.contains(range.startContainer)||!reader.contains(range.endContainer))return;
-  const touched=nodes.filter(node=>range.intersectsNode(node));if(!touched.length)return;
-  const first=touched[0],last=touched.at(-1),start=offsetIn(first,range.startContainer,range.startOffset),end=offsetIn(last,range.endContainer,range.endOffset);
-  const revision=structureRevision(),blocks=structureBlocks(revision.payload),firstIndex=blocks.findIndex(b=>b.id===first.dataset.structureBlock),lastIndex=blocks.findIndex(b=>b.id===last.dataset.structureBlock);
-  if(firstIndex<0||lastIndex<firstIndex||first===last&&end<=start)return;
-  const pieces=blocks.slice(firstIndex,lastIndex+1).map(b=>chars(b.text));pieces[0]=pieces[0].slice(start);pieces[pieces.length-1]=pieces.length===1?chars(blocks[firstIndex].text).slice(start,end):pieces[pieces.length-1].slice(0,end);
-  const quote=pieces.map(part=>part.join('')).join('\n');if(!quote.trim())return;
-  state.pending={type:'text',block_id:first.dataset.structureBlock,end_block_id:last.dataset.structureBlock,start,end,quote};
-  const rect=range.getBoundingClientRect();action.style.left=`${Math.max(8,Math.min(innerWidth-145,rect.left))}px`;action.style.top=`${Math.max(8,rect.top-43)}px`;action.hidden=false;
+function selectedStructureAnchor(){
+  const revision=structureRevision();if(!revision||state.drawMode)return null;
+  const anchor=textSelectionAnchor($('#structure-reader'),structureBlocks(revision.payload),'data-structure-block');
+  return anchor?{type:'text',...anchor}:null;
 }
 function structurePoint(event,stage){const rect=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))}}
 function structureRect(a,b){return[{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.max(a.y,b.y)},{x:Math.min(a.x,b.x),y:Math.max(a.y,b.y)}]}
@@ -143,4 +176,6 @@ document.addEventListener('pointerdown',event=>{const stage=event.target.closest
 document.addEventListener('pointermove',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const stage=document.querySelector(`.structure-visual-stage[data-visual-id="${CSS.escape(structureDrawing.visual)}"]`);const point=structurePoint(event,stage),last=structureDrawing.points.at(-1);if(Math.hypot(point.x-last.x,point.y-last.y)<.002)return;structureDrawing.points.push(point);if(structureDrawing.points.length>260)structureDrawing.points=structureDrawing.points.filter((_,i)=>i%2===0);paintStructureRegions()});
 document.addEventListener('pointerup',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const drawing=structureDrawing,stage=document.querySelector(`.structure-visual-stage[data-visual-id="${CSS.escape(drawing.visual)}"]`),visual=structureVisuals(structureRevision().payload).find(v=>v.id===drawing.visual);drawing.points.push(structurePoint(event,stage));structureDrawing=null;state.drawMode=null;stage.classList.remove('drawing');let points=drawing.points;if(drawing.rect)points=structureRect(points[0],points.at(-1));const xs=points.map(p=>p.x),ys=points.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);if(width<.008||height<.008){toast('圈选区域太小，请重新拖动');paintStructureRegions();return}if(points.length<4||structureArea(points)<width*height*.06)points=structureRect({x:Math.min(...xs),y:Math.min(...ys)},{x:Math.max(...xs),y:Math.max(...ys)});points=points.map(p=>({x:Math.round(p.x*10000)/10000,y:Math.round(p.y*10000)/10000}));startDraft({type:'region',visual_id:visual.id,asset_file:visual.file,points});paintStructureRegions()});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.drawMode){state.drawMode=null;structureDrawing=null;document.querySelectorAll('.structure-visual-stage').forEach(s=>s.classList.remove('drawing'));paintStructureRegions()}});
-window.addEventListener('DOMContentLoaded',()=>{$('#open-story-sources').onclick=()=>switchWorkspace('story.sources');$('#open-story-structure').onclick=()=>switchWorkspace('story.outline');$('#structure-comments').onclick=togglePanel});
+document.addEventListener('scroll',scheduleStructureIndex,{capture:true,passive:true});
+window.addEventListener('resize',scheduleStructureIndex);
+window.addEventListener('DOMContentLoaded',()=>{$('#open-story-sources').onclick=()=>switchWorkspace('story.sources');$('#open-story-structure').onclick=()=>switchWorkspace('story.outline')});

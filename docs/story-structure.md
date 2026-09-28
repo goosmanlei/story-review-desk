@@ -2,13 +2,18 @@
 
 故事结构在 `story.outline` 工作区阅读。设计依据为 [`design/story-structure/dist/index.html`](../design/story-structure/dist/index.html) 与[设计说明](../design/story-structure/README.md)。设计稿中的人物、图像和 24 分钟节奏都是示例，不会自动导入故事实例。
 
+章节目录按正文滚动位置高亮当前章节，点击目录可平滑定位；切换结构稿及图片加载引起的排版变化会重新校准。当前章节使用 `aria-current="location"` 标识，窄屏横向目录同步保持该项可见。
+
+图片和 SVG 图示按阅读栏宽度等比缩放，原始资产保持不变。图像容器与圈选叠层共用显示边界，归一化区域坐标在桌面和窄屏保持一致；不能让高清图片按原始像素撑开阅读栏。点击图片或 SVG 在当前页面打开大图浮层，原图按窗口完整适配；可用 Esc 或右上角关闭按钮退出，焦点回到原图。图片也支持 Enter／空格打开。圈选评论与已有区域评论保持原操作，绘制期间不打开大图；大图内的 Esc 不连带关闭评论面板。
+
 ## 方向与稿件版本
 
-1. 故事采编和故事结构在同一“故事创作”页面的子页标签间切换。故事结构未选方向时，初始页直接列出 `expansion-directions` 候选的摘要，提供“回看全文”和“选用这个方向”；选择操作属于故事结构子页。浏览器调用 `POST /api/story-structure/select-direction`，请求 `{"source_id":"...","expected_version":0}`。`expected_version` 是当前选择对象版本；重新选择须传最新版本。响应包含精确的选择修订。`GET /api/story-structure` 返回选择记录、来源资料、全部结构修订、当前修订、方向变更提示和确认记录。
+1. 故事采编和故事结构在同一“故事创作”页面的子页标签间切换。故事结构未选方向时，初始页直接列出 `expansion-directions` 候选的摘要，提供“回看全文”和“选用这个方向”；选择操作属于故事结构子页。浏览器调用 `POST /api/story-structure/select-direction`，请求 `{"source_id":"...","expected_version":0}`。`expected_version` 是当前选择对象版本；重新选择须传最新版本。响应包含精确的选择修订。`GET /api/story-structure` 返回选择记录、来源资料、全部结构修订、当前修订、方向变更提示和确认记录。方向选定后的阅读页不再显示回看方向全文、重新选择方向的操作区；首次选方向的初始页仍保留。
 2. Codex 读取 `structure-get`、`structure-review`，依据选定方向起草一份**完整**结构稿。方向未选定时不应为真实故事导入稿件。将图片或 SVG 图示放入故事实例的 `export/assets/`，在 JSON 中引用文件名。所有修订引用的资产都保留，导出清单逐一哈希。
 3. Codex 用 `structure-import file.json --expected-version N` 导入。初稿 `N=0`、`parent_revision=null`；调整稿 `N` 为当前结构对象版本、`parent_revision` 必须等于当前结构修订。调整稿须完整列出六章，不能只传 diff。方向选择修订必须是当前选择；方向变化后不能静默沿用旧选择。导入结果给出新结构修订 ID。
 4. 评论始终留在原修订。调整稿的 `responses` 单独写意见处理说明，关联原稿评论 ID；不会自动关闭意见。用户可切换版本审阅、点击处理说明定位原意见。新稿的评论从空白开始，历史待决数单列。
-5. 用户在页面勾选、填写确认人后，才可确认**当前**结构修订。`POST /api/story-structure/confirm` 记录 `revision_id,reviewer,note?`、所选方向修订和当时待决评论。`script-input`/`GET /api/story-structure/script-input` 返回准确确认稿、对应图文、方向来源与待决项。确认后再导入实质新稿或改选方向时 `requires_re_review=true`；剧本工作流应停止沿用旧确认作为当前约束。
+5. 阅读页只承担结构阅读与评论，不提供“确认此具体版本，供剧本创作”的按钮、弹窗或确认状态提示。历史确认记录与底层 `POST /api/story-structure/confirm`、`script-input` 接口保留兼容；移除页面入口不创建确认，不改变已有记录。
+6. 评论面板统一由浮动评论按钮打开，结构标题旁不再放重复的“审阅意见”按钮。文字圈选、整图／圈图评论、整体意见、版本切换和意见回应定位继续使用原能力。
 
 ## CLI
 
@@ -61,4 +66,4 @@ PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
 
 ## 持久化与恢复
 
-结构选择、完整修订、意见回应、确认记录都在对象/修订/依赖账本；图文评论和事件继续沿用共用账本。`export` 的 `objects.json`、`comments.json`、`manifest.json` 与 `assets/` 保存全部引用关系和素材 SHA-256。把实例仓库公开同步前须审阅评论和素材内容。干净恢复要求空库并验证清单及锚点。设计稿不会成为实例业务数据；正式故事方向和结构确认须由用户在真实实例中操作。
+结构选择、完整修订、意见回应、确认记录都在对象/修订/依赖账本；图文评论和事件继续沿用共用账本。`export` 的 `objects.json`、`comments.json`、`manifest.json` 与 `assets/` 保存全部引用关系和素材 SHA-256。把实例仓库公开同步前须审阅评论和素材内容。干净恢复要求空库并验证清单及锚点。设计稿不会成为实例业务数据；正式故事方向选择与版本接受以用户明确说明为准，页面精简不创建确认。
