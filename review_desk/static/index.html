@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="/polish.css">
   <link rel="stylesheet" href="/workspace.css">
   <link rel="stylesheet" href="/structure.css">
+  <link rel="stylesheet" href="/approach.css">
 </head>
 <body>
   <div class="layout">
@@ -35,7 +36,14 @@
             <div class="structure-layout"><nav id="structure-index" aria-label="结构稿章节"></nav><article id="structure-reader" aria-label="故事结构阅读稿"></article></div>
           </section>
         </section>
-        <div id="configuration-view" class="workspace-view" hidden></div><div id="current-view" class="workspace-view" hidden></div><div id="placeholder-view" class="workspace-view" hidden></div>
+        <div id="configuration-view" class="workspace-view" hidden></div><section id="approach-view" class="workspace-view" hidden>
+          <header class="approach-heading"><small>从故事到影像</small><h1>制作思路</h1><p>理解每一步为什么做、依据什么、交付什么，以及发现问题时回到哪里修订。</p></header>
+          <div class="approach-tabs" role="tablist" aria-label="制作思路">
+            <button id="approach-tab-story" data-approach-tab="story" type="button" role="tab" aria-controls="approach-body" aria-selected="true">故事创作</button>
+            <button id="approach-tab-materials" data-approach-tab="materials" type="button" role="tab" aria-controls="approach-body" aria-selected="false" tabindex="-1">素材生产</button>
+          </div>
+          <article id="approach-body" class="approach-body" role="tabpanel" aria-labelledby="approach-tab-story" tabindex="0"></article>
+        </section><div id="placeholder-view" class="workspace-view" hidden></div>
         <footer class="workspace-footer"><div><span class="footer-mark">阅</span><span><b>故事审阅台</b><small>故事创作与制作审阅</small></span></div><p>故事资料、创作配置与审阅意见以当前实例为准；本机运行凭据不会公开同步。</p></footer>
       </div>
     </main>
@@ -47,6 +55,7 @@
     <div id="comment-body"></div>
   </aside>
   <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/approach.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/structure.js" defer></script>
 </body>

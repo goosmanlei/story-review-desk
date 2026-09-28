@@ -23,7 +23,7 @@ STAGES = (
 )
 
 WORKSPACES = (
-    {"id": "current", "label": "当前工作", "domain": "project", "implemented": True},
+    {"id": "production.approach", "label": "制作思路", "domain": "project", "implemented": True},
     {"id": "story.sources", "label": "资料采编", "domain": "story", "implemented": True},
     {"id": "story.outline", "label": "故事结构", "domain": "story", "implemented": True},
     {"id": "story.script", "label": "剧本创作", "domain": "story", "implemented": False},

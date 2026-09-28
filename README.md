@@ -1,10 +1,12 @@
 # Story Review Desk
 
-独立、可复用的故事创作审阅台。展示、审阅、评论与数据管理的通用系统代码在本仓库；每个故事仓库保存实例配置、业务数据、素材，以及该故事特有的后台创作工具。创作过程不属于审阅台系统功能。服务端为 Python 标准库 HTTP + SQLite。整体框架已开放故事采编、故事结构阅读与系统配置，其他创作环节逐步迭代，见 [架构说明](docs/architecture.md)。
+独立、可复用的故事创作审阅台。展示、审阅、评论与数据管理的通用系统代码在本仓库；每个故事仓库保存实例配置、业务数据、素材，以及该故事特有的后台创作工具。创作过程不属于审阅台系统功能。服务端为 Python 标准库 HTTP + SQLite。整体框架已开放制作思路、故事采编、故事结构阅读与系统配置，其他创作环节逐步迭代，见 [架构说明](docs/architecture.md)。
+
+首页为“制作思路”，默认“故事创作”，另可切换“素材生产”；旧 `workspace=current` 链接兼容进入新页。方法内容由故事实例的 `content/production-approach.json` 提供，通用系统只做阅读展示，不维护工作统计或执行进度。存储格式、清理清单和验收入口见[制作思路说明](docs/production-approach.md)。
 
 ## 启动一个故事实例
 
-正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`。首次从公开导出恢复：
+正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`；有方法文档时一并保留 Git 中的 `content/`。首次从公开导出恢复：
 
 ```bash
 cd /path/to/story-review-desk-python

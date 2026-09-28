@@ -118,7 +118,7 @@ function jumpSourceChapter(sourceId,blockId){
 function renderWorkspaceNav(){
   const nav=$('#workspace-nav');nav.replaceChildren();
   const sections=[
-    ['current','当前工作','当前','全剧状态与当下可开展工作'],
+    ['production.approach','制作思路','思路','故事创作与素材生产方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与叙事拆解'],
     ['settings.workspace','故事设定','设定','主体、空间与实体关系'],
     ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
@@ -141,24 +141,25 @@ function renderStageLabel(){const current=state.configurations.values.PROJECT.bo
 
 function switchWorkspace(id,updateUrl=true){
   hideSelectionAction();
-  if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='story.sources';
+  if(id==='current')id='production.approach';
+  if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='production.approach';
   const previous=state.workspace,storyChild=id==='story.sources'||id==='story.outline';
   if(state.workspace!==id){state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null}
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
-  $('#story-workspace').hidden=!source;$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#current-view').hidden=id!=='current';
-  $('#placeholder-view').hidden=storyChild||id==='project.configuration'||id==='current';
+  $('#story-workspace').hidden=!source;$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#approach-view').hidden=id!=='production.approach';
+  $('#placeholder-view').hidden=storyChild||id==='project.configuration'||id==='production.approach';
   for(const [tab,selected] of [['#open-story-sources',source],['#open-story-structure',id==='story.outline']]){
     const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
   }
   $('#comments-toggle').hidden=!(source||id==='story.outline');closePanel();
-  $('#source-search').hidden=!source;$('#source-count').hidden=!source;
-  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'current':['当前工作','当']};
+  $('#source-search').closest('.search-box').hidden=!source;$('#source-search').hidden=!source;$('#source-count').hidden=!source;
+  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
-  if(id==='project.configuration')renderConfigurations();if(id==='current')renderCurrent();if(id==='story.outline'){renderStructureReader();renderComments()}
+  if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
   if(source){renderComments();scheduleSourceChapter()}
-  if(!source&&id!=='story.outline'&&id!=='project.configuration'&&id!=='current')renderPlaceholder(id);
-  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);history.replaceState(null,'',url)}
+  if(!source&&id!=='story.outline'&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
+  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
   if(updateUrl&&!(storyChild&&['story.sources','story.outline'].includes(previous)))window.scrollTo(0,0);
 }
 
@@ -170,35 +171,6 @@ function renderPlaceholder(id){
   nodeText('h2',null,'这个工作区将在后续阶段开放',card);
   nodeText('p',null,'当前故事实例处于资料采编阶段。此入口保留在完整系统框架中；尚未实现的创作、设定或制作功能不会假装可用，也不会产生隐含业务数据。',card);
   const button=nodeText('button','primary','返回故事采编',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
-}
-
-function renderCurrent(){const root=$('#current-view');root.replaceChildren();
-  const stage=state.framework.stages.find(s=>s.id===state.configurations.values.PROJECT.body.current_stage);
-  const open=state.comments.filter(comment=>comment.status==='OPEN').length;
-  const heading=el('header','current-heading');nodeText('h1',null,'当前工作',heading);
-  nodeText('p',null,'选择工作链与阶段，查看当前实例真实可推进的对象。',heading);root.append(heading);
-  const lanes=el('div','current-lanes');
-  for(const [index,title,detail,count,ready] of [
-    ['01','故事 → 剧本','来源、结构与剧本创作',`${state.sources.length} 份资料 · ${open} 条待处理评论`,true],
-    ['02','剧本 → 素材','设定与素材生产','后续阶段开放',false],
-    ['03','剧本 + 素材 → 全剧制作','分集与逐场制作','后续阶段开放',false]]){
-    const card=el('section','current-lane'+(ready?' active':''));nodeText('small',null,`${index} · ${ready?'正在推进':'已规划'}`,card);
-    nodeText('h2',null,title,card);nodeText('p',null,detail,card);nodeText('span',null,count,card);lanes.append(card)
-  }root.append(lanes);
-  const steps=el('div','current-steps');
-  for(const [index,title,detail,ready] of [['01','原始资料审阅',`${state.sources.length} 份版本 · ${open} 条待处理评论`,true],['02','故事结构',state.structure?.current_revision?`${state.structure.revisions.length} 稿 · 可继续审阅`:'等待选择改编方向',true],['03','叙事拆解与剧本','待后续任务开放',false]]){
-    const card=el('section','current-step'+(ready?' active':''));nodeText('small',null,index,card);nodeText('b',null,title,card);nodeText('span',null,detail,card);steps.append(card)
-  }root.append(steps);
-  const board=el('div','current-board'),status=el('aside','current-status');nodeText('small',null,'所选阶段',status);
-  nodeText('h2',null,stage?.label||'故事采编',status);nodeText('p',null,'当前资料、素材与评论均按本故事实例独立保存；页面仅依据已登记数据统计。',status);
-  nodeText('strong',null,`${state.sources.length} 份已登记资料`,status);nodeText('strong',null,`${open} 条待处理评论`,status);
-  const action=nodeText('button',null,'打开本阶段工作区 →',status);action.type='button';action.onclick=()=>switchWorkspace('story.sources');board.append(status);
-  const queue=el('section','current-queue');nodeText('small',null,'本阶段的对象与行动',queue);
-  nodeText('h2',null,'现在看什么，接下来做什么',queue);
-  for(const source of state.sources){const card=el('article','current-item');nodeText('small',null,source.version_type,card);
-    nodeText('h3',null,source.title,card);nodeText('p',null,source.origin,card);
-    const button=nodeText('button',null,'打开故事采编 →',card);button.type='button';button.onclick=()=>{switchWorkspace('story.sources');chooseSource(source.id)};queue.append(card)
-  }board.append(queue);root.append(board)
 }
 
 function renderConfigurations(){
@@ -316,7 +288,7 @@ function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
   if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   if(sourceChapters(state.current).length)state.expandedSources.add(state.current.id);
   $('#selection-action').hidden=true;
-  if(updateUrl){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
+  if(updateUrl&&state.current){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
   renderSources();renderDocument();renderComments();if(!keepScroll)$('#source-view').scrollTop=0;
 }
 
@@ -495,7 +467,12 @@ async function init(){try{
   renderStageLabel();
   const initialUrl=new URL(location.href);
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
-  switchWorkspace(initialUrl.searchParams.get('workspace')||'current',false);
+  switchWorkspace(initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach'),false);
+  window.addEventListener('popstate',()=>{
+    const url=new URL(location.href),source=url.searchParams.get('source');
+    if(source&&source!==state.current?.id)chooseSource(source,true,false);
+    switchWorkspace(url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),false);
+  });
   $('#brand-home').onclick=()=>location.assign('/');
   $('#reader-comments').onclick=togglePanel;
   $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources(false)};

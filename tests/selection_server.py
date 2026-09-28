@@ -3,6 +3,7 @@
 Open http://127.0.0.1:8776/selection-tests in a browser. No production data or AI
 credentials are loaded. The temporary instance is removed when the server stops.
 """
+import argparse
 import tempfile
 from pathlib import Path
 
@@ -18,8 +19,11 @@ class SelectionHandler(ReviewHandler):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8776)
+    args = parser.parse_args()
     with tempfile.TemporaryDirectory(prefix="review-selection-") as root:
-        with ReviewServer(("127.0.0.1", 8776), root, {"id": "selection-test", "title": "文本圈选隔离验收"}) as server:
+        with ReviewServer(("127.0.0.1", args.port), root, {"id": "selection-test", "title": "文本圈选隔离验收"}) as server:
             server.RequestHandlerClass = SelectionHandler
             source = {"id": "fixture", "title": "拖选测试正文", "version_type": "测试",
                       "origin": "隔离浏览器夹具", "source_url": "https://example.org/test",
@@ -41,7 +45,7 @@ def main():
             anchor = {"type": "text", "block_id": "long", "end_block_id": "long", "start": long_text.index(quote), "end": len(long_text), "quote": quote}
             server.store.create_comment({"source_id": "fixture", "anchor": anchor, "body": "长正文定位测试"})
             server.store.create_comment({"target_object_id": "story-structure", "target_revision_id": structure["revision"], "anchor": anchor, "body": "长结构定位测试"})
-            print("Browser tests: http://127.0.0.1:8776/selection-tests", flush=True)
+            print(f"Browser tests: http://127.0.0.1:{args.port}/selection-tests", flush=True)
             try:
                 server.serve_forever()
             except KeyboardInterrupt:
