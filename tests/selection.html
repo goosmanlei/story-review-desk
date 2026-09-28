@@ -123,6 +123,28 @@ async function main(){
     const rect=mark.getBoundingClientRect(),host=structure?{top:0,bottom:w.innerHeight}:d.querySelector('#source-view').getBoundingClientRect();
     assert(rect.top>=Math.max(0,host.top)&&rect.bottom<=Math.min(w.innerHeight,host.bottom),'定位后原圈选仍在可视范围外');
   });
+  await test('制作思路往返保留正文阅读位置',async()=>{
+    const reader=d.querySelector('#source-view');reader.scrollTop=180;await settle();const top=reader.scrollTop;
+    w.switchWorkspace('production.approach');await settle();w.switchWorkspace('story.sources');await settle();
+    assert(Math.abs(reader.scrollTop-top)<2,'切换制作思路丢失正文阅读位置');
+  });
+  await test('制作思路往返不删除未保存的评论草稿',async()=>{
+    const p=d.querySelector('#source-text p');await select(p,0,p,2,{release:p});quote();
+    const input=d.querySelector('#comment-editor-text');input.value='隔离测试草稿';input.dispatchEvent(new w.Event('input',{bubbles:true}));
+    w.switchWorkspace('production.approach');await settle();w.switchWorkspace('story.sources');await settle();
+    const same=d.querySelector('#source-text p');await select(same,0,same,2,{release:same});quote();
+    assert(d.querySelector('#comment-editor-text').value==='隔离测试草稿','未保存草稿被清除');
+  });
+  await test('制作思路 Tab 与浏览器历史同步',async()=>{
+    w.switchWorkspace('production.approach');d.querySelector('#approach-tab-story').click();await settle();
+    d.querySelector('#approach-tab-materials').click();await settle();
+    assert(new URL(w.location.href).searchParams.get('tab')==='materials','Tab 未写入直接链接');
+    assert(d.querySelector('#approach-tab-materials').getAttribute('aria-selected')==='true','素材 Tab 未选中');
+    const backward=new Promise(resolve=>w.addEventListener('popstate',resolve,{once:true}));w.history.back();await backward;await settle();
+    assert(d.querySelector('#approach-tab-story').getAttribute('aria-selected')==='true','后退未恢复故事 Tab');
+    const forward=new Promise(resolve=>w.addEventListener('popstate',resolve,{once:true}));w.history.forward();await forward;await settle();
+    assert(d.querySelector('#approach-tab-materials').getAttribute('aria-selected')==='true','前进未恢复素材 Tab');
+  });
   const count=await fetch('/api/comments').then(r=>r.json());assert(count.length===3,'浏览器测试意外创建了评论');
   document.querySelector('#result').textContent=`${passed} passed, ${failed} failed`;
   document.title=`${failed?'FAIL':'PASS'} — 文本圈选回归测试`;

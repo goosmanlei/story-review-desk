@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
+from .approach import read_document
 from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
 from .polish import build_context, suggest
@@ -57,6 +58,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         store = self.server.store
         if path == "/api/instance":
             return self._json({"id": self.server.config["id"], "title": self.server.config["title"]})
+        if path == "/api/production-approach":
+            try:
+                return self._json(read_document(self.server.root))
+            except (ValueError, OSError):
+                return self._json({"error": "实例制作方法文档格式错误或无法读取"}, 503)
         if path == "/api/sources":
             return self._json(store.sources())
         if path == "/api/framework":
@@ -79,7 +85,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 404)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/app.js", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/app.js", "/approach.js", "/approach.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
