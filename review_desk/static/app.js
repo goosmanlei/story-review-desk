@@ -177,6 +177,8 @@ function renderPlaceholder(id){
   const button=nodeText('button','primary','返回故事采编',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
 }
 
+function applyFavicon(){const link=$("#site-favicon"),icon=state.configurations.favicon;if(link&&icon){link.type=icon.mime;link.href=icon.url}}
+
 function renderConfigurations(){
   const root=$('#configuration-view');root.replaceChildren();
   const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
@@ -210,14 +212,28 @@ function renderConfigurations(){
         if(spec.type==='model')group.addEventListener('change',()=>{const model=form.elements.ai_polish_model.value,allowed=effortOptions[model];const current=form.elements.ai_polish_effort.value;radioChoices(effortGroup,'ai_polish_effort',allowed,allowed.includes(current)?current:allowed.includes('medium')?'medium':allowed[0])});
         else effortGroup=group;form.append(group);continue}
       const label=el('label','config-field');nodeText('span',null,spec.label,label);
-      let input;if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
+      let input;if(spec.type==='favicon'){
+        input=el('select');const empty=el('option',null,'默认审阅台图标');empty.value='';input.append(empty);
+        for(const name of data.favicon_assets||[]){const option=el('option',null,name);option.value=name;input.append(option)}input.value=record.body[key];
+        const preview=el('img');preview.width=32;preview.height=32;preview.alt='站点图标预览';
+        const show=()=>{preview.src=input.value?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg'};show();input.onchange=show;
+        const file=el('input');file.type='file';file.accept='.svg,.png,.ico';file.setAttribute('aria-label','上传站点图标');
+        file.onchange=async()=>{const selected=file.files[0];if(!selected)return;if(selected.size>256*1024){toast('图标须在 256 KiB 以内');file.value='';return}save.disabled=true;
+          try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(selected)});
+            const result=await api('/api/favicon',{method:'POST',body:JSON.stringify({name:selected.name,data:encoded})});
+            if(!Array.from(input.options).some(option=>option.value===result.file)){const option=el('option',null,result.file);option.value=result.file;input.append(option)}input.value=result.file;show();toast('图标已上传，请保存配置以应用')
+          }catch(error){toast(error.message)}finally{save.disabled=false;file.value=''}};
+        label.append(preview,file);const clear=nodeText('button',null,'清空，恢复默认',label);clear.type='button';clear.onclick=()=>{input.value='';show()};
+        nodeText('small',null,'上传 SVG、PNG 或 PNG 编码的 ICO，至多 256 KiB。选择或清空后点保存配置。',label);
+      }
+      else if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
       else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=record.body[key]}
       else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=record.body[key]}
       if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
-      input.name=key;label.append(input);form.append(label)}
-    const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);updates[key]=value}
-      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');renderConfigurations();renderWorkspaceNav();renderStageLabel();toast('配置已保存')}
-      catch(error){toast(error.message)}};
+      input.name=key;input.setAttribute('aria-label',spec.label);label.append(input);form.append(label)}
+    const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();if(save.disabled)return;save.disabled=true;const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);updates[key]=value}
+      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');applyFavicon();renderConfigurations();renderWorkspaceNav();renderStageLabel();toast('配置已保存')}
+      catch(error){toast(error.message)}finally{save.disabled=false}};
     section.append(form);article.append(section)}
   showSection()
 }
@@ -514,7 +530,7 @@ function locateComment(comment){if(isScript())return locateScriptComment(comment
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
-  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
+  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
   renderStageLabel();
   const initialUrl=new URL(location.href);
   if(structure.revisions.some(r=>r.id===initialUrl.searchParams.get('structure_revision')))state.structureRevision=initialUrl.searchParams.get('structure_revision');

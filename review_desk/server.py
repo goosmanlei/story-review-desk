@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
+from .favicon import current as current_favicon, choices as favicon_choices, upload as upload_favicon
 from .approach import read_document
 from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
@@ -44,6 +45,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
@@ -70,7 +72,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/framework":
             return self._json(framework_catalog())
         if path == "/api/configurations":
-            return self._json({"catalog": configuration_catalog(), "values": store.configurations()})
+            try:
+                _, _, icon = current_favicon(self.server.root, store.configuration("SYSTEM")["body"])
+                return self._json({"catalog": configuration_catalog(), "values": store.configurations(), "favicon": icon, "favicon_assets": favicon_choices(self.server.root)})
+            except (ValueError, OSError) as exc:
+                return self._json({"error": str(exc)}, 503)
         if path == "/api/comments":
             comments = store.comments(query.get("source_id", [None])[0], query.get("target_object_id", [None])[0], query.get("target_revision_id", [None])[0])
             return self._json([{**comment, "anchor_state": store.anchor_state(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])} for comment in comments])
@@ -94,13 +100,21 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(script_input(store))
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 404)
+        if path == "/default-favicon.svg":
+            return self._file(Path(__file__).parent / "static" / "favicon.svg", "image/svg+xml")
+        if path == "/favicon.ico":
+            try:
+                icon_path, _, icon = current_favicon(self.server.root, store.configuration("SYSTEM")["body"])
+                return self._file(icon_path, icon["mime"])
+            except (ValueError, OSError) as exc:
+                return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
         if path in ("/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
-            mime = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm"}.get(asset.suffix.lower(), "application/octet-stream")
+            mime = {".ico": "image/x-icon", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm"}.get(asset.suffix.lower(), "application/octet-stream")
             return self._file(asset, mime)
         return self._json({"error": "not found"}, 404)
 
@@ -118,6 +132,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path == "/api/favicon":
+            try:
+                value = self._input()
+                name = upload_favicon(self.server.root, value.get("name"), value.get("data"))
+                return self._json({"file": name}, 201)
+            except (ValueError, KeyError, TypeError, OSError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if self.path == "/api/screenplays":
             try:
                 return self._json(import_screenplay(self.server.store, self._input()), 201)

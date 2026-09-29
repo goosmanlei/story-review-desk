@@ -4,7 +4,7 @@ import re
 
 from .framework import STAGES
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Curated Responses API choices, not an assertion that the local API key has access.
 MODEL_EFFORTS = {
@@ -17,6 +17,7 @@ MODEL_EFFORTS = {
 
 FIELDS = {
     "SYSTEM": {
+        "site_favicon": {"label": "站点图标（favicon）", "type": "favicon", "default": ""},
         "ai_polish_model": {"label": "评论润色模型", "type": "model", "default": "gpt-4.1-mini"},
         "ai_polish_effort": {"label": "推理强度", "type": "reasoning_effort", "default": "off"},
         "ai_polish_api_key_env": {"label": "润色 API Key 环境变量名", "type": "env_name", "default": "OPENAI_API_KEY"},
@@ -46,7 +47,11 @@ def validate(scope, body):
     merged = {**defaults(scope), **body}
     for name, spec in FIELDS[scope].items():
         value = merged[name]
-        if spec["type"] in ("text", "long_text"):
+        if spec["type"] == "favicon":
+            from .favicon import validate_name
+            if value != "":
+                validate_name(value)
+        elif spec["type"] in ("text", "long_text"):
             if not isinstance(value, str) or len(value) > (8000 if spec["type"] == "long_text" else 200):
                 raise ValueError("invalid configuration text: " + name)
         elif spec["type"] == "integer":
@@ -70,7 +75,7 @@ def validate(scope, body):
 def migrate(scope, saved_schema_version, body):
     if saved_schema_version > SCHEMA_VERSION:
         raise ValueError("configuration requires newer software")
-    if saved_schema_version not in (1, 2, SCHEMA_VERSION):
+    if saved_schema_version not in (1, 2, 3, SCHEMA_VERSION):
         raise ValueError("no migration for configuration schema")
     if scope == "SYSTEM" and saved_schema_version < 3:
         body = {key: value for key, value in body.items() if key != "enabled_workspaces"}

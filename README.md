@@ -19,6 +19,8 @@ docker compose up -d --build
 
 可选的“AI 润色修改意见”默认从服务容器的 `OPENAI_API_KEY` 环境变量读取密钥（启动 Compose 的 shell 中提供）。“系统管理 → 系统配置 → 系统与 AI”可编辑模型、该模型支持的推理强度和密钥环境变量名；这里保存的只是名称，不是密钥值。若改用其他名称，须在本机、不入库的 `compose.override.yaml` 中给 `app` 服务添加同名环境变量透传，例如 `environment: [STORY_POLISH_API_KEY]`，并在启动 Compose 的 shell 中提供其值；仅修改页面配置不会自动把宿主机变量传进容器。选项按 [OpenAI 模型文档](https://developers.openai.com/api/docs/models)维护，具体可用性还取决于本机 API 密钥权限。新建或编辑评论时，有输入即可直接点击润色：系统先生成并核验包含故事背景、创作背景、阶段、原文上下文、各版本资料和草稿的参考快照，再调用 Responses API（`store=false`）；也可先单独点击“查看润色参考”。建议不会自动保存。未配置密钥时明确报错。凭据不得写进故事仓库。
 
+站点图标可在同一“系统与 AI”配置页上传、选择、替换或清空；默认使用系统书页图标。图标保存在实例受管目录并随公开导出校验、恢复；格式、API 与迁移规则见[站点图标说明](docs/favicon.md)。
+
 ## 数据访问与公开同步
 
 导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目仅显示标题，类型、来源等信息在右侧详情中查看。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放/下载；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
