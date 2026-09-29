@@ -120,7 +120,7 @@ function jumpSourceChapter(sourceId,blockId){
 function renderWorkspaceNav(){
   const nav=$('#workspace-nav');nav.replaceChildren();
   const sections=[
-    ['production.approach','制作思路','思路','故事创作与素材生产方法'],
+    ['production.approach','制作思路','思路','故事创作与生产制作方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与分集剧本'],
     ['settings.workspace','故事设定','设定','主体、空间与实体关系'],
     ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],

@@ -47,7 +47,7 @@ class ApproachTest(unittest.TestCase):
     def test_instance_document_round_trip_and_reload(self):
         value = {"schema_version": 1, "tabs": [
             {"id": id, "label": label, "title": "独立实例", "lead": "<b>原样文本</b>", "sections": []}
-            for id, label in [("story", "故事创作"), ("materials", "素材生产")]
+            for id, label in [("story", "故事创作"), ("materials", "生产制作")]
         ]}
         self.path.write_text(json.dumps(value))
         self.assertEqual(self.get("/api/production-approach"), value)
