@@ -19,7 +19,7 @@
 
 ## 分集剧本回归
 
-`PYTHONPATH=.:tests python3 tests/screenplay_server.py --port 8793 --evidence /tmp/screenplay-browser.json` 启动一次性双版本、双分集测试资料，浏览器打开 `/screenplay-tests` 点击“运行隔离检查”。19 项覆盖版本展开、分集切换、评论新增/编辑/关闭/重开、历史查看、不同版本和分集的评论与草稿隔离、长块精确引用定位、刷新持久化、润色上下文及返回原故事/结构。测试会写入临时评论，不使用正式库或 AI 密钥；重新运行前重启夹具以恢复干净资料。
+`PYTHONPATH=.:tests python3 tests/screenplay_server.py --port 8793 --evidence /tmp/screenplay-browser.json` 启动一次性双版本、双分集测试资料，浏览器打开 `/screenplay-tests` 点击“运行隔离检查”。34 项覆盖版本、分集、场次与直达链接，概览和单场正文、前进后退、无效场链接、窄屏、新增版本自动展示，以及评论新增/编辑/关闭/重开、跨场完整引用与两端定位、草稿隔离和恢复、长块精确定位、刷新持久化、润色上下文及返回原故事/结构。测试会写入临时评论，不使用正式库或 AI 密钥；重新运行前重启夹具以恢复干净资料。
 
 `tests/test_screenplay.py` 验证整版原子保存、同 ID 不覆盖、Unicode 跨块锚点、评论事件与导出恢复、改编依据固定于原修订。AI 异步结果按当前分集与草稿匹配；切换后迟到的建议不会写入新草稿。真实鼠标圈选和桌面/窄屏检查另在实例验收记录中留证，不把程序化 Range 检查算作真实手势。
 

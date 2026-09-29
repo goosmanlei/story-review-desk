@@ -1,45 +1,95 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>剧本浏览器隔离验收</title>
-<style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb}pre{white-space:pre-wrap}</style>
-<h1>剧本浏览器隔离验收</h1><button id="run">运行隔离检查</button><pre id="results">尚未运行。只使用临时测试资料，无正式评论或 AI 请求。</pre><iframe id="app" src="/?workspace=story.script&script=script-one&episode=script-one-e1"></iframe>
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>剧本集场隔离验收</title>
+<style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb;max-width:100%}pre{white-space:pre-wrap}</style>
+<h1>剧本集场隔离验收</h1><button id="run">运行隔离检查</button><pre id="results">尚未运行。只使用临时测试资料，无正式评论或 AI 请求。</pre><iframe id="app" src="/?workspace=story.script&script=script-one&episode=script-one-e1"></iframe>
 <script>
-const frame=document.querySelector('iframe'),out=document.querySelector('#results');
-const wait=async(fn)=>{for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('等待页面状态超时')};
+const frame=document.querySelector('iframe'),out=document.querySelector('#results'),checks=[];
+const wait=async fn=>{for(let i=0;i<120;i++){if(fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('等待页面状态超时')};
 const delay=()=>new Promise(r=>setTimeout(r,150));
-const checks=[];function ok(value,name){if(!value)throw Error(name);checks.push({name,passed:true});out.textContent=JSON.stringify(checks,null,2)}
 const d=()=>frame.contentDocument,w=()=>frame.contentWindow,q=s=>d().querySelector(s);
-const click=async s=>{q(s).click();await delay()};
-const text=value=>{q('#comment-editor-text').value=value;q('#comment-editor-text').dispatchEvent(new Event('input',{bubbles:true}))};
-async function select(block,start,end){const n=q(`#screenplay-text [data-block-id="${block}"]`),r=d().createRange();r.setStart(n.firstChild,start);r.setEnd(n.firstChild,end);w().getSelection().removeAllRanges();w().getSelection().addRange(r);n.scrollIntoView({block:end>100?'end':'center'});d().dispatchEvent(new Event('selectionchange'));await wait(()=>!q('#selection-action').hidden);await click('#selection-action')}
-async function edition(id){const button=q(`[data-script-id="${id}"]`);if(button.getAttribute('aria-expanded')!=='true')await click(`[data-script-id="${id}"]`)}
+function ok(value,name){if(!value)throw Error(name);checks.push({name,passed:true});out.textContent=JSON.stringify(checks,null,2)}
+async function click(s){const node=q(s);if(!node)throw Error('未找到 '+s);node.click();await delay()}
+function text(value){q('#comment-editor-text').value=value;q('#comment-editor-text').dispatchEvent(new Event('input',{bubbles:true}))}
+function pointAt(host,offset){const walker=d().createTreeWalker(host,NodeFilter.SHOW_TEXT);let node;while((node=walker.nextNode())){if(offset<=node.length)return [node,offset];offset-=node.length}throw Error('选区超出正文')}
+async function select(block,start,end){
+ const n=q('#screenplay-text [data-block-id="'+block+'"]'),r=d().createRange(),a=pointAt(n,start),b=pointAt(n,end);
+ r.setStart(a[0],a[1]);r.setEnd(b[0],b[1]);w().getSelection().removeAllRanges();w().getSelection().addRange(r);
+ n.scrollIntoView({block:end>100?'end':'center'});d().dispatchEvent(new Event('selectionchange'));await wait(()=>!q('#selection-action').hidden);await click('#selection-action');
+}
+async function load(url){await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.src=url})}
+async function episode(id){await click('[data-episode-id="'+id+'"]')}
+async function scene(id){await click('[data-scene-id="'+id+'"]')}
+async function edition(id){const button=q('[data-script-id="'+id+'"]');if(button.getAttribute('aria-expanded')!=='true')await click('[data-script-id="'+id+'"]')}
 document.querySelector('#run').onclick=async()=>{checks.length=0;try{
  await wait(()=>q('[data-episode-id="script-one-e1"]'));
- ok(q('#open-story-script').getAttribute('aria-selected')==='true','剧本 Tab 与直接链接');
+ ok(q('#open-story-script').getAttribute('aria-selected')==='true'&&q('[data-scene-id="s1"]')&&q('[data-scene-id="s2"]'),'直达分集概览及有序场次');
+ ok(!q('#screenplay-text')&&q('#screenplay-reader').textContent.includes('本集 2 场'),'概览不重复展示正文');
  await click('[data-script-id="script-one"]');ok(q('[data-episode-id="script-one-e1"]').parentElement.hidden,'版本可收起');
- await edition('script-one');await click('[data-episode-id="script-one-e2"]');ok(q('#screenplay-head').textContent==='第2集','切换分集');
- await click('[data-episode-id="script-one-e1"]');await select('a',0,2);text('隔离测试：请补动作');await click('button[data-polish] + button');
- ok(!q('#comment-editor-text'),'收起草稿');await select('a',0,2);ok(q('#comment-editor-text').value==='隔离测试：请补动作','相同圈选恢复本集草稿');
- await click('[data-episode-id="script-one-e2"]');await select('a',0,2);ok(q('#comment-editor-text').value==='','另一集草稿不串位');
- await edition('script-two');await click('[data-episode-id="script-two-e1"]');await select('a',0,2);ok(q('#comment-editor-text').value==='','另一版本草稿不串位');
- await edition('script-one');await click('[data-episode-id="script-one-e1"]');await select('a',0,2);text('隔离测试：请补动作');
- const preview=[...q('.editor-actions').querySelectorAll('button')].find(b=>b.textContent==='查看润色参考');preview.click();await wait(()=>q('.context-preview'));
- ok(q('.context-preview').textContent.includes('剧本创作')&&q('.context-preview').textContent.includes('小说待审阅'),'润色参考含剧本阶段、分集、源小说及结构');
- q('.editor-actions .primary').click();await wait(()=>q('.comment-card'));ok(q('.comment-card').textContent.includes('隔离测试：请补动作'),'创建评论');
- await click('[data-episode-id="script-one-e2"]');ok(!q('.comment-card'),'切换分集评论隔离');
- await edition('script-two');await click('[data-episode-id="script-two-e1"]');ok(!q('.comment-card'),'切换版本评论隔离');
- await edition('script-one');await click('[data-episode-id="script-one-e1"]');await click('#comments-toggle');
- [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='编辑').click();text('隔离测试：动作已核对');q('.editor-actions .primary').click();await wait(()=>!q('#comment-editor-text'));
- ok(q('.comment-card').textContent.includes('动作已核对'),'编辑评论');
+ await edition('script-one');await scene('s1');
+ ok(q('#screenplay-text').textContent.includes('李寄')&&!q('#screenplay-text').textContent.includes('末尾定位目标')&&q('#screenplay-reader').textContent.includes('庙后｜外景·日'),'单场正文与时空');
+ ok(w().location.search.includes('scene=s1'),'场 ID 写入直达链接');
+ await click('.screenplay-scene-pager button:last-child');
+ ok(q('#screenplay-text').textContent.includes('末尾定位目标')&&!q('#screenplay-text').textContent.includes('李寄'),'换场只展示目标场正文');
+ ok(q('#screenplay-reader').textContent.includes('庙门｜内景·夜')&&q('#screenplay-reader').textContent.includes('预计 2分'),'场名时空与预计时长');
+ w().history.back();await wait(()=>q('#screenplay-head').textContent==='场一·庙后');ok(true,'浏览器后退恢复场次');
+ await select('a',0,2);text('隔离测试：请补动作');
+ await click('.screenplay-scene-pager button:last-child');
+ ok(q('#comment-editor-text').value==='隔离测试：请补动作','换场保留本集评论草稿');
+ await click('.screenplay-scene-pager button:first-child');
+ ok(q('#comment-editor-text').value==='隔离测试：请补动作','返回原场保留草稿');
+ await click('button[data-polish] + button');await select('a',0,2);
+ ok(q('#comment-editor-text').value==='隔离测试：请补动作','收起后原圈选恢复草稿');
+ await episode('script-one-e2');await scene('s1');await select('a',0,2);
+ ok(q('#comment-editor-text').value==='','另一集草稿不串位');
+ await click('[data-script-id="script-two"]');await scene('s1');await select('a',0,2);
+ ok(q('#comment-editor-text').value==='','另一版本草稿不串位');
+ await click('[data-script-id="script-one"]');await scene('s1');
+ ok(q('#comment-editor-text').value==='隔离测试：请补动作','返回原集自动恢复草稿');
+ await load(w().location.href);await wait(()=>q('#comment-editor-text'));
+ ok(q('#comment-editor-text').value==='隔离测试：请补动作','刷新恢复未保存草稿');
+ const preview=[...d().querySelectorAll('.editor-actions button')].find(b=>b.textContent==='查看润色参考');preview.click();await wait(()=>q('.context-preview'));
+ ok(q('.context-preview').textContent.includes('剧本创作')&&q('.context-preview').textContent.includes('小说待审阅'),'AI 润色参考含准确分集与创作依据');
+ await click('.editor-actions .primary');await wait(()=>q('.comment-card'));
+ ok(q('.comment-card').textContent.includes('隔离测试：请补动作'),'评论提交与原修订归属');
+ await episode('script-one-e2');ok(!q('.comment-card'),'切换分集评论隔离');
+ await episode('script-one-e1');await scene('s1');
+ await click('#comments-toggle');
+ [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='编辑').click();text('隔离测试：动作已核对');q('.editor-actions .primary').click();
+ await wait(()=>!q('#comment-editor-text'));ok(q('.comment-card').textContent.includes('动作已核对'),'编辑评论');
  [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='关闭评论').click();await wait(()=>!q('.comment-card'));
  await click('.history-head button');ok(q('.comment-card').textContent.includes('已关闭'),'关闭及历史查看');
  [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='重新打开').click();await wait(()=>q('#open-count').textContent.includes('1'));
  ok(q('.comment-card').textContent.includes('待处理'),'重新打开');
- const n=q('#screenplay-text [data-block-id="b"]'),len=n.firstChild.length;await select('b',len-7,len);text('隔离测试：末尾位置');q('.editor-actions .primary').click();await wait(()=>d().querySelectorAll('.comment-card').length===2);
- const card=[...d().querySelectorAll('.comment-card')].find(c=>c.textContent.includes('末尾位置'));card.querySelector('button').click();await new Promise(r=>setTimeout(r,750));
- const rect=q('.comment-mark.selected').getBoundingClientRect(),host=q('#screenplay-reader').getBoundingClientRect();ok(rect.top>=Math.max(host.top,0)&&rect.bottom<=host.bottom,'长段精确定位引用');
- await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.src=frame.src});await wait(()=>q('#screenplay-head')?.textContent==='第1集');await click('#comments-toggle');await wait(()=>d().querySelectorAll('.comment-card').length===2);ok(true,'刷新后正文与评论保持');
- await click('#open-story-sources');ok(!q('#story-workspace').hidden&&q('#source-text').textContent.includes('李寄'),'原故事采编可用');
- await click('#open-story-structure');ok(!q('#structure-workspace').hidden&&q('#structure-reader').textContent.includes('主题'),'原故事结构可用');
- await click('#open-story-script');ok(q('#screenplay-head').textContent==='第1集','返回剧本保留当前集');
+ const snapshot=await (await fetch('/api/screenplays')).json(),ep=snapshot.versions.find(v=>v.object_id==='script-one').episodes[0],a=ep.payload.blocks[0],b=ep.payload.blocks[1],start=Array.from(a.text).length-1,anchor={block_id:'a',end_block_id:'b',start,end:2,quote:'🌙\n'+Array.from(b.text).slice(0,2).join('')};
+ const created=await fetch('/api/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({target_object_id:ep.object_id,target_revision_id:ep.id,anchor,body:'跨场引用测试'})});
+ ok(created.ok,'跨场评论仍由原分集修订接受');
+ const cross=await created.json();await w().refreshComments();await wait(()=>q('#comment-'+cross.id));
+ ok(q('#comment-'+cross.id).textContent.includes('场一·庙后 → 场二·门闩')&&q('#comment-'+cross.id+' q').textContent.includes('🌙'),'跨场完整引用与场次范围');
+ await click('#comment-'+cross.id+' .card-actions button:first-child');
+ ok(q('#screenplay-head').textContent==='场一·庙后'&&q('.comment-mark.selected'),'跨场引用定位开头');
+ await click('#comment-'+cross.id+' .screenplay-comment-end');
+ ok(q('#screenplay-head').textContent==='场二·门闩'&&q('.comment-mark.selected'),'跨场引用定位结尾');
+ const n=q('#screenplay-text [data-block-id="b"]'),len=n.textContent.length;await select('b',len-7,len);text('隔离测试：末尾位置');await click('.editor-actions .primary');
+ await wait(()=>[...d().querySelectorAll('.comment-card')].some(c=>c.textContent.includes('末尾位置')));
+ const card=[...d().querySelectorAll('.comment-card')].find(c=>c.textContent.includes('末尾位置'));card.querySelector('.card-actions button').click();await delay();
+ const rect=q('.comment-mark.selected').getBoundingClientRect(),host=q('#screenplay-reader').getBoundingClientRect();
+ ok(rect.top>=Math.max(host.top,0)&&rect.bottom<=host.bottom,'长块末尾精确定位');
+ await load(w().location.href);await wait(()=>q('#screenplay-head')?.textContent==='场二·门闩');
+ ok(q('[data-block-id="b"]')&&q('#open-count').textContent.includes('3'),'刷新恢复场次与评论');
+ await load('/?workspace=story.script&script=script-one&episode=script-one-e1&scene=invalid');
+ await wait(()=>q('[data-scene-id="s1"]'));ok(!q('#screenplay-text'),'无效场链接回到本集概览');
+ frame.style.width='400px';await delay();
+ ok(d().documentElement.scrollWidth<=420&&q('[data-scene-id="s1"]'),'窄屏场次目录可阅读');
+ frame.style.width='1400px';
+ const current=(await (await fetch('/api/screenplays')).json()).versions.find(v=>v.object_id==='script-one');
+ const third={...current.payload,id:'script-three',title:'版本三',episodes:current.episodes.map((item,index)=>({...item.payload,id:'script-three-e'+(index+1)}))};
+ const published=await fetch('/api/screenplays',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(third)});
+ ok(published.ok,'隔离实例可按现有契约新增版本');
+ await load('/?workspace=story.script&script=script-three&episode=script-three-e1');
+ await wait(()=>q('[data-script-id="script-three"]'));
+ ok(q('[data-episode-id="script-three-e2"]')&&q('[data-scene-id="s2"]'),'新增版本自动显示集场目录');
+ await click('#open-story-sources');ok(q('#source-text').textContent.includes('李寄'),'故事采编仍可用');
+ await click('#open-story-structure');ok(q('#structure-reader').textContent.includes('主题'),'故事结构仍可用');
+ await click('#open-story-script');ok(q('[data-scene-id="s1"]'),'返回剧本保留本集概览');
  const result={passed:checks.length,checks};await fetch('/test-results',{method:'POST',body:JSON.stringify(result)});out.textContent=JSON.stringify(result,null,2);
  }catch(e){const result={failed:String(e),checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)})}};
 </script></html>

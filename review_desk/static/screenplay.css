@@ -6,6 +6,19 @@
 .screenplay-basis a {color:var(--accent,#9b502e)}
 .screenplay-scene-meta {color:var(--muted,#756e64);font-size:14px}
 #screenplay-text .section-title {margin-top:32px}
+#screenplay-index .source-group-toggle.active {color:#fff1d9;border-left:3px solid var(--desk-gold,#deb083)}
+.screenplay-breadcrumb {display:flex;align-items:center;flex-wrap:wrap;gap:5px;margin-bottom:18px;color:#77786f;font-size:12px}
+.screenplay-breadcrumb button {border:0;background:transparent;padding:3px 0;color:var(--desk-red,#9f382e);text-align:left;text-decoration:underline;text-underline-offset:3px}
+.screenplay-scene-list {display:grid;gap:10px;margin:25px 0 36px}
+.screenplay-scene-button {display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 18px;width:100%;padding:16px 18px;border:1px solid var(--desk-line,#d4cbb9);background:#fffdf7;color:var(--desk-ink,#20221d);text-align:left}
+.screenplay-scene-button:hover,.screenplay-scene-button:focus-visible {border-color:var(--desk-red,#9f382e);background:#fff7ed}
+.screenplay-scene-button strong {grid-column:1/-1;font-size:17px;line-height:1.45}
+.screenplay-scene-button span {color:#5d615b;font-size:13px;line-height:1.5}
+.screenplay-scene-button small {white-space:nowrap;color:var(--desk-red,#9f382e);font-size:12px}
+.screenplay-scene-pager {display:flex;justify-content:space-between;gap:12px;margin-top:35px;padding-top:20px;border-top:1px solid var(--desk-line,#d4cbb9)}
+.screenplay-scene-pager button {max-width:48%;padding:9px 13px;border:1px solid var(--desk-line,#d4cbb9);background:#fffdf7;color:var(--desk-red,#9f382e);text-align:left}
+.screenplay-comment-scope {display:block;margin:5px 0;color:#755948!important;letter-spacing:normal!important}
+.screenplay-comment-end {margin-bottom:8px;border:0;background:transparent;padding:0;color:var(--desk-red,#9f382e);font-size:12px;text-decoration:underline}
 @media(min-width:701px){
   #screenplay-workspace .text-reader{position:sticky;top:70px;height:calc(100dvh - 70px);min-height:0;overflow:hidden}
   #screenplay-workspace .text-reader-index{min-height:0;overflow:hidden}
@@ -16,4 +29,6 @@
 @media(max-width:700px){
   #screenplay-workspace .text-reader-index{max-height:min(44dvh,360px);min-height:0;overflow:hidden}
   #screenplay-index .source-button{min-width:0;width:100%}
+  .screenplay-scene-button{grid-template-columns:1fr;padding:13px}
+  .screenplay-scene-button strong{font-size:15px}
 }
