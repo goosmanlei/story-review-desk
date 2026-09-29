@@ -1,8 +1,9 @@
 <!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>剧本集场隔离验收</title>
 <style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb;max-width:100%}pre{white-space:pre-wrap}</style>
-<h1>剧本集场隔离验收</h1><button id="run">运行隔离检查</button><pre id="results">尚未运行。只使用临时测试资料，无正式评论或 AI 请求。</pre><iframe id="app" src="/?workspace=story.script&script=script-one&episode=script-one-e1"></iframe>
+<h1>剧本集场隔离验收</h1><button id="run">运行隔离检查</button> <button id="narrow" type="button">切换 400 像素预览</button><pre id="results">尚未运行。只使用临时测试资料，无正式评论或 AI 请求。</pre><iframe id="app" src="/?workspace=story.script"></iframe>
 <script>
 const frame=document.querySelector('iframe'),out=document.querySelector('#results'),checks=[];
+document.querySelector('#narrow').onclick=()=>{frame.style.width=frame.style.width==='400px'?'1400px':'400px'};
 const wait=async fn=>{for(let i=0;i<120;i++){if(fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('等待页面状态超时')};
 const delay=()=>new Promise(r=>setTimeout(r,150));
 const d=()=>frame.contentDocument,w=()=>frame.contentWindow,q=s=>d().querySelector(s);
@@ -18,23 +19,28 @@ async function select(block,start,end){
 async function load(url){await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.src=url})}
 async function episode(id){await click('[data-episode-id="'+id+'"]')}
 async function scene(id){await click('[data-scene-id="'+id+'"]')}
-async function edition(id){const button=q('[data-script-id="'+id+'"]');if(button.getAttribute('aria-expanded')!=='true')await click('[data-script-id="'+id+'"]')}
+async function edition(id){const button=q('[data-script-id="'+id+'"]');if(button.getAttribute('aria-current')!=='page')await click('[data-script-id="'+id+'"]')}
 document.querySelector('#run').onclick=async()=>{checks.length=0;try{
+ await wait(()=>q('[data-script-id="script-two"]'));
+ ok(q('[data-script-id="script-two"]').getAttribute('aria-current')==='page','默认选择最新可用版本');
+ await load('/?workspace=story.script&script=script-one&episode=script-one-e1');
  await wait(()=>q('[data-episode-id="script-one-e1"]'));
  ok(q('#open-story-script').getAttribute('aria-selected')==='true'&&q('[data-scene-id="s1"]')&&q('[data-scene-id="s2"]'),'直达分集概览及有序场次');
- ok(!q('#screenplay-text')&&q('#screenplay-reader').textContent.includes('本集 2 场'),'概览不重复展示正文');
- await click('[data-script-id="script-one"]');ok(q('[data-episode-id="script-one-e1"]').parentElement.hidden,'版本可收起');
- await edition('script-one');await scene('s1');
- ok(q('#screenplay-text').textContent.includes('李寄')&&!q('#screenplay-text').textContent.includes('末尾定位目标')&&q('#screenplay-reader').textContent.includes('庙后｜外景·日'),'单场正文与时空');
+ ok(q('#screenplay-index').children.length===2&&q('#screenplay-index').firstElementChild.dataset.scriptId==='script-one'&&q('#screenplay-index').lastElementChild.dataset.scriptId==='script-two','可选版本保留原顺序');
+ ok(q('[data-episode-id="script-one-e1"] .screenplay-episode-meta').textContent.includes('E01')&&q('[data-episode-id="script-one-e1"] strong').textContent==='第1集','分集双行显示编号、场次与标题');
+ ok(!q('#screenplay-text')&&q('#screenplay-overview').textContent.includes('2 场')&&q('#screenplay-scene-index').children.length===2,'概览不重复展示正文');
+ await scene('s1');
+ ok(q('#screenplay-text').textContent.includes('李寄')&&!q('#screenplay-text').textContent.includes('末尾定位目标')&&q('#screenplay-detail').textContent.includes('庙后 · 外景·日'),'单场正文与时空');
+ ok(!q('#screenplay-reader h2')&&!q('#screenplay-reader nav')&&!q('#screenplay-reader details'),'正文区直接显示单场原文');
  ok(w().location.search.includes('scene=s1'),'场 ID 写入直达链接');
- await click('.screenplay-scene-pager button:last-child');
+ await scene('s2');
  ok(q('#screenplay-text').textContent.includes('末尾定位目标')&&!q('#screenplay-text').textContent.includes('李寄'),'换场只展示目标场正文');
- ok(q('#screenplay-reader').textContent.includes('庙门｜内景·夜')&&q('#screenplay-reader').textContent.includes('预计 2分'),'场名时空与预计时长');
+ ok(q('#screenplay-detail').textContent.includes('庙门 · 内景·夜')&&q('#screenplay-detail').textContent.includes('预计 2分'),'场名时空与预计时长');
  w().history.back();await wait(()=>q('#screenplay-head').textContent==='场一·庙后');ok(true,'浏览器后退恢复场次');
  await select('a',0,2);text('隔离测试：请补动作');
- await click('.screenplay-scene-pager button:last-child');
+ await scene('s2');
  ok(q('#comment-editor-text').value==='隔离测试：请补动作','换场保留本集评论草稿');
- await click('.screenplay-scene-pager button:first-child');
+ await scene('s1');
  ok(q('#comment-editor-text').value==='隔离测试：请补动作','返回原场保留草稿');
  await click('button[data-polish] + button');await select('a',0,2);
  ok(q('#comment-editor-text').value==='隔离测试：请补动作','收起后原圈选恢复草稿');
