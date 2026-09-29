@@ -26,7 +26,7 @@ WORKSPACES = (
     {"id": "production.approach", "label": "制作思路", "domain": "project", "implemented": True},
     {"id": "story.sources", "label": "资料采编", "domain": "story", "implemented": True},
     {"id": "story.outline", "label": "故事结构", "domain": "story", "implemented": True},
-    {"id": "story.script", "label": "剧本创作", "domain": "story", "implemented": False},
+    {"id": "story.script", "label": "剧本创作", "domain": "story", "implemented": True},
     {"id": "settings.workspace", "label": "故事设定", "domain": "settings", "implemented": False},
     {"id": "materials.workspace", "label": "素材管理", "domain": "materials", "implemented": False},
     {"id": "production.workspace", "label": "全剧制作", "domain": "production", "implemented": False},

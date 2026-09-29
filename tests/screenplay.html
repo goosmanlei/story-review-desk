@@ -1,0 +1,45 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>剧本浏览器隔离验收</title>
+<style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb}pre{white-space:pre-wrap}</style>
+<h1>剧本浏览器隔离验收</h1><button id="run">运行隔离检查</button><pre id="results">尚未运行。只使用临时测试资料，无正式评论或 AI 请求。</pre><iframe id="app" src="/?workspace=story.script&script=script-one&episode=script-one-e1"></iframe>
+<script>
+const frame=document.querySelector('iframe'),out=document.querySelector('#results');
+const wait=async(fn)=>{for(let i=0;i<100;i++){if(fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('等待页面状态超时')};
+const delay=()=>new Promise(r=>setTimeout(r,150));
+const checks=[];function ok(value,name){if(!value)throw Error(name);checks.push({name,passed:true});out.textContent=JSON.stringify(checks,null,2)}
+const d=()=>frame.contentDocument,w=()=>frame.contentWindow,q=s=>d().querySelector(s);
+const click=async s=>{q(s).click();await delay()};
+const text=value=>{q('#comment-editor-text').value=value;q('#comment-editor-text').dispatchEvent(new Event('input',{bubbles:true}))};
+async function select(block,start,end){const n=q(`#screenplay-text [data-block-id="${block}"]`),r=d().createRange();r.setStart(n.firstChild,start);r.setEnd(n.firstChild,end);w().getSelection().removeAllRanges();w().getSelection().addRange(r);n.scrollIntoView({block:end>100?'end':'center'});d().dispatchEvent(new Event('selectionchange'));await wait(()=>!q('#selection-action').hidden);await click('#selection-action')}
+async function edition(id){const button=q(`[data-script-id="${id}"]`);if(button.getAttribute('aria-expanded')!=='true')await click(`[data-script-id="${id}"]`)}
+document.querySelector('#run').onclick=async()=>{checks.length=0;try{
+ await wait(()=>q('[data-episode-id="script-one-e1"]'));
+ ok(q('#open-story-script').getAttribute('aria-selected')==='true','剧本 Tab 与直接链接');
+ await click('[data-script-id="script-one"]');ok(q('[data-episode-id="script-one-e1"]').parentElement.hidden,'版本可收起');
+ await edition('script-one');await click('[data-episode-id="script-one-e2"]');ok(q('#screenplay-head').textContent==='第2集','切换分集');
+ await click('[data-episode-id="script-one-e1"]');await select('a',0,2);text('隔离测试：请补动作');await click('button[data-polish] + button');
+ ok(!q('#comment-editor-text'),'收起草稿');await select('a',0,2);ok(q('#comment-editor-text').value==='隔离测试：请补动作','相同圈选恢复本集草稿');
+ await click('[data-episode-id="script-one-e2"]');await select('a',0,2);ok(q('#comment-editor-text').value==='','另一集草稿不串位');
+ await edition('script-two');await click('[data-episode-id="script-two-e1"]');await select('a',0,2);ok(q('#comment-editor-text').value==='','另一版本草稿不串位');
+ await edition('script-one');await click('[data-episode-id="script-one-e1"]');await select('a',0,2);text('隔离测试：请补动作');
+ const preview=[...q('.editor-actions').querySelectorAll('button')].find(b=>b.textContent==='查看润色参考');preview.click();await wait(()=>q('.context-preview'));
+ ok(q('.context-preview').textContent.includes('剧本创作')&&q('.context-preview').textContent.includes('小说待审阅'),'润色参考含剧本阶段、分集、源小说及结构');
+ q('.editor-actions .primary').click();await wait(()=>q('.comment-card'));ok(q('.comment-card').textContent.includes('隔离测试：请补动作'),'创建评论');
+ await click('[data-episode-id="script-one-e2"]');ok(!q('.comment-card'),'切换分集评论隔离');
+ await edition('script-two');await click('[data-episode-id="script-two-e1"]');ok(!q('.comment-card'),'切换版本评论隔离');
+ await edition('script-one');await click('[data-episode-id="script-one-e1"]');await click('#comments-toggle');
+ [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='编辑').click();text('隔离测试：动作已核对');q('.editor-actions .primary').click();await wait(()=>!q('#comment-editor-text'));
+ ok(q('.comment-card').textContent.includes('动作已核对'),'编辑评论');
+ [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='关闭评论').click();await wait(()=>!q('.comment-card'));
+ await click('.history-head button');ok(q('.comment-card').textContent.includes('已关闭'),'关闭及历史查看');
+ [...q('.comment-card').querySelectorAll('button')].find(b=>b.textContent==='重新打开').click();await wait(()=>q('#open-count').textContent.includes('1'));
+ ok(q('.comment-card').textContent.includes('待处理'),'重新打开');
+ const n=q('#screenplay-text [data-block-id="b"]'),len=n.firstChild.length;await select('b',len-7,len);text('隔离测试：末尾位置');q('.editor-actions .primary').click();await wait(()=>d().querySelectorAll('.comment-card').length===2);
+ const card=[...d().querySelectorAll('.comment-card')].find(c=>c.textContent.includes('末尾位置'));card.querySelector('button').click();await new Promise(r=>setTimeout(r,750));
+ const rect=q('.comment-mark.selected').getBoundingClientRect(),host=q('#screenplay-reader').getBoundingClientRect();ok(rect.top>=Math.max(host.top,0)&&rect.bottom<=host.bottom,'长段精确定位引用');
+ await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.src=frame.src});await wait(()=>q('#screenplay-head')?.textContent==='第1集');await click('#comments-toggle');await wait(()=>d().querySelectorAll('.comment-card').length===2);ok(true,'刷新后正文与评论保持');
+ await click('#open-story-sources');ok(!q('#story-workspace').hidden&&q('#source-text').textContent.includes('李寄'),'原故事采编可用');
+ await click('#open-story-structure');ok(!q('#structure-workspace').hidden&&q('#structure-reader').textContent.includes('主题'),'原故事结构可用');
+ await click('#open-story-script');ok(q('#screenplay-head').textContent==='第1集','返回剧本保留当前集');
+ const result={passed:checks.length,checks};await fetch('/test-results',{method:'POST',body:JSON.stringify(result)});out.textContent=JSON.stringify(result,null,2);
+ }catch(e){const result={failed:String(e),checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)})}};
+</script></html>

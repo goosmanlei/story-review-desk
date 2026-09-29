@@ -120,6 +120,16 @@ class Store:
         return [dict(row) for row in self.db.execute("SELECT * FROM dependencies ORDER BY from_revision,to_revision,role")]
 
     def put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        return self.put_objects([{"object_id": object_id, "kind": kind, "payload": payload,
+                                  "expected_version": expected_version, "dependencies": dependencies}])[0]
+
+    def put_objects(self, records):
+        """Publish a complete set atomically, including optimistic version checks."""
+        with self.db:
+            self.db.execute("BEGIN IMMEDIATE")
+            return [self._put_object(**record) for record in records]
+
+    def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
         kinds = {item for domain in DOMAINS.values() for item in domain["kinds"]}
         if kind == "SOURCE" or kind not in kinds or not isinstance(object_id, str) or not object_id or not isinstance(payload, dict):
             raise ValueError("invalid object kind, id or payload; SOURCE uses put_source")
@@ -138,13 +148,12 @@ class Store:
                 raise ValueError("unknown dependency revision")
             refs.append((revision_id, target["id"], ref["role"]))
         stamp = now()
-        with self.db:
-            if current:
-                self.db.execute("UPDATE objects SET current_revision=?,version=?,updated_at=? WHERE id=?", (revision_id, new_version, stamp, object_id))
-            else:
-                self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
-            self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, canonical(payload), stamp))
-            self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
+        if current:
+            self.db.execute("UPDATE objects SET current_revision=?,version=?,updated_at=? WHERE id=?", (revision_id, new_version, stamp, object_id))
+        else:
+            self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
+        self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, canonical(payload), stamp))
+        self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
         return {"id": object_id, "kind": kind, "revision": revision_id, "version": new_version}
 
     def configuration(self, scope):
