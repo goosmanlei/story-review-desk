@@ -1,5 +1,48 @@
 /* Instance-owned reading material. No production state or progress is stored here. */
 let approachDocument = null;
+let approachIndexFrame = 0, approachIndexObserver = null;
+
+function scheduleApproachIndex() {
+  if (approachIndexFrame || $('#approach-view').hidden) return;
+  approachIndexFrame = requestAnimationFrame(() => { approachIndexFrame = 0; syncApproachIndex(); });
+}
+
+function syncApproachIndex() {
+  if ($('#approach-view').hidden) return;
+  const host = $('#approach-body'), index = $('#approach-index'), sidebar = $('#approach-sidebar');
+  const sections = [...host.querySelectorAll('.approach-section')];
+  if (!sections.length) return;
+  let readingTop = Math.max(0, $('.workspace-topbar').getBoundingClientRect().bottom) + 20;
+  // On narrow screens the same menu sits above the text; anchors must clear it.
+  if (getComputedStyle(index).display === 'flex') {
+    readingTop = Math.max(readingTop, parseFloat(getComputedStyle(sidebar).top) + sidebar.getBoundingClientRect().height + 20);
+  }
+  host.style.setProperty('--approach-scroll-offset', `${readingTop}px`);
+  let current = sections[0];
+  for (const section of sections) { if (section.getBoundingClientRect().top <= readingTop + 1) current = section; else break; }
+  const page = document.scrollingElement;
+  if (page.scrollTop > 0 && page.scrollTop + window.innerHeight >= page.scrollHeight - 2) current = sections.at(-1);
+  for (const link of index.querySelectorAll('a')) {
+    const active = link.hash === `#${current.id}`, changed = active && !link.classList.contains('active');
+    link.classList.toggle('active', active);
+    if (active) link.setAttribute('aria-current', 'location'); else link.removeAttribute('aria-current');
+    if (changed) {
+      const item = link.getBoundingClientRect(), menu = index.getBoundingClientRect();
+      if (item.top < menu.top) index.scrollTop += item.top - menu.top;
+      else if (item.bottom > menu.bottom) index.scrollTop += item.bottom - menu.bottom;
+      if (item.left < menu.left) index.scrollLeft += item.left - menu.left;
+      else if (item.right > menu.right) index.scrollLeft += item.right - menu.right;
+    }
+  }
+}
+
+function restoreApproachAnchor() {
+  if ($('#approach-view').hidden) return;
+  syncApproachIndex();
+  const target = document.getElementById(location.hash.slice(1));
+  if (target?.classList.contains('approach-section') && $('#approach-body').contains(target)) target.scrollIntoView({block: 'start'});
+  scheduleApproachIndex();
+}
 
 async function renderApproach() {
   const host = $('#approach-body');
@@ -11,23 +54,30 @@ async function renderApproach() {
     button.classList.toggle('active', active);
   }
   host.setAttribute('aria-labelledby', `approach-tab-${selected}`);
+  // Hash navigation must keep the mounted text and its browser reading position.
+  if (host.dataset.tab === selected) { restoreApproachAnchor(); return; }
+  delete host.dataset.tab;
+  approachIndexObserver?.disconnect();
+  const index = $('#approach-index'), sidebar = $('#approach-sidebar');
+  index.replaceChildren(); sidebar.hidden = true;
   host.textContent = '正在读取制作方法…';
   try {
     if (!approachDocument) approachDocument = api('/api/production-approach').catch(error => { approachDocument = null; throw error; });
-    const document = await approachDocument;
+    const guide = await approachDocument;
     // A fast tab switch must not let the previous request replace the selected text.
     const current = new URL(location.href).searchParams.get('tab') === 'materials' ? 'materials' : 'story';
     if (current !== selected) return;
     host.replaceChildren();
-    if (!document) { nodeText('p', 'approach-note', '本实例尚未提供制作方法文档。已有故事与审阅功能可继续使用。', host); return; }
-    const tab = document.tabs.find(item => item.id === selected);
+    if (!guide) { nodeText('p', 'approach-note', '本实例尚未提供制作方法文档。已有故事与审阅功能可继续使用。', host); return; }
+    const tab = guide.tabs.find(item => item.id === selected);
     nodeText('h2', null, tab.title, host);
     nodeText('p', 'approach-lead', tab.lead, host);
-    const index = el('nav', 'approach-index'); index.setAttribute('aria-label', `${tab.label}阅读目录`);
+    $('#approach-index-title').textContent = tab.label;
+    index.setAttribute('aria-label', `${tab.label}阅读目录`);
     for (const section of tab.sections) {
-      const a = nodeText('a', null, section.title, index); a.href = `#approach-${tab.id}-${section.id}`;
+      const a = nodeText('a', 'source-chapter-button', section.title, index); a.href = `#approach-${tab.id}-${section.id}`;
     }
-    host.append(index);
+    sidebar.hidden = !tab.sections.length;
     for (const section of tab.sections) {
       const article = el('section', 'approach-section'); article.id = `approach-${tab.id}-${section.id}`;
       nodeText('h3', null, section.title, article);
@@ -67,8 +117,16 @@ async function renderApproach() {
       }
       host.append(article);
     }
+    host.dataset.tab = selected;
+    approachIndexObserver = new ResizeObserver(scheduleApproachIndex);
+    for (const node of [host, sidebar, $('.workspace-topbar')]) approachIndexObserver.observe(node);
+    restoreApproachAnchor();
   } catch (error) { host.textContent = `制作方法加载失败：${error.message}。刷新可重试；已有故事与审阅数据不受影响。`; }
 }
+
+document.addEventListener('scroll', scheduleApproachIndex, {capture: true, passive: true});
+window.addEventListener('resize', scheduleApproachIndex);
+window.addEventListener('hashchange', restoreApproachAnchor);
 
 function selectApproachTab(tab, focus = false) {
   const url = new URL(location.href); url.searchParams.set('workspace', 'production.approach'); url.searchParams.set('tab', tab); url.hash = '';
