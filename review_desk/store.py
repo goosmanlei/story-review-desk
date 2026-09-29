@@ -176,6 +176,9 @@ class Store:
         if not isinstance(updates, dict):
             raise ValueError("configuration updates must be an object")
         body = validate(scope, {**current["body"], **updates})
+        if scope == "SYSTEM" and body["site_favicon"]:
+            from .favicon import asset
+            asset(self.db_path.parent.parent, body["site_favicon"])
         version, stamp = expected_version + 1, now()
         with self.db:
             self.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET schema_version=excluded.schema_version,version=excluded.version,body=excluded.body,updated_at=excluded.updated_at", (scope, SCHEMA_VERSION, version, canonical(body), stamp))

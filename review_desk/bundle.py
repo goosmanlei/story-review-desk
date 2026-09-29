@@ -28,6 +28,11 @@ def export(store, export_dir):
         payload = json.loads(revision["payload"])
         if revision["object_id"] == "story-structure":
             asset_names.update(_safe_asset(visual["file"]) for section in payload["sections"] for visual in section.get("visuals", []))
+    from .favicon import asset as favicon_asset
+    icon = store.configuration("SYSTEM")["body"]["site_favicon"]
+    if icon:
+        favicon_asset(target.parent, icon)
+        asset_names.add(icon)
     asset_names = sorted(asset_names)
     for name in asset_names:
         if not (target / "assets" / name).is_file():
@@ -119,7 +124,13 @@ def restore(store, export_dir):
                 if dependency["from_revision"] not in revisions or dependency["to_revision"] not in revisions:
                     raise ValueError("invalid dependency")
             for record in configurations["records"]:
-                migrate(record["scope"], record["schema_version"], json.loads(record["body"]))
+                body = migrate(record["scope"], record["schema_version"], json.loads(record["body"]))
+                if record["scope"] == "SYSTEM" and body["site_favicon"]:
+                    from .favicon import asset as favicon_asset
+                    name = body["site_favicon"]
+                    if "assets/" + name not in manifest["files"]:
+                        raise ValueError("unmanifested favicon")
+                    favicon_asset(target.parent, name)
             if any(event["scope"] not in ("SYSTEM", "PROJECT") for event in configurations["events"]):
                 raise ValueError("invalid configuration event")
         else:
