@@ -4,6 +4,21 @@ const scriptEpisode=()=>scriptVersion()?.episodes.find(e=>e.object_id===state.sc
 const scriptScene=()=>scriptEpisode()?.payload.scenes.find(s=>s.id===state.screenplayScene);
 const scriptVersionLabel=version=>version.payload.title.replace(/^剧本(?=[一二三四五六七八九十百零〇\d])/u,'版本');
 const durationLabel=seconds=>Math.floor(seconds/60)+'分'+(seconds%60?String(seconds%60).padStart(2,'0')+'秒':'');
+const episodeCode=episode=>'E'+String(episode.payload.number).padStart(2,'0');
+function sceneCode(scene){
+  const numbered=scene.id.match(/^s0*(\d+)$/iu);
+  if(numbered)return 'S'+numbered[1].padStart(2,'0');
+  const index=scriptVersion()?.episodes.flatMap(episode=>episode.payload.scenes).findIndex(item=>item===scene);
+  return index<0?'场次':'S'+String(index+1).padStart(2,'0');
+}
+const sceneTitle=scene=>scene.heading.replace(/^\d+-\d+\s*/u,'');
+const episodeTitle=episode=>episode.payload.title.replace(/^第\d+集\s*/u,'')||episode.payload.title;
+function episodeSceneRange(episode){
+  const scenes=episode.payload.scenes;
+  if(!scenes.length)return '暂无场次';
+  const first=sceneCode(scenes[0]),last=sceneCode(scenes.at(-1));
+  return first===last?first:first+'–'+last;
+}
 const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id;
 function rememberScriptDraft(){
   const episode=scriptEpisode();
@@ -33,7 +48,6 @@ function chooseScript(versionId,episodeId,sceneId=null,updateUrl=true){
   const scene=episode?.payload.scenes.find(s=>s.id===sceneId)||null;
   const changedEpisode=episode?.id!==scriptEpisode()?.id;
   state.screenplayVersion=version?.object_id||null;state.screenplayEpisode=episode?.object_id||null;state.screenplayScene=scene?.id||null;
-  if(version)state.expandedScreenplays.add(version.object_id);
   if(changedEpisode){
     state.anchor=null;state.editing=null;state.selected=null;state.preview=null;state.suggestion=null;state.pending=null;
     restoreScriptDraft();
@@ -43,69 +57,63 @@ function chooseScript(versionId,episodeId,sceneId=null,updateUrl=true){
   renderScriptIndex();renderScriptReader();if(isScript())renderComments();$('#screenplay-reader').scrollTop=0;
 }
 function renderScriptIndex(){
-  const nav=$('#screenplay-index'),scrollTop=nav.scrollTop;nav.replaceChildren();
-  if(!state.screenplays.length)nodeText('p','source-no-results','尚未发布剧本。完整版本导入后在此审阅。',nav);
-  for(const version of [...state.screenplays].reverse()){
-    const open=state.expandedScreenplays.has(version.object_id),group=el('section','source-group');
-    const button=nodeText('button','source-group-toggle'+(version.object_id===state.screenplayVersion?' active':''),(open?'▾':'▸')+' '+scriptVersionLabel(version),group);
-    button.type='button';button.dataset.scriptId=version.object_id;button.setAttribute('aria-expanded',String(open));
-    button.onclick=()=>{
-      if(version.object_id!==state.screenplayVersion)chooseScript(version.object_id,version.episodes[0]?.object_id);
-      else{if(open)state.expandedScreenplays.delete(version.object_id);else state.expandedScreenplays.add(version.object_id);renderScriptIndex()}
-    };
-    const list=el('div','source-group-items');list.hidden=!open;
-    for(const episode of version.episodes){
-      const item=nodeText('button','source-button'+(episode.object_id===state.screenplayEpisode?' active':''),episode.payload.title,list);
-      item.type='button';item.dataset.episodeId=episode.object_id;item.setAttribute('aria-current',episode.object_id===state.screenplayEpisode?'page':'false');
-      item.onclick=()=>chooseScript(version.object_id,episode.object_id);
-    }group.append(list);nav.append(group);
-  }nav.scrollTop=scrollTop;
+  const versions=$('#screenplay-index'),episodes=$('#screenplay-episodes');
+  const versionScroll=versions.scrollLeft,episodeScroll=episodes.scrollLeft;
+  versions.replaceChildren();episodes.replaceChildren();
+  if(!state.screenplays.length){nodeText('p','source-no-results','尚未发布剧本。',versions);return}
+  for(const version of state.screenplays){
+    const active=version.object_id===state.screenplayVersion;
+    const button=nodeText('button','screenplay-version'+(active?' active':''),scriptVersionLabel(version),versions);
+    button.type='button';button.dataset.scriptId=version.object_id;button.setAttribute('aria-current',active?'page':'false');
+    button.onclick=()=>chooseScript(version.object_id,version.episodes[0]?.object_id);
+  }
+  for(const episode of scriptVersion()?.episodes||[]){
+    const active=episode.object_id===state.screenplayEpisode;
+    const button=el('button','screenplay-episode'+(active?' active':''));button.type='button';button.dataset.episodeId=episode.object_id;
+    button.setAttribute('aria-current',active?'page':'false');
+    const top=el('span','screenplay-episode-meta');button.append(top);
+    nodeText('b',null,episodeCode(episode),top);nodeText('span',null,episodeSceneRange(episode),top);
+    nodeText('strong',null,episodeTitle(episode),button);
+    button.onclick=()=>chooseScript(state.screenplayVersion,episode.object_id);
+    episodes.append(button);
+  }
+  versions.scrollLeft=versionScroll;episodes.scrollLeft=episodeScroll;
 }
-function scriptSceneDirectory(episode,parent){
-  const directory=el('nav','screenplay-scene-list');directory.setAttribute('aria-label',episode.payload.title+'场次目录');
+function renderScriptSceneIndex(episode){
+  const directory=$('#screenplay-scene-index');directory.replaceChildren();
+  if(!episode)return;
   for(const scene of episode.payload.scenes){
-    const button=el('button','screenplay-scene-button');button.type='button';button.dataset.sceneId=scene.id;
-    nodeText('strong',null,scene.heading,button);
-    nodeText('span',null,scene.location+' · '+scene.time,button);
-    nodeText('small',null,'预计 '+durationLabel(scene.estimated_seconds),button);
-    button.onclick=()=>chooseScript(state.screenplayVersion,episode.object_id,scene.id);directory.append(button);
-  }parent.append(directory);
+    const selected=scene.id===state.screenplayScene;
+    const button=el('button','screenplay-scene-button'+(selected?' active':''));button.type='button';button.dataset.sceneId=scene.id;
+    button.setAttribute('aria-current',selected?'page':'false');
+    nodeText('span','screenplay-scene-code',sceneCode(scene),button);
+    nodeText('strong',null,sceneTitle(scene),button);
+    nodeText('small',null,durationLabel(scene.estimated_seconds),button);
+    button.onclick=()=>chooseScript(state.screenplayVersion,episode.object_id,scene.id);
+    directory.append(button);
+  }
 }
 function renderScriptReader(){
-  hideSelectionAction();const root=$('#screenplay-reader'),scrollTop=root.scrollTop;root.replaceChildren();
-  const version=scriptVersion(),episode=scriptEpisode();
+  hideSelectionAction();const root=$('#screenplay-reader'),scrollTop=root.scrollTop,overview=$('#screenplay-overview');root.replaceChildren();overview.replaceChildren();
+  const episode=scriptEpisode();
+  renderScriptSceneIndex(episode);
   if(!episode){$('#screenplay-head').textContent='尚未发布剧本';$('#screenplay-detail').textContent='';nodeText('p','empty','完整分集影视剧本将在这里阅读和审阅。',root);return}
   const data=episode.payload,scene=scriptScene();
-  $('#screenplay-head').textContent=scene?scene.heading:data.title;
-  $('#screenplay-detail').textContent=scriptVersionLabel(version)+' · '+data.title+' · '+(scene?'本场预计 '+durationLabel(scene.estimated_seconds):'本集预计正片 '+durationLabel(data.estimated_seconds))+' · 待审阅';
-  const doc=el('article','document screenplay-document');
-  const breadcrumb=el('div','screenplay-breadcrumb');
-  const back=nodeText('button',null,data.title,breadcrumb);back.type='button';back.onclick=()=>chooseScript(version.object_id,episode.object_id);
-  if(scene)nodeText('span',null,' / '+scene.heading,breadcrumb);
-  doc.append(breadcrumb);nodeText('h2',null,scene?scene.heading:data.title,doc);
-  if(!scene){
-    nodeText('p','intro','本集 '+data.scenes.length+' 场，预计正片 '+durationLabel(data.estimated_seconds)+'。时长含场间转换，不含片头、前情和片尾；这是制作估算，尚无成片实测。选择下方场次阅读完整正文。',doc);
-    scriptSceneDirectory(episode,doc);
-    const basis=el('details','screenplay-basis');nodeText('summary',null,'改编依据与版本说明',basis);
-    nodeText('p',null,version.payload.notes,basis);
-    for(const [key,label] of [['story','故事'],['structure','结构']]){
-      const ref=data.basis[key],row=el('p');row.append(document.createTextNode(label+'：'+(ref.title||ref.object_id)+'。修订 '+ref.revision_id+'。'));
-      const a=nodeText('a',null,' 阅读依据',row);a.href=key==='story'?'/?workspace=story.sources&source='+encodeURIComponent(ref.object_id):'/?workspace=story.outline&structure_revision='+encodeURIComponent(ref.revision_id);basis.append(row);
-    }doc.append(basis);
-  }else{
-    nodeText('p','screenplay-scene-meta',scene.location+'｜'+scene.time+'｜预计 '+durationLabel(scene.estimated_seconds)+'（制作估算）',doc);
+  const heading=el('div','screenplay-overview-heading');overview.append(heading);
+  nodeText('strong',null,episodeCode(episode)+' '+episodeTitle(episode),heading);
+  nodeText('span',null,episodeSceneRange(episode)+' · '+data.scenes.length+' 场 · 预计正片 '+durationLabel(data.estimated_seconds),heading);
+  const summary=state.screenplaySummaries.get(episode.object_id+':'+episode.id);
+  if(summary)nodeText('p','screenplay-summary',summary,overview);
+  $('#screenplay-head').textContent=scene?scene.heading:'选择左侧场次阅读正文';
+  $('#screenplay-detail').textContent=scene?scene.location+' · '+scene.time+' · 预计 '+durationLabel(scene.estimated_seconds):'本集场次按原剧本顺序排列';
+  if(scene){
     const text=el('section','source-text');text.id='screenplay-text';text.setAttribute('aria-label',scene.heading+'完整正文');
     const source={id:episode.object_id,target_revision_id:episode.id,blocks:data.blocks};
     const indexes=new Map(data.blocks.map((block,index)=>[block.id,index]));
     for(const id of scene.block_ids){const index=indexes.get(id);if(index!==undefined)text.append(renderBlock(source,data.blocks[index],index))}
-    doc.append(text);
-    const position=data.scenes.indexOf(scene),next=data.scenes[position+1],previous=data.scenes[position-1];
-    const pager=el('nav','screenplay-scene-pager');pager.setAttribute('aria-label','场次切换');
-    if(previous){const button=nodeText('button',null,'← '+previous.heading,pager);button.onclick=()=>chooseScript(version.object_id,episode.object_id,previous.id)}
-    if(next){const button=nodeText('button',null,next.heading+' →',pager);button.onclick=()=>chooseScript(version.object_id,episode.object_id,next.id)}
-    doc.append(pager);
-  }
-  root.append(doc);root.scrollTop=scrollTop;
+    root.append(text);
+  }else nodeText('p','screenplay-scene-empty','选择左侧场次，阅读该场完整正文。',root);
+  root.scrollTop=scrollTop;
 }
 function appendScriptCommentScope(card,comment){
   const episode=scriptEpisode(),first=sceneForBlock(episode,comment.anchor.block_id),last=sceneForBlock(episode,comment.anchor.end_block_id);

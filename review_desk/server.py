@@ -9,6 +9,7 @@ from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
 from .polish import build_context, suggest
 from .screenplay import snapshot as screenplay_snapshot, review_context as screenplay_review, import_screenplay
+from .screenplay_summaries import read_summaries
 from .store import Conflict, Store
 from .structure import select_direction, snapshot, confirm_structure, review_context, script_input
 
@@ -77,6 +78,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(store.context())
         if path == "/api/screenplays":
             return self._json(screenplay_snapshot(store))
+        if path == "/api/screenplay-summaries":
+            try:
+                return self._json(read_summaries(self.server.root))
+            except ValueError:
+                return self._json({"error": "剧本分集摘要格式错误或无法读取"}, 503)
         if path == "/api/screenplays/review-context":
             return self._json(screenplay_review(store))
         if path == "/api/story-structure":
