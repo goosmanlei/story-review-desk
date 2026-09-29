@@ -12,6 +12,8 @@ from test_screenplay import ScreenplayTest
 
 class Handler(ReviewHandler):
     def do_GET(self):
+        if self.path == '/comment-shortcut-tests':
+            return self._file(Path(__file__).with_name('comment-shortcuts.html'), 'text/html; charset=utf-8')
         if self.path == '/screenplay-tests':
             return self._file(Path(__file__).with_name('screenplay.html'), 'text/html; charset=utf-8')
         super().do_GET()
