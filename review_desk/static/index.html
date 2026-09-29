@@ -42,7 +42,13 @@
             <button id="approach-tab-story" data-approach-tab="story" type="button" role="tab" aria-controls="approach-body" aria-selected="true">故事创作</button>
             <button id="approach-tab-materials" data-approach-tab="materials" type="button" role="tab" aria-controls="approach-body" aria-selected="false" tabindex="-1">素材生产</button>
           </div>
-          <article id="approach-body" class="approach-body" role="tabpanel" aria-labelledby="approach-tab-story" tabindex="0"></article>
+          <div class="approach-layout">
+            <aside id="approach-sidebar" class="approach-sidebar text-reader-index" hidden>
+              <header><small>阅读目录</small><h2 id="approach-index-title">故事创作</h2><p>选择章节，阅读对应的方法与例子。</p></header>
+              <nav id="approach-index" class="approach-index" aria-label="故事创作阅读目录"></nav>
+            </aside>
+            <article id="approach-body" class="approach-body" role="tabpanel" aria-labelledby="approach-tab-story" tabindex="0"></article>
+          </div>
         </section><div id="placeholder-view" class="workspace-view" hidden></div>
         <footer class="workspace-footer"><div><span class="footer-mark">阅</span><span><b>故事审阅台</b><small>故事创作与制作审阅</small></span></div><p>故事资料、创作配置与审阅意见以当前实例为准；本机运行凭据不会公开同步。</p></footer>
       </div>
