@@ -1,6 +1,7 @@
 /* Episodes use the same renderer, Unicode selection and comment panel as sources. */
 const scriptVersion=()=>state.screenplays.find(v=>v.object_id===state.screenplayVersion);
 const scriptEpisode=()=>scriptVersion()?.episodes.find(e=>e.object_id===state.screenplayEpisode);
+const scriptVersionLabel=version=>version.payload.title.replace(/^剧本(?=[一二三四五六七八九十百零〇\d])/u,'版本');
 const durationLabel=seconds=>`${Math.floor(seconds/60)}分${seconds%60?String(seconds%60).padStart(2,'0')+'秒':''}`;
 function chooseScript(versionId,episodeId,updateUrl=true){
   const version=state.screenplays.find(v=>v.object_id===versionId)||state.screenplays.at(-1);
@@ -17,7 +18,7 @@ function renderScriptIndex(){
   if(!state.screenplays.length)nodeText('p','source-no-results','尚未发布剧本。完整版本导入后在此审阅。',nav);
   for(const version of [...state.screenplays].reverse()){
     const open=state.expandedScreenplays.has(version.object_id),group=el('section','source-group');
-    const button=nodeText('button','source-group-toggle',`${open?'▾':'▸'} ${version.payload.title}`,group);button.type='button';button.dataset.scriptId=version.object_id;button.setAttribute('aria-expanded',String(open));
+    const button=nodeText('button','source-group-toggle',`${open?'▾':'▸'} ${scriptVersionLabel(version)}`,group);button.type='button';button.dataset.scriptId=version.object_id;button.setAttribute('aria-expanded',String(open));
     button.onclick=()=>{if(open)state.expandedScreenplays.delete(version.object_id);else state.expandedScreenplays.add(version.object_id);renderScriptIndex()};
     const list=el('div','source-group-items');list.hidden=!open;
     for(const episode of version.episodes){
@@ -31,7 +32,7 @@ function renderScriptReader(){
   const version=scriptVersion(),episode=scriptEpisode();
   if(!episode){$('#screenplay-head').textContent='尚未发布剧本';$('#screenplay-detail').textContent='';nodeText('p','empty','完整分集影视剧本将在这里阅读和审阅。',root);return}
   const data=episode.payload;
-  $('#screenplay-head').textContent=data.title;$('#screenplay-detail').textContent=`${version.payload.title} · 预计正片 ${durationLabel(data.estimated_seconds)} · 待审阅`;
+  $('#screenplay-head').textContent=data.title;$('#screenplay-detail').textContent=`${scriptVersionLabel(version)} · 预计正片 ${durationLabel(data.estimated_seconds)} · 待审阅`;
   const doc=el('article','document screenplay-document');nodeText('h2',null,data.title,doc);
   nodeText('p','intro',`预计正片 ${durationLabel(data.estimated_seconds)}，不含片头、前情和片尾；这是制作估算，尚无成片实测。`,doc);
   const basis=el('details','screenplay-basis');nodeText('summary',null,'改编依据与版本说明',basis);
