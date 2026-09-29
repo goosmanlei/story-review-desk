@@ -8,6 +8,7 @@ const isStructure=()=>state.workspace==='story.outline';
 const isScript=()=>state.workspace==='story.script';
 const commentTarget=()=>isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id};
 const draftKey=()=>state.anchor?`review-draft:${isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const commentSaves=new Set();
 const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.source_id===state.current?.id);
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整篇结构稿':a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
@@ -389,6 +390,31 @@ function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
 function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){const key=draftKey();if(key)localStorage.removeItem(key);if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
 
+// Every comment editor binds here. Buttons own validation and submission state;
+// shortcuts invoke those same actions, and never handle unrelated inputs.
+function bindCommentEditorShortcuts(textarea,{submit,cancel}){
+  let composing=false;
+  textarea.addEventListener('compositionstart',()=>{composing=true});
+  textarea.addEventListener('compositionend',()=>{composing=false});
+  textarea.addEventListener('keydown',event=>{
+    const action=event.key==='Escape'?cancel:event.key==='Enter'&&event.metaKey&&!event.ctrlKey&&!event.altKey?submit:null;
+    if(!action)return;
+    // Do not let IME Escape bubble to the panel's existing close handler.
+    event.stopPropagation();
+    if(composing||event.isComposing||event.keyCode===229)return;
+    event.preventDefault();
+    if(event.repeat||textarea.disabled||textarea.readOnly||action.disabled)return;
+    action.click();
+  });
+}
+function updateCommentEditorControls(){
+  const editor=$('.comment-editor'),textarea=editor?.querySelector('textarea');if(!textarea)return;
+  const busy=commentSaves.has(draftKey());textarea.readOnly=busy;
+  for(const button of editor.querySelectorAll('.editor-actions button'))button.disabled=busy;
+  editor.querySelector('[data-comment-submit]').disabled=busy||!textarea.value.trim();
+  editor.querySelector('[data-polish]').disabled=busy||!textarea.value.trim();
+}
+
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
@@ -413,12 +439,14 @@ function renderComments(){
   nodeText('p','comment-help',isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
-    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;const action=editor.querySelector('[data-polish]');if(action)action.disabled=!textarea.value.trim()});editor.append(textarea);
-    const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.onclick=saveComment;
+    textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
+    nodeText('small','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);
+    const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.dataset.commentSubmit='true';save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;
     const collapse=nodeText('button',null,'收起草稿',actions);collapse.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments();toast('草稿已留在本机，重新圈选同一内容可继续编辑')};
     const cancel=nodeText('button','destructive',state.editing?'取消编辑':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'未保存的编辑已放弃':'本次未提交评论已取消');editor.append(actions);
+    bindCommentEditorShortcuts(textarea,{submit:save,cancel});
     if(state.preview){const basis=el('details','context-preview');basis.open=state.previewExpanded;basis.addEventListener('toggle',()=>{state.previewExpanded=basis.open});const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
       nodeText('p',null,`载体：${context.target_medium}；受众：${context.audience}；风格：${context.style}`,basis);
@@ -427,7 +455,7 @@ function renderComments(){
       for(const doc of context.source_documents){const row=el('p');nodeText('strong',null,`${doc.title} · ${doc.version_type} · ${doc.truncated?'节选':'全文'}：`,row);nodeText('span',null,doc.text,row);basis.append(row)}
       nodeText('small',null,`上下文 SHA-256：${state.preview.context_sha256}`,basis);editor.append(basis)}
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
-      const apply=nodeText('button','secondary','采用到草稿',preview);apply.onclick=()=>{const accepted=state.suggestion;state.suggestion=null;localStorage.setItem(draftKey(),accepted);renderComments()};editor.append(preview)}body.append(editor)}
+      const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{const accepted=state.suggestion;state.suggestion=null;localStorage.setItem(draftKey(),accepted);renderComments()};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
   nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
   for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
@@ -443,15 +471,19 @@ async function refreshComments(){
   state.comments=comments;renderActiveReader();renderComments();
 }
 async function saveComment(){
-  const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  const key=draftKey(),editing=state.editing,request={id:crypto.randomUUID(),...commentTarget(),anchor:state.anchor,body:text};
+  const textarea=$('#comment-editor-text'),key=draftKey();
+  if(!key||!textarea||textarea.disabled||textarea.readOnly||commentSaves.has(key))return;
+  const text=textarea.value.trim();if(!text)return toast('请先填写修改意见');
+  const editing=state.editing,request={id:crypto.randomUUID(),...commentTarget(),anchor:state.anchor,body:text};
+  commentSaves.add(key);updateCommentEditorControls();
   try{
     if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
     else await api('/api/comments',{method:'POST',body:JSON.stringify(request)});
-    localStorage.removeItem(key);if(isScript())forgetScriptDraft();
-    if(draftKey()===key){state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false}
+    localStorage.removeItem(key);
+    if(draftKey()===key){if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false}
     await refreshComments();toast('评论已保存');
   }catch(error){toast(error.message)}
+  finally{commentSaves.delete(key);updateCommentEditorControls()}
 }
 const sameDraft=(key,text)=>draftKey()===key&&$('#comment-editor-text')?.value.trim()===text;
 async function polishComment(){

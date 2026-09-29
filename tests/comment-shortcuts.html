@@ -1,0 +1,81 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>评论快捷键隔离验收</title>
+<style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb;max-width:100%}pre{white-space:pre-wrap;max-height:220px;overflow:auto}</style>
+<h1>评论快捷键隔离验收</h1><p>仅使用临时资料。组合输入及请求延迟由测试事件模拟；真实键盘另行验收。</p>
+<button id="run">运行快捷键检查</button><label for="native-mode">真实键盘页面</label><select id="native-mode"><option value="0">故事采编</option><option value="1">故事结构</option><option value="2">剧本分集</option></select><button id="native">准备真实键盘草稿</button><pre id="results">尚未运行</pre><iframe id="app" title="隔离审阅台" src="/?workspace=story.sources&source=novel"></iframe>
+<script>
+const frame=document.querySelector('iframe'),out=document.querySelector('#results'),checks=[];
+const w=()=>frame.contentWindow,d=()=>frame.contentDocument,q=s=>d().querySelector(s);
+const wait=async fn=>{for(let i=0;i<120;i++){if(fn())return;await new Promise(r=>setTimeout(r,50))}throw Error('等待状态超时')};
+const pause=()=>new Promise(r=>setTimeout(r,100));
+function ok(v,name){if(!v)throw Error(name);checks.push({name,passed:true});out.textContent=JSON.stringify(checks,null,2)}
+function text(v){const t=q('#comment-editor-text');t.value=v;t.dispatchEvent(new (w().Event)('input',{bubbles:true}))}
+function key(k,opts={},target=q('#comment-editor-text')){const e=new (w().KeyboardEvent)('keydown',{key:k,bubbles:true,cancelable:true,...opts});target.dispatchEvent(e);return e}
+const getComments=async()=>await (await fetch('/api/comments')).json();
+const edit=c=>w().startDraft(c.anchor,c);
+const storage=()=>Object.fromEntries(Object.keys(w().localStorage).map(k=>[k,w().localStorage.getItem(k)]));
+const actions=()=>q('.editor-actions');
+const cancel=()=>actions().querySelector('.destructive').click();
+let contexts=[];
+async function prepare(){
+ await wait(()=>q('#source-text'));
+ const [sources,structure,scripts]=await Promise.all(['/api/sources','/api/story-structure','/api/screenplays'].map(async p=>await (await fetch(p)).json()));
+ const a=sources.find(s=>s.id==='novel').blocks[0];
+ contexts=[{name:'采编',workspace:'story.sources',anchor:{block_id:a.id,end_block_id:a.id,start:0,end:2,quote:Array.from(a.text).slice(0,2).join('')}},
+ {name:'结构',workspace:'story.outline',anchor:{type:'global'}},
+ {name:'剧本',workspace:'story.script',anchor:{block_id:'a',end_block_id:'a',start:0,end:2,quote:'李寄'}}];
+}
+function open(ctx){w().switchWorkspace(ctx.workspace);if(ctx.workspace==='story.sources')w().chooseSource('novel');w().startDraft(ctx.anchor)}
+document.querySelector('#native').onclick=async()=>{await prepare();open(contexts[Number(document.querySelector('#native-mode').value)]);text('真实键盘：第一行');out.textContent='在下方修改意见输入框按 Enter 换行，再按 ⌘+Enter 提交；编辑后按 Esc 取消。'};
+document.querySelector('#run').onclick=async()=>{checks.length=0;try{
+ await prepare();w().localStorage.clear();
+ for(const ctx of contexts){
+ const name=ctx.name+'：';open(ctx);const before=await getComments();
+ ok(q('.editor-actions .primary').disabled,name+'空内容按钮禁用');
+ key('Enter',{metaKey:true});await pause();ok((await getComments()).length===before.length&&q('#comment-editor-text'),name+'空内容快捷键不提交');
+ text('未提交内容');const plain=key('Enter');ok(!plain.defaultPrevented&&q('#comment-editor-text'),name+'普通 Enter 保留浏览器换行');
+ key('Enter',{ctrlKey:true});key('Enter',{metaKey:true,altKey:true});key('Enter',{metaKey:true,repeat:true});
+ ok(q('#comment-editor-text')&&q('.comment-card')===null,name+'其他组合及按住重复不提交');
+ for(const method of ['composition','isComposing','229']){
+ const t=q('#comment-editor-text');if(method==='composition')t.dispatchEvent(new (w().CompositionEvent)('compositionstart',{bubbles:true}));
+ const options=method==='isComposing'?{isComposing:true}:method==='229'?{keyCode:229}:{};
+ const enter=key('Enter',{metaKey:true,...options}),escape=key('Escape',options);
+ ok(!enter.defaultPrevented&&!escape.defaultPrevented&&q('#comment-editor-text')===t&&!q('#comment-panel').hidden,name+method+' 输入法不误提交或关闭');
+ if(method==='composition')t.dispatchEvent(new (w().CompositionEvent)('compositionend',{bubbles:true}));
+ }
+ let t=q('#comment-editor-text');t.readOnly=true;key('Enter',{metaKey:true});key('Escape');ok(q('#comment-editor-text')===t&&!q('#comment-panel').hidden,name+'只读输入不执行快捷操作');t.readOnly=false;
+ t.disabled=true;key('Enter',{metaKey:true});key('Escape');ok(q('#comment-editor-text')===t,name+'禁用输入不执行快捷操作');t.disabled=false;
+ const savedDraft=storage();key('Escape');ok(!q('#comment-editor-text')&&!q('#comment-panel').hidden,name+'Esc 取消新评论且不先关闭面板');
+ ok((await getComments()).length===before.length&&Object.keys(savedDraft).some(k=>!Object.hasOwn(storage(),k)),name+'取消删除草稿且已保存评论不变');
+ w().startDraft(ctx.anchor);ok(q('#comment-editor-text').value==='',name+'同锚点重新打开无被取消内容');
+ text('外部 Esc 保留草稿');q('#comments-close').focus();key('Escape',{},q('#comments-close'));
+ ok(q('#comment-panel').hidden,name+'输入框外 Esc 沿用面板收起');w().openPanel();ok(q('#comment-editor-text').value==='外部 Esc 保留草稿',name+'收起后草稿保留');cancel();
+ w().startDraft(ctx.anchor);text('  '+ctx.name+'快捷提交\n第二行  ');key('Enter',{metaKey:true});
+ await wait(()=>!q('#comment-editor-text'));let all=await getComments(),c=all.find(c=>c.body===ctx.name+'快捷提交\n第二行');
+ ok(c&&all.length===before.length+1,name+'⌘+Enter 新增且正文与点击相同地去首尾空白');
+ w().startDraft(ctx.anchor);text(ctx.name+'按钮提交');actions().querySelector('.primary').click();await wait(()=>!q('#comment-editor-text'));
+ let button=(await getComments()).find(c=>c.body===ctx.name+'按钮提交');ok(button&&JSON.stringify(button.anchor)===JSON.stringify(c.anchor)&&button.target_object_id===c.target_object_id&&button.target_revision_id===c.target_revision_id,name+'按钮与快捷键归属和锚点一致');
+ edit(c);text('未保存的编辑');key('Escape');ok(!q('#comment-editor-text')&&!q('#comment-panel').hidden,name+'Esc 取消编辑保持面板打开');
+ let unchanged=(await getComments()).find(x=>x.id===c.id);ok(unchanged.body===c.body&&unchanged.version===c.version,name+'取消编辑不改变正式正文与版本');
+ edit(c);ok(q('#comment-editor-text').value===c.body,name+'重开编辑恢复已保存正文');text(ctx.name+'编辑保存');key('Enter',{metaKey:true});await wait(()=>!q('#comment-editor-text'));c=(await getComments()).find(x=>x.id===c.id);
+ ok(c.body===ctx.name+'编辑保存'&&c.version===2,name+'⌘+Enter 编辑保存');
+ // Hold only the mutation response. This exercises the same real API, not a mock store.
+ edit(c);text(ctx.name+'延迟保存');const realFetch=w().fetch;let release,requests=0;
+ w().fetch=async(...args)=>{if(args[0].startsWith('/api/comments/')&&args[1]?.method==='PATCH'){requests++;await new Promise(r=>{release=r})}return realFetch(...args)};
+ try{key('Enter',{metaKey:true});await wait(()=>release);key('Enter',{metaKey:true});key('Enter',{metaKey:true,repeat:true});key('Escape');actions().querySelector('.primary').click();w().saveComment();
+ ok(requests===1&&q('#comment-editor-text').readOnly&&[...actions().children].every(b=>b.disabled),name+'提交中按键与按钮共用限制且只发一次请求');release();await wait(()=>!q('#comment-editor-text'))}finally{w().fetch=realFetch}
+ c=(await getComments()).find(x=>x.id===c.id);ok(c.version===3&&c.body===ctx.name+'延迟保存',name+'连续快捷键只产生一次编辑');
+ edit(c);text(ctx.name+'失败保留草稿');w().fetch=async(p,opts)=>p.startsWith('/api/comments/')&&opts?.method==='PATCH'?new (w().Response)(JSON.stringify({error:'隔离模拟版本冲突'}),{status:409}):realFetch(p,opts);
+ try{key('Enter',{metaKey:true});await wait(()=>q('#toast').textContent==='隔离模拟版本冲突');ok(q('#comment-editor-text').value===ctx.name+'失败保留草稿'&&!q('#comment-editor-text').readOnly&&!actions().querySelector('.primary').disabled,name+'提交失败保留草稿并解除限制')}finally{w().fetch=realFetch}cancel();
+ w().changeComment(c,'CLOSE');await wait(()=>!q('#comment-'+c.id));w().changeComment((await getComments()).find(x=>x.id===c.id),'REOPEN');await wait(()=>q('#comment-'+c.id));
+ ok((await getComments()).find(x=>x.id===c.id).status==='OPEN',name+'原有关闭与重开可用');
+ }
+ // An independent future editor receives identical behavior from the same binding.
+ let submits=0,cancels=0;const t=d().createElement('textarea'),submit=d().createElement('button'),cancelButton=d().createElement('button');
+ d().body.append(t,submit,cancelButton);submit.onclick=()=>submits++;cancelButton.onclick=()=>cancels++;
+ w().bindCommentEditorShortcuts(t,{submit,cancel:cancelButton});t.focus();key('Enter',{metaKey:true},t);key('Escape',{},t);
+ ok(submits===1&&cancels===1,'未来独立评论输入复用同一绑定');submit.disabled=true;cancelButton.disabled=true;key('Enter',{metaKey:true},t);key('Escape',{},t);ok(submits===1&&cancels===1,'复用机制遵循两个按钮各自禁用状态');t.remove();submit.remove();cancelButton.remove();
+ open(contexts[0]);text('其他输入测试');const search=q('#source-search'),count=(await getComments()).length;search.focus();key('Enter',{metaKey:true},search);await pause();ok((await getComments()).length===count&&q('#source-text'),'搜索输入框沿用资料跳转且不提交评论');
+ w().switchWorkspace('story.outline');w().startDraft({type:'global'});text('大图不影响草稿');q('.structure-image-trigger').click();await wait(()=>q('dialog[open]'));key('Escape',{},q('dialog'));ok(!q('dialog[open]')&&!q('#comment-panel').hidden&&q('#comment-editor-text').value==='大图不影响草稿','大图 Esc 只关闭图像且保留原草稿');cancel();
+ const result={passed:checks.length,checks};await fetch('/test-results',{method:'POST',body:JSON.stringify(result)});out.textContent=JSON.stringify(result,null,2);
+ }catch(e){const result={failed:String(e),checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)})}};
+</script></html>
