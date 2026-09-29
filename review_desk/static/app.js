@@ -150,8 +150,6 @@ function switchWorkspace(id,updateUrl=true){
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
   $('#story-workspace').hidden=!source;$('#screenplay-workspace').hidden=id!=='story.script';$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#approach-view').hidden=id!=='production.approach';
-  $('#story-mode-title').textContent=id==='story.script'?'剧本集场阅读与审阅':'从来源核对、结构理解到分集与逐场成稿';
-  $('#story-mode-summary').hidden=id!=='story.script';
   $('#placeholder-view').hidden=storyChild||id==='project.configuration'||id==='production.approach';
   for(const [tab,selected] of [['#open-story-sources',source],['#open-story-structure',id==='story.outline'],['#open-story-script',id==='story.script']]){
     const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
@@ -406,6 +404,7 @@ function commentCard(comment){
 }
 
 function renderComments(){
+  if(isScript())renderScriptCommentCounts();
   if((isScript()&&!scriptEpisode())||(!isStructure()&&!isScript()&&!state.current)){$('#comment-body').replaceChildren();$('#open-count').textContent='0';$('#comments-toggle').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
   $('#open-count').textContent=`${open.length} 待处理`;

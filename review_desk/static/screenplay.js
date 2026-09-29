@@ -2,7 +2,7 @@
 const scriptVersion=()=>state.screenplays.find(v=>v.object_id===state.screenplayVersion);
 const scriptEpisode=()=>scriptVersion()?.episodes.find(e=>e.object_id===state.screenplayEpisode);
 const scriptScene=()=>scriptEpisode()?.payload.scenes.find(s=>s.id===state.screenplayScene);
-const scriptVersionLabel=version=>version.payload.title.replace(/^剧本(?=[一二三四五六七八九十百零〇\d])/u,'版本');
+const scriptVersionLabel=(version,index)=>'版本'+(version.payload.title.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u)?.[1]||String(index+1));
 const durationLabel=seconds=>Math.floor(seconds/60)+'分'+(seconds%60?String(seconds%60).padStart(2,'0')+'秒':'');
 const episodeCode=episode=>'E'+String(episode.payload.number).padStart(2,'0');
 function sceneCode(scene){
@@ -18,6 +18,29 @@ function episodeSceneRange(episode){
   if(!scenes.length)return '暂无场次';
   const first=sceneCode(scenes[0]),last=sceneCode(scenes.at(-1));
   return first===last?first:first+'–'+last;
+}
+const scriptEpisodeComments=episode=>state.comments.filter(comment=>comment.target_object_id===episode.object_id&&comment.target_revision_id===episode.id);
+function scriptSceneCommentCounts(episode){
+  const scenes=episode.payload.scenes,counts=new Map(scenes.map(scene=>[scene.id,0]));
+  for(const comment of scriptEpisodeComments(episode)){
+    const first=scenes.findIndex(scene=>scene.block_ids.includes(comment.anchor.block_id));
+    const last=scenes.findIndex(scene=>scene.block_ids.includes(comment.anchor.end_block_id));
+    if(first<0)continue;
+    for(let index=first;index<=Math.max(first,last);index++)counts.set(scenes[index].id,counts.get(scenes[index].id)+1);
+  }
+  return counts;
+}
+function renderScriptCommentCounts(){
+  const version=scriptVersion(),episode=scriptEpisode();
+  for(const button of $('#screenplay-episodes').children){
+    const item=version?.episodes.find(entry=>entry.object_id===button.dataset.episodeId);
+    if(item)button.querySelector('.screenplay-episode-count').textContent='评论 '+scriptEpisodeComments(item).length;
+  }
+  if(!episode)return;
+  const counts=scriptSceneCommentCounts(episode);
+  for(const button of $('#screenplay-scene-index').children){
+    button.querySelector('.screenplay-scene-count').textContent='评论 '+counts.get(button.dataset.sceneId);
+  }
 }
 const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id;
 function rememberScriptDraft(){
@@ -45,7 +68,7 @@ function scriptUrl(){
 function chooseScript(versionId,episodeId,sceneId=null,updateUrl=true){
   const version=state.screenplays.find(v=>v.object_id===versionId)||state.screenplays.at(-1);
   const episode=version?.episodes.find(e=>e.object_id===episodeId)||version?.episodes[0];
-  const scene=episode?.payload.scenes.find(s=>s.id===sceneId)||null;
+  const scene=episode?.payload.scenes.find(s=>s.id===sceneId)||episode?.payload.scenes[0]||null;
   const changedEpisode=episode?.id!==scriptEpisode()?.id;
   state.screenplayVersion=version?.object_id||null;state.screenplayEpisode=episode?.object_id||null;state.screenplayScene=scene?.id||null;
   if(changedEpisode){
@@ -61,9 +84,9 @@ function renderScriptIndex(){
   const versionScroll=versions.scrollLeft,episodeScroll=episodes.scrollLeft;
   versions.replaceChildren();episodes.replaceChildren();
   if(!state.screenplays.length){nodeText('p','source-no-results','尚未发布剧本。',versions);return}
-  for(const version of state.screenplays){
+  for(const [index,version] of state.screenplays.entries()){
     const active=version.object_id===state.screenplayVersion;
-    const button=nodeText('button','screenplay-version'+(active?' active':''),scriptVersionLabel(version),versions);
+    const button=nodeText('button','screenplay-version'+(active?' active':''),scriptVersionLabel(version,index),versions);
     button.type='button';button.dataset.scriptId=version.object_id;button.setAttribute('aria-current',active?'page':'false');
     button.onclick=()=>chooseScript(version.object_id,version.episodes[0]?.object_id);
   }
@@ -74,14 +97,24 @@ function renderScriptIndex(){
     const top=el('span','screenplay-episode-meta');button.append(top);
     nodeText('b',null,episodeCode(episode),top);nodeText('span',null,episodeSceneRange(episode),top);
     nodeText('strong',null,episodeTitle(episode),button);
+    const count=nodeText('small','screenplay-episode-count','评论 '+scriptEpisodeComments(episode).length,button);
+    count.title='包含已关闭评论';
     button.onclick=()=>chooseScript(state.screenplayVersion,episode.object_id);
     episodes.append(button);
   }
   versions.scrollLeft=versionScroll;episodes.scrollLeft=episodeScroll;
+  for(const bar of [versions,episodes]){
+    const selected=bar.querySelector('.active');
+    if(!selected)continue;
+    const item=selected.getBoundingClientRect(),edge=bar.getBoundingClientRect();
+    if(item.left<edge.left)bar.scrollLeft+=item.left-edge.left;
+    else if(item.right>edge.right)bar.scrollLeft+=item.right-edge.right;
+  }
 }
 function renderScriptSceneIndex(episode){
   const directory=$('#screenplay-scene-index');directory.replaceChildren();
   if(!episode)return;
+  const counts=scriptSceneCommentCounts(episode);
   for(const scene of episode.payload.scenes){
     const selected=scene.id===state.screenplayScene;
     const button=el('button','screenplay-scene-button'+(selected?' active':''));button.type='button';button.dataset.sceneId=scene.id;
@@ -89,6 +122,8 @@ function renderScriptSceneIndex(episode){
     nodeText('span','screenplay-scene-code',sceneCode(scene),button);
     nodeText('strong',null,sceneTitle(scene),button);
     nodeText('small',null,durationLabel(scene.estimated_seconds),button);
+    const count=nodeText('span','screenplay-scene-count','评论 '+counts.get(scene.id),button);
+    count.title='引用覆盖本场的评论，包含已关闭评论';
     button.onclick=()=>chooseScript(state.screenplayVersion,episode.object_id,scene.id);
     directory.append(button);
   }
@@ -112,7 +147,7 @@ function renderScriptReader(){
     const indexes=new Map(data.blocks.map((block,index)=>[block.id,index]));
     for(const id of scene.block_ids){const index=indexes.get(id);if(index!==undefined)text.append(renderBlock(source,data.blocks[index],index))}
     root.append(text);
-  }else nodeText('p','screenplay-scene-empty','选择左侧场次，阅读该场完整正文。',root);
+  }else nodeText('p','screenplay-scene-empty','本集暂无场次。',root);
   root.scrollTop=scrollTop;
 }
 function appendScriptCommentScope(card,comment){
