@@ -23,7 +23,7 @@
       <header class="workspace-topbar"><div class="view-context"><span id="view-symbol">故</span><div><small>当前视图</small><b id="view-title">故事创作</b></div></div><div class="top-actions"><label class="search-box"><span>⌕</span><input id="source-search" type="search" aria-label="搜索故事采编与正文" placeholder="搜索故事采编与正文"></label><span id="source-count"></span></div></header>
       <div class="workspace-content">
         <section id="story-creation-shell" class="workspace-view">
-          <header class="story-workspace-heading"><div><p>STORY → SCREENPLAY</p><h1 id="story-mode-title">从来源核对、结构理解到分集与逐场成稿</h1><span id="story-mode-summary" class="story-mode-summary" hidden>按版本、分集、场次阅读完整剧本；圈选正文可继续评论与润色。预计时长是制作估算。</span></div><div class="story-mode-tabs" role="tablist" aria-label="故事创作方式"><button type="button" class="active" role="tab" aria-selected="true" aria-controls="story-workspace" id="open-story-sources">故事采编</button><button type="button" role="tab" aria-selected="false" aria-controls="structure-workspace" id="open-story-structure">故事结构</button><button type="button" role="tab" aria-selected="false" aria-controls="screenplay-workspace" id="open-story-script">剧本创作</button></div></header>
+          <header class="story-workspace-heading"><div><p>STORY → SCREENPLAY</p><h1>从来源核对、结构理解到分集与逐场成稿</h1></div><div class="story-mode-tabs" role="tablist" aria-label="故事创作方式"><button type="button" class="active" role="tab" aria-selected="true" aria-controls="story-workspace" id="open-story-sources">故事采编</button><button type="button" role="tab" aria-selected="false" aria-controls="structure-workspace" id="open-story-structure">故事结构</button><button type="button" role="tab" aria-selected="false" aria-controls="screenplay-workspace" id="open-story-script">剧本创作</button></div></header>
           <section id="story-workspace" role="tabpanel" aria-labelledby="open-story-sources">
             <p class="story-reader-guide">阅读本故事已登记的原始依据、派生整理与辅助资料。正文、出处、版本类型与素材来源分别核对。</p>
             <div class="text-reader">
@@ -32,6 +32,7 @@
             </div>
           </section>
           <section id="screenplay-workspace" role="tabpanel" aria-labelledby="open-story-script" hidden>
+            <header class="screenplay-page-heading"><p>STORY → SCREENPLAY</p><h2>剧本集场阅读与审阅</h2><span>按版本、分集、场次阅读完整剧本；圈选正文可继续评论与润色。预计时长是制作估算。</span></header>
             <div class="screenplay-board">
               <nav id="screenplay-index" class="screenplay-versions" aria-label="剧本版本"></nav>
               <nav id="screenplay-episodes" class="screenplay-episodes" aria-label="剧本分集"></nav>
