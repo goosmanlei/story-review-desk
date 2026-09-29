@@ -12,6 +12,44 @@ def build_context(store, source_id, anchor, draft, target_object_id=None, target
     draft = str(draft or "").strip()
     if not 1 <= len(draft) <= 2000:
         raise ValueError("comment draft must be 1-2000 characters")
+    if target_object_id and target_object_id != "story-structure":
+        from .screenplay import EPISODE_FORMAT
+        from .structure import revision_record
+        target = store.validate_target(target_object_id, target_revision_id, anchor)
+        episode = revision_record(store, target_revision_id)
+        if target["object"]["kind"] != "EPISODE" or episode["payload"].get("format") != EPISODE_FORMAT:
+            raise ValueError("unsupported polish target")
+        payload = episode["payload"]
+        project, system = store.configuration("PROJECT"), store.configuration("SYSTEM")
+        blocks = target["blocks"]
+        index = next(i for i, b in enumerate(blocks) if b["id"] == anchor["block_id"])
+        story_ref, structure_ref = payload["basis"]["story"], payload["basis"]["structure"]
+        source = store.source(story_ref["object_id"])
+        structure = revision_record(store, structure_ref["revision_id"])
+        edition_obj = next(o for o in store.objects() if o["id"] == payload["screenplay_id"])
+        edition = revision_record(store, edition_obj["current_revision"])
+        documents, budget = [], system["body"]["ai_context_max_chars"]
+        inputs = [(target_object_id, payload["title"], "分集影视剧本 · 待审阅", target_revision_id, "\n".join(b["text"] for b in blocks)),
+                  (source["id"], source["title"], source["version_type"], story_ref["revision_id"], "\n".join(b["text"] for b in source["blocks"])),
+                  (structure_ref["object_id"], structure["payload"]["title"], "故事结构 · 改编依据", structure_ref["revision_id"], "\n".join(b["text"] for section in structure["payload"]["sections"] for b in section["blocks"]))]
+        # Give all three exact inputs space instead of silently exhausting the budget
+        # on a long novel. The complete selected quote remains available separately.
+        for i, (oid, title, kind, rid, entire) in enumerate(inputs):
+            allowance = min(len(entire), budget // (len(inputs) - i))
+            documents.append({"id": oid, "title": title, "version_type": kind, "revision": rid,
+                              "text": entire[:allowance], "truncated": allowance < len(entire)})
+            budget -= allowance
+        context = {"creative_stage": stage("SCRIPT_DRAFT"), "project_stage": stage(project["body"]["current_stage"]),
+                   "project_configuration_version": project["version"],
+                   **{k: project["body"][k] for k in ("story_background", "creative_background", "target_medium", "audience", "style")},
+                   "target_object_id": target_object_id, "target_revision_id": target_revision_id,
+                   "screenplay_id": payload["screenplay_id"], "screenplay_revision": edition["id"],
+                   "episode_number": payload["number"], "basis": payload["basis"],
+                   "selected_quote": anchor["quote"], "neighbor_blocks": blocks[max(0, index - 1):index + 3],
+                   "source_documents": documents, "comment_draft": draft}
+        return {"context": context, "context_sha256": digest(canonical(context).encode()),
+                "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
+                "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
     if target_object_id == "story-structure":
         target = store.validate_target(target_object_id, target_revision_id, anchor)
         from .structure import revision_record

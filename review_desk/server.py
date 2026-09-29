@@ -8,6 +8,7 @@ from .approach import read_document
 from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
 from .polish import build_context, suggest
+from .screenplay import snapshot as screenplay_snapshot, review_context as screenplay_review, import_screenplay
 from .store import Conflict, Store
 from .structure import select_direction, snapshot, confirm_structure, review_context, script_input
 
@@ -74,6 +75,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json([{**comment, "anchor_state": store.anchor_state(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])} for comment in comments])
         if path == "/api/comments/context":
             return self._json(store.context())
+        if path == "/api/screenplays":
+            return self._json(screenplay_snapshot(store))
+        if path == "/api/screenplays/review-context":
+            return self._json(screenplay_review(store))
         if path == "/api/story-structure":
             return self._json(snapshot(store))
         if path == "/api/story-structure/review-context":
@@ -85,7 +90,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 404)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/app.js", "/approach.js", "/approach.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -107,6 +112,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path == "/api/screenplays":
+            try:
+                return self._json(import_screenplay(self.server.store, self._input()), 201)
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if self.path in ("/api/story-structure/select-direction", "/api/story-structure/confirm"):
             try:
                 value = self._input()
