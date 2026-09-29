@@ -1,6 +1,6 @@
 # 制作思路：实例方法文档
 
-首页工作区为 `production.approach`，提供“故事创作”“素材生产”两个 Tab。无参数首页默认前者；`?workspace=production.approach&tab=materials` 直接进入后者。Tab 支持刷新、浏览器前进后退及左右方向键、Home/End。旧 `?workspace=current` 只在前端映射到新页，不再登记旧工作区或运行旧统计。
+首页工作区为 `production.approach`，提供“故事创作”“生产制作”两个 Tab。无参数首页默认前者；`?workspace=production.approach&tab=materials` 直接进入后者。显示名称改为“生产制作”后，仍保留 `materials` 路由 ID 与章节锚点，原链接继续有效。Tab 支持刷新、浏览器前进后退及左右方向键、Home/End。旧 `?workspace=current` 只在前端映射到新页，不再登记旧工作区或运行旧统计。
 
 两个 Tab 均以左侧常驻目录组织章节，沿用故事创作页的浅色阅读栏、红色选中边线与章节高亮。目录随正文滚动更新当前位置；条目保留原生锚点链接，章节可直接访问、刷新恢复并使用浏览器前进／后退。宽度不超过 1000 像素时目录移到正文上方，常驻并可横向滚动，定位时避开目录与站点顶栏。该高亮仅为当前阅读位置，不产生进度数据。
 
@@ -17,7 +17,7 @@
   "schema_version": 1,
   "tabs": [
     {"id": "story", "label": "故事创作", "title": "本故事的创作方法", "lead": "读者导语", "sections": []},
-    {"id": "materials", "label": "素材生产", "title": "本故事的素材方案", "lead": "实现边界", "sections": []}
+    {"id": "materials", "label": "生产制作", "title": "本故事的制作方案", "lead": "实现边界", "sections": []}
   ]
 }
 ```
