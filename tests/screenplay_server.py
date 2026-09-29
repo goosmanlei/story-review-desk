@@ -30,6 +30,12 @@ def main():
     for id in ('script-one','script-two'):
         d=fixture.edition(id)
         d['episodes'][0]['blocks'][-1]['text']='长段落，检查定位是否到引用，而非整块中间。\n'*70+'末尾定位目标。'
+        d['episodes'][0]['scenes']=[
+            {'id':'s1','heading':'场一·庙后','location':'庙后','time':'外景·日',
+             'estimated_seconds':120,'block_ids':['a']},
+            {'id':'s2','heading':'场二·门闩','location':'庙门','time':'内景·夜',
+             'estimated_seconds':120,'block_ids':['b']},
+        ]
         import_screenplay(fixture.store,d)
     fixture.store.close()
     try:

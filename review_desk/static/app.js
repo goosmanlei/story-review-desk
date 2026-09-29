@@ -1,4 +1,4 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplayVersion:null,screenplayEpisode:null,expandedScreenplays:new Set()};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplayVersion:null,screenplayEpisode:null,screenplayScene:null,expandedScreenplays:new Set()};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
@@ -160,7 +160,7 @@ function switchWorkspace(id,updateUrl=true){
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
   if(source){renderComments();scheduleSourceChapter()}
-  if(id==='story.script'){renderScriptIndex();renderScriptReader();renderComments()}
+  if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
   if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
@@ -323,7 +323,7 @@ function textSelectionAnchor(host,blocks,attribute){
 }
 function selectedAnchor(){
   if(isStructure())return selectedStructureAnchor();
-  if(isScript())return scriptEpisode()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
+  if(isScript())return scriptScene()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
   if(state.workspace!=='story.sources'||!state.current)return null;
   return textSelectionAnchor($('#source-text'),state.current.blocks,'data-block-id');
 }
@@ -386,13 +386,14 @@ function setPanelOpen(open){
 function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
 function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
-function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
-function abandonDraft(message){const key=draftKey();if(key)localStorage.removeItem(key);state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
+function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function abandonDraft(message){const key=draftKey();if(key)localStorage.removeItem(key);if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
 
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
   nodeText('q',null,anchorLabel(comment.anchor),card);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
+  if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
   const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=()=>locateComment(comment);
   if(comment.status==='OPEN'){
@@ -446,7 +447,7 @@ async function saveComment(){
   try{
     if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
     else await api('/api/comments',{method:'POST',body:JSON.stringify(request)});
-    localStorage.removeItem(key);
+    localStorage.removeItem(key);if(isScript())forgetScriptDraft();
     if(draftKey()===key){state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false}
     await refreshComments();toast('评论已保存');
   }catch(error){toast(error.message)}
@@ -485,7 +486,7 @@ async function init(){try{
   const initialUrl=new URL(location.href);
   if(structure.revisions.some(r=>r.id===initialUrl.searchParams.get('structure_revision')))state.structureRevision=initialUrl.searchParams.get('structure_revision');
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
-  chooseScript(initialUrl.searchParams.get('script'),initialUrl.searchParams.get('episode'),false);
+  chooseScript(initialUrl.searchParams.get('script'),initialUrl.searchParams.get('episode'),initialUrl.searchParams.get('scene'),false);
   switchWorkspace(initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach'),false);
   window.addEventListener('popstate',()=>{
     const url=new URL(location.href),source=url.searchParams.get('source');
@@ -493,8 +494,8 @@ async function init(){try{
     const structureRevision=url.searchParams.get('structure_revision');
     if(state.structure.revisions.some(r=>r.id===structureRevision))state.structureRevision=structureRevision;
     if(url.searchParams.get('workspace')==='story.script'){
-      const version=url.searchParams.get('script'),episode=url.searchParams.get('episode');
-      if((version&&version!==state.screenplayVersion)||(episode&&episode!==state.screenplayEpisode))chooseScript(version,episode,false);
+      const version=url.searchParams.get('script'),episode=url.searchParams.get('episode'),scene=url.searchParams.get('scene');
+      if(version!==state.screenplayVersion||episode!==state.screenplayEpisode||scene!==state.screenplayScene)chooseScript(version,episode,scene,false);
     }
     switchWorkspace(url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),false);
   });
