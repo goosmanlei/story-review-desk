@@ -523,4 +523,4 @@ async function init(){try{
   window.addEventListener('resize',scheduleSourceChapter);
   window.addEventListener('focus',()=>refreshComments().catch(()=>{}));
 }catch(error){$('#source-view').textContent=`加载失败：${error.message}`}}
-init();
+document.addEventListener('DOMContentLoaded',init,{once:true});
