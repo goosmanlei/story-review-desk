@@ -133,9 +133,6 @@ button { border-radius: 0; }
 .config-choice span { display: block; padding: 9px 12px; border: 1px solid var(--desk-line); background: #fffdfa; color: #484a43; font-size: 12px; }
 .config-choice input:checked + span { border-color: var(--desk-red); background: var(--desk-ink); color: #fff7ed; }
 .config-choice input:focus-visible + span { outline: 2px solid var(--desk-red); outline-offset: 2px; }
-.search-box { width: 245px; min-height: 35px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border: 1px solid var(--desk-line); background: #f8f4e9; color: var(--desk-red); }
-.search-box input { width: 100%; min-width: 0; padding: 5px 0; border: 0; outline: 0; background: transparent; color: #282a25; font-size: 11px; }.search-box input::placeholder { color: #898a80; }
-.search-box:has(input[hidden]) { display: none; }
 #comments-toggle { position: fixed; right: 26px; bottom: 26px; z-index: 5; padding: 10px 14px; border: 1px solid #72372f; border-radius: 24px; background: #71382f; color: #fff7ed; box-shadow: 0 5px 16px #0002; font-size: 12px; }
 #comments-toggle:hover { color: #fff; border-color: #71382f; background: #8f473b; }
 .workspace-footer { display: flex; align-items: center; justify-content: space-between; gap: 30px; padding: 30px 0 45px; border-top: 1px solid var(--desk-ink); color: #66685e; font-size: 11px; }
@@ -153,7 +150,7 @@ button { border-radius: 0; }
 .placeholder-heading { padding-bottom: 24px; border-bottom: 1px solid var(--desk-ink); }.placeholder-heading p { margin: 0 0 12px; color: var(--desk-red); font-size: 11px; font-weight: 700; letter-spacing: .16em; }.placeholder-heading h1 { margin: 0; font-size: clamp(32px,4vw,54px); }
 .placeholder-card { max-width: 900px; margin-top: 28px; padding: 30px; border: 1px solid var(--desk-line); background: #f8f4e9; }.placeholder-card small { color: var(--desk-red); font-size: 11px; letter-spacing: .12em; }.placeholder-card h2 { margin: 16px 0 10px; font-size: 24px; }.placeholder-card p { color: var(--desk-muted); font-size: 13px; line-height: 1.8; }.placeholder-card .primary { margin-top: 14px; }
 @media(max-width:1200px) { .story-workspace-heading { grid-template-columns: 1fr; } }
-@media(max-width:700px) { .workspace-content { width: calc(100% - 24px); }.workspace-topbar { padding-inline: 14px; }.search-box { width: 140px; }#comments-toggle { right: 12px; bottom: 12px; }.workspace-footer { display: block; }.workspace-footer p { margin-top: 12px; text-align: left; }.configuration-layout { grid-template-columns: 1fr; }.configuration-sections { display: flex; overflow-x: auto; }.configuration-sections button { white-space: nowrap; border-bottom: 0; border-right: 1px solid var(--desk-line); }.config-page form { grid-template-columns: 1fr; }.config-page .config-field:has(textarea) { grid-column: auto; } }
+@media(max-width:700px) { .workspace-content { width: calc(100% - 24px); }.workspace-topbar { padding-inline: 14px; }#comments-toggle { right: 12px; bottom: 12px; }.workspace-footer { display: block; }.workspace-footer p { margin-top: 12px; text-align: left; }.configuration-layout { grid-template-columns: 1fr; }.configuration-sections { display: flex; overflow-x: auto; }.configuration-sections button { white-space: nowrap; border-bottom: 0; border-right: 1px solid var(--desk-line); }.config-page form { grid-template-columns: 1fr; }.config-page .config-field:has(textarea) { grid-column: auto; } }
 @media(max-width:700px) { .text-reader { min-height: 0; grid-template-rows: auto auto; }.text-reader-index { max-height: none; }.source-reader-main { min-height: 0; }.config-choice-field { grid-column: auto; } }
 
 /* Keep the compilation desk in the viewport after the page reaches the top bar.
@@ -174,3 +171,10 @@ button { border-radius: 0; }
   #story-workspace .text-reader-index #source-list { display: block; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
   #story-workspace .source-button { min-width: 0; width: 100%; }
 }
+
+/* Titles keep their width; counts sit on a secondary line with the same vocabulary. */
+.source-labels { display: block; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.source-button .revision-comment-count { display: block; margin: 5px 0 0; color: #d7ad84; font-size: 11px; line-height: 1.5; font-weight: 400; }
+.source-button.active .revision-comment-count { color: #594333; }
+.source-group-totals { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 5px; }
+.source-group-totals small { margin: 0; font-weight: 400; }

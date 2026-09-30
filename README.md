@@ -23,7 +23,7 @@ docker compose up -d --build
 
 ## 数据访问与公开同步
 
-导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目仅显示标题，类型、来源等信息在右侧详情中查看。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放/下载；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
+导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放/下载；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
 
 ```bash
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo import-sources /path/to/new-sources.json
@@ -34,7 +34,7 @@ PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo objects
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
 ```
 
-故事结构阅读页提供版本切换、章节目录、图文圈选和整体意见；评论面板使用浮动按钮统一打开。已选方向后不显示回看／重选方向区，也不提供供剧本创作的版本确认控件。旧数据与底层接口保持兼容。图片和图示按阅读栏等比缩放，保留原始高清文件；窄屏也显示完整图幅，圈选叠层与图片边界一致。故事结构中的图片和图示可点击或按 Enter／空格在当前页面放大，按 Esc 或右上角关闭按钮返回原阅读位置；圈选评论模式不触发放大。
+故事结构阅读页提供版本切换、章节目录、图文圈选和整体意见；每个“第 N 稿”按钮显示精确修订的全部现存评论数（含已关闭，文字、整篇、整图和区域各计一次），评论面板使用浮动按钮统一打开。已选方向后不显示回看／重选方向区，也不提供供剧本创作的版本确认控件。旧数据与底层接口保持兼容。图片和图示按阅读栏等比缩放，保留原始高清文件；窄屏也显示完整图幅，圈选叠层与图片边界一致。故事结构中的图片和图示可点击或按 Enter／空格在当前页面放大，按 Esc 或右上角关闭按钮返回原阅读位置；圈选评论模式不触发放大。
 
 故事精修版本下可展开章节三级菜单：从各正文块首行的“第N章 章名”提取标题，不另存章节数据。选择版本自动展开，再点当前版本可收起且保留正文位置；点击章名跳到章首，当前章随阅读滚动与布局变化高亮。桌面沿用正文与目录各自滚动，窄屏跳转避开固定顶栏。该展示不改变原文块、字符偏移或评论锚点。
 

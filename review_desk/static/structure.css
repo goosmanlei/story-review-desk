@@ -41,3 +41,9 @@ body.structure-image-open{overflow:hidden}
 .structure-image-canvas{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 16px 16px}
 .structure-image-canvas img{display:block;width:100%;height:100%;object-fit:contain}
 @media(max-width:700px){.structure-image-dialog{width:calc(100vw - 16px);height:calc(100vh - 16px);height:calc(100dvh - 16px)}.structure-image-toolbar{padding:8px;gap:8px}.structure-image-canvas{padding:0 8px 8px}}
+
+.structure-versions button { display: grid; gap: 4px; text-align: left; }
+.structure-versions button strong { font-weight: 500; }
+.structure-versions .revision-comment-count { font-size: 11px; color: #746657; }
+.structure-versions button.active .revision-comment-count { color: #e3d2ba; }
+.revision-count-help { margin: 8px 0; font-size: 12px; color: #67695f; }

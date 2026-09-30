@@ -1,0 +1,47 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>故事创作导航与评论数隔离验收</title>
+<style>body{font:16px/1.6 sans-serif}iframe{width:1400px;height:850px;border:1px solid #bbb;max-width:100%}pre{white-space:pre-wrap;max-height:230px;overflow:auto}</style>
+<h1>故事创作导航与评论数隔离验收</h1><p>临时资料与数据库。导航、实际计数和布局使用真实页面与接口。圈选手势和真实键盘另行检查。</p>
+<button id="run">运行界面统一检查</button><pre id="results">尚未运行</pre><iframe src="/?workspace=story.sources&source=plain"></iframe>
+<script>
+const frame=document.querySelector('iframe'),out=document.querySelector('#results'),checks=[];
+const w=()=>frame.contentWindow,d=()=>frame.contentDocument,q=s=>d().querySelector(s);
+const pause=()=>new Promise(r=>setTimeout(r,100));
+const wait=async fn=>{for(let i=0;i<120;i++){if(fn())return;await pause()}throw Error('等待状态超时')};
+function ok(v,name){if(!v)throw Error(name);checks.push({name,passed:true});out.textContent=JSON.stringify(checks,null,2)}
+async function load(url){await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});frame.src=url});await wait(()=>q('#source-text'));}
+async function reload(){await new Promise(resolve=>{frame.addEventListener('load',resolve,{once:true});w().location.reload()});await wait(()=>q('#source-text'));}
+const count=s=>q(s+' .revision-comment-count')?.textContent;
+const sourceCount=id=>count('.source-button[data-source-id="'+id+'"]');
+const groupCount=id=>count('.source-group-toggle[data-group-id="'+id+'"]');
+const version=n=>[...d().querySelectorAll('.structure-versions button')].find(b=>b.querySelector('strong').textContent===`第 ${n} 稿`);
+function nav(tab){ok(q('#workspace-nav .active .nav-labels b')?.textContent==='故事创作'&&q('#workspace-nav [aria-current="page"] .nav-labels b')?.textContent==='故事创作'&&q('.story-mode-tabs [aria-selected="true"]')?.id===tab,'一级导航与当前子页 '+tab);ok(!q('#source-search')&&!q('#reader-comments'),'移除搜索和重复按钮 '+tab)}
+function expand(){for(const b of [...d().querySelectorAll('.source-group-toggle')])if(b.getAttribute('aria-expanded')==='false')b.click()}
+function text(value){q('#comment-editor-text').value=value;q('#comment-editor-text').dispatchEvent(new (w().Event)('input',{bubbles:true}))}
+async function save(){q('[data-comment-submit]').click();await wait(()=>!q('#comment-editor-text'))}
+const comments=async()=>await (await fetch('/api/comments')).json();
+function sourceTotals(expected=2){ok(sourceCount('plain')==='评论 2'&&sourceCount('folk-many')===`评论 ${expected}`&&sourceCount('folk-zero')==='评论 0'&&sourceCount('refine-many')==='评论 2'&&sourceCount('refine-zero')==='评论 0'&&sourceCount('novel')==='评论 2','各资料零／多／关闭评论且修订隔离');ok(groupCount('folk-tales')===`评论 ${expected}`&&groupCount('story-refinements')==='评论 2'&&groupCount('expansion-directions')==='评论 2','分类总数等于所属资料之和');ok([...d().querySelectorAll('.source-group-totals')].every(n=>/资料 \d+ 项/.test(n.textContent)),'资料项数与评论数区分')}
+function bounds(){return [...d().querySelectorAll('.source-button,.source-group-toggle,.structure-versions button')].filter(n=>n.getClientRects().length).every(n=>{const r=n.getBoundingClientRect();return [...n.querySelectorAll('strong,small')].every(c=>{const b=c.getBoundingClientRect();return b.left>=r.left-1&&b.right<=r.right+1&&b.bottom<=r.bottom+1})})}
+document.querySelector('#run').onclick=async()=>{checks.length=0;try{
+ for(const [workspace,tab] of [['story.sources','open-story-sources'],['story.outline','open-story-structure'],['story.script','open-story-script']]){
+  await load('/?workspace='+workspace+'&source=plain');nav(tab);await reload();nav(tab);
+ }
+ await load('/?workspace=story.sources&source=plain');for(const tab of ['open-story-structure','open-story-script']){q('#'+tab).click();nav(tab)}
+ w().history.back();await wait(()=>q('#open-story-structure').getAttribute('aria-selected')==='true');nav('open-story-structure');w().history.back();await wait(()=>q('#open-story-sources').getAttribute('aria-selected')==='true');nav('open-story-sources');w().history.forward();await wait(()=>q('#open-story-structure').getAttribute('aria-selected')==='true');nav('open-story-structure');w().history.forward();await wait(()=>q('#open-story-script').getAttribute('aria-selected')==='true');nav('open-story-script');
+ q('#open-story-sources').click();expand();sourceTotals();ok([...d().querySelectorAll('.revision-comment-count')].every(n=>n.title==='包含已关闭评论'),'计数提示明确包含关闭评论');
+ q('[data-source-id="refine-many"]').click();ok(q('.source-version-toggle.active').getAttribute('aria-expanded')==='true'&&q('.source-chapters:not([hidden])'),'精修标题选中和章节展开');q('.source-version-toggle.active').click();ok(q('.source-version-toggle.active').getAttribute('aria-expanded')==='false','再次点击精修可收起');q('.source-version-toggle.active').click();q('.source-chapters:not([hidden]) button:last-child').click();await pause();ok(q('[data-block-id="b"].source-chapter-button.active'),'章节导航有效');
+ q('[data-source-id="folk-many"]').click();q('#comments-toggle').click();ok(!q('#comment-panel').hidden&&q('#open-count').textContent==='1 待处理','共用入口保留未关闭口径');q('#comments-close').click();q('#source-text .comment-mark').click();ok(!q('#comment-panel').hidden,'正文高亮打开评论面板');q('#comments-close').click();q('#comments-toggle').click();ok(!q('#comment-panel').hidden,'删除重复按钮后开关无空引用');
+ const src=(await (await fetch('/api/sources')).json()).find(s=>s.id==='folk-many'),anchor={block_id:'summary',end_block_id:'summary',start:0,end:2,quote:'李寄'};
+ w().startDraft(anchor);text('新增评论');await save();sourceTotals(3);let c=(await comments()).find(c=>c.body==='新增评论');ok(c.target_revision_id===src.target_revision_id,'新评论绑定展示修订');
+ w().startDraft(c.anchor,c);text('编辑后正文');await save();sourceTotals(3);c=(await comments()).find(x=>x.id===c.id);await w().changeComment(c,'CLOSE');sourceTotals(3);c=(await comments()).find(x=>x.id===c.id);await w().changeComment(c,'REOPEN');sourceTotals(3);
+ await fetch('/api/comments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_id:'folk-many',anchor,body:'独立接口新增，测试重新获取'})});await w().refreshComments();sourceTotals(4);
+ // A duplicate response entry cannot double count the record. Production GET is unique.
+ const realFetch=w().fetch;w().fetch=async(...args)=>{const response=await realFetch(...args);if(args[0]==='/api/comments'){const rows=await response.json();return new (w().Response)(JSON.stringify([...rows,rows[0]]),{status:200})}return response};try{await w().refreshComments();sourceTotals(4);ok(true,'重复返回的同一 UUID 只计一次')}finally{w().fetch=realFetch;await w().refreshComments()}
+ await reload();expand();sourceTotals(4);
+ q('#open-story-structure').click();ok(version(1).querySelector('small').textContent==='评论 4'&&version(2).querySelector('small').textContent==='评论 0','文字／整篇／整图／区域计入原稿且新稿为零');
+ version(1).click();q('#comments-toggle').click();ok(d().querySelectorAll('.comment-card').length===3&&q('#comments-toggle').textContent.includes('本稿评论 3'),'第一稿内容与未关闭数量一致');version(2).click();ok(d().querySelectorAll('.comment-card').length===0&&q('#comments-toggle').textContent.includes('历史待决 3'),'新稿不串原稿内容');
+ w().startDraft({type:'global'});text('第二稿整体意见');await save();ok(version(2).querySelector('small').textContent==='评论 1'&&version(1).querySelector('small').textContent==='评论 4','新稿新增即时更新且旧稿数量不变');c=(await comments()).find(c=>c.body==='第二稿整体意见');await w().changeComment(c,'CLOSE');ok(version(2).querySelector('small').textContent==='评论 1','结构关闭不改变总数');c=(await comments()).find(x=>x.id===c.id);await w().changeComment(c,'REOPEN');w().startDraft(c.anchor,(await comments()).find(x=>x.id===c.id));text('第二稿编辑');await save();ok(version(2).querySelector('small').textContent==='评论 1','结构重开与编辑不改变总数');
+ await reload();await wait(()=>version(2));ok(version(2).querySelector('small').textContent==='评论 1'&&version(1).querySelector('small').textContent==='评论 4','结构刷新后数量持久一致');
+ for(const width of [1400,390]){frame.style.width=width+'px';await pause();q('#open-story-sources').click();expand();q('[data-source-id="refine-many"]').click();ok(bounds(),width+'像素资料标题与计数不遮挡');q('.source-version-toggle.active').click();ok(q('.source-version-toggle.active').getAttribute('aria-expanded')==='false',width+'像素精修收起可操作');q('[data-group-id="folk-tales"]').click();ok(q('[data-group-id="folk-tales"]').getAttribute('aria-expanded')==='false',width+'像素分类收起可操作');q('[data-group-id="folk-tales"]').click();q('#open-story-structure').click();ok(bounds(),width+'像素结构版本按钮无溢出');version(1).click();ok(version(1).getAttribute('aria-pressed')==='true',width+'像素结构版本选中态');q('#open-story-script').click();nav('open-story-script');}
+ frame.style.width='1400px';const result={passed:checks.length,checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)});
+ }catch(error){const result={failed:String(error),checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)})}};
+</script></html>
