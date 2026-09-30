@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from .store import Store, canonical, digest
+from .production_media import file_hash
 
 
 def _bytes(value):
@@ -17,19 +18,33 @@ def _safe_asset(name):
 def export(store, export_dir):
     target = Path(export_dir)
     target.mkdir(parents=True, exist_ok=True)
-    materials = store.sources()
-    comments = {"comments": store.comments(), "events": store.events()}
-    framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
-    configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
-                      "events": store.configuration_events()}
+    store.db.execute('SAVEPOINT export_snapshot')
+    try:
+        materials = store.sources()
+        comments = {"comments": store.comments(), "events": store.events()}
+        framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
+        configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
+                          "events": store.configuration_events()}
+        icon = store.configuration("SYSTEM")["body"]["site_favicon"]
+    finally:
+        store.db.execute('RELEASE SAVEPOINT export_snapshot')
     asset_names = {_safe_asset(name) for source in materials for name in
                    [*(asset["file"] for asset in source["assets"]), *([source["media"]["file"]] if (source.get("media") or {}).get("file") else [])]}
     for revision in framework["revisions"]:
         payload = json.loads(revision["payload"])
         if revision["object_id"] == "story-structure":
             asset_names.update(_safe_asset(visual["file"]) for section in payload["sections"] for visual in section.get("visuals", []))
+        if str(payload.get("format", "")).startswith("production-"):
+            from .production import FORMATS, validate_payload
+            if payload["format"] not in FORMATS:
+                raise ValueError("unsupported production export format")
+            # Alias uniqueness is a head-only constraint, so individual historic
+            # entities are not rechecked against current aliases during export.
+            from .production_media import validate_component
+            for component in payload.get("components", []):
+                validate_component(target.parent, component, inspect=False)
+                asset_names.add(component["file"])
     from .favicon import asset as favicon_asset
-    icon = store.configuration("SYSTEM")["body"]["site_favicon"]
     if icon:
         favicon_asset(target.parent, icon)
         asset_names.add(icon)
@@ -46,7 +61,7 @@ def export(store, export_dir):
     hashes = {"materials.json": digest(material_bytes), "comments.json": digest(comment_bytes),
               "objects.json": digest(framework_bytes), "configurations.json": digest(configuration_bytes)}
     for name in asset_names:
-        hashes["assets/" + name] = digest((target / "assets" / name).read_bytes())
+        hashes["assets/" + name] = file_hash(target / "assets" / name)
     manifest = {"schema_version": 3, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
@@ -66,7 +81,7 @@ def restore(store, export_dir):
             _safe_asset(name[7:])
         elif name not in (("materials.json", "comments.json") if schema == 1 else ("materials.json", "comments.json", "objects.json", "configurations.json")):
             raise ValueError("unexpected export file")
-        if digest(path.read_bytes()) != expected:
+        if path.is_symlink() or file_hash(path) != expected:
             raise ValueError("export checksum mismatch: " + name)
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
@@ -120,6 +135,18 @@ def restore(store, export_dir):
                         for visual in section.get("visuals", []):
                             if "assets/" + _safe_asset(visual["file"]) not in manifest["files"]:
                                 raise ValueError("unmanifested structure visual")
+                if str(payload.get("format", "")).startswith("production-"):
+                    from .production import FORMATS, references
+                    from .production_media import validate_component
+                    if payload["format"] not in FORMATS or FORMATS[payload["format"]] != objects[revision["object_id"]]["kind"]:
+                        raise ValueError("unsupported restored production format/kind")
+                    for _, ref in references(payload):
+                        if ref["revision_id"] not in revisions or revisions[ref["revision_id"]]["object_id"] != ref["object_id"]:
+                            raise ValueError("invalid restored production reference")
+                    for component in payload.get("components", []):
+                        if "assets/" + component["file"] not in manifest["files"]:
+                            raise ValueError("unmanifested production component")
+                        validate_component(target.parent, component)
             for dependency in framework["dependencies"]:
                 if dependency["from_revision"] not in revisions or dependency["to_revision"] not in revisions:
                     raise ValueError("invalid dependency")
@@ -172,6 +199,18 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], stamp, stamp))
                 for revision in test.revisions():
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
+            if schema >= 2:
+                from .production import FORMATS, validate_payload, references, current_records
+                for revision in framework["revisions"]:
+                    payload = json.loads(revision["payload"])
+                    if payload.get("format") in FORMATS:
+                        validate_payload(store, revision["object_id"], objects[revision["object_id"]]["kind"], payload, inspect=False, check_current=False)
+                        expected_deps = {(ref["revision_id"], role) for role, ref in references(payload)}
+                        actual_deps = {(d["to_revision"], d["role"]) for d in framework["dependencies"] if d["from_revision"] == revision["id"]}
+                        if expected_deps != actual_deps:
+                            raise ValueError("restored production dependencies differ from payload")
+                for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
+                    validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
             for c in restored_comments:
                 store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))

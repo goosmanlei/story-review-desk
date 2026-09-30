@@ -416,6 +416,8 @@ class Store:
             source = None
         else:
             blocks, visuals, source = payload.get("blocks"), [], None
+            if str(payload.get("format", "")).startswith("production-"):
+                visuals = [c for c in payload.get("components", []) if c.get("mime", "").startswith("image/")]
         if blocks is None and isinstance(payload.get("body"), str):
             blocks = [{"id": "body", "text": payload["body"]}]
         if not isinstance(anchor, dict):
@@ -424,14 +426,28 @@ class Store:
         if kind == "text":
             self._validate_blocks(blocks, anchor)
         elif kind == "global":
-            if obj["kind"] != "STORY" or object_id != "story-structure" or set(anchor) != {"type"}:
+            production = str(payload.get("format", "")).startswith("production-")
+            if not (production or obj["kind"] == "STORY" and object_id == "story-structure") or set(anchor) != {"type"}:
                 raise ValueError("invalid global anchor")
+        elif kind == "time":
+            from .production_media import validate_component
+            from .production import validate_selection, FORMATS
+            if payload.get("format") not in FORMATS:
+                raise ValueError("time comments require a production media revision")
+            component = next((c for c in payload.get("components", []) if c["id"] == anchor.get("component_id")), None)
+            if not component or component["file"] != anchor.get("asset_file"):
+                raise Conflict("time comment differs from exact component")
+            validate_component(self.db_path.parent.parent, component, inspect=False)
+            validate_selection(component, {"range": anchor})
         elif kind in ("visual", "region"):
             visual = next((v for v in visuals if v.get("id", v.get("file")) == anchor.get("visual_id")), None)
             if not visual or anchor.get("asset_file") != visual.get("file"):
                 raise Conflict("visual asset reference differs from target revision")
             if not (self.db_path.parent.parent / "export" / "assets" / visual["file"]).is_file():
                 raise Conflict("referenced visual asset is missing")
+            if str(payload.get("format", "")).startswith("production-"):
+                from .production_media import validate_component
+                validate_component(self.db_path.parent.parent, visual, inspect=False)
             if kind == "region":
                 points = anchor.get("points")
                 if not isinstance(points, list) or not 3 <= len(points) <= 260 or any(
@@ -519,7 +535,7 @@ class Store:
                 continue
             target = self.validate_target(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])
             source, blocks = target["source"], target["blocks"]
-            index = next((i for i, b in enumerate(blocks) if b["id"] == comment["anchor"].get("block_id")), None)
+            index = next((i for i, b in enumerate(blocks or []) if b["id"] == comment["anchor"].get("block_id")), None)
             results.append({**comment, "object_kind": target["object"]["kind"],
                             "source_title": source["title"] if source else None,
                             "source_url": source["source_url"] if source else None,

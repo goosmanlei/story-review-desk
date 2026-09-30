@@ -1,4 +1,6 @@
 import json
+import mimetypes
+import re
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -13,6 +15,8 @@ from .screenplay import snapshot as screenplay_snapshot, review_context as scree
 from .screenplay_summaries import read_summaries
 from .store import Conflict, Store
 from .structure import select_direction, snapshot, confirm_structure, review_context, script_input
+from . import production
+from .production_media import asset_path, ingest
 
 
 class ReviewServer(HTTPServer):
@@ -41,18 +45,45 @@ class ReviewHandler(BaseHTTPRequestHandler):
     def _file(self, path, mime):
         if not path.is_file():
             return self._json({"error": "not found"}, 404)
-        data = path.read_bytes()
-        self.send_response(200)
+        size, start, end = path.stat().st_size, 0, path.stat().st_size - 1
+        partial = self.headers.get("Range")
+        if partial:
+            match = re.fullmatch(r"bytes=(\d*)-(\d*)", partial)
+            if not match or not any(match.groups()):
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+            left, right = match.groups()
+            start = int(left) if left else max(0, size - int(right))
+            end = min(int(right), size - 1) if left and right else size - 1
+            if start > end or start >= size:
+                self.send_response(416)
+                self.send_header("Content-Range", f"bytes */{size}")
+                self.end_headers()
+                return
+        self.send_response(206 if partial else 200)
         self.send_header("Content-Type", mime)
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(max(0, end - start + 1)))
+        self.send_header("Accept-Ranges", "bytes")
+        if partial:
+            self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(data)
+        with path.open("rb") as stream:
+            stream.seek(start)
+            remaining = end - start + 1
+            while remaining > 0:
+                chunk = stream.read(min(1024 * 1024, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _input(self):
         length = int(self.headers.get("Content-Length", "0"))
-        if length > 1_000_000:
+        if length <= 0 or length > 20_000_000:
             raise ValueError("request too large")
         return json.loads(self.rfile.read(length))
 
@@ -60,6 +91,33 @@ class ReviewHandler(BaseHTTPRequestHandler):
         parsed = urlsplit(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
         store = self.server.store
+        if path == "/api/production" or path.startswith("/api/production/"):
+            try:
+                param = lambda name: query.get(name, [None])[0]
+                if path == "/api/production":
+                    return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
+                if path == "/api/production/impact":
+                    return self._json(production.impact(store, param("revision_id")))
+                if path == "/api/production/source":
+                    ref = {"object_id": param("object_id"), "revision_id": param("revision_id")}
+                    if param('scene_id'):
+                        ref['scene_id'] = param('scene_id')
+                    if param('block_ids'):
+                        ref['block_ids'] = param('block_ids').split(',')
+                    return self._json(production.source_excerpt(store, ref))
+                if path == "/api/production/readiness":
+                    return self._json(production.readiness(store, param("scope")))
+                if path == "/api/production/package":
+                    return self._json(production.package_manifest(store, param("scope")))
+                if path.startswith("/api/production/files/"):
+                    media = asset_path(self.server.root, path.removeprefix("/api/production/files/"))
+                    return self._file(media, mimetypes.guess_type(media.name)[0] or "application/octet-stream")
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except KeyError:
+                return self._json({"error": "production record not found"}, 404)
+            except (ValueError, TypeError, OSError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if path == "/api/instance":
             return self._json({"id": self.server.config["id"], "title": self.server.config["title"]})
         if path == "/api/production-approach":
@@ -114,7 +172,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -136,6 +194,20 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment"):
+            try:
+                value = self._input()
+                if self.path.endswith("import"):
+                    result = production.import_records(self.server.store, value, value.get("validate_only") is True)
+                elif self.path.endswith("adopt"):
+                    result = production.adopt(self.server.store, value)
+                else:
+                    result = production.judge(self.server.store, value)
+                return self._json(result, 201)
+            except Conflict as exc:
+                return self._json({"error": str(exc)}, 409)
+            except (KeyError, ValueError, TypeError, OSError) as exc:
+                return self._json({"error": str(exc)}, 400)
         if self.path == "/api/favicon":
             try:
                 value = self._input()
@@ -181,6 +253,18 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 400)
             except (HTTPError, URLError, TimeoutError):
                 return self._json({"error": "AI 润色请求失败；草稿未修改，请稍后重试"}, 502)
+        return self._json({"error": "not found"}, 404)
+
+    def do_PUT(self):
+        if self.path.startswith("/api/production/files/"):
+            try:
+                size = int(self.headers.get("Content-Length", "0"))
+                if not 0 < size <= 8 * 1024 ** 3:
+                    raise ValueError("media upload requires Content-Length between 1 byte and 8 GiB")
+                result = ingest(self.server.root, self.rfile, self.path.rsplit("/", 1)[1], size)
+                return self._json(result, 201)
+            except (ValueError, TypeError, OSError) as exc:
+                return self._json({"error": str(exc)}, 400)
         return self._json({"error": "not found"}, 404)
 
     def do_PATCH(self):

@@ -6,13 +6,14 @@ const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
 const isStructure=()=>state.workspace==='story.outline';
 const isScript=()=>state.workspace==='story.script';
-const commentTarget=()=>isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
-const draftKey=()=>state.anchor?`review-draft:${isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
+const commentTarget=()=>isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
+const draftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const commentSaves=new Set();
-const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
+const activeComments=()=>state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
-const anchorLabel=a=>a.type==='global'?'整篇结构稿':a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
-const renderActiveReader=()=>isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
+const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
+const renderActiveReader=()=>isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
 const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
@@ -131,7 +132,7 @@ function renderWorkspaceNav(){
   const sections=[
     ['production.approach','制作思路','思路','故事创作与生产制作方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与分集剧本'],
-    ['settings.workspace','故事设定','设定','主体、空间与实体关系'],
+    ['settings.workspace','制作设定','设定','主体、空间与实体关系'],
     ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
     ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
     ['project.configuration','系统管理','管理','系统配置、数据与运行']
@@ -160,17 +161,18 @@ function switchWorkspace(id,updateUrl=true){
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
   $('#story-workspace').hidden=!source;$('#screenplay-workspace').hidden=id!=='story.script';$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#approach-view').hidden=id!=='production.approach';
-  $('#placeholder-view').hidden=storyChild||id==='project.configuration'||id==='production.approach';
+  $('#placeholder-view').hidden=storyChild||isProduction()||id==='project.configuration'||id==='production.approach';
+  $('#production-view').hidden=!isProduction();
   for(const [tab,selected] of [['#open-story-sources',source],['#open-story-structure',id==='story.outline'],['#open-story-script',id==='story.script']]){
     const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
   }
-  $('#comments-toggle').hidden=!storyChild;closePanel();
-  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
+  $('#comments-toggle').hidden=!storyChild&&!isProduction();closePanel();
+  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['制作设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
   if(source){renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
-  if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
+  if(isProduction())loadProductionWorkspace().catch(e=>toast(e.message));else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
   if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
 }
@@ -347,6 +349,7 @@ function textSelectionAnchor(host,blocks,attribute){
   return {block_id:blocks[first].id,end_block_id:blocks[last].id,start,end,quote};
 }
 function selectedAnchor(){
+  if(isProduction())return state.productionSelected?textSelectionAnchor($('#production-blocks'),state.productionSelected.payload.blocks,'data-block-id'):null;
   if(isStructure())return selectedStructureAnchor();
   if(isScript())return scriptScene()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
   if(state.workspace!=='story.sources'||!state.current)return null;
@@ -367,7 +370,7 @@ function selectionBounds(host){
 function updateSelectionAction(){
   const anchor=selectionPointer===null&&!state.drawMode?selectedAnchor():null;
   if(!anchor){hideSelectionAction();return}
-  const selection=getSelection(),range=selection.getRangeAt(0),host=$(isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view'),bounds=selectionBounds(host);
+  const selection=getSelection(),range=selection.getRangeAt(0),host=$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view'),bounds=selectionBounds(host);
   const rects=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0&&r.right>bounds.left&&r.left<bounds.right&&r.bottom>bounds.top&&r.top<bounds.bottom);
   if(!rects.length){hideSelectionAction();return}
   // Stay by the visible end of the gesture, even when the beginning has scrolled away.
@@ -436,7 +439,7 @@ function updateCommentEditorControls(){
   const busy=commentSaves.has(draftKey());textarea.readOnly=busy;
   for(const button of editor.querySelectorAll('.editor-actions button'))button.disabled=busy;
   editor.querySelector('[data-comment-submit]').disabled=busy||!textarea.value.trim();
-  editor.querySelector('[data-polish]').disabled=busy||!textarea.value.trim();
+  editor.querySelector('[data-polish]').disabled=busy||isProduction()||!textarea.value.trim();
 }
 
 function commentCard(comment){
@@ -455,7 +458,7 @@ function commentCard(comment){
 
 function renderComments(){
   if(isScript())renderScriptCommentCounts();
-  if((isScript()&&!scriptEpisode())||(!isStructure()&&!isScript()&&!state.current)){$('#comment-body').replaceChildren();$('#open-count').textContent='0';$('#comments-toggle').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
+  if((isScript()&&!scriptEpisode())||(isProduction()&&!state.productionSelected)||(!isProduction()&&!isStructure()&&!isScript()&&!state.current)){$('#comment-body').replaceChildren();$('#open-count').textContent='0';$('#comments-toggle').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
   $('#open-count').textContent=`${open.length} 待处理`;
   const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
@@ -466,8 +469,8 @@ function renderComments(){
     textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
     const help=nodeText('p','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);help.id='comment-editor-shortcuts';textarea.setAttribute('aria-describedby',help.id);
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.dataset.commentSubmit='true';save.onclick=saveComment;
-    const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;
-    const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;
+    const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;inspect.hidden=isProduction();
+    const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;polish.hidden=isProduction();
     const collapse=nodeText('button',null,'收起草稿',actions);collapse.onclick=()=>{state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments();toast('草稿已留在本机，重新圈选同一内容可继续编辑')};
     const cancel=nodeText('button','destructive',state.editing?'取消编辑':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'未保存的编辑已放弃':'本次未提交评论已取消');editor.append(actions);
     bindCommentEditorShortcuts(textarea,{submit:save,cancel});
@@ -534,7 +537,7 @@ async function previewPolish(){
 }
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
 function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
-function locateComment(comment){if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!isStructure())switchWorkspace('story.outline');state.structureRevision=comment.target_revision_id;state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));if(!block){toast('原引用已失效；评论仍保留');return}(block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'})}
+function locateComment(comment){if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!isStructure())switchWorkspace('story.outline');state.structureRevision=comment.target_revision_id;state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));if(!block){toast('原引用已失效；评论仍保留');return}(block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'})}
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
