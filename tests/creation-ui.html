@@ -14,7 +14,7 @@ const count=s=>q(s+' .revision-comment-count')?.textContent;
 const sourceCount=id=>count('.source-button[data-source-id="'+id+'"]');
 const groupCount=id=>count('.source-group-toggle[data-group-id="'+id+'"]');
 const version=n=>[...d().querySelectorAll('.structure-versions button')].find(b=>b.querySelector('strong').textContent===`第 ${n} 稿`);
-function nav(tab){ok(q('#workspace-nav .active .nav-labels b')?.textContent==='故事创作'&&q('#workspace-nav [aria-current="page"] .nav-labels b')?.textContent==='故事创作'&&q('.story-mode-tabs [aria-selected="true"]')?.id===tab,'一级导航与当前子页 '+tab);ok(!q('#source-search')&&!q('#reader-comments'),'移除搜索和重复按钮 '+tab)}
+function nav(tab){ok(q('#workspace-nav .active .nav-labels b')?.textContent==='故事创作'&&q('#workspace-nav [aria-current="page"] .nav-labels b')?.textContent==='故事创作'&&q('.story-mode-tabs [aria-selected="true"]')?.id===tab,'一级导航与当前子页 '+tab);ok(!q('#source-search')&&!q('#source-count')&&!q('#reader-comments'),'移除搜索、页头资料总数和重复按钮 '+tab)}
 function expand(){for(const b of [...d().querySelectorAll('.source-group-toggle')])if(b.getAttribute('aria-expanded')==='false')b.click()}
 function text(value){q('#comment-editor-text').value=value;q('#comment-editor-text').dispatchEvent(new (w().Event)('input',{bubbles:true}))}
 async function save(){q('[data-comment-submit]').click();await wait(()=>!q('#comment-editor-text'))}

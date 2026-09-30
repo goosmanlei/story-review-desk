@@ -80,7 +80,6 @@ function renderSources(preserveScroll=true){
   }
   for(const source of sources.filter(item=>item.group&&!['folk-tales','expansion-directions','story-refinements'].includes(item.group)))addSource(source,nav);
   if(!sources.length)nodeText('p','source-no-results','暂无资料。',nav);
-  $('#source-count').textContent=`${state.sources.length} 份资料`;
   nav.scrollTop=scrollTop;
 }
 
@@ -166,7 +165,6 @@ function switchWorkspace(id,updateUrl=true){
     const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
   }
   $('#comments-toggle').hidden=!storyChild;closePanel();
-  $('#source-count').hidden=!source;
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
