@@ -68,8 +68,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
             except (ValueError, OSError):
                 return self._json({"error": "实例制作方法文档格式错误或无法读取"}, 503)
         if path == "/api/sources":
-            revisions = {obj["id"]: obj["current_revision"] for obj in store.objects() if obj["kind"] == "SOURCE"}
-            return self._json([{**source, "target_revision_id": revisions[source["id"]]} for source in store.sources()])
+            sources = store.sources()
+            if query.get("with_revision") == ["1"]:
+                revisions = {obj["id"]: obj["current_revision"] for obj in store.objects() if obj["kind"] == "SOURCE"}
+                sources = [{**source, "target_revision_id": revisions[source["id"]]} for source in sources]
+            return self._json(sources)
         if path == "/api/framework":
             return self._json(framework_catalog())
         if path == "/api/configurations":
