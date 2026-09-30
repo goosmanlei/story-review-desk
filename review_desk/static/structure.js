@@ -129,8 +129,8 @@ function renderStructureReader(){
   }
   if(state.structure.direction_changed){const alert=nodeText('p','structure-alert','所选方向已更新。当前结构稿仍引用原方向修订；请核对并导入针对新方向的完整结构稿。',status);alert.setAttribute('role','alert')}
   const versions=el('div','structure-versions');nodeText('span',null,'阅读版本：',versions);
-  for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'',`第 ${revision.version} 稿`,versions);button.type='button';button.onclick=()=>{state.structureRevision=revision.id;state.anchor=null;state.selected=null;renderStructureReader();renderComments()}}
-  status.append(versions);
+  for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'','',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>{state.structureRevision=revision.id;state.anchor=null;state.selected=null;renderStructureReader();renderComments()}}
+  status.append(versions);nodeText('p','revision-count-help','评论数包含已关闭评论。',status);
   if(!active){nodeText('p','structure-empty','方向已选定。等待 Codex 通过 structure-import 导入完整图文结构初稿。',status);return}
   const doc=active.payload;
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}

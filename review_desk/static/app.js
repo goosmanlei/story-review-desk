@@ -1,4 +1,4 @@
-const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',query:'',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplaySummaries:new Map(),screenplayVersion:null,screenplayEpisode:null,screenplayScene:null};
+const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplaySummaries:new Map(),screenplayVersion:null,screenplayEpisode:null,screenplayScene:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
 const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
@@ -6,10 +6,10 @@ const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
 const isStructure=()=>state.workspace==='story.outline';
 const isScript=()=>state.workspace==='story.script';
-const commentTarget=()=>isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id};
+const commentTarget=()=>isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const draftKey=()=>state.anchor?`review-draft:${isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const commentSaves=new Set();
-const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.source_id===state.current?.id);
+const activeComments=()=>state.comments.filter(c=>isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整篇结构稿':a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
 const renderActiveReader=()=>isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
@@ -17,6 +17,15 @@ const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
 function link(label,url,parent){const a=el('a',null,label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);return a}
+
+// Count records, including closed comments, on the exact displayed revision.
+function revisionCommentCount(objectId,revisionId){
+  return new Set(state.comments.filter(c=>c.target_object_id===objectId&&c.target_revision_id===revisionId).map(c=>c.id)).size;
+}
+function commentCountLabel(parent,count){
+  const label=nodeText('small','revision-comment-count',`评论 ${count}`,parent);
+  label.title='包含已关闭评论';return label;
+}
 
 function sourceChapters(source){
   if(source?.group!=='story-refinements')return [];
@@ -28,7 +37,7 @@ function sourceChapters(source){
 
 function renderSources(preserveScroll=true){
   const nav=$('#source-list'),scrollTop=preserveScroll?nav.scrollTop:0;nav.replaceChildren();
-  const filtered=state.sources.filter(source=>!state.query||[source.title,source.origin,source.version_type,...source.blocks.map(block=>block.text)].join('\n').toLocaleLowerCase().includes(state.query));
+  const sources=state.sources;
   const addSource=(source,parent)=>{
     const button=el('button','source-button'+(source.id===state.current?.id?' active':''));button.type='button';
     button.dataset.sourceId=source.id;button.setAttribute('aria-current',source.id===state.current?.id?'true':'false');
@@ -38,7 +47,7 @@ function renderSources(preserveScroll=true){
       button.classList.add('source-version-toggle');button.setAttribute('aria-expanded',String(open));button.setAttribute('aria-controls',`source-chapters-${source.id}`);
       nodeText('span','source-version-arrow',open?'▾':'▸',button).setAttribute('aria-hidden','true');
     }
-    nodeText('strong',null,title,button);
+    const labels=el('span','source-labels');nodeText('strong',null,title,labels);commentCountLabel(labels,revisionCommentCount(source.id,source.target_revision_id));button.append(labels);
     button.addEventListener('click',()=>{
       if(chapters.length&&source.id===state.current?.id){
         if(open)state.expandedSources.delete(source.id);else state.expandedSources.add(source.id);
@@ -56,22 +65,22 @@ function renderSources(preserveScroll=true){
       }parent.append(list);
     }
   };
-  for(const source of filtered.filter(item=>!item.group))addSource(source,nav);
+  for(const source of sources.filter(item=>!item.group))addSource(source,nav);
   for(const [id,label] of [['folk-tales','民间小故事'],['expansion-directions','扩写方向'],['story-refinements','故事精修']]){
-    const items=filtered.filter(source=>source.group===id);
+    const items=sources.filter(source=>source.group===id);
     if(!items.length)continue;
     const group=el('section','source-group'),header=el('button','source-group-toggle');header.type='button';
     const open=state.expandedGroups.has(id);
     header.setAttribute('aria-expanded',String(open));header.dataset.groupId=id;
-    nodeText('span',null,`${open?'▾':'▸'} ${label}`,header);nodeText('small',null,`${items.length} 项`,header);
+    const labels=el('span','source-labels');nodeText('span',null,`${open?'▾':'▸'} ${label}`,labels);const totals=el('span','source-group-totals');nodeText('small',null,`资料 ${items.length} 项`,totals);commentCountLabel(totals,items.reduce((sum,item)=>sum+revisionCommentCount(item.id,item.target_revision_id),0));labels.append(totals);header.append(labels);
     header.onclick=()=>{if(state.expandedGroups.has(id))state.expandedGroups.delete(id);else state.expandedGroups.add(id);renderSources()};
     group.append(header);
     if(open){const children=el('div','source-group-items');for(const item of items)addSource(item,children);group.append(children)}
     nav.append(group);
   }
-  for(const source of filtered.filter(item=>item.group&&!['folk-tales','expansion-directions','story-refinements'].includes(item.group)))addSource(source,nav);
-  if(!filtered.length)nodeText('p','source-no-results','未找到匹配的资料。',nav);
-  $('#source-count').textContent=state.query?`${filtered.length} / ${state.sources.length} 份资料`:`${state.sources.length} 份资料`;
+  for(const source of sources.filter(item=>item.group&&!['folk-tales','expansion-directions','story-refinements'].includes(item.group)))addSource(source,nav);
+  if(!sources.length)nodeText('p','source-no-results','暂无资料。',nav);
+  $('#source-count').textContent=`${state.sources.length} 份资料`;
   nav.scrollTop=scrollTop;
 }
 
@@ -130,8 +139,9 @@ function renderWorkspaceNav(){
   ];
   for(const [id,title,index,description] of sections){
     const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented;
-    const button=el('button','workspace-button'+(state.workspace===id?' active':'')+(active?'':' planned'));button.type='button';
-    button.setAttribute('aria-current',state.workspace===id?'page':'false');
+    const selected=state.workspace===id||(id==='story.sources'&&['story.outline','story.script'].includes(state.workspace));
+    const button=el('button','workspace-button'+(selected?' active':'')+(active?'':' planned'));button.type='button';
+    button.setAttribute('aria-current',selected?'page':'false');
     nodeText('span','nav-index',index,button);const labels=el('span','nav-labels');nodeText('b',null,title,labels);nodeText('small',null,active?description:`${description} · 待开放`,labels);button.append(labels);
     button.onclick=()=>switchWorkspace(id);nav.append(button);
   }
@@ -156,7 +166,7 @@ function switchWorkspace(id,updateUrl=true){
     const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
   }
   $('#comments-toggle').hidden=!storyChild;closePanel();
-  $('#source-search').closest('.search-box').hidden=!source;$('#source-search').hidden=!source;$('#source-count').hidden=!source;
+  $('#source-count').hidden=!source;
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['故事设定','设'],'materials.workspace':['素材管理','素'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
@@ -398,7 +408,7 @@ function watchTextSelection(){
 
 function setPanelOpen(open){
   $('#comment-panel').hidden=!open;
-  for(const trigger of ['#comments-toggle','#reader-comments','#screenplay-comments'])$(trigger).setAttribute('aria-expanded',String(open));
+  for(const trigger of ['#comments-toggle','#screenplay-comments'])$(trigger).setAttribute('aria-expanded',String(open));
 }
 function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
@@ -484,7 +494,7 @@ async function refreshComments(){
   // Refocusing the window fetches comments asynchronously. A no-op refresh must not
   // replace the text nodes underneath a selection gesture (or the current editor).
   if(JSON.stringify(comments)===JSON.stringify(state.comments))return;
-  state.comments=comments;renderActiveReader();renderComments();
+  state.comments=comments;renderSources();renderActiveReader();renderComments();
 }
 async function saveComment(){
   const textarea=$('#comment-editor-text'),key=draftKey();
@@ -549,10 +559,8 @@ async function init(){try{
     switchWorkspace(url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),false);
   });
   $('#brand-home').onclick=()=>location.assign('/');
-  $('#reader-comments').onclick=togglePanel;$('#screenplay-comments').onclick=togglePanel;
+  $('#screenplay-comments').onclick=togglePanel;
   $('#open-story-script').onclick=()=>switchWorkspace('story.script');
-  $('#source-search').oninput=event=>{state.query=event.target.value.trim().toLocaleLowerCase();renderSources(false)};
-  $('#source-search').onkeydown=event=>{if(event.key==='Enter'){const first=$('#source-list .source-button');if(first){event.preventDefault();first.click()}}};
   $('#comments-toggle').onclick=togglePanel;$('#comments-close').onclick=closePanel;
   document.addEventListener('keydown',event=>{
     const panel=$('#comment-panel');if(event.key!=='Escape'||panel.hidden)return;
@@ -561,7 +569,7 @@ async function init(){try{
   });
   document.addEventListener('pointerdown',event=>{
     const panel=$('#comment-panel');
-    if(panel.hidden||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#reader-comments').contains(event.target)||$('#screenplay-comments').contains(event.target))return;
+    if(panel.hidden||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#screenplay-comments').contains(event.target))return;
     closePanel();
   });
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};

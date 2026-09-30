@@ -74,7 +74,7 @@ document.querySelector('#run').onclick=async()=>{checks.length=0;try{
  d().body.append(t,submit,cancelButton);submit.onclick=()=>submits++;cancelButton.onclick=()=>cancels++;
  w().bindCommentEditorShortcuts(t,{submit,cancel:cancelButton});t.focus();key('Enter',{metaKey:true},t);key('Escape',{},t);
  ok(submits===1&&cancels===1,'未来独立评论输入复用同一绑定');submit.disabled=true;cancelButton.disabled=true;key('Enter',{metaKey:true},t);key('Escape',{},t);ok(submits===1&&cancels===1,'复用机制遵循两个按钮各自禁用状态');t.remove();submit.remove();cancelButton.remove();
- open(contexts[0]);text('其他输入测试');const search=q('#source-search'),count=(await getComments()).length;search.focus();key('Enter',{metaKey:true},search);await pause();ok((await getComments()).length===count&&q('#source-text'),'搜索输入框沿用资料跳转且不提交评论');
+ open(contexts[0]);text('其他输入测试');const input=d().createElement('input'),count=(await getComments()).length;d().body.append(input);input.focus();key('Enter',{metaKey:true},input);await pause();ok((await getComments()).length===count&&q('#source-text'),'普通输入框不触发评论提交');input.remove();
  w().switchWorkspace('story.outline');w().startDraft({type:'global'});text('大图不影响草稿');q('.structure-image-trigger').click();await wait(()=>q('dialog[open]'));key('Escape',{},q('dialog'));ok(!q('dialog[open]')&&!q('#comment-panel').hidden&&q('#comment-editor-text').value==='大图不影响草稿','大图 Esc 只关闭图像且保留原草稿');cancel();
  const result={passed:checks.length,checks};await fetch('/test-results',{method:'POST',body:JSON.stringify(result)});out.textContent=JSON.stringify(result,null,2);
  }catch(e){const result={failed:String(e),checks};out.textContent=JSON.stringify(result,null,2);await fetch('/test-results',{method:'POST',body:JSON.stringify(result)})}};
