@@ -18,8 +18,10 @@ class SourceApiTest(unittest.TestCase):
             result = {}
             def client():
                 try:
-                    with urllib.request.urlopen(url + '/api/sources', timeout=5) as response:
+                    with urllib.request.urlopen(url + '/api/sources?with_revision=1', timeout=5) as response:
                         result['sources'] = json.load(response)
+                    with urllib.request.urlopen(url + '/api/sources', timeout=5) as response:
+                        result['plain_sources'] = json.load(response)
                     payload = {'source_id': 'a', 'target_revision_id': current, 'anchor': {'block_id': 'summary', 'end_block_id': 'summary', 'start': 0, 'end': 2, 'quote': '李寄'}, 'body': '精确修订评论'}
                     request = urllib.request.Request(url + '/api/comments', data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json'})
                     with urllib.request.urlopen(request, timeout=5) as response:
@@ -29,11 +31,12 @@ class SourceApiTest(unittest.TestCase):
             thread = threading.Thread(target=client, daemon=True); thread.start()
             server.timeout = 5
             # The server and SQLite remain on their owning thread.
-            for _ in range(2): server.handle_request()
+            for _ in range(3): server.handle_request()
             thread.join(timeout=6)
             self.assertFalse(thread.is_alive())
             self.assertNotIn('error', result)
             self.assertEqual(result['sources'], [{**source, 'target_revision_id': current}])
+            self.assertEqual(result['plain_sources'], [source])
             self.assertEqual(result['comment']['target_revision_id'], current)
             self.assertEqual(result['comment']['target_object_id'], 'a')
             self.assertEqual(server.store.sources(), before)
