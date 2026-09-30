@@ -131,4 +131,4 @@ def current(root, body):
         path = Path(__file__).parent / 'static' / 'favicon.svg'
         data = path.read_bytes()
     checksum = hashlib.sha256(data).hexdigest()
-    return path, data, {'file': name, 'url': '/favicon.ico?v=' + checksum, 'mime': MIMES[path.suffix.lower()], 'sha256': checksum}
+    return path, data, {'file': name, 'url': ('/assets/' + name if name else '/default-favicon.svg') + '?v=' + checksum, 'mime': MIMES[path.suffix.lower()], 'sha256': checksum}

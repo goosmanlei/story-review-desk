@@ -177,7 +177,7 @@ function renderPlaceholder(id){
   const button=nodeText('button','primary','返回故事采编',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
 }
 
-function applyFavicon(){const link=$("#site-favicon"),icon=state.configurations.favicon;if(link&&icon){link.type=icon.mime;link.href=icon.url}}
+function applyFavicon(){const previous=$("#site-favicon"),icon=state.configurations.favicon;if(previous&&icon){const link=document.createElement("link");link.id="site-favicon";link.rel="icon";link.type=icon.mime;link.href=icon.url;previous.replaceWith(link)}}
 
 function renderConfigurations(){
   const root=$('#configuration-view');root.replaceChildren();
