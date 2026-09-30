@@ -90,6 +90,9 @@ class FaviconHTTPTests(unittest.TestCase):
                 with request('/api/favicon','POST',{'name':'light.svg','data':base64.b64encode(SVG).decode()}) as response:
                     name=json.load(response)['file'];self.assertEqual(response.status,201)
                 with request('/api/configurations/SYSTEM','PATCH',{'expected_version':0,'updates':{'site_favicon':name}}) as response:self.assertEqual(json.load(response)['version'],1)
+                with request('/api/configurations') as response: icon=json.load(response)['favicon']
+                self.assertTrue(icon['url'].startswith('/assets/'+name+'?v='))
+                with request(icon['url']) as response: self.assertEqual(response.read(),SVG)
                 with request('/favicon.ico?v=old') as response:
                     self.assertEqual(response.read(),SVG);self.assertEqual(response.headers['Content-Type'],'image/svg+xml');self.assertEqual(response.headers['Cache-Control'],'no-store')
                 with self.assertRaises(HTTPError) as error:request('/api/configurations/SYSTEM','PATCH',{'expected_version':0,'updates':{'site_favicon':''}})
@@ -100,5 +103,8 @@ class FaviconHTTPTests(unittest.TestCase):
                 with self.assertRaises(HTTPError) as error:request('/favicon.ico')
                 self.assertEqual(error.exception.code,503)
                 with request('/api/configurations/SYSTEM','PATCH',{'expected_version':1,'updates':{'site_favicon':''}}) as response:self.assertEqual(json.load(response)['body']['site_favicon'],'')
+                with request('/api/configurations') as response: icon=json.load(response)['favicon']
+                self.assertTrue(icon['url'].startswith('/default-favicon.svg?v='))
+                with request(icon['url']) as response:self.assertIn(b'<svg',response.read())
                 with request('/favicon.ico') as response:self.assertIn(b'<svg',response.read())
             finally:server.shutdown();thread.join(timeout=5)

@@ -12,7 +12,7 @@
 {"expected_version":4,"updates":{"site_favicon":"lantern-home-favicon.svg"}}
 ```
 
-`GET /favicon.ico` 按当前配置返回实际图像及对应 MIME 类型；名字兼容浏览器默认请求，内容可以是 SVG、PNG 或 ICO。页面链接带内容 SHA-256 查询参数，响应不缓存，以支持替换；默认预览使用 `/default-favicon.svg`。`POST /api/favicon` 接受 `{name,data}`，其中 `data` 是 Base64 文件内容，返回受管文件名。配置接口另外返回当前图标元数据和可选受管文件名。
+`GET /favicon.ico` 按当前配置返回实际图像及对应 MIME 类型；名字兼容浏览器默认请求，内容可以是 SVG、PNG 或 ICO。页面链接使用具体 `/assets/<文件名>` 或 `/default-favicon.svg`，并带内容 SHA-256 查询参数；更新时替换图标节点，避免 Chrome 清空后重新设置再刷新仍显示旧图标。响应不缓存，以支持替换。`POST /api/favicon` 接受 `{name,data}`，其中 `data` 是 Base64 文件内容，返回受管文件名。配置接口另外返回当前图标元数据和可选受管文件名。
 
 执行 `export` 后，当前图标加入 `manifest.json` 的 SHA-256 清单。公开同步需提交配置导出、清单及图标文件；可编辑母版和派生文件由故事仓库保存。恢复前先复制完整导出与 Git 跟踪的实例内容，再执行 `restore`；图标缺失、校验不符或未被清单覆盖时，拒绝写入空实例。历史配置事件保持原样，当前配置指向的文件必须有效。恢复已采用的图标不需要生成平台或临时链接。
 
