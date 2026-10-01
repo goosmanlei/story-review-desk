@@ -24,6 +24,11 @@ test('review notes keep exact text and field index without mutating immutable pa
   {id:'@@review/unknowns/1',text:'未知',field:'unknowns',index:1}]);
  assert.equal(JSON.stringify(payload),before);
 });
+test('generation parameters retain server numeric spelling for exact comment offsets',()=>{
+ const {ctx}=setup(),text='{\n  "epsilon": 1e-07,\n  "pitch": 1.0\n}';
+ const record={payload:{blocks:[],generation:{parameters:{epsilon:1e-7,pitch:1}}},review_parameter_text:text};
+ assert.equal(ctx.productionTextBlocks(record).find(b=>b.field==='generation.parameters').text,text);
+});
 test('whole-entity content remains constant when selecting a different form or comment target',async()=>{
  const {ctx,data}=setup();await ctx.openEntityReview('person',{record:entity},0,null);
  assert.equal(ctx.state.productionChildDetail.record,form);
@@ -121,4 +126,11 @@ test('time comment location scopes a repeated component id to the exact asset re
  ctx.CSS={escape:x=>x};ctx.$=()=>null;ctx.document.querySelector=value=>{selector=value;return value.startsWith('[data-comment-media]')?null:{querySelector:value=>{component=value;return player}}};
  ctx.locateProductionComment({id:'c',target_revision_id:'voice-v2',anchor:{type:'time',component_id:'original',start_seconds:1.2}},true);
  assert.equal(selector,'[data-review-revision="voice-v2"]');assert.equal(component,'[data-component-id="original"]');assert.equal(player.currentTime,1.2);assert.equal(focused,true);
+});
+
+test('refreshing a media comment keeps the explicitly selected state',async()=>{
+ const {ctx}=setup();ctx.location.href='http://local/?production_entity=person&entity_state=later&production_object=voice';
+ const voice=row('voice','ASSET',{title:'声音'});await ctx.openEntityReview('person',{record:voice},0,null);
+ assert.equal(ctx.state.productionChildDetail.record,second);
+ assert.equal(new URL(ctx.location.href).searchParams.get('entity_state'),'later');
 });

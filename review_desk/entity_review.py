@@ -172,7 +172,7 @@ def validate_current_acceptance(store, payload, check_current=True):
         raise Conflict('内容已有更新，请刷新后采纳当前版本。')
 
 
-def snapshot(store, entity_id, revision_id=None):
+def legacy_snapshot(store, entity_id, revision_id=None):
     """Read current versions, or the exact content of an earlier acceptance.
 
 This operation is read-only. No submission, initialization or other workflow
@@ -229,3 +229,8 @@ transition is required before viewing, commenting or accepting output.
             'usages': usages, 'history': [{'revision_id': d['id'], 'created_at': d['created_at'], 'actor': d['payload']['actor'],
                                          'entity_version': p.ref_record(store, d['payload']['target'])['version']} for d in decisions],
             'previous_accepted': {'decision': previous, **scope_contents(store, previous['payload']['acceptance_scope'])} if previous else None}
+
+
+def snapshot(store, entity_id, revision_id=None):
+    from .generation import snapshot as generation_snapshot
+    return generation_snapshot(store, entity_id, revision_id)

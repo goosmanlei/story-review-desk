@@ -12,6 +12,10 @@ function productionTextBlocks(record){
     if(typeof text!=='string'||!text.trim()||body.includes(text)||seen.has(text))continue;
     seen.add(text);blocks.push({id:`${prefix}${field}/${index}`,text,field,index});
   }
+  const sorted=value=>Array.isArray(value)?value.map(sorted):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sorted(value[k])])):value;
+  const extra=[['production_description',p.production_description]],plan=p.generation;
+  if(plan){extra.push(['generation.tool',plan.tool],['generation.model',plan.model],['generation.parameters',record.review_parameter_text??JSON.stringify(sorted(plan.parameters||{}),null,2)],['generation.prompt',plan.prompt],['generation.output.description',plan.output?.description],['generation.output.review_criteria',(plan.output?.review_criteria||[]).join('\n')]);for(const [i,v] of (plan.inputs||[]).entries())extra.push([`generation.inputs.${i}.use`,v.use])}
+  for(const [field,text] of extra)if(typeof text==='string'&&text.trim()&&!body.includes(text)&&!seen.has(text)){seen.add(text);blocks.push({id:prefix+field.replaceAll('.','/'),text,field})}
   return blocks;
 }
 const productionEntitySymbols={
@@ -276,7 +280,7 @@ function focusProductionReview(detail,paint=true){
   state.productionSelected=r;state.productionDetail=detail;
   const url=new URL(location.href);url.searchParams.set('production_object',r.object_id);url.searchParams.set('production_revision',r.id);
   if(typeof isEntityReview==='function'&&isEntityReview()&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
-  if(state.workspace==='settings.workspace'&&state.productionEntityId)url.searchParams.set('production_entity',state.productionEntityId);else url.searchParams.delete('production_entity');
+  if(state.workspace==='settings.workspace'&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
   history.replaceState(null,'',url);
   for(const blocks of document.querySelectorAll('[data-production-blocks]')){if(blocks.dataset.productionBlocks===r.id)blocks.id='production-blocks';else{blocks.removeAttribute('id');for(const para of blocks.querySelectorAll('.comment-flash'))para.classList.remove('comment-flash')}}
   if(paint){paintProductionReview();renderComments()}
@@ -286,7 +290,7 @@ function productionList(parent,title,items){if(!items?.length)return;nodeText('h
 function productionMedia(parent,component,review=true){
   const url='/api/production/files/'+encodeURIComponent(component.file);
   if(component.mime.startsWith('image/')){if(review)parent.append(renderStructureVisual({...component,title:state.productionSelected.payload.title,alt:state.productionSelected.payload.title,description:`${component.role} · ${component.width}×${component.height}`},true));else{const img=el('img');img.width=component.width;img.height=component.height;img.src=url;img.alt=component.id;parent.append(img)}}
-  else if(component.mime.startsWith('audio/')||component.mime.startsWith('video/')){const media=el(component.mime.startsWith('audio/')?'audio':'video');media.controls=true;media.preload='metadata';media.src=url;media.dataset.componentId=component.id;parent.append(media);if(review){const row=el('div','production-toolbar'),start=el('input'),end=el('input');for(const [input,label] of [[start,'评论开始秒'],[end,'评论结束秒']]){input.type='number';input.min='0';input.step='0.01';input.setAttribute('aria-label',label);input.placeholder=label;row.append(input)}start.value='0';end.value=Math.min(component.duration_seconds,3).toFixed(2);productionButton(row,'取当前为起点',()=>{start.value=media.currentTime.toFixed(2)});productionButton(row,'取当前为终点',()=>{end.value=media.currentTime.toFixed(2)});productionButton(row,'评论此时间段',()=>{const a=Number(start.value),b=Number(end.value);if(!(0<=a&&a<b&&b<=component.duration_seconds))throw Error('请选择原件内的有效时间段');startDraft({type:'time',component_id:component.id,asset_file:component.file,start_seconds:a,end_seconds:b})});parent.append(row)}}
+  else if(component.mime.startsWith('audio/')||component.mime.startsWith('video/'))reviewMediaPlayer(parent,component,state.productionSelected,{},review);
   link(`下载 ${component.role} · ${component.file.slice(0,12)}…`,url,parent);nodeText('p','production-meta',`${component.mime} · ${component.bytes.toLocaleString()} bytes · SHA-256 ${component.sha256}`,parent);
 }
 function renderProductionReader(){
@@ -307,7 +311,7 @@ function renderProductionRecord(root,detail,entityCard=false){
   nodeText('small','production-pill',entityCard?'实体基础信息 · '+productionLabels[p.entity_type]:productionKinds[r.kind],root);nodeText('h2',null,p.title,root);nodeText('p','production-meta',`版本 ${r.version} · ${r.id}${r.id===r.current_revision?' · 当前版本':' · 历史版本'}`,review);
   const bar=el('div','production-toolbar'),versions=el('select');versions.setAttribute('aria-label',entityCard?'选择实体版本':'选择精确版本');for(const v of detail.history)versions.append(new Option(`版本 ${v.version} · ${v.created_at}`,v.id));versions.value=r.id;versions.onchange=()=>openProductionRecord(r.object_id,versions.value).catch(e=>toast(e.message));bar.append(versions);
   productionButton(bar,'整体意见',activate(()=>startDraft({type:'global'})));productionButton(bar,'查看评论',activate(openPanel));if(state.workspace!=='settings.workspace')productionButton(bar,'编辑说明与设定',activate(showProductionEditor));productionButton(bar,'查看所选修订的影响',async()=>{const data=await api('/api/production/impact?revision_id='+r.id);const section=el('section');nodeText('h3',null,`受影响的当前引用 ${data.affected.length}`,section);for(const use of data.affected)productionRefLink(section,use,`${productionKinds[use.kind]||use.kind} · ${use.title}`);if(!data.affected.length)nodeText('p',null,'没有查到当前下游引用。',section);root.append(section);section.scrollIntoView({block:'center'})});review.append(bar);if(entityCard)root.append(review);
-  const blocks=el('div');blocks.dataset.productionBlocks=r.id;if(state.productionSelected?.id===r.id)blocks.id='production-blocks';blocks.onpointerdown=()=>focusProductionReview(detail);blocks.onfocusin=()=>focusProductionReview(detail);for(const b of p.blocks){const para=nodeText('p',null,b.text,blocks);para.dataset.blockId=b.id}root.append(blocks);
+  const blocks=reviewSurface(el('div'));blocks.dataset.productionBlocks=r.id;if(state.productionSelected?.id===r.id)blocks.id='production-blocks';blocks.onpointerdown=()=>focusProductionReview(detail);blocks.onfocusin=()=>focusProductionReview(detail);for(const b of p.blocks){const para=nodeText('p',null,b.text,blocks);para.dataset.blockId=b.id}root.append(blocks);
   if(productionCompleteState(r)){
     nodeText('p','production-meta','这是该实体在一个时刻的完整形态，可跨场复用。整体参考说明全貌，角度、局部和声音作为补充。',root);
     productionFields(root,[['整体参考类型',({image:'图像',audio:'声音',none:'仅提及，无媒体生产要求'})[p.reference_media]]]);
@@ -338,7 +342,7 @@ function renderProductionRecord(root,detail,entityCard=false){
 }
 function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.start<Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
 function paintProductionReview(){
-  if(!isProduction())return;paintStructureRegions();
+  if(!isProduction())return;paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
   const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
   for(const para of document.querySelectorAll('#production-blocks [data-block-id]'))para.classList.toggle('comment-flash',para===target);
 }
@@ -398,7 +402,7 @@ function locateProductionComment(comment,local=false){
   // Component ids can repeat across state references and unassigned candidates.
   // Locate the exact asset revision before looking up its image or player.
   const exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,mediaRoot=typeof isEntityReview==='function'&&isEntityReview()?(document.querySelector('[data-comment-media]'+exact)||document.querySelector(exact)):$('#production-reader');
-  if(a.type==='time'){const media=mediaRoot?.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;media.scrollIntoView({block:'center'});media.focus()}}
+  if(a.type==='time'){const media=mediaRoot?.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;const player=media.closest?.('.review-media-player');if(player?.reviewLocate)player.reviewLocate(a);else{media.scrollIntoView({block:'center'});media.focus()}}}
   else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?mediaRoot?.querySelector(`[data-visual-id="${CSS.escape(a.visual_id)}"]`):mediaRoot||$('#production-reader');target?.scrollIntoView({block:'center'})}
   paintProductionReview();renderComments();
 }

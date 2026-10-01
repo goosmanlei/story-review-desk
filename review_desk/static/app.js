@@ -304,7 +304,7 @@ function renderDocument(){
   if(source.references?.length){const refs=el('section','source-references');nodeText('strong',null,'旁证与补充链接',refs);for(const reference of source.references){const row=el('p');link(reference.label,reference.url,row);refs.append(row)}doc.append(refs)}
   nodeText('p','intro',source.notes,doc);nodeText('h3','section-title',source.text_heading||'完整文本',doc);
   const text=el('section','source-text');text.id='source-text';text.setAttribute('aria-label','资料正文');
-  source.blocks.forEach((block,index)=>text.append(renderBlock(source,block,index)));doc.append(text);
+  source.blocks.forEach((block,index)=>text.append(renderBlock(source,block,index)));reviewSurface(text);doc.append(text);
   if(source.assets.length){nodeText('h3','section-title','图片与出处',doc);const gallery=el('section','image-grid');
     for(const asset of source.assets){const figure=renderStructureVisual({id:asset.file,file:asset.file,title:asset.title,kind:'image',alt:asset.alt||asset.title,description:asset.note||''});
       if(asset.source_url)link('图片来源／制作依据 ↗',asset.source_url,figure.querySelector('figcaption'));gallery.append(figure)}doc.append(gallery)}

@@ -31,6 +31,15 @@ def root_of(store):
     return store.db_path.parent.parent
 
 
+def record_view(row):
+    value = {**dict(row), "payload": json.loads(row["payload"])}
+    if value['payload'].get('generation'):
+        # Use the exact server projection for numeric JSON (1.0 / exponents),
+        # whose browser serialization can otherwise change comment offsets.
+        value['review_parameter_text'] = json.dumps(value['payload']['generation'].get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)
+    return value
+
+
 def record(store, object_id=None, revision_id=None):
     if revision_id:
         row = store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM revisions r
@@ -42,7 +51,7 @@ def record(store, object_id=None, revision_id=None):
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
         raise KeyError("unknown production object or revision")
-    return {**dict(row), "payload": json.loads(row["payload"])}
+    return record_view(row)
 
 
 def ref_record(store, ref, kinds=None):
@@ -309,6 +318,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         if 'native_4k' in p['specification'] and type(p['specification']['native_4k']) is not bool:
             raise ValueError('native_4k specification must be boolean')
         full_states.validate_reference_requirement(store, p)
+        from .generation import validate_plan
+        validate_plan(store, object_id, p)
         if check_current and store.db.execute("""SELECT 1 FROM objects o JOIN revisions r ON r.id=o.current_revision
                 WHERE o.kind='REQUIREMENT' AND o.id!=? AND json_extract(r.payload,'$.format')='production-requirement-v1'
                 AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
@@ -326,6 +337,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "SHOT_DESIGN", "INPUT_LOCK"})
             _refs(store, p, "states", {"STATE"})
             full_states.validate_asset_coverage(store, p)
+            for candidate in p.get('candidate_requirements', []):
+                need = ref_record(store, candidate, {'REQUIREMENT'})
+                if need['payload']['media_type'] != p['media_type'] or not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', [])):
+                    raise ValueError('candidate requirement needs exact state and media coverage')
             call = ref_record(store, p.get("production"), {"CALL"})
             if call["payload"].get("status") not in ("submitted", "completed"):
                 raise ValueError("an asset needs a real production record")
@@ -356,15 +371,23 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             if input_ref.get('component_id'):
                 component_for(store, input_ref, input_ref['component_id'])
         _lineage(store, p)
+        if check_current:
+            from .generation import validate_call
+            validate_call(store, object_id, p)
     elif kind == "JUDGMENT":
         target = ref_record(store, p.get("target"))
         from . import entity_review
-        if 'acceptance_model' in p:
+        if p.get('acceptance_model') == 'entity-generation-v1':
+            from .generation import validate_decision
+            validate_decision(store, object_id, p, check_current)
+        elif 'acceptance_model' in p:
             entity_review.validate_current_acceptance(store, p, check_current)
         if p.get('verdict') == 'accepted' and entity_review.submission(target):
             entity_review.validate_acceptance(store, target, check_current)
-        if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved"):
+        if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved", "revoked"):
             raise ValueError("invalid review verdict")
+        if p.get("verdict") == "revoked" and p.get("acceptance_model") != "entity-generation-v1":
+            raise ValueError("revocation requires a generation acceptance")
         for key in ("actor", "reason"):
             _text(p.get(key), key)
         if p.get("change"):
@@ -431,7 +454,7 @@ def current_records(store, kinds=None):
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
             p = json.loads(row["payload"])
             if p.get("format") in FORMATS:
-                result.append({**dict(row), "payload": p})
+                result.append(record_view(row))
     return result
 
 
