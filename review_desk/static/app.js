@@ -10,7 +10,7 @@ const isProduction=()=>['settings.workspace','materials.workspace','production.w
 const commentTarget=()=>isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const draftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const commentSaves=new Set();
-const activeComments=()=>state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
+const activeComments=()=>typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
 const renderActiveReader=()=>isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
@@ -337,9 +337,12 @@ function textSelectionAnchor(host,blocks,attribute){
     if(part.compareBoundaryPoints(Range.START_TO_START,contents)<0)part.setStart(contents.startContainer,contents.startOffset);
     if(part.compareBoundaryPoints(Range.END_TO_END,contents)>0)part.setEnd(contents.endContainer,contents.endOffset);
     if(!part.toString())continue;
-    touched.push({id:node.getAttribute(attribute),start:offsetIn(node,part.startContainer,part.startOffset),end:offsetIn(node,part.endContainer,part.endOffset)});
+    const base=Number(node.dataset.anchorOffset||0);
+    touched.push({id:node.getAttribute(attribute),start:base+offsetIn(node,part.startContainer,part.startOffset),end:base+offsetIn(node,part.endContainer,part.endOffset),segmented:node.hasAttribute('data-anchor-offset')});
   }
   if(!touched.length)return null;
+  // Rearranged/collapsed review excerpts must never fabricate a cross-gap quote.
+  if(touched.some(t=>t.segmented)&&touched.slice(1).some((t,i)=>t.id===touched[i].id&&t.start!==touched[i].end+1))return null;
   const first=blocks.findIndex(b=>b.id===touched[0].id),last=blocks.findIndex(b=>b.id===touched.at(-1).id);
   if(first<0||last<first)return null;
   const start=touched[0].start,end=touched.at(-1).end;
@@ -450,21 +453,22 @@ function commentCard(comment){
   const actions=el('div','card-actions');
   const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=()=>locateComment(comment);
   if(comment.status==='OPEN'){
-    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>startDraft(comment.anchor,comment);
+    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>{if(typeof isEntityReview==='function'&&isEntityReview())locateEntityReviewComment(comment);startDraft(comment.anchor,comment)};
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
   }else{const reopen=nodeText('button',null,'重新打开',actions);reopen.onclick=()=>changeComment(comment,'REOPEN')}
   card.append(actions);return card;
 }
 
 function renderComments(){
+  if(typeof updateEntityReviewCounts==='function')updateEntityReviewCounts();
   if(isScript())renderScriptCommentCounts();
   if((isScript()&&!scriptEpisode())||(isProduction()&&!state.productionSelected)||(!isProduction()&&!isStructure()&&!isScript()&&!state.current)){$('#comment-body').replaceChildren();$('#open-count').textContent='0';$('#comments-toggle').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
   $('#open-count').textContent=`${open.length} 待处理`;
   const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
   $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史待决 ${older}`:`查看评论 · ${open.length}`;
-  nodeText('p','comment-help',isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
-  if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);
+  nodeText('p','comment-help',typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
+  if(state.anchor){const editor=el('section','comment-editor');nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);if(typeof isEntityReview==='function'&&isEntityReview())nodeText('small',null,'评论对象：'+(state.productionSelected.kind==='REPRESENTATION'?'整个实体':state.productionSelected.payload.title),editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
     const help=nodeText('p','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);help.id='comment-editor-shortcuts';textarea.setAttribute('aria-describedby',help.id);
@@ -484,10 +488,10 @@ function renderComments(){
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
       const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{const accepted=state.suggestion;state.suggestion=null;localStorage.setItem(draftKey(),accepted);renderComments()};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
   nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
-  for(const comment of open)body.append(commentCard(comment));
+  if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,open);else for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
   const toggle=nodeText('button',null,state.historyOpen?'收起历史':'展开历史',head);toggle.onclick=()=>{state.historyOpen=!state.historyOpen;renderComments()};body.append(head);
-  if(state.historyOpen){for(const comment of closed.slice(0,state.historyLimit))body.append(commentCard(comment));if(closed.length>state.historyLimit){const more=nodeText('button','secondary','显示更多',body);more.onclick=()=>{state.historyLimit+=20;renderComments()}}}
+  if(state.historyOpen){if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,closed.slice(0,state.historyLimit));else for(const comment of closed.slice(0,state.historyLimit))body.append(commentCard(comment));if(closed.length>state.historyLimit){const more=nodeText('button','secondary','显示更多',body);more.onclick=()=>{state.historyLimit+=20;renderComments()}}}
 }
 
 async function refreshComments(){

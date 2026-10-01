@@ -69,9 +69,10 @@ function drawPolygon(points,cls){const polygon=document.createElementNS('http://
 function paintStructureRegions(){
   document.querySelectorAll('.structure-visual-stage').forEach(stage=>{
     const svg=stage.querySelector('svg');svg.replaceChildren();const visual=stage.dataset.visualId,draft=newDraftAnchor();stage.classList.toggle('draft-visual',draft?.type==='visual'&&draft.visual_id===visual);
-    for(const comment of activeComments().filter(c=>c.anchor.type==='region'&&c.anchor.visual_id===visual)){
+    for(const comment of activeComments().filter(c=>c.anchor.type==='region'&&c.anchor.visual_id===visual&&(!isProduction()||c.target_revision_id===state.productionSelected?.id))){
       const polygon=drawPolygon(comment.anchor.points,'review-region'+(comment.status==='CLOSED'?' closed':''));polygon.onclick=()=>selectComment(comment.id);svg.append(polygon);
     }
+    if(stage.dataset.reviewCrop){const c=JSON.parse(stage.dataset.reviewCrop);svg.append(drawPolygon([{x:c.x,y:c.y},{x:c.x+c.width,y:c.y},{x:c.x+c.width,y:c.y+c.height},{x:c.x,y:c.y+c.height}],'entity-review-crop'))}
     if(draft?.type==='region'&&draft.visual_id===visual)svg.append(drawPolygon(draft.points,'review-region draft'));
     if(structureDrawing?.visual===visual)svg.append(drawPolygon(structureDrawing.points,'review-region drawing'));
   });

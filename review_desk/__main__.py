@@ -7,7 +7,7 @@ from .screenplay import import_screenplay, snapshot as screenplay_snapshot, revi
 from .server import ReviewServer
 from .store import Store
 from .structure import import_structure, snapshot, review_context, script_input
-from . import production
+from . import production, entity_review
 from .production_media import ingest
 
 
@@ -48,6 +48,9 @@ def main():
     production_get.add_argument("--kind", choices=production.KINDS)
     production_get.add_argument("--object", dest="object_id")
     production_get.add_argument("--revision", dest="revision_id")
+    entity_get = subs.add_parser('production-entity-review')
+    entity_get.add_argument('entity_id')
+    entity_get.add_argument('--revision', dest='revision_id')
     production_source = subs.add_parser('production-source')
     production_source.add_argument('object_id')
     production_source.add_argument('revision_id')
@@ -118,6 +121,8 @@ def main():
             result = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
         elif args.command == "production-get":
             result = production.snapshot(store, args.kind, args.object_id, args.revision_id)
+        elif args.command == 'production-entity-review':
+            result = entity_review.snapshot(store, args.entity_id, args.revision_id)
         elif args.command == 'production-source':
             ref = {'object_id': args.object_id, 'revision_id': args.revision_id}
             if args.scene:
