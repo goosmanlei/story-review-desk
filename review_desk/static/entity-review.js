@@ -51,36 +51,37 @@ function entityReviewScope(row){
   const sceneName=ref=>{const ep=state.screenplays.flatMap(s=>s.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);return `${(ep?.payload.number||ep?.payload.episode_number)?'第'+(ep.payload.number||ep.payload.episode_number)+'集 · ':''}${ref.scene_id}`};
   return scenes.length===1?sceneName(scenes[0]):`${sceneName(scenes[0])} 至 ${sceneName(scenes.at(-1))} · ${scenes.length} 场`;
 }
-function reviewTextBlocks(parent,row,{compact=false}={}){
+function reviewTextBlocks(parent,row){
   const host=el('div','entity-review-text');host.dataset.productionBlocks=row.id;if(state.productionSelected?.id===row.id)host.id='production-blocks';
   host.onpointerdown=()=>entityReviewFocus(row);host.onfocusin=()=>entityReviewFocus(row);
-  const deferred=[];
   for(const block of row.payload.blocks){
     let offset=0;
     for(const line of block.text.split('\n')){
       const para=el('p',null,line);para.dataset.blockId=block.id;para.dataset.anchorOffset=offset;
-      // Collapse only generic uncertainty wording; concrete uncertain observations stay visible.
-      const boilerplate=compact&&/^(服装：除上述明确服装外|伤势：除上述明示体征外|健康：本阶段健康细节未明确|疲劳：本阶段未明确持续疲劳|随身物：随身及手持物以本场)/u.test(line);
-      if(boilerplate)deferred.push(para);else host.append(para);
+      host.append(para);
       offset+=Array.from(line).length+1;
     }
   }
-  if(deferred.length){const details=el('details','entity-review-secondary');nodeText('summary',null,`其他完整状态说明与未明确事项 · ${deferred.length} 项`,details);for(const para of deferred)details.append(para);host.append(details)}
+  reviewNotes(host,row);
   parent.append(host);
 }
 function reviewNotes(parent,row){
-  const body=row.payload.blocks.map(b=>b.text).join('\n'),seen=new Set();
+  const notes=productionTextBlocks(row).slice(row.payload.blocks.length);
   for(const [key,label] of [['facts','剧本事实'],['choices','制作选择'],['unknowns','待确认']]){
-    const values=(row.payload[key]||[]).filter(value=>{if(typeof value!=='string'||body.includes(value)||seen.has(value))return false;seen.add(value);return true});
-    if(values.length){const section=key==='unknowns'?el('details','entity-review-secondary'):el('section','entity-review-notes');nodeText(key==='unknowns'?'summary':'h4',null,label,section);for(const value of values)nodeText('p',null,value,section);parent.append(section)}
+    const values=notes.filter(block=>block.field===key);
+    if(!values.length)continue;
+    const section=el('section','entity-review-notes'+(key==='unknowns'?' entity-review-unknowns':''));section.setAttribute('aria-label',label);nodeText('h4',null,label,section);
+    if(key==='unknowns')nodeText('small','entity-review-note-hint','圈选文字，可通过评论补充信息。',section);
+    for(const block of values){const para=nodeText('p',null,block.text,section);para.dataset.blockId=block.id}
+    parent.append(section);
   }
 }
 function renderEntityReview(root){
   const data=state.entityReview,entity=state.productionEntityDetail.record,form=state.productionChildDetail?.record;
-  const header=el('header','entity-review-header'),identity=el('div');nodeText('small','production-pill',productionLabels[entity.payload.entity_type],identity);nodeText('h2',null,entity.payload.title,identity);
+  const header=el('header','entity-review-header'),identity=el('div'),badge=el('small','production-pill production-entity-badge');badge.dataset.entityType=entity.payload.entity_type;badge.append(productionEntityIcon(entity.payload.entity_type));nodeText('span',null,productionLabels[entity.payload.entity_type],badge);identity.append(badge);nodeText('h2',null,entity.payload.title,identity);
   const status=data.accepted?'已采纳':data.previous_accepted?'内容已更新 · 当前版本未采纳':'未采纳';
   nodeText('p','entity-review-status',`${data.historical?'历史内容':'当前内容'} · 基础信息版本 ${entity.version} · ${status}`,identity);header.append(identity);
-  const actions=el('div','production-toolbar');const comments=productionButton(actions,'',openPanel);comments.dataset.entityReviewCount='true';
+  const actions=el('div','production-toolbar');
   productionButton(actions,'评论整个实体',()=>{entityReviewFocus(entity);startDraft({type:'global'})});
   const accept=productionButton(actions,data.accepted?'已采纳':'采纳当前版本',async()=>{
     if(!data.can_accept||data.historicalTarget)return;accept.disabled=true;
@@ -93,19 +94,19 @@ function renderEntityReview(root){
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section','entity-review-secondary');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');nodeText('h3',null,'基础信息',basics);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);
-  reviewTextBlocks(basics,entity);reviewNotes(basics,entity);productionButton(basics,'评论基础信息',()=>{entityReviewFocus(entity);startDraft({type:'global'})});root.append(basics);
+  reviewTextBlocks(basics,entity);root.append(basics);
   const nav=el('section','production-entity-context');nav.setAttribute('aria-label','选择完整状态');nodeText('h3','production-entity-title',`完整状态 · ${data.states.length}`,nav);const choices=el('div','production-entity-options');
   for(const [index,row] of data.states.entries()){
     const button=productionButton(choices,'',()=>selectEntityReviewState(row));nodeText('span',null,(index===0?'基础状态 · ':'')+entityReviewShort(row,entity),button);nodeText('small',null,`${entityReviewScope(row)} · ${entityReviewMediaCount(entityReviewStateMedia(data,row))} 份素材`,button);button.setAttribute('aria-pressed',String(row.id===form?.id));button.dataset.stateId=row.object_id;
   }nav.append(choices);root.append(nav);
   if(form){
     const heading=el('div','entity-review-state-heading');nodeText('h3',null,entityReviewShort(form,entity),heading);productionButton(heading,'评论此状态',()=>{entityReviewFocus(form);startDraft({type:'global'})});root.append(heading);
-    const media=entityReviewStateMedia(data,form),layout=el('div','entity-review-layout'+(media.length?'':' no-media')),visuals=el('section','entity-review-media');visuals.setAttribute('aria-label','此状态的参考素材');
+    const media=entityReviewStateMedia(data,form),layout=el('div','entity-review-layout'),visuals=el('section','entity-review-media');visuals.setAttribute('aria-label','此状态的参考素材');
     renderEntityReviewMedia(visuals,media,form);layout.append(visuals);
     const description=el('section','entity-review-description');description.setAttribute('aria-label','完整状态描述');
     const base=data.states[0],changes=base&&base.id!==form.id?Object.keys(form.payload.dimensions||{}).filter(k=>form.payload.dimensions[k]!==base.payload.dimensions[k]):[];
     if(changes.length)nodeText('p','entity-review-changes','相对基础状态变化：'+changes.map(k=>productionDimensionLabels[k]||k).join('、'),description);
-    nodeText('h4',null,'完整状态描述',description);reviewTextBlocks(description,form,{compact:true});reviewNotes(description,form);layout.append(description);root.append(layout);
+    nodeText('h4',null,'完整状态描述',description);reviewTextBlocks(description,form);layout.append(description);root.append(layout);
   }
   if(data.historicalMedia){const original=el('section','entity-review-secondary');original.setAttribute('aria-label','评论对应的素材版本');nodeText('h3',null,'评论对应的素材版本',original);nodeText('p',null,'以下为原意见绑定的文件，未将它关联到当前选中的状态。',original);renderEntityReviewMedia(original,[data.historicalMedia],null,'entityReviewHistoricalMedia');root.append(original)}
   const unassigned=entityReviewUnassignedMedia(data);
@@ -118,10 +119,18 @@ function renderEntityReview(root){
     if(pending.open)show();pending.ontoggle=()=>{data.unassignedOpen=pending.open;if(pending.open)show()};root.append(pending);
   }
   if(entity.payload.lyrics?.length){const lyrics=el('section','entity-review-lyrics');nodeText('h3',null,'歌词原文与段落',lyrics);for(const lyric of entity.payload.lyrics){nodeText('h4',null,lyric.section,lyrics);nodeText('p',null,lyric.text,lyrics);productionRefLink(lyrics,lyric.source,'查看歌词依据')}root.append(lyrics)}
-  renderEntityReviewHistory(root,data,form);updateEntityReviewCounts();
+  renderEntityReviewHistory(root,data,form);
+}
+function renderEntityPlaceholder(parent,form,audio=false){
+  const entity=state.productionEntityDetail.record,type=entity.payload.entity_type,label=productionLabels[type]||'实体',box=el('div','entity-review-placeholder');box.dataset.entityType=type;
+  const illustration=el('div','entity-review-placeholder-art');illustration.setAttribute('role','img');illustration.setAttribute('aria-label',label+'占位图');illustration.append(productionEntityIcon(type));box.append(illustration);
+  nodeText('strong',null,entity.payload.title,box);
+  nodeText('p',null,audio?'声音参考':form?.payload.reference_media==='none'?'仅被提及，无媒体制作要求':'此状态暂无关联素材',box);
+  if(!audio&&form?.payload.reference_media!=='none')nodeText('small',null,'可先审阅状态描述并提出意见',box);
+  parent.append(box);
 }
 function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMedia'){
-  if(!items.length){nodeText('p','entity-review-empty',form?.payload.reference_media==='none'?'此状态仅被提及，无媒体制作要求。':'此状态尚无关联素材，可先审阅状态描述。',parent);return}
+  if(!items.length){nodeText('h4',null,'参考素材',parent);renderEntityPlaceholder(parent,form);return}
   const ordered=[...items].sort((a,b)=>(a.role==='overall'?0:1)-(b.role==='overall'?0:1));
   const current=ordered.find(m=>m.id===state[selectionKey])||ordered[0];state[selectionKey]=current.id;
   const roleLabel=item=>item.role==='overall'?'整体参考':item.role==='detail'?'补充参考':selectionKey==='entityReviewHistoricalMedia'?'原素材':'待关联状态';
@@ -139,6 +148,7 @@ function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMed
     pane.append(renderStructureVisual({...component,title:current.label,alt:current.label,description:`${component.width} × ${component.height}`},true));
     if(current.crop){nodeText('p','production-meta',`参考范围：左 ${(current.crop.x*100).toFixed(1)}% / 上 ${(current.crop.y*100).toFixed(1)}% / 宽 ${(current.crop.width*100).toFixed(1)}% / 高 ${(current.crop.height*100).toFixed(1)}%（原图坐标）`,pane);pane.querySelector('.structure-visual-stage').dataset.reviewCrop=JSON.stringify(current.crop)}
   }else{
+    if(component.mime.startsWith('audio/'))renderEntityPlaceholder(pane,form,true);
     const player=el(component.mime.startsWith('audio/')?'audio':'video');player.controls=true;player.preload='metadata';player.src=url;player.dataset.componentId=component.id;pane.append(player);
     const from=current.range?.start_seconds||0,to=current.range?.end_seconds||component.duration_seconds;
     player.addEventListener('loadedmetadata',()=>{player.currentTime=Number(player.dataset.reviewSeek??from)});player.addEventListener('play',()=>{entityReviewFocus(current.record);if(player.currentTime<from||player.currentTime>=to)player.currentTime=from});player.addEventListener('timeupdate',()=>{if(current.range&&player.currentTime>=to)player.pause()});
@@ -163,7 +173,6 @@ function renderEntityReviewHistory(parent,data,form){
   if(data.accepted)nodeText('p',null,`${data.accepted.payload.actor} · ${new Date(data.accepted.created_at).toLocaleString('zh-CN')} · ${data.accepted.payload.reason}`,history);
   nodeText('p','production-meta','采纳表达对具体版本的认可，评论始终开放。镜头实际使用哪些素材仍单独记录。',history);parent.append(history);
 }
-function updateEntityReviewCounts(){if(!isEntityReview())return;const count=entityReviewComments().filter(c=>c.status==='OPEN').length;for(const button of document.querySelectorAll('[data-entity-review-count]'))button.textContent=`查看评论 · ${count}`}
 function locateEntityReviewComment(comment){
   const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id);if(!row)return;
   data.historicalTarget=row.id!==row.current_revision?row:null;data.historicalMedia=null;data.unassignedOpen=false;

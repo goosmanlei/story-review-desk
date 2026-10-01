@@ -4,6 +4,28 @@ const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION']
 const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',pending:'待审',passed:'通过',changes_requested:'需修改',rejected:'未通过',accepted:'用户接受',impact_resolved:'影响已处理'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';
+// This read-only projection also runs in review_text.py for exact anchor validation.
+function productionTextBlocks(record){
+  const p=record.payload,blocks=[...(p.blocks||[])],body=blocks.map(b=>b.text).join('\n'),seen=new Set();
+  let prefix='@review/';while(blocks.some(b=>b.id.startsWith(prefix)))prefix='@'+prefix;
+  for(const field of ['facts','choices','unknowns'])for(const [index,text] of (p[field]||[]).entries()){
+    if(typeof text!=='string'||!text.trim()||body.includes(text)||seen.has(text))continue;
+    seen.add(text);blocks.push({id:`${prefix}${field}/${index}`,text,field,index});
+  }
+  return blocks;
+}
+const productionEntitySymbols={
+  character:['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M4.5 21v-2a7.5 7.5 0 0 1 15 0v2'],
+  space:['M3 4h18v16H3Z','M3 17l5-5 4 4 4-7 5 8','M8 8h.01'],
+  prop:['m12 3 9 5v9l-9 5-9-5V8Z','m3 8 9 5 9-5','M12 13v9','m7.5 5.5 9 5V15'],
+  song:['M9 17V5l12-2v12','M9 9l12-2','M9 17c0 2-2 3-4 3s-3-1-3-2 2-3 4-3c1 0 3 0 3 2Z','M21 15c0 2-2 3-4 3s-3-1-3-2 2-3 4-3c1 0 3 0 3 2Z']
+};
+function productionEntityIcon(type){
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 24 24');svg.setAttribute('fill','none');svg.setAttribute('stroke','currentColor');svg.setAttribute('stroke-width','1.6');svg.setAttribute('stroke-linecap','round');svg.setAttribute('stroke-linejoin','round');svg.setAttribute('aria-hidden','true');svg.setAttribute('focusable','false');svg.classList.add('production-entity-icon');
+  for(const d of productionEntitySymbols[type]||productionEntitySymbols.prop){const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',d);svg.append(path)}
+  return svg;
+}
 const productionDimensionLabels={appearance:'整体外观',clothing:'服装',injury:'伤势',health:'健康',fatigue:'疲劳',voice:'声音',attachments:'随身物',layout:'空间布局',dressing:'场景布置',time_light:'时间与光照',structure:'完整形态',condition:'状况',contents:'组成与内容',placement:'使用位置',lyrics_scope:'歌词范围',rendition:'演唱方式',performers:'演唱者'};
 let productionLoadEpoch=0,productionReadEpoch=0;
 function productionButton(parent,text,action){const b=nodeText('button',null,text,parent);b.type='button';b.onclick=()=>Promise.resolve().then(action).catch(e=>toast(e.message));return b}
@@ -115,6 +137,7 @@ async function loadProductionWorkspace(){
       for(const [value,title] of options){
         const button=productionButton(choices,'',()=>{filters[key]=filters[key]===value?'':value;refreshIndex()});
         button.className='production-filter-chip';button.dataset.filterKey=key;button.dataset.filterValue=value;
+        if(productionEntitySymbols[value]){button.append(productionEntityIcon(value));button.dataset.entityType=value}
         nodeText('span',null,title,button);const count=nodeText('b','production-filter-count','0',button);count.setAttribute('aria-hidden','true');
         facetButtons.push({button,count,key,value,label,title});
       }
@@ -183,7 +206,7 @@ async function loadProductionWorkspace(){
         const children=childrenByEntity.get(r.object_id)||[],states=children.filter(child=>child.kind==='STATE').length;
         const b=productionButton(index,r.payload.title,()=>openProductionRecord(r.object_id));b.dataset.objectId=r.object_id;
         b.classList.toggle('active',(flatFilters?state.productionEntityId:state.productionSelected?.object_id)===r.object_id);
-        if(flatFilters){nodeText('span','production-state-count',`${states} 个完整状态`,b);const settings=children.filter(child=>child.kind==='REPRESENTATION').length;nodeText('small',null,`${productionLabels[r.payload.entity_type]}${settings?' · '+settings+' 项制作设定':''}`,b)}
+        if(flatFilters){b.dataset.entityType=r.payload.entity_type;const icon=el('span','production-entity-avatar');icon.append(productionEntityIcon(r.payload.entity_type));b.prepend(icon);nodeText('span','production-state-count',`${states} 个完整状态`,b);const settings=children.filter(child=>child.kind==='REPRESENTATION').length;nodeText('small',null,`${productionLabels[r.payload.entity_type]}${settings?' · '+settings+' 项制作设定':''}`,b)}
         else nodeText('small',null,`${productionLabels[r.payload.entity_type]||contexts.get(r.object_id).scene||''} 版本 ${r.version}`,b);
       }
     }
@@ -315,7 +338,7 @@ function renderProductionRecord(root,detail,entityCard=false){
 }
 function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.start<Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
 function paintProductionReview(){
-  if(!isProduction())return;if(typeof updateEntityReviewCounts==='function')updateEntityReviewCounts();paintStructureRegions();
+  if(!isProduction())return;paintStructureRegions();
   const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
   for(const para of document.querySelectorAll('#production-blocks [data-block-id]'))para.classList.toggle('comment-flash',para===target);
 }

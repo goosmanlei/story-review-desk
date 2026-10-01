@@ -352,7 +352,7 @@ function textSelectionAnchor(host,blocks,attribute){
   return {block_id:blocks[first].id,end_block_id:blocks[last].id,start,end,quote};
 }
 function selectedAnchor(){
-  if(isProduction())return state.productionSelected?textSelectionAnchor($('#production-blocks'),state.productionSelected.payload.blocks,'data-block-id'):null;
+  if(isProduction())return state.productionSelected?textSelectionAnchor($('#production-blocks'),productionTextBlocks(state.productionSelected),'data-block-id'):null;
   if(isStructure())return selectedStructureAnchor();
   if(isScript())return scriptScene()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
   if(state.workspace!=='story.sources'||!state.current)return null;
@@ -460,7 +460,6 @@ function commentCard(comment){
 }
 
 function renderComments(){
-  if(typeof updateEntityReviewCounts==='function')updateEntityReviewCounts();
   if(isScript())renderScriptCommentCounts();
   if((isScript()&&!scriptEpisode())||(isProduction()&&!state.productionSelected)||(!isProduction()&&!isStructure()&&!isScript()&&!state.current)){$('#comment-body').replaceChildren();$('#open-count').textContent='0';$('#comments-toggle').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
