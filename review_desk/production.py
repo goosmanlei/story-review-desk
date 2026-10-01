@@ -352,6 +352,16 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             old, new = ref_record(store, change.get("old")), ref_record(store, change.get("new"))
             if old["object_id"] != new["object_id"] or old["id"] == new["id"] or change.get("action") not in ("needs_review", "keep", "rework", "replace"):
                 raise ValueError("invalid upstream change decision")
+            if change.get("scope") not in (None, "target", "state_title_only"):
+                raise ValueError("invalid change decision scope")
+            if change.get("scope") == "state_title_only":
+                before = {k: v for k, v in old["payload"].items() if k != "title"}
+                after = {k: v for k, v in new["payload"].items() if k != "title"}
+                if (old["kind"] != "STATE" or new["version"] <= old["version"] or
+                        before != after or old["payload"]["title"] == new["payload"]["title"] or
+                        p["target"]["revision_id"] != new["id"] or
+                        change["action"] != "keep" or p["verdict"] != "impact_resolved"):
+                    raise ValueError("state title review requires only a title change and the exact new state target")
     elif kind == "RELATION":
         if p.get("relation_type") != "adoption" or p.get("usage") not in USAGES:
             raise ValueError("only explicit production adoption is supported")
@@ -502,7 +512,8 @@ def stale_inputs(store, target_revision, judgments=None):
     for value in values.values():
         if value["kind"] not in CHANGE_KINDS or value["id"] == value["current_revision"]:
             continue
-        kept = any(j["payload"]["target"]["revision_id"] == target_revision and
+        kept = any((j["payload"]["target"]["revision_id"] == target_revision or
+                    j["payload"].get("change", {}).get("scope") == "state_title_only") and
                    j["payload"].get("change", {}).get("old", {}).get("revision_id") == value["id"] and
                    j["payload"].get("change", {}).get("new", {}).get("revision_id") == value["current_revision"] and
                    j["payload"].get("change", {}).get("action") == "keep" for j in judgments)
