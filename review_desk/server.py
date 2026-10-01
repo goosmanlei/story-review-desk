@@ -26,6 +26,13 @@ class ReviewServer(HTTPServer):
         self.config = config
         self.store = Store(self.root / ".runtime" / "review.sqlite3")
 
+    def get_request(self):
+        request, address = super().get_request()
+        # Browsers can preconnect without sending an HTTP request. Keep such
+        # idle sockets from blocking the single thread that owns the SQLite store.
+        request.settimeout(2)
+        return request, address
+
     def server_close(self):
         self.store.close()
         super().server_close()
