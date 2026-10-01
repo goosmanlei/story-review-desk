@@ -16,6 +16,14 @@ function setup(read){
  for(const name of ['entityReviewStateMedia','entityReviewUnassignedMedia','entityReviewMediaCount'])ctx[name]=vm.runInContext(name,ctx);
  return {ctx,data};
 }
+test('review notes keep exact text and field index without mutating immutable payloads',()=>{
+ const {ctx}=setup(),payload={blocks:[{id:'@review/unknowns/1',text:'已有正文🧵'}],facts:['已有正文🧵','事实'],choices:['事实','选择'],unknowns:['','未知','未知',null]},before=JSON.stringify(payload);
+ assert.deepEqual(JSON.parse(JSON.stringify(ctx.productionTextBlocks({payload}))),[payload.blocks[0],
+  {id:'@@review/facts/1',text:'事实',field:'facts',index:1},
+  {id:'@@review/choices/1',text:'选择',field:'choices',index:1},
+  {id:'@@review/unknowns/1',text:'未知',field:'unknowns',index:1}]);
+ assert.equal(JSON.stringify(payload),before);
+});
 test('whole-entity content remains constant when selecting a different form or comment target',async()=>{
  const {ctx,data}=setup();await ctx.openEntityReview('person',{record:entity},0,null);
  assert.equal(ctx.state.productionChildDetail.record,form);

@@ -417,6 +417,8 @@ class Store:
         else:
             blocks, visuals, source = payload.get("blocks"), [], None
             if str(payload.get("format", "")).startswith("production-"):
+                from .review_text import production_text_blocks
+                blocks = production_text_blocks(payload)
                 visuals = [c for c in payload.get("components", []) if c.get("mime", "").startswith("image/")]
         if blocks is None and isinstance(payload.get("body"), str):
             blocks = [{"id": "body", "text": payload["body"]}]

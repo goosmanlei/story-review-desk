@@ -9,6 +9,7 @@ import test_complete_states as fixtures
 from review_desk import entity_review as er, production as p
 from review_desk.bundle import export, restore
 from review_desk.store import Conflict, Store
+from review_desk.review_text import production_text_blocks
 
 
 class EntityReviewTest(unittest.TestCase):
@@ -46,6 +47,47 @@ class EntityReviewTest(unittest.TestCase):
         self.assertEqual(current['entity']['id'], self.ref('songbook')['revision_id'])
         self.assertEqual(len(current['states']), 3)
         self.assertNotEqual(snapshot['content_key'], current['content_key'])
+
+    def test_note_comments_bind_exact_entity_and_state_fields_and_survive_restore(self):
+        self.setup_full()
+        saved = []
+        for oid in ('songbook', 'full'):
+            self.change(oid, lambda value: value.update(unknowns=['颜色尚待确认。', '补充🧵纹理与材质。']))
+            revision = self.ref(oid)['revision_id']
+            notes = [b for b in production_text_blocks(p.record(self.store, oid)['payload']) if b.get('field') == 'unknowns']
+            anchor = {'type':'text', 'block_id':notes[0]['id'], 'end_block_id':notes[1]['id'],
+                      'start':0, 'end':4, 'quote':'颜色尚待确认。\n补充🧵纹'}
+            comment = self.store.create_comment({'target_object_id':oid, 'target_revision_id':revision,
+                                                  'anchor':anchor, 'body':'仅技术验证：提供待确认信息'})
+            with self.assertRaises(Conflict):
+                self.store.validate_target(oid, revision, {**anchor, 'quote':'错误引用'})
+            self.change(oid, lambda value: value.update(unknowns=['改为新的待确认事项。']))
+            self.assertTrue(self.store.anchor_state(oid, revision, anchor)['valid'])
+            self.assertFalse(self.store.anchor_state(oid, self.ref(oid)['revision_id'], anchor)['valid'])
+            saved.append(comment)
+        destination = self.root / 'restored'
+        export(self.store, self.root/'export')
+        shutil.copytree(self.root/'export', destination/'export')
+        recovered = Store(destination/'.runtime/review.sqlite3')
+        try:
+            restore(recovered, destination/'export')
+            for comment in saved:
+                self.assertEqual(recovered.comment(comment['id']), comment)
+                self.assertTrue(recovered.anchor_state(comment['target_object_id'], comment['target_revision_id'], comment['anchor'])['valid'])
+        finally:
+            recovered.close()
+
+    def test_note_projection_preserves_original_blocks_and_avoids_id_collisions(self):
+        payload = {'blocks':[{'id':'@review/unknowns/1', 'text':'已有正文🧵'}],
+                   'facts':['已有正文🧵','事实'], 'choices':['事实','选择'],
+                   'unknowns':['', '未知', '未知', None]}
+        original = copy.deepcopy(payload)
+        result = production_text_blocks(payload)
+        self.assertEqual(result, [payload['blocks'][0],
+            {'id':'@@review/facts/1','text':'事实','field':'facts','index':1},
+            {'id':'@@review/choices/1','text':'选择','field':'choices','index':1},
+            {'id':'@@review/unknowns/1','text':'未知','field':'unknowns','index':1}])
+        self.assertEqual(payload, original)
 
     def test_related_candidates_visible_without_inventing_state_coverage(self):
         self.setup_full(); self.media(); self.media('project-audio')
