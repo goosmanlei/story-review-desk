@@ -17,7 +17,7 @@ const plain=value=>JSON.parse(JSON.stringify(value));
 
 test('shared and state-only settings appear under each owner exactly once; project settings stay unowned',()=>{
   const a=row('a','ENTITY'),b=row('b','ENTITY');
-  const wet=row('wet','STATE',{entity:{object_id:'a',revision_id:'a-old'}});
+  const wet=row('wet','STATE',{state_model:'complete-v1',entity:{object_id:'a',revision_id:'a-old'}});
   const shared=row('shared','REPRESENTATION',{entities:[{object_id:'a'},{object_id:'b'}],states:[{object_id:'wet'}]});
   const stateOnly=row('state-only','REPRESENTATION',{entities:[],states:[{object_id:'wet'}]});
   const common=row('common','REPRESENTATION',{entities:[],states:[]});
@@ -67,4 +67,11 @@ test('a slow historical ownership lookup cannot replace a newer selection',async
   await ctx.openProductionRecord('entity');release();await first;
   assert.equal(ctx.state.productionSelected,entity);
   assert.equal(new URL(ctx.location.href).searchParams.get('production_object'),'entity');
+});
+
+test('legacy fragments do not count as current complete forms but keep their owner',()=>{
+  const entity=row('person','ENTITY'),legacy=row('hand','STATE',{entity:{object_id:'person'}}),full=row('full','STATE',{state_model:'complete-v1',entity:{object_id:'person'}});
+  const ctx=setup([entity,legacy,full]);
+  assert.deepEqual(plain(ctx.productionEntityChildren('person').map(r=>r.object_id)),['full']);
+  assert.deepEqual(plain(ctx.productionEntityIds(legacy)),['person']);
 });
