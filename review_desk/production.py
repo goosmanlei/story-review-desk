@@ -251,6 +251,11 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         _refs(store, p, "states", {"STATE"})
         for key in ("sources", "choices", "unknowns"):
             _list(p, key)
+        if 'review_model' in p:
+            from . import entity_review
+            if p['review_model'] != entity_review.MODEL:
+                raise ValueError('unsupported entity review model')
+            entity_review.validate(store, object_id, p, check_current)
     elif kind == "PREPARATION":
         episode = ref_record(store, p.get("source"), {"EPISODE"})
         scene = next((s for s in episode["payload"].get("scenes", []) if s["id"] == p["source"].get("scene_id")), None)
@@ -352,7 +357,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 component_for(store, input_ref, input_ref['component_id'])
         _lineage(store, p)
     elif kind == "JUDGMENT":
-        ref_record(store, p.get("target"))
+        target = ref_record(store, p.get("target"))
+        from . import entity_review
+        if p.get('verdict') == 'accepted' and entity_review.submission(target):
+            entity_review.validate_acceptance(store, target, check_current)
         if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved"):
             raise ValueError("invalid review verdict")
         for key in ("actor", "reason"):
