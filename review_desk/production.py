@@ -12,6 +12,7 @@ import shutil
 
 from .store import Conflict, canonical
 from .production_media import validate_component
+from . import production_states as full_states
 
 
 KINDS = {"INPUT_LOCK": "input-lock", "ENTITY": "entity", "STATE": "state",
@@ -240,6 +241,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             raise ValueError("state dimensions are required")
         for key in ("sources", "facts", "choices", "unknowns"):
             _list(p, key)
+        full_states.validate_state(store, p)
         for previous in p.get("previous_states", []):
             parent = ref_record(store, previous, {"STATE"})
             if parent["payload"]["entity"]["object_id"] != p["entity"]["object_id"]:
@@ -266,6 +268,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             evidence = _list(occurrence, "evidence")
             if not evidence or any(r.get("revision_id") != episode["id"] or r.get("scene_id") != scene["id"] or not r.get("block_ids") for r in evidence):
                 raise ValueError("occurrence evidence must locate this scene")
+        full_states.validate_usage(store, kind, p)
     elif kind == "SHOT_DESIGN":
         ref_record(store, p.get("episode"), {"EPISODE"})
         if p.get("source", {}).get("revision_id") != p["episode"]["revision_id"] or p.get("scene_id") != p["source"].get("scene_id"):
@@ -278,12 +281,17 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         _list(p, "sound")
         _refs(store, p, "entities", {"ENTITY"})
         _refs(store, p, "states", {"STATE"})
+        full_states.validate_usage(store, kind, p)
     elif kind == "REQUIREMENT":
         ref_record(store, p.get("scope"))
         for key in ("slot", "purpose", "media_type"):
             _text(p.get(key), key)
         if type(p.get("required")) is not bool or p.get("usage") not in USAGES:
             raise ValueError("invalid requirement required/usage")
+        if p.get('status') == 'withdrawn':
+            if p['required']:
+                raise ValueError('withdrawn requirement cannot remain required')
+            _text(p.get('withdrawal_reason'), 'withdrawal reason')
         if p["media_type"] not in ("image", "audio", "video", "project", "document"):
             raise ValueError("invalid required media type")
         _refs(store, p, "entities", {"ENTITY"})
@@ -295,6 +303,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 _number(value, key)
         if 'native_4k' in p['specification'] and type(p['specification']['native_4k']) is not bool:
             raise ValueError('native_4k specification must be boolean')
+        full_states.validate_reference_requirement(store, p)
         if check_current and store.db.execute("""SELECT 1 FROM objects o JOIN revisions r ON r.id=o.current_revision
                 WHERE o.kind='REQUIREMENT' AND o.id!=? AND json_extract(r.payload,'$.format')='production-requirement-v1'
                 AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
@@ -311,6 +320,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 raise ValueError("original component does not match the asset media type")
             _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "SHOT_DESIGN", "INPUT_LOCK"})
             _refs(store, p, "states", {"STATE"})
+            full_states.validate_asset_coverage(store, p)
             call = ref_record(store, p.get("production"), {"CALL"})
             if call["payload"].get("status") not in ("submitted", "completed"):
                 raise ValueError("an asset needs a real production record")
@@ -421,6 +431,13 @@ def import_records(store, document, validate_only=False):
     results, resolved = [], {}
     store.db.execute("BEGIN IMMEDIATE")
     try:
+        guards = document.get('expected_heads', {})
+        if not isinstance(guards, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in guards.items()):
+            raise ValueError('expected_heads must map object ids to exact revision ids')
+        for object_id, revision_id in guards.items():
+            current = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
+            if not current or current['current_revision'] != revision_id:
+                raise Conflict('production planning input changed: ' + object_id)
         for source in document["records"]:
             if not isinstance(source, dict) or not ID.fullmatch(str(source.get("object_id", ""))):
                 raise ValueError("invalid production object id")
@@ -557,7 +574,10 @@ def readiness(store, scope):
         in_scene = item['kind'] == 'SHOT_DESIGN' and scene and item['payload']['scene_id'] == scene and ep['revision_id'] == subject['payload']['source']['revision_id']
         if in_episode or in_scene:
             scope_ids.add(item['object_id'])
-    requirements = [r for r in heads if r["kind"] == "REQUIREMENT" and r["payload"]["scope"]["object_id"] in scope_ids]
+    coverage = full_states.scope_coverage(store, [r for r in heads if r['object_id'] in scope_ids], heads)
+    state_keys = {full_states.exact(r) for r in coverage['states']}
+    requirements = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and
+                    (r["payload"]["scope"]["object_id"] in scope_ids or full_states.exact(r['payload']['scope']) in state_keys)]
     uses = {(r["payload"]["scope"]["object_id"], r["payload"]["slot"]): r for r in heads if r["kind"] == "RELATION"}
     judgments = [r for r in heads if r["kind"] == "JUDGMENT"]
     rows = []
@@ -586,6 +606,11 @@ def readiness(store, scope):
                     issues.append('missing_entity_reference')
                 if not {r['object_id'] for r in p['states']} <= states:
                     issues.append('missing_state_reference')
+                for state_ref in p['states']:
+                    if full_states.complete(ref_record(store, state_ref, {'STATE'})) and not full_states.covers(
+                            asset, component, ap, state_ref, p.get('specification', {}).get('reference_role')):
+                        issues.append('missing_exact_state_coverage')
+                        break
                 spec = p.get("specification", {})
                 for key in ("width", "height", "sample_rate", "channels"):
                     if spec.get("minimum_" + key, 0) > component.get(key, 0):
@@ -607,10 +632,10 @@ def readiness(store, scope):
             pending_changes.extend({'target': {'object_id': requirement['object_id'], 'revision_id': requirement['id']}, **change} for change in requirement_changes)
         reviews = [r for r in judgments if asset and r["payload"]["target"]["revision_id"] == asset["id"]]
         rows.append({"requirement": requirement, "adoption": adoption, "asset": asset, "issues": issues, "reviews": reviews, 'pending_changes': pending_changes})
-    return {"scope": subject, "requirements": rows,
+    return {"scope": subject, "requirements": rows, "state_coverage": coverage,
             "required_count": sum(r["requirement"]["payload"]["required"] for r in rows),
             "missing_count": sum(r["requirement"]["payload"]["required"] and bool(r["issues"]) for r in rows),
-            "inputs_ready": any(r["requirement"]["payload"]["required"] for r in rows) and
+            "inputs_ready": not coverage['issues'] and any(r["requirement"]["payload"]["required"] for r in rows) and
                             all(not r["issues"] for r in rows if r["requirement"]["payload"]["required"]),
             "creative_acceptance": [r for r in judgments if r["payload"]["target"]["revision_id"] == subject["id"] and r["payload"]["verdict"] == "accepted"]}
 
