@@ -77,6 +77,34 @@ class EntityReviewTest(unittest.TestCase):
         self.assertTrue(historical['historical']); self.assertFalse(historical['can_accept'])
         self.assertEqual(historical['scope'], before['scope'])
 
+    def test_state_revision_update_does_not_transfer_media_or_acceptance(self):
+        self.setup_full(); self.media(); self.associate(); self.put(self.accept())
+        before = er.snapshot(self.store, 'songbook')
+        original = before['media'][0]
+        self.change('full', lambda value: value['dimensions'].update(condition='完整形态修订'))
+        current = er.snapshot(self.store, 'songbook')
+        self.assertEqual(current['status'], 'unaccepted')
+        self.assertTrue(all(item['state'] is None for item in current['media']))
+        self.assertEqual(current['media'][0]['record']['id'], original['record']['id'])
+        self.assertEqual(current['previous_accepted']['media'][0]['state'], original['state'])
+        self.associate()
+        checked = er.snapshot(self.store, 'songbook')
+        self.assertEqual(checked['media'][0]['state'], self.ref('full'))
+        self.assertNotEqual(checked['media'][0]['asset'], original['asset'])
+
+    def test_unmapped_component_stays_separate_from_explicit_state_coverage(self):
+        self.setup_full(); self.media(); self.associate()
+        def add_component(value):
+            component = copy.deepcopy(value['components'][0]); component['id'] = 'alternate'
+            value['components'].append(component)
+        self.change('voice', add_component)
+        current = er.snapshot(self.store, 'songbook')
+        mapped = [item for item in current['media'] if item['state']]
+        unmapped = [item for item in current['media'] if not item['state']]
+        self.assertEqual([(item['state'], item['component_id']) for item in mapped], [(self.ref('full'), 'original')])
+        self.assertEqual([item['component_id'] for item in unmapped], ['alternate'])
+        self.assertEqual(len({item['record']['id'] for item in current['media']}), 1)
+
     def test_stale_collection_identity_media_and_forgery_reject_atomically(self):
         self.setup_full(); initial = er.snapshot(self.store, 'songbook')['scope']
         self.put(self.full('new-form')); before = self.store.objects()
