@@ -1,14 +1,21 @@
 /* Production readers share app.js comments, drafts, keyboard handling and API. */
-const productionKinds={ENTITY:'实体',STATE:'实体状态',REPRESENTATION:'制作设定',INPUT_LOCK:'正式输入',PREPARATION:'集场检查',SHOT_DESIGN:'镜头设计',REQUIREMENT:'素材需求',ASSET:'实际素材',CALL:'实际制作',RELATION:'明确采用',JUDGMENT:'审阅结论',ASSEMBLY:'动态分镜组合',DELIVERABLE:'输出与工程'};
-const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION','INPUT_LOCK'],'materials.workspace':['ASSET','CALL','JUDGMENT','RELATION'],'production.workspace':['PREPARATION','SHOT_DESIGN','REQUIREMENT','ASSEMBLY','DELIVERABLE']};
+const productionKinds={ENTITY:'实体',STATE:'实体状态',REPRESENTATION:'制作设定',INPUT_LOCK:'剧本依据',PREPARATION:'集场检查',SHOT_DESIGN:'镜头设计',REQUIREMENT:'素材需求',ASSET:'实际素材',CALL:'实际制作',RELATION:'明确采用',JUDGMENT:'审阅结论',ASSEMBLY:'动态分镜组合',DELIVERABLE:'输出与工程'};
+const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION'],'materials.workspace':['ASSET','CALL','JUDGMENT','RELATION'],'production.workspace':['PREPARATION','SHOT_DESIGN','REQUIREMENT','ASSEMBLY','DELIVERABLE']};
 const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',pending:'待审',passed:'通过',changes_requested:'需修改',rejected:'未通过',accepted:'用户接受',impact_resolved:'影响已处理'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 let productionLoadEpoch=0,productionReadEpoch=0;
 function productionButton(parent,text,action){const b=nodeText('button',null,text,parent);b.type='button';b.onclick=()=>Promise.resolve().then(action).catch(e=>toast(e.message));return b}
 function productionVisuals(){return (state.productionSelected?.payload.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:state.productionSelected.payload.title,alt:state.productionSelected.payload.title,description:`${c.role} · ${c.width}×${c.height} · ${c.sha256}`}))}
 function productionName(ref){return state.productionRecords?.find(r=>r.object_id===ref.object_id)?.payload.title||state.screenplays.flatMap(s=>s.episodes).find(e=>e.object_id===ref.object_id)?.payload.title||state.screenplays.find(s=>s.object_id===ref.object_id)?.payload.title||ref.object_id}
+function productionBasisSummary(record){
+  const p=record.payload,script=state.screenplays.find(s=>s.object_id===p.screenplay.object_id&&s.id===p.screenplay.revision_id);
+  const title=script?.payload.title||p.title,label=title.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u);
+  return `剧本依据：${label?'版本'+label[1]:title} · 已确认 · ${p.episodes.length} 集`;
+}
 function productionRefLink(parent,ref,label){
   if(!ref?.object_id||!ref.revision_id)return;
+  const basis=state.productionRecords?.find(r=>r.object_id===ref.object_id&&r.kind==='INPUT_LOCK');
+  if(basis){nodeText('span','production-ref',basis.id===ref.revision_id?productionBasisSummary(basis):(label||'剧本依据')+' · 历史版本',parent);return}
   if(ref.scene_id||ref.block_ids){const b=productionButton(parent,label||`${productionName(ref)} · ${ref.scene_id||'正文依据'}`,()=>showProductionSource(ref));b.className='production-ref';b.title=`精确修订 ${ref.revision_id}`;return}
   const episode=state.screenplays.flatMap(v=>v.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);
   if(episode){const url=new URL(location.href);url.search='';url.searchParams.set('workspace','story.script');url.searchParams.set('script',episode.payload.screenplay_id);url.searchParams.set('episode',episode.object_id);if(ref.scene_id)url.searchParams.set('scene',ref.scene_id);const a=link(label||`${episode.payload.title} · ${ref.scene_id||'本集'}`,url.href,parent);a.className='production-ref';a.title=`修订 ${ref.revision_id}\n${(ref.block_ids||[]).join(', ')}`;return}
@@ -28,10 +35,21 @@ async function showProductionSource(ref){
 async function loadProductionWorkspace(){
   const workspace=state.workspace,epoch=++productionLoadEpoch;$('#production-view').replaceChildren();nodeText('p',null,'正在读取制作记录…',$('#production-view'));const result=await api('/api/production');if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
+  const param=new URL(location.href).searchParams,selected=param.get('production_object'),requested=result.records.find(r=>r.object_id===selected);
+  if(requested?.kind==='INPUT_LOCK'){
+    const url=new URL(location.href);url.searchParams.delete('production_object');url.searchParams.delete('production_revision');history.replaceState(null,'',url);
+    if(workspace!=='production.workspace'){switchWorkspace('production.workspace');return}
+  }
   const host=$('#production-view');host.replaceChildren();
   const heading=el('header','production-heading'),title=el('div');nodeText('small',null,'剧本依据 → 制作设定 → 实际素材 → 镜头输入',title);nodeText('h1',null,{'settings.workspace':'制作设定','materials.workspace':'素材管理','production.workspace':'全剧制作'}[workspace],title);
   nodeText('p',null,{'settings.workspace':'核对身份、实体状态、来源与制作选择，反查出场和镜头。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场组织镜头和输入槽位，检查缺项并登记动态分镜组合与交付。'}[workspace],title);heading.append(title);const actions=el('div','production-toolbar');productionButton(actions,'批量导入',showProductionImport);if(workspace==='materials.workspace')productionButton(actions,'登记实际原件',showProductionUpload);heading.append(actions);host.append(heading);
-  const flatFilters=workspace==='settings.workspace',filters={kind:'',category:'',episode:'',scene:''};
+  const inputLocks=result.records.filter(r=>r.kind==='INPUT_LOCK');
+  if(workspace==='production.workspace'){
+    const basis=el('div','production-basis');basis.setAttribute('aria-label','剧本依据');
+    for(const lock of inputLocks)nodeText('p',null,productionBasisSummary(lock),basis);
+    if(!inputLocks.length)nodeText('p',null,'剧本依据：尚未登记',basis);host.append(basis);
+  }
+  const flatFilters=workspace==='settings.workspace',filters={kind:'',category:'',episode:'',scene:''},filterSelects={};
   const filterPanel=el('section',flatFilters?'production-filters':''),toolbar=el('div','production-toolbar'),search=el('input');
   search.type='search';search.placeholder=flatFilters?'搜索名称、别名或设定内容':'搜索名称、别名或集场';search.setAttribute('aria-label','搜索制作记录');
   let clearFilters,resultSummary;
@@ -62,7 +80,7 @@ async function loadProductionWorkspace(){
     }else{
       const select=el('select');select.setAttribute('aria-label',label);
       for(const [value,title] of options)select.append(new Option(title,value));
-      select.onchange=()=>{filters[key]=select.value;refreshIndex()};toolbar.append(select);
+      filterSelects[key]=select;select.onchange=()=>{filters[key]=select.value;refreshIndex()};toolbar.append(select);
     }
   }
   if(flatFilters){resultSummary=nodeText('p','production-filter-summary','',filterPanel);resultSummary.setAttribute('role','status')}
@@ -80,10 +98,29 @@ async function loadProductionWorkspace(){
       (!selection.episode||context.episode===selection.episode)&&(!selection.scene||context.scene===selection.scene)&&searchTexts.get(r.object_id).includes(search.value.trim().toLowerCase());
   };
   const episodeFilter=el('select'),sceneFilter=el('select');episodeFilter.setAttribute('aria-label','制作分集');sceneFilter.setAttribute('aria-label','制作场次');episodeFilter.append(new Option('全剧各集',''));sceneFilter.append(new Option('全部场次',''));
+  const episodes=state.screenplays.flatMap(s=>s.episodes),scopeReview=el('section','production-scope-review');
+  let scopeButton,scopeReviewEpoch=0;
+  const scopeRecord=()=>filters.scene?workspaceRows.find(r=>r.kind==='PREPARATION'&&contexts.get(r.object_id).episode===filters.episode&&contexts.get(r.object_id).scene===filters.scene):episodes.find(e=>e.object_id===filters.episode);
+  const clearScopeReview=()=>{scopeReviewEpoch++;scopeReview.replaceChildren();scopeReview.hidden=true;if(scopeButton){scopeButton.textContent=filters.scene?'检查本场素材缺项':'检查本集素材缺项';scopeButton.disabled=!filters.episode||!scopeRecord()}};
   if(workspace==='production.workspace'){
     const present=new Set([...contexts.values()].map(c=>c.episode));
-    for(const ep of state.screenplays.flatMap(s=>s.episodes).filter(e=>present.has(e.object_id)))episodeFilter.append(new Option(ep.payload.title,ep.object_id));
+    const available=episodes.filter(e=>present.has(e.object_id));
+    for(const ep of available)episodeFilter.append(new Option(ep.payload.title,ep.object_id));
+    const requestedContext=requested&&productionGroups[workspace].includes(requested.kind)?contexts.get(requested.object_id):null;
+    filters.episode=requestedContext?(requestedContext.episode||''):inputLocks.flatMap(r=>r.payload.episodes).find(ref=>available.some(e=>e.object_id===ref.object_id&&e.id===ref.revision_id))?.object_id||available[0]?.object_id||'';
+    filters.scene=requestedContext?.scene||'';
+    filters.kind=requestedContext?requested.kind:workspaceRows.some(r=>r.kind==='SHOT_DESIGN'&&contexts.get(r.object_id).episode===filters.episode)?'SHOT_DESIGN':'PREPARATION';
+    episodeFilter.value=filters.episode;filterSelects.kind.value=filters.kind;
     toolbar.append(episodeFilter,sceneFilter);
+    scopeButton=productionButton(toolbar,'检查本集素材缺项',async()=>{
+      const subject=scopeRecord();if(!subject)return;
+      const check=++scopeReviewEpoch,isCurrent=()=>state.workspace===workspace&&productionLoadEpoch===epoch&&scopeReviewEpoch===check;
+      scopeReview.hidden=false;scopeReview.replaceChildren();nodeText('p',null,'正在检查所选范围…',scopeReview);scopeButton.disabled=true;
+      try{await renderProductionReadiness(scopeReview,subject,{isCurrent,replace:true,title:subject.payload.title,close:clearScopeReview})}
+      catch(e){if(isCurrent())nodeText('p','production-issue',e.message,scopeReview)}
+      finally{if(isCurrent())scopeButton.disabled=false}
+    });
+    scopeReview.hidden=true;scopeReview.setAttribute('aria-label','所选集场素材缺项');host.insertBefore(scopeReview,board);
   }
   const renderIndex=()=>{
     index.replaceChildren();
@@ -110,9 +147,11 @@ async function loadProductionWorkspace(){
       clearFilters.disabled=!search.value&&!Object.values(filters).some(Boolean);
     }
   };
-  const renderScenes=()=>{filters.scene='';sceneFilter.replaceChildren(new Option('全部场次',''));const scenes=[...new Set([...contexts.values()].filter(c=>c.scene&&(!filters.episode||c.episode===filters.episode)).map(c=>c.scene))].sort();for(const scene of scenes)sceneFilter.append(new Option(scene,scene));refreshIndex()};
-  search.oninput=refreshIndex;sceneFilter.onchange=()=>{filters.scene=sceneFilter.value;refreshIndex()};episodeFilter.onchange=()=>{filters.episode=episodeFilter.value;renderScenes()};renderScenes();
-  const param=new URL(location.href).searchParams,selected=param.get('production_object'),candidate=result.records.find(r=>r.object_id===selected&&productionGroups[workspace].includes(r.kind))||result.records.find(r=>productionGroups[workspace].includes(r.kind));
+  const renderScenes=()=>{sceneFilter.replaceChildren(new Option('全部场次',''));const scenes=[...new Set([...contexts.values()].filter(c=>c.scene&&(!filters.episode||c.episode===filters.episode)).map(c=>c.scene))].sort();for(const scene of scenes)sceneFilter.append(new Option(scene,scene));sceneFilter.value=filters.scene;refreshIndex();clearScopeReview()};
+  const firstMatchingRow=()=>productionGroups[workspace].flatMap(kind=>workspaceRows.filter(r=>r.kind===kind&&matches(r)).sort((a,b)=>a.object_id.localeCompare(b.object_id)))[0];
+  const openFilteredScope=()=>{const row=firstMatchingRow();if(row)openProductionRecord(row.object_id).catch(e=>toast(e.message));else{++productionReadEpoch;state.productionSelected=null;reader.replaceChildren();const url=new URL(location.href);url.searchParams.delete('production_object');url.searchParams.delete('production_revision');history.replaceState(null,'',url);nodeText('p',null,'当前范围没有此类记录，请调整记录类型。',reader);renderComments()}};
+  search.oninput=refreshIndex;sceneFilter.onchange=()=>{filters.scene=sceneFilter.value;refreshIndex();clearScopeReview();openFilteredScope()};episodeFilter.onchange=()=>{filters.episode=episodeFilter.value;filters.scene='';if(!workspaceRows.some(r=>matches(r))){filters.kind=workspaceRows.some(r=>r.kind==='PREPARATION'&&(!filters.episode||contexts.get(r.object_id).episode===filters.episode))?'PREPARATION':'';filterSelects.kind.value=filters.kind}renderScenes();openFilteredScope()};renderScenes();
+  const candidate=workspaceRows.find(r=>r.object_id===selected)||firstMatchingRow();
   if(candidate)await openProductionRecord(candidate.object_id,selected===candidate.object_id?param.get('production_revision'):null);else{state.productionSelected=null;nodeText('p',null,'此入口已开放，当前实例尚未登记生产数据。',reader);renderComments()}
 }
 async function openProductionRecord(objectId,revisionId=null,navigate=false){
@@ -151,7 +190,7 @@ function renderProductionReader(){
   const relatedVersions=r.id===r.current_revision?state.productionDetail.history:[r];
   const related=(state.productionRecords||[]).filter(other=>other.object_id!==r.object_id).map(other=>({other,versions:relatedVersions.filter(v=>JSON.stringify(other.payload).includes('"'+v.id+'"'))})).filter(item=>item.versions.length);
   if(related.length){nodeText('h3',null,'出场、状态与当前使用',root);for(const {other,versions} of related)productionRefLink(root,productionRef(other),`${productionKinds[other.kind]} · ${other.payload.title}${relatedVersions.length>1?' · 引用版本 '+versions.map(v=>v.version).join('、'):''}`)}
-  if(['SHOT_DESIGN','PREPARATION','INPUT_LOCK'].includes(r.kind)){if(r.id===r.current_revision)renderProductionReadiness(root,r).catch(e=>nodeText('p','production-issue',e.message,root));else nodeText('p','production-meta','当前正在阅读历史修订。查看现有缺项或改变采用，请切换到当前版本；历史制作输入保留在下方精确引用中。',root)}
+  if(['SHOT_DESIGN','PREPARATION'].includes(r.kind)){if(r.id===r.current_revision)renderProductionReadiness(root,r).catch(e=>nodeText('p','production-issue',e.message,root));else nodeText('p','production-meta','当前正在阅读历史修订。查看现有缺项或改变采用，请切换到当前版本；历史制作输入保留在下方精确引用中。',root)}
   const details=el('details');nodeText('summary',null,'完整记录与历史引用',details);nodeText('pre',null,JSON.stringify({record:r,uses:state.productionDetail.uses},null,2),details);root.append(details);paintProductionReview();
 }
 function paintProductionReview(){if(!isProduction())return;paintStructureRegions();for(const para of document.querySelectorAll('#production-blocks [data-block-id]')){para.classList.toggle('comment-flash',!!state.selected&&state.comments.find(c=>c.id===state.selected)?.anchor.block_id===para.dataset.blockId)}}
@@ -209,10 +248,31 @@ function showProductionUpload(){
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}
 function showProductionJudgment(root){const r=state.productionSelected,box=el('section','production-editor');nodeText('h3',null,'审阅结论仅针对此版本',box);const verdict=el('select');verdict.setAttribute('aria-label','审阅结果');for(const key of ['passed','changes_requested','rejected'])verdict.append(new Option(productionLabels[key],key));const actor=el('input');actor.placeholder='审阅者';actor.setAttribute('aria-label','审阅者');const reason=el('textarea');reason.placeholder='结论依据';reason.setAttribute('aria-label','结论依据');box.append(verdict,actor,reason);productionButton(box,'保存审阅',async()=>{if(!actor.value.trim()||!reason.value.trim())throw Error('请填写审阅者和结论依据');const id='review-'+crypto.randomUUID();await api('/api/production/judgment',{method:'POST',body:JSON.stringify({object_id:id,expected_version:0,payload:{format:'production-judgment-v1',title:r.payload.title+' · 审阅',blocks:[{id:'review',text:reason.value}],target:productionRef(r),verdict:verdict.value,actor:actor.value,reason:reason.value}})});toast('审阅已记录；采用保持原样');await loadProductionWorkspace()});productionButton(box,'取消',()=>box.remove());root.append(box)}
-async function renderProductionReadiness(root,r){
-  const data=await api('/api/production/readiness?scope='+encodeURIComponent(r.object_id));if(state.productionSelected?.id!==r.id)return;const section=el('section');nodeText('h3',null,`必要输入：${data.required_count} 项，缺项或待复核 ${data.missing_count} 项`,section);nodeText('p',null,data.inputs_ready?'技术输入齐备；作品是否接受单独记录。':'必要槽位尚未全部就绪。',section);
-  for(const row of data.requirements){const p=row.requirement.payload,card=el('div','production-need');nodeText('strong',null,p.title,card);nodeText('p',null,`${p.purpose} · ${productionLabels[p.usage]} · ${p.required?'必需':'可选'}`,card);if(row.adoption)productionRefLink(card,row.adoption.payload.asset,`已采用：${row.asset?.payload.title||'素材'} · 版本 ${row.asset?.version}`);for(const issue of row.issues)nodeText('span','production-pill production-issue',({missing_adoption:'尚未采用',upstream_needs_review:'上游变化待复核',requirement_needs_review:'需求待复核',scope_revision_changed:'使用位置已修订',placeholder_is_not_ready:'占位素材',missing_entity_reference:'素材未标明所需实体',missing_state_reference:'素材未覆盖所需状态',below_minimum_long_edge:'实际长边像素不足',native_4k_not_verified:'原生 4K 尚未核实',below_minimum_width:'实际宽度不足',below_minimum_height:'实际高度不足',below_minimum_sample_rate:'采样率不足',below_minimum_channels:'声道数不足',incompatible_media_or_usage:'媒体类型或用途不匹配'}[issue]||issue),card);if(row.pending_changes?.length){const changes=el('details');nodeText('summary',null,`待复核的准确版本 · ${row.pending_changes.length} 项`,changes);for(const change of row.pending_changes){const line=el('div');nodeText('p',null,productionName(change)+' · '+(change.target.object_id===row.requirement.object_id?'需求依据':'采用依据'),line);productionRefLink(line,{object_id:change.object_id,revision_id:change.used_revision},'当时采用的上游版本');productionRefLink(line,{object_id:change.object_id,revision_id:change.current_revision},'上游当前版本');productionButton(line,'记录变更处理',()=>showProductionChange(line,change));changes.append(line)}card.append(changes)}productionButton(card,row.adoption?'显式换版':'选择素材版本',()=>showProductionAdoption(card,row));section.append(card)}
-  const button=productionButton(section,'下载逐镜输入清单',async()=>{const value=await api('/api/production/package?scope='+encodeURIComponent(r.object_id));const a=el('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));a.download=r.object_id+'-manifest.json';a.click();URL.revokeObjectURL(a.href);toast('清单已下载；包含原件的目录包可由 production-package 命令导出')});button.disabled=!data.inputs_ready;root.append(section);
+async function renderProductionReadiness(root,r,options={}){
+  const readEpoch=productionReadEpoch;
+  const isCurrent=options.isCurrent||(()=>state.productionSelected?.id===r.id&&productionReadEpoch===readEpoch&&root.isConnected);
+  const data=await api('/api/production/readiness?scope='+encodeURIComponent(r.object_id));if(!isCurrent())return;
+  const section=el('section','production-readiness');section.setAttribute('aria-label','素材缺项检查');
+  if(options.title)nodeText('h3',null,options.title,section);
+  nodeText('h3',null,`必要输入：${data.required_count} 项，缺项或待复核 ${data.missing_count} 项`,section);
+  nodeText('p',null,data.inputs_ready?'技术输入齐备；作品是否接受单独记录。':'必要槽位尚未全部就绪。',section);
+  const actions=el('div','production-toolbar');section.append(actions);
+  if(options.close)productionButton(actions,'收起缺项检查',options.close);
+  const cards=el('div'),pagination=el('div','production-toolbar');section.append(pagination,cards);
+  const pageSize=20;let page=0;
+  const drawPage=()=>{
+    cards.replaceChildren();pagination.replaceChildren();
+    if(data.requirements.length>pageSize){
+      const previous=productionButton(pagination,'上一页',()=>{page--;drawPage()});previous.disabled=page===0;
+      nodeText('span','production-meta',`第 ${page*pageSize+1}–${Math.min((page+1)*pageSize,data.requirements.length)} 项 / 共 ${data.requirements.length} 项`,pagination);
+      const next=productionButton(pagination,'下一页',()=>{page++;drawPage()});next.disabled=(page+1)*pageSize>=data.requirements.length;
+    }
+  for(const row of data.requirements.slice(page*pageSize,(page+1)*pageSize)){const p=row.requirement.payload,card=el('div','production-need');nodeText('strong',null,p.title,card);nodeText('p',null,`${p.purpose} · ${productionLabels[p.usage]} · ${p.required?'必需':'可选'}`,card);if(row.adoption)productionRefLink(card,row.adoption.payload.asset,`已采用：${row.asset?.payload.title||'素材'} · 版本 ${row.asset?.version}`);for(const issue of row.issues)nodeText('span','production-pill production-issue',({missing_adoption:'尚未采用',upstream_needs_review:'上游变化待复核',requirement_needs_review:'需求待复核',scope_revision_changed:'使用位置已修订',placeholder_is_not_ready:'占位素材',missing_entity_reference:'素材未标明所需实体',missing_state_reference:'素材未覆盖所需状态',below_minimum_long_edge:'实际长边像素不足',native_4k_not_verified:'原生 4K 尚未核实',below_minimum_width:'实际宽度不足',below_minimum_height:'实际高度不足',below_minimum_sample_rate:'采样率不足',below_minimum_channels:'声道数不足',incompatible_media_or_usage:'媒体类型或用途不匹配'}[issue]||issue),card);if(row.pending_changes?.length){const changes=el('details');nodeText('summary',null,`待复核的准确版本 · ${row.pending_changes.length} 项`,changes);for(const change of row.pending_changes){const line=el('div');nodeText('p',null,productionName(change)+' · '+(change.target.object_id===row.requirement.object_id?'需求依据':'采用依据'),line);productionRefLink(line,{object_id:change.object_id,revision_id:change.used_revision},'当时采用的上游版本');productionRefLink(line,{object_id:change.object_id,revision_id:change.current_revision},'上游当前版本');productionButton(line,'记录变更处理',()=>showProductionChange(line,change));changes.append(line)}card.append(changes)}productionButton(card,row.adoption?'显式换版':'选择素材版本',()=>showProductionAdoption(card,row));cards.append(card)}
+  };
+  drawPage();
+  const label=r.kind==='SHOT_DESIGN'?'下载逐镜输入清单':r.kind==='EPISODE'?'下载本集输入清单':'下载本场输入清单';
+  const button=productionButton(actions,label,async()=>{const value=await api('/api/production/package?scope='+encodeURIComponent(r.object_id));const a=el('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(value,null,2)],{type:'application/json'}));a.download=r.object_id+'-manifest.json';a.click();URL.revokeObjectURL(a.href);toast('清单已下载；包含原件的目录包可由 production-package 命令导出')});button.disabled=!data.inputs_ready;
+  if(options.replace)root.replaceChildren();root.append(section);
 }
 function showProductionAdoption(parent,row){
   const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','采用素材版本');components.setAttribute('aria-label','采用文件组成');assets.append(new Option('选择一个实际素材',''));for(const r of state.productionRecords.filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type))assets.append(new Option(r.payload.title,r.object_id));let history=[];
