@@ -29,6 +29,16 @@ test('generation parameters retain server numeric spelling for exact comment off
  const record={payload:{blocks:[],generation:{parameters:{epsilon:1e-7,pitch:1}}},review_parameter_text:text};
  assert.equal(ctx.productionTextBlocks(record).find(b=>b.field==='generation.parameters').text,text);
 });
+test('switching one version back to current cannot accept another still historical section',()=>{
+ const {ctx,data}=setup();
+ const oldEntity={...entity,id:'person-old'},oldState={...form,id:'form-old'};
+ data.historicalTarget=null;
+ assert.equal(ctx.entityReviewHasHistoricalContent(data,oldEntity,form),true);
+ assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,oldState),true);
+ assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),false);
+ data.localVersions={recipe:{id:'old-recipe',current_revision:'new-recipe'}};
+ assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),true);
+});
 test('whole-entity content remains constant when selecting a different form or comment target',async()=>{
  const {ctx,data}=setup();await ctx.openEntityReview('person',{record:entity},0,null);
  assert.equal(ctx.state.productionChildDetail.record,form);
