@@ -13,6 +13,7 @@ function setup(read){
  const ctx={state:{workspace:'settings.workspace',productionRecords:records,comments:[]},URL,URLSearchParams,location:{href:'http://local/?workspace=settings.workspace'},document:{querySelectorAll:()=>[]},api:read||(async()=>data),isProduction:()=>true,renderComments:()=>{}};
  ctx.history={replaceState:(_s,_t,url)=>{ctx.location.href=String(url)}};
  vm.createContext(ctx);vm.runInContext(code,ctx);ctx.renderProductionReader=()=>{};ctx.paintProductionReview=()=>{};
+ for(const name of ['entityReviewStateMedia','entityReviewUnassignedMedia','entityReviewMediaCount'])ctx[name]=vm.runInContext(name,ctx);
  return {ctx,data};
 }
 test('whole-entity content remains constant when selecting a different form or comment target',async()=>{
@@ -62,4 +63,54 @@ test('locating a current opinion resets an earlier historical state context',asy
  assert.equal(ctx.state.productionChildDetail.record,old);assert.equal(data.historicalTarget,old);
  ctx.locateEntityReviewComment({id:'current-comment',target_revision_id:entity.id,anchor:{type:'global'}});
  assert.equal(ctx.state.productionChildDetail.record,form);assert.equal(data.historicalTarget,null);
+});
+test('state media excludes entity-only candidates, other states and other revisions',()=>{
+ const {ctx}=setup(),asset=row('image','ASSET',{title:'候选'});
+ const media=[{id:'unassigned',state:null,record:asset},{id:'base',state:ref(form),record:asset},{id:'later',state:ref(second),record:asset},{id:'old',state:{...ref(form),revision_id:'old'},record:asset},{id:'wrong-owner',state:{object_id:'other',revision_id:form.id},record:asset}];
+ assert.deepEqual(Array.from(ctx.entityReviewStateMedia({media},form),m=>m.id),['base']);
+ assert.deepEqual(Array.from(ctx.entityReviewStateMedia({media},second),m=>m.id),['later']);
+ assert.deepEqual(Array.from(ctx.entityReviewUnassignedMedia({media}),m=>m.id),['unassigned']);
+ assert.equal(ctx.entityReviewStateMedia({media},undefined).length,0);
+ // Historical comparisons use the same exact-state filter, without a fallback.
+ assert.deepEqual(Array.from(ctx.entityReviewStateMedia({media},{...form,id:'old'}),m=>m.id),['old']);
+});
+test('several materials can describe one state and reuse requires explicit coverage for each state',()=>{
+ const {ctx}=setup(),image=row('image','ASSET'),voice=row('voice','ASSET'),crop={x:.1,y:.1,width:.5,height:.5},range={start_seconds:1,end_seconds:3};
+ const media=[{id:'image',state:ref(form),record:image,role:'overall',crop},{id:'voice-base',state:ref(form),record:voice,role:'detail',range},{id:'voice-later',state:ref(second),record:voice,role:'detail',range}];
+ assert.equal(ctx.entityReviewMediaCount(ctx.entityReviewStateMedia({media},form)),2);
+ assert.equal(ctx.entityReviewMediaCount(ctx.entityReviewStateMedia({media},second)),1);
+ assert.equal(ctx.entityReviewStateMedia({media},form)[0].crop,crop);
+ assert.equal(ctx.entityReviewStateMedia({media},second)[0].range,range);
+});
+test('unassigned media comments open their separate area without changing the selected state',async()=>{
+ const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'待关联声音'}),item={id:'voice',state:null,record:asset,component_id:'original'};data.media=[item];
+ await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
+ ctx.selectEntityReviewState(second);ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'time',component_id:'original',start_seconds:1,end_seconds:2}});
+ assert.equal(data.unassignedOpen,true);assert.equal(ctx.state.productionChildDetail.record,second);
+ assert.equal(ctx.state.entityReviewUnassignedMedia,item.id);assert.equal(ctx.entityReviewStateMedia(data,second).length,0);
+ ctx.selectEntityReviewState(form);assert.equal(data.unassignedOpen,false);
+});
+test('mapped media comments select their state; historical unlinked media stays separate',async()=>{
+ const {ctx,data}=setup(),asset=row('image','ASSET',{title:'图像',components:[{id:'original',mime:'image/png'}]}),old={...asset,id:'old-image',current_revision:asset.id};
+ data.media=[{id:'image',state:ref(second),record:asset,component_id:'original'}];data.comment_records=[old];
+ await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
+ ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original'}});
+ assert.equal(ctx.state.productionChildDetail.record,second);assert.equal(ctx.state.entityReviewMedia,'image');assert.equal(data.unassignedOpen,false);
+ ctx.locateEntityReviewComment({id:'old',target_revision_id:old.id,anchor:{type:'visual',visual_id:'original'}});
+ assert.equal(data.historicalMedia.record,old);assert.equal(data.historicalMedia.state,null);assert.equal(data.historicalTarget,old);
+ assert.equal(ctx.entityReviewStateMedia(data,second)[0].record,asset);
+});
+test('a time opinion outside current coverage opens its original file separately',async()=>{
+ const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'声音',components:[{id:'original',mime:'audio/wav'}]});
+ data.media=[{id:'voice',state:ref(form),record:asset,component_id:'original',range:{start_seconds:3,end_seconds:5}}];
+ await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
+ ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'time',component_id:'original',start_seconds:1,end_seconds:2}});
+ assert.equal(data.historicalMedia.record,asset);assert.equal(data.unassignedOpen,false);
+});
+test('time comment location scopes a repeated component id to the exact asset revision',()=>{
+ const {ctx}=setup();ctx.state.entityReview={};let selector,component,focused=false;
+ const player={dataset:{},scrollIntoView:()=>{},focus:()=>{focused=true}};
+ ctx.CSS={escape:x=>x};ctx.$=()=>null;ctx.document.querySelector=value=>{selector=value;return value.startsWith('[data-comment-media]')?null:{querySelector:value=>{component=value;return player}}};
+ ctx.locateProductionComment({id:'c',target_revision_id:'voice-v2',anchor:{type:'time',component_id:'original',start_seconds:1.2}},true);
+ assert.equal(selector,'[data-review-revision="voice-v2"]');assert.equal(component,'[data-component-id="original"]');assert.equal(player.currentTime,1.2);assert.equal(focused,true);
 });

@@ -367,7 +367,18 @@ function showProductionCoverage(root,r){
     await api('/api/production/import',{method:'POST',body:JSON.stringify({format:'production-import-v1',records:[{object_id:r.object_id,kind:'ASSET',expected_version:r.version,payload:p}]})});await loadProductionWorkspace();await openProductionRecord(r.object_id);toast('新候选关联已保存，尚未自动采用');
   });productionButton(box,'取消',()=>box.remove());root.prepend(box);
 }
-function locateProductionComment(comment,local=false){if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;if(select&&component&&select.value!==component){select.value=component;select.onchange()}if(a.type==='time'){const media=document.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;media.scrollIntoView({block:'center'});media.focus()}}else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?document.querySelector(`[data-visual-id="${CSS.escape(a.visual_id)}"]`):$('#production-reader');target?.scrollIntoView({block:'center'})}paintProductionReview();renderComments()}
+function locateProductionComment(comment,local=false){
+  if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
+  if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
+  state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
+  if(select&&component&&select.value!==component){select.value=component;select.onchange()}
+  // Component ids can repeat across state references and unassigned candidates.
+  // Locate the exact asset revision before looking up its image or player.
+  const exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,mediaRoot=typeof isEntityReview==='function'&&isEntityReview()?(document.querySelector('[data-comment-media]'+exact)||document.querySelector(exact)):$('#production-reader');
+  if(a.type==='time'){const media=mediaRoot?.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;media.scrollIntoView({block:'center'});media.focus()}}
+  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?mediaRoot?.querySelector(`[data-visual-id="${CSS.escape(a.visual_id)}"]`):mediaRoot||$('#production-reader');target?.scrollIntoView({block:'center'})}
+  paintProductionReview();renderComments();
+}
 function showProductionEditor(){
   const r=state.productionSelected,p=structuredClone(r.payload),root=$('#production-reader');if(r.id!==r.current_revision)throw Error('历史修订不可改写，请先选择当前版本');
   const form=el('form','production-editor');nodeText('h3',null,'保存为新修订',form);const controls=[];
