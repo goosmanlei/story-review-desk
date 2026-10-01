@@ -3,6 +3,7 @@
 @media(max-width:750px){.production-board{grid-template-columns:1fr}.production-index{position:static;max-height:220px}.production-fields{grid-template-columns:1fr;gap:4px}.production-fields dd{margin-bottom:12px}.production-compare{grid-template-columns:1fr}.production-reader{padding:14px}}
 
 .production-filters{padding:18px 20px;border:1px solid #d4d9ce;border-radius:10px;background:#f5f5ef}
+.production-basis{margin:-8px 0 20px;padding:10px 14px;border-left:3px solid #879b83;background:#f3f6ef;color:#4a604c;font-size:14px;line-height:1.6}.production-basis p{margin:0}.production-scope-review:not([hidden]){margin:18px 0;padding:18px;border:1px solid #dce4d8;border-radius:8px;background:#f8faf6}.production-scope-review .production-toolbar button,.production-scope-review .production-need button{border:1px solid #ccd7ca;background:#f5f8f3;border-radius:6px;padding:7px 11px;cursor:pointer}.production-scope-review button:disabled{opacity:.5;cursor:default}
 .production-filters .production-toolbar{justify-content:space-between;gap:12px}
 .production-filter-search{display:flex;align-items:center;gap:16px;flex:1;max-width:620px;font-size:13px;font-weight:600}
 .production-filter-search input[type=search]{flex:1;min-width:0;width:100%;font-weight:400}
