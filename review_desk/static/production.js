@@ -55,7 +55,7 @@ function renderProductionEntityNavigation(root,r){
   nodeText('h3','production-entity-title','选择状态',section);
   const children=productionEntityChildren(entity.object_id);
   // A historical link can refer to an earlier parent; do not lose the selected revision.
-  if(r&&r.kind!=='ENTITY'&&!children.some(row=>row.object_id===r.object_id))children.push(r);
+  if(r&&r.kind!=='ENTITY'&&!r.payload.review_model&&!children.some(row=>row.object_id===r.object_id))children.push(r);
   for(const [kind,label] of [['STATE','完整状态'],['REPRESENTATION','制作设定']]){
     const rows=children.filter(row=>row.kind===kind&&(kind!=='STATE'||productionCompleteState(row))).sort(productionStateOrder);
     if(!rows.length)continue;
@@ -84,7 +84,7 @@ async function loadProductionWorkspace(){
   }
   const host=$('#production-view');host.replaceChildren();
   const heading=el('header','production-heading'),title=el('div');nodeText('small',null,'剧本依据 → 制作设定 → 实际素材 → 镜头输入',title);nodeText('h1',null,{'settings.workspace':'制作设定','materials.workspace':'素材管理','production.workspace':'全剧制作'}[workspace],title);
-  nodeText('p',null,{'settings.workspace':'核对实体身份、完整状态和送审素材，留下意见并认可整个实体。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场组织镜头和输入槽位，检查缺项并登记动态分镜组合与交付。'}[workspace],title);heading.append(title);const actions=el('div','production-toolbar');if(workspace!=='settings.workspace')productionButton(actions,'批量导入',showProductionImport);if(workspace==='materials.workspace')productionButton(actions,'登记实际原件',showProductionUpload);heading.append(actions);host.append(heading);
+  nodeText('p',null,{'settings.workspace':'直接审阅实体、完整状态和关联素材，通过评论提出意见，也可采纳当前版本。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场组织镜头和输入槽位，检查缺项并登记动态分镜组合与交付。'}[workspace],title);heading.append(title);const actions=el('div','production-toolbar');if(workspace!=='settings.workspace')productionButton(actions,'批量导入',showProductionImport);if(workspace==='materials.workspace')productionButton(actions,'登记实际原件',showProductionUpload);heading.append(actions);host.append(heading);
   const inputLocks=result.records.filter(r=>r.kind==='INPUT_LOCK');
   if(workspace==='production.workspace'){
     const basis=el('div','production-basis');basis.setAttribute('aria-label','剧本依据');
@@ -135,7 +135,7 @@ async function loadProductionWorkspace(){
   const childrenByEntity=new Map(workspaceRows.map(r=>[r.object_id,[]]));
   if(flatFilters)for(const r of result.records.filter(r=>productionCompleteState(r)||r.kind==='REPRESENTATION'&&!r.payload.review_model))for(const id of productionEntityIds(r,byId))childrenByEntity.get(id)?.push(r);
   const searchTexts=new Map(workspaceRows.map(r=>[r.object_id,JSON.stringify([r.payload,...(childrenByEntity.get(r.object_id)||[]).map(child=>child.payload)]).toLowerCase()]));
-  const commonSettings=flatFilters?result.records.filter(r=>r.kind==='REPRESENTATION'&&!productionEntityIds(r,byId).length):[];
+  const commonSettings=flatFilters?result.records.filter(r=>r.kind==='REPRESENTATION'&&!r.payload.review_model&&!productionEntityIds(r,byId).length):[];
   if(commonSettings.length){
     const common=el('section','production-common-settings');common.setAttribute('aria-label','项目共用设定');
     nodeText('h3',null,'项目共用设定',common);
@@ -252,6 +252,7 @@ function focusProductionReview(detail,paint=true){
   if(state.productionSelected?.id!==r.id){state.anchor=null;state.editing=null;state.selected=null;state.drawMode=null}
   state.productionSelected=r;state.productionDetail=detail;
   const url=new URL(location.href);url.searchParams.set('production_object',r.object_id);url.searchParams.set('production_revision',r.id);
+  if(typeof isEntityReview==='function'&&isEntityReview()&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
   if(state.workspace==='settings.workspace'&&state.productionEntityId)url.searchParams.set('production_entity',state.productionEntityId);else url.searchParams.delete('production_entity');
   history.replaceState(null,'',url);
   for(const blocks of document.querySelectorAll('[data-production-blocks]')){if(blocks.dataset.productionBlocks===r.id)blocks.id='production-blocks';else{blocks.removeAttribute('id');for(const para of blocks.querySelectorAll('.comment-flash'))para.classList.remove('comment-flash')}}
