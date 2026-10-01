@@ -231,6 +231,53 @@ class ProductionTest(unittest.TestCase):
         wrong={**self.source,'block_ids':['missing']}
         with self.assertRaises(ValueError):p.source_excerpt(self.store,wrong)
 
+    def test_reviewed_state_rename_keeps_exact_inputs_and_expires_on_later_change(self):
+        self.put(self.entity(), self.entity('other'))
+        self.put(self.spec('wet', 'STATE', entity=self.ref('songbook'), dimensions={'condition':'wet'},
+                           sources=[self.source], facts=['浸湿'], choices=[], unknowns=[]))
+        old = self.ref('wet')
+        for oid, scope in [('first', 'songbook'), ('second', 'other')]:
+            need = self.requirement(oid, scope)
+            need['payload']['states'] = [old]
+            self.put(need)
+        inputs = {oid:p.record(self.store, oid) for oid in ('first', 'second')}
+        payload = copy.deepcopy(p.record(self.store, 'wet')['payload'])
+        payload['title'] = '歌本·浸湿'
+        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':1, 'payload':payload})
+        for rec in inputs.values():
+            self.assertEqual(len(p.stale_inputs(self.store, rec['id'])), 1)
+        self.put(self.spec('naming-review', 'JUDGMENT', target=self.ref('wet'), verdict='impact_resolved',
+                           actor='命名复核者', reason='核对正文、维度和全部引用，仅标题改名',
+                           change={'old':old, 'new':self.ref('wet'), 'action':'keep', 'scope':'state_title_only'}))
+        for oid, rec in inputs.items():
+            self.assertEqual(p.record(self.store, oid), rec)
+            self.assertEqual(p.stale_inputs(self.store, rec['id']), [])
+        self.assertEqual(p.record(self.store, revision_id=old['revision_id'])['payload']['title'], 'wet')
+        self.assertTrue(p.impact(self.store, old['revision_id'])['affected'])
+        payload['facts'].append('书页撕裂')
+        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':2, 'payload':payload})
+        for rec in inputs.values():
+            self.assertEqual(len(p.stale_inputs(self.store, rec['id'])), 1)
+
+    def test_state_rename_review_cannot_exempt_content_changes_or_wrong_target(self):
+        self.put(self.entity())
+        self.put(self.spec('wet', 'STATE', entity=self.ref('songbook'), dimensions={'condition':'wet'},
+                           sources=[self.source], facts=[], choices=[], unknowns=[]))
+        old = self.ref('wet')
+        payload = copy.deepcopy(p.record(self.store, 'wet')['payload'])
+        payload.update(title='歌本·浸湿', facts=['正文发生修改'])
+        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':1, 'payload':payload})
+        review = self.spec('naming-review', 'JUDGMENT', target=self.ref('wet'), verdict='impact_resolved',
+                           actor='复核者', reason='尝试命名复核',
+                           change={'old':old, 'new':self.ref('wet'), 'action':'keep', 'scope':'state_title_only'})
+        with self.assertRaisesRegex(ValueError, 'only a title change'):
+            self.put(review)
+        prior = self.ref('wet'); payload['title'] = '歌本·湿润'
+        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':2, 'payload':payload})
+        review['payload']['change'].update(old=prior, new=self.ref('wet'))
+        with self.assertRaisesRegex(ValueError, 'exact new state target'):
+            self.put(review)
+
     def test_selected_asset_must_cover_required_identity_and_state(self):
         self.put(self.entity()); self.image()
         self.put(self.spec('wet','STATE',entity=self.ref('songbook'),dimensions={'condition':'wet'},sources=[self.source],facts=[],choices=[],unknowns=[]))
