@@ -80,19 +80,25 @@ function reviewNotes(parent,row){
     for(const block of values){const para=nodeText('p',null,block.text,section);para.dataset.blockId=block.id}parent.append(section);
   }
 }
+function entityReviewHasHistoricalContent(data,entity,form){
+  return !!data.historicalTarget||!!data.historical||entity.id!==data.entity.id||
+    !!form&&!data.states.some(row=>row.object_id===form.object_id&&row.id===form.id)||
+    Object.values(data.localVersions||{}).some(row=>row.id!==row.current_revision);
+}
 function renderEntityReview(root){
   const data=state.entityReview,entity=state.productionEntityDetail.record,form=state.productionChildDetail?.record;
+  const viewingHistory=entityReviewHasHistoricalContent(data,entity,form);
   const header=el('header','entity-review-header'),identity=el('div'),badge=el('small','production-pill production-entity-badge');badge.dataset.entityType=entity.payload.entity_type;badge.append(productionEntityIcon(entity.payload.entity_type));nodeText('span',null,productionLabels[entity.payload.entity_type],badge);identity.append(badge);nodeText('h2',null,entity.payload.title,identity);header.append(identity);
   const actions=el('div','production-toolbar');
   const accept=productionButton(actions,data.accepted?'取消采纳':'采纳',async()=>{
     accept.disabled=true;const action=data.accepted?'revoke':'accept',reason=action==='accept'?'采纳此实体的基础信息、全部完整状态和素材生成方案，允许推进素材生成。':'取消当前采纳，保留历史制作与意见。';
     try{await api('/api/production/entity-decision',{method:'POST',body:JSON.stringify({entity_id:data.entity.object_id,action,expected_version:data.decision_version,scope:data.scope,actor:'用户',reason})});if(state.entityReview===data){await reloadEntityReview();toast(action==='accept'?'已采纳，可推进素材生成':'已取消采纳')}}
     catch(error){if(state.entityReview===data)await reloadEntityReview();throw error}
-  });accept.classList.add('entity-review-accept');accept.title='采纳基础信息、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=(!data.can_accept&&!data.can_revoke)||!!data.historicalTarget||!!data.localVersions&&Object.values(data.localVersions).some(r=>r.id!==r.current_revision);
+  });accept.classList.add('entity-review-accept');accept.title='采纳基础信息、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=(!data.can_accept&&!data.can_revoke)||viewingHistory;
   if(data.accepted)nodeText('span','production-pill','已采纳',actions);
   if(data.history.length){const more=el('details','entity-review-more');nodeText('summary',null,'更多',more);for(const item of data.history)productionButton(more,`${item.verdict==='revoked'?'取消采纳':'采纳'} · ${new Date(item.created_at).toLocaleString('zh-CN')}`,()=>reloadEntityReview(item.revision_id));actions.append(more)}
   header.append(actions);root.append(header);
-  if(data.historicalTarget||data.historical){const warning=el('div','entity-review-notice');nodeText('span',null,data.historical?'历史采纳范围':'历史内容',warning);productionButton(warning,'返回当前版本',()=>reloadEntityReview());root.append(warning)}
+  if(viewingHistory){const warning=el('div','entity-review-notice');nodeText('span',null,data.historical?'历史采纳范围':'历史内容',warning);productionButton(warning,'返回当前版本',()=>reloadEntityReview());root.append(warning)}
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);entityVersionControl(basicHeading,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});basics.append(basicHeading);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
