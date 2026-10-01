@@ -5,6 +5,9 @@ shared text anchor address a field item without migrating existing revisions.
 Keep this projection in sync with productionTextBlocks in production.js.
 """
 
+import json
+
+
 NOTE_FIELDS = ('facts', 'choices', 'unknowns')
 
 
@@ -22,4 +25,17 @@ def production_text_blocks(payload):
             seen.add(text)
             blocks.append({'id': f'{prefix}{field}/{index}', 'text': text,
                            'field': field, 'index': index})
+    extra = [('production_description', payload.get('production_description'))]
+    plan = payload.get('generation') or {}
+    if plan:
+        extra += [('generation.tool', plan.get('tool')), ('generation.model', plan.get('model')),
+                  ('generation.parameters', json.dumps(plan.get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)),
+                  ('generation.prompt', plan.get('prompt')),
+                  ('generation.output.description', plan.get('output', {}).get('description')),
+                  ('generation.output.review_criteria', '\n'.join(plan.get('output', {}).get('review_criteria', [])))]
+        extra += [(f'generation.inputs.{i}.use', value.get('use')) for i,value in enumerate(plan.get('inputs', []))]
+    for field,text in extra:
+        if isinstance(text,str) and text.strip() and text not in body and text not in seen:
+            seen.add(text)
+            blocks.append({'id':prefix+field.replace('.', '/'), 'text':text, 'field':field})
     return blocks

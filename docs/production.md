@@ -63,52 +63,17 @@ flowchart LR
 
 ## 实体卡审阅与版本采纳
 
-基本工作方式是 AI 生成或修订内容，用户直接阅读并评论，AI 依据准确版本的意见继续修改。不存在提交、送审或重新送审步骤；新内容保存后即可在页面查看。采纳是可选的版本认可，不是开始评论、继续修改或推进创作的门槛。
+工作方式是 AI 生成或修订，用户直接阅读并评论，AI 按准确版本的意见推进；没有送审步骤，也不在阅读页提供内容编辑入口。采纳定义为认可当前实体基础信息、全部完整状态和逐素材生成方案，允许准备素材生成。按钮在采纳后变为“取消采纳”，新评论和新候选不撤销方案认可；内容或方案修订后需重新认可。
 
-实体卡顶部显示类型、名称、基础信息版本和采纳状态；基础说明、别名与稳定特征常驻。下面平铺全部完整状态，默认选中按剧情来源排序的首个，标为“基础状态”，并显示实际关联的集场。状态详情按左侧参考素材、右侧完整描述排列，窄屏上下展示。变化维度先概括，具体描述完整保留。待确认信息直接展开，用户可圈选原文，通过评论补充信息；不能将未知写成确定事实。
+基础信息常驻，状态平铺且默认基础状态。完整状态描述之后按图像、声音和视频分区，列出具体素材名称、用途、模型、参数、提示词、参考及检查要点。各区域只在有历史修订时显示版本选择；历史采纳从“更多”查看，无记录不占位。剧情依据与镜头链接靠近相关内容。
 
-角色、场景、道具、歌曲分别使用人物、风景、方盒和音符图标，在筛选项、实体列表及卡片标题保持一致。当前状态没有素材时，参考区显示所属实体类型的占位图、实体名和缺失说明，保持媒体与描述的位置稳定。仅有音频时显示同类封面及实际播放器。占位图只是界面元素，不登记为素材，不计入素材数量、采纳范围或就绪条件。
+文字、图像及时间段的可评论区域采用统一边线和评论图标；事实、制作选择、待确认、完整描述和方案文字均可圈选。评论区是全局功能，意见绑定实际阅读的对象修订；旧意见加载原文字／原文件，用户草稿继续按版本和锚点隔离。
 
-状态下的素材只读取明确覆盖该状态准确修订的当前候选，按整体或补充参考展示；每个状态选项显示其素材份数。一个状态允许多份素材，同一素材服务多个状态必须逐项明确关联，不能从实体归属推断。状态换版后，旧覆盖不自动沿用；此前采纳的内容仍按原状态修订展示。
+状态素材必须明确关联到该状态准确修订与文件组成，不能从实体身份推断。图片只在明确缺失的图像需求处占位；缺音频使用紧凑提示条，真实音频直接使用波形播放器，不放人物封面。未匹配当前状态的候选单独保留；旧素材评论独立打开原版本，不混入当前状态。
 
-仅关联实体、旧局部状态或旧状态版本的候选，不出现在当前状态的参考区。未匹配当前完整状态的文件组成集中在“待关联状态的素材”折叠区，仍可预览和评论，由 Codex 核对后新增准确关联；不自动配给基础状态，也不计入各状态的素材数量或就绪条件。旧素材评论单独打开原文件，不把历史文件放到当前状态下面。项目级素材不强制挂到人物。素材版本变化立即可见，既有镜头采用保持原引用。
+`GET /api/production/entity-review?entity_id=ID` 与 CLI `production-entity-review ID` 返回同一 `entity-workspace-v2` 聚合，包含实体、完整状态、素材、生成需求、精确评论目标、版本及来源。`scope` 锁定 `{entity,states,requirements,dependencies}`；新增候选不进入生成方案的采纳范围。`POST /api/production/entity-decision`／`production-entity-decide FILE` 原子检查范围及乐观版本，记录采纳或取消。执行另检查必要原件的明确采用及准确范围。
 
-页面提供“评论整个实体”“评论此状态”、文字圈选及图像区域、音视频时间段评论，不提供内容编辑入口。基础信息直接圈选评论，不另设按钮；已有评论使用全局浮动入口查看，实体卡不重复提供“查看评论”。评论始终绑定准确对象修订，Codex 通过共用 HTTP／CLI 修订内容。评论面板汇总该实体及其状态、关联素材的当前和历史意见；历史意见有明确标识，定位时读取原文字／原文件及原锚点。草稿按版本和锚点独立保留。
-
-“采纳当前版本”覆盖页面列明的基础信息、全部完整状态及关联素材版本，切换选中状态不会改变范围。采纳后仍可添加、编辑和处理意见；新意见不撤销已有采纳。实体、状态集合或关联素材变化后，当前版本显示未采纳，旧采纳保留可查。采纳不是镜头素材采用、媒体齐备、首轮基准全部接受或任务完成。
-
-```mermaid
-flowchart LR
-  E[当前 ENTITY 基础信息] --> P[实体页面 直接阅读]
-  S[当前完整 STATE] --> P
-  A[当前关联 ASSET 素材] --> P
-  P --> C[精确修订上的评论]
-  C --> AI[AI 修订内容]
-  AI --> P
-  P --> J[可选 JUDGMENT 采纳当时版本]
-```
-
-读取契约为 `GET /api/production/entity-review?entity_id=ID`，CLI 为 `production-entity-review ID`。两者返回相同的 `entity-workspace-v1` 聚合：
-
-- `entity,states,media`：当前基础信息、完整状态及关联素材记录，媒体包含确切文件组成。`media` 每项含 `id,label,asset,component_id,state,role,crop?,range?`；状态覆盖取自素材的 `state_coverage`，待关联项使用 `state:null,role:related`。状态区必须同时匹配 `state.object_id` 与 `state.revision_id`，`state:null` 不表示通用状态。份数按准确素材修订去重，多个文件组成仍属于同一份素材。
-- `scope:{entity,states,media}`：上述内容的精确引用，状态按对象 ID 排序、媒体按项 ID 排序；`content_key` 是该范围规范 JSON 的 SHA-256，用于识别同一份内容，不新建中间对象。
-- `comment_targets,comment_records`：当前及历史意见的准确目标和原记录；`usages` 是各状态实际的场次／镜头引用。
-- `status:accepted|unaccepted,accepted,can_accept,historical`：当前认可及可操作状态；`history,previous_accepted` 提供以前采纳的确切内容。
-
-读取操作完全只读，不需要初始化。普通页面地址跟随当前修订；准确历史评论地址仍固定其原修订。读取过去采纳时，HTTP 追加 `revision_id=采纳判断的修订`，CLI 追加 `--revision SHA`，页面使用 `entity_acceptance` 参数。历史范围不会混入新素材或新状态。
-
-采纳复用 `POST /api/production/judgment`／`production-judge`，载荷仍含 `format,title,blocks,target,verdict,actor,reason`，其中 `target` 为当前 ENTITY 的准确引用、`verdict:accepted`，另外增加：
-
-```json
-{
-  "acceptance_model": "entity-current-v1",
-  "acceptance_scope": {"entity": {"object_id":"ENTITY_ID","revision_id":"SHA"}, "states": [], "media": []}
-}
-```
-
-`acceptance_scope` 必须原样来自本次阅读结果；数组为空仅适用于实际没有对应内容的实体。采纳与批量导入使用同一 `BEGIN IMMEDIATE` 事务，核对基础信息、全部完整状态及关联素材集合仍与阅读结果完全相同。新状态、新素材、版本变化或关联变化使请求返回 409 并整批回滚；伪造归属、文件组成或覆盖范围被拒绝。系统不会自动生成素材采用关系。
-
-迁移无需新表或业务写入。已有 `review_model:entity-review-v1` 的旧 REPRESENTATION 只留作历史引用和恢复，隐藏于正常列表、状态选项和数量；旧页面地址回到对应实体，旧意见仍可定位。新工作不再创建这种记录。Schema 3 完整导出恢复保留评论、采纳和精确依赖；历史校验不以后来版本反向否定旧采纳。生产重放使用 `production.restore_records`，仅允许空的生产对象集合，校验历史载荷和准确引用；普通 HTTP／CLI 导入始终执行当前范围校验，不提供跳过开关。
+完整字段、关系图、采纳／取消并发、生成前检查、输入包和迁移说明见 [实体生成准备契约](generation-preparation.md)。旧 `entity-current-v1` 仅保留为历史认可，不作为生成许可；旧送审 REPRESENTATION 也仅供历史引用和恢复。生产历史重放仅允许空的生产对象集合；普通导入不开放跳过当前校验的开关。
 
 ## 数据契约
 
@@ -122,8 +87,8 @@ flowchart LR
 | representation | `entities`、`states`、`sources`、`choices`、`unknowns`。选择的基准通过 adoption 关系查询，不把候选混入设定事实。 |
 | preparation | `source` 精确分集／场／全场正文引用、`occurrences:[{entity,states,mode,evidence}]`、`checked:true`、`notes`；mode 为 visual、voice、visual_voice、mention。 |
 | shot-design | `episode`、`scene_id`、`source`、`number`、`purpose`、`framing`、`spatial`、`action_start`、`action_end`、`duration_frames`、`fps`、`sound`、`entities`、`states`、`continuity`。预计帧数不冒充实测。 |
-| requirement | `scope`、`slot`、`required`、`purpose`、`media_type`、`usage:generation_input/post_audio/editorial`、`entities`、`states`、`specification`。缺项以槽位为单位显示。 |
-| asset | `media_type`、`subjects`（可空，支持项目级声音）、`states`、`components`、`production` 实际制作引用、`lineage`。组件包含 `id,role,file,sha256,bytes,mime` 和实际宽高／时长等。必须有原件；工程素材可登记工程文件为原件。 |
+| requirement | `scope`、`slot`、`required`、`purpose`、`media_type`、`usage:generation_input/post_audio/editorial`、`entities`、`states`、`specification`，可选 `generation` 逐素材生成方案。缺项以槽位为单位显示。 |
+| asset | `media_type`、`subjects`（可空，支持项目级声音）、`states`、`components`、`production` 实际制作引用、`lineage`。组件包含 `id,role,file,sha256,bytes,mime` 和实际宽高／时长等。必须有原件；工程素材可登记工程文件为原件。可选 `candidate_requirements` 绑定准确需求，但不表示已按该方案执行或采用。 |
 | call | `method`、`status:planned/submitted/completed/failed/unknown`、`tool`、`model`、`prompt`、`parameters`、`inputs`、`outputs`、`receipt`、`usage`、`lineage`。completed 必须有实际结果；网络结果不明保留 unknown，不自动重复扣费。 |
 | judgment | `target`、`verdict`、`actor`、`reason`、可选 `change:{old,new,action}`；action 为 needs_review、keep、rework、replace。用户接受必须有真实确认依据，不由自检生成。 |
 | relation | `relation_type:adoption`、`scope`、`slot`、`asset`、`component_id`、`usage`、`crop` 或 `range`、`reason`。一个 scope＋slot 对应一个稳定采用对象，更新必须带 expected_version。 |

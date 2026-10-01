@@ -7,7 +7,7 @@ from .screenplay import import_screenplay, snapshot as screenplay_snapshot, revi
 from .server import ReviewServer
 from .store import Store
 from .structure import import_structure, snapshot, review_context, script_input
-from . import production, entity_review
+from . import production, entity_review, generation
 from .production_media import ingest
 
 
@@ -56,17 +56,17 @@ def main():
     production_source.add_argument('revision_id')
     production_source.add_argument('--scene')
     production_source.add_argument('--block', action='append')
-    for command in ("production-import", "production-adopt", "production-judge", "production-file"):
+    for command in ("production-import", "production-adopt", "production-judge", "production-file", "production-entity-decide"):
         sub = subs.add_parser(command)
         sub.add_argument("file", type=Path)
         if command == "production-import":
             sub.add_argument("--validate-only", action="store_true")
     impact = subs.add_parser("production-impact")
     impact.add_argument("revision_id")
-    for command in ("production-ready", "production-package"):
+    for command in ("production-ready", "production-package", "production-generation-ready", "production-generation-package"):
         sub = subs.add_parser(command)
         sub.add_argument("scope")
-        if command == "production-package":
+        if command in ("production-package", "production-generation-package"):
             sub.add_argument("--output", required=True, type=Path)
     subs.add_parser("check")
     args = parser.parse_args()
@@ -136,6 +136,12 @@ def main():
             result = production.adopt(store, json.loads(args.file.read_text()))
         elif args.command == "production-judge":
             result = production.judge(store, json.loads(args.file.read_text()))
+        elif args.command == "production-entity-decide":
+            result = generation.decide(store, json.loads(args.file.read_text()))
+        elif args.command == "production-generation-ready":
+            result = generation.readiness(store, args.scope)
+        elif args.command == "production-generation-package":
+            result = generation.write_package(store, args.scope, args.output)
         elif args.command == "production-file":
             with args.file.open("rb") as stream:
                 result = ingest(root, stream, args.file.name)

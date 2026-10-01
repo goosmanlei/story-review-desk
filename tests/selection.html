@@ -72,10 +72,10 @@ async function main(){
     assert(!button().hidden,'反向选区无按钮');assert(quote()===a.textContent.slice(1)+'\n第二段','跨段引用不符');
   });
   await test('选区端点落在正文容器边界',async()=>{
-    const host=d.querySelector('#source-text'),p=host.children[1],r=d.createRange();
+    const host=d.querySelector('#source-text'),[first,p]=host.querySelectorAll('[data-block-id]'),r=d.createRange();
     r.setStart(host,0);r.setEnd(...point(p,3));w.getSelection().removeAllRanges();w.getSelection().addRange(r);
     host.dispatchEvent(new w.MouseEvent('mouseup',{bubbles:true}));await pause(30);await settle();
-    assert(!button().hidden,'容器端点被拒绝');assert(quote()===host.children[0].textContent+'\n第二段','边界引用错误');
+    assert(!button().hidden,'容器端点被拒绝');assert(quote()===first.textContent+'\n第二段','边界引用错误');
   });
   await test('拖选中不出现遮挡鼠标的按钮',async()=>{
     const p=d.querySelector('#source-text p');p.dispatchEvent(new w.PointerEvent('pointerdown',{bubbles:true,pointerId:1,button:0}));

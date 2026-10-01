@@ -91,7 +91,7 @@ function openStructureImage(visual,trigger){
   document.body.append(dialog);document.body.classList.add('structure-image-open');dialog.showModal();
 }
 function renderStructureVisual(visual,preview=false){
-  const figure=el('figure','structure-figure'),head=el('div','structure-figure-head');
+  const figure=reviewSurface(el('figure','structure-figure'),'image'),head=el('div','structure-figure-head');
   nodeText('strong',null,visual.title,head);nodeText('span',null,visual.kind==='diagram'?'结构图':'图片',head);figure.append(head);
   const viewport=el('div','structure-visual-viewport'),stage=el('div','structure-visual-stage');stage.dataset.visualId=visual.id;
   const img=el('img');img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
@@ -142,7 +142,7 @@ function renderStructureReader(){
     const nav=nodeText('button',null,STRUCTURE_SECTIONS[section.id],index);nav.type='button';nav.setAttribute('aria-controls',`structure-section-${section.id}`);nav.onclick=()=>document.getElementById(nav.getAttribute('aria-controls'))?.scrollIntoView({behavior:'smooth',block:'start'});
     const area=el('section','structure-section');area.id=`structure-section-${section.id}`;nodeText('small',null,STRUCTURE_SECTIONS[section.id].toUpperCase(),area);
     area.append(structureBlockElement('h2',{id:`heading-${section.id}`,text:section.title},active));
-    for(const block of section.blocks)area.append(structureBlockElement('p',block,active));
+    const content=reviewSurface(el('div','structure-review-text'));for(const block of section.blocks)content.append(structureBlockElement('p',block,active));area.append(content);
     for(const visual of section.visuals||[])area.append(renderStructureVisual(visual,true));reader.append(area);
   }
   const tail=el('section','structure-review-tail');nodeText('h2',null,'意见处理与版本记录',tail);

@@ -142,7 +142,7 @@ function renderScriptReader(){
   $('#screenplay-head').textContent=scene?scene.heading:'选择左侧场次阅读正文';
   $('#screenplay-detail').textContent=scene?scene.location+' · '+scene.time+' · 预计 '+durationLabel(scene.estimated_seconds):'本集场次按原剧本顺序排列';
   if(scene){
-    const text=el('section','source-text');text.id='screenplay-text';text.setAttribute('aria-label',scene.heading+'完整正文');
+    const text=el('section','source-text');text.id='screenplay-text';reviewSurface(text);text.setAttribute('aria-label',scene.heading+'完整正文');
     const source={id:episode.object_id,target_revision_id:episode.id,blocks:data.blocks};
     const indexes=new Map(data.blocks.map((block,index)=>[block.id,index]));
     for(const id of scene.block_ids){const index=indexes.get(id);if(index!==undefined)text.append(renderBlock(source,data.blocks[index],index))}
