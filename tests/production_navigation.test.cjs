@@ -75,3 +75,57 @@ test('legacy fragments do not count as current complete forms but keep their own
   assert.deepEqual(plain(ctx.productionEntityChildren('person').map(r=>r.object_id)),['full']);
   assert.deepEqual(plain(ctx.productionEntityIds(legacy)),['person']);
 });
+
+function recordApi(records){return async url=>{const params=new URL(url,'http://localhost').searchParams;const record=records.find(r=>r.object_id===params.get('object_id')&&(!params.get('revision_id')||r.id===params.get('revision_id')));assert.ok(record,url);return {record,history:records.filter(r=>r.object_id===record.object_id),uses:[]}}}
+const complete=(id,entity,scene)=>row(id,'STATE',{state_model:'complete-v1',entity:{object_id:entity},sources:[{scene_id:scene,block_ids:[scene+'-b001']}]});
+
+test('opening an entity shows its basic information and defaults to the earliest complete state',async()=>{
+  const entity=row('bag','ENTITY'),late=complete('a-filled','bag','s002'),base=complete('z-empty','bag','s001');
+  const ctx=setup([entity,late,base],recordApi([entity,late,base]));
+  await ctx.openProductionRecord('bag');
+  assert.equal(ctx.state.productionEntityDetail.record,entity);
+  assert.equal(ctx.state.productionChildDetail.record,base);
+  assert.equal(ctx.state.productionSelected,base);
+  await ctx.openProductionRecord(late.object_id,late.id);
+  assert.equal(ctx.state.productionEntityDetail.record,entity);
+  assert.equal(ctx.state.productionChildDetail.record,late);
+  await ctx.openProductionRecord('bag');
+  assert.equal(ctx.state.productionChildDetail.record,base);
+});
+
+test('entity history and review focus keep the selected state and separate exact comment targets',async()=>{
+  const entity=row('person','ENTITY'),old={...entity,id:'person-old'},form=complete('form','person','s001');
+  const ctx=setup([entity,form],recordApi([entity,old,form]));
+  await ctx.openProductionRecord('form');
+  const child=ctx.state.productionChildDetail;
+  await ctx.openProductionRecord('person','person-old');
+  assert.equal(ctx.state.productionSelected,old);
+  assert.equal(ctx.state.productionEntityDetail.record,old);
+  assert.equal(ctx.state.productionChildDetail,child);
+  ctx.focusProductionReview(child,false);
+  assert.equal(ctx.state.productionSelected,form);
+  assert.equal(ctx.state.productionEntityDetail.record,old);
+  assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),form.id);
+});
+
+test('a slow entity overview lookup cannot overwrite a newer entity and its default state',async()=>{
+  const a=row('a','ENTITY'),b=row('b','ENTITY'),form=complete('a-form','a','s001'),bForm=complete('b-form','b','s001');
+  let release,started;const pending=new Promise(resolve=>{started=resolve});
+  const read=recordApi([a,b,form,bForm]);
+  const ctx=setup([a,b,form,bForm],async url=>{if(new URL(url,'http://localhost').searchParams.get('object_id')==='a'){started();return new Promise(resolve=>{release=()=>resolve({record:a,history:[a]})})}return read(url)});
+  const first=ctx.openProductionRecord('a-form');await pending;
+  await ctx.openProductionRecord('b');release();await first;
+  assert.equal(ctx.state.productionEntityId,'b');
+  assert.equal(ctx.state.productionEntityDetail.record,b);
+  assert.equal(ctx.state.productionChildDetail.record,bForm);
+  assert.equal(ctx.state.productionSelected,bForm);
+});
+
+test('an entity with only historical partial states stays readable without inventing a default form',async()=>{
+  const entity=row('person','ENTITY'),legacy=row('hand','STATE',{entity:{object_id:'person'}});
+  const ctx=setup([entity,legacy],recordApi([entity,legacy]));
+  await ctx.openProductionRecord('person');
+  assert.equal(ctx.state.productionSelected,entity);
+  assert.equal(ctx.state.productionEntityDetail.record,entity);
+  assert.equal(ctx.state.productionChildDetail,null);
+});
