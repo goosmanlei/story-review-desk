@@ -359,6 +359,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     elif kind == "JUDGMENT":
         target = ref_record(store, p.get("target"))
         from . import entity_review
+        if 'acceptance_model' in p:
+            entity_review.validate_current_acceptance(store, p, check_current)
         if p.get('verdict') == 'accepted' and entity_review.submission(target):
             entity_review.validate_acceptance(store, target, check_current)
         if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved"):
@@ -434,6 +436,23 @@ def current_records(store, kinds=None):
 
 
 def import_records(store, document, validate_only=False):
+    return _import_records(store, document, validate_only)
+
+
+def restore_records(store, batches):
+    """Replay exact historical records into an empty production collection only.
+
+    Ordinary HTTP/CLI imports always validate current membership. Recovery
+    validates historical references, like bundle.restore, without mistaking
+    later state or asset revisions for the inputs of an earlier acceptance.
+    """
+    if current_records(store):
+        raise Conflict('production recovery requires an empty production collection')
+    for batch in batches:
+        _import_records(store, batch, check_current=False)
+
+
+def _import_records(store, document, validate_only=False, *, check_current=True):
     if not isinstance(document, dict) or document.get("format") != "production-import-v1" or not isinstance(document.get("records"), list) or not document["records"]:
         raise ValueError("nonempty production-import-v1 records are required")
     results, resolved = [], {}
@@ -459,7 +478,7 @@ def import_records(store, document, validate_only=False):
                     if alias != ref["object_id"] or alias not in resolved:
                         raise ValueError("batch reference must target an earlier object")
                     ref["revision_id"] = resolved[alias]
-            validate_payload(store, object_id, kind, p)
+            validate_payload(store, object_id, kind, p, check_current=check_current)
             dependencies = [{"revision_id": ref["revision_id"], "role": path} for path, ref in references(p)]
             result = store._put_object(object_id, kind, p, source.get("expected_version"), dependencies)
             results.append(result)

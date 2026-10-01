@@ -1,6 +1,5 @@
 import copy
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import sys
@@ -24,85 +23,123 @@ class EntityReviewTest(unittest.TestCase):
     setup_full = fixtures.CompleteStatesTest.setup_full
     associate = fixtures.CompleteStatesTest.associate
 
-    def review(self, media=None):
-        old = next((r for r in p.current_records(self.store) if r['object_id'] == 'submission'), None)
-        row = self.spec('submission', 'REPRESENTATION', review_model=er.MODEL,
-                        entities=[self.ref('songbook')], states=[self.ref(s) for s in ('full', 'wet')],
-                        media=media or [], sources=[], choices=[], unknowns=[])
-        row['expected_version'] = old['version'] if old else 0
-        return row
+    def accept(self, scope=None, oid='accept'):
+        scope = scope or er.snapshot(self.store, 'songbook')['scope']
+        return self.spec(oid, 'JUDGMENT', target=scope['entity'], verdict='accepted', actor='测试用户',
+                         reason='仅技术测试：采纳当前版本', acceptance_model=er.ACCEPTANCE_MODEL, acceptance_scope=scope)
 
-    def accept(self, target=None, oid='accept'):
-        return self.spec(oid, 'JUDGMENT', target=target or self.ref('submission'), verdict='accepted', actor='测试用户', reason='仅技术测试：认可送审整体')
+    def change(self, oid, fn):
+        row = p.record(self.store, oid); payload = copy.deepcopy(row['payload']); fn(payload)
+        self.put({'object_id':oid, 'kind':row['kind'], 'expected_version':row['version'], 'payload':payload})
 
-    def test_explicit_media_exact_ranges_candidates_and_acceptance_are_independent(self):
-        self.setup_full(); self.media(); self.associate(states=('full', 'wet'), range={'start_seconds': .1, 'end_seconds': .9})
-        selection = {'id':'voice-full', 'state': self.ref('full'), 'asset': self.ref('voice'), 'component_id':'original', 'role':'overall', 'label':'整体现状', 'range':{'start_seconds':.1,'end_seconds':.9}}
-        wrong = copy.deepcopy(selection); wrong['range']['end_seconds'] = .8
-        with self.assertRaisesRegex(ValueError, 'exact state coverage'): self.put(self.review([wrong]))
-        self.put(self.review([selection, {**selection, 'id':'voice-wet', 'state':self.ref('wet')}]))
-        first = er.snapshot(self.store, 'songbook')
-        self.assertEqual(len(first['media']), 2)
-        self.assertEqual(len(first['comment_targets']), 5)  # entity, two states, shared asset, submission
-        self.assertEqual(first['status'], 'pending')
-        self.put(self.accept())
-        accepted_ref = self.ref('submission')
-        asset = p.record(self.store, 'voice'); payload = copy.deepcopy(asset['payload']); payload['blocks'][0]['text'] = '新候选，未送审'
-        self.put({'object_id':'voice', 'kind':'ASSET', 'expected_version':asset['version'], 'payload':payload})
-        latest = er.snapshot(self.store, 'songbook')
-        self.assertEqual(latest['status'], 'accepted')
-        self.assertEqual(latest['media'][0]['record']['id'], selection['asset']['revision_id'])
-        self.assertEqual(p.current_records(self.store, {'RELATION'}), [])
-        self.store.create_comment({'target_object_id':'full','target_revision_id':self.ref('full')['revision_id'], 'anchor':{'type':'global'}, 'body':'认可后意见不撤销认可'})
-        self.assertEqual(er.snapshot(self.store, 'songbook')['status'], 'accepted')
-        self.put(self.review([{**selection, 'asset':self.ref('voice')}]))
-        updated = er.snapshot(self.store, 'songbook')
-        self.assertEqual(updated['status'], 'pending')
-        self.assertEqual(updated['previous_accepted']['submission']['id'], accepted_ref['revision_id'])
-        self.assertEqual(updated['previous_accepted']['media'][0]['record']['id'], selection['asset']['revision_id'])
-
-    def test_complete_membership_exact_versions_and_atomic_stale_acceptance(self):
+    def test_current_content_needs_no_workflow_and_query_is_read_only(self):
         self.setup_full()
-        omitted = self.review(); omitted['payload']['states'].pop()
-        with self.assertRaises(Conflict): self.put(omitted)
-        duplicate = self.review(); duplicate['payload']['states'].append(self.ref('full'))
-        with self.assertRaises(ValueError): self.put(duplicate)
-        self.put(self.review()); old = self.ref('submission')
-        self.put(self.full('new-form'))
-        before = self.store.objects()
-        with self.assertRaises(Conflict): self.put(self.entity('first-in-batch'), self.accept())
-        self.assertEqual(before, self.store.objects())
-        self.assertEqual(er.snapshot(self.store, 'songbook')['status'], 'outdated')
-        new = self.review(); new['payload']['states'].append(self.ref('new-form')); self.put(new)
-        with self.assertRaises(Conflict): self.put(self.accept(old))
-        self.put(self.accept())
-        form = self.full(); form['expected_version'] = 1; form['payload']['dimensions']['condition'] = '变化后'
-        self.put(form)
-        self.assertEqual(er.snapshot(self.store, 'songbook')['status'], 'outdated')
-        with self.assertRaises(Conflict): self.put(self.accept(oid='stale'))
-        self.assertEqual(len(p.current_records(self.store, {'JUDGMENT'})), 1)
-
-    def test_identity_changes_foreign_states_duplicate_submission_and_read_only_query(self):
-        self.setup_full(); self.put(self.entity('other'))
-        foreign = self.full('other-form'); foreign['payload']['entity'] = self.ref('other'); self.put(foreign)
-        bad = self.review(); bad['payload']['states'].append(self.ref('other-form'))
-        with self.assertRaises(ValueError): self.put(bad)
-        self.put(self.review())
-        duplicate = self.review(); duplicate['object_id'] = 'another'; duplicate['expected_version'] = 0
-        with self.assertRaises(Conflict): self.put(duplicate)
-        entity = self.entity(); entity['expected_version'] = 1; entity['payload']['facts'].append('新身份事实'); self.put(entity)
         before = self.store.revisions()
         snapshot = er.snapshot(self.store, 'songbook')
-        self.assertEqual(snapshot['status'], 'outdated')
-        self.assertNotEqual(snapshot['entity']['id'], self.ref('songbook')['revision_id'])
+        self.assertEqual(snapshot['status'], 'unaccepted'); self.assertTrue(snapshot['can_accept'])
+        self.assertEqual(len(snapshot['states']), 2)
         self.assertEqual(before, self.store.revisions())
-        with self.assertRaises(Conflict): self.put(self.accept())
+        self.assertFalse(p.current_records(self.store, {'REPRESENTATION', 'JUDGMENT'}))
+        self.change('songbook', lambda value: value['facts'].append('新的身份事实'))
+        self.put(self.full('new-form'))
+        current = er.snapshot(self.store, 'songbook')
+        self.assertEqual(current['entity']['id'], self.ref('songbook')['revision_id'])
+        self.assertEqual(len(current['states']), 3)
+        self.assertNotEqual(snapshot['content_key'], current['content_key'])
+
+    def test_related_candidates_visible_without_inventing_state_coverage(self):
+        self.setup_full(); self.media(); self.media('project-audio')
+        self.change('voice', lambda value: value.update(subjects=[self.ref('songbook')]))
+        current = er.snapshot(self.store, 'songbook')
+        self.assertEqual(len(current['media']), 1)
+        self.assertEqual(current['media'][0]['role'], 'related')
+        self.assertIsNone(current['media'][0]['state'])
+        self.assertFalse(p.record(self.store, 'voice')['payload'].get('state_coverage'))
+        self.assertNotIn('project-audio', str(current['scope']))
+        self.associate(states=('full', 'wet'), range={'start_seconds':.1, 'end_seconds':.9})
+        mapped = er.snapshot(self.store, 'songbook')
+        self.assertEqual(len(mapped['media']), 2)
+        self.assertEqual(mapped['media'][0]['range'], {'start_seconds':.1, 'end_seconds':.9})
+        self.assertEqual(len(mapped['comment_targets']), 4)  # two forms share one asset
+
+    def test_acceptance_allows_comments_and_new_candidate_does_not_inherit_it(self):
+        self.setup_full(); self.media(); self.associate(states=('full', 'wet'))
+        before = er.snapshot(self.store, 'songbook'); self.put(self.accept(before['scope']))
+        self.store.create_comment({'target_object_id':'full','target_revision_id':self.ref('full')['revision_id'], 'anchor':{'type':'global'}, 'body':'采纳后仍可补充意见'})
+        self.assertEqual(er.snapshot(self.store, 'songbook')['status'], 'accepted')
+        self.assertFalse(p.current_records(self.store, {'RELATION'}))
+        self.change('voice', lambda value: value['blocks'][0].update(text='新的素材版本'))
+        latest = er.snapshot(self.store, 'songbook')
+        self.assertEqual(latest['status'], 'unaccepted')
+        self.assertNotEqual(latest['media'][0]['record']['id'], before['media'][0]['record']['id'])
+        self.assertEqual(latest['previous_accepted']['media'][0]['record']['id'], before['media'][0]['record']['id'])
+        historical = er.snapshot(self.store, 'songbook', self.ref('accept')['revision_id'])
+        self.assertTrue(historical['historical']); self.assertFalse(historical['can_accept'])
+        self.assertEqual(historical['scope'], before['scope'])
+
+    def test_stale_collection_identity_media_and_forgery_reject_atomically(self):
+        self.setup_full(); initial = er.snapshot(self.store, 'songbook')['scope']
+        self.put(self.full('new-form')); before = self.store.objects()
+        with self.assertRaises(Conflict): self.put(self.entity('rollback'), self.accept(initial))
+        self.assertEqual(self.store.objects(), before)
+        stale = er.snapshot(self.store, 'songbook')['scope']
+        self.change('full', lambda value: value['dimensions'].update(condition='修订'))
+        with self.assertRaises(Conflict): self.put(self.accept(stale))
+        stale = er.snapshot(self.store, 'songbook')['scope']
+        self.change('songbook', lambda value: value['facts'].append('身份变更'))
+        with self.assertRaises(Conflict): self.put(self.accept(stale))
+        stale = er.snapshot(self.store, 'songbook')['scope']
+        self.media(); self.change('voice', lambda value: value.update(subjects=[self.ref('songbook')]))
+        with self.assertRaises(Conflict): self.put(self.accept(stale))
+        invalid = er.snapshot(self.store, 'songbook')['scope']; invalid['media'][0]['role'] = 'overall'
+        with self.assertRaises(ValueError): self.put(self.accept(invalid))
+        self.put(self.accept())
+        self.assertEqual(len(p.current_records(self.store, {'JUDGMENT'})), 1)
+
+    def test_legacy_records_and_historical_comments_do_not_gate_current_content(self):
+        self.setup_full(); self.media(); self.associate()
+        legacy = self.spec('old-review', 'REPRESENTATION', review_model=er.MODEL, entities=[self.ref('songbook')],
+                           states=[self.ref('full'), self.ref('wet')], media=[], sources=[], choices=[], unknowns=[])
+        self.put(legacy)
+        original = [self.ref(oid) for oid in ('old-review', 'full', 'voice')]
+        for reference in original:
+            self.store.create_comment({'target_object_id':reference['object_id'], 'target_revision_id':reference['revision_id'], 'anchor':{'type':'global'}, 'body':'保留的原版意见'})
+        self.change('full', lambda value: value['dimensions'].update(condition='修订'))
+        self.change('voice', lambda value: value.update(states=[], state_coverage=[]))
+        current = er.snapshot(self.store, 'songbook')
+        self.assertTrue(current['can_accept']); self.assertEqual(current['media'], [])
+        self.assertTrue(all(r in current['comment_targets'] for r in original))
+        self.assertNotIn('submission', current)
+        self.assertEqual(len(current['states']), 2)
+
+    def test_production_recovery_is_empty_only_and_preserves_old_acceptance(self):
+        self.setup_full(); self.put(self.accept()); accepted = self.ref('accept')
+        self.change('full', lambda value: value['dimensions'].update(condition='后来修订'))
+        with self.assertRaisesRegex(Conflict, 'empty production'):
+            p.restore_records(self.store, [])
+        # Recovery can encounter the latest state before the old acceptance.
+        ordered = ['songbook', 'full', 'wet', 'accept']
+        batches = []
+        for oid in ordered:
+            for row in self.store.revisions():
+                if row['object_id'] == oid:
+                    batches.append({'format':'production-import-v1', 'records':[{'object_id':oid,
+                        'kind':p.record(self.store, oid)['kind'], 'expected_version':row['version'] - 1,
+                        'payload':json.loads(row['payload'])}]})
+        other = Store(self.root / 'replay/.runtime/review.sqlite3')
+        try:
+            original = next(row for row in self.store.revisions() if row['id'] == self.episode['revision'])
+            other.put_object('episode', 'EPISODE', json.loads(original['payload']))
+            p.restore_records(other, batches)
+            self.assertEqual(er.snapshot(other, 'songbook')['status'], 'unaccepted')
+            self.assertEqual(er.snapshot(other, 'songbook', accepted['revision_id'])['accepted']['id'], accepted['revision_id'])
+        finally: other.close()
 
     def test_bundle_restores_historical_acceptance_and_cli_reads_same_aggregate(self):
-        self.setup_full(); self.put(self.review(), self.accept({'object_id':'submission','revision_id':'@submission'}))
-        old = self.ref('submission')
-        form = self.full(); form['expected_version'] = 1; form['payload']['dimensions']['condition'] = '另一个版本'; self.put(form)
-        self.put(self.review())
+        self.setup_full(); self.media(); self.associate(); self.put(self.accept())
+        old = self.ref('accept')
+        self.change('full', lambda value: value['dimensions'].update(condition='另一个版本'))
+        self.put(self.full('later'))
         before = er.snapshot(self.store, 'songbook')
         export(self.store, self.root / 'export')
         recovered = self.root / 'recovered'; shutil.copytree(self.root / 'export', recovered / 'export')
