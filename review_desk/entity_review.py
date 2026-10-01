@@ -181,7 +181,7 @@ transition is required before viewing, commenting or accepting output.
     rows = p.current_records(store)
     scope = current_scope(store, entity_id, rows)
     decisions = []
-    for row in store.db.execute("SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT' AND json_extract(r.payload,'$.acceptance_model')=? ORDER BY r.created_at DESC,r.rowid DESC", (ACCEPTANCE_MODEL,)):
+    for row in store.db.execute("SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT' AND json_extract(r.payload,'$.acceptance_model')=? ORDER BY r.created_at DESC,r.id DESC", (ACCEPTANCE_MODEL,)):
         decision = p.record(store, revision_id=row[0])
         if decision['payload']['target']['object_id'] == entity_id:
             decisions.append(decision)
@@ -196,7 +196,7 @@ transition is required before viewing, commenting or accepting output.
         scope = selected['payload']['acceptance_scope']
     contents = scope_contents(store, scope)
     accepted = selected or next((d for d in decisions if d['payload']['acceptance_scope'] == scope), None)
-    previous = next((d for d in decisions if d['payload']['acceptance_scope'] != scope), None)
+    previous = next((d for d in decisions if d['payload']['acceptance_scope'] != scope), None) if not revision_id else None
     usages = {}
     for form in contents['states']:
         usages[form['id']] = []
