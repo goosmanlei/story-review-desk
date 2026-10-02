@@ -610,6 +610,14 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             result['review_contexts']={a['id']:context(store,a) for a in candidates}
         from .material_versions import for_record
         result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
+        if result['material_versions']:
+            from .material_review import context
+            contexts = result.setdefault('review_contexts', {})
+            for rounds in result['material_versions'].values():
+                for round in rounds:
+                    for candidate in round['members']:
+                        if candidate['kind'] == 'ASSET' and candidate['id'] not in contexts:
+                            contexts[candidate['id']] = context(store, candidate)
         return result
     return {"records": current_records(store, {kind} if kind else None)}
 

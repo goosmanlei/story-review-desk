@@ -42,7 +42,7 @@
 
 ## 原始生成记录与兼容
 
-ASSET 的 `production` 是实际 CALL 的准确修订。读取素材时返回 `review_context: {call, requirements, inputs}` 和历史素材版本的 `review_contexts`。实体媒体条目也返回这一上下文。即使 CALL 后来登记完成、当前方案改写，也不替换原输入。
+ASSET 的 `production` 是实际 CALL 的准确修订。读取素材时返回 `review_context: {call, requirements, inputs}` 和按准确素材修订索引的 `review_contexts`。后者覆盖该素材关联的各轮全部候选，包括同轮中其他素材身份的原件；从任一候选进入，实际生成信息都属于当前显示的原件。实体媒体条目也返回这一上下文。即使 CALL 后来登记完成、当前方案改写，也不替换原输入。
 
 CALL 投影 `@review/call/model`、`@review/call/parameters`、`@review/call/prompt` 为可评论字段。参数文本由服务端产生；参数中与主提示词完全相同的 `prompt` 只展示一次，原数据不改动。既有正文与生成方案评论锚点保留。
 
