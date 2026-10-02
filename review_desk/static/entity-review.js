@@ -136,7 +136,11 @@ function renderStateMaterials(parent,data,form){
 }
 function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMedia'){
   const grid=el('section','entity-review-materials');parent.append(grid);
-  for(const item of items){const card=renderMaterialCard(grid,{need:null,candidates:[item]});if(selectionKey==='entityReviewHistoricalMedia')card.querySelector('.entity-review-media-pane').dataset.commentMedia='true'}
+  const data=state.entityReview;
+  for(const model of materialRoundModels([],items,data)){
+    const card=renderMaterialCard(grid,model,{roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)}});
+    if(selectionKey==='entityReviewHistoricalMedia')for(const pane of card.querySelectorAll('.entity-review-media-pane'))pane.dataset.commentMedia='true';
+  }
 }
 function locateEntityReviewComment(comment){
   const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id);if(!row)return;
