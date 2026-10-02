@@ -85,10 +85,10 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true){
 
 // Shared modal chrome; closing never changes the review target or draft.
 let reviewDialogSerial=0;
-function openReviewDialog(label,trigger,className=''){
+function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   const dialog=el('dialog','review-dialog '+className),header=el('header','review-dialog-header');
   const title=nodeText('h2',null,label,header);title.id='review-dialog-'+(++reviewDialogSerial);dialog.setAttribute('aria-labelledby',title.id);
-  const close=productionButton(header,'×',()=>dialog.close());close.className='review-dialog-close';close.setAttribute('aria-label','关闭');close.title='关闭（Esc）';close.autofocus=true;
+  const close=productionButton(header,'×',()=>dialog.close());close.className='review-dialog-close';close.setAttribute('aria-label',closeLabel);close.title='关闭（Esc）';close.autofocus=true;
   const body=el('div','review-dialog-body');dialog.append(header,body);
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});

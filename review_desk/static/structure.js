@@ -80,15 +80,11 @@ function paintStructureRegions(){
 function openStructureImage(visual,trigger){
   if(state.drawMode||structureDrawing||document.querySelector('.structure-image-dialog'))return;
   hideSelectionAction();
-  const dialog=el('dialog','structure-image-dialog');dialog.setAttribute('aria-labelledby','structure-image-title');
-  const toolbar=el('div','structure-image-toolbar'),title=nodeText('h2',null,visual.title,toolbar);title.id='structure-image-title';
-  const close=nodeText('button','structure-image-close','×',toolbar);close.type='button';close.setAttribute('aria-label','关闭放大图');close.title='关闭（Esc）';close.autofocus=true;close.onclick=()=>dialog.close();
-  const canvas=el('div','structure-image-canvas'),image=el('img');image.src=`/assets/${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;canvas.append(image);dialog.append(toolbar,canvas);
-  dialog.addEventListener('keydown',event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();dialog.close()}});
-  dialog.addEventListener('cancel',event=>{event.preventDefault();dialog.close()});
-  dialog.addEventListener('pointerdown',event=>event.stopPropagation());
-  dialog.addEventListener('close',()=>{document.body.classList.remove('structure-image-open');dialog.remove();if(trigger.isConnected)trigger.focus({preventScroll:true})},{once:true});
-  document.body.append(dialog);document.body.classList.add('structure-image-open');dialog.showModal();
+  const {dialog,body}=openReviewDialog(visual.title,trigger,'structure-image-dialog','关闭放大图');
+  body.classList.add('structure-image-canvas');
+  const image=el('img');image.src=`/assets/${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;body.append(image);
+  dialog.addEventListener('close',()=>document.body.classList.remove('structure-image-open'),{once:true});
+  document.body.classList.add('structure-image-open');
 }
 function renderStructureVisual(visual,preview=false){
   const figure=reviewSurface(el('figure','structure-figure'),'image'),head=el('div','structure-figure-head');
