@@ -93,8 +93,11 @@ function focusMaterialRoundControl(mid){[...document.querySelectorAll('.material
 function materialRoundModels(needs,items,data){
   const used=new Set(),models=needs.map(current=>{
     const rounds=data.material_versions?.[current.object_id]||[],number=data.selectedMaterialRounds?.[current.object_id],round=rounds.find(r=>r.number===number)||rounds[0];
-    if(!round){const model=materialCardModels([current],items)[0];model.candidates.forEach(i=>used.add(i.record.object_id));return model}
+    if(!round){const model=materialCardModels([current],items).find(m=>m.need===current);model.candidates.forEach(i=>used.add(i.record.object_id));return model}
     data.selectedMaterialRounds||={};data.selectedMaterialRounds[current.object_id]=round.number;
+    // A result owned by an older round remains inside that history. It must
+    // not reappear as an unrelated card when the selected round has no result.
+    for(const history of rounds)for(const row of history.members)if(row.kind==='ASSET')used.add(row.object_id);
     const candidates=round.results.map(row=>{const original=items.find(i=>i.record.object_id===row.object_id),component=row.payload.components.find(c=>c.role==='original')||row.payload.components[0];
       return {...original,record:row,component,review_context:data.materialContexts?.[row.id],range:original?.record.id===row.id?original.range:null,crop:original?.record.id===row.id?original.crop:null}});
     candidates.forEach(i=>used.add(i.record.object_id));
