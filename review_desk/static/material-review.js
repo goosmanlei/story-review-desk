@@ -103,7 +103,13 @@ function materialRoundModels(needs,items,data){
     candidates.forEach(i=>used.add(i.record.object_id));
     return {need:data.localVersions?.[current.object_id]&&round.members.some(r=>r.id===data.localVersions[current.object_id].id)?data.localVersions[current.object_id]:round.plan||current,candidates,round,rounds,material_id:current.object_id};
   });
-  const extra=materialCardModels([],items.filter(i=>!used.has(i.record.object_id))).map(model=>{const identity=model.candidates[0].record,mid=identity.object_id,rounds=data.material_versions?.[mid],round=rounds?.find(r=>r.number===data.selectedMaterialRounds?.[mid])||rounds?.[0];if(!round)return model;data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number;return {...model,identity,material_id:mid,round,rounds,candidates:round.results.map(record=>({...model.candidates[0],record,component:record.payload.components.find(c=>c.role==='original')}))}});
+  const extra=materialCardModels([],items.filter(i=>!used.has(i.record.object_id))).map(model=>{
+    const original=model.candidates[0],identity=original.record;
+    const entry=Object.entries(data.material_versions||{}).find(([mid,rs])=>mid!==identity.object_id&&rs.some(r=>r.members.some(m=>m.object_id===identity.object_id)))||[identity.object_id,data.material_versions?.[identity.object_id]];
+    const [mid,rounds]=entry,round=rounds?.find(r=>r.number===data.selectedMaterialRounds?.[mid])||rounds?.[0];if(!round)return model;
+    data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number;
+    return {...model,need:round.plan,identity,material_id:mid,round,rounds,candidates:materialRoundResults(round,identity,!!data.localVersions?.[identity.object_id]).map(record=>({...original,record,component:record.payload.components.find(c=>c.id===original.component.id)||record.payload.components.find(c=>c.role==='original'),review_context:data.materialContexts?.[record.id]||original.review_context,range:record.id===identity.id?original.range:null,crop:record.id===identity.id?original.crop:null}))};
+  });
   return [...models,...extra];
 }
 function materialRevisionIntent(){
