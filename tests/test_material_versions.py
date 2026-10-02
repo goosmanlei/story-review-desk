@@ -141,6 +141,20 @@ class MaterialVersionsTest(unittest.TestCase):
         with self.assertRaises(Conflict):self.change('delayed',prompt='rewrite real input')
         self.assertEqual(before,mv.fingerprint(self.store))
 
+    def test_shared_result_reads_original_round_and_comments_on_other_entity_without_expanding_acceptance(self):
+        self.setup_plans();self.generate()
+        self.put(self.entity('other'))
+        form=self.full('other-full');form['payload']['entity']=self.ref('other');self.put(form)
+        self.change('generated',states=[self.ref('full'),self.ref('other-full')],state_coverage=[
+            {'state':self.ref(s),'role':'overall','component_id':'original','detail':'共享声音'} for s in ('full','other-full')])
+        original=self.ref('generated');comment=self.comment(1)
+        view=g.snapshot(self.store,'other');rounds=view['material_versions']['need-full-overall']
+        self.assertEqual([r['number'] for r in rounds],[2,1]);self.assertEqual(rounds[0]['results'],[])
+        self.assertEqual(rounds[1]['results'][0]['id'],original['revision_id'])
+        self.assertEqual(view['scope']['requirements'],[])
+        self.assertIn(comment['target_revision_id'],[r['revision_id'] for r in view['comment_targets']])
+        self.assertEqual(view['materialContexts'][original['revision_id']]['call']['object_id'],'call1')
+
     def test_migration_guard_idempotence_and_export_recovery(self):
         self.setup_plans();self.generate();self.comment(1,cid='revision');export(self.store,self.root/'export')
         dest=self.root/'restored';shutil.copytree(self.root/'export',dest/'export');recovered=Store(dest/'.runtime/review.sqlite3')

@@ -135,3 +135,30 @@ test('shared media use its associated requirement round even outside the visible
  assert.equal(cards.length,1);assert.equal(cards[0].material_id,demand.object_id);
  assert.equal(cards[0].round.number,1);assert.equal(cards[0].need.id,demand.id);
 });
+
+test('a pending material round keeps earlier results inside history instead of creating duplicate cards',()=>{
+ const plan=need('portrait'),asset={id:'old-image',object_id:'portrait-image',kind:'ASSET',payload:{media_type:'image',components:[{id:'original',role:'original'}]}},media={id:'media',record:asset,component:asset.payload.components[0]};
+ const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
+ const data={material_versions:{portrait:[pending,old]}};
+ let cards=ctx.materialRoundModels([plan],[media],data);
+ assert.equal(cards.length,1);assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ data.selectedMaterialRounds.portrait=1;cards=ctx.materialRoundModels([plan],[media],data);
+ assert.equal(cards.length,1);assert.equal(cards[0].candidates[0].record.id,'old-image');
+});
+
+test('legacy audio requirements do not inherit an unrelated image card through display sorting',()=>{
+ const voice=need('voice',undefined,'audio'),unrelated=item('image',[]);
+ const cards=ctx.materialRoundModels([voice],[unrelated],{});
+ assert.equal(cards.length,2);assert.equal(cards[0].need,voice);assert.equal(cards[0].candidates.length,0);assert.equal(cards[1].candidates[0],unrelated);
+});
+
+test('a shared asset uses its producing requirement rounds on another state instead of database revisions',()=>{
+ const plan=need('foreign-plan'),asset={id:'shared-v4',object_id:'shared',kind:'ASSET',version:4,payload:{media_type:'audio',components:[{id:'original',role:'original'}]}};
+ const original={id:'shared-media',record:asset,component:asset.payload.components[0],range:{start_seconds:1,end_seconds:2}};
+ const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
+ const data={material_versions:{'foreign-plan':[pending,old]}};
+ let cards=ctx.materialRoundModels([],[original],data);
+ assert.equal(cards.length,1);assert.equal(cards[0].material_id,'foreign-plan');assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ data.selectedMaterialRounds['foreign-plan']=1;cards=ctx.materialRoundModels([],[original],data);
+ assert.equal(cards[0].round.number,1);assert.equal(cards[0].need,plan);assert.deepEqual(cards[0].candidates[0].range,original.range);
+});

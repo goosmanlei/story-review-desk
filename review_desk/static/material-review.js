@@ -93,11 +93,10 @@ function focusMaterialRoundControl(mid){[...document.querySelectorAll('.material
 function materialRoundModels(needs,items,data){
   const used=new Set(),models=needs.map(current=>{
     const rounds=data.material_versions?.[current.object_id]||[],number=data.selectedMaterialRounds?.[current.object_id],round=rounds.find(r=>r.number===number)||rounds[0];
-    if(!round){const model=materialCardModels([current],items)[0];model.candidates.forEach(i=>used.add(i.record.object_id));return model}
-    // An empty new round still owns its historical results. They remain in
-    // this card's version selector, rather than becoming extra current cards.
-    for(const version of rounds)for(const row of version.members)if(row.kind==='ASSET')used.add(row.object_id);
+    if(!round){const model=materialCardModels([current],items).find(m=>m.need===current);model.candidates.forEach(i=>used.add(i.record.object_id));return model}
     data.selectedMaterialRounds||={};data.selectedMaterialRounds[current.object_id]=round.number;
+    // Older results belong to this card's history, including when the current round has no result.
+    for(const history of rounds)for(const row of history.members)if(row.kind==='ASSET')used.add(row.object_id);
     const candidates=round.results.map(row=>{const original=items.find(i=>i.record.object_id===row.object_id),component=row.payload.components.find(c=>c.role==='original')||row.payload.components[0];
       return {...original,record:row,component,review_context:data.materialContexts?.[row.id],range:original?.record.id===row.id?original.range:null,crop:original?.record.id===row.id?original.crop:null}});
     candidates.forEach(i=>used.add(i.record.object_id));
@@ -105,12 +104,11 @@ function materialRoundModels(needs,items,data){
   });
   const shownRounds=new Set(models.map(m=>m.material_id).filter(Boolean));
   const extra=materialCardModels([],items.filter(i=>!used.has(i.record.object_id))).flatMap(model=>{
-    const identity=model.candidates[0].record;
-    const [mid,rounds]=data.material_versions?.[identity.object_id]?.length?[identity.object_id,data.material_versions[identity.object_id]]:
-      Object.entries(data.material_versions||{}).find(([,versions])=>versions.some(v=>v.members.some(r=>r.kind==='ASSET'&&r.object_id===identity.object_id)))||[];
+    const original=model.candidates[0],identity=original.record;
+    const [mid,rounds]=Object.entries(data.material_versions||{}).find(([mid,rs])=>mid!==identity.object_id&&rs.some(r=>r.members.some(m=>m.kind==='ASSET'&&m.object_id===identity.object_id)))||[identity.object_id,data.material_versions?.[identity.object_id]];
     const round=rounds?.find(r=>r.number===data.selectedMaterialRounds?.[mid])||rounds?.[0];if(!round)return [model];
     if(shownRounds.has(mid))return [];shownRounds.add(mid);data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number;
-    return [{...model,need:round.plan||null,identity,material_id:mid,round,rounds,candidates:round.results.map(record=>({...model.candidates[0],record,component:record.payload.components.find(c=>c.role==='original')||record.payload.components[0],review_context:data.materialContexts?.[record.id]}))}];
+    return [{...model,need:round.plan||null,identity,material_id:mid,round,rounds,candidates:materialRoundResults(round,identity,!!data.localVersions?.[identity.object_id]).map(record=>({...original,record,component:record.payload.components.find(c=>c.id===original.component?.id)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],review_context:data.materialContexts?.[record.id]||(record.id===identity.id?original.review_context:undefined),range:record.id===identity.id?original.range:null,crop:record.id===identity.id?original.crop:null}))}];
   });
   return [...models,...extra];
 }
