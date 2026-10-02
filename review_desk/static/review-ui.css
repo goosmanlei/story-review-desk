@@ -84,3 +84,17 @@
 .material-reference{margin:4px 6px 4px 0;text-align:left;text-decoration:underline;text-underline-offset:3px}
 
 .reference-crop-frame{position:relative;width:fit-content;max-width:100%;margin:auto}.reference-crop-frame img{margin:0}.reference-crop{position:absolute;box-sizing:border-box;border:2px solid #b27047;pointer-events:none}
+
+.review-cue{pointer-events:auto;cursor:pointer;box-sizing:border-box;min-width:26px;width:26px;height:26px;padding:4px;border:1px solid transparent;background:transparent;border-radius:4px}
+.review-cue:hover{background:#edf3e9;border-color:#9eb6a2}.review-cue:focus-visible{outline:2px solid #497757;outline-offset:2px}
+.entity-review-media-pane .structure-visual-viewport.material-image-frame{height:300px;width:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#eef1e9}
+.material-image-frame .structure-visual-stage{flex:none;margin:0}.material-image-frame .structure-visual-stage img{width:100%;height:100%;object-fit:contain}
+.material-reference-dialog button,.material-reference-dialog select,.material-card button,.material-card select{font:inherit;color:inherit;background:#f5f7f2;border:1px solid #c8d6c6;border-radius:5px;padding:7px 10px;cursor:pointer}
+.material-reference-dialog button:hover,.material-card button:hover{border-color:#65896d;background:#eaf1e6}
+.material-reference-dialog button:focus-visible,.material-reference-dialog select:focus-visible,.material-card button:focus-visible,.material-card select:focus-visible{outline:2px solid #497757;outline-offset:2px}
+.material-reference-dialog button:disabled,.material-card button:disabled{opacity:.5;cursor:default}
+.material-card .review-cue{padding:4px;background:transparent}.material-reference-dialog{box-sizing:border-box;background:var(--paper,#fdfefb)}
+.material-input{margin:8px 0}.material-input small{display:block}.comment-intent{display:flex;align-items:center;gap:6px;margin:12px 0}.comment-intent input{width:auto}
+
+.material-reference-dialog [role=button]:focus-visible{outline:2px solid #497757;outline-offset:3px}
+.material-card select:hover:enabled,.material-reference-dialog select:hover:enabled{border-color:#65896d}

@@ -271,7 +271,16 @@ def snapshot(store, entity_id, revision_id=None):
     prep=preparation(store,scope)
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
-    return {**base,**data,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    from .material_versions import snapshot as material_snapshot
+    for need in data['requirements']:
+        need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
+    material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
+    for item in data['media']:
+        oid = item['record']['object_id']
+        if oid not in material_versions:
+            rounds = material_snapshot(store, oid)
+            if rounds:material_versions[oid] = rounds
+    return {**base,**data,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'status':'accepted' if a else 'unaccepted','can_accept':not revision_id and not a and prep['complete'],
@@ -322,9 +331,13 @@ def package(store, requirement_id):
     ready=readiness(store,requirement_id)
     if not ready['ready']:raise Conflict('；'.join(ready['issues']))
     plan=ready['plan']
+    from .input_contracts import label_inputs, check
+    inputs=label_inputs(ready['inputs'])
+    contract=check(plan['model'],plan['prompt'],inputs)
+    if contract['issues']:raise Conflict('；'.join(contract['issues']))
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']),'acceptances':ready['acceptances'],
             'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
-            'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':ready['inputs'],'i2i_depth':ready['i2i_depth'],
+            'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':inputs,'input_contract':contract,'i2i_depth':ready['i2i_depth'],
             'execution_note':'执行前重新检查有效采纳、参考文件、平台可用性及现有额度；此包不表示已经调用模型。'}
 
 
@@ -340,17 +353,19 @@ def write_package(store, requirement_id, output):
 
 
 def validate_call(store, object_id, payload):
-    if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return
     try:old=p.record(store,object_id)
     except KeyError:old=None
     # Finishing a real submitted call keeps its already executed inputs, even
     # when the user has since revoked approval or revised the next plan.
-    if payload['status']=='completed' and old and old['payload'].get('status') in ('submitted','completed'):
-        for key in ('generation_requirement','generation_acceptances','tool','model','parameters','prompt','inputs'):
+    if old and old['payload'].get('status') in ('submitted','completed'):
+        for key in ('generation_requirement','generation_acceptances','method','tool','model','parameters','prompt','inputs'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('完成记录不能改写已经执行的生成输入')
         return
+    if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return
     need=p.ref_record(store,payload['generation_requirement'],{'REQUIREMENT'})
     manifest=package(store,need['object_id'])
+    if manifest['inputs'] and not manifest['input_contract']['verified']:
+        raise Conflict('参考输入的模型契约尚未核实，不能登记新执行调用')
     if manifest['requirement']!=payload['generation_requirement'] or manifest['acceptances']!=payload.get('generation_acceptances'):
         raise Conflict('生成依据或采纳已变化')
     for field in ('model','parameters','prompt'):
