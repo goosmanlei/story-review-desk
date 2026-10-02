@@ -93,6 +93,27 @@ class MaterialRelationshipsTest(unittest.TestCase):
         self.decide();self.assertTrue(g.accepted(self.store,'songbook'))
         self.change('belongs',status='withdrawn');self.assertIsNone(g.accepted(self.store,'songbook'))
 
+    def test_relationship_revision_preserves_the_original_comment_and_evidence_after_restore(self):
+        self.setup_plans();self.put(self.relationship())
+        old=p.record(self.store,'belongs');text=old['payload']['blocks'][0]['text']
+        self.store.create_comment({'target_object_id':old['object_id'],'target_revision_id':old['id'],
+            'anchor':{'type':'text','block_id':'notes','end_block_id':'notes','start':0,'end':len(text),'quote':text},
+            'body':'关系旧版的准确意见'})
+        original_comments=self.store.comments();original_source=p.source_excerpt(self.store,old['payload']['sources'][0])
+        self.change('belongs',label='保管歌本')
+        latest=p.record(self.store,'belongs')
+        self.assertEqual(p.record(self.store,revision_id=old['id']),{**old,'current_revision':latest['id']})
+        self.assertEqual(self.store.comments(),original_comments)
+        export(self.store,self.root/'export');dest=self.root/'relationship-restored'
+        shutil.copytree(self.root/'export',dest/'export');restored=Store(dest/'.runtime/review.sqlite3')
+        try:
+            restore(restored,dest/'export')
+            self.assertEqual(restored.comments(),original_comments)
+            self.assertEqual(p.record(restored,revision_id=old['id']),{**old,'current_revision':latest['id']})
+            self.assertEqual(p.source_excerpt(restored,old['payload']['sources'][0]),original_source)
+            self.assertEqual(p.record(restored,'belongs')['payload']['label'],'保管歌本')
+        finally:restored.close()
+
     def test_material_provenance_stays_on_exact_call_and_fields_are_commentable(self):
         self.setup_plans();plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan.pop('tool')
         self.change('need-full-overall',generation=plan);self.decide();manifest=g.package(self.store,'need-full-overall')

@@ -36,7 +36,7 @@
 
 两个端点必须是不同的准确 ENTITY 修订；方向为 `forward` 或 `mutual`。类型为人物 `personal`、空间 `spatial`、归属 `ownership`、使用 `use`、演唱／演出 `performance`。依据区分剧本事实 `script` 与制作选择 `production`；必须保留准确来源。`applies_to` 标明已核实的剧情适用范围，稳定身份关系可为空；不能把一次使用推断成永久持有。撤回用 `status: withdrawn` 新修订，原评论和历史采纳保留。
 
-写入使用既有 `POST /api/production/import` 或 `production-import FILE`，携带 `expected_version` 与 `expected_heads`；可 `--validate-only` 预演。读取沿用 `/api/production?object_id=ID[&revision_id=SHA]`／`production-get ID`，不增加另一套存储。实体审阅响应增加 `relationships`、`related_entities`、`materialContexts`；准确关系修订纳入采纳的 `scope.relationships`。新增、撤回或改变关系后，需要重新认可生成准备；已有采纳仍可显式取消。
+写入使用既有 `POST /api/production/import` 或 `production-import FILE`，携带 `expected_version` 与 `expected_heads`；可 `--validate-only` 预演。读取沿用 `/api/production?object_id=ID[&revision_id=SHA]`／`production-get --object ID [--revision SHA]`，不增加另一套存储。实体审阅响应增加 `relationships`、`related_entities`、`materialContexts`；准确关系修订纳入采纳的 `scope.relationships`。新增、撤回或改变关系后，需要重新认可生成准备；已有采纳仍可显式取消。
 
 ## 原始生成记录与兼容
 
@@ -52,7 +52,7 @@ CALL 投影 `@review/call/model`、`@review/call/parameters`、`@review/call/pro
 
 素材管理以平铺分组按钮筛选记录类型和媒体类型，可与搜索组合，全部类别包括零结果仍可访问。数量按当前列表对象计数，历史修订只算一次；真实未生成的状态需求单独计为需求，不算实际素材或就绪。声音占位使用声音图标，不显示人物封面。已有准确结果时显示原件，后台需求详情包含候选准确修订及原调用上下文；筛选不改变正在阅读的准确版本。
 
-剧情依据返回匹配所引分集修订的剧本版本，并限定到引用的场次与正文块，不追随当前剧本。共用 `openReviewDialog` 统一标题、关闭按钮、字体和间距；Esc 只关闭最上层，焦点回到触发控件，阅读、版本和未提交草稿保持。多个来源按钮按实际数量留足关系图高度，不裁切证据入口。
+剧情依据返回匹配所引分集修订的剧本版本，并限定到引用的场次与正文块，不追随当前剧本。剧情依据、参考输入和放大原图复用 `openReviewDialog`，统一标题、关闭按钮、字体和间距；原图仍按完整比例显示。Esc 只关闭最上层，焦点回到触发控件，阅读、版本和未提交草稿保持。参考图可点击或使用 Enter／空格打开原图，再返回参考弹窗。多个来源按钮按实际数量留足关系图高度，不裁切证据入口。
 
 ## 验证与恢复
 

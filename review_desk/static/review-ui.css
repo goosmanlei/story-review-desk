@@ -98,3 +98,6 @@
 .review-dialog-body h3{font-size:17px;margin:0 0 16px}.review-dialog-body p{margin:0 0 16px;white-space:pre-wrap;overflow-wrap:anywhere}
 .review-dialog-body pre{white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:600px){.review-dialog-header{padding:16px;gap:12px}.review-dialog-header h2{font-size:18px}.review-dialog-body{padding:16px}}
+.review-dialog.structure-image-dialog{width:calc(100vw - 32px);height:calc(100dvh - 32px);max-width:none;max-height:none}
+.review-dialog.structure-image-dialog .review-dialog-body{flex:1;min-height:0;background:#191d19;padding:16px}
+@media(max-width:700px){.review-dialog.structure-image-dialog{width:calc(100vw - 16px);height:calc(100dvh - 16px)}}
