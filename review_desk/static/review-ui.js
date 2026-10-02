@@ -25,7 +25,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true){
   const from=selection.range?.start_seconds??0,to=selection.range?.end_seconds??component.duration_seconds,span=to-from;
   const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;
   const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src='/api/production/files/'+encodeURIComponent(component.file);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
-  const focus=()=>{if(isEntityReview())entityReviewFocus(record)};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
+  const focus=()=>{if(review)focusProductionReview({record,history:[record],uses:[]})};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
   const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
   const mute=productionButton(top,'静音',()=>{media.muted=!media.muted;mute.textContent=media.muted?'恢复声音':'静音'});box.append(top);
   const track=el('div','review-timeline');track.tabIndex=0;track.setAttribute('role','slider');track.setAttribute('aria-label',audio?'音频时间轴':'视频时间轴');track.setAttribute('aria-valuemin',String(from));track.setAttribute('aria-valuemax',String(to));

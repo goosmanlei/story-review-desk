@@ -86,7 +86,7 @@ class GenerationTest(unittest.TestCase):
 
     def test_execution_call_checks_current_decision_and_exact_inputs(self):
         self.setup_plans();self.decide();package=g.package(self.store,'need-full-overall')
-        call=self.spec('draw','CALL',method='generation',status='submitted',inputs=[],outputs=[],generation_requirement=package['requirement'],generation_acceptances=package['acceptances'],**{k:package[k] for k in ('tool','model','parameters','prompt')})
+        call=self.spec('draw','CALL',method='generation',status='submitted',tool='chosen-at-execution',inputs=[],outputs=[],generation_requirement=package['requirement'],generation_acceptances=package['acceptances'],**{k:package[k] for k in ('model','parameters','prompt')})
         wrong=copy.deepcopy(call);wrong['payload']['prompt']='未采纳的输入'
         with self.assertRaises(Conflict):self.put(wrong)
         self.put(call);self.decide('revoke')

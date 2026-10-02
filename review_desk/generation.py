@@ -29,7 +29,7 @@ def validate_plan(store, object_id, payload):
         return
     if not isinstance(plan, dict) or plan.get('format') != PLAN or plan.get('method') not in ('generate', 'reuse'):
         raise ValueError('unsupported generation plan')
-    for key in ('tool', 'model', 'prompt'):
+    for key in ('model', 'prompt'):
         p._text(plan.get(key), 'generation ' + key)
     if not isinstance(plan.get('parameters'), dict) or not isinstance(plan.get('output'), dict):
         raise ValueError('generation parameters and output must be objects')
@@ -110,7 +110,9 @@ def current_scope(store, entity_id, rows=None):
             dependencies[target['id']] = ref(target)
             if target['kind'] == 'REQUIREMENT':
                 todo.append(target)
+    from .entity_relations import for_entity
     return {'entity': ref(entity), 'states': [ref(r) for r in states],
+            'relationships': [ref(r) for r in for_entity(rows, entity_id)],
             'requirements': [ref(r) for r in requirements],
             'dependencies': sorted((r for rid,r in dependencies.items() if rid not in owned), key=lambda r:(r['object_id'],r['revision_id']))}
 
@@ -118,7 +120,8 @@ def current_scope(store, entity_id, rows=None):
 def contents(store, scope):
     return {'entity':p.ref_record(store, scope['entity'], {'ENTITY'}),
             'states':[p.ref_record(store, r, {'STATE'}) for r in scope['states']],
-            'requirements':[p.ref_record(store, r, {'REQUIREMENT'}) for r in scope['requirements']]}
+            'requirements':[p.ref_record(store, r, {'REQUIREMENT'}) for r in scope.get('requirements', [])],
+            'relationships':[p.ref_record(store, r, {'RELATION'}) for r in scope.get('relationships', [])]}
 
 
 def preparation(store, scope):
@@ -147,56 +150,74 @@ def preparation(store, scope):
 
 
 def decision(store, entity_id):
+    # Once a canonical decision exists it permanently supersedes old content
+    # decisions, including after cancellation. Never fall back to an older yes.
     try:
-        return p.record(store,decision_id(entity_id))
+        return p.record(store, decision_id(entity_id))
     except KeyError:
-        return None
+        row = store.db.execute("""SELECT r.id FROM objects o JOIN revisions r ON r.id=o.current_revision
+            WHERE o.kind='JUDGMENT' AND json_extract(r.payload,'$.acceptance_model')='entity-current-v1'
+            AND json_extract(r.payload,'$.target.object_id')=? ORDER BY r.created_at DESC,r.id DESC LIMIT 1""", (entity_id,)).fetchone()
+        return p.record(store, revision_id=row[0]) if row else None
 
 
 def accepted(store, entity_id, scope=None):
     d=decision(store,entity_id)
     scope = scope or current_scope(store,entity_id)
-    return d if d and d['payload']['verdict']=='accepted' and d['payload']['acceptance_scope']==scope and preparation(store,scope)['complete'] else None
+    return d if d and d['payload'].get('acceptance_model')==MODEL and d['payload']['verdict']=='accepted' and d['payload']['acceptance_scope']==scope and preparation(store,scope)['complete'] else None
 
 
 def validate_decision(store, object_id, payload, check_current=True):
     scope=payload.get('acceptance_scope')
     if payload.get('acceptance_model')!=MODEL or payload.get('verdict') not in ('accepted','revoked'):
         raise ValueError('unsupported generation decision')
-    if not isinstance(scope,dict) or set(scope)!={'entity','states','requirements','dependencies'}:
-        raise ValueError('generation acceptance requires exact content scope')
-    data=contents(store,scope);eid=data['entity']['object_id']
+    if not isinstance(scope,dict):raise ValueError('decision requires exact scope')
+    entity=p.ref_record(store,scope.get('entity'),{'ENTITY'});eid=entity['object_id']
     if object_id!=decision_id(eid) or payload['target']!=scope['entity']:
         raise ValueError('generation decision must use the entity decision identity')
-    for refs in (scope['states'],scope['requirements'],scope['dependencies']):
+    if payload['verdict']=='revoked':
+        previous=p.ref_record(store,payload.get('previous_decision'),{'JUDGMENT'})
+        if (previous['payload'].get('acceptance_model') not in (MODEL,'entity-current-v1')
+                or previous['payload'].get('verdict')!='accepted'
+                or previous['payload'].get('acceptance_scope')!=scope
+                or previous['payload']['target']['object_id']!=eid):
+            raise ValueError('revoke must name the exact accepted decision')
+        if check_current:
+            old=decision(store,eid)
+            if not old or ref(old)!=payload['previous_decision']:
+                raise Conflict('采纳记录已有变化，请刷新后操作。')
+        return
+    if set(scope) not in ({'entity','states','requirements','dependencies'}, {'entity','states','requirements','dependencies','relationships'}):
+        raise ValueError('generation acceptance requires exact content scope')
+    data=contents(store,scope)
+    for refs in (scope['states'],scope['requirements'],scope['dependencies'],scope.get('relationships',[])):
         if len({canonical(r) for r in refs})!=len(refs):raise ValueError('duplicate accepted reference')
     if any(not complete(s) or s['payload']['entity']['object_id']!=eid for s in data['states']):
         raise ValueError('accepted state belongs to another entity')
     if any(r['payload']['scope'] not in scope['states'] for r in data['requirements']):
         raise ValueError('accepted requirement belongs to another state')
+    from .entity_relations import for_entity
+    if for_entity(data['relationships'],eid)!=data['relationships']:
+        raise ValueError('accepted relationships must directly involve this entity')
     for r in scope['dependencies']:p.ref_record(store,r,{'ASSET','REQUIREMENT'})
-    if payload['verdict']=='revoked':
-        previous=p.ref_record(store,payload.get('previous_decision'),{'JUDGMENT'})
-        if previous['object_id']!=object_id or previous['payload'].get('verdict')!='accepted' or previous['payload'].get('acceptance_scope')!=scope:
-            raise ValueError('revoke must name the exact accepted decision')
     if not check_current:return
-    old=decision(store,eid)
-    if payload['verdict']=='revoked':
-        if not old or old['id']!=payload['previous_decision']['revision_id']:
-            raise Conflict('采纳记录已有变化，请刷新后操作。')
-    else:
-        if scope!=current_scope(store,eid):raise Conflict('设定或生成方案已有更新，请刷新后采纳。')
-        if not preparation(store,scope)['complete']:raise Conflict('制作描述或素材方案尚未完整。')
-        if accepted(store,eid,scope):raise Conflict('当前方案已采纳。')
+    if scope!=current_scope(store,eid):raise Conflict('设定、关系或生成方案已有更新，请刷新后采纳。')
+    if not preparation(store,scope)['complete']:raise Conflict('制作描述或素材方案尚未完整。')
+    if accepted(store,eid,scope):raise Conflict('当前方案已采纳。')
 
 
 def decide(store, value):
-    eid=value['entity_id'];scope=value['scope'];old=decision(store,eid)
+    eid=value['entity_id'];old=decision(store,eid)
     if type(value.get('expected_version')) is not int:raise ValueError('expected_version required')
     action=value.get('action')
     if action not in ('accept','revoke'):raise ValueError('action must be accept or revoke')
-    if action=='revoke' and (not old or old['payload']['verdict']!='accepted'):
-        raise Conflict('没有可取消的当前采纳。')
+    if action=='revoke':
+        if not old or old['payload']['verdict']!='accepted':raise Conflict('没有可取消的当前采纳。')
+        if value.get('decision_ref') is not None and value['decision_ref']!=ref(old):raise Conflict('采纳记录已有变化，请刷新后操作。')
+        if old['payload'].get('acceptance_model')!='entity-generation-v1' and value.get('decision_ref')!=ref(old):
+            raise Conflict('取消旧采纳须指定准确决定。')
+        scope=old['payload']['acceptance_scope']
+    else:scope=value['scope']
     payload={'format':'production-judgment-v1','title':p.ref_record(store,scope['entity'])['payload']['title']+' · '+('采纳生成方案' if action=='accept' else '取消采纳'),
              'blocks':[{'id':'decision','text':value['reason']}], 'target':scope['entity'],'verdict':'accepted' if action=='accept' else 'revoked',
              'acceptance_model':MODEL,'acceptance_scope':scope,'actor':value['actor'],'reason':value['reason']}
@@ -205,39 +226,56 @@ def decide(store, value):
 
 
 def snapshot(store, entity_id, revision_id=None):
-    from . import entity_review as er
+    from . import entity_review as er, entity_relations as rel, material_review as media_review
     if revision_id:
         selected=p.record(store,revision_id=revision_id)
-        if selected['payload'].get('acceptance_model')!=MODEL:
-            result=er.legacy_snapshot(store,entity_id,revision_id)
-            result.update({'legacy_acceptance':True,'can_accept':False,'can_revoke':False,'requirements':[]})
+        legacy=selected['payload'].get('acceptance_model')!=MODEL
+        legacy_cancel=selected['payload'].get('acceptance_model')==MODEL and 'media' in selected['payload'].get('acceptance_scope',{})
+        if legacy or legacy_cancel:
+            if legacy_cancel and selected['object_id']!=decision_id(entity_id):raise ValueError('historical decision belongs to another entity')
+            result=er.legacy_snapshot(store,entity_id,selected['payload']['previous_decision']['revision_id'] if legacy_cancel else revision_id)
+            result.update({'legacy_acceptance':True,'can_accept':False,'can_revoke':False,'requirements':[], 'relationships':[], 'related_entities':[]})
+            if legacy_cancel:result.update(accepted=None,status='revoked')
+            result['materialContexts']=media_review.enrich_media(store,result['media'])
             return result
         if selected['object_id']!=decision_id(entity_id):raise ValueError('historical decision belongs to another entity')
         scope=selected['payload']['acceptance_scope']
     else:
         selected=None;scope=current_scope(store,entity_id)
     data=contents(store,scope);rows=p.current_records(store)
-    # Legacy aggregation keeps historical comments and precise media coverage;
-    # no legacy acceptance can serve as a generation authorization.
     base=er.legacy_snapshot(store,entity_id)
     media=er.related_media(store,rows,entity_id,data['states'])
     data['media']=er.scope_contents(store,{'entity':scope['entity'],'states':scope['states'],'media':media})['media']
-    targets={r['id']:r for r in [*base['comment_records'],data['entity'],*data['states'],*data['requirements'],*(m['record'] for m in data['media'])]}
-    need_ids={r['object_id'] for r in data['requirements']}
+    contexts=media_review.enrich_media(store,data['media'])
+    calls=[c['call'] for c in contexts.values() if c['call']]
+    for oid in {m['record']['object_id'] for m in data['media']}:
+        for history in store.db.execute('SELECT id FROM revisions WHERE object_id=?',(oid,)):
+            asset=p.record(store,revision_id=history[0])
+            contexts.setdefault(asset['id'],media_review.context(store,asset))
+            if contexts[asset['id']]['call']:calls.append(contexts[asset['id']]['call'])
+    targets={r['id']:r for r in [*base['comment_records'],data['entity'],*data['states'],*data['requirements'],*data['relationships'],*calls,*(m['record'] for m in data['media'])]}
+    related_ids={r['object_id'] for r in [*data['requirements'],*data['relationships'],*calls]}
+    # Keep opinions on withdrawn relationships and earlier actual inputs discoverable.
     for c in store.comments():
-        if c.get('target_object_id') in need_ids and c.get('target_revision_id') not in targets:
-            r=p.record(store,c['target_object_id'],c['target_revision_id']);targets[r['id']]=r
+        rid=c.get('target_revision_id')
+        if not rid or rid in targets:continue
+        r=p.record(store,c['target_object_id'],rid)
+        if r['object_id'] in related_ids or rel.for_entity([r],entity_id):targets[rid]=r
     d=decision(store,entity_id);a=selected if selected and selected['payload']['verdict']=='accepted' else (accepted(store,entity_id,scope) if not revision_id else None)
+    revoke=d if not revision_id and d and d['payload']['verdict']=='accepted' else None
     history=[]
-    if d:
-        for row in store.db.execute('SELECT id FROM revisions WHERE object_id=? ORDER BY version DESC',(d['object_id'],)):
-            h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict']})
+    for row in store.db.execute("""SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT'
+            AND json_extract(r.payload,'$.acceptance_model') IN ('entity-current-v1','entity-generation-v1')
+            AND json_extract(r.payload,'$.target.object_id')=? ORDER BY r.created_at DESC,r.version DESC,r.id DESC""",(entity_id,)):
+        h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict']})
     prep=preparation(store,scope)
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
-              for r in [data['entity'],*data['states'],*data['requirements'],*(m['record'] for m in data['media'])]}
-    return {**base,**data,'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
+              for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
+    return {**base,**data,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+            'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'status':'accepted' if a else 'unaccepted','can_accept':not revision_id and not a and prep['complete'],
-            'can_revoke':not revision_id and bool(a),'decision_version':d['version'] if d else 0,'preparation':prep,'history':history,
+            'can_revoke':bool(revoke),'revoke_target':ref(revoke) if revoke else None,
+            'decision_version':d['version'] if d and d['object_id']==decision_id(entity_id) else 0,'preparation':prep,'history':history,
             'previous_accepted':None,'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
 
 
@@ -284,7 +322,7 @@ def package(store, requirement_id):
     if not ready['ready']:raise Conflict('；'.join(ready['issues']))
     plan=ready['plan']
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']),'acceptances':ready['acceptances'],
-            'method':plan['method'],'tool':plan['tool'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
+            'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
             'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':ready['inputs'],'i2i_depth':ready['i2i_depth'],
             'execution_note':'执行前重新检查有效采纳、参考文件、平台可用性及现有额度；此包不表示已经调用模型。'}
 
@@ -314,7 +352,7 @@ def validate_call(store, object_id, payload):
     manifest=package(store,need['object_id'])
     if manifest['requirement']!=payload['generation_requirement'] or manifest['acceptances']!=payload.get('generation_acceptances'):
         raise Conflict('生成依据或采纳已变化')
-    for field in ('tool','model','parameters','prompt'):
+    for field in ('model','parameters','prompt'):
         if manifest[field]!=payload.get(field):raise Conflict('实际生成输入不同于采纳方案：'+field)
     expected=[{'object_id':v['asset']['object_id'],'revision_id':v['asset']['revision_id'],'component_id':v['component']['id'],**{k:v[k] for k in ('crop','range') if k in v}} for v in manifest['inputs']]
     actual=[v for v in payload['inputs'] if v.get('component_id')]

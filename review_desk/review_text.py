@@ -34,6 +34,10 @@ def production_text_blocks(payload):
                   ('generation.output.description', plan.get('output', {}).get('description')),
                   ('generation.output.review_criteria', '\n'.join(plan.get('output', {}).get('review_criteria', [])))]
         extra += [(f'generation.inputs.{i}.use', value.get('use')) for i,value in enumerate(plan.get('inputs', []))]
+    if payload.get('format') == 'production-call-v1':
+        extra += [('call.model', payload.get('model')),
+                  ('call.parameters', json.dumps({k:v for k,v in payload.get('parameters', {}).items() if not (k=='prompt' and v==payload.get('prompt'))}, ensure_ascii=False, sort_keys=True, indent=2)),
+                  ('call.prompt', payload.get('prompt'))]
     for field,text in extra:
         if isinstance(text,str) and text.strip() and text not in body and text not in seen:
             seen.add(text)
