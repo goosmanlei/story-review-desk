@@ -26,6 +26,8 @@ def production_text_blocks(payload):
             blocks.append({'id': f'{prefix}{field}/{index}', 'text': text,
                            'field': field, 'index': index})
     extra = [('production_description', payload.get('production_description'))]
+    if payload.get('relation_type') == 'entity':
+        extra.append(('relationship.label', payload.get('label')))
     plan = payload.get('generation') or {}
     if plan:
         extra += [('generation.tool', plan.get('tool')), ('generation.model', plan.get('model')),

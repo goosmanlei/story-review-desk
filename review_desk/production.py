@@ -481,7 +481,7 @@ def restore_records(store, batches):
 
 
 def _import_records(store, document, validate_only=False, *, check_current=True):
-    if not isinstance(document, dict) or document.get("format") != "production-import-v1" or not isinstance(document.get("records"), list) or not document["records"]:
+    if not isinstance(document, dict) or document.get("format") != "production-import-v1" or not isinstance(document.get("records"), list) or not (document["records"] or document.get("remove_unreferenced_requirements")):
         raise ValueError("nonempty production-import-v1 records are required")
     results, resolved = [], {}
     store.db.execute("BEGIN IMMEDIATE")
@@ -493,6 +493,7 @@ def _import_records(store, document, validate_only=False, *, check_current=True)
             current = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
             if not current or current['current_revision'] != revision_id:
                 raise Conflict('production planning input changed: ' + object_id)
+        removed = remove_unreferenced_requirements(store, document.get("remove_unreferenced_requirements", []))
         for source in document["records"]:
             if not isinstance(source, dict) or not ID.fullmatch(str(source.get("object_id", ""))):
                 raise ValueError("invalid production object id")
@@ -518,7 +519,34 @@ def _import_records(store, document, validate_only=False, *, check_current=True)
     except BaseException:
         store.db.rollback()
         raise
-    return {"validated_only": validate_only, "records": results}
+    return {"validated_only": validate_only, "records": results, "removed": removed}
+
+
+def remove_unreferenced_requirements(store, removals):
+    """Explicit import-only deletion. Refuse comments and all retained history uses."""
+    if not isinstance(removals, list):
+        raise ValueError('removals must be a list of exact requirement references')
+    ids = set()
+    for ref in removals:
+        row = ref_record(store, ref, {'REQUIREMENT'})
+        if row['id'] != row['current_revision'] or row['object_id'] in ids:
+            raise Conflict('requirement removal head changed or duplicated')
+        ids.add(row['object_id'])
+    if not ids:
+        return []
+    revisions = {r['id']: r['object_id'] for r in store.db.execute('SELECT id,object_id FROM revisions')}
+    for row in store.db.execute('SELECT target_object_id FROM comments'):
+        if row[0] in ids:
+            raise Conflict('cannot remove a requirement with comments')
+    for row in store.db.execute('SELECT from_revision,to_revision FROM dependencies'):
+        if revisions[row[1]] in ids and revisions[row[0]] not in ids:
+            raise Conflict('cannot remove a requirement referenced by retained history')
+    for oid in sorted(ids):
+        store.db.execute('DELETE FROM dependencies WHERE from_revision IN (SELECT id FROM revisions WHERE object_id=?)', (oid,))
+    for oid in sorted(ids):
+        store.db.execute('DELETE FROM revisions WHERE object_id=?', (oid,))
+        store.db.execute('DELETE FROM objects WHERE id=?', (oid,))
+    return sorted(ids)
 
 
 def adopt(store, value):

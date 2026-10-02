@@ -221,3 +221,9 @@ CLI 均从系统仓库运行 `python3 -m review_desk --instance /path/to/instanc
 [Kitsu 的 Breakdown & Casting](https://kitsu.cg-wire.com/guides/production/breakdown-casting/)展示按集、序列或镜头关联资产，并支持批量导入。本项目借鉴“先检查使用位置，再补资产缺项”的阅读路径；精确实体状态、来源修订和用户定稿门槛是本项目自己的要求，不因采用同类页面就继承 Kitsu 的任务系统。
 
 [ftrack 的 Versions 与 Components](https://help.ftrack-studio.backlight.co/hc/en-us/articles/13129800589591-Introduction-to-Versions)区分可审阅结果版本及其文件组成。本项目据此分别呈现候选版本、原件／预览／工程；使用既有 SQLite 不可变修订和本地校验清单，无需接入 ftrack 存储或重建资产版本平台。上述来源于 2026-09-30 现场读取；它们解释参照，不替代本项目实际验证。
+
+## 描述型声音状态与显式需求清理
+
+完整状态可声明 `reference_mode: "description"`，表示仍会实际呈现／发声，但通过完整描述随镜头生成，无须为它单独提供整体原件。默认 `material` 保持原行为。描述型状态必须有非空 `production_description`，仍校验实体归属、准确来源、转换与镜头使用；不能与只表示提及的 `reference_media: "none"` 混用。它不免除镜头其余素材，也不代表视听产出已完成。具体音色、旋律及模型编排由故事实例负责。
+
+用户明确要求物理删除尚未被使用的计划时，可在既有 `POST /api/production/import` 或 CLI `production-import FILE` 的批次中增加 `remove_unreferenced_requirements`，值为准确 `{object_id, revision_id}` 数组。`records` 可为空。该操作仅允许 REQUIREMENT：核对当前版本，拒绝存在任何历史评论、保留对象的历史依赖或非需求身份的删除；校验与删除全部修订、依赖及同批新修订在一个事务完成，任何失败完整回滚。`expected_heads` 与 `--validate-only` 仍有效。返回 `removed` 为实际删除对象 ID，不提供页面删除按钮，不将撤回与物理删除混同。删除前必须另存完整可恢复导出；实际媒体及已执行调用应保留。

@@ -21,3 +21,13 @@ test('CALL review uses server numeric spelling and omits only a duplicate prompt
  const blocks=ctx.productionTextBlocks(row);assert.equal(blocks.find(b=>b.field==='call.parameters').text,row.review_call_parameter_text);
  assert.equal(blocks.find(b=>b.field==='call.prompt').text,'words');assert.equal(row.payload.parameters.prompt,'words');
 });
+test('older asset versions keep their card using placement context without rewriting history',()=>{
+ const current=need('voice','v3','audio'),previous=item('voice-asset',[],'audio');
+ previous.placement_requirements=[ref(current)];const before=JSON.stringify(previous.record);
+ const cards=ctx.materialCardModels([current],[previous]);assert.equal(cards.length,1);assert.equal(cards[0].candidates[0],previous);assert.equal(JSON.stringify(previous.record),before);
+});
+
+test('relationship labels changed independently of prose still have an exact anchor',()=>{
+ const r={payload:{format:'production-relation-v1',relation_type:'entity',blocks:[{id:'relationship',text:'旧说法'}],label:'保管歌本'}};
+ const block=ctx.productionTextBlocks(r).find(b=>b.field==='relationship.label');assert.equal(block.text,'保管歌本');assert.equal(block.id,'@review/relationship/label');
+});

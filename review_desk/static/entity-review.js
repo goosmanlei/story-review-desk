@@ -95,10 +95,7 @@ function renderEntityReview(root){
     try{await api('/api/production/entity-decision',{method:'POST',body:JSON.stringify({entity_id:data.entity.object_id,action,decision_ref:data.revoke_target,expected_version:data.decision_version,scope:data.scope,actor:'用户',reason})});if(state.entityReview===data){await reloadEntityReview();toast(action==='accept'?'已采纳，可推进素材生成':'已取消采纳')}}
     catch(error){if(state.entityReview===data)await reloadEntityReview();throw error}
   });accept.classList.add('entity-review-accept');accept.title='采纳基础信息、关系、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=(!data.can_accept&&!data.can_revoke)||viewingHistory;
-  if(data.accepted)nodeText('span','production-pill','已采纳',actions);
-  if(data.history.length){const more=el('details','entity-review-more');nodeText('summary',null,'更多',more);for(const item of data.history)productionButton(more,`${item.verdict==='revoked'?'取消采纳':'采纳'} · ${new Date(item.created_at).toLocaleString('zh-CN')}`,()=>reloadEntityReview(item.revision_id));actions.append(more)}
   header.append(actions);root.append(header);
-  if(viewingHistory){const warning=el('div','entity-review-notice');nodeText('span',null,data.historical?'历史采纳范围':'历史内容',warning);productionButton(warning,'返回当前版本',()=>reloadEntityReview());root.append(warning)}
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);entityVersionControl(basicHeading,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});basics.append(basicHeading);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
@@ -128,10 +125,10 @@ function renderMaterialPlaceholder(parent,need){
 function renderStateMaterials(parent,data,form){
   const needs=(data.requirements||[]).filter(r=>r.payload.scope.object_id===form.object_id&&r.payload.scope.revision_id===form.id).map(r=>data.localVersions?.[r.object_id]||r);
   const items=entityReviewStateMedia(data,form).map(original=>{
-    const record=data.localVersions?.[original.record.object_id]||original.record,component=record.payload.components.find(c=>c.id===original.component_id);
-    return {...original,record,component,review_context:data.materialContexts?.[record.id]||(record.id===original.record.id?original.review_context:null),...(record.id!==original.record.id?{crop:null,range:null}:{})};
+    const record=data.localVersions?.[original.record.object_id]||original.record,component=record.payload.components.find(c=>c.id===original.component_id)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0];
+    return {...original,record,component,review_context:data.materialContexts?.[record.id]||(record.id===original.record.id?original.review_context:null),...(record.id!==original.record.id?{crop:null,range:null,placement_requirements:original.record.payload.candidate_requirements||[]}:{})};
   }).filter(i=>i.component);
-  if(!needs.length&&!items.length){nodeText('p','production-meta',form.payload.reference_media==='none'?'仅被提及，无需生成素材':'此状态的素材方案待完善',parent);return}
+  if(!needs.length&&!items.length){nodeText('p','production-meta',form.payload.reference_media==='none'?'仅被提及，无需生成素材':form.payload.reference_mode==='description'?'按状态描述随镜头生成':'此状态的素材方案待完善',parent);return}
   const grid=el('section','entity-review-materials');grid.setAttribute('aria-label','此状态的素材与生成方案');
   const change=row=>{data.localVersions||={};data.localVersions[row.object_id]=row};
   for(const model of materialCardModels(needs,items))renderMaterialCard(grid,model,{planVersion:(h,row)=>entityVersionControl(h,row,change),assetVersion:(h,item)=>entityVersionControl(h,item.record,change)});
