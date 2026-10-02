@@ -62,11 +62,12 @@ def register(store, row):
         active = ensure(store, row['object_id'])
         member(store, row['object_id'], active['number'], row, 'requirement/plan update')
     elif row['kind'] == 'CALL':
-        previous = store.db.execute('SELECT m.* FROM material_members m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=? ORDER BY r.version DESC', (row['object_id'],)).fetchall()
-        targets = {(v['material_id'], v['number']) for v in previous}
-        if not targets and payload.get('generation_requirement'):
+        previous = store.db.execute("SELECT m.*,json_extract(r.payload,'$.status') AS call_status FROM material_members m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=? ORDER BY r.version DESC", (row['object_id'],)).fetchall()
+        executed = [v for v in previous if v['call_status'] in ('submitted','completed')]
+        targets = {(v['material_id'], v['number']) for v in executed or previous}
+        if payload.get('generation_requirement') and (not targets or not executed and payload.get('status') in ('submitted','completed')):
             mid = payload['generation_requirement']['object_id']
-            targets.add((mid, ensure(store, mid)['number']))
+            targets = {(mid, ensure(store, mid)['number'])}
         for mid, number in targets:
             member(store, mid, number, row, 'exact call lifecycle')
     elif row['kind'] == 'ASSET':
