@@ -357,9 +357,10 @@ def validate_call(store, object_id, payload):
     except KeyError:old=None
     # Finishing a real submitted call keeps its already executed inputs, even
     # when the user has since revoked approval or revised the next plan.
-    if old and old['payload'].get('status') in ('submitted','completed'):
+    executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed') LIMIT 1", (object_id,)).fetchone()
+    if executed:
         for key in ('generation_requirement','generation_acceptances','method','tool','model','parameters','prompt','inputs'):
-            if payload.get(key)!=old['payload'].get(key):raise Conflict('完成记录不能改写已经执行的生成输入')
+            if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
     if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return
     need=p.ref_record(store,payload['generation_requirement'],{'REQUIREMENT'})

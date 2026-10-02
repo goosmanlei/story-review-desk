@@ -128,6 +128,18 @@ class MaterialVersionsTest(unittest.TestCase):
         self.assertEqual(view['material_versions']['need-full-overall'][0]['number'],1)
         self.assertEqual(view['material_versions']['voice'][0]['number'],1)
 
+    def test_delayed_first_submission_uses_active_round_and_input_history_is_frozen(self):
+        self.setup_plans();self.decide();manifest=g.package(self.store,'need-full-overall')
+        self.put(self.spec('delayed','CALL',method='generation',tool='test',status='planned',inputs=[],outputs=[],
+            generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
+            **{k:manifest[k] for k in ('model','parameters','prompt')}))
+        self.generate();self.comment(1);self.change('delayed',status='submitted')
+        current=p.record(self.store,'delayed')
+        self.assertEqual({m['number'] for m in mv.memberships(self.store,current['id'])},{2})
+        before=mv.fingerprint(self.store)
+        with self.assertRaises(Conflict):self.change('delayed',prompt='rewrite real input')
+        self.assertEqual(before,mv.fingerprint(self.store))
+
     def test_migration_guard_idempotence_and_export_recovery(self):
         self.setup_plans();self.generate();self.comment(1,cid='revision');export(self.store,self.root/'export')
         dest=self.root/'restored';shutil.copytree(self.root/'export',dest/'export');recovered=Store(dest/'.runtime/review.sqlite3')
