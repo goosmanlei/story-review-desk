@@ -71,7 +71,9 @@ function materialMedia(parent,item){
   const focus=()=>focusProductionReview({record,history:[record],uses:[]});pane.addEventListener('pointerdown',focus,true);pane.addEventListener('focusin',focus,true);
   if(component.mime.startsWith('image/')){
     pane.append(renderStructureVisual({...component,title:item.label||record.payload.title,alt:item.label||record.payload.title,description:`${component.width} × ${component.height}`},true));
-    if(item.crop)pane.querySelector('.structure-visual-stage').dataset.reviewCrop=JSON.stringify(item.crop);
+    const stage=pane.querySelector('.structure-visual-stage');
+    if(component.width&&component.height)stage.style.maxWidth=(420*component.width/component.height)+'px';
+    if(item.crop)stage.dataset.reviewCrop=JSON.stringify(item.crop);
   }else if(/^(audio|video)\//.test(component.mime))reviewMediaPlayer(pane,component,record,item);
   else nodeText('p','production-meta',component.id+' · '+component.mime,pane);
   link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
