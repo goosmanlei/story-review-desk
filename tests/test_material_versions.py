@@ -129,6 +129,32 @@ class MaterialVersionsTest(unittest.TestCase):
         self.assertEqual(view['material_versions']['need-full-overall'][0]['number'],1)
         self.assertEqual(view['material_versions']['voice'][0]['number'],1)
 
+    def test_asset_entry_keeps_each_round_candidate_actual_call_context(self):
+        self.setup_plans();self.generate()
+        first=self.ref('generated')['revision_id']
+        self.change('need-full-overall',generation={
+            **p.record(self.store,'need-full-overall')['payload']['generation'],
+            'prompt':'第二次实际调用的不同提示词'})
+        self.generate('call2','another-candidate')
+        second=self.ref('another-candidate')['revision_id']
+        self.comment(1)
+        self.generate('call3','next-round-candidate')
+        third=self.ref('next-round-candidate')['revision_id']
+        expected={first:'call1',second:'call2',third:'call3'}
+        for entry in ('generated','another-candidate','next-round-candidate','need-full-overall'):
+            view=p.snapshot(self.store,object_id=entry)
+            rounds=view['material_versions']['need-full-overall']
+            self.assertEqual([r['number'] for r in rounds],[2,1])
+            for round in rounds:
+                for candidate in round['results']:
+                    context=view['review_contexts'][candidate['id']]
+                    self.assertEqual(context['call']['object_id'],expected[candidate['id']])
+                    original=p.ref_record(self.store,candidate['payload']['production'])
+                    self.assertEqual(context['call']['id'],original['id'])
+                    self.assertEqual(context['call']['payload']['prompt'],original['payload']['prompt'])
+            self.assertNotEqual(view['review_contexts'][first]['call']['payload']['prompt'],
+                                view['review_contexts'][second]['call']['payload']['prompt'])
+
     def test_delayed_first_submission_uses_active_round_and_input_history_is_frozen(self):
         self.setup_plans();self.decide();manifest=g.package(self.store,'need-full-overall')
         self.put(self.spec('delayed','CALL',method='generation',tool='test',status='planned',inputs=[],outputs=[],
