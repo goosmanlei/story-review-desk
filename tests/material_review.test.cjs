@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-const ctx={};vm.createContext(ctx);
+const ctx={URLSearchParams,state:{productionRecords:[]}};vm.createContext(ctx);
 for(const f of ['production.js','material-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',f),'utf8'),ctx);
 const need=(id,revision=id+'-v1',media='image')=>({object_id:id,id:revision,current_revision:revision,payload:{media_type:media}});
 const item=(id,refs,media='image')=>({id,record:{object_id:id,id:id+'-v1',payload:{media_type:media,candidate_requirements:refs}}});
@@ -30,4 +30,21 @@ test('older asset versions keep their card using placement context without rewri
 test('relationship labels changed independently of prose still have an exact anchor',()=>{
  const r={payload:{format:'production-relation-v1',relation_type:'entity',blocks:[{id:'relationship',text:'旧说法'}],label:'保管歌本'}};
  const block=ctx.productionTextBlocks(r).find(b=>b.field==='relationship.label');assert.equal(block.text,'保管歌本');assert.equal(block.id,'@review/relationship/label');
+});
+
+test('story references use the exact source reader and preserve scene and block limits',()=>{
+ const ref={object_id:'episode',revision_id:'old-version',scene_id:'s010',block_ids:['b005','b006']};
+ const request=ctx.materialReferenceRequest(ref,true),url=new URL(request.url,'http://localhost');
+ assert.equal(request.isSource,true);assert.equal(url.pathname,'/api/production/source');
+ assert.equal(url.searchParams.get('revision_id'),'old-version');assert.equal(url.searchParams.get('scene_id'),'s010');assert.equal(url.searchParams.get('block_ids'),'b005,b006');
+ // Even an unscoped story/structure/source reference must not use production-get.
+ assert.equal(ctx.materialReferenceRequest({object_id:'story',revision_id:'r1'}).isSource,true);
+});
+
+test('material references retain their exact media reader; explicit evidence can cite an entity',()=>{
+ ctx.state.productionRecords=[{object_id:'voice',kind:'ASSET'},{object_id:'person',kind:'ENTITY'}];
+ const ref={object_id:'voice',revision_id:'voice-v1'};
+ assert.equal(new URL(ctx.materialReferenceRequest(ref).url,'http://localhost').pathname,'/api/production');
+ assert.equal(ctx.materialReferenceRequest({object_id:'person',revision_id:'person-v1'},true).isSource,true);
+ ctx.state.productionRecords=[];
 });
