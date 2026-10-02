@@ -326,13 +326,23 @@ def snapshot(store, entity_id, revision_id=None):
     acceptance_mode='generation' if prep['complete'] else 'content' if compatible else 'generation'
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
-    from .material_versions import snapshot as material_snapshot, for_record as material_rounds_for_record
+    from .material_versions import snapshot as material_snapshot, for_record as material_for_record
     for need in data['requirements']:
         need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
     material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
     for item in data['media']:
-        for mid, rounds in material_rounds_for_record(store, item['record']).items():
-            if mid not in material_versions and rounds:material_versions[mid] = rounds
+        # Shared media may have its production requirement on another entity.
+        # Read that same round without extending this entity's acceptance scope.
+        for mid, rounds in material_for_record(store, item['record']).items():
+            if rounds:material_versions.setdefault(mid, rounds)
+    for rounds in material_versions.values():
+        for round in rounds:
+            for row in round['members']:
+                targets[row['id']] = row
+                if row['kind'] == 'ASSET':
+                    contexts.setdefault(row['id'], media_review.context(store, row))
+                    for related in [contexts[row['id']]['call'], *contexts[row['id']]['requirements']]:
+                        if related:targets[related['id']] = related
     return {**base,**data,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
