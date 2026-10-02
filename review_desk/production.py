@@ -53,7 +53,10 @@ def record(store, object_id=None, revision_id=None):
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
         raise KeyError("unknown production object or revision")
-    return record_view(row)
+    value = record_view(row)
+    memberships = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
+    value['material_round_numbers'] = {v['material_id']: v['number'] for v in reversed(memberships)}
+    return value
 
 
 def ref_record(store, ref, kinds=None):
@@ -459,7 +462,11 @@ def current_records(store, kinds=None):
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
             p = json.loads(row["payload"])
             if p.get("format") in FORMATS:
-                result.append(record_view(row))
+                value=record_view(row)
+                if value['kind']=='ASSET':
+                    member=store.db.execute('SELECT MAX(r.number) FROM material_rounds r WHERE r.material_id IN (SELECT material_id FROM material_members WHERE revision_id=?)',(value['id'],)).fetchone()
+                    value['material_version']=member[0]
+                result.append(value)
     return result
 
 
@@ -512,6 +519,9 @@ def _import_records(store, document, validate_only=False, *, check_current=True)
             result = store._put_object(object_id, kind, p, source.get("expected_version"), dependencies)
             results.append(result)
             resolved[object_id] = result["revision"]
+            if check_current:
+                from .material_versions import register
+                register(store, record(store, revision_id=result['revision']))
         if validate_only:
             store.db.rollback()
         else:
@@ -544,6 +554,10 @@ def remove_unreferenced_requirements(store, removals):
     for oid in sorted(ids):
         store.db.execute('DELETE FROM dependencies WHERE from_revision IN (SELECT id FROM revisions WHERE object_id=?)', (oid,))
     for oid in sorted(ids):
+        if store.db.execute('SELECT 1 FROM material_feedback WHERE material_id=?', (oid,)).fetchone():
+            raise Conflict('cannot remove a material with revision feedback')
+        store.db.execute('DELETE FROM material_members WHERE material_id=?', (oid,))
+        store.db.execute('DELETE FROM material_rounds WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM revisions WHERE object_id=?', (oid,))
         store.db.execute('DELETE FROM objects WHERE id=?', (oid,))
     return sorted(ids)
@@ -568,11 +582,17 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         uses = [dict(r) for r in store.db.execute("""SELECT d.role,r.id AS revision_id,r.object_id,o.kind,
             r.id=o.current_revision AS is_current FROM dependencies d JOIN revisions r ON r.id=d.from_revision
             JOIN objects o ON o.id=r.object_id WHERE d.to_revision=? ORDER BY r.object_id,r.version""", (selected["id"],))]
+        if selected['kind']=='REQUIREMENT':
+            selected['review_input_records'] = [ref_record(store, v['reference']) for v in selected['payload'].get('generation', {}).get('inputs', [])]
+        elif selected['kind']=='CALL':
+            selected['review_input_records'] = [ref_record(store, v.get('reference', v)) for v in selected['payload'].get('inputs', [])]
         result = {"record": selected, "history": history, "uses": uses}
         if selected["kind"] == "ASSET":
             from .material_review import context
             result["review_context"] = context(store, selected)
             result["review_contexts"] = {r["id"]: context(store, r) for r in history}
+        from .material_versions import for_record
+        result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         return result
     return {"records": current_records(store, {kind} if kind else None)}
 

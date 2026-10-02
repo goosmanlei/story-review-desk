@@ -48,3 +48,34 @@ test('material references retain their exact media reader; explicit evidence can
  assert.equal(ctx.materialReferenceRequest({object_id:'person',revision_id:'person-v1'},true).isSource,true);
  ctx.state.productionRecords=[];
 });
+
+const ui={...ctx,document:{addEventListener(){}}};vm.createContext(ui);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8'),ui);
+test('block scope aggregates all live statuses and anchor kinds, excludes other blocks and versions, deduplicates',()=>{
+ const c=(id,r,anchor,status='OPEN')=>({id,target_revision_id:r,anchor,status});
+ const rows=[c('a','r',{type:'text',block_id:'prompt'}),c('b','r',{type:'global'},'CLOSED'),c('c','r',{type:'text',block_id:'other'}),c('d','old',{type:'text',block_id:'prompt'}),c('a','r',{type:'text',block_id:'prompt'})];
+ assert.deepEqual(Array.from(ui.reviewBlockComments(rows,{revision:'r',kind:'text',blockIds:['prompt']}),c=>c.id),['a','b']);
+ const media=[c('region','r',{type:'region',visual_id:'one',asset_file:'a.png'}),c('whole','r',{type:'visual',visual_id:'one',asset_file:'a.png'},'CLOSED'),c('other','r',{type:'visual',visual_id:'two',asset_file:'b.png'})];
+ assert.deepEqual(Array.from(ui.reviewBlockComments(media,{revision:'r',kind:'image',visualId:'one',file:'a.png'}),c=>c.id),['region','whole']);
+ const audio=[c('t','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:1,end_seconds:3}),c('outside','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:8,end_seconds:9}),c('file','r',{type:'time',component_id:'original',asset_file:'b.wav',start_seconds:1,end_seconds:3})];
+ assert.deepEqual(Array.from(ui.reviewBlockComments(audio,{revision:'r',kind:'audio',componentId:'original',file:'a.wav',from:0,to:5}),c=>c.id),['t']);
+});
+test('effective inputs retain source order and type numbering, ignore storyline context',()=>{
+ const refs=[{kind:'ENTITY',id:'person',object_id:'person',payload:{}},{kind:'ASSET',id:'i',object_id:'i',payload:{components:[{id:'original',mime:'image/png'}]}},{kind:'ASSET',id:'a',object_id:'a',payload:{components:[{id:'original',mime:'audio/wav'}]}},{kind:'ASSET',id:'j',object_id:'j',payload:{components:[{id:'original',mime:'image/png'}]}}];
+ const inputs=refs.map(r=>({object_id:r.object_id,revision_id:r.id,component_id:r.kind==='ASSET'?'original':undefined}));
+ const items=ctx.materialInputs(inputs,refs);assert.deepEqual(Array.from(items,i=>i.label),['图片1','音频1','图片2']);assert.deepEqual(Array.from(items,i=>i.index),[1,2,3]);assert.equal(ctx.materialInputs([],refs).length,0);
+});
+
+test('carried text revisions keep comments inside the selected material round',()=>{
+ const rows=[{id:'one',target_revision_id:'same',anchor:{type:'text',block_id:'first',end_block_id:'last'},material_scopes:[{material_id:'need',number:1}]},{id:'two',target_revision_id:'same',anchor:{type:'global'},material_scopes:[{material_id:'need',number:2}]}];
+ const scope={revision:'same',materialId:'need',materialNumber:1,kind:'text',blockIds:['middle'],orderedBlockIds:['first','middle','last']};
+ assert.deepEqual(Array.from(ui.reviewBlockComments(rows,scope),c=>c.id),['one']);
+ scope.materialNumber=2;assert.deepEqual(Array.from(ui.reviewBlockComments(rows,scope),c=>c.id),['two']);
+});
+
+test('an exact historical candidate does not replace other real calls in the same material round',()=>{
+ const row=(id,call,sha)=>({id,object_id:'same-asset',payload:{production:{object_id:call},components:[{role:'original',sha256:sha}]}});
+ const old=row('old','call1','a'),metadata=row('metadata','call1','a'),other=row('other','call2','b');
+ const round={results:[metadata,other],members:[old,metadata,other]};
+ assert.deepEqual(Array.from(ctx.materialRoundResults(round,old,true),r=>r.id),['old','other']);
+ assert.deepEqual(Array.from(ctx.materialRoundResults(round,other,true),r=>r.id),['metadata','other']);
+});
