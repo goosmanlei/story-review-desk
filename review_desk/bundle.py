@@ -60,6 +60,13 @@ def export(store, export_dir):
     (target / "configurations.json").write_bytes(configuration_bytes)
     hashes = {"materials.json": digest(material_bytes), "comments.json": digest(comment_bytes),
               "objects.json": digest(framework_bytes), "configurations.json": digest(configuration_bytes)}
+    layout = target.parent / 'config/entity-relationship-layout.json'
+    if layout.exists():
+        value = json.loads(layout.read_text())
+        if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
+            raise ValueError('unsupported relationship layout')
+        (target / 'entity-relationship-layout.json').write_bytes(_bytes(value))
+        hashes['entity-relationship-layout.json'] = file_hash(target / 'entity-relationship-layout.json')
     for name in asset_names:
         hashes["assets/" + name] = file_hash(target / "assets" / name)
     manifest = {"schema_version": 3, "sources": len(materials), "comments": len(comments["comments"]),
@@ -79,7 +86,7 @@ def restore(store, export_dir):
         path = target / name
         if name.startswith("assets/"):
             _safe_asset(name[7:])
-        elif name not in (("materials.json", "comments.json") if schema == 1 else ("materials.json", "comments.json", "objects.json", "configurations.json")):
+        elif name not in (("materials.json", "comments.json") if schema == 1 else ("materials.json", "comments.json", "objects.json", "configurations.json", "entity-relationship-layout.json")):
             raise ValueError("unexpected export file")
         if path.is_symlink() or file_hash(path) != expected:
             raise ValueError("export checksum mismatch: " + name)
@@ -91,6 +98,10 @@ def restore(store, export_dir):
         raise ValueError("export count mismatch")
     if store.sources() or store.comments() or store.objects() or any(c["version"] for c in store.configurations().values()):
         raise ValueError("restore requires an empty instance")
+    if 'entity-relationship-layout.json' in manifest['files']:
+        layout_value = json.loads((target / 'entity-relationship-layout.json').read_text())
+        if not isinstance(layout_value, dict) or layout_value.get('format') != 'entity-relationship-layout-v1':
+            raise ValueError('unsupported relationship layout')
     # Validate in a separate in-memory store before any destination write.
     test = Store(":memory:")
     try:
@@ -223,4 +234,11 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO configuration_events VALUES (?,?,?,?,?)", (event["id"], event["scope"], event["version"], event["body"], event["at"]))
     finally:
         test.close()
+    if 'entity-relationship-layout.json' in manifest['files']:
+        value = json.loads((target / 'entity-relationship-layout.json').read_text())
+        if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
+            raise ValueError('unsupported relationship layout')
+        config = store.db_path.parent.parent / 'config'
+        config.mkdir(parents=True, exist_ok=True)
+        (config / 'entity-relationship-layout.json').write_bytes(_bytes(value))
     return manifest

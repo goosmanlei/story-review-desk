@@ -28,6 +28,12 @@ def validate_state(store, p):
         _text(p["dimensions"].get(name), "complete state dimension: " + name)
     if p.get("reference_media") not in ("image", "audio", "none"):
         raise ValueError("complete state requires reference_media")
+    if p.get("reference_mode", "material") not in ("material", "description"):
+        raise ValueError("unsupported state reference mode")
+    if p.get("reference_mode") == "description":
+        _text(p.get("production_description"), "description-only state needs production description")
+        if p["reference_media"] == "none":
+            raise ValueError("description mode describes presentation, not a mention")
     if not p["sources"]:
         raise ValueError("complete state requires exact source evidence")
 
@@ -179,7 +185,7 @@ def scope_coverage(store, subjects, heads):
         p = subject["payload"]
         if subject["kind"] == "STATE":
             groups = []
-            if complete(subject) and p["reference_media"] != "none":
+            if complete(subject) and p["reference_media"] != "none" and p.get("reference_mode") != "description":
                 used[(subject["object_id"], subject["id"])] = {"object_id": subject["object_id"], "revision_id": subject["id"]}
         elif subject["kind"] == "PREPARATION":
             groups = [([o["entity"]], o["states"], o.get("transitions", [])) for o in p["occurrences"] if o["mode"] != "mention"]
@@ -193,7 +199,7 @@ def scope_coverage(store, subjects, heads):
                 issues.append({"scope": {"object_id": subject["object_id"], "revision_id": subject["id"]}, **issue})
             for ref in states:
                 state = ref_record(store, ref, {"STATE"})
-                if complete(state) and state["payload"]["reference_media"] != "none":
+                if complete(state) and state["payload"]["reference_media"] != "none" and state["payload"].get("reference_mode") != "description":
                     used[exact(ref)] = ref
     for key, ref in used.items():
         matches = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and exact(r["payload"]["scope"]) == key and

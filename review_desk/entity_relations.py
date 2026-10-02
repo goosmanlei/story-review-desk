@@ -45,3 +45,24 @@ def nodes(store, relationships, historical=False):
         for ref in row['payload']['entities']:
             result[ref['object_id']] = p.ref_record(store, ref) if historical else p.record(store, ref['object_id'])
     return list(result.values())
+
+
+def layout(store, entity_id, relationships):
+    """Display priorities are instance configuration, never accepted story facts."""
+    import json
+    path = p.root_of(store) / 'config/entity-relationship-layout.json'
+    if not path.exists():
+        return {'primary': [], 'order': []}
+    value = json.loads(path.read_text())
+    if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
+        raise ValueError('unsupported relationship layout')
+    selected = value.get('entities', {}).get(entity_id, {})
+    allowed = {r['object_id'] for r in relationships}
+    result = {}
+    for key in ('primary', 'order'):
+        ids = selected.get(key, [])
+        if not isinstance(ids, list) or any(not isinstance(i, str) for i in ids) or len(ids) != len(set(ids)):
+            raise ValueError('invalid relationship display order')
+        # A withdrawn edge or historical scope can have fewer edges than config.
+        result[key] = [oid for oid in ids if oid in allowed]
+    return result

@@ -137,7 +137,7 @@ def preparation(store, scope):
         if form['payload']['entity'] != scope['entity']:
             issues.append({'object_id':form['object_id'], 'code':'entity_changed', 'message':form['payload']['title']+'：基础信息已变化，需复核'})
         needs = [r for r in data['requirements'] if r['payload']['scope']==ref(form)]
-        if form['payload']['reference_media']!='none' and not any(r['payload']['required'] for r in needs):
+        if form['payload']['reference_media']!='none' and form['payload'].get('reference_mode')!='description' and not any(r['payload']['required'] for r in needs):
             issues.append({'object_id':form['object_id'], 'code':'materials_missing', 'message':form['payload']['title']+'：预期素材待明确'})
     for need in data['requirements']:
         if not need['payload'].get('generation'):
@@ -272,6 +272,7 @@ def snapshot(store, entity_id, revision_id=None):
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     return {**base,**data,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+            'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'status':'accepted' if a else 'unaccepted','can_accept':not revision_id and not a and prep['complete'],
             'can_revoke':bool(revoke),'revoke_target':ref(revoke) if revoke else None,
