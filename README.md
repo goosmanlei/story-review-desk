@@ -87,3 +87,5 @@ git push origin main
 旧审阅台仅作为产品交互参考，未复制其代码、表或故事数据。核对结果见 [docs/comment-checklist.md](docs/comment-checklist.md)。
 
 运行自动测试：`NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost PYTHONPATH=. python3 -m unittest discover -s tests -v`；导航及审阅聚合前端测试使用 `node --test tests/*.test.cjs`。本机 HTTP 用例直连环回地址，避免被环境代理转发。
+
+制作设定与素材管理共用素材卡；直接关系、历史采纳取消及准确实际生成信息见 [素材卡与关系契约](docs/materials-and-relationships.md)。

@@ -10,7 +10,7 @@ const isProduction=()=>['settings.workspace','materials.workspace','production.w
 const commentTarget=()=>isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const draftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const commentSaves=new Set();
-const activeComments=()=>typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
+const activeComments=()=>typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
 const renderActiveReader=()=>isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
@@ -453,7 +453,7 @@ function commentCard(comment){
   const actions=el('div','card-actions');
   const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=()=>locateComment(comment);
   if(comment.status==='OPEN'){
-    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>{if(typeof isEntityReview==='function'&&isEntityReview())locateEntityReviewComment(comment);startDraft(comment.anchor,comment)};
+    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>{if(typeof isEntityReview==='function'&&isEntityReview())locateEntityReviewComment(comment);else if(typeof isMaterialReview==='function'&&isMaterialReview())locateMaterialComment(comment);startDraft(comment.anchor,comment)};
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
   }else{const reopen=nodeText('button',null,'重新打开',actions);reopen.onclick=()=>changeComment(comment,'REOPEN')}
   card.append(actions);return card;

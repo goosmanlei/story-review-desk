@@ -15,6 +15,7 @@ function productionTextBlocks(record){
   const sorted=value=>Array.isArray(value)?value.map(sorted):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sorted(value[k])])):value;
   const extra=[['production_description',p.production_description]],plan=p.generation;
   if(plan){extra.push(['generation.tool',plan.tool],['generation.model',plan.model],['generation.parameters',record.review_parameter_text??JSON.stringify(sorted(plan.parameters||{}),null,2)],['generation.prompt',plan.prompt],['generation.output.description',plan.output?.description],['generation.output.review_criteria',(plan.output?.review_criteria||[]).join('\n')]);for(const [i,v] of (plan.inputs||[]).entries())extra.push([`generation.inputs.${i}.use`,v.use])}
+  if(p.format==='production-call-v1')extra.push(['call.model',p.model],['call.parameters',record.review_call_parameter_text??JSON.stringify(sorted(Object.fromEntries(Object.entries(p.parameters||{}).filter(([k,v])=>k!=='prompt'||v!==p.prompt))),null,2)],['call.prompt',p.prompt]);
   for(const [field,text] of extra)if(typeof text==='string'&&text.trim()&&!body.includes(text)&&!seen.has(text)){seen.add(text);blocks.push({id:prefix+field.replaceAll('.','/'),text,field})}
   return blocks;
 }
@@ -158,7 +159,7 @@ async function loadProductionWorkspace(){
   const byId=new Map(result.records.map(r=>[r.object_id,r]));
   const contextOf=(r,seen=new Set())=>{if(!r||seen.has(r.object_id))return {};seen.add(r.object_id);const p=r.payload;if(p.episode||p.source)return {episode:(p.episode||p.source).object_id,scene:p.scene_id||p.source?.scene_id,number:p.number};return contextOf(byId.get(p.scope?.object_id),seen)};
   const contexts=new Map(result.records.map(r=>[r.object_id,contextOf(r)]));
-  const workspaceRows=result.records.filter(r=>flatFilters?r.kind==='ENTITY':productionGroups[workspace].includes(r.kind)&&r.payload.status!=='withdrawn');
+  const workspaceRows=result.records.filter(r=>flatFilters?r.kind==='ENTITY':productionGroups[workspace].includes(r.kind)&&!(r.kind==='RELATION'&&r.payload.relation_type==='entity')&&r.payload.status!=='withdrawn');
   const childrenByEntity=new Map(workspaceRows.map(r=>[r.object_id,[]]));
   if(flatFilters)for(const r of result.records.filter(r=>productionCompleteState(r)||r.kind==='REPRESENTATION'&&!r.payload.review_model))for(const id of productionEntityIds(r,byId))childrenByEntity.get(id)?.push(r);
   const searchTexts=new Map(workspaceRows.map(r=>[r.object_id,JSON.stringify([r.payload,...(childrenByEntity.get(r.object_id)||[]).map(child=>child.payload)]).toLowerCase()]));
@@ -254,7 +255,7 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
   if(state.workspace==='settings.workspace'&&owner&&typeof openEntityReview==='function'&&(detail.record.kind!=='REPRESENTATION'||detail.record.payload.review_model==='entity-review-v1')){
     await openEntityReview(owner,detail,epoch,revisionId);return;
   }
-  state.entityReview=null;
+  state.entityReview=null;state.materialReview=state.workspace==='materials.workspace'&&detail.record.kind==='ASSET'?detail:null;
   let entityDetail=null,childDetail=null;
   if(state.workspace==='settings.workspace'&&owner){
     const read=async record=>record?api('/api/production?'+new URLSearchParams({object_id:record.object_id,revision_id:record.id})):null;
@@ -270,7 +271,8 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
     if(epoch!==productionReadEpoch||state.workspace!==workspaceAtStart)return;
   }
   state.productionEntityId=owner;state.productionEntityDetail=entityDetail;state.productionChildDetail=childDetail;
-  focusProductionReview(detail,false);
+  const materialTarget=state.materialReview&&materialRows(detail).find(r=>r.id===url.searchParams.get('material_target'));
+  focusProductionReview(materialTarget?{record:materialTarget,history:[materialTarget],uses:[]}:detail,false);
   for(const button of document.querySelectorAll('#production-index button'))button.classList.toggle('active',button.dataset.objectId===(state.workspace==='settings.workspace'?owner:detail.record.object_id));
   renderProductionReader();renderComments();
 }
@@ -281,6 +283,7 @@ function focusProductionReview(detail,paint=true){
   const url=new URL(location.href);url.searchParams.set('production_object',r.object_id);url.searchParams.set('production_revision',r.id);
   if(typeof isEntityReview==='function'&&isEntityReview()&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
   if(state.workspace==='settings.workspace'&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
+  if(typeof isMaterialReview==='function'&&isMaterialReview()){url.searchParams.set('production_object',state.materialReview.record.object_id);url.searchParams.set('production_revision',state.materialReview.record.id);url.searchParams.set('material_target',r.id)}
   history.replaceState(null,'',url);
   for(const blocks of document.querySelectorAll('[data-production-blocks]')){if(blocks.dataset.productionBlocks===r.id)blocks.id='production-blocks';else{blocks.removeAttribute('id');for(const para of blocks.querySelectorAll('.comment-flash'))para.classList.remove('comment-flash')}}
   if(paint){paintProductionReview();renderComments()}
@@ -296,6 +299,7 @@ function productionMedia(parent,component,review=true){
 function renderProductionReader(){
   const root=$('#production-reader');root.replaceChildren();
   if(typeof isEntityReview==='function'&&isEntityReview()){renderEntityReview(root);paintProductionReview();return}
+  if(typeof isMaterialReview==='function'&&isMaterialReview()){renderMaterialWorkspace(root,state.materialReview);paintProductionReview();return}
   if(state.workspace==='settings.workspace'&&state.productionEntityDetail){
     const entity=el('section','production-entity-basics');entity.setAttribute('aria-label','实体基础信息');root.append(entity);
     renderProductionRecord(entity,state.productionEntityDetail,true);
@@ -396,6 +400,7 @@ function showProductionCoverage(root,r){
 }
 function locateProductionComment(comment,local=false){
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
+  if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
   if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}

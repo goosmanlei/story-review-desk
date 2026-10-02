@@ -24,7 +24,7 @@ FORMATS = {"production-" + v + "-v1": k for k, v in KINDS.items()}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$")
 USAGES = ("generation_input", "post_audio", "editorial")
 CHANGE_KINDS = {"ENTITY", "STATE", "REPRESENTATION", "INPUT_LOCK", "EPISODE", "STORY",
-                "PREPARATION", "SHOT_DESIGN", "REQUIREMENT"}
+                "PREPARATION", "SHOT_DESIGN", "REQUIREMENT", "RELATION"}
 
 
 def root_of(store):
@@ -37,6 +37,8 @@ def record_view(row):
         # Use the exact server projection for numeric JSON (1.0 / exponents),
         # whose browser serialization can otherwise change comment offsets.
         value['review_parameter_text'] = json.dumps(value['payload']['generation'].get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)
+    if value["kind"] == "CALL":
+        value["review_call_parameter_text"] = json.dumps({k:v for k,v in value['payload'].get('parameters', {}).items() if not (k=='prompt' and v==value['payload'].get('prompt'))}, ensure_ascii=False, sort_keys=True, indent=2)
     return value
 
 
@@ -405,6 +407,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                         p["target"]["revision_id"] != new["id"] or
                         change["action"] != "keep" or p["verdict"] != "impact_resolved"):
                     raise ValueError("state title review requires only a title change and the exact new state target")
+    elif kind == "RELATION" and p.get("relation_type") == "entity":
+        from .entity_relations import validate
+        validate(store, p)
     elif kind == "RELATION":
         if p.get("relation_type") != "adoption" or p.get("usage") not in USAGES:
             raise ValueError("only explicit production adoption is supported")
@@ -415,7 +420,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         validate_selection(component, p)
         for other in current_records(store, {"RELATION"}) if check_current else []:
             op = other["payload"]
-            if other["object_id"] != object_id and op["scope"]["object_id"] == p["scope"]["object_id"] and op["slot"] == p["slot"]:
+            if op.get("relation_type") == "adoption" and other["object_id"] != object_id and op["scope"]["object_id"] == p["scope"]["object_id"] and op["slot"] == p["slot"]:
                 raise Conflict("scope/slot already has an adoption; revise that object explicitly")
     elif kind == "ASSEMBLY":
         for key in ("fps", "width", "height", "duration_frames"):
@@ -535,7 +540,12 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         uses = [dict(r) for r in store.db.execute("""SELECT d.role,r.id AS revision_id,r.object_id,o.kind,
             r.id=o.current_revision AS is_current FROM dependencies d JOIN revisions r ON r.id=d.from_revision
             JOIN objects o ON o.id=r.object_id WHERE d.to_revision=? ORDER BY r.object_id,r.version""", (selected["id"],))]
-        return {"record": selected, "history": history, "uses": uses}
+        result = {"record": selected, "history": history, "uses": uses}
+        if selected["kind"] == "ASSET":
+            from .material_review import context
+            result["review_context"] = context(store, selected)
+            result["review_contexts"] = {r["id"]: context(store, r) for r in history}
+        return result
     return {"records": current_records(store, {kind} if kind else None)}
 
 
@@ -628,7 +638,7 @@ def readiness(store, scope):
     state_keys = {full_states.exact(r) for r in coverage['states']}
     requirements = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and
                     (r["payload"]["scope"]["object_id"] in scope_ids or full_states.exact(r['payload']['scope']) in state_keys)]
-    uses = {(r["payload"]["scope"]["object_id"], r["payload"]["slot"]): r for r in heads if r["kind"] == "RELATION"}
+    uses = {(r["payload"]["scope"]["object_id"], r["payload"]["slot"]): r for r in heads if r["kind"] == "RELATION" and r["payload"].get("relation_type") == "adoption"}
     judgments = [r for r in heads if r["kind"] == "JUDGMENT"]
     rows = []
     for requirement in requirements:

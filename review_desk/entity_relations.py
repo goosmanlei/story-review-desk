@@ -1,0 +1,47 @@
+"""Versioned direct entity relationships, independent of media adoptions."""
+from . import production as p
+
+
+def is_relationship(row):
+    return row['kind'] == 'RELATION' and row['payload'].get('relation_type') == 'entity'
+
+
+def for_entity(rows, entity_id):
+    return sorted((r for r in rows if is_relationship(r)
+                   and r['payload'].get('status') != 'withdrawn'
+                   and any(e['object_id'] == entity_id for e in r['payload']['entities'])),
+                  key=lambda r: r['object_id'])
+
+
+def validate(store, payload):
+    entities = p._list(payload, 'entities')
+    if len(entities) != 2:
+        raise ValueError('entity relationship requires two distinct entities')
+    for ref in entities:
+        p.ref_record(store, ref, {'ENTITY'})
+    if entities[0]['object_id'] == entities[1]['object_id']:
+        raise ValueError('entity relationship requires two distinct entities')
+    p._text(payload.get('label'), 'relationship label')
+    if payload.get('direction') not in ('forward', 'mutual'):
+        raise ValueError('relationship direction must be forward or mutual')
+    if payload.get('category') not in ('personal', 'spatial', 'ownership', 'use', 'performance'):
+        raise ValueError('unsupported entity relationship category')
+    if payload.get('basis') not in ('script', 'production'):
+        raise ValueError('relationship basis must distinguish script facts and production choices')
+    sources = p._list(payload, 'sources')
+    if not sources:
+        raise ValueError('relationship requires exact supporting sources')
+    for ref in sources:
+        p.source_check(store, ref)
+    for ref in p._list(payload, 'applies_to'):
+        p.source_check(store, ref)
+    if payload.get('status', 'active') not in ('active', 'withdrawn'):
+        raise ValueError('invalid relationship status')
+
+
+def nodes(store, relationships, historical=False):
+    result = {}
+    for row in relationships:
+        for ref in row['payload']['entities']:
+            result[ref['object_id']] = p.ref_record(store, ref) if historical else p.record(store, ref['object_id'])
+    return list(result.values())

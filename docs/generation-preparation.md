@@ -1,6 +1,6 @@
 # 实体生成准备与统一审阅
 
-实体采纳认可基础设定、全部完整状态及逐素材生成方案，允许 Codex 按依赖顺序准备生成。采纳不自动调用模型，不等于接受生成结果；新增候选和新评论不撤销方案采纳。实体、状态、需求或显式参考方案换版后，当前方案重新待认可。
+实体采纳认可基础设定、直接关系、全部完整状态及逐素材生成方案，允许 Codex 按依赖顺序准备生成。采纳不自动调用模型，不等于接受生成结果；新增候选和新评论不撤销方案采纳。实体、关系、状态、需求或显式参考方案换版后，当前方案重新待认可。
 
 ## 对象与数据流
 
@@ -22,20 +22,20 @@ flowchart LR
 需求的既有 `scope,slot,entities,states,purpose,media_type,specification` 继续说明使用位置和输出要求。新增：
 
 ```json
-{"generation":{"format":"generation-plan-v1","method":"generate","tool":"明确平台和入口","model":"明确模型 ID","parameters":{},"prompt":"完整实际提示词","inputs":[],"output":{"name":"素材名称","description":"具体产出与用途","review_criteria":["可核对的要求"]},"blockers":[]}}
+{"generation":{"format":"generation-plan-v1","method":"generate","model":"明确模型 ID","parameters":{},"prompt":"完整实际提示词","inputs":[],"output":{"name":"素材名称","description":"具体产出与用途","review_criteria":["可核对的要求"]},"blockers":[]}}
 ```
 
-`method` 为 `generate` 或 `reuse`。每项输入含 `reference:{object_id,revision_id}`、`use`，可引用准确 ASSET 及 `component_id,crop?,range?`，或引用准确 REQUIREMENT 的未来产出。后者必须先通过既有采用关系明确选定原件才可执行；不会自动取最新候选。复用方式必须引用同媒体类型的前置需求或文件。循环、错误类型、空的工具／模型／提示词、缺少输出说明及无效参数结构被拒绝。方案可有明确的执行阻断（平台未核验等），这些不伪装成可执行状态。
+`method` 为 `generate` 或 `reuse`。每项输入含 `reference:{object_id,revision_id}`、`use`，可引用准确 ASSET 及 `component_id,crop?,range?`，或引用准确 REQUIREMENT 的未来产出。后者必须先通过既有采用关系明确选定原件才可执行；不会自动取最新候选。复用方式必须引用同媒体类型的前置需求或文件。循环、错误类型、空的模型／提示词、缺少输出说明及无效参数结构被拒绝。方案可有明确的执行阻断（平台未核验等），这些不伪装成可执行状态。
 
 ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的完整描述；既有剧本事实和来源保留，新增造型／布局等是待用户采纳的制作选择。`production_blockers` 列出尚未解决且阻碍内容采纳的问题，普通未知不自动阻断。未完善描述或素材方案时，实体聚合列出准确缺项。
 
 ## 采纳、取消与并发
 
-新模型 `entity-generation-v1` 的范围为 `{entity,states,requirements,dependencies}`，全部为准确修订。`dependencies` 递归锁定方案引用，未来原件的具体选择在执行输入中另存。生成结果不进入采纳范围。决策使用每个实体唯一的 JUDGMENT 身份，采纳和取消分别形成 `accepted`、`revoked` 新修订。取消指明被取消的决策；不得删除记录或通过更换判断 ID 绕过取消。
+新模型 `entity-generation-v1` 的范围为 `{entity,relationships,states,requirements,dependencies}`，全部为准确修订。`dependencies` 递归锁定方案引用，未来原件的具体选择在执行输入中另存。生成结果不进入采纳范围。决策使用每个实体唯一的 JUDGMENT 身份，采纳和取消分别形成 `accepted`、`revoked` 新修订。取消指明被取消的决策；不得删除记录或通过更换判断 ID 绕过取消。
 
-`POST /api/production/entity-decision` 与 CLI `production-entity-decide FILE` 接受 `{entity_id,action:accept|revoke,expected_version,scope,actor,reason}`。读接口给出当前 `decision_version` 与完整范围；写操作在既有原子导入事务中检查版本和范围。重复或过期请求返回 409，不静默认可新内容。普通 judgment 导入同样执行校验，无绕过入口。
+`POST /api/production/entity-decision` 与 CLI `production-entity-decide FILE` 接受 `{entity_id,action:accept|revoke,expected_version,scope,decision_ref?,actor,reason}`。读接口给出当前 `decision_version` 与完整范围；写操作在既有原子导入事务中检查版本和范围。重复或过期请求返回 409，不静默认可新内容。普通 judgment 导入同样执行校验，无绕过入口。
 
-`GET /api/production/entity-review?entity_id=ID[&revision_id=SHA]` 返回现有实体、状态、媒体和评论，并增加 `requirements,preparation,decision_version,can_revoke`；`preparation` 含方案缺项及完整性。历史采纳通过准确决策修订读取冻结内容。旧 `entity-current-v1` 只表示过去的内容认可，保留原历史接口，不作为生成许可。
+`GET /api/production/entity-review?entity_id=ID[&revision_id=SHA]` 返回现有实体、状态、媒体和评论，并增加 `requirements,preparation,decision_version,can_revoke`；`preparation` 含方案缺项及完整性。历史采纳通过准确决策修订读取冻结内容。旧 `entity-current-v1` 只表示过去的内容认可，不作为生成许可；可以携带 `revoke_target` 作为 `decision_ref` 取消，方案缺项不阻止取消。详见[素材卡与关系契约](materials-and-relationships.md)。
 
 ## 执行输入
 
@@ -49,7 +49,7 @@ ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的�
 
 所有已支持评论的文字和图像区域使用一致的轻边线、评论图标和焦点反馈，选区后就近添加评论。不可评论的导航和说明不使用此样式。方案的描述、提示词、参数及参考说明投影为准确评论块，原有正文块和历史锚点不改写。
 
-音频使用一个紧凑播放器：真实波形、播放头、时间选段和评论标记合并；拖动选段后可试听并评论，数值用于精调。时间保持原件坐标，限定在当前关联范围；解码失败保留时间轴，不伪造波形。已有音频不显示人物封面；图像、音频分区，缺失项仅在明确需求的位置按媒体类型占位。
+音频使用一个紧凑播放器：真实波形、播放头、时间选段和评论标记合并；拖动选段后可试听并评论，数值用于精调。时间保持原件坐标，限定在当前关联范围；解码失败保留时间轴，不伪造波形。已有音频不显示人物封面；每份素材为独立卡片，固定两列，阅读区小于 720 像素时单列；缺失项仅在明确需求的位置按媒体类型占位。
 
 ## 迁移与验收
 
@@ -58,3 +58,5 @@ ASSET 可用 `candidate_requirements` 将候选明确对应到准确需求，要
 无需新表或破坏式迁移。旧对象和评论继续恢复；新增方案、准确依赖、采纳／取消修订及原件进入现有 Schema 3 导出。包含新方案评论的恢复必须使用支持该契约的系统。
 
 验证覆盖：方案完整性、循环和错误输入拒绝、采纳／取消／重新采纳、结果不改变采纳、新方案必须重新认可、引用选择与范围、I2I 上限、并发拒绝、历史和恢复。浏览器必须操作文字／图像／音频评论、各区域版本、空素材和窄屏，并回归故事采编、结构、剧本及用户草稿。技术评论只写隔离实例。
+
+实际工具在执行时选择并记录到 CALL，生成方案无需指定工具。两处页面共用的素材卡、准确实际输入及关系契约见 [materials-and-relationships.md](materials-and-relationships.md)。
