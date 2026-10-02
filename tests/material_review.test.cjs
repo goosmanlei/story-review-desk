@@ -79,3 +79,19 @@ test('an exact historical candidate does not replace other real calls in the sam
  assert.deepEqual(Array.from(ctx.materialRoundResults(round,old,true),r=>r.id),['old','other']);
  assert.deepEqual(Array.from(ctx.materialRoundResults(round,other,true),r=>r.id),['metadata','other']);
 });
+
+test('a pending material round keeps earlier results inside history instead of creating duplicate cards',()=>{
+ const plan=need('portrait'),asset={id:'old-image',object_id:'portrait-image',kind:'ASSET',payload:{media_type:'image',components:[{id:'original',role:'original'}]}},media={id:'media',record:asset,component:asset.payload.components[0]};
+ const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
+ const data={material_versions:{portrait:[pending,old]}};
+ let cards=ctx.materialRoundModels([plan],[media],data);
+ assert.equal(cards.length,1);assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ data.selectedMaterialRounds.portrait=1;cards=ctx.materialRoundModels([plan],[media],data);
+ assert.equal(cards.length,1);assert.equal(cards[0].candidates[0].record.id,'old-image');
+});
+
+test('legacy audio requirements do not inherit an unrelated image card through display sorting',()=>{
+ const voice=need('voice',undefined,'audio'),unrelated=item('image',[]);
+ const cards=ctx.materialRoundModels([voice],[unrelated],{});
+ assert.equal(cards.length,2);assert.equal(cards[0].need,voice);assert.equal(cards[0].candidates.length,0);assert.equal(cards[1].candidates[0],unrelated);
+});
