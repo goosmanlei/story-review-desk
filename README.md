@@ -4,6 +4,8 @@
 
 首页为“制作思路”，默认“故事创作”，另可切换“生产制作”；旧 `workspace=current` 链接兼容进入新页。方法内容由故事实例的 `content/production-approach.json` 提供，通用系统只做阅读展示，不维护工作统计或执行进度。存储格式、清理清单和验收入口见[制作思路说明](docs/production-approach.md)。
 
+素材卡按修订轮次统一方案与产出，并保留真实调用、历史原件与准确评论；接口、迁移与验证见 [素材轮次](docs/material-versions.md)。
+
 ## 启动一个故事实例
 
 正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`；有方法文档时一并保留 Git 中的 `content/`。首次从公开导出恢复：

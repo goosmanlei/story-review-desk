@@ -23,6 +23,8 @@ def export(store, export_dir):
         materials = store.sources()
         comments = {"comments": store.comments(), "events": store.events()}
         framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
+        from .material_versions import dump
+        framework.update(dump(store))
         configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                           "events": store.configuration_events()}
         icon = store.configuration("SYSTEM")["body"]["site_favicon"]
@@ -69,7 +71,7 @@ def export(store, export_dir):
         hashes['entity-relationship-layout.json'] = file_hash(target / 'entity-relationship-layout.json')
     for name in asset_names:
         hashes["assets/" + name] = file_hash(target / "assets" / name)
-    manifest = {"schema_version": 3, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 4, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     (target / "manifest.json").write_bytes(_bytes(manifest))
@@ -80,7 +82,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3):
+    if schema not in (1, 2, 3, 4):
         raise ValueError("unsupported export schema")
     for name, expected in manifest["files"].items():
         path = target / name
@@ -93,6 +95,10 @@ def restore(store, export_dir):
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
     framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
+    if schema >= 4:
+        from .material_versions import TABLES
+        if any(name not in framework for name in TABLES):
+            raise ValueError('material round tables missing from schema 4 export')
     configurations = json.loads((target / "configurations.json").read_text()) if schema >= 2 else None
     if len(materials) != manifest["sources"] or len(comments["comments"]) != manifest["comments"] or len(comments["events"]) != manifest["events"]:
         raise ValueError("export count mismatch")
@@ -227,6 +233,9 @@ def restore(store, export_dir):
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
             for e in comments["events"]:
                 store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))
+            if schema >= 4:
+                from .material_versions import restore as restore_rounds
+                restore_rounds(store, framework)
             if schema >= 2:
                 for record in configurations["records"]:
                     store.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?)", (record["scope"], record["schema_version"], record["version"], record["body"], record["updated_at"]))
