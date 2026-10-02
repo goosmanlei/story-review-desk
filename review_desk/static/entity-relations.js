@@ -32,7 +32,11 @@ function renderEntityRelations(root,data){
   for(const group of relationGroups(data,rows)){
     make('text',{x:24,y,class:'relation-group-title'},group.main?'主要关系':'其他关系');y+=26;
     for(let i=0;i<group.rows.length;i+=2){
-      const pair=group.rows.slice(i,i+2),rowHeight=Math.max(86,...pair.map(r=>Math.ceil(Array.from(relationCaption(r).text).length/13)*20+50));
+      const pair=group.rows.slice(i,i+2),rowHeight=Math.max(86,...pair.map(r=>{
+        const sources=r.payload.applies_to?.length?r.payload.applies_to:r.payload.sources;
+        const versions=data.versions?.[r.object_id]?.length>1?28:0;
+        return Math.ceil(Array.from(relationCaption(r).text).length/13)*22+sources.length*28+versions+24;
+      }));
       pair.forEach((row,index)=>{
         const left=index===0,other=row.payload.entities.find(r=>r.object_id!==entity.object_id),record=by.get(other.object_id);if(!record)return;
         const x=left?105:895,cy=y+rowHeight/2,labelX=left?205:596;

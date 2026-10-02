@@ -48,3 +48,34 @@ test('material references retain their exact media reader; explicit evidence can
  assert.equal(ctx.materialReferenceRequest({object_id:'person',revision_id:'person-v1'},true).isSource,true);
  ctx.state.productionRecords=[];
 });
+
+test('materials count current identities and show only genuine missing state demands',()=>{
+ const form={object_id:'form',id:'form-v2',kind:'STATE',payload:{state_model:'complete-v1'}};
+ const demand={...need('need'),kind:'REQUIREMENT',payload:{media_type:'image',scope:ref(form)}};
+ const oldDemand={...need('old-need'),kind:'REQUIREMENT',payload:{media_type:'audio',scope:{object_id:'form',revision_id:'form-v1'}}};
+ const shotDemand={...need('shot-need'),kind:'REQUIREMENT',payload:{media_type:'video',scope:{object_id:'shot',revision_id:'shot-v1'}}};
+ const relation={object_id:'rel',kind:'RELATION',payload:{relation_type:'entity'}};
+ const records=[form,demand,oldDemand,shotDemand,relation];
+ assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['need']);
+ const asset={object_id:'asset',kind:'ASSET',payload:{media_type:'image',components:[{id:'original'}],candidate_requirements:[ref(demand)]}};
+ records.push(asset);
+ assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['asset']);
+ asset.payload.placeholder=true;
+ assert.ok(ctx.productionWorkspaceRows(records,'materials.workspace').includes(demand));
+});
+
+test('content facets include actual calls, review conclusions and adoption through their material',()=>{
+ const audio={object_id:'audio',kind:'ASSET',payload:{media_type:'audio'}};
+ const call={object_id:'call',kind:'CALL',payload:{outputs:[{object_id:'audio',revision_id:'a1'}]}};
+ const judgment={object_id:'judgment',kind:'JUDGMENT',payload:{target:{object_id:'call',revision_id:'c1'}}};
+ const adoption={object_id:'adoption',kind:'RELATION',payload:{asset:{object_id:'audio',revision_id:'a1'}}};
+ const by=new Map([audio,call,judgment,adoption].map(r=>[r.object_id,r]));
+ for(const r of [call,judgment,adoption])assert.deepEqual(Array.from(ctx.productionFilterMediaTypes(r,by)),['audio']);
+ call.payload.outputs.push({object_id:'judgment',revision_id:'j1'});
+ assert.deepEqual(Array.from(ctx.productionFilterMediaTypes(call,by)),['audio']);
+});
+
+test('review workspaces have no manual-entry forms or workflow navigation',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'../review_desk/static/production.js'),'utf8')+fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8');
+ for(const forbidden of ['showProductionImport','showProductionUpload','showProductionEditor','showProductionStateNeed','showProductionCoverage','剧本依据 → 制作设定 → 实际素材 → 镜头输入'])assert.ok(!source.includes(forbidden),forbidden);
+});

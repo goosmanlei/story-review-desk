@@ -48,6 +48,39 @@ class MaterialRelationshipsTest(unittest.TestCase):
             restore(recovered,dest/'export');self.assertEqual(er.snapshot(recovered,'songbook'),after)
         finally:recovered.close()
 
+    def test_legacy_content_cycle_has_no_generation_permission_and_rejects_changed_scope(self):
+        self.put(self.entity());self.put(self.full())
+        scope=er.current_scope(self.store,'songbook')
+        self.put(self.spec('old-yes','JUDGMENT',acceptance_model=er.ACCEPTANCE_MODEL,
+            acceptance_scope=scope,target=scope['entity'],verdict='accepted',actor='用户',reason='旧认可'))
+        original=p.record(self.store,'old-yes')
+        for action in ('revoke','accept','revoke','accept'):
+            view=er.snapshot(self.store,'songbook')
+            request={'entity_id':'songbook','action':action,'decision_ref':view['revoke_target'],
+                'expected_version':view['decision_version'],'scope':view['decision_scope'],
+                'acceptance_mode':view['acceptance_mode'],'actor':'测试','reason':'兼容循环'}
+            self.assertTrue(view['can_revoke'] if action=='revoke' else view['can_accept'])
+            g.decide(self.store,request)
+            with self.assertRaises(Conflict):g.decide(self.store,request)
+            self.assertIsNone(g.accepted(self.store,'songbook'))
+        self.assertEqual(p.record(self.store,'old-yes'),original)
+        current=g.decision(self.store,'songbook')
+        self.assertEqual(current['payload']['acceptance_model'],g.CONTENT_MODEL)
+        self.assertFalse(er.snapshot(self.store,'songbook',current['id'])['can_revoke'])
+        g.decide(self.store,{'entity_id':'songbook','action':'revoke','decision_ref':g.ref(current),'expected_version':current['version'],'actor':'测试','reason':'取消内容认可'});view=er.snapshot(self.store,'songbook')
+        self.change('full',production_description='改过的完整描述')
+        self.assertFalse(er.snapshot(self.store,'songbook')['can_accept'])
+        with self.assertRaises(Conflict):
+            g.decide(self.store,{'entity_id':'songbook','action':'accept','expected_version':view['decision_version'],
+                'scope':view['decision_scope'],'acceptance_mode':'content','actor':'测试','reason':'过期内容'})
+        export(self.store,self.root/'export');dest=self.root/'content-restored'
+        shutil.copytree(self.root/'export',dest/'export');restored=Store(dest/'.runtime/review.sqlite3')
+        try:
+            restore(restored,dest/'export')
+            self.assertEqual(g.decision(restored,'songbook'),g.decision(self.store,'songbook'))
+            self.assertIsNone(g.accepted(restored,'songbook'))
+        finally:restored.close()
+
     def test_changed_relationship_invalidates_generation_but_keeps_cancel_and_media_adoption(self):
         self.setup_plans();self.put(self.relationship());self.decide();old=g.decision(self.store,'songbook')
         self.assertEqual(er.snapshot(self.store,'owner')['relationships'][0]['object_id'],'belongs')

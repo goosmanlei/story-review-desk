@@ -75,6 +75,7 @@
 .relation-node-name{font-size:14px;fill:#233e2c}.relation-group-title{font-size:13px;fill:#5e765e;font-weight:600}
 .relation-text{background:#fafcf8;padding:8px!important;font-size:14px;min-height:50px}
 .relation-caption{display:inline-block;user-select:text;max-width:100%}.relation-text p{margin:0 0 4px;line-height:1.45}.relation-text button,.relation-text select{font-size:11px;padding:2px 5px;max-width:100%}
+.relation-text button,.relation-text select{display:block;margin-top:4px}
 @container (max-width:719px){.entity-review-materials{grid-template-columns:minmax(0,1fr)}.material-card{padding:12px}}
 
 .material-reference-dialog{width:min(900px,90vw);max-height:88vh;overflow:auto;border:1px solid #a5b9a4;border-radius:10px;padding:24px;color:var(--text,#26332b)}
@@ -84,3 +85,16 @@
 .material-reference{margin:4px 6px 4px 0;text-align:left;text-decoration:underline;text-underline-offset:3px}
 
 .reference-crop-frame{position:relative;width:fit-content;max-width:100%;margin:auto}.reference-crop-frame img{margin:0}.reference-crop{position:absolute;box-sizing:border-box;border:2px solid #b27047;pointer-events:none}
+
+/* Common modal presentation for exact source and nested reference readers. */
+.review-dialog{font:inherit;color:inherit;background:#fff;width:min(900px,calc(100vw - 32px));max-height:88vh;border:1px solid #d8e1d6;border-radius:12px;padding:0;box-shadow:0 16px 60px #15251a30}
+.review-dialog::backdrop{background:#15251a88}
+.review-dialog-header{position:sticky;top:0;z-index:2;display:flex;align-items:start;justify-content:space-between;gap:20px;padding:20px 24px 16px;background:#fff;border-bottom:1px solid #e5e9e2}
+.review-dialog-header h2{font-size:20px;line-height:1.5;margin:0;overflow-wrap:anywhere}
+.review-dialog button{font:inherit;border:1px solid #ccd7ca;background:#f5f8f3;border-radius:6px;padding:7px 11px;color:inherit}
+.review-dialog .review-dialog-close{flex:none;line-height:1;font-size:22px;padding:7px 10px}
+.review-dialog button:focus-visible{outline:2px solid #426763;outline-offset:3px}
+.review-dialog-body{padding:20px 24px 24px;line-height:1.85}
+.review-dialog-body h3{font-size:17px;margin:0 0 16px}.review-dialog-body p{margin:0 0 16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.review-dialog-body pre{white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:600px){.review-dialog-header{padding:16px;gap:12px}.review-dialog-header h2{font-size:18px}.review-dialog-body{padding:16px}}
