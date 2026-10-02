@@ -61,8 +61,8 @@
 .material-card>section+section{border-top:1px solid #dce3d8;margin-top:18px;padding-top:14px}
 .material-card pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 ui-monospace,monospace}
 .material-card .entity-review-text{min-width:0;overflow-wrap:anywhere}
-.material-card .structure-visual-stage{max-height:420px}
-.material-card .structure-visual-stage img{max-height:420px;object-fit:contain}
+.material-card .structure-visual-stage{margin-inline:auto}
+.material-card .structure-visual-stage img{max-height:none;height:auto}
 .material-card .structure-visual{margin:12px 0}
 .material-card .review-audio-controls{gap:6px}
 .material-card h3{font-size:16px}.material-card h4{font-size:14px}
