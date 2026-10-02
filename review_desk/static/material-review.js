@@ -123,13 +123,22 @@ function locateMaterialComment(comment){
 
 // Preview exact references without changing the reader, selection, or draft.
 let materialReferenceCount=0;
-function materialReferenceLink(parent,ref,title){
-  const button=productionButton(parent,title,()=>openMaterialReference(ref,button));
+function materialReferenceRequest(ref,source=false){
+  // Story revisions share exact references with production records, but have a
+  // separate reader that validates the cited scene and limits the text blocks.
+  const isSource=!!(source||ref.scene_id||ref.block_ids?.length||!(state.productionRecords||[]).some(r=>r.object_id===ref.object_id));
+  const query=new URLSearchParams({object_id:ref.object_id,revision_id:ref.revision_id});
+  if(isSource){if(ref.scene_id)query.set('scene_id',ref.scene_id);if(ref.block_ids?.length)query.set('block_ids',ref.block_ids.join(','))}
+  return {isSource,url:'/api/production'+(isSource?'/source':'')+'?'+query};
+}
+function materialReferenceLink(parent,ref,title,source=false){
+  const button=productionButton(parent,title,()=>openMaterialReference(ref,button,source));
   button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog');button.addEventListener('pointerdown',e=>e.stopPropagation());button.addEventListener('focusin',e=>e.stopPropagation());return button;
 }
-async function openMaterialReference(ref,trigger){
+async function openMaterialReference(ref,trigger,source=false){
+  const request=materialReferenceRequest(ref,source);
   const dialog=el('dialog','material-reference-dialog'),head=el('div','entity-review-local-heading');
-  const title=nodeText('h2',null,'参考输入',head);title.id='material-reference-title-'+(++materialReferenceCount);dialog.setAttribute('aria-labelledby',title.id);
+  const title=nodeText('h2',null,request.isSource?'剧情依据':'参考输入',head);title.id='material-reference-title-'+(++materialReferenceCount);dialog.setAttribute('aria-labelledby',title.id);
   productionButton(head,'关闭',()=>dialog.close());dialog.append(head);
   const body=el('div');nodeText('p',null,'读取中…',body);dialog.append(body);
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
@@ -138,8 +147,15 @@ async function openMaterialReference(ref,trigger){
   dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();dialog.remove();if(trigger.isConnected)trigger.focus({preventScroll:true})},{once:true});
   document.body.append(dialog);dialog.showModal();
   try{
-    const detail=await api('/api/production?object_id='+encodeURIComponent(ref.object_id)+'&revision_id='+encodeURIComponent(ref.revision_id));
+    const detail=await api(request.url);
     if(!dialog.isConnected)return;
+    if(request.isSource){
+      body.replaceChildren();body.dataset.referenceRevision=detail.reference.revision_id;
+      title.textContent='剧情依据 · '+detail.title;
+      if(detail.scene)nodeText('h3',null,detail.scene.heading,body);
+      for(const block of detail.blocks)nodeText('p','reference-text',block.text,body);
+      return;
+    }
     const row=detail.record,p=row.payload;body.replaceChildren();title.textContent=p.title+' · 版本 '+row.version;body.dataset.referenceRevision=row.id;
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');

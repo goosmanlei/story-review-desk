@@ -46,7 +46,7 @@ function renderEntityRelations(root,data){
         if(caption.block){label.dataset.blockId=caption.block.id;label.dataset.anchorOffset=caption.offset}
         entityVersionControl(host,row,r=>{data.localVersions||={};data.localVersions[r.object_id]=r});
         if(row.payload.basis==='production')nodeText('small','production-meta','制作选择',host);
-        const scoped=row.payload.applies_to?.length;for(const source of scoped?row.payload.applies_to:row.payload.sources)materialReferenceLink(host,source,scoped?relationSceneLabel(source):'剧情依据');
+        const scoped=row.payload.applies_to?.length;for(const source of scoped?row.payload.applies_to:row.payload.sources)materialReferenceLink(host,source,scoped?relationSceneLabel(source):'剧情依据',true);
         node(record,x,cy);
       });y+=rowHeight;
     }
