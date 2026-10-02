@@ -69,6 +69,25 @@ class Store:
           id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
           version INTEGER NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS material_rounds (
+          material_id TEXT NOT NULL REFERENCES objects(id), number INTEGER NOT NULL,
+          state TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(material_id,number)
+        );
+        CREATE TABLE IF NOT EXISTS material_members (
+          material_id TEXT NOT NULL, number INTEGER NOT NULL,
+          revision_id TEXT NOT NULL REFERENCES revisions(id), role TEXT NOT NULL, evidence TEXT NOT NULL,
+          PRIMARY KEY(material_id,number,revision_id),
+          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
+        );
+        CREATE TABLE IF NOT EXISTS material_feedback (
+          comment_id TEXT PRIMARY KEY REFERENCES comments(id), material_id TEXT NOT NULL, number INTEGER NOT NULL,
+          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
+        );
+        CREATE TABLE IF NOT EXISTS material_comment_scopes (
+          comment_id TEXT NOT NULL REFERENCES comments(id), material_id TEXT NOT NULL, number INTEGER NOT NULL,
+          PRIMARY KEY(comment_id,material_id),
+          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
+        );
         """)
         # Existing V1 instance databases are upgraded without rewriting source text.
         for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
@@ -356,10 +375,11 @@ class Store:
             rows = self.db.execute("SELECT * FROM comments ORDER BY source_id,created_at,id")
         return [self._comment(row) for row in rows]
 
-    @staticmethod
-    def _comment(row):
+    def _comment(self, row):
         value = dict(row)
         value["anchor"] = json.loads(value["anchor"])
+        scopes = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_comment_scopes WHERE comment_id=? ORDER BY material_id', (value['id'],))]
+        if scopes:value['material_scopes'] = scopes
         return value
 
     def comment(self, comment_id):
@@ -495,8 +515,17 @@ class Store:
             raise Conflict("comment id already used")
         stamp = now()
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            existing = self.comment(comment_id)
+            if existing:
+                if existing['target_object_id'] == object_id and existing['target_revision_id'] == revision_id and existing['anchor'] == anchor and existing['body'] == body:
+                    return existing
+                raise Conflict('comment id already used')
             self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, "CREATE", body, stamp))
+            from .material_versions import feedback, comment_scope
+            comment_scope(self, self.comment(comment_id), value.get('material_context'), value.get('material_revision'))
+            feedback(self, self.comment(comment_id), value.get('material_revision'))
         return self.comment(comment_id)
 
     def change_comment(self, comment_id, action, expected_version, body=None):

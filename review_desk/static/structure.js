@@ -69,7 +69,7 @@ function drawPolygon(points,cls){const polygon=document.createElementNS('http://
 function paintStructureRegions(){
   document.querySelectorAll('.structure-visual-stage').forEach(stage=>{
     const svg=stage.querySelector('svg');svg.replaceChildren();const visual=stage.dataset.visualId,draft=newDraftAnchor(),revision=stage.closest('[data-review-revision]')?.dataset.reviewRevision,active=!isProduction()||!revision||revision===state.productionSelected?.id;stage.classList.toggle('draft-visual',active&&draft?.type==='visual'&&draft.visual_id===visual);
-    for(const comment of activeComments().filter(c=>active&&c.anchor.type==='region'&&c.anchor.visual_id===visual&&(!isProduction()||c.target_revision_id===state.productionSelected?.id))){
+    for(const comment of unscopedComments().filter(c=>active&&c.anchor.type==='region'&&c.anchor.visual_id===visual&&(!isProduction()||c.target_revision_id===state.productionSelected?.id))){
       const polygon=drawPolygon(comment.anchor.points,'review-region'+(comment.status==='CLOSED'?' closed':''));polygon.onclick=()=>selectComment(comment.id);svg.append(polygon);
     }
     if(stage.dataset.reviewCrop){const c=JSON.parse(stage.dataset.reviewCrop);svg.append(drawPolygon([{x:c.x,y:c.y},{x:c.x+c.width,y:c.y},{x:c.x+c.width,y:c.y+c.height},{x:c.x,y:c.y+c.height}],'entity-review-crop'))}
@@ -89,7 +89,7 @@ function openStructureImage(visual,trigger){
 function renderStructureVisual(visual,preview=false){
   const figure=reviewSurface(el('figure','structure-figure'),'image'),head=el('div','structure-figure-head');
   nodeText('strong',null,visual.title,head);nodeText('span',null,visual.kind==='diagram'?'结构图':'图片',head);figure.append(head);
-  const viewport=el('div','structure-visual-viewport'),stage=el('div','structure-visual-stage');stage.dataset.visualId=visual.id;
+  const viewport=el('div','structure-visual-viewport'),stage=el('div','structure-visual-stage');stage.dataset.visualId=visual.id;figure.dataset.reviewFile=visual.file;
   const img=el('img');img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
   if(preview){
     img.classList.add('structure-image-trigger');img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;

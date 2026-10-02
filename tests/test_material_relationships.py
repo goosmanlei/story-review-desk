@@ -93,6 +93,18 @@ class MaterialRelationshipsTest(unittest.TestCase):
         self.decide();self.assertTrue(g.accepted(self.store,'songbook'))
         self.change('belongs',status='withdrawn');self.assertIsNone(g.accepted(self.store,'songbook'))
 
+    def test_media_keeps_its_requirement_round_when_the_plan_is_no_longer_in_current_preparation(self):
+        self.setup_plans();self.media();self.associate('detail')
+        optional=self.need(slot='voice-detail',required=False)
+        optional['payload']['generation']=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation'])
+        self.put(optional)
+        self.change('voice',candidate_requirements=[self.ref('need-full-voice-detail')])
+        self.change('need-full-voice-detail',status='withdrawn',withdrawal_reason='当前准备不再使用，保留原件与历史轮次')
+        view=g.snapshot(self.store,'songbook')
+        self.assertNotIn('need-full-voice-detail',[r['object_id'] for r in view['requirements']])
+        rounds=view['material_versions']['need-full-voice-detail']
+        self.assertEqual(rounds[0]['results'][0]['object_id'],'voice')
+
     def test_relationship_revision_preserves_the_original_comment_and_evidence_after_restore(self):
         self.setup_plans();self.put(self.relationship())
         old=p.record(self.store,'belongs');text=old['payload']['blocks'][0]['text']

@@ -5,9 +5,34 @@ function reviewIcon(){
 }
 function reviewSurface(host,kind='text'){
   host.classList.add('review-surface');host.dataset.reviewKind=kind;
-  const cue=el('span','review-cue');cue.append(reviewIcon());cue.title=kind==='text'?'圈选文字后添加评论':kind==='image'?'圈选图像区域后添加评论':'拖动时间轴选段后添加评论';cue.setAttribute('aria-label',cue.title);host.prepend(cue);
+  const cue=el('button','review-cue');cue.type='button';cue.append(reviewIcon());cue.title='查看此块全部评论';cue.setAttribute('aria-label',cue.title);host.prepend(cue);
+  cue.addEventListener('pointerdown',e=>e.stopPropagation());cue.addEventListener('focusin',e=>e.stopPropagation());cue.onclick=e=>{e.preventDefault();e.stopPropagation();openReviewBlockComments(host,kind)};
   if(kind==='text'){host.tabIndex=0;host.setAttribute('aria-description','可圈选文字评论；键盘选择文字后也可添加评论。')}
   return host;
+}
+function reviewBlockScope(host,kind){
+  const revision=host.dataset.productionBlocks||host.closest('[data-review-revision]')?.dataset.reviewRevision||commentTarget().target_revision_id;
+  const blockIds=[...host.querySelectorAll('[data-block-id],[data-structure-block],[data-block]')].map(n=>n.dataset.blockId||n.dataset.structureBlock||n.dataset.block);
+  const visual=host.querySelector('[data-visual-id]'),media=host.querySelector('[data-component-id]');
+  let revisions=[revision];
+  let materialId=null,materialNumber=null;
+  let orderedBlockIds=blockIds;
+  if(isProduction()){const row=(typeof materialVersions==='function'?Object.values(materialVersions()).flatMap(rs=>rs.flatMap(r=>r.members)):[]).find(r=>r.id===revision)||state.productionSelected;if(row?.id===revision)orderedBlockIds=productionTextBlocks(row).map(b=>b.id)}
+  if(isProduction()&&typeof materialVersions==='function'){for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid];const round=rounds.find(r=>r.number===selected)||rounds.find(r=>r.members.some(m=>m.id===revision));const row=round?.members.find(r=>r.id===revision);if(row){revisions=round.members.filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;break}}}
+  return {revision,revisions,materialId,materialNumber,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
+}
+function reviewBlockComments(comments,scope){
+  const selected=new Map();for(const c of comments){if(!(scope.revisions||[scope.revision]).includes(c.target_revision_id))continue;const a=c.anchor;let matches=false;
+    if(scope.materialId&&c.material_scopes&&!c.material_scopes.some(s=>s.material_id===scope.materialId&&s.number===scope.materialNumber))continue;
+    if(scope.kind==='text'){const order=scope.orderedBlockIds||scope.blockIds,start=order.indexOf(a.block_id),end=order.indexOf(a.end_block_id||a.block_id);matches=a.type==='global'||(!a.type||a.type==='text')&&scope.blockIds.some(id=>id===a.block_id||id===a.end_block_id||start>=0&&end>=0&&order.indexOf(id)>=Math.min(start,end)&&order.indexOf(id)<=Math.max(start,end))}
+    else if(scope.kind==='image')matches=['visual','region'].includes(a.type)&&a.visual_id===scope.visualId&&(!scope.file||a.asset_file===scope.file);
+    else matches=a.type==='time'&&a.component_id===scope.componentId&&(!scope.file||a.asset_file===scope.file)&&a.start_seconds<scope.to&&a.end_seconds>scope.from;
+    if(matches)selected.set(c.id,c);
+  }return [...selected.values()];
+}
+function openReviewBlockComments(host,kind){
+  const scope=reviewBlockScope(host,kind);state.reviewCommentScope=scope;state.historyOpen=true;state.historyLimit=Number.MAX_SAFE_INTEGER;
+  openPanel();renderComments();
 }
 const reviewWaveCache=new Map();let reviewAudioContext;
 async function reviewWaveform(url){
@@ -23,7 +48,7 @@ async function reviewWaveform(url){
 }
 function reviewMediaPlayer(parent,component,record,selection={},review=true){
   const from=selection.range?.start_seconds??0,to=selection.range?.end_seconds??component.duration_seconds,span=to-from;
-  const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;
+  const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;box.dataset.reviewFile=component.file;box.dataset.reviewFrom=from;box.dataset.reviewTo=to;
   const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src='/api/production/files/'+encodeURIComponent(component.file);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
   const focus=()=>{if(review)focusProductionReview({record,history:[record],uses:[]})};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
   const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);

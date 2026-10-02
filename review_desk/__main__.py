@@ -61,6 +61,9 @@ def main():
         sub.add_argument("file", type=Path)
         if command == "production-import":
             sub.add_argument("--validate-only", action="store_true")
+    migration = subs.add_parser('material-round-migrate')
+    migration.add_argument('file', type=Path)
+    migration.add_argument('--validate-only', action='store_true')
     impact = subs.add_parser("production-impact")
     impact.add_argument("revision_id")
     for command in ("production-ready", "production-package", "production-generation-ready", "production-generation-package"):
@@ -130,6 +133,9 @@ def main():
             if args.block:
                 ref['block_ids'] = args.block
             result = production.source_excerpt(store, ref)
+        elif args.command == 'material-round-migrate':
+            from .material_versions import migrate
+            result = migrate(store, json.loads(args.file.read_text()), args.validate_only)
         elif args.command == "production-import":
             result = production.import_records(store, json.loads(args.file.read_text()), args.validate_only)
         elif args.command == "production-adopt":
