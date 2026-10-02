@@ -26,7 +26,8 @@ class MaterialVersionsTest(unittest.TestCase):
     decide=fixtures.GenerationTest.decide
 
     def generate(self, name='call1', asset='generated'):
-        self.decide();manifest=g.package(self.store,'need-full-overall')
+        if not g.accepted(self.store,'songbook'):self.decide()
+        manifest=g.package(self.store,'need-full-overall')
         self.put(self.spec(name,'CALL',method='generation',tool='test',status='submitted',inputs=[],outputs=[],
                            generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
                            **{k:manifest[k] for k in ('model','parameters','prompt')}))
