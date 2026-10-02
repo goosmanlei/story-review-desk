@@ -119,7 +119,15 @@ def source_excerpt(store, ref):
     ids = ref.get('block_ids') or (scene or {}).get('block_ids')
     if ids:
         blocks = [b for b in blocks if b['id'] in ids]
+    screenplay = None
+    if source['kind']=='EPISODE':
+        for row in store.db.execute('SELECT id FROM revisions WHERE object_id=? ORDER BY version DESC', (payload.get('screenplay_id'),)):
+            script=record(store, revision_id=row[0])
+            if any(e.get('revision_id')==source['id'] for e in script['payload'].get('episodes', [])):
+                screenplay={'object_id':script['object_id'],'revision_id':script['id'],'title':script['payload']['title']}
+                break
     return {'reference': ref, 'kind': source['kind'], 'title': payload.get('title', source['object_id']),
+            'screenplay':screenplay, 'episode_number':payload.get('number') if source['kind']=='EPISODE' else None,
             'scene': scene, 'blocks': blocks, 'is_current': source['id'] == source['current_revision']}
 
 
@@ -379,7 +387,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     elif kind == "JUDGMENT":
         target = ref_record(store, p.get("target"))
         from . import entity_review
-        if p.get('acceptance_model') == 'entity-generation-v1':
+        if p.get('acceptance_model') == 'entity-content-v1':
+            from .generation import validate_content_decision
+            validate_content_decision(store, object_id, p, check_current)
+        elif p.get('acceptance_model') == 'entity-generation-v1':
             from .generation import validate_decision
             validate_decision(store, object_id, p, check_current)
         elif 'acceptance_model' in p:
@@ -388,7 +399,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             entity_review.validate_acceptance(store, target, check_current)
         if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved", "revoked"):
             raise ValueError("invalid review verdict")
-        if p.get("verdict") == "revoked" and p.get("acceptance_model") != "entity-generation-v1":
+        if p.get("verdict") == "revoked" and p.get("acceptance_model") not in ("entity-generation-v1", "entity-content-v1"):
             raise ValueError("revocation requires a generation acceptance")
         for key in ("actor", "reason"):
             _text(p.get(key), key)
@@ -573,6 +584,12 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             from .material_review import context
             result["review_context"] = context(store, selected)
             result["review_contexts"] = {r["id"]: context(store, r) for r in history}
+        if selected['kind']=='REQUIREMENT':
+            from .material_review import context
+            candidates=[record(store, revision_id=r[0]) for r in store.db.execute("SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='ASSET'")]
+            candidates=[a for a in candidates if any(ref.get('object_id')==selected['object_id'] for ref in a['payload'].get('candidate_requirements', []))]
+            result['candidate_records']=candidates
+            result['review_contexts']={a['id']:context(store,a) for a in candidates}
         return result
     return {"records": current_records(store, {kind} if kind else None)}
 

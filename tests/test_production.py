@@ -231,6 +231,20 @@ class ProductionTest(unittest.TestCase):
         wrong={**self.source,'block_ids':['missing']}
         with self.assertRaises(ValueError):p.source_excerpt(self.store,wrong)
 
+    def test_evidence_version_follows_the_cited_episode_instead_of_the_latest_script(self):
+        episode=copy.deepcopy(p.record(self.store,'episode')['payload'])
+        episode.update(screenplay_id='script',number=3)
+        older=self.store.put_object('episode','EPISODE',episode,expected_version=1)
+        exact={**self.source,'revision_id':older['revision']}
+        v4=self.store.put_object('script','STORY',{'title':'版本四','episodes':[{'object_id':'episode','revision_id':older['revision']}]},expected_version=0)
+        episode['blocks'][0]['text']='新版本的不同动作。'
+        newer=self.store.put_object('episode','EPISODE',episode,expected_version=2)
+        self.store.put_object('script','STORY',{'title':'版本五','episodes':[{'object_id':'episode','revision_id':newer['revision']}]},expected_version=1)
+        source=p.source_excerpt(self.store,exact)
+        self.assertEqual(source['screenplay'],{'object_id':'script','revision_id':v4['revision'],'title':'版本四'})
+        self.assertEqual(source['episode_number'],3)
+        self.assertEqual(source['blocks'][0]['text'],'女孩拿起完好的歌本。')
+
     def test_reviewed_state_rename_keeps_exact_inputs_and_expires_on_later_change(self):
         self.put(self.entity(), self.entity('other'))
         self.put(self.spec('wet', 'STATE', entity=self.ref('songbook'), dimensions={'condition':'wet'},
