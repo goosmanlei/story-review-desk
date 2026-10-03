@@ -148,8 +148,17 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(framework_catalog())
         if path == "/api/configurations":
             try:
-                _, _, icon = current_favicon(self.server.root, store.configuration("SYSTEM")["body"])
-                return self._json({"catalog": configuration_catalog(), "values": store.configurations(), "favicon": icon, "favicon_assets": favicon_choices(self.server.root)})
+                values = store.configurations()
+                icon_error = None
+                try:
+                    _, _, icon = current_favicon(self.server.root, values["SYSTEM"]["body"])
+                except (ValueError, OSError) as exc:
+                    # An unavailable appearance asset must not hide the settings
+                    # needed to repair it. The saved configuration stays intact.
+                    icon_error = str(exc)
+                    _, _, icon = current_favicon(self.server.root, {})
+                return self._json({"catalog": configuration_catalog(), "values": values, "favicon": icon,
+                                   "favicon_error": icon_error, "favicon_assets": favicon_choices(self.server.root)})
             except (ValueError, OSError) as exc:
                 return self._json({"error": str(exc)}, 503)
         if path == "/api/comments":

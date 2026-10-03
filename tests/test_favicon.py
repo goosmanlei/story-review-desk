@@ -102,8 +102,21 @@ class FaviconHTTPTests(unittest.TestCase):
                 (root/'export/assets'/name).unlink()
                 with self.assertRaises(HTTPError) as error:request('/favicon.ico')
                 self.assertEqual(error.exception.code,503)
+                with request('/api/configurations') as response:
+                    degraded=json.load(response)
+                self.assertTrue(degraded['favicon_error'])
+                self.assertEqual(degraded['values']['SYSTEM']['body']['site_favicon'],name)
+                self.assertEqual(degraded['values']['SYSTEM']['version'],1)
+                self.assertEqual(degraded['favicon']['file'],'')
+                with request(degraded['favicon']['url']) as response:self.assertIn(b'<svg',response.read())
+                with request('/api/sources') as response:self.assertEqual(response.status,200)
+                with self.assertRaises(HTTPError) as error:request('/api/configurations/SYSTEM','PATCH',{'expected_version':1,'updates':{'site_favicon':name}})
+                self.assertEqual(error.exception.code,400)
                 with request('/api/configurations/SYSTEM','PATCH',{'expected_version':1,'updates':{'site_favicon':''}}) as response:self.assertEqual(json.load(response)['body']['site_favicon'],'')
-                with request('/api/configurations') as response: icon=json.load(response)['favicon']
+                with request('/api/configurations') as response:
+                    repaired=json.load(response);icon=repaired['favicon']
+                self.assertIsNone(repaired['favicon_error'])
+                self.assertEqual(repaired['values']['SYSTEM']['version'],2)
                 self.assertTrue(icon['url'].startswith('/default-favicon.svg?v='))
                 with request(icon['url']) as response:self.assertIn(b'<svg',response.read())
                 with request('/favicon.ico') as response:self.assertIn(b'<svg',response.read())
