@@ -220,16 +220,21 @@ function renderConfigurations(){
       const label=el('label','config-field');nodeText('span',null,spec.label,label);
       let input;if(spec.type==='favicon'){
         input=el('select');const empty=el('option',null,'默认审阅台图标');empty.value='';input.append(empty);
-        for(const name of data.favicon_assets||[]){const option=el('option',null,name);option.value=name;input.append(option)}input.value=record.body[key];
+        for(const name of data.favicon_assets||[]){const option=el('option',null,name);option.value=name;input.append(option)}
+        if(record.body[key]&&!Array.from(input.options).some(option=>option.value===record.body[key])){const option=el('option',null,`${record.body[key]}（不可用）`);option.value=record.body[key];input.append(option)}
+        input.value=record.body[key];
         const preview=el('img');preview.width=32;preview.height=32;preview.alt='站点图标预览';
-        const show=()=>{preview.src=input.value?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg'};show();input.onchange=show;
+        let unavailableFile=data.favicon_error?record.body[key]:'',errorStatus;
+        const show=()=>{preview.src=input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg'};show();input.onchange=show;
         const file=el('input');file.type='file';file.accept='.svg,.png,.ico';file.setAttribute('aria-label','上传站点图标');
         file.onchange=async()=>{const selected=file.files[0];if(!selected)return;if(selected.size>256*1024){toast('图标须在 256 KiB 以内');file.value='';return}save.disabled=true;
           try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(selected)});
             const result=await api('/api/favicon',{method:'POST',body:JSON.stringify({name:selected.name,data:encoded})});
-            if(!Array.from(input.options).some(option=>option.value===result.file)){const option=el('option',null,result.file);option.value=result.file;input.append(option)}input.value=result.file;show();toast('图标已上传，请保存配置以应用')
+            let option=Array.from(input.options).find(option=>option.value===result.file);if(!option){option=el('option');option.value=result.file;input.append(option)}option.textContent=result.file;
+            if(result.file===unavailableFile){unavailableFile='';if(errorStatus)errorStatus.remove()}input.value=result.file;show();toast('图标已上传，请保存配置以应用')
           }catch(error){toast(error.message)}finally{save.disabled=false;file.value=''}};
         label.append(preview,file);const clear=nodeText('button',null,'清空，恢复默认',label);clear.type='button';clear.onclick=()=>{input.value='';show()};
+        if(data.favicon_error){errorStatus=nodeText('small',null,'当前图标不可用，暂用默认图标。请选择其他图标或清空后保存。',label);errorStatus.setAttribute('role','status')}
         nodeText('small',null,'上传 SVG、PNG 或 PNG 编码的 ICO，至多 256 KiB。选择或清空后点保存配置。',label);
       }
       else if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
