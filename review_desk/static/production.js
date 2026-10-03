@@ -35,7 +35,7 @@ function productionFilterMediaTypes(row,byId,seen=new Set()){
   return [...new Set(refs.flatMap(ref=>productionFilterMediaTypes(byId.get(ref.object_id),byId,seen)))];
 }
 function productionWorkspaceRows(records,workspace){
-  return records.filter(r=>workspace==='settings.workspace'?r.kind==='ENTITY':
+  return records.filter(r=>workspace==='settings.workspace'?r.kind==='ENTITY'&&r.payload.status!=='withdrawn':
     productionGroups[workspace].includes(r.kind)&&!(r.kind==='RELATION'&&r.payload.relation_type==='entity')&&r.payload.status!=='withdrawn'&&
     (workspace!=='materials.workspace'||r.kind!=='REQUIREMENT'||
       records.some(s=>productionCompleteState(s)&&s.id===r.payload.scope.revision_id)&&
@@ -81,7 +81,7 @@ function productionEntityIds(record,byId=new Map((state.productionRecords||[]).m
 }
 function productionEntityChildren(entityId){
   const byId=new Map((state.productionRecords||[]).map(r=>[r.object_id,r]));
-  return (state.productionRecords||[]).filter(r=>(productionCompleteState(r)||r.kind==='REPRESENTATION'&&!r.payload.review_model)&&productionEntityIds(r,byId).includes(entityId));
+  return (state.productionRecords||[]).filter(r=>r.payload.status!=='withdrawn'&&(productionCompleteState(r)||r.kind==='REPRESENTATION'&&!r.payload.review_model)&&productionEntityIds(r,byId).includes(entityId));
 }
 function productionStateOrder(a,b){const x=a.payload.sources?.[0],y=b.payload.sources?.[0];return (x?.scene_id||'').localeCompare(y?.scene_id||'')||(x?.block_ids?.[0]||'').localeCompare(y?.block_ids?.[0]||'')||a.object_id.localeCompare(b.object_id)}
 function renderProductionEntityNavigation(root,r){
