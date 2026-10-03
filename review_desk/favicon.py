@@ -87,7 +87,10 @@ def asset(root, name):
     path = base / name
     if path.is_symlink() or not path.is_file() or path.resolve().parent != base:
         raise ValueError('站点图标文件不存在或不是受管本地文件')
-    data = validate_image(path.read_bytes(), path.suffix.lower())
+    if path.stat().st_size > MAX_BYTES:
+        raise ValueError('站点图标文件须在 256 KiB 以内')
+    with path.open('rb') as stream:
+        data = validate_image(stream.read(MAX_BYTES + 1), path.suffix.lower())
     return path, data
 
 
