@@ -96,6 +96,7 @@ button { border-radius: 0; }
 .text-reader-scroll .document { width: min(100%,920px); max-width: none; margin: 0 auto; padding: 34px clamp(24px,5vw,68px) 75px; }
 .text-reader-scroll .document .overline,.text-reader-scroll .document > h2,.text-reader-scroll .document > .type-pill { display: none; }
 .source-meta { margin: 0 0 25px; padding: 18px; border: 1px solid var(--desk-line); border-radius: 0; background: #ede6d8; }
+#story-workspace .text-reader-head > div,#story-workspace .source-meta > div { min-width: 0; overflow-wrap: anywhere; }
 .intro { margin: 20px 0 28px; }.source-text { font-size: 17px; line-height: 1.95; }.source-text p { margin-bottom: 20px; }
 .image-grid figure,.comment-card,.comment-editor { border-radius: 0; }
 .comment-panel { top: 0; width: min(440px,100vw); background: #f8f4e9; box-shadow: -16px 0 48px #1719144d; }.comment-panel > header { background: var(--desk-ink); border-color: #34362f; }.comment-panel > header h2,.comment-panel > header button { color: #f8f4e9; }
