@@ -416,10 +416,22 @@ async function renderProductionReadiness(root,r,options={}){
 function showProductionAdoption(parent,row){
   const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','采用素材版本');components.setAttribute('aria-label','采用文件组成');assets.append(new Option('选择一个实际素材',''));for(const r of state.productionRecords.filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type))assets.append(new Option(r.payload.title,r.object_id));
   const workspace=state.workspace,readEpoch=productionReadEpoch;
-  let history=[],requestEpoch=0,closed=false,loading=false,saving=false,confirm;
+  let history=[],requestEpoch=0,closed=false,loading=false,saving=false,confirm,pendingRequest=null;
   const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionReadEpoch===readEpoch;
   const selectedAsset=()=>history.find(r=>r.object_id===assets.value&&r.id===versions.value);
-  const updateControls=()=>{const asset=selectedAsset();assets.disabled=saving;versions.disabled=loading||saving||!history.length;components.disabled=loading||saving||!asset;confirm.disabled=loading||saving||!asset?.payload.components.some(c=>c.id===components.value)};
+  const updateControls=()=>{const asset=selectedAsset();assets.disabled=saving;versions.disabled=loading||saving||!history.length;components.disabled=loading||saving||!asset;confirm.disabled=loading||saving||!asset?.payload.components.some(c=>c.id===components.value);for(const input of [reason,start,end,...Object.values(cropFields)])input.disabled=saving};
+  const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
+  const samePayload=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
+  const readAttempt=async request=>{
+    const result=await api('/api/production?kind=RELATION');
+    if(!Array.isArray(result.records))throw Error('采用结果暂无法核实，请重试核对');
+    const current=result.records.find(r=>r.object_id===request.object_id);
+    const other=result.records.find(r=>r.object_id!==request.object_id&&r.payload.relation_type==='adoption'&&r.payload.scope.object_id===request.payload.scope.object_id&&r.payload.slot===request.payload.slot);
+    if(!other&&current?.version===request.expected_version+1&&samePayload(current.payload,request.payload))return 'saved';
+    if(other||current&&current.version!==request.expected_version||!current&&request.expected_version!==0)return 'changed';
+    return 'unchanged';
+  };
+  const changed=()=>Error('采用已变化，未覆盖现有判断。请刷新并核对当前采用后再操作');
   const renderComponents=()=>{components.replaceChildren();for(const c of selectedAsset()?.payload.components||[])components.append(new Option(`${c.id} · ${c.role}`,c.id));updateControls()};
   assets.onchange=async()=>{
     if(!isOpen()||saving)return;
@@ -438,7 +450,30 @@ function showProductionAdoption(parent,row){
     const asset=selectedAsset();if(!asset||!asset.payload.components.some(c=>c.id===components.value)||!reason.value.trim())throw Error('请选择确切素材版本和文件组成并填写理由');
     const payload={format:'production-relation-v1',title:p.title+' · 采用',blocks:[{id:'adoption',text:reason.value}],relation_type:'adoption',scope:p.scope,slot:p.slot,asset:productionRef(asset),component_id:components.value,usage:p.usage,reason:reason.value};if(start.value!==''||end.value!=='')payload.range={start_seconds:Number(start.value),end_seconds:Number(end.value)};if(Object.values(cropFields).some(input=>input.value!=='')){if(Object.values(cropFields).some(input=>input.value===''))throw Error('裁切需同时填写左、上、宽、高四项');payload.crop=Object.fromEntries(Object.entries(cropFields).map(([key,input])=>[key,Number(input.value)]))}
     saving=true;updateControls();
-    try{await api('/api/production/adopt',{method:'POST',body:JSON.stringify({object_id:row.adoption?.object_id||'adoption-'+crypto.randomUUID(),expected_version:row.adoption?.version||0,payload})});if(!isOpen())return;toast('精确采用已保存');await loadProductionWorkspace()}
+    try{
+      let saved=false;
+      if(pendingRequest){
+        const status=await readAttempt(pendingRequest);if(!isOpen())return;
+        if(status==='changed')throw changed();
+        if(status==='saved'){
+          if(!samePayload(payload,pendingRequest.payload))throw Error('上次采用已保存；当前修改尚未提交，请保留输入并刷新核对');
+          saved=true;
+        }
+      }
+      if(!saved){
+        // Keep the exact wire payload and id until an uncertain write is resolved.
+        if(!pendingRequest||!samePayload(payload,pendingRequest.payload))pendingRequest=JSON.parse(JSON.stringify({object_id:row.adoption?.object_id||'adoption-'+crypto.randomUUID(),expected_version:row.adoption?.version||0,payload}));
+        try{await api('/api/production/adopt',{method:'POST',body:JSON.stringify(pendingRequest)})}
+        catch(error){
+          if(!isOpen())return;
+          let status;try{status=await readAttempt(pendingRequest)}catch(readError){throw Error(`${error.message}；采用结果暂无法核实，请重试核对`)}
+          if(!isOpen())return;
+          if(status==='changed')throw changed();
+          if(status!=='saved')throw error;
+        }
+      }
+      if(!isOpen())return;pendingRequest=null;toast('精确采用已保存');await loadProductionWorkspace();
+    }
     catch(error){if(isOpen())throw error}finally{saving=false;if(isOpen())updateControls()}
   });
   productionButton(box,'取消',()=>{closed=true;++requestEpoch;box.remove()});parent.append(box);updateControls();
