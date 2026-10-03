@@ -65,7 +65,7 @@ function renderActualGeneration(parent,context){
 function renderGenerationRecipe(parent,need){
   const plan=need.payload.generation,box=el('section','material-plan');box.dataset.requirementId=need.object_id;
   nodeText('h3',null,'生成方案',box);
-  if(!plan){nodeText('p','production-issue','生成方案待完善',box);parent.append(box);return}
+  if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);materialField(host,need,'generation.output.description',null);
   materialParameters(host,need,'generation',plan.model);
   renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
@@ -125,7 +125,7 @@ function materialRoundModels(needs,items,data){
     // Older results belong to this card's history, including when the current round has no result.
     for(const history of rounds)for(const row of history.members)if(row.kind==='ASSET')used.add(row.object_id);
     const candidates=round.results.map(row=>{const original=items.find(i=>i.record.object_id===row.object_id),component=row.payload.components.find(c=>c.role==='original')||row.payload.components[0];
-      return {...original,record:row,component,review_context:data.materialContexts?.[row.id],range:original?.record.id===row.id?original.range:null,crop:original?.record.id===row.id?original.crop:null}});
+      return {...original,record:row,label:original?.record.id===row.id?original.label:items.find(item=>item.record.id===row.id)?.label,component,review_context:data.materialContexts?.[row.id],range:original?.record.id===row.id?original.range:null,crop:original?.record.id===row.id?original.crop:null}});
     candidates.forEach(i=>used.add(i.record.object_id));
     return {need,candidates,round,rounds,material_id:current.object_id};
   });
@@ -135,7 +135,7 @@ function materialRoundModels(needs,items,data){
     const [mid,rounds]=Object.entries(data.material_versions||{}).find(([mid,rs])=>mid!==identity.object_id&&rs.some(r=>r.members.some(m=>m.kind==='ASSET'&&m.object_id===identity.object_id)))||[identity.object_id,data.material_versions?.[identity.object_id]];
     const round=rounds?.find(r=>r.number===data.selectedMaterialRounds?.[mid])||rounds?.[0];if(!round)return [model];
     if(shownRounds.has(mid))return [];shownRounds.add(mid);data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number;
-    return [{...model,need:round.plan||null,identity,material_id:mid,round,rounds,candidates:materialRoundResults(round,identity,!!data.localVersions?.[identity.object_id]).map(record=>({...original,record,component:record.payload.components.find(c=>c.id===original.component?.id)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],review_context:data.materialContexts?.[record.id]||(record.id===identity.id?original.review_context:undefined),range:record.id===identity.id?original.range:null,crop:record.id===identity.id?original.crop:null}))}];
+    return [{...model,need:round.plan||null,identity,material_id:mid,round,rounds,candidates:materialRoundResults(round,identity,!!data.localVersions?.[identity.object_id]).map(record=>({...original,record,label:record.id===identity.id?original.label:items.find(item=>item.record.id===record.id)?.label,component:record.payload.components.find(c=>c.id===original.component?.id)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],review_context:data.materialContexts?.[record.id]||(record.id===identity.id?original.review_context:undefined),range:record.id===identity.id?original.range:null,crop:record.id===identity.id?original.crop:null}))}];
   });
   return [...models,...extra];
 }
@@ -196,7 +196,8 @@ function renderMaterialCard(parent,model,options={}){
     }
     items=[chosen];
   }
-  if(!items.length)renderMaterialPlaceholder(box,need||model.identity);
+  if(need?.payload.status==='withdrawn')nodeText('p','production-meta','此素材需求已撤回',box);
+  else if(!items.length)renderMaterialPlaceholder(box,need||model.identity);
   for(const item of items){
     const h=el('div','entity-review-local-heading');if(need||items.length>1)nodeText('h4',null,item.record.payload.title,h);
     if(!model.round)options.assetVersion?.(h,item);box.append(h);

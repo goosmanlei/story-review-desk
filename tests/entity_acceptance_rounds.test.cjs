@@ -1,5 +1,5 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){},remove(){},toggle(){}}}append(...nodes){this.children.push(...nodes)}setAttribute(){}addEventListener(){}all(){return this.children.flatMap(n=>[n,...n.all()])}}
+class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.isConnected=true;this.classList={add(){},remove(){},toggle(){}}}append(...nodes){this.children.push(...nodes)}setAttribute(){}addEventListener(){}all(){return this.children.flatMap(n=>[n,...n.all()])}}
 const row=(object,kind,id=object+'-v1',payload={})=>({object_id:object,id,current_revision:id,kind,version:1,payload:{title:object,...payload}}),ref=r=>({object_id:r.object_id,revision_id:r.id});
 function setup(){
   const entity=row('entity','ENTITY',undefined,{entity_type:'character'}),form=row('form','STATE'),other=row('other','STATE');
@@ -11,12 +11,12 @@ function setup(){
   vm.createContext(context);for(const file of ['app.js','production.js','material-review.js','entity-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),context);
   vm.runInContext('globalThis.state=state;',context);Object.assign(context.state,{workspace:'settings.workspace',entityReview:data,productionEntityDetail:{record:entity},productionChildDetail:{record:form},productionSelected:plan});
   for(const fn of ['entityVersionControl','reviewTextBlocks','entitySources','renderEntityRelations','renderComments','paintProductionReview'])context[fn]=()=>{};
-  context.entityReviewScope=()=>'';context.productionEntityIcon=()=>new Element('svg');context.reloadEntityReview=async()=>{};
+  context.entityReviewScope=()=>'';context.productionEntityIcon=()=>new Element('svg');const realReload=context.reloadEntityReview;context.reloadEntityReview=async()=>{};
   context.fetch=async(url,options)=>{requests.push({url,payload:JSON.parse(options.body)});return {ok:true,json:async()=>({})}};
   context.renderStateMaterials=(_root,data,form)=>context.materialRoundModels(data.requirements.filter(r=>r.payload.scope.revision_id===form.id).map(r=>data.localVersions?.[r.object_id]||r),[],data);
   const render=()=>{const root=new Element('main');context.renderEntityReview(root);const button=root.all().find(n=>n.tag==='button'&&['采纳','取消采纳'].includes(n.textContent));assert.ok(button);return button};
   context.renderProductionReader=render;
-  return {context,data,entity,form,other,plan,old,same,requests,messages,render};
+  return {context,data,entity,form,other,plan,old,same,requests,messages,render,realReload};
 }
 
 test('a displayed old plan disables the real acceptance button and its exact scope is never posted',async()=>{
@@ -67,4 +67,34 @@ test('a queued old button callback cannot judge a newer historical display or a 
   const f=setup(),button=f.render();assert.equal(button.disabled,false);const click=button.onclick();f.context.switchMaterialRound(f.data,'need',1);await click;assert.equal(f.requests.length,0);
   f.context.switchMaterialRound(f.data,'need',2);const next=f.render().onclick();f.context.state.entityReview={...f.data};await next;assert.equal(f.requests.length,0);
   f.context.state.entityReview=f.data;const away=f.render().onclick();f.context.state.workspace='story.sources';await away;assert.equal(f.requests.length,0);
+});
+
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+test('entity save keeps one request across double invocation and rerender, and distinguishes its actual refresh failure',async()=>{
+ const f=setup(),requests=[];f.context.fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}));f.context.reloadEntityReview=f.realReload;
+ const button=f.render(),saving=button.onclick();await flush();await button.onclick();assert.equal(f.render().disabled,true);await f.render().onclick();assert.equal(requests.length,1);
+ requests[0].resolve({ok:true,json:async()=>({saved:true})});await flush();assert.equal(requests.length,2);assert.match(requests[1].url,/entity-review/);requests[1].reject(Error('own read unavailable'));await saving;
+ assert.equal(requests.length,2);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('尚未更新')&&s.includes('own read unavailable')));assert.equal(f.render().disabled,true);await f.render().onclick();assert.equal(requests.length,2);
+});
+test('entity unknown result retains the exact version, blocks blind resend and does not claim success',async()=>{
+ const f=setup(),requests=[];f.context.fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}));
+ const saving=f.render().onclick();await flush();assert.equal(JSON.parse(requests[0].options.body).expected_version,0);requests[0].reject(Error('response lost'));await saving;
+ assert.match(f.messages.at(-1),/结果待确认/);assert.ok(!f.messages.some(s=>s.includes('已保存')));await f.render().onclick();assert.equal(requests.length,1);
+});
+test('entity late writes never reload a new entity, workspace or replaced local reader',async()=>{
+ for(const outcome of ['success','failure'])for(const change of ['entity','workspace','reader']){
+  const f=setup(),requests=[];let reloads=0;f.context.fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({resolve,reject}));f.context.reloadEntityReview=async()=>{reloads++};
+  const button=f.render(),saving=button.onclick();await flush();
+  if(change==='entity')f.context.state.entityReview={...f.data,entity:{...f.entity,object_id:'new-entity'}};
+  if(change==='workspace')f.context.state.workspace='story.sources';
+  if(change==='reader')button.isConnected=false;
+  if(outcome==='success')requests[0].resolve({ok:true,json:async()=>({})});else requests[0].reject(Error('old request failure'));await saving;
+  assert.equal(reloads,0);assert.equal(f.messages.length,outcome==='success'?1:0);if(outcome==='success')assert.match(f.messages[0],/「entity」.*已保存/);
+ }
+});
+test('entity own refresh failure stays quiet after a new actual detail read takes ownership',async()=>{
+ const f=setup(),requests=[];f.context.fetch=(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}));f.context.reloadEntityReview=f.realReload;
+ const saving=f.render().onclick();await flush();requests[0].resolve({ok:true,json:async()=>({})});await flush();assert.match(requests[1].url,/entity-review/);
+ const newer=f.context.openProductionRecord('new-entity');await flush();requests[1].reject(Error('old refresh failure'));await saving;assert.ok(!f.messages.some(s=>s.includes('old refresh failure')));
+ requests[2].reject(Error('new read stopped'));await assert.rejects(newer,/new read stopped/);
 });

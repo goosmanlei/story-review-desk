@@ -112,7 +112,10 @@ function renderProductionEntityNavigation(root,r){
   root.append(section);
 }
 async function loadProductionWorkspace({onReadStart}={}){
-  const workspace=state.workspace,epoch=++productionLoadEpoch;$('#production-view').replaceChildren();nodeText('p',null,'正在读取制作记录…',$('#production-view'));const result=await api('/api/production');if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
+  const workspace=state.workspace,epoch=++productionLoadEpoch,readEpoch=productionReadEpoch,view=$('#production-view');view.replaceChildren();const loading=nodeText('p',null,'正在读取制作记录…',view);
+  let result;try{result=await api('/api/production')}
+  catch(error){if(state.workspace===workspace&&epoch===productionLoadEpoch&&readEpoch===productionReadEpoch&&loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
+  if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
   const param=new URL(location.href).searchParams,selected=param.get('production_object'),requested=result.records.find(r=>r.object_id===selected);
   if(requested?.kind==='INPUT_LOCK'){
@@ -438,7 +441,7 @@ function showProductionJudgment(root){
       let refreshOwner=null;
       const refresh=loadProductionWorkspace({onReadStart:owner=>{refreshOwner=owner}}),initialOwner={workspace,loadEpoch:productionLoadEpoch,readEpoch};
       try{await refresh}
-      catch(error){const owner=refreshOwner||initialOwner;if(state.workspace===owner.workspace&&productionLoadEpoch===owner.loadEpoch&&productionReadEpoch===owner.readEpoch)toast(`「${title}」的审阅已保存；当前列表尚未更新：${error.message}`)}
+      catch(error){const owner=refreshOwner||initialOwner;if(state.workspace===owner.workspace&&productionLoadEpoch===owner.loadEpoch&&productionReadEpoch===owner.readEpoch)toast(`「${title}」的审阅已保存；当前页面尚未完整更新：${error.message}`)}
     }catch(error){if(isOpen()){notice.hidden=false;notice.textContent=error.message;toast(error.message)}}
     finally{saving=false;if(isOpen())controls()}
   });productionButton(box,'取消',()=>{closed=true;box.remove()});root.append(box);controls();
