@@ -150,12 +150,40 @@ function watchSourceChapters(){
   for(const node of [$('#source-view'),$('#source-text'),$('.workspace-topbar')])if(node)sourceChapterObserver.observe(node);
   scheduleSourceChapter();
 }
-function jumpSourceChapter(sourceId,blockId){
-  if(state.current?.id!==sourceId)chooseSource(sourceId);
-  const reader=$('#source-view'),target=$(`#block-${escapeSelector(blockId)}`);if(!target)return;
-  if(getComputedStyle(reader).overflowY==='auto')reader.scrollTo({top:reader.scrollTop+target.getBoundingClientRect().top-reader.getBoundingClientRect().top-12,behavior:'instant'});
+let sourceChapterRouteKey=null,sourceRouteFrame=0;
+function sourceReadingRoute(url){
+  const source=state.sources.find(item=>item.id===url.searchParams.get('source'));
+  const chapter=sourceChapters(source).find(item=>item.id===url.searchParams.get('source_chapter'));
+  return {source,chapter,key:JSON.stringify([source?.id||null,chapter?.id||null])};
+}
+function cancelSourceChapterRestore(){if(sourceRouteFrame)cancelAnimationFrame(sourceRouteFrame);sourceRouteFrame=0}
+function scrollSourceChapter(blockId=null){
+  const reader=$('#source-view'),target=blockId?$(`#block-${escapeSelector(blockId)}`):reader;if(!target)return;
+  if(getComputedStyle(reader).overflowY==='auto')reader.scrollTo({top:blockId?reader.scrollTop+target.getBoundingClientRect().top-reader.getBoundingClientRect().top-12:0,behavior:'instant'});
   else window.scrollBy({top:target.getBoundingClientRect().top-Math.max(0,$('.workspace-topbar').getBoundingClientRect().bottom)-12,behavior:'instant'});
   scheduleSourceChapter();
+}
+function restoreSourceChapter(url,{initial=false,force=false}={}){
+  const route=sourceReadingRoute(url),changed=route.key!==sourceChapterRouteKey;sourceChapterRouteKey=route.key;
+  cancelSourceChapterRestore();
+  if(state.workspace!=='story.sources'||(!changed&&!force)||(initial&&!route.chapter))return;
+  const source=state.current,text=$('#source-text'),anchor=state.anchor,selected=state.selected,href=location.href;
+  sourceRouteFrame=requestAnimationFrame(()=>{
+    sourceRouteFrame=0;
+    // A later comment location or editor action takes precedence over route scrolling.
+    if(state.workspace!=='story.sources'||state.current!==source||$('#source-text')!==text||state.anchor!==anchor||state.selected!==selected||location.href!==href)return;
+    scrollSourceChapter(route.source?.id===source?.id?route.chapter?.id:null);
+  });
+}
+function jumpSourceChapter(sourceId,blockId){
+  const source=state.sources.find(item=>item.id===sourceId);
+  if(state.workspace!=='story.sources'||!sourceChapters(source).some(chapter=>chapter.id===blockId))return;
+  cancelSourceChapterRestore();
+  if(state.current?.id!==sourceId)chooseSource(sourceId,false,false);
+  const url=new URL(location.href);url.searchParams.set('workspace','story.sources');url.searchParams.set('source',sourceId);url.searchParams.set('source_chapter',blockId);url.hash='';
+  if(url.href!==location.href)history.pushState(null,'',url);
+  sourceChapterRouteKey=sourceReadingRoute(url).key;
+  scrollSourceChapter(blockId);
   $(`#source-list .source-chapter-button[data-source-id="${escapeSelector(sourceId)}"][data-block-id="${escapeSelector(blockId)}"]`)?.focus({preventScroll:true});
 }
 
@@ -183,6 +211,7 @@ function switchWorkspace(id,updateUrl=true){
   hideSelectionAction();
   if(id==='current')id='production.approach';
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='production.approach';
+  if(state.workspace!==id)cancelSourceChapterRestore();
   const previous=state.workspace,storyChild=['story.sources','story.outline','story.script'].includes(id);
   if(state.workspace!==id){state.reviewCommentScope=null;getSelection()?.removeAllRanges();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null}
   state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
@@ -200,7 +229,7 @@ function switchWorkspace(id,updateUrl=true){
   if(source){renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
   if(isProduction())loadProductionWorkspace().catch(e=>toast(e.message));else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
-  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
+  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);if(id==='story.outline'){const revision=resolveStructureRevision(state.structureRevision);if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision')}url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
 }
 
@@ -341,11 +370,12 @@ function renderDocument(){
 }
 
 function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
+  cancelSourceChapterRestore();
   state.reviewCommentScope=null;state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;state.pending=null;state.sourceChapter=null;
   if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   if(sourceChapters(state.current).length)state.expandedSources.add(state.current.id);
   $('#selection-action').hidden=true;
-  if(updateUrl&&state.current){const url=new URL(location.href);url.searchParams.set('source',state.current.id);history.replaceState(null,'',url)}
+  if(updateUrl&&state.current){const url=new URL(location.href);url.searchParams.set('source',state.current.id);url.searchParams.delete('source_chapter');history.replaceState(null,'',url);sourceChapterRouteKey=sourceReadingRoute(url).key}
   renderSources();renderDocument();renderComments();if(!keepScroll)$('#source-view').scrollTop=0;
 }
 
@@ -444,7 +474,8 @@ function setPanelOpen(open){
 function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
 function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
-function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+let commentAction=0;
+function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){const key=draftKey();if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission')}if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
 
 // Every comment editor binds here. Buttons own validation and submission state;
@@ -473,15 +504,26 @@ function updateCommentEditorControls(){
   editor.querySelector('[data-polish]').disabled=busy||isProduction()||!textarea.value.trim();
 }
 
+async function editComment(comment){
+  const action=++commentAction,workspace=state.workspace;
+  try{
+    let located=true;
+    if(typeof isEntityReview==='function'&&isEntityReview())located=locateEntityReviewComment(comment);
+    else if(typeof isMaterialReview==='function'&&isMaterialReview())located=await locateMaterialComment(comment);
+    if(located===false||action!==commentAction||state.workspace!==workspace)return;
+    if(isProduction()&&state.productionSelected?.id!==comment.target_revision_id)return;
+    startDraft(comment.anchor,comment);
+  }catch(error){if(action===commentAction&&state.workspace===workspace)toast(error.message)}
+}
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
   nodeText('q',null,anchorLabel(comment.anchor),card);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
-  const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=()=>locateComment(comment);
+  const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=async()=>{++commentAction;try{await locateComment(comment)}catch(error){toast(error.message)}};
   if(comment.status==='OPEN'){
-    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>{if(typeof isEntityReview==='function'&&isEntityReview())locateEntityReviewComment(comment);else if(typeof isMaterialReview==='function'&&isMaterialReview())locateMaterialComment(comment);startDraft(comment.anchor,comment)};
+    const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>editComment(comment);
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
   }else{const reopen=nodeText('button',null,'重新打开',actions);reopen.onclick=()=>changeComment(comment,'REOPEN')}
   card.append(actions);return card;
@@ -588,26 +630,29 @@ async function previewPolish(){
 }
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
 function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
-function locateComment(comment){if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!isStructure())switchWorkspace('story.outline');state.structureRevision=comment.target_revision_id;state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));if(!block){toast('原引用已失效；评论仍保留');return}(block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'})}
+function locateComment(comment){if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}state.selected=comment.id;renderDocument();renderComments();const block=$('#block-'+escapeSelector(comment.anchor.block_id));if(!block){toast('原引用已失效；评论仍保留');return}(block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'})}
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
   const initialUrl=new URL(location.href);
-  if(structure.revisions.some(r=>r.id===initialUrl.searchParams.get('structure_revision')))state.structureRevision=initialUrl.searchParams.get('structure_revision');
+  state.structureRevision=resolveStructureRevision(initialUrl.searchParams.get('structure_revision'));
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
   chooseScript(initialUrl.searchParams.get('script'),initialUrl.searchParams.get('episode'),initialUrl.searchParams.get('scene'),false);
   switchWorkspace(initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach'),false);
+  restoreSourceChapter(initialUrl,{initial:true});
   window.addEventListener('popstate',()=>{
-    const url=new URL(location.href),source=url.searchParams.get('source');
-    if(source&&source!==state.current?.id)chooseSource(source,true,false);
-    const structureRevision=url.searchParams.get('structure_revision');
-    if(state.structure.revisions.some(r=>r.id===structureRevision))state.structureRevision=structureRevision;
+    const url=new URL(location.href),source=url.searchParams.get('source'),workspace=url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),previous=state.workspace;
+    const nextSource=state.sources.find(item=>item.id===source)||state.sources[0],sourceChanged=workspace==='story.sources'&&nextSource?.id!==state.current?.id;
+    if(sourceChanged)chooseSource(nextSource?.id,true,false);
+    else if(workspace!=='story.sources'&&source&&source!==state.current?.id)chooseSource(source,true,false);
+    if(url.searchParams.get('workspace')==='story.outline')chooseStructureRevision(url.searchParams.get('structure_revision'),false);
     if(url.searchParams.get('workspace')==='story.script'){
       const version=url.searchParams.get('script'),episode=url.searchParams.get('episode'),scene=url.searchParams.get('scene');
       if(version!==state.screenplayVersion||episode!==state.screenplayEpisode||scene!==state.screenplayScene)chooseScript(version,episode,scene,false);
     }
-    switchWorkspace(url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),false);
+    if(workspace!=='story.sources'||previous!==workspace)switchWorkspace(workspace,false);
+    restoreSourceChapter(url,{force:sourceChanged||previous!==state.workspace});
   });
   $('#brand-home').onclick=()=>location.assign('/');
   $('#screenplay-comments').onclick=togglePanel;

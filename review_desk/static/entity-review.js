@@ -42,6 +42,7 @@ async function reloadEntityReview(revision=null){
   await openEntityReview(data.entity.object_id,entityReviewDetail(revision?data.entity:form||data.entity),++productionReadEpoch,null);
 }
 function selectEntityReviewState(row){
+  cancelMaterialCommentLocation();
   state.entityReview.historicalTarget=null;state.entityReview.historicalMedia=null;state.entityReview.historicalCall=null;state.entityReview.historicalRelation=null;state.entityReview.localVersions={};state.entityReview.unassignedOpen=false;state.productionEntityDetail=entityReviewDetail(state.entityReview.entity);
   state.productionChildDetail=entityReviewDetail(row);state.entityReviewMedia=null;
   focusProductionReview(state.productionChildDetail,false);renderProductionReader();renderComments();
@@ -83,7 +84,8 @@ function reviewNotes(parent,row){
 function entityReviewHasHistoricalContent(data,entity,form){
   return !!data.historicalTarget||!!data.historical||entity.id!==data.entity.id||
     !!form&&!data.states.some(row=>row.object_id===form.object_id&&row.id===form.id)||
-    Object.values(data.localVersions||{}).some(row=>row.id!==row.current_revision);
+    Object.values(data.localVersions||{}).some(row=>row.id!==row.current_revision)||
+    (data.requirements||[]).some(current=>{const {need}=materialRoundSelection(data.localVersions?.[current.object_id]||current,data);return need.object_id!==current.object_id||need.id!==current.id});
 }
 function renderEntityReview(root){
   const data=state.entityReview,entity=state.productionEntityDetail.record,form=state.productionChildDetail?.record;
@@ -91,10 +93,11 @@ function renderEntityReview(root){
   const header=el('header','entity-review-header'),identity=el('div'),badge=el('small','production-pill production-entity-badge');badge.dataset.entityType=entity.payload.entity_type;badge.append(productionEntityIcon(entity.payload.entity_type));nodeText('span',null,productionLabels[entity.payload.entity_type],badge);identity.append(badge);nodeText('h2',null,entity.payload.title,identity);header.append(identity);
   const actions=el('div','production-toolbar');
   const accept=productionButton(actions,data.can_revoke?'取消采纳':'采纳',async()=>{
+    if(!isEntityReview()||state.entityReview!==data||entityReviewHasHistoricalContent(data,state.productionEntityDetail.record,state.productionChildDetail?.record))return;
     accept.disabled=true;const action=data.can_revoke?'revoke':'accept',reason=action==='accept'?(data.acceptance_mode==='content'?'重新认可原基础信息、完整状态与关联素材；不授予生成许可。':'采纳此实体的基础信息、关系、全部完整状态和素材生成方案，允许推进素材生成。'):'取消当前采纳，保留历史制作与意见。';
     try{await api('/api/production/entity-decision',{method:'POST',body:JSON.stringify({entity_id:data.entity.object_id,action,decision_ref:data.revoke_target,expected_version:data.decision_version,scope:data.decision_scope||data.scope,acceptance_mode:data.acceptance_mode,actor:'用户',reason})});if(state.entityReview===data){await reloadEntityReview();toast(action==='accept'?(data.acceptance_mode==='content'?'已重新认可原内容，生成方案仍待完善':'已采纳，可推进素材生成'):'已取消采纳')}}
     catch(error){if(state.entityReview===data)await reloadEntityReview();throw error}
-  });accept.classList.add('entity-review-accept');accept.title=data.acceptance_mode==='content'?'重新认可原基础信息、完整状态与关联素材；生成方案仍需单独完善和认可。':'采纳基础信息、关系、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=(!data.can_accept&&!data.can_revoke)||viewingHistory;
+  });accept.classList.add('entity-review-accept');accept.title=viewingHistory?'正在查看历史内容；请切回当前基础信息、状态和素材方案后再采纳或取消。':data.acceptance_mode==='content'?'重新认可原基础信息、完整状态与关联素材；生成方案仍需单独完善和认可。':'采纳基础信息、关系、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=(!data.can_accept&&!data.can_revoke)||viewingHistory;
   header.append(actions);root.append(header);if(data.acceptance_mode==='content')nodeText('p','production-meta','此操作认可原基础信息、完整状态和关联素材；生成方案完善并获认可后才可推进生成。',root);
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);entityVersionControl(basicHeading,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});basics.append(basicHeading);
@@ -144,9 +147,10 @@ function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMed
   }
 }
 function locateEntityReviewComment(comment){
-  const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id);if(!row)return;
+  cancelMaterialCommentLocation();
+  const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id);if(!row)return false;
+  if(!selectCommentMaterialRound(data,row,comment))return false;
   data.historicalTarget=row.id!==row.current_revision?row:null;data.historicalMedia=null;data.historicalCall=null;data.historicalRelation=null;data.unassignedOpen=false;data.localVersions={};
-  for(const [mid,rounds] of Object.entries(data.material_versions||{})){const round=rounds.find(r=>r.members.some(m=>m.id===row.id));if(round){data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number}}
   state.productionEntityDetail=entityReviewDetail(data.entity);
   const currentForm=data.states.find(r=>r.object_id===state.productionChildDetail?.record.object_id)||data.states[0];
   state.productionChildDetail=currentForm?entityReviewDetail(currentForm):null;
@@ -172,8 +176,8 @@ function locateEntityReviewComment(comment){
   }
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
   if(row.kind==='REPRESENTATION')data.historicalTarget=row;
-  focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
+  state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
   // Expand any collapsed exact text before using the common locate behavior.
   for(const node of document.querySelectorAll('#production-blocks [data-block-id]'))if(node.dataset.blockId===comment.anchor.block_id){let parent=node.parentElement;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement}}
-  locateProductionComment(comment,true);
+  locateProductionComment(comment,true);return true;
 }

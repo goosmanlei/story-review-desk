@@ -38,6 +38,26 @@ function watchStructureIndex(){
   scheduleStructureIndex();
 }
 function structureRevision(){return state.structure?.revisions.find(r=>r.id===state.structureRevision)||null}
+function resolveStructureRevision(id){
+  const revisions=state.structure?.revisions||[];
+  return revisions.some(revision=>revision.id===id)?id:revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
+}
+function chooseStructureRevision(id,updateUrl=true){
+  const revision=resolveStructureRevision(id),changed=revision!==state.structureRevision;
+  if(changed){
+    if(isStructure()){
+      getSelection()?.removeAllRanges();hideSelectionAction();
+      state.anchor=null;state.editing=null;state.selected=null;state.preview=null;state.previewExpanded=false;state.suggestion=null;state.pending=null;state.drawMode=null;state.reviewCommentScope=null;structureDrawing=null;
+    }
+    state.structureRevision=revision;
+  }
+  if(updateUrl){
+    const url=new URL(location.href);
+    if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision');
+    if(url.href!==location.href)history.pushState(null,'',url);
+  }
+  if(changed&&isStructure()){renderStructureReader();renderComments()}
+}
 function structureBlocks(doc){return doc.sections.flatMap(s=>[{id:`heading-${s.id}`,text:s.title},...s.blocks])}
 function structureVisuals(doc){return doc.sections.flatMap(s=>s.visuals||[])}
 function structureSourceTitle(id){return state.sources.find(s=>s.id===id)?.title||id}
@@ -126,7 +146,7 @@ function renderStructureReader(){
   }
   if(state.structure.direction_changed){const alert=nodeText('p','structure-alert','所选方向已更新。当前结构稿仍引用原方向修订；请核对并导入针对新方向的完整结构稿。',status);alert.setAttribute('role','alert')}
   const versions=el('div','structure-versions');nodeText('span',null,'阅读版本：',versions);
-  for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'','',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>{state.structureRevision=revision.id;state.anchor=null;state.selected=null;renderStructureReader();renderComments()}}
+  for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'','',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
   status.append(versions);nodeText('p','revision-count-help','评论数包含已关闭评论。',status);
   if(!active){nodeText('p','structure-empty','方向已选定。等待 Codex 通过 structure-import 导入完整图文结构初稿。',status);return}
   const doc=active.payload;
