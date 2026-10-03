@@ -8,8 +8,39 @@ const isStructure=()=>state.workspace==='story.outline';
 const isScript=()=>state.workspace==='story.script';
 const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
 const commentTarget=()=>isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
-const draftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number])}`:key};
 const commentSaves=new Set();
+function pendingCommentSubmission(key){
+  try{const value=JSON.parse(localStorage.getItem(key+':submission'));return value?.id&&value.payload?value:null}catch{return null}
+}
+function appendCommentSubmissionNotice(editor,key){
+  if(!editor||!key||state.editing||!pendingCommentSubmission(key)||editor.querySelector('.comment-submission-notice'))return;
+  const notice=nodeText('p','comment-help comment-submission-notice','上次提交尚未确认。原样重试可确认保存；修改内容后提交会作为一条新评论。',editor);
+  notice.setAttribute('role','status');
+}
+function commentRevisionIntent(){
+  if(state.editing)return null;
+  return (typeof materialRevisionIntent==='function'?materialRevisionIntent():null)||pendingCommentSubmission(draftKey())?.payload.material_revision||null;
+}
+function recoverLegacyMaterialDraft(key,legacy){
+  if(localStorage.getItem(key))return false;
+  const text=localStorage.getItem(legacy);if(text===null)return false;
+  // Write the destination completely before removing the only old copy.
+  localStorage.setItem(key,text);
+  const discussion=localStorage.getItem(legacy+':discussion');
+  if(discussion!==null)localStorage.setItem(key+':discussion',discussion);
+  localStorage.removeItem(legacy);localStorage.removeItem(legacy+':discussion');return true;
+}
+function appendLegacyMaterialDraft(editor,key){
+  const legacy=legacyDraftKey();if(state.editing||legacy===key||localStorage.getItem(legacy)===null)return;
+  const details=el('details','context-preview');nodeText('summary',null,'有一份旧草稿，轮次无法确定',details);
+  nodeText('p','comment-help','旧版本没有记录素材轮次，请核对后再恢复。已有本轮内容时不会覆盖，旧文字仍可查看和复制。',details);
+  nodeText('pre',null,localStorage.getItem(legacy),details);
+  const context=materialCommentContext(),restore=nodeText('button',null,`恢复到当前第 ${context.number} 轮`,details);restore.type='button';restore.disabled=!!localStorage.getItem(key);
+  restore.onclick=()=>{if(draftKey()!==key)return;try{if(recoverLegacyMaterialDraft(key,legacy))renderComments()}catch(error){toast(error.message)}};
+  editor.append(details);
+}
 const unscopedComments=()=>typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const activeComments=()=>state.reviewCommentScope?reviewBlockComments(state.comments,state.reviewCommentScope):unscopedComments();
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
@@ -414,7 +445,7 @@ function openPanel(){setPanelOpen(true)}
 function closePanel(){setPanelOpen(false)}
 function togglePanel(){setPanelOpen($('#comment-panel').hidden)}
 function startDraft(anchor,comment=null){state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
-function abandonDraft(message){const key=draftKey();if(key)localStorage.removeItem(key);if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
+function abandonDraft(message){const key=draftKey();if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission')}if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
 
 // Every comment editor binds here. Buttons own validation and submission state;
 // shortcuts invoke those same actions, and never handle unrelated inputs.
@@ -436,6 +467,7 @@ function bindCommentEditorShortcuts(textarea,{submit,cancel}){
 function updateCommentEditorControls(){
   const editor=$('.comment-editor'),textarea=editor?.querySelector('textarea');if(!textarea)return;
   const busy=commentSaves.has(draftKey());textarea.readOnly=busy;
+  const intent=editor.querySelector('#material-revision-intent');if(intent)intent.disabled=busy;
   for(const button of editor.querySelectorAll('.editor-actions button'))button.disabled=busy;
   editor.querySelector('[data-comment-submit]').disabled=busy||!textarea.value.trim();
   editor.querySelector('[data-polish]').disabled=busy||isProduction()||!textarea.value.trim();
@@ -468,7 +500,9 @@ function renderComments(){
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=localStorage.getItem(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     textarea.addEventListener('input',()=>{localStorage.setItem(draftKey(),textarea.value);state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
     const help=nodeText('p','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);help.id='comment-editor-shortcuts';textarea.setAttribute('aria-describedby',help.id);
-    const revisionIntent=typeof materialRevisionIntent==='function'?materialRevisionIntent():null;
+    appendLegacyMaterialDraft(editor,draftKey());
+    appendCommentSubmissionNotice(editor,draftKey());
+    const revisionIntent=commentRevisionIntent();
     if(revisionIntent){const label=el('label','comment-intent'),check=el('input');check.type='checkbox';check.checked=localStorage.getItem(draftKey()+':discussion')!=='true';check.id='material-revision-intent';check.onchange=()=>localStorage.setItem(draftKey()+':discussion',String(!check.checked));label.append(check,document.createTextNode('作为素材修订意见'));editor.append(label)}
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.dataset.commentSubmit='true';save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;inspect.hidden=isProduction();
@@ -503,18 +537,30 @@ async function saveComment(){
   const textarea=$('#comment-editor-text'),key=draftKey();
   if(!key||!textarea||textarea.disabled||textarea.readOnly||commentSaves.has(key))return;
   const text=textarea.value.trim();if(!text)return toast('请先填写修改意见');
-  const editing=state.editing,request={id:crypto.randomUUID(),...commentTarget(),anchor:state.anchor,body:text};
-  if(!editing&&typeof materialCommentContext==='function'){const context=materialCommentContext();if(context)request.material_context=context}
-  if(!editing&&$('#material-revision-intent')?.checked)request.material_revision=materialRevisionIntent();
+  const editing=state.editing,draftText=textarea.value,payload={...commentTarget(),anchor:state.anchor,body:text};
+  if(!editing&&typeof materialCommentContext==='function'){const context=materialCommentContext();if(context)payload.material_context=context}
+  if(!editing&&$('#material-revision-intent')?.checked)payload.material_revision=commentRevisionIntent();
+  let submission,storedSubmission,sent=false;
   commentSaves.add(key);updateCommentEditorControls();
   try{
+    try{
+      localStorage.setItem(key,draftText);
+      if(!editing){
+        const pending=pendingCommentSubmission(key);
+        submission=pending&&JSON.stringify(pending.payload)===JSON.stringify(payload)?pending:{id:crypto.randomUUID(),payload};
+        storedSubmission=JSON.stringify(submission);localStorage.setItem(key+':submission',storedSubmission);
+      }
+    }catch{throw Error('本机草稿保存失败，评论尚未发送。当前输入仍保留，请复制留存后重试。')}
     if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
-    else await api('/api/comments',{method:'POST',body:JSON.stringify(request)});
-    localStorage.removeItem(key);
-    if(draftKey()===key){if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false}
-    if(request.material_revision){const url=new URL(location.href);url.searchParams.delete('material_round');history.replaceState(null,'',url);if(isEntityReview())await reloadEntityReview();else if(isMaterialReview())await openProductionRecord(state.materialReview.record.object_id)}
+    else{sent=true;await api('/api/comments',{method:'POST',body:JSON.stringify({id:submission.id,...submission.payload})})}
+    const sameSubmission=editing||localStorage.getItem(key+':submission')===storedSubmission;
+    const stillHere=sameSubmission&&draftKey()===key&&$('#comment-editor-text')?.value===draftText;
+    if(sameSubmission&&localStorage.getItem(key)===draftText){localStorage.removeItem(key);localStorage.removeItem(key+':discussion')}
+    if(!editing&&sameSubmission)localStorage.removeItem(key+':submission');
+    if(stillHere){if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments()}
+    if(stillHere&&payload.material_revision){const url=new URL(location.href);url.searchParams.delete('material_round');history.replaceState(null,'',url);if(isEntityReview())await reloadEntityReview();else if(isMaterialReview())await openProductionRecord(state.materialReview.record.object_id)}
     await refreshComments();toast('评论已保存');
-  }catch(error){toast(error.message)}
+  }catch(error){if(sent&&draftKey()===key)appendCommentSubmissionNotice($('.comment-editor'),key);toast(error.message)}
   finally{commentSaves.delete(key);updateCommentEditorControls()}
 }
 const sameDraft=(key,text)=>draftKey()===key&&$('#comment-editor-text')?.value.trim()===text;

@@ -102,6 +102,7 @@ function switchMaterialRound(data,mid,number){
   data.roundDrafts||={};data.roundDrafts[mid+':'+old]={row:state.productionSelected,anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope};
   data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=number;data.explicitRevision=false;delete data.selectedCandidateId;
   const round=rounds.find(r=>r.number===number),saved=data.roundDrafts[mid+':'+number];
+  state.materialCommentCard={data,material_id:mid,number};
   const row=saved?.row&&round.members.some(r=>r.id===saved.row.id)?saved.row:round.results[0]||round.plan;
   state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;state.drawMode=null;
   if(row)focusProductionReview({record:row,history:[row],uses:[]},false);
@@ -133,7 +134,9 @@ function materialRoundModels(needs,items,data){
 function materialRevisionIntent(){
   if(!isProduction()||state.editing)return null;
   const row=state.productionSelected;if(!row)return null;
+  const context=materialCommentContext();
   for(const [mid,rounds] of Object.entries(materialVersions())){
+    if(context&&context.material_id!==mid)continue;
     const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid]||rounds[0]?.number;
     const active=rounds[0];if(!active||selected!==active.number)continue;
     if(active.members.some(r=>r.id===row.id)||(active.state==='preparing'&&rounds[1]?.members.some(r=>r.id===row.id)))return {material_id:mid,expected_round:active.number};
@@ -141,8 +144,18 @@ function materialRevisionIntent(){
 }
 function materialCommentContext(){
   const row=state.productionSelected;if(!isProduction()||!row)return null;
-  for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid]||rounds[0]?.number;if(rounds.find(r=>r.number===selected)?.members.some(r=>r.id===row.id))return {material_id:mid,number:selected}}
-  return null;
+  const data=isEntityReview()?state.entityReview:state.materialReview,card=state.materialCommentCard,matches=[];
+  for(const [mid,rounds] of Object.entries(materialVersions())){const selected=data?.selectedMaterialRounds?.[mid]||rounds[0]?.number;if(rounds.find(r=>r.number===selected)?.members.some(r=>r.id===row.id))matches.push({material_id:mid,number:selected})}
+  return matches.find(c=>card?.data===data&&c.material_id===card.material_id&&c.number===card.number)||matches.find(c=>c.material_id===data?.record?.object_id)||(matches.length===1?matches[0]:null);
+}
+function focusMaterialCommentCard(mid,number){
+  const data=isEntityReview()?state.entityReview:state.materialReview,previous=state.materialCommentCard;
+  const changed=previous?.data!==data||previous.material_id!==mid||previous.number!==number;
+  state.materialCommentCard={data,material_id:mid,number};
+  if(changed){
+    state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;state.pending=null;
+    renderComments();
+  }
 }
 function materialMedia(parent,item){
   const {record,component}=item,pane=el('div','entity-review-media-pane');pane.dataset.reviewRevision=record.id;
@@ -162,6 +175,7 @@ function renderMaterialCard(parent,model,options={}){
   const box=el('article','material-card'),need=model.need;
   let items=model.candidates;
   box.dataset.materialKey=need?.object_id||model.material_id||items[0].record.object_id;
+  if(model.round){const focus=()=>focusMaterialCommentCard(model.material_id,model.round.number);box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,need?.payload.generation?.output.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title,heading);
   if(model.round)materialRoundControl(heading,model.material_id,model.rounds,model.round,options.roundChange);else if(need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
   if(options.selectCandidate&&items.length){
