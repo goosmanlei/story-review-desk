@@ -5,6 +5,26 @@ for(const f of ['production.js','material-review.js'])vm.runInContext(fs.readFil
 const need=(id,revision=id+'-v1',media='image')=>({object_id:id,id:revision,current_revision:revision,payload:{media_type:media}});
 const item=(id,refs,media='image')=>({id,record:{object_id:id,id:id+'-v1',payload:{media_type:media,candidate_requirements:refs}}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
+test('an exact review link chooses its candidate and its original call, not the first result',()=>{
+ const a={record:{id:'first'},review_context:{call:{id:'call-first'}}},b={record:{id:'requested'},review_context:{call:{id:'call-requested'}}};
+ assert.equal(ctx.materialCandidateChoice([a,b],'requested'),b);
+ assert.equal(ctx.materialCandidateChoice([a,b],'call-requested'),b);
+ assert.equal(ctx.materialCandidateChoice([a,b],'missing'),a);
+ assert.equal(ctx.materialCandidateChoice([],'requested'),null);
+});
+test('a historical target keeps its exact revision after feedback updates the asset metadata',()=>{
+ const original={id:'original',role:'original',sha256:'same-file'};
+ const old={object_id:'asset',id:'old',kind:'ASSET',payload:{production:{object_id:'call'},components:[original]}};
+ const current={...old,id:'current'},other={...old,object_id:'other',id:'other'};
+ const requestedContext={call:{id:'actual-call'},requirements:[]};
+ const detail={record:current,history:[current,old],review_contexts:{old:requestedContext}};
+ const items=[{record:other,component:original},{record:current,component:original}];
+ const exact=ctx.materialExactCandidates(detail,items,'old');
+ assert.equal(exact[0],items[0]);assert.equal(exact[1].record,old);assert.equal(exact[1].review_context,requestedContext);
+ assert.equal(ctx.materialCandidateChoice(exact,'old').record.id,'old');assert.equal(items[1].record.id,'current');
+ const different={...current,payload:{production:{object_id:'other-call'},components:[original]}};
+ assert.equal(ctx.materialExactCandidates(detail,[{record:different,component:original}],'old')[0].record,different);
+});
 test('cards preserve exact plan candidates and do not attach an old candidate to a new recipe',()=>{
  const a=need('a'),b=need('b'),old=need('a','a-old'),clip=item('clip',[ref(a),ref(b)]),previous=item('old',[ref(old)]);
  const cards=ctx.materialCardModels([a,b],[clip,previous]);
