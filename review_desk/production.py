@@ -475,8 +475,10 @@ def current_records(store, kinds=None):
             if p.get("format") in FORMATS:
                 value=record_view(row)
                 if value['kind']=='ASSET':
-                    member=store.db.execute('SELECT MAX(r.number) FROM material_rounds r WHERE r.material_id IN (SELECT material_id FROM material_members WHERE revision_id=?)',(value['id'],)).fetchone()
-                    value['material_version']=member[0]
+                    # Match the default detail card: associated material first,
+                    # then its latest round containing this exact revision.
+                    member=store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone()
+                    value['material_version']=member[0] if member else None
                 result.append(value)
     return result
 
