@@ -1,4 +1,7 @@
 import json
+import shutil
+import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 
 from .store import Store, canonical, digest
@@ -13,6 +16,58 @@ def _safe_asset(name):
     if not name or name != Path(name).name or name.startswith("."):
         raise ValueError("unsafe asset name")
     return name
+
+
+@contextmanager
+def _staged_files(target, files):
+    """Stage metadata, then allow publication with rollback on caught failures.
+
+    Keep this context outside a SQLite transaction when publishing restore
+    metadata: a database commit failure then restores the previous files too.
+    This is not a crash-atomic transaction across the filesystem and SQLite.
+    """
+    if not files:
+        yield lambda: None
+        return
+    target.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix='.bundle-', dir=target))
+    changed = []
+    keep_recovery = False
+    try:
+        (stage / 'new').mkdir()
+        (stage / 'previous').mkdir()
+        for name, data in files.items():
+            destination = target / name
+            if destination.is_symlink() or (destination.exists() and not destination.is_file()):
+                raise ValueError('bundle metadata destination is not a regular file: ' + name)
+            (stage / 'new' / name).write_bytes(data)
+            if destination.exists():
+                shutil.copyfile(destination, stage / 'previous' / name)
+
+        def publish():
+            for name in files:
+                changed.append(name)
+                (stage / 'new' / name).replace(target / name)
+
+        yield publish
+    except BaseException:
+        failures = []
+        for name in reversed(changed):
+            try:
+                previous = stage / 'previous' / name
+                if previous.exists():
+                    previous.replace(target / name)
+                else:
+                    (target / name).unlink(missing_ok=True)
+            except OSError as exc:
+                failures.append(str(exc))
+        if failures:
+            keep_recovery = True
+            raise RuntimeError('bundle rollback failed; recovery metadata retained at ' + str(stage) + ': ' + '; '.join(failures))
+        raise
+    finally:
+        if not keep_recovery:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def export(store, export_dir):
@@ -56,25 +111,25 @@ def export(store, export_dir):
             raise ValueError("missing asset: " + name)
     material_bytes, comment_bytes = _bytes(materials), _bytes(comments)
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
-    (target / "materials.json").write_bytes(material_bytes)
-    (target / "comments.json").write_bytes(comment_bytes)
-    (target / "objects.json").write_bytes(framework_bytes)
-    (target / "configurations.json").write_bytes(configuration_bytes)
-    hashes = {"materials.json": digest(material_bytes), "comments.json": digest(comment_bytes),
-              "objects.json": digest(framework_bytes), "configurations.json": digest(configuration_bytes)}
+    files = {"materials.json": material_bytes, "comments.json": comment_bytes,
+             "objects.json": framework_bytes, "configurations.json": configuration_bytes}
     layout = target.parent / 'config/entity-relationship-layout.json'
     if layout.exists():
         value = json.loads(layout.read_text())
         if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
             raise ValueError('unsupported relationship layout')
-        (target / 'entity-relationship-layout.json').write_bytes(_bytes(value))
-        hashes['entity-relationship-layout.json'] = file_hash(target / 'entity-relationship-layout.json')
+        files['entity-relationship-layout.json'] = _bytes(value)
+    hashes = {name: digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = file_hash(target / "assets" / name)
     manifest = {"schema_version": 4, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
-    (target / "manifest.json").write_bytes(_bytes(manifest))
+    # All validation and hashing precede writes. Publish the manifest last;
+    # a caught staging/replacement failure leaves the previous bundle intact.
+    files['manifest.json'] = _bytes(manifest)
+    with _staged_files(target, files) as publish:
+        publish()
     return manifest
 
 
@@ -84,6 +139,11 @@ def restore(store, export_dir):
     schema = manifest.get("schema_version")
     if schema not in (1, 2, 3, 4):
         raise ValueError("unsupported export schema")
+    required = {'materials.json', 'comments.json'}
+    if schema >= 2:
+        required.update(('objects.json', 'configurations.json'))
+    if not isinstance(manifest.get('files'), dict) or not required <= manifest['files'].keys():
+        raise ValueError('required core file missing from export manifest')
     for name, expected in manifest["files"].items():
         path = target / name
         if name.startswith("assets/"):
@@ -104,10 +164,12 @@ def restore(store, export_dir):
         raise ValueError("export count mismatch")
     if store.sources() or store.comments() or store.objects() or any(c["version"] for c in store.configurations().values()):
         raise ValueError("restore requires an empty instance")
+    layout_files = {}
     if 'entity-relationship-layout.json' in manifest['files']:
         layout_value = json.loads((target / 'entity-relationship-layout.json').read_text())
         if not isinstance(layout_value, dict) or layout_value.get('format') != 'entity-relationship-layout-v1':
             raise ValueError('unsupported relationship layout')
+        layout_files['entity-relationship-layout.json'] = _bytes(layout_value)
     # Validate in a separate in-memory store before any destination write.
     test = Store(":memory:")
     try:
@@ -199,7 +261,8 @@ def restore(store, export_dir):
             if comment["status"] not in ("OPEN", "CLOSED") or type(comment["version"]) is not int or comment["version"] < 1:
                 raise ValueError("invalid comment status/version")
             restored_comments.append({**comment, "target_object_id": object_id, "target_revision_id": revision_id})
-        with store.db:
+        config = store.db_path.parent.parent / 'config'
+        with _staged_files(config, layout_files) as publish, store.db:
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))
             if schema >= 2:
@@ -241,13 +304,12 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?)", (record["scope"], record["schema_version"], record["version"], record["body"], record["updated_at"]))
                 for event in configurations["events"]:
                     store.db.execute("INSERT INTO configuration_events VALUES (?,?,?,?,?)", (event["id"], event["scope"], event["version"], event["body"], event["at"]))
+            publish()
+    except BaseException:
+        # A busy COMMIT can leave the transaction open on older sqlite3
+        # bindings. Do not leave rows pending for a later unrelated commit.
+        store.db.rollback()
+        raise
     finally:
         test.close()
-    if 'entity-relationship-layout.json' in manifest['files']:
-        value = json.loads((target / 'entity-relationship-layout.json').read_text())
-        if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
-            raise ValueError('unsupported relationship layout')
-        config = store.db_path.parent.parent / 'config'
-        config.mkdir(parents=True, exist_ok=True)
-        (config / 'entity-relationship-layout.json').write_bytes(_bytes(value))
     return manifest
