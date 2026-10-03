@@ -59,7 +59,7 @@ test('cancel during an uncertain read prevents a stale retry and preserves the n
 });
 test('known saved judgment and later refresh failure are separate outcomes with no second POST',async()=>{
   const f=fixture(),form=f.open();f.context.loadProductionWorkspace=()=>{vm.runInContext('++productionLoadEpoch',f.context);return Promise.reject(Error('list offline'))};const saving=form.button('保存审阅').onclick();await flush();f.requests[0].resolve({});await saving;
-  assert.equal(form.box.isConnected,false);assert.match(f.messages.at(-1),/已保存.*列表尚未更新.*list offline/);await form.button('保存审阅').onclick();assert.equal(f.posts.length,1);
+  assert.equal(form.box.isConnected,false);assert.match(f.messages.at(-1),/已保存.*页面尚未完整更新.*list offline/);await form.button('保存审阅').onclick();assert.equal(f.posts.length,1);
 });
 test('a refresh failure after another record takes over does not report an error on that record',async()=>{
   const f=fixture(),form=f.open();let rejectRefresh;f.context.loadProductionWorkspace=()=>{vm.runInContext('++productionLoadEpoch',f.context);return new Promise((resolve,reject)=>rejectRefresh=reject)};const saving=form.button('保存审阅').onclick();await flush();f.requests[0].resolve({});await flush();vm.runInContext('++productionReadEpoch',f.context);rejectRefresh(Error('old list failure'));await saving;assert.equal(f.messages.length,1);assert.match(f.messages[0],/审阅已记录/);

@@ -186,16 +186,25 @@ function renderStructureReader(){
   reader.append(tail);paintStructureRegions();watchStructureIndex();
 }
 async function chooseStructureDirection(id){
-  const current=state.structure.selection;
+  const data=state.structure,current=data.selection;
+  if(data.directionSave)return toast(data.directionSave.message||'方向选择正在提交，请等待结果。');
   if(current?.payload.source_id===id)return toast('当前已选择这个方向');
+  const workspace=state.workspace,revision=state.structureRevision,status=$('#structure-status'),content=status.firstChild;
+  const ownsPage=()=>state.workspace===workspace&&isStructure()&&state.structure===data&&state.structureRevision===revision&&status.firstChild===content;
   const dialog=document.createElement('dialog');dialog.className='structure-confirm-dialog';
   nodeText('h2',null,`选择「${structureSourceTitle(id)}」`,dialog);
   nodeText('p',null,current?'旧结构稿仍保留原方向依据；页面会提示重新核对，Codex 需基于新方向导入完整新稿。':'系统会保存该方向当前的准确资料修订，供 Codex 起草结构初稿。',dialog);
+  const notice=nodeText('p','production-issue','',dialog);notice.hidden=true;notice.setAttribute('role','status');
   const actions=el('div'),cancel=nodeText('button',null,'返回',actions);cancel.type='button';cancel.onclick=()=>dialog.close();
   const commit=nodeText('button','primary','选择这个方向',actions);commit.type='button';commit.onclick=async()=>{
-    commit.disabled=true;
-    try{await api('/api/story-structure/select-direction',{method:'POST',body:JSON.stringify({source_id:id,expected_version:current?.version||0})});state.structure=await api('/api/story-structure');dialog.close();renderStructureReader();toast('方向选择已保存，等待 Codex 起草结构稿')}
-    catch(error){commit.disabled=false;toast(error.message)}
+    if(data.directionSave||!ownsPage()||!dialog.open)return;
+    commit.disabled=true;data.directionSave={message:''};const ownsDialog=()=>ownsPage()&&dialog.isConnected&&dialog.open;
+    const savedMessage=`「${structureSourceTitle(id)}」的方向选择已保存`;
+    try{await api('/api/story-structure/select-direction',{method:'POST',body:JSON.stringify({source_id:id,expected_version:current?.version||0})})}
+    catch(error){data.directionSave.message=`方向选择结果待确认：${error.message}。请刷新页面核对后再操作。`;if(ownsDialog()){notice.hidden=false;notice.textContent=data.directionSave.message;toast(data.directionSave.message)}return}
+    data.directionSave.message=savedMessage+'；请刷新页面核对当前状态。';const refresh=ownsDialog();if(dialog.isConnected)dialog.close();toast(savedMessage+'，等待 Codex 起草结构稿');if(!refresh)return;
+    try{const result=await api('/api/story-structure');if(!ownsPage())return;state.structure=result;renderStructureReader()}
+    catch(error){data.directionSave.message=savedMessage+`；当前显示尚未更新：${error.message}。请刷新页面核对。`;if(ownsPage()){nodeText('p','production-issue',data.directionSave.message,status);toast(data.directionSave.message)}}
   };dialog.append(actions);document.body.append(dialog);dialog.addEventListener('close',()=>dialog.remove());dialog.showModal();
 }
 function selectedStructureAnchor(){

@@ -138,7 +138,7 @@ test('judgment refresh reports a failed own detail read through the actual load 
   const f=materialJudgmentFixture();await f.context.loadProductionWorkspace();const form=openMaterialJudgment(f),original=f.context.api;
   f.context.api=(url,options)=>url.startsWith('/api/production?')?Promise.reject(Error('own detail unavailable')):original(url,options);
   const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await saving;
-  assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,false);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('尚未更新')&&s.includes('own detail unavailable')),JSON.stringify(f.messages));
+  assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,false);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('页面尚未完整更新')&&s.includes('own detail unavailable')),JSON.stringify(f.messages));
 });
 test('judgment refresh cannot report its old failure after a real new read or workspace takes over',async()=>{
   for(const takeover of ['new-read','new-workspace']){
@@ -156,4 +156,28 @@ test('judgment refresh cannot report its old failure after a real new read or wo
     assert.ok(!f.messages.some(s=>s.includes('late old detail unavailable')),JSON.stringify(f.messages));
     if(takeover==='new-read')assert.equal(f.context.state.productionSelected.object_id,'asset-B');
   }
+});
+
+test('list load failure replaces its own loading message and keeps the error for the save caller',async()=>{
+ const f=fixture(),failure=Error('list unavailable');f.context.api=async()=>{throw failure};
+ await assert.rejects(f.context.loadProductionWorkspace(),error=>error===failure);
+ assert.match(f.text(f.host),/制作记录读取失败：list unavailable/);assert.match(f.text(f.host),/左侧导航/);assert.doesNotMatch(f.text(f.host),/正在读取/);
+});
+test('a failed list load cannot replace newer loading, another detail read or another workspace',async()=>{
+ for(const takeover of ['new-load','new-read','workspace','detached']){
+  const f=fixture(),requests=[];f.context.api=()=>new Promise((resolve,reject)=>requests.push({resolve,reject}));
+  const old=f.context.loadProductionWorkspace();let newer;
+  if(takeover==='new-load')newer=f.context.loadProductionWorkspace();
+  if(takeover==='new-read')newer=f.context.openProductionRecord('new-target');
+  if(takeover==='workspace')f.context.state.workspace='story.sources';
+  if(takeover==='detached')f.host.replaceChildren(new Node('p'));
+  const before=f.text(f.host);requests[0].reject(Error('old list unavailable'));await assert.rejects(old,/old list unavailable/);assert.equal(f.text(f.host),before);
+  if(newer){requests[1].reject(Error('new request unavailable'));await assert.rejects(newer,/new request unavailable/);if(takeover==='new-load')assert.match(f.text(f.host),/new request unavailable/)}
+ }
+});
+test('saved judgment and failed actual list refresh show both saved feedback and a recoverable error page',async()=>{
+ const f=materialJudgmentFixture();await f.context.loadProductionWorkspace();const form=openMaterialJudgment(f),original=f.context.api;
+ f.context.api=(url,options)=>url==='/api/production'?Promise.reject(Error('list unavailable')):original(url,options);
+ const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await saving;
+ assert.equal(f.posts.length,1);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('页面尚未完整更新')));assert.match(f.text(f.host),/制作记录读取失败/);assert.doesNotMatch(f.text(f.host),/正在读取/);
 });
