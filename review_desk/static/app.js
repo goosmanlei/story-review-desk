@@ -136,7 +136,7 @@ function renderWorkspaceNav(){
     ['settings.workspace','制作设定','设定','主体、空间与实体关系'],
     ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
     ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
-    ['project.configuration','系统管理','管理','系统配置、数据与运行']
+    ['project.configuration','系统管理','管理','故事项目与系统配置']
   ];
   for(const [id,title,index,description] of sections){
     const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented;
@@ -189,11 +189,6 @@ function renderConfigurations(){
   const root=$('#configuration-view');root.replaceChildren();
   const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
   nodeText('p',null,'当前故事实例 · 系统与故事项目配置',header);root.append(header);
-  const tabs=el('nav','management-tabs');tabs.setAttribute('aria-label','系统管理模块');
-  for(const [label,ready] of [['使用与初始化',false],['系统配置',true],['数据与运行',false],['系统架构',false]]){
-    const button=nodeText('button',ready?'active':'',ready?label:`${label} · 待开放`,tabs);button.type='button';button.disabled=!ready;
-    button.setAttribute('aria-current',ready?'page':'false');
-  }root.append(tabs);
   const layout=el('div','configuration-layout'),sections=el('nav','configuration-sections');sections.setAttribute('aria-label','系统配置分组');
   const article=el('article','config-page');
   const showSection=()=>{for(const section of article.querySelectorAll('[data-config-section]'))section.hidden=section.dataset.configSection!==state.configSection;
