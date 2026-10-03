@@ -75,6 +75,24 @@ function materialVersions(){return (isEntityReview()?state.entityReview:state.ma
 function materialRecordRound(row){if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];for(const rounds of Object.values(materialVersions()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;return null}
 function materialResultKey(row){return JSON.stringify([row.payload.production?.object_id,row.payload.components.filter(c=>c.role==='original').map(c=>c.sha256)])}
 function materialRoundResults(round,selected,explicit){return round.results.map(row=>explicit&&row.object_id===selected.object_id&&materialResultKey(row)===materialResultKey(selected)&&round.members.some(m=>m.id===selected.id)?selected:row)}
+function materialCandidateChoice(items,targetId){
+  return items.find(i=>i.record.id===targetId)||items.find(i=>i.review_context?.call?.id===targetId)||items[0]||null;
+}
+function materialExactCandidates(detail,items,targetId){
+  const target=materialRows(detail).find(r=>r.kind==='ASSET'&&r.id===targetId);if(!target)return items;
+  return items.map(item=>{
+    if(item.record.object_id!==target.object_id||materialResultKey(item.record)!==materialResultKey(target))return item;
+    return {...item,record:target,components:target.payload.components,component:target.payload.components.find(c=>c.id===item.component.id)||item.component,review_context:detail.review_contexts?.[target.id]||item.review_context};
+  });
+}
+function materialCandidateOptions(detail,items){
+  const targetId=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target');
+  return {selectedCandidateId:targetId,selectCandidate:id=>{
+    const item=items.find(i=>i.record.id===id);if(!item)return;
+    detail.selectedCandidateId=id;focusProductionReview({record:item.record,history:[item.record],uses:[]},false);
+    renderProductionReader();renderComments();document.querySelector('[aria-label="本轮候选"]')?.focus({preventScroll:true});
+  }};
+}
 function materialRoundControl(parent,mid,rounds,selected,change){
   const select=el('select','entity-review-version');select.setAttribute('aria-label','素材版本');
   for(const round of rounds)select.append(new Option(`版本 ${round.number}${round===rounds[0]?' · 当前':''}`,round.number));select.value=selected.number;select.disabled=rounds.length<2;select.onchange=()=>change(Number(select.value));parent.append(select);
@@ -82,7 +100,7 @@ function materialRoundControl(parent,mid,rounds,selected,change){
 function switchMaterialRound(data,mid,number){
   const rounds=data.material_versions[mid],old=data.selectedMaterialRounds?.[mid]||rounds[0].number;
   data.roundDrafts||={};data.roundDrafts[mid+':'+old]={row:state.productionSelected,anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope};
-  data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=number;data.explicitRevision=false;
+  data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=number;data.explicitRevision=false;delete data.selectedCandidateId;
   const round=rounds.find(r=>r.number===number),saved=data.roundDrafts[mid+':'+number];
   const row=saved?.row&&round.members.some(r=>r.id===saved.row.id)?saved.row:round.results[0]||round.plan;
   state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;state.drawMode=null;
@@ -141,10 +159,20 @@ function materialMedia(parent,item){
   if(!component.mime.startsWith('audio/'))link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
 }
 function renderMaterialCard(parent,model,options={}){
-  const box=el('article','material-card'),need=model.need,items=model.candidates;
+  const box=el('article','material-card'),need=model.need;
+  let items=model.candidates;
   box.dataset.materialKey=need?.object_id||model.material_id||items[0].record.object_id;
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,need?.payload.generation?.output.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title,heading);
   if(model.round)materialRoundControl(heading,model.material_id,model.rounds,model.round,options.roundChange);else if(need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
+  if(options.selectCandidate&&items.length){
+    const chosen=materialCandidateChoice(items,options.selectedCandidateId);
+    if(items.length>1){
+      const select=el('select','entity-review-version');select.setAttribute('aria-label','本轮候选');
+      items.forEach((item,index)=>select.append(new Option(`候选 ${index+1} · ${item.record.payload.title}`,item.record.id)));
+      select.value=chosen.record.id;select.onchange=()=>options.selectCandidate(select.value);heading.append(select);
+    }
+    items=[chosen];
+  }
   if(!items.length)renderMaterialPlaceholder(box,need||model.identity);
   for(const item of items){
     const h=el('div','entity-review-local-heading');if(need||items.length>1)nodeText('h4',null,item.record.payload.title,h);
@@ -167,14 +195,16 @@ function renderMaterialWorkspace(root,detail){
   let round;if(rounds?.length){const number=detail.selectedMaterialRounds?.[mid]||Number(new URL(location.href).searchParams.get('material_round'));round=rounds.find(v=>v.number===number)||(detail.explicitRevision?rounds.find(v=>v.members.some(m=>m.id===r.id)):null)||rounds[0]}
   if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);url.searchParams.set('material_round',round.number);history.replaceState(null,'',url)}
   if(round&&round.plan&&detail.localPlans?.[round.plan.object_id]&&round.members.some(r=>r.id===detail.localPlans[round.plan.object_id].id))round={...round,plan:detail.localPlans[round.plan.object_id]};
-  const candidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===detail.componentId)||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||detail.review_context}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
+  const allCandidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===detail.componentId)||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||detail.review_context}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
+  const candidateTarget=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'),candidates=materialExactCandidates(detail,allCandidates,candidateTarget);
   renderMaterialCard(root,{need:round?.plan||null,identity:r,candidates,round,rounds,material_id:mid},{
+    ...materialCandidateOptions(detail,candidates),
     roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);url.searchParams.set('material_round',number);history.replaceState(null,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},
     relatedPlans:round?[]:detail.review_context?.requirements||[],
     assetVersion:(parent,item)=>{if(detail.history.length<2)return;const select=el('select','entity-review-version');select.setAttribute('aria-label',r.payload.title+'的版本');for(const v of detail.history)select.append(new Option(`版本 ${v.version}${v.id===v.current_revision?' · 当前':''}`,v.id));select.value=r.id;select.onchange=()=>openProductionRecord(r.object_id,select.value);parent.append(select)},
     selectComponent:id=>{detail.componentId=id;renderProductionReader();document.querySelector('#production-component')?.focus({preventScroll:true})}
   });
-  const displayed=candidates.find(i=>i.record.id===r.id)?.record||candidates.find(i=>i.record.object_id===r.object_id)?.record;
+  const displayed=materialCandidateChoice(candidates,candidateTarget)?.record;
   if(displayed?.payload.blocks?.length)reviewTextBlocks(root,displayed);
   if(!displayed)return;
   const uses=el('section');nodeText('h3',null,'关联用途',uses);
@@ -259,8 +289,10 @@ function renderMaterialDemand(root,detail){
   const local=detail.localPlans?.[r.object_id];
   const need=local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||r;
   const results=round?.results||(detail.candidate_records||[]).filter(a=>a.payload.candidate_requirements?.some(ref=>ref.revision_id===r.id));
-  const candidates=results.filter(a=>!a.payload.placeholder).map(record=>({record,component:record.payload.components.find(c=>c.id===detail.componentId)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],components:record.payload.components,review_context:detail.review_contexts?.[record.id]})).filter(i=>i.component);
+  const allCandidates=results.filter(a=>!a.payload.placeholder).map(record=>({record,component:record.payload.components.find(c=>c.id===detail.componentId)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],components:record.payload.components,review_context:detail.review_contexts?.[record.id]})).filter(i=>i.component);
+  const candidates=materialExactCandidates(detail,allCandidates,detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'));
   renderMaterialCard(root,{need,candidates,round,rounds,material_id:mid},{
+    ...materialCandidateOptions(detail,candidates),
     roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);url.searchParams.set('material_round',number);history.replaceState(null,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},
     planVersion:(parent,row)=>{if(rounds?.length||detail.history.length<2)return;const select=el('select','entity-review-version');select.setAttribute('aria-label',row.payload.title+'的版本');for(const v of detail.history)select.append(new Option(`版本 ${v.version}${v.id===v.current_revision?' · 当前':''}`,v.id));select.value=row.id;select.onchange=()=>openProductionRecord(row.object_id,select.value);parent.append(select)},
     selectComponent:id=>{detail.componentId=id;renderProductionReader();document.querySelector('#production-component')?.focus({preventScroll:true})}
