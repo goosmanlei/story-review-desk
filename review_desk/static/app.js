@@ -148,11 +148,6 @@ function renderWorkspaceNav(){
   }
 }
 
-function renderStageLabel(){const current=state.configurations.values.PROJECT.body.current_stage;
-  const stage=state.framework.stages.find(item=>item.id===current);
-  $('#sidebar-current-stage').textContent=`当前阶段 · ${stage?.label||current}`;
-}
-
 function switchWorkspace(id,updateUrl=true){
   hideSelectionAction();
   if(id==='current')id='production.approach';
@@ -243,7 +238,7 @@ function renderConfigurations(){
       if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
       input.name=key;input.setAttribute('aria-label',spec.label);label.append(input);form.append(label)}
     const save=nodeText('button','primary','保存配置',form);save.type='submit';form.onsubmit=async event=>{event.preventDefault();if(save.disabled)return;save.disabled=true;const updates={};for(const [key,spec] of Object.entries(fields)){let value=form.elements[key].value;if(spec.type==='integer')value=Number(value);updates[key]=value}
-      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');applyFavicon();renderConfigurations();renderWorkspaceNav();renderStageLabel();toast('配置已保存')}
+      try{await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:record.version,updates})});state.configurations=await api('/api/configurations');applyFavicon();renderConfigurations();renderWorkspaceNav();toast('配置已保存')}
       catch(error){toast(error.message)}finally{save.disabled=false}};
     section.append(form);article.append(section)}
   showSection()
@@ -552,7 +547,6 @@ function locateComment(comment){if(isProduction())return locateProductionComment
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
-  renderStageLabel();
   const initialUrl=new URL(location.href);
   if(structure.revisions.some(r=>r.id===initialUrl.searchParams.get('structure_revision')))state.structureRevision=initialUrl.searchParams.get('structure_revision');
   chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
