@@ -132,5 +132,16 @@ class CompleteStatesTest(unittest.TestCase):
             p.import_records(self.store,{'format':'production-import-v1','expected_heads':guards,'records':[self.need()]})
         self.assertEqual(before,self.store.objects())
 
+    def test_withdrawn_overall_retains_exact_scope_without_requiring_new_media(self):
+        self.setup_full();self.put(self.need())
+        old=self.ref('need-full-overall');need=p.record(self.store,'need-full-overall')
+        payload=copy.deepcopy(need['payload']);payload.update(required=False,status='withdrawn',withdrawal_reason='重复形态归并，历史保留')
+        self.put({'object_id':need['object_id'],'kind':'REQUIREMENT','expected_version':need['version'],'payload':payload})
+        self.assertTrue(p.ref_record(self.store,old)['payload']['required'])
+        self.assertEqual(p.record(self.store,need['object_id'])['payload']['scope'],self.ref('full'))
+        state=p.record(self.store,'full');payload=copy.deepcopy(state['payload']);payload.update(status='withdrawn',withdrawal_reason='由其他完整状态表达')
+        self.put({'object_id':'full','kind':'STATE','expected_version':state['version'],'payload':payload})
+        self.assertEqual(p.readiness(self.store,'full')['state_coverage']['issues'],[])
+
 
 if __name__=='__main__':unittest.main()

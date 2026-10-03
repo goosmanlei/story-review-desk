@@ -143,7 +143,7 @@ def validate_reference_requirement(store, p):
     if (p["states"] != [p["scope"]] or len(p["entities"]) != 1 or
             p["entities"][0]["object_id"] != scope["payload"]["entity"]["object_id"]):
         raise ValueError("state reference requirement must bind its exact state and owner")
-    if role == "overall" and (p["slot"] != "overall" or p["required"] is not True or
+    if role == "overall" and (p["slot"] != "overall" or (p["required"] is not True and p.get('status') != 'withdrawn') or
             p["media_type"] != scope["payload"]["reference_media"]):
         raise ValueError("overall state reference must be the required overall slot with matching media")
     if role == "detail" and p["slot"] == "overall":
@@ -183,6 +183,8 @@ def scope_coverage(store, subjects, heads):
     used, issues, checked = {}, [], 0
     for subject in subjects:
         p = subject["payload"]
+        if p.get('status') == 'withdrawn':
+            continue
         if subject["kind"] == "STATE":
             groups = []
             if complete(subject) and p["reference_media"] != "none" and p.get("reference_mode") != "description":

@@ -15,6 +15,16 @@ function setup(records,api){
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
 
+test('withdrawn entities and states leave current lists without deleting historical rows',()=>{
+  const a=row('a','ENTITY'),old=row('old','ENTITY',{status:'withdrawn'});
+  const current=row('current','STATE',{state_model:'complete-v1',entity:{object_id:'a'}});
+  const previous=row('previous','STATE',{state_model:'complete-v1',entity:{object_id:'a'},status:'withdrawn'});
+  const records=[a,old,current,previous],ctx=setup(records);
+  assert.deepEqual(plain(ctx.productionWorkspaceRows(records,'settings.workspace').map(r=>r.object_id)),['a']);
+  assert.deepEqual(plain(ctx.productionEntityChildren('a').map(r=>r.object_id)),['current']);
+  assert.equal(ctx.state.productionRecords.length,4);
+});
+
 test('shared and state-only settings appear under each owner exactly once; project settings stay unowned',()=>{
   const a=row('a','ENTITY'),b=row('b','ENTITY');
   const wet=row('wet','STATE',{state_model:'complete-v1',entity:{object_id:'a',revision_id:'a-old'}});

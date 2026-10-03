@@ -98,6 +98,19 @@ class GenerationTest(unittest.TestCase):
         self.change('draw',status='completed',outputs=[self.ref('generated')])
         self.assertEqual(p.record(self.store,'draw')['payload']['generation_acceptances'],package['acceptances'])
 
+    def test_withdrawn_state_leaves_current_scope_but_preserves_accepted_history(self):
+        self.setup_plans();self.decide();old=g.decision(self.store,'songbook');scope=g.current_scope(self.store,'songbook')
+        self.put(self.spec('legacy-review','REPRESENTATION',review_model=er.MODEL,entities=[self.ref('songbook')],states=scope['states'],media=[],sources=[self.source],choices=[],unknowns=[]))
+        self.change('need-wet-overall',required=False,status='withdrawn',withdrawal_reason='与另一完整状态归并')
+        self.change('wet',status='withdrawn',withdrawal_reason='与另一完整状态归并')
+        self.change('legacy-review',status='withdrawn',withdrawal_reason='保留原送审内容历史')
+        current=g.current_scope(self.store,'songbook')
+        self.assertEqual(current['states'],[self.ref('full')])
+        self.assertEqual(current['requirements'],[self.ref('need-full-overall')])
+        self.assertEqual(er.current_scope(self.store,'songbook')['states'],[self.ref('full')])
+        self.assertEqual(er.snapshot(self.store,'songbook',old['id'])['scope'],scope)
+        self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
+
     def test_candidate_association_is_not_generation_or_adoption(self):
         self.setup_plans();self.decide();before=g.accepted(self.store,'songbook')['id'];self.media();self.associate()
         self.change('voice',candidate_requirements=[self.ref('need-full-overall')])

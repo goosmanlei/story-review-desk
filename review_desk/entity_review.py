@@ -16,7 +16,8 @@ def submission(row):
 
 
 def full_states(rows, entity_id):
-    return [r for r in rows if complete(r) and r['payload']['entity']['object_id'] == entity_id]
+    return [r for r in rows if complete(r) and r['payload'].get('status') != 'withdrawn'
+            and r['payload']['entity']['object_id'] == entity_id]
 
 
 def freshness(store, payload, rows=None):
@@ -60,7 +61,7 @@ def validate(store, object_id, payload, check_current=True):
         keys = ('state', 'role', 'component_id', 'crop', 'range')
         if not any(all(c.get(k) == item.get(k) for k in keys) for c in asset['payload'].get('state_coverage', [])):
             raise ValueError('review media requires explicit exact state coverage including selection')
-    if check_current:
+    if check_current and payload.get('status') != 'withdrawn':
         rows = p.current_records(store)
         if any(submission(r) and r['object_id'] != object_id and r['payload']['entities'][0]['object_id'] == entity_id for r in rows):
             raise Conflict('entity already has a review submission object; revise that object')

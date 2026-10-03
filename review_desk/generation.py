@@ -98,7 +98,8 @@ def current_scope(store, entity_id, rows=None):
     entity = p.record(store, entity_id)
     if entity['kind'] != 'ENTITY':
         raise ValueError('generation acceptance requires an entity')
-    states = sorted((r for r in rows if complete(r) and r['payload']['entity']['object_id'] == entity_id), key=lambda r:r['object_id'])
+    states = sorted((r for r in rows if complete(r) and r['payload'].get('status') != 'withdrawn'
+                     and r['payload']['entity']['object_id'] == entity_id), key=lambda r:r['object_id'])
     requirements = requirements_for(rows, states)
     dependencies = {}; todo = requirements[:]
     owned = {r['id'] for r in requirements}
