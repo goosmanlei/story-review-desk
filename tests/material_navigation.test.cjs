@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 class Element{
- constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.classList={add(){},remove(){},toggle(){}}}
+ constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.isConnected=true;this.classList={add(){},remove(){},toggle(){}}}
  append(...nodes){this.children.push(...nodes)}replaceChildren(...nodes){this.children=[...nodes]}setAttribute(k,v){this.attributes[k]=v}addEventListener(){}all(){return this.children.flatMap(node=>[node,...node.all()])}
 }
 function setup(){
@@ -60,4 +60,21 @@ test('multiple material memberships retain the explicitly selected nonfirst card
 test('a previous detail card cannot override the newly opened asset membership',async()=>{
  const f=setup();f.ctx.state.materialCommentCard={data:f.ctx.state.materialReview,material_id:'other',number:9};await f.ctx.openProductionRecord(f.b.object_id);
  const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'need');assert.equal(f.roundControl().value,1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
+});
+
+for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested member and submits its accurate judgment`,async()=>{
+ const f=setup();f.a.payload.production={...f.b.payload.production};f.a.payload.components=f.b.payload.components.map(c=>({...c}));
+ f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
+ f.rounds.splice(0,f.rounds.length,{number:1,state:'produced',plan:f.plan,members:[f.plan,f.a,f.b],results:[f.b]});
+ const before=JSON.stringify(f.rounds);await f.ctx.openProductionRecord(f.a.object_id,explicit?f.a.id:null);
+ assert.equal(f.roundControl().value,1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text').map(n=>n.dataset.revision),[f.a.id]);
+ assert.equal(f.nodes('select').filter(n=>n.attributes['aria-label']==='本轮候选').length,0);assert.equal(JSON.stringify(f.rounds),before);
+ f.ctx.crypto=require('node:crypto').webcrypto;f.ctx.toast=()=>{};
+ await f.nodes('button').find(n=>n.textContent==='记录本版本审阅结论').onclick();
+ assert.equal(f.ctx.state.productionSelected.id,f.a.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.a.id);
+ const field=label=>f.root.all().find(n=>n.attributes['aria-label']===label);field('审阅者').value='Technical reviewer';field('结论依据').value='Exact member A';field('审阅结果').value='passed';
+ const posts=[];let release;f.ctx.fetch=(url,options)=>{posts.push({url,payload:JSON.parse(options.body)});return new Promise(resolve=>{release=resolve})};
+ const saving=f.nodes('button').find(n=>n.textContent==='保存审阅').onclick();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(posts.length,1);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].payload.payload.target)),{object_id:f.a.object_id,revision_id:f.a.id});
+ f.ctx.state.workspace='story.sources';release({ok:true,json:async()=>({saved:true})});await saving;
 });

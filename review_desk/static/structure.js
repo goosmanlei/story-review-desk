@@ -61,6 +61,17 @@ function chooseStructureRevision(id,updateUrl=true){
 function structureBlocks(doc){return doc.sections.flatMap(s=>[{id:`heading-${s.id}`,text:s.title},...s.blocks])}
 function structureVisuals(doc){return doc.sections.flatMap(s=>s.visuals||[])}
 function structureSourceTitle(id){return state.sources.find(s=>s.id===id)?.title||id}
+function openStructureResponseComment(comment){
+  locateComment(comment);
+  if(comment.anchor_state?.valid===false||!isStructure()||state.structureRevision!==comment.target_revision_id||state.selected!==comment.id)return false;
+  const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');
+  if(!target)return false;
+  if(comment.status==='CLOSED'){
+    const index=activeComments().filter(item=>item.status==='CLOSED').findIndex(item=>item.id===comment.id);
+    state.historyOpen=true;state.historyLimit=Math.max(state.historyLimit,index+1);renderComments();
+  }
+  openPanel();$('#comment-'+escapeSelector(comment.id))?.scrollIntoView({block:'nearest'});return true;
+}
 function structureMarkParts(block,revision){
   const blocks=structureBlocks(revision.payload),index=blocks.findIndex(b=>b.id===block.id),letters=chars(block.text),marks=[];
   for(const c of state.comments.filter(c=>c.target_revision_id===revision.id&&c.target_object_id==='story-structure'&&(!c.anchor.type||c.anchor.type==='text'))){
@@ -130,11 +141,13 @@ function renderStructureReader(){
   $('#structure-workspace .structure-layout').hidden=!active;
   $('#comments-toggle').hidden=!active;
   if(!selection){
+    const directions=state.sources.filter(s=>s.group==='expansion-directions');
+    if(!directions.length){nodeText('p','structure-empty','尚无扩写方向。等待 Codex 准备候选后，可在这里阅读并选择。',status);return}
     const box=el('section','structure-start');nodeText('small',null,'第一步 · 选择结构稿依据',box);
     nodeText('h3',null,'选择一个扩写方向',box);
     nodeText('p',null,'这里是故事结构的起点。你可以先回看候选全文，再选定一个方向；Codex 会依据所选资料的当前修订起草完整图文结构稿。',box);
     const choices=el('div','structure-direction-grid');
-    for(const source of state.sources.filter(s=>s.group==='expansion-directions')){
+    for(const source of directions){
       const card=el('article','structure-direction-card');nodeText('small',null,`方向 ${String(source.order||'').padStart(2,'0')} · ${source.version_type}`,card);
       nodeText('h4',null,source.title,card);nodeText('p',null,source.notes||source.origin,card);
       const actions=el('div','structure-direction-actions');
@@ -144,11 +157,15 @@ function renderStructureReader(){
     }
     box.append(choices);status.append(box);return;
   }
+  if(!active&&!state.structure.revisions.length){
+    const source=state.sources.find(item=>item.id===selection.payload?.source_id),label=source?`已选「${source.title}」。`:'方向已选定。';
+    nodeText('p','structure-empty',`${label}等待 Codex 准备完整结构稿。`,status);return;
+  }
   if(state.structure.direction_changed){const alert=nodeText('p','structure-alert','所选方向已更新。当前结构稿仍引用原方向修订；请核对并导入针对新方向的完整结构稿。',status);alert.setAttribute('role','alert')}
   const versions=el('div','structure-versions');nodeText('span',null,'阅读版本：',versions);
   for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'','',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
   status.append(versions);nodeText('p','revision-count-help','评论数包含已关闭评论。',status);
-  if(!active){nodeText('p','structure-empty','方向已选定。等待 Codex 通过 structure-import 导入完整图文结构初稿。',status);return}
+  if(!active){nodeText('p','structure-empty','请选择一个结构稿版本继续阅读。',status);return}
   const doc=active.payload;
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}
   const basisSelection=state.structure.selection_history?.find(item=>item.id===doc.direction_selection_revision);
@@ -162,7 +179,7 @@ function renderStructureReader(){
     for(const visual of section.visuals||[])area.append(renderStructureVisual(visual,true));reader.append(area);
   }
   const tail=el('section','structure-review-tail');nodeText('h2',null,'意见处理与版本记录',tail);
-  if(doc.responses?.length){for(const item of doc.responses){const c=state.comments.find(c=>c.id===item.comment_id);const row=el('p');nodeText('b',null,c?`回应原稿意见：${c.body}`:`意见 ${item.comment_id}`,row);nodeText('span',null,item.explanation,row);if(c){const back=nodeText('button',null,'查看原稿意见',row);back.type='button';back.onclick=()=>locateComment(c)}tail.append(row)}}
+  if(doc.responses?.length){for(const item of doc.responses){const c=state.comments.find(c=>c.id===item.comment_id);const row=el('p');nodeText('b',null,c?`回应原稿意见：${c.body}`:`意见 ${item.comment_id}`,row);nodeText('span',null,item.explanation,row);if(c){const back=nodeText('button',null,'查看原稿意见',row);back.type='button';back.onclick=()=>openStructureResponseComment(c)}tail.append(row)}}
   else nodeText('p',null,'本稿尚无关联意见处理说明。',tail);
   const allOpen=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN');nodeText('p',null,`待决意见 ${allOpen.length} 条；新稿不会自动关闭原稿意见。`,tail);
   const overall=nodeText('button',null,'添加整体意见',tail);overall.type='button';overall.onclick=()=>startDraft({type:'global'});
@@ -189,9 +206,24 @@ function selectedStructureAnchor(){
 function structurePoint(event,stage){const rect=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))}}
 function structureRect(a,b){return[{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.max(a.y,b.y)},{x:Math.min(a.x,b.x),y:Math.max(a.y,b.y)}]}
 function structureArea(points){return Math.abs(points.reduce((sum,p,i)=>sum+p.x*points[(i+1)%points.length].y-points[(i+1)%points.length].x*p.y,0))/2}
-document.addEventListener('pointerdown',event=>{const stage=event.target.closest('.structure-visual-stage');if(!stage||stage.dataset.visualId!==state.drawMode)return;event.preventDefault();const overlay=stage.querySelector('svg');overlay.setPointerCapture(event.pointerId);structureDrawing={stage,visual:state.drawMode,points:[structurePoint(event,stage)],rect:event.shiftKey,pointer:event.pointerId};paintStructureRegions()});
+document.addEventListener('pointerdown',event=>{const stage=event.target.closest('.structure-visual-stage');if(!stage||stage.dataset.visualId!==state.drawMode)return;event.preventDefault();const overlay=stage.querySelector('svg');overlay.setPointerCapture(event.pointerId);structureDrawing={stage,visual:state.drawMode,points:[structurePoint(event,stage)],rect:event.shiftKey,pointer:event.pointerId,workspace:state.workspace,target:commentTarget(),reader:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':'#source-view'),source:state.workspace==='story.sources'?{id:state.current?.id,revision:state.current?.target_revision_id}:null};paintStructureRegions()});
 document.addEventListener('pointermove',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const stage=structureDrawing.stage;const point=structurePoint(event,stage),last=structureDrawing.points.at(-1);if(Math.hypot(point.x-last.x,point.y-last.y)<.002)return;structureDrawing.points.push(point);if(structureDrawing.points.length>260)structureDrawing.points=structureDrawing.points.filter((_,i)=>i%2===0);paintStructureRegions()});
-document.addEventListener('pointerup',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const drawing=structureDrawing,stage=drawing.stage,visual=(isProduction()?productionVisuals():structureVisuals(structureRevision().payload)).find(v=>v.id===drawing.visual);drawing.points.push(structurePoint(event,stage));structureDrawing=null;state.drawMode=null;stage.classList.remove('drawing');let points=drawing.points;if(drawing.rect)points=structureRect(points[0],points.at(-1));const xs=points.map(p=>p.x),ys=points.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);if(width<.008||height<.008){toast('圈选区域太小，请重新拖动');paintStructureRegions();return}if(points.length<4||structureArea(points)<width*height*.06)points=structureRect({x:Math.min(...xs),y:Math.min(...ys)},{x:Math.max(...xs),y:Math.max(...ys)});points=points.map(p=>({x:Math.round(p.x*10000)/10000,y:Math.round(p.y*10000)/10000}));startDraft({type:'region',visual_id:visual.id,asset_file:visual.file,points});paintStructureRegions()});
+document.addEventListener('pointerup',event=>{
+  if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;
+  const drawing=structureDrawing,stage=drawing.stage;
+  structureDrawing=null;state.drawMode=null;stage.classList.remove('drawing');
+  if(state.workspace!==drawing.workspace||!drawing.target.target_revision_id||JSON.stringify(commentTarget())!==JSON.stringify(drawing.target)||drawing.reader!==$(isProduction()?'#production-reader':isStructure()?'#structure-reader':'#source-view')||!drawing.reader?.contains(stage)){paintStructureRegions();return}
+  let visual;
+  if(drawing.source){
+    const source=state.current;
+    // A source gesture owns this exact document and rendered image. Navigation
+    // or a newer draft can detach the old stage before its pointerup arrives.
+    if(state.workspace!=='story.sources'||source?.id!==drawing.source.id||source?.target_revision_id!==drawing.source.revision||!$('#source-view').contains(stage)){paintStructureRegions();return}
+    const asset=source.assets.find(item=>item.file===drawing.visual&&item.file===stage.closest('figure')?.dataset.reviewFile);
+    if(!asset){paintStructureRegions();toast('原图已不可用，请重新打开资料后圈选');return}
+    visual={id:asset.file,file:asset.file};
+  }else visual=(isProduction()?productionVisuals():structureVisuals(structureRevision().payload)).find(v=>v.id===drawing.visual);
+  drawing.points.push(structurePoint(event,stage));let points=drawing.points;if(drawing.rect)points=structureRect(points[0],points.at(-1));const xs=points.map(p=>p.x),ys=points.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);if(width<.008||height<.008){toast('圈选区域太小，请重新拖动');paintStructureRegions();return}if(points.length<4||structureArea(points)<width*height*.06)points=structureRect({x:Math.min(...xs),y:Math.min(...ys)},{x:Math.max(...xs),y:Math.max(...ys)});points=points.map(p=>({x:Math.round(p.x*10000)/10000,y:Math.round(p.y*10000)/10000}));startDraft({type:'region',visual_id:visual.id,asset_file:visual.file,points});paintStructureRegions()});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.drawMode){state.drawMode=null;structureDrawing=null;document.querySelectorAll('.structure-visual-stage').forEach(s=>s.classList.remove('drawing'));paintStructureRegions()}});
 document.addEventListener('scroll',scheduleStructureIndex,{capture:true,passive:true});
 window.addEventListener('resize',scheduleStructureIndex);

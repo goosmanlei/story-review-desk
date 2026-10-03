@@ -111,7 +111,7 @@ function renderProductionEntityNavigation(root,r){
   if(!children.length)nodeText('p','production-meta','尚未登记实体状态或制作设定。',section);
   root.append(section);
 }
-async function loadProductionWorkspace(){
+async function loadProductionWorkspace({onReadStart}={}){
   const workspace=state.workspace,epoch=++productionLoadEpoch;$('#production-view').replaceChildren();nodeText('p',null,'正在读取制作记录…',$('#production-view'));const result=await api('/api/production');if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
   const param=new URL(location.href).searchParams,selected=param.get('production_object'),requested=result.records.find(r=>r.object_id===selected);
@@ -248,7 +248,7 @@ async function loadProductionWorkspace(){
   const openFilteredScope=()=>{const row=firstMatchingRow();if(row)openProductionRecord(row.object_id).catch(e=>toast(e.message));else{++productionReadEpoch;state.productionSelected=null;reader.replaceChildren();const url=new URL(location.href);url.searchParams.delete('production_object');url.searchParams.delete('production_revision');history.replaceState(null,'',url);nodeText('p',null,'当前范围没有此类记录，请调整记录类型。',reader);renderComments()}};
   search.oninput=refreshIndex;sceneFilter.onchange=()=>{filters.scene=sceneFilter.value;refreshIndex();clearScopeReview();openFilteredScope()};episodeFilter.onchange=()=>{filters.episode=episodeFilter.value;filters.scene='';if(!workspaceRows.some(r=>matches(r))){filters.kind=workspaceRows.some(r=>r.kind==='PREPARATION'&&(!filters.episode||contexts.get(r.object_id).episode===filters.episode))?'PREPARATION':'';filterSelects.kind.value=filters.kind}renderScenes();openFilteredScope()};renderScenes();
   const candidate=(requested&&productionGroups[workspace].includes(requested.kind)?requested:null)||(flatFilters?result.records.find(r=>r.kind==='ENTITY'&&r.object_id===param.get('production_entity')):null)||firstMatchingRow();
-  if(candidate)await openProductionRecord(candidate.object_id,selected===candidate.object_id?param.get('production_revision'):null);else{state.productionSelected=null;nodeText('p',null,'此入口已开放，当前实例尚未登记生产数据。',reader);renderComments()}
+  if(candidate){const reading=openProductionRecord(candidate.object_id,selected===candidate.object_id?param.get('production_revision'):null);onReadStart?.({workspace,loadEpoch:epoch,readEpoch:productionReadEpoch});await reading}else{state.productionSelected=null;nodeText('p',null,'此入口已开放，当前实例尚未登记生产数据。',reader);renderComments()}
 }
 async function openProductionRecord(objectId,revisionId=null,navigate=false,entityId=null){
   const workspaceAtStart=state.workspace,epoch=++productionReadEpoch;
@@ -385,7 +385,64 @@ function locateProductionComment(comment,local=false){
   paintProductionReview();renderComments();
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}
-function showProductionJudgment(root){const r=state.productionSelected,box=el('section','production-editor');nodeText('h3',null,'审阅结论仅针对此版本',box);const verdict=el('select');verdict.setAttribute('aria-label','审阅结果');for(const key of ['passed','changes_requested','rejected'])verdict.append(new Option(productionLabels[key],key));const actor=el('input');actor.placeholder='审阅者';actor.setAttribute('aria-label','审阅者');const reason=el('textarea');reason.placeholder='结论依据';reason.setAttribute('aria-label','结论依据');box.append(verdict,actor,reason);productionButton(box,'保存审阅',async()=>{if(!actor.value.trim()||!reason.value.trim())throw Error('请填写审阅者和结论依据');const id='review-'+crypto.randomUUID();await api('/api/production/judgment',{method:'POST',body:JSON.stringify({object_id:id,expected_version:0,payload:{format:'production-judgment-v1',title:r.payload.title+' · 审阅',blocks:[{id:'review',text:reason.value}],target:productionRef(r),verdict:verdict.value,actor:actor.value,reason:reason.value}})});toast('审阅已记录；采用保持原样');await loadProductionWorkspace()});productionButton(box,'取消',()=>box.remove());root.append(box)}
+function showProductionJudgment(root){
+  const r=state.productionSelected,target=productionRef(r),title=r.payload.title,box=el('section','production-editor');
+  const workspace=state.workspace,loadEpoch=productionLoadEpoch,readEpoch=productionReadEpoch;
+  let closed=false,saving=false,saved=false,pendingRequest=null,save;
+  const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionLoadEpoch===loadEpoch&&productionReadEpoch===readEpoch;
+  nodeText('h3',null,'审阅结论仅针对此版本',box);
+  const verdict=el('select');verdict.setAttribute('aria-label','审阅结果');for(const key of ['passed','changes_requested','rejected'])verdict.append(new Option(productionLabels[key],key));
+  const actor=el('input');actor.placeholder='审阅者';actor.setAttribute('aria-label','审阅者');
+  const reason=el('textarea');reason.placeholder='结论依据';reason.setAttribute('aria-label','结论依据');box.append(verdict,actor,reason);
+  const notice=nodeText('p','production-issue','',box);notice.hidden=true;notice.setAttribute('role','status');
+  const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
+  const same=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
+  const controls=()=>{for(const node of [verdict,actor,reason,save])node.disabled=saving||saved};
+  const readAttempt=async request=>{
+    const response=await fetch('/api/production?object_id='+encodeURIComponent(request.object_id));
+    if(response.status===404)return 'absent';
+    const value=await response.json();if(!response.ok||!value.record)throw Error('审阅保存结果暂无法核实');
+    const row=value.record;
+    return row.object_id===request.object_id&&row.kind==='JUDGMENT'&&row.version===1&&same(row.payload,request.payload)?'saved':'changed';
+  };
+  save=productionButton(box,'保存审阅',async()=>{
+    if(!isOpen()||saving||saved)return;
+    if(!actor.value.trim()||!reason.value.trim())throw Error('请填写审阅者和结论依据');
+    const payload={format:'production-judgment-v1',title:title+' · 审阅',blocks:[{id:'review',text:reason.value}],target,verdict:verdict.value,actor:actor.value,reason:reason.value};
+    saving=true;notice.hidden=true;controls();
+    try{
+      let confirmed=false;
+      if(pendingRequest){
+        let status;try{status=await readAttempt(pendingRequest)}catch{throw Error('上次审阅结果待确认，请原样重试核对；当前内容尚未提交')}
+        if(!isOpen())return;
+        if(status==='changed')throw Error('此审阅记录已有不同内容，未覆盖现有结论');
+        if(status==='saved'){
+          if(!same(payload,pendingRequest.payload))throw Error('上次审阅已保存；当前修改尚未提交，请保留输入并重新核对');
+          confirmed=true;
+        }
+      }
+      if(!confirmed){
+        if(!pendingRequest||!same(payload,pendingRequest.payload))pendingRequest=JSON.parse(JSON.stringify({object_id:'review-'+crypto.randomUUID(),expected_version:0,payload}));
+        try{await api('/api/production/judgment',{method:'POST',body:JSON.stringify(pendingRequest)})}
+        catch(error){
+          if(!isOpen())return;
+          let status;try{status=await readAttempt(pendingRequest)}catch{throw Error('审阅结果待确认，请原样重试核对；尚未再次发送')}
+          if(status==='changed')throw Error('此审阅记录已有不同内容，未覆盖现有结论');
+          if(status!=='saved')throw Error(`${error.message}；审阅尚未确认保存，可原样重试`);
+        }
+      }
+      saved=true;pendingRequest=null;toast(`「${title}」的审阅已记录；采用保持原样`);
+      if(!isOpen())return;
+      closed=true;box.remove();
+      if(state.productionSelected?.id!==target.revision_id)return;
+      let refreshOwner=null;
+      const refresh=loadProductionWorkspace({onReadStart:owner=>{refreshOwner=owner}}),initialOwner={workspace,loadEpoch:productionLoadEpoch,readEpoch};
+      try{await refresh}
+      catch(error){const owner=refreshOwner||initialOwner;if(state.workspace===owner.workspace&&productionLoadEpoch===owner.loadEpoch&&productionReadEpoch===owner.readEpoch)toast(`「${title}」的审阅已保存；当前列表尚未更新：${error.message}`)}
+    }catch(error){if(isOpen()){notice.hidden=false;notice.textContent=error.message;toast(error.message)}}
+    finally{saving=false;if(isOpen())controls()}
+  });productionButton(box,'取消',()=>{closed=true;box.remove()});root.append(box);controls();
+}
 async function renderProductionReadiness(root,r,options={}){
   const readEpoch=productionReadEpoch;
   const isCurrent=options.isCurrent||(()=>state.productionSelected?.id===r.id&&productionReadEpoch===readEpoch&&root.isConnected);

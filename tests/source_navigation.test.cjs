@@ -108,7 +108,7 @@ test('cross-source drafts and unconfirmed submissions remain with the original e
 
 test('pending route scroll yields to actual comment location, editor changes and rapid route changes',async()=>{
   const f=await fixture();f.pop(base+'&source_chapter=chapter-10',false);
-  const comment={id:'location',anchor:{block_id:'chapter-1',quote:'first'},anchor_state:{valid:true}};f.context.locateComment(comment);const block=f.root.querySelector('#block-chapter-1');assert.equal(block.located,true);const before=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,before);
+  const comment={id:'location',target_object_id:'refinement-a',target_revision_id:'source-a-r1',anchor:{type:'text',block_id:'chapter-1',quote:'first'},anchor_state:{valid:true}};f.context.locateComment(comment);const block=f.root.querySelector('#block-chapter-1');assert.equal(block.located,true);const before=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,before);
   f.pop(base+'&source_chapter=chapter-1',false);f.context.startDraft({block_id:'chapter-10',quote:'new choice'});const beforeDraft=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,beforeDraft);
   f.pop(base+'&source_chapter=chapter-10',false);f.pop(base+'&source_chapter=chapter-1',false);f.flush();assert.equal(f.reader.scrollTop,488);
 });

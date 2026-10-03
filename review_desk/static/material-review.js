@@ -78,12 +78,14 @@ function materialRoundResults(round,selected,explicit){return round.results.map(
 function materialCandidateChoice(items,targetId){
   return items.find(i=>i.record.id===targetId)||items.find(i=>i.review_context?.call?.id===targetId)||items[0]||null;
 }
-function materialExactCandidates(detail,items,targetId){
-  const target=materialRows(detail).find(r=>r.kind==='ASSET'&&r.id===targetId);if(!target)return items;
-  return items.map(item=>{
-    if(item.record.object_id!==target.object_id||materialResultKey(item.record)!==materialResultKey(target))return item;
-    return {...item,record:target,components:target.payload.components,component:target.payload.components.find(c=>c.id===item.component.id)||item.component,review_context:detail.review_contexts?.[target.id]||item.review_context};
-  });
+function materialExactCandidates(detail,items,targetId,round=null){
+  const target=(round?round.members:materialRows(detail)).find(r=>r.kind==='ASSET'&&r.id===targetId);if(!target)return items;
+  const sameResult=item=>materialResultKey(item.record)===materialResultKey(target);
+  let index=items.findIndex(item=>item.record.object_id===target.object_id&&sameResult(item));
+  // A round may deduplicate equal originals from the same call under another
+  // asset object. Keep its one result while displaying the exact member read.
+  if(index<0&&round)index=items.findIndex(sameResult);if(index<0)return items;
+  return items.map((item,i)=>i!==index?item:{...item,record:target,components:target.payload.components,component:target.payload.components.find(c=>c.id===item.component.id)||target.payload.components.find(c=>c.role==='original')||target.payload.components[0],review_context:detail.review_contexts?.[target.id]||(detail.record.id===target.id?detail.review_context:null)||(item.review_context?.call?.id===target.payload.production?.revision_id?item.review_context:undefined)});
 }
 function materialCandidateOptions(detail,items){
   const targetId=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target');
@@ -220,7 +222,7 @@ function renderMaterialWorkspace(root,detail){
   if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);url.searchParams.set('material_round',round.number);history.replaceState(null,'',url)}
   if(round&&round.plan&&detail.localPlans?.[round.plan.object_id]&&round.members.some(r=>r.id===detail.localPlans[round.plan.object_id].id))round={...round,plan:detail.localPlans[round.plan.object_id]};
   const allCandidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===detail.componentId)||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||detail.review_context}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
-  const candidateTarget=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target')||r.id,candidates=materialExactCandidates(detail,allCandidates,candidateTarget);
+  const candidateTarget=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target')||r.id,candidates=materialExactCandidates(detail,allCandidates,candidateTarget,round);
   renderMaterialCard(root,{need:round?.plan||null,identity:r,candidates,round,rounds,material_id:mid},{
     ...materialCandidateOptions(detail,candidates),
     selectedCandidateId:candidateTarget,
@@ -352,7 +354,7 @@ function renderMaterialDemand(root,detail){
   const need=local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||r;
   const results=round?.results||(detail.candidate_records||[]).filter(a=>a.payload.candidate_requirements?.some(ref=>ref.revision_id===r.id));
   const allCandidates=results.filter(a=>!a.payload.placeholder).map(record=>({record,component:record.payload.components.find(c=>c.id===detail.componentId)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],components:record.payload.components,review_context:detail.review_contexts?.[record.id]})).filter(i=>i.component);
-  const candidates=materialExactCandidates(detail,allCandidates,detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'));
+  const candidates=materialExactCandidates(detail,allCandidates,detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'),round);
   renderMaterialCard(root,{need,candidates,round,rounds,material_id:mid},{
     ...materialCandidateOptions(detail,candidates),
     roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);url.searchParams.set('material_round',number);history.replaceState(null,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},

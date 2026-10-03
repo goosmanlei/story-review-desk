@@ -77,7 +77,12 @@ def build_context(store, source_id, anchor, draft, target_object_id=None, target
     source_object = next((item for item in store.objects() if item["id"] == source_id), None)
     if not source_object:
         raise ValueError("unknown source")
-    target = store.validate_target(source_id, source_object["current_revision"], anchor)
+    try:
+        target = store.validate_target(source_id, target_revision_id if target_revision_id is not None else source_object["current_revision"], anchor)
+    except ValueError as error:
+        if target_revision_id is not None and str(error) == "unknown object or mismatched revision":
+            raise ValueError("资料版本已变化或不可用；请保留当前意见，刷新后重新圈选。") from error
+        raise
     source = target["source"]
     project = store.configuration("PROJECT")
     system = store.configuration("SYSTEM")
