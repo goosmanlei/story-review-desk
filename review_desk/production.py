@@ -11,7 +11,7 @@ import re
 import shutil
 
 from .store import Conflict, canonical
-from .production_media import validate_component
+from .production_media import asset_path, validate_component
 from . import production_states as full_states
 
 
@@ -689,7 +689,46 @@ def asset_coverage(store, asset):
     return entities, {r['object_id'] for r in states}
 
 
-def readiness(store, scope):
+def _package_component_validator(store):
+    """Reuse hashes only inside one check while the file and metadata stay equal."""
+    root, checked = root_of(store), {}
+
+    def stamp(path):
+        stat = path.stat()
+        return stat.st_dev, stat.st_ino, stat.st_mode, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+    def validate(component):
+        if not isinstance(component, dict):
+            return validate_component(root, component, inspect=False)
+        path = asset_path(root, component.get('file'))
+        try:
+            before = stamp(path)
+        except OSError:
+            return validate_component(root, component, inspect=False)
+        key = canonical(component)
+        cached = checked.get(key)
+        if cached and cached[0] == before:
+            if cached[1] is not None:
+                raise cached[1]
+            return path
+        try:
+            validate_component(root, component, inspect=False)
+        except (ValueError, OSError) as error:
+            try:
+                if stamp(path) == before:
+                    checked[key] = before, error
+            except OSError:
+                pass
+            raise
+        if stamp(path) != before:
+            raise ValueError('media changed during verification')
+        checked[key] = before, None
+        return path
+
+    return validate
+
+
+def _input_readiness(store, scope, validate_file):
     subject = record(store, scope)
     heads = current_records(store)
     scope_ids = {scope}
@@ -726,7 +765,7 @@ def readiness(store, scope):
             ap = adoption["payload"]
             try:
                 asset, component = component_for(store, ap["asset"], ap["component_id"])
-                validate_component(root_of(store), component, inspect=False)
+                validate_file(component)
                 validate_selection(component, ap)
                 if ap["scope"] != p["scope"]:
                     issues.append("scope_revision_changed")
@@ -773,8 +812,15 @@ def readiness(store, scope):
             "creative_acceptance": [r for r in judgments if r["payload"]["target"]["revision_id"] == subject["id"] and r["payload"]["verdict"] == "accepted"]}
 
 
-def package_manifest(store, scope):
-    ready = readiness(store, scope)
+class _PackageFileError(ValueError):
+    def __init__(self, record, component, error):
+        self.issue = {'object_id': record['object_id'], 'revision_id': record['id'],
+                      'title': record['payload'].get('title', record['object_id']),
+                      'component_id': component.get('id'), 'file': component.get('file'), 'reason': str(error)}
+        super().__init__(f"{self.issue['title']} / {self.issue['component_id']}: {error}")
+
+
+def _package_contents(store, ready, validate_file):
     if not ready["inputs_ready"]:
         raise Conflict("required production inputs are incomplete or need review")
     revisions = dependency_closure(store, ready["scope"]["id"])
@@ -786,10 +832,36 @@ def package_manifest(store, scope):
     for value in revisions.values():
         if value["payload"].get("format") in FORMATS:
             for component in value["payload"].get("components", []):
-                validate_component(root_of(store), component, inspect=False)
+                try:
+                    validate_file(component)
+                except (ValueError, OSError) as error:
+                    raise _PackageFileError(value, component, error) from error
                 files[component["file"]] = component
+    return list(revisions.values()), files
+
+
+def readiness(store, scope):
+    validate_file = _package_component_validator(store)
+    ready = _input_readiness(store, scope, validate_file)
+    ready.update(package_available=False, package_issue=None)
+    if ready['inputs_ready']:
+        try:
+            _package_contents(store, ready, validate_file)
+            ready['package_available'] = True
+        except _PackageFileError as error:
+            ready['package_issue'] = error.issue
+        except (ValueError, KeyError, OSError) as error:
+            ready['package_issue'] = {'reason': str(error)}
+    return ready
+
+
+def package_manifest(store, scope):
+    validate_file = _package_component_validator(store)
+    ready = _input_readiness(store, scope, validate_file)
+    revisions, files = _package_contents(store, ready, validate_file)
+    ready.update(package_available=True, package_issue=None)
     return {"format": "production-package-v1", "scope": {"object_id": scope, "revision_id": ready["scope"]["id"]},
-            "readiness": ready, "revisions": list(revisions.values()), "files": files,
+            "readiness": ready, "revisions": revisions, "files": files,
             "note": "All paths below assets/ are relative to this package. Generation inputs and post_audio remain separate in each requirement."}
 
 
