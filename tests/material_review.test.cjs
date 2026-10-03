@@ -25,6 +25,28 @@ test('a historical target keeps its exact revision after feedback updates the as
  const different={...current,payload:{production:{object_id:'other-call'},components:[original]}};
  assert.equal(ctx.materialExactCandidates(detail,[{record:different,component:original}],'old')[0].record,different);
 });
+
+test('an exact member replaces its deduplicated representative without expanding or mutating the round',()=>{
+ const original={id:'original',role:'original',sha256:'same-file'},preview={id:'preview',role:'preview',sha256:'a-preview'};
+ const a={object_id:'a',id:'a-revision',kind:'ASSET',payload:{production:{object_id:'call',revision_id:'call-revision'},components:[original,preview]}},b={...a,object_id:'b',id:'b-revision'};
+ const ownContext={call:{id:'call-revision'},requirements:[]},round={members:[a,b],results:[b]},detail={record:a,history:[a],review_context:ownContext};
+ const items=[{record:b,component:{id:'removed-preview',role:'preview'},review_context:{call:{id:'wrong-old-call'}}}],before=JSON.stringify({round,items});
+ const exact=ctx.materialExactCandidates(detail,items,a.id,round);
+ assert.equal(exact.length,1);assert.equal(exact[0].record,a);assert.equal(exact[0].component,original);assert.equal(exact[0].review_context,ownContext);assert.equal(JSON.stringify({round,items}),before);
+});
+test('exact fallback cannot borrow a nonmember from another round or a different original or call',()=>{
+ const row=(object,call,sha)=>({object_id:object,id:object+'-revision',kind:'ASSET',payload:{production:{object_id:call,revision_id:call+'-revision'},components:[{id:'original',role:'original',sha256:sha}]}});
+ const a=row('a','call','sha'),detail={record:a,history:[a]};
+ for(const [b,members] of [[row('b','call','sha'),[]],[row('b','other-call','sha'),[a]],[row('b','call','different-sha'),[a]]]){
+  const items=[{record:b,component:b.payload.components[0]}],round={members:[...members,b],results:[b]};
+  assert.equal(ctx.materialExactCandidates(detail,items,a.id,round),items);
+ }
+});
+test('exact member substitution prefers its own object and preserves other distinct candidates',()=>{
+ const original={id:'original',role:'original',sha256:'same'},a={object_id:'a',id:'a-old',kind:'ASSET',payload:{production:{object_id:'call'},components:[original]}},newA={...a,id:'a-new'},b={...a,object_id:'b',id:'b-revision'},other={...a,object_id:'other',id:'other',payload:{...a.payload,production:{object_id:'another-call'}}};
+ const items=[b,newA,other].map(record=>({record,component:original})),round={members:[a,newA,b,other],results:[b,newA,other]},detail={record:newA,history:[newA,a]};
+ const exact=ctx.materialExactCandidates(detail,items,a.id,round);assert.equal(exact.length,3);assert.equal(exact[0],items[0]);assert.equal(exact[1].record,a);assert.equal(exact[2],items[2]);
+});
 test('cards preserve exact plan candidates and do not attach an old candidate to a new recipe',()=>{
  const a=need('a'),b=need('b'),old=need('a','a-old'),clip=item('clip',[ref(a),ref(b)]),previous=item('old',[ref(old)]);
  const cards=ctx.materialCardModels([a,b],[clip,previous]);

@@ -20,7 +20,7 @@ function fixture({storage=new Map(),fetch:transport}={}){
     globalThis.forgetScriptDraft=()=>{};globalThis.scriptEpisode=()=>state.episode;
     globalThis.focusProductionReview=detail=>{state.productionSelected=detail.record};`,context);
   const target=(workspace='story.sources',id='source-1',revision='rev-1')=>{
-    Object.assign(context.state,{workspace,current:{id,target_revision_id:revision},structureRevision:revision,episode:{object_id:id,id:revision},productionSelected:{object_id:id,id:revision},editing:null,anchor:{type:'global'},materialReview:null,entityReview:null});
+    Object.assign(context.state,{workspace,current:{id,target_revision_id:revision},structureRevision:revision,structure:{revisions:[{id:revision}]},episode:{object_id:id,id:revision},productionSelected:{object_id:id,id:revision},editing:null,anchor:{type:'global'},materialReview:null,entityReview:null});
     context.intent=null;textarea.value='opinion';return context.key();
   };
   const material=(number=1,mid='need',data=null)=>{

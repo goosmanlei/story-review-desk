@@ -15,7 +15,7 @@ class Element{
 }
 function actualEditor(f){
   const root=new Element('main');
-  for(const id of ['comment-body','open-count','comments-toggle','toast']){const node=new Element('div');node.id=id;root.append(node)}
+  for(const id of ['comment-body','comment-panel','open-count','comments-toggle','screenplay-comments','toast']){const node=new Element('div');node.id=id;root.append(node)}
   f.context.document={querySelector:s=>root.querySelector(s),createElement:tag=>new Element(tag),createTextNode:text=>{const node=new Element('text');node.textContent=text;return node}};
   const start=source.indexOf('function renderComments(){'),end=source.indexOf('\nasync function refreshComments(){',start);vm.runInContext(source.slice(start,end),f.context);
   return root;
@@ -28,7 +28,7 @@ for(const workspace of ['story.sources','story.outline','materials.workspace'])f
     const textarea=root.querySelector('#comment-editor-text'),editor=root.querySelector('.comment-editor'),intent=root.querySelector('#material-revision-intent');
     const typed='new unique unsaved opinion';textarea.value=typed;if(intent)intent.checked=false;
     const set=f.context.localStorage.setItem;f.context.localStorage.setItem=(k,v)=>{if(k===(failure==='draft'?key:key+':submission'))throw Error('quota exceeded');return set(k,v)};
-    if(failure==='draft')assert.throws(()=>textarea.listeners.input(),/quota/);
+    if(failure==='draft'){assert.doesNotThrow(()=>textarea.listeners.input());assert.match(root.querySelector('#toast').textContent,/本机草稿保存失败.*当前输入仍保留/)}
     await f.context.saveComment();
     assert.equal(root.querySelector('.comment-editor'),editor);assert.equal(root.querySelector('#comment-editor-text'),textarea);assert.equal(textarea.value,typed);assert.equal(textarea.readOnly,false);
     assert.equal(f.requests.length,0);assert.match(root.querySelector('#toast').textContent,/本机草稿保存失败.*尚未发送/);
