@@ -45,17 +45,29 @@ function renderScriptCommentCounts(){
 const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id;
 function rememberScriptDraft(){
   const episode=scriptEpisode();
-  if(episode&&state.anchor)localStorage.setItem(scriptDraftMetaKey(episode),JSON.stringify({anchor:state.anchor,editing:state.editing}));
+  if(!episode||!state.anchor)return;
+  try{localStorage.setItem(scriptDraftMetaKey(episode),JSON.stringify({anchor:state.anchor,editing:state.editing}))}
+  catch{toast('本机草稿定位信息保存失败。当前仍可编辑，刷新后可能无法恢复原位置。')}
 }
-function forgetScriptDraft(){const episode=scriptEpisode();if(episode)localStorage.removeItem(scriptDraftMetaKey(episode))}
+function forgetScriptDraft(){
+  const episode=scriptEpisode();if(!episode)return;
+  try{localStorage.removeItem(scriptDraftMetaKey(episode))}
+  catch{toast('本机草稿定位信息未清理，刷新后可能重新打开原位置。')}
+}
 function restoreScriptDraft(){
   const episode=scriptEpisode();if(!episode||state.anchor)return;
-  try{
-    const saved=JSON.parse(localStorage.getItem(scriptDraftMetaKey(episode))||'null');
-    if(saved?.anchor&&(!saved.editing||state.comments.some(c=>c.id===saved.editing&&c.target_revision_id===episode.id))){
-      state.anchor=saved.anchor;state.editing=saved.editing||null;
-    }
-  }catch{localStorage.removeItem(scriptDraftMetaKey(episode))}
+  let raw,saved;
+  try{raw=localStorage.getItem(scriptDraftMetaKey(episode))}
+  catch{toast('本机草稿定位信息读取失败，本集正文仍可阅读。');return}
+  try{saved=JSON.parse(raw||'null')}
+  catch{
+    try{localStorage.removeItem(scriptDraftMetaKey(episode))}
+    catch{toast('本机草稿定位信息无法读取且未能清理，本集正文仍可阅读。')}
+    return;
+  }
+  if(saved?.anchor&&(!saved.editing||state.comments.some(c=>c.id===saved.editing&&c.target_revision_id===episode.id))){
+    state.anchor=saved.anchor;state.editing=saved.editing||null;
+  }
 }
 function sceneForBlock(episode,blockId){return episode?.payload.scenes.find(scene=>scene.block_ids.includes(blockId))}
 function scriptUrl(){
