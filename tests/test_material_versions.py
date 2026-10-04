@@ -12,7 +12,10 @@ from review_desk.bundle import export, restore
 
 
 class MaterialVersionsTest(unittest.TestCase):
-    setUp=fixtures.GenerationTest.setUp
+    def setUp(self):
+        from legacy_material_fixture import install
+        install(self)
+        fixtures.GenerationTest.setUp(self)
     tearDown=fixtures.GenerationTest.tearDown
     spec=fixtures.GenerationTest.spec
     put=fixtures.GenerationTest.put

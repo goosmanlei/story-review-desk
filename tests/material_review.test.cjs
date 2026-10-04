@@ -89,6 +89,7 @@ test('material references retain their exact media reader; explicit evidence can
  assert.equal(new URL(ctx.materialReferenceRequest(ref).url,'http://localhost').pathname,'/api/production');
  assert.equal(ctx.materialReferenceRequest({object_id:'person',revision_id:'person-v1'},true).isSource,true);
  ctx.state.productionRecords=[];
+ assert.equal(ctx.materialReferenceRequest(ref,false).isSource,false);
 });
 
 test('materials count current identities and show only genuine missing state demands',()=>{

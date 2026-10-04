@@ -24,7 +24,7 @@ def validate_state(store, p):
     if p["state_model"] != MODEL:
         raise ValueError("unsupported state model")
     entity = ref_record(store, p["entity"], {"ENTITY"})
-    for name in DIMENSIONS[entity["payload"]["entity_type"]]:
+    for name in DIMENSIONS.get(entity["payload"]["entity_type"], tuple(entity["payload"].get("attribute_definitions", {}))):
         _text(p["dimensions"].get(name), "complete state dimension: " + name)
     if p.get("reference_media") not in ("image", "audio", "none"):
         raise ValueError("complete state requires reference_media")

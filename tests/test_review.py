@@ -126,7 +126,7 @@ class ReviewTest(unittest.TestCase):
         self.store.put_object("outline-1", "STORY", {"title": "第二版", "body": "甲丁戊"}, 1, [{"revision_id": source_revision, "role": "依据"}])
         self.assertEqual(next(c for c in self.store.context() if c["id"] == "object-one")["block_text"], "甲乙丙")
         manifest = export(self.store, self.root / "export")
-        self.assertEqual((manifest["sources"], manifest["comments"], manifest["events"], manifest["schema_version"]), (1, 2, 2, 4))
+        self.assertEqual((manifest["sources"], manifest["comments"], manifest["events"], manifest["schema_version"]), (1, 2, 2, 5))
         recovered = Store(self.root / "clean.sqlite3")
         try:
             restore(recovered, self.root / "export")

@@ -17,7 +17,7 @@ async function main(){
     const data=example.material?await (await transport('/api/production?object_id='+example.object_id)).json():input.material;
     // New JS environment models refresh; only durable browser storage survives.
     const next=fixture({fetch:transport,storage:first.storage});setup(next,example,data);
-    if(example.material){assert.equal(next.context.materialRevisionIntent(),null);assert.equal(next.context.commentRevisionIntent().expected_round,1)}
+    if(example.material){assert.equal(next.context.materialRevisionIntent(),null);assert.equal(next.context.commentRevisionIntent(),null)}
     await next.context.saveComment();assert.equal(next.messages.at(-1),'评论已保存');
     const before=JSON.parse(first.requests[0].body),after=JSON.parse(next.requests[0].body);
     assert.deepEqual(before,after);assert.equal(after.id,pending.id);assert.equal(next.storage.has(key),false);assert.equal(next.storage.has(key+':submission'),false);

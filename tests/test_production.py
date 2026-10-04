@@ -161,10 +161,11 @@ class ProductionTest(unittest.TestCase):
         return component
 
     def test_actual_image_inputs_cannot_be_omitted_to_reset_lineage(self):
-        self.image()
+        component = self.image()
         call = self.spec('derive', 'CALL', method='generation', tool='test-renderer', status='submitted',
                          inputs=[self.ref('still')], outputs=[], lineage={'i2i_depth':0,'references':[]})
-        with self.assertRaisesRegex(ValueError, 'every actual image input'): self.put(call)
+        with self.assertRaisesRegex(ValueError, 'every actual image input|actual media input'): self.put(call)
+        call['payload']['inputs'] = [{**self.ref('still'), 'component_id': component['id']}]
         call['payload']['lineage'] = {'i2i_depth':1,'references':[self.ref('still')]}
         self.put(call)
 

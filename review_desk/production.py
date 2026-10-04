@@ -271,8 +271,16 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         if not isinstance(p.get("specification"), dict):
             raise ValueError("production specification required")
     elif kind == "ENTITY":
-        if p.get("entity_type") not in ("character", "space", "prop", "song"):
+        if not isinstance(p.get("entity_type"), str) or not ID.fullmatch(p["entity_type"]):
             raise ValueError("invalid entity type")
+        if p["entity_type"] not in ("character", "space", "prop", "song"):
+            _text(p.get("entity_type_label"), "entity type label")
+            attributes = p.get("attributes", {})
+            definitions = p.get("attribute_definitions", {})
+            if not isinstance(attributes, dict) or not isinstance(definitions, dict) or set(attributes) - set(definitions):
+                raise ValueError("entity attributes need explicit definitions")
+            for definition in definitions.values():
+                _text(definition, "attribute meaning")
         for key in ("aliases", "facts", "choices", "unknowns", "sources"):
             _list(p, key)
         names = [p["title"], *p["aliases"]]
@@ -305,6 +313,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             entity_review.validate(store, object_id, p, check_current)
     elif kind == "PREPARATION":
         episode = ref_record(store, p.get("source"), {"EPISODE"})
+        if p.get('input_lock'):
+            locked = ref_record(store, p['input_lock'], {'INPUT_LOCK'})
+            if not any(r['object_id']==episode['object_id'] and r['revision_id']==episode['id'] for r in locked['payload']['episodes']):
+                raise ValueError('scene input lock does not contain its exact episode')
         scene = next((s for s in episode["payload"].get("scenes", []) if s["id"] == p["source"].get("scene_id")), None)
         if not scene or set(p["source"].get("block_ids", [])) != set(scene["block_ids"]) or p.get("checked") is not True:
             raise ValueError("scene preparation must cover the complete scene")
@@ -322,6 +334,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 raise ValueError("occurrence evidence must locate this scene")
         full_states.validate_usage(store, kind, p)
     elif kind == "SHOT_DESIGN":
+        from .production_breakdown import validate_parent
+        validate_parent(store, p)
         ref_record(store, p.get("episode"), {"EPISODE"})
         if p.get("source", {}).get("revision_id") != p["episode"]["revision_id"] or p.get("scene_id") != p["source"].get("scene_id"):
             raise ValueError("shot episode/scene/source differ")
@@ -377,7 +391,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             full_states.validate_asset_coverage(store, p)
             for candidate in p.get('candidate_requirements', []):
                 need = ref_record(store, candidate, {'REQUIREMENT'})
-                if need['payload']['media_type'] != p['media_type'] or not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', [])):
+                if need['payload']['media_type'] != p['media_type'] or (ref_record(store, need['payload']['scope'])['kind'] == 'STATE' and not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', []))):
                     raise ValueError('candidate requirement needs exact state and media coverage')
             call = ref_record(store, p.get("production"), {"CALL"})
             if call["payload"].get("status") not in ("submitted", "completed"):
@@ -407,7 +421,17 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         for input_ref in p['inputs']:
             value = ref_record(store, input_ref)
             if input_ref.get('component_id'):
-                component_for(store, input_ref, input_ref['component_id'])
+                _, component=component_for(store, input_ref, input_ref['component_id'])
+                validate_selection(component,input_ref)
+            elif check_current and value['kind']=='ASSET':
+                raise ValueError('actual media input needs an exact component')
+        if p.get('actual_seed') is not None and (type(p['actual_seed']) is not int or p['actual_seed']<0):
+            raise ValueError('actual seed must be a nonnegative integer')
+        if check_current:
+            from .material_plans import randomization
+            strategy=randomization(p)
+            if strategy['mode']=='fixed' and p.get('actual_seed') not in (None,strategy['seed']):
+                raise ValueError('actual seed differs from the fixed strategy')
         _lineage(store, p)
         if check_current:
             from .generation import validate_call
@@ -448,6 +472,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                     raise ValueError("state title review requires only a title change and the exact new state target")
         from .production_changes import validate as validate_change
         validate_change(store, object_id, p, check_current)
+    elif kind == "RELATION" and p.get("relation_type") in ("applicability", "occurrence"):
+        from .production_breakdown import validate_relation
+        validate_relation(store, p)
     elif kind == "RELATION" and p.get("relation_type") == "entity":
         from .entity_relations import validate
         validate(store, p)
@@ -509,7 +536,7 @@ def current_records(store, kinds=None):
                 if value['kind']=='ASSET':
                     # Match the default detail card: associated material first,
                     # then its latest round containing this exact revision.
-                    member=store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone()
+                    member=store.db.execute('SELECT number FROM material_plan_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone() or store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone()
                     value['material_version']=member[0] if member else None
                 result.append(value)
     return result
@@ -565,7 +592,7 @@ def _import_records(store, document, validate_only=False, *, check_current=True)
             results.append(result)
             resolved[object_id] = result["revision"]
             if check_current:
-                from .material_versions import register
+                from .material_plans import register
                 register(store, record(store, revision_id=result['revision']))
         if validate_only:
             store.db.rollback()
@@ -601,6 +628,10 @@ def remove_unreferenced_requirements(store, removals):
     for oid in sorted(ids):
         if store.db.execute('SELECT 1 FROM material_feedback WHERE material_id=?', (oid,)).fetchone():
             raise Conflict('cannot remove a material with revision feedback')
+        if store.db.execute("SELECT 1 FROM material_plan_members WHERE material_id=? AND role!='plan'", (oid,)).fetchone():
+            raise Conflict('cannot remove material with actual calls or candidates')
+        store.db.execute('DELETE FROM material_plan_members WHERE material_id=?', (oid,))
+        store.db.execute('DELETE FROM material_plan_versions WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM material_members WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM material_rounds WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM revisions WHERE object_id=?', (oid,))
@@ -649,12 +680,16 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             result["review_contexts"] = {r["id"]: context(store, r) for r in history}
         if selected['kind']=='REQUIREMENT':
             from .material_review import context
-            candidates=[record(store, revision_id=r[0]) for r in store.db.execute("SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='ASSET'")]
+            candidates=[record(store, revision_id=r[0]) for r in store.db.execute("SELECT DISTINCT r.id FROM revisions r JOIN objects o ON o.id=r.object_id JOIN json_each(r.payload,'$.candidate_requirements') c WHERE o.kind='ASSET' AND json_extract(c.value,'$.object_id')=?", (selected['object_id'],))]
             candidates=[a for a in candidates if any(ref.get('object_id')==selected['object_id'] for ref in a['payload'].get('candidate_requirements', []))]
             result['candidate_records']=candidates
             result['review_contexts']={a['id']:context(store,a) for a in candidates}
-        from .material_versions import for_record
+        from .material_versions import for_record as legacy_versions
+        from .material_plans import for_record
+        result['legacy_material_versions'] = legacy_versions(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
+        if not result['material_versions']:
+            result['material_versions'] = result['legacy_material_versions']
         if result['material_versions']:
             from .material_review import context
             contexts = result.setdefault('review_contexts', {})

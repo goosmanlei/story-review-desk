@@ -24,6 +24,13 @@ test('a displayed old plan disables the real acceptance button and its exact sco
   const button=f.render();assert.equal(button.disabled,true);assert.match(button.title,/历史内容/);await button.onclick();assert.equal(f.requests.length,0);
 });
 
+test('a frozen actual-call version without a matching draft remains readable and cannot accept current scope',()=>{
+  const f=setup();Object.assign(f.data.material_versions.need[1],{model:'plan-v1',frozen:1,plan:null});
+  f.context.switchMaterialRound(f.data,'need',1);
+  assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),true);
+  assert.equal(f.render().disabled,true);
+});
+
 test('older round sharing the same exact plan remains acceptable and posts the existing current scope',async()=>{
   const f=setup();f.context.switchMaterialRound(f.data,'same-need',1);assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);
   const before=JSON.stringify(f.data.scope),button=f.render();assert.equal(button.disabled,false);await button.onclick();assert.equal(f.requests.length,1);assert.equal(JSON.stringify(f.requests[0].payload.scope),before);assert.equal(f.requests[0].payload.action,'accept');assert.equal(f.requests[0].payload.expected_version,0);

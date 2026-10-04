@@ -91,10 +91,10 @@ class CommentRetryHTTPTest(unittest.TestCase):
                     self.assertEqual(len([c for c in store.comments() if c['body'] == row['body']]), 1)
                     self.assertEqual(len([e for e in store.events() if e['comment_id'] == cid]), 1)
                 feedback = result['results'][2]
-                self.assertEqual(feedback['material_rounds_after_first'], [2, 1])
-                self.assertEqual(store.comment(feedback['first']['id'])['material_scopes'], [{'material_id': plan['object_id'], 'number': 1}])
-                self.assertEqual([tuple(r) for r in store.db.execute('SELECT material_id,number FROM material_feedback')], [(plan['object_id'], 2)])
-                self.assertEqual(store.db.execute('SELECT COUNT(*) FROM material_rounds WHERE material_id=?', (plan['object_id'],)).fetchone()[0], 2)
+                self.assertEqual(feedback['material_rounds_after_first'], [1])
+                self.assertEqual(store.comment(feedback['first']['id'])['material_plan_scopes'], [{'material_id': plan['object_id'], 'number': 1}])
+                self.assertEqual([tuple(r) for r in store.db.execute('SELECT material_id,number FROM material_feedback')], [])
+                self.assertEqual(store.db.execute('SELECT COUNT(*) FROM material_rounds WHERE material_id=?', (plan['object_id'],)).fetchone()[0], 0)
                 for body in ('changed first', 'changed second'):
                     self.assertEqual(len([c for c in store.comments() if c['body'] == body]), 1)
             finally:

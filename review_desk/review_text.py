@@ -36,6 +36,8 @@ def production_text_blocks(payload):
             blocks.append({'id': f'{prefix}{field}/{index}', 'text': text,
                            'field': field, 'index': index})
     extra = [('production_description', payload.get('production_description'))]
+    if payload.get('format') == 'production-shot-design-v1':
+        extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','action_start','action_end','motion','continuity')]
     if payload.get('relation_type') == 'entity':
         extra.append(('relationship.label', payload.get('label')))
     plan = payload.get('generation') or {}

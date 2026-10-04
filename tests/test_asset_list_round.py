@@ -11,6 +11,8 @@ from review_desk.store import Store
 
 class AssetListRoundTest(unittest.TestCase):
     def setUp(self):
+        from legacy_material_fixture import install
+        install(self)
         self.fixture = fixtures.GenerationTest()
         self.fixture.setUp()
         self.fixture.setup_plans()

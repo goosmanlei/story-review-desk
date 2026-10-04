@@ -6,6 +6,7 @@ const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';
 // This read-only projection also runs in review_text.py for exact anchor validation.
 function productionTextBlocks(record){
+  if(!record)return [];
   const p=record.payload,blocks=[...(p.blocks||[])],body=blocks.map(b=>b.text).join('\n'),seen=new Set();
   let prefix='@review/';while(blocks.some(b=>b.id.startsWith(prefix)))prefix='@'+prefix;
   for(const field of ['facts','choices','unknowns'])for(const [index,text] of (p[field]||[]).entries()){
@@ -14,6 +15,7 @@ function productionTextBlocks(record){
   }
   const sorted=value=>Array.isArray(value)?value.map(sorted):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sorted(value[k])])):value;
   const extra=[['production_description',p.production_description]],plan=p.generation;
+  if(p.format==='production-shot-design-v1')for(const field of ['purpose','framing','spatial','action_start','action_end','motion','continuity'])extra.push([field,p[field]]);
   if(p.relation_type==='entity')extra.push(['relationship.label',p.label]);
   if(plan){extra.push(['generation.tool',plan.tool],['generation.model',plan.model],['generation.parameters',record.review_parameter_text??JSON.stringify(sorted(plan.parameters||{}),null,2)],['generation.prompt',plan.prompt],['generation.output.description',plan.output?.description],['generation.output.review_criteria',(plan.output?.review_criteria||[]).join('\n')]);for(const [i,v] of (plan.inputs||[]).entries())extra.push([`generation.inputs.${i}.use`,v.use])}
   if(p.format==='production-call-v1')extra.push(['call.model',p.model],['call.parameters',record.review_call_parameter_text??JSON.stringify(sorted(Object.fromEntries(Object.entries(p.parameters||{}).filter(([k,v])=>k!=='prompt'||v!==p.prompt))),null,2)],['call.prompt',p.prompt]);
@@ -128,8 +130,23 @@ function renderProductionEntityNavigation(root,r){
   root.append(section);
 }
 async function loadProductionWorkspace({onReadStart}={}){
+  const route=new URL(location.href),legacyObject=route.searchParams.get('production_object');
+  if(typeof productionTab==='function'&&legacyObject&&!route.searchParams.has('production_tab')&&!route.searchParams.has('production_entity')){
+    const workspace=state.workspace,read=++productionReadEpoch;
+    const linked=await api('/api/production?'+new URLSearchParams({object_id:legacyObject,...(route.searchParams.get('production_revision')?{revision_id:route.searchParams.get('production_revision')}:{})}));
+    if(state.workspace!==workspace||read!==productionReadEpoch)return;
+    const row=linked.record;
+    if(workspace==='production.workspace'&&!['SHOT_DESIGN','PREPARATION','INPUT_LOCK','EPISODE'].includes(row.kind))route.searchParams.set('production_tab','history');
+    else if(workspace==='settings.workspace'&&['ENTITY','STATE','REPRESENTATION'].includes(row.kind))route.searchParams.set('production_tab','entities');
+    else if(['SHOT_DESIGN','PREPARATION'].includes(row.kind)){
+      route.searchParams.set('breakdown_episode',(row.payload.episode||row.payload.source).object_id);
+      route.searchParams.set('breakdown_object',row.object_id);route.searchParams.set('breakdown_revision',row.id);
+    }
+    history.replaceState(null,'',route);
+  }
+  if(typeof productionTab==='function'){const tab=productionTab();if(tab==='breakdown'||tab==='shots')return loadProductionBreakdown();if(tab==='materials')return loadProductionMaterials()}
   const workspace=state.workspace,epoch=++productionLoadEpoch,readEpoch=productionReadEpoch,view=$('#production-view');view.replaceChildren();const loading=nodeText('p',null,'正在读取制作记录…',view);
-  let result;try{result=await api('/api/production')}
+  let result;try{result=await api(typeof productionTab==='function'?'/api/production/index?'+new URLSearchParams({view:workspace==='settings.workspace'?'settings':'history',object_id:new URL(location.href).searchParams.get('production_object')||''}):'/api/production')}
   catch(error){if(state.workspace===workspace&&epoch===productionLoadEpoch&&readEpoch===productionReadEpoch&&loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
   if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
@@ -140,7 +157,7 @@ async function loadProductionWorkspace({onReadStart}={}){
   }
   const host=$('#production-view');host.replaceChildren();
   const heading=el('header','production-heading'),title=el('div');nodeText('h1',null,{'settings.workspace':'制作设定','materials.workspace':'素材管理','production.workspace':'全剧制作'}[workspace],title);
-  nodeText('p',null,{'settings.workspace':'直接审阅实体、完整状态和关联素材，通过评论提出意见，也可采纳当前版本。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场查看镜头与输入，检查素材缺项及准确采用版本。'}[workspace],title);heading.append(title);host.append(heading);
+  nodeText('p',null,{'settings.workspace':'直接审阅实体、完整状态和关联素材，通过评论提出意见，也可采纳当前版本。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场查看镜头与输入，检查素材缺项及准确采用版本。'}[workspace],title);heading.append(title);host.append(heading);if(typeof productionTabs==='function')productionTabs(host);
   const inputLocks=result.records.filter(r=>r.kind==='INPUT_LOCK');
   if(workspace==='production.workspace'){
     const basis=el('div','production-basis');basis.setAttribute('aria-label','剧本依据');
@@ -159,8 +176,8 @@ async function loadProductionWorkspace({onReadStart}={}){
   }else{toolbar.append(search);filterPanel.append(toolbar)}
   const kindOptions=workspace==='materials.workspace'?[['','全部'],['ungenerated','未生成'],['generated','已生成']]:[['','全部类型'],...productionGroups[workspace].map(kind=>[kind,productionKinds[kind]])];
   const categoryRows=productionWorkspaceRows(result.records,workspace,result.material_assets),categoryById=new Map(result.records.map(r=>[r.object_id,r]));
-  const categories=flatFilters?['character','space','prop','song']:workspace==='materials.workspace'?['image','audio','video','project','document'].filter(type=>categoryRows.some(r=>productionFilterMediaTypes(r,categoryById).includes(type))):[];
-  const categoryOptions=[['',flatFilters?'全部实体':'全部内容'],...categories.map(value=>[value,productionLabels[value]||({image:'图像',audio:'声音',video:'视频',project:'工程',document:'说明文件'})[value]])];
+  const categories=flatFilters?[...new Set(categoryRows.filter(r=>r.kind==='ENTITY').map(r=>r.payload.entity_type))]:workspace==='materials.workspace'?['image','audio','video','project','document'].filter(type=>categoryRows.some(r=>productionFilterMediaTypes(r,categoryById).includes(type))):[];
+  const categoryOptions=[['',flatFilters?'全部实体':'全部内容'],...categories.map(value=>[value,productionLabels[value]||categoryRows.find(r=>r.payload.entity_type===value)?.payload.entity_type_label||({image:'图像',audio:'声音',video:'视频',project:'工程',document:'说明文件'})[value]])];
   const facetButtons=[];
   for(const [key,label,options] of [['kind',workspace==='materials.workspace'?'生成状态':'记录类型',kindOptions],['category','内容分类',categoryOptions]]){
     if((key==='kind'&&flatFilters)||(key==='category'&&!categories.length))continue;
@@ -240,7 +257,7 @@ async function loadProductionWorkspace({onReadStart}={}){
         const children=childrenByEntity.get(r.object_id)||[],states=children.filter(child=>child.kind==='STATE').length;
         const b=productionButton(index,r.payload.title,()=>openProductionRecord(r.object_id));b.dataset.objectId=r.object_id;
         b.classList.toggle('active',(flatFilters?state.productionEntityId:state.productionSelected?.object_id)===r.object_id);
-        if(flatFilters){b.dataset.entityType=r.payload.entity_type;const icon=el('span','production-entity-avatar');icon.append(productionEntityIcon(r.payload.entity_type));b.prepend(icon);nodeText('span','production-state-count',`${states} 个完整状态`,b);const settings=children.filter(child=>child.kind==='REPRESENTATION').length;nodeText('small',null,`${productionLabels[r.payload.entity_type]}${settings?' · '+settings+' 项制作设定':''}`,b)}
+        if(flatFilters){b.dataset.entityType=r.payload.entity_type;const icon=el('span','production-entity-avatar');icon.append(productionEntityIcon(r.payload.entity_type));b.prepend(icon);nodeText('span','production-state-count',`${states} 个完整状态`,b);const settings=children.filter(child=>child.kind==='REPRESENTATION').length;nodeText('small',null,`${productionLabels[r.payload.entity_type]||r.payload.entity_type_label}${settings?' · '+settings+' 项制作设定':''}`,b)}
         else{
           const version=workspace==='materials.workspace'?(r.material_generated?'已生成':'未生成'):r.kind==='ASSET'?(Number.isInteger(r.material_version)&&r.material_version>0?'版本 '+r.material_version:''):'修订 '+r.version;
           const label=[productionLabels[r.payload.entity_type]||contexts.get(r.object_id).scene,version].filter(Boolean).join(' ');if(label)nodeText('small',null,label,b);
@@ -313,14 +330,14 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
 }
 function focusProductionReview(detail,paint=true){
   const r=detail.record;
-  if(state.productionSelected?.id!==r.id){state.reviewCommentScope=null;state.anchor=null;state.editing=null;state.selected=null;state.drawMode=null}
+  if(state.productionSelected?.id!==r.id){if(typeof rememberProductionDraft==='function')rememberProductionDraft();state.reviewCommentScope=null;state.anchor=null;state.editing=null;state.selected=null;state.drawMode=null}
   state.productionSelected=r;state.productionDetail=detail;
   const url=new URL(location.href);url.searchParams.set('production_object',r.object_id);url.searchParams.set('production_revision',r.id);
   if(typeof isEntityReview==='function'&&isEntityReview()){
     if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
     const context=['ASSET','REQUIREMENT','CALL'].includes(r.kind)?materialCommentContext():null;
-    if(context){url.searchParams.set('material_id',context.material_id);url.searchParams.set('material_round',context.number)}
-    else{url.searchParams.delete('material_id');url.searchParams.delete('material_round')}
+    if(context){url.searchParams.set('material_id',context.material_id);url.searchParams.set(context.model==='plan-v1'?'material_version':'material_round',context.number)}
+    else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version')}
   }
   if(state.workspace==='settings.workspace'&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
   if(typeof isMaterialReview==='function'&&isMaterialReview()){url.searchParams.set('production_object',state.materialReview.record.object_id);url.searchParams.set('production_revision',state.materialReview.record.id);url.searchParams.set('material_target',r.id)}
@@ -516,7 +533,7 @@ async function renderProductionReadiness(root,r,options={}){
   if(options.replaceSection)options.replaceSection.replaceWith(section);else{if(options.replace)root.replaceChildren();root.append(section)}
 }
 function showProductionAdoption(parent,row){
-  const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','采用素材版本');components.setAttribute('aria-label','采用文件组成');assets.append(new Option('选择一个实际素材',''));for(const r of state.productionRecords.filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type))assets.append(new Option(r.payload.title,r.object_id));
+  const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','候选记录修订');components.setAttribute('aria-label','采用文件组成');assets.append(new Option('选择一个实际素材',''));for(const r of state.productionRecords.filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type))assets.append(new Option(r.payload.title,r.object_id));
   const workspace=state.workspace,readEpoch=productionReadEpoch;
   let history=[],requestEpoch=0,closed=false,loading=false,saving=false,confirm,pendingRequest=null;
   const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionReadEpoch===readEpoch;
@@ -541,13 +558,13 @@ function showProductionAdoption(parent,row){
     history=[];versions.replaceChildren();components.replaceChildren();loading=!!assetId;updateControls();if(!assetId)return;
     try{const result=await api('/api/production?object_id='+encodeURIComponent(assetId));if(!isCurrent())return;
       if(!Array.isArray(result.history)||result.history.some(r=>r.object_id!==assetId))throw Error('素材版本与当前选择不一致，请重新选择');
-      history=result.history;for(const r of history)versions.append(new Option(`版本 ${r.version} · ${r.id.slice(0,12)}`,r.id));renderComponents();
+      history=result.history;for(const r of history)versions.append(new Option(`记录修订 ${r.version} · ${r.id.slice(0,12)}`,r.id));renderComponents();
     }catch(error){if(isCurrent())toast(error.message)}finally{if(isCurrent()){loading=false;updateControls()}}
   };
   versions.onchange=renderComponents;components.onchange=updateControls;box.append(assets,versions,components);
   const reason=el('input');reason.placeholder='采用或换版理由';reason.setAttribute('aria-label','采用理由');box.append(reason);const start=el('input'),end=el('input');for(const [input,label] of [[start,'入点秒（可选）'],[end,'出点秒（可选）']]){input.type='number';input.step='.01';input.min='0';input.placeholder=label;input.setAttribute('aria-label',label);box.append(input)}
   const cropFields={};if(p.media_type==='image'||p.media_type==='video'){nodeText('p',null,'局部采用可填写裁切比例：左上角为 0,0，整张图为宽 1、高 1。留空采用完整画面。',box);for(const [key,label] of Object.entries({x:'裁切左边比例',y:'裁切上边比例',width:'裁切宽度比例',height:'裁切高度比例'})){const input=el('input');input.type='number';input.min='0';input.max='1';input.step='.01';input.placeholder=label;input.setAttribute('aria-label',label);cropFields[key]=input;box.append(input)}}
-  confirm=productionButton(box,'确认采用此版本',async()=>{
+  confirm=productionButton(box,'确认采用此原件',async()=>{
     if(!isOpen()||loading||saving)return;
     const asset=selectedAsset();if(!asset||!asset.payload.components.some(c=>c.id===components.value)||!reason.value.trim())throw Error('请选择确切素材版本和文件组成并填写理由');
     const payload={format:'production-relation-v1',title:p.title+' · 采用',blocks:[{id:'adoption',text:reason.value}],relation_type:'adoption',scope:p.scope,slot:p.slot,asset:productionRef(asset),component_id:components.value,usage:p.usage,reason:reason.value};if(start.value!==''||end.value!=='')payload.range={start_seconds:Number(start.value),end_seconds:Number(end.value)};if(Object.values(cropFields).some(input=>input.value!=='')){if(Object.values(cropFields).some(input=>input.value===''))throw Error('裁切需同时填写左、上、宽、高四项');payload.crop=Object.fromEntries(Object.entries(cropFields).map(([key,input])=>[key,Number(input.value)]))}
