@@ -61,17 +61,19 @@ test('changed body is a new operation while an unchanged retry keeps its ID',asy
   assert.notEqual(rows[0].id,rows[1].id);assert.equal(rows[1].body,'changed opinion');assert.equal(rows[1].id,rows[2].id);
 });
 
-test('changed anchor, material or revision intent cannot reuse another operation ID',async()=>{
+test('changed anchor and material create distinct operations; comments add no revision intent',async()=>{
   const f=fixture({fetch:async()=>{throw Error('lost response')}});f.material(2);f.context.intent=f.intent;f.intent.checked=true;
   await f.context.saveComment();f.intent.checked=false;await f.context.saveComment();
   f.context.state.anchor={type:'text',quote:'other'};await f.context.saveComment();
   f.material(1,'other');await f.context.saveComment();const rows=payloads(f);
-  assert.equal(new Set(rows.map(r=>r.id)).size,4);assert.ok(rows[0].material_revision);assert.equal(rows[1].material_revision,undefined);
+  assert.equal(new Set(rows.map(r=>r.id)).size,3);assert.equal(rows[0].id,rows[1].id);assert.equal(rows[0].material_revision,undefined);
 });
 
 test('old round reload retains the unconfirmed feedback intent after the server advanced',async()=>{
   const f=fixture({fetch:async()=>{throw Error('lost response')}});const key=f.material(1),data=f.context.state.materialReview;
   data.material_versions.need=data.material_versions.need.filter(r=>r.number===1);f.context.intent=f.intent;f.intent.checked=true;await f.context.saveComment();
+  // This pending payload was written by an archived pre-plan client.
+  const archived=JSON.parse(f.storage.get(key+':submission'));archived.payload.material_revision={material_id:'need',expected_round:1};f.storage.set(key+':submission',JSON.stringify(archived));f.requests[0].body=JSON.stringify({...JSON.parse(f.requests[0].body),material_revision:archived.payload.material_revision});
   const next=fixture({storage:f.storage});next.material(1);assert.equal(next.context.materialRevisionIntent(),null);
   assert.equal(next.context.commentRevisionIntent().expected_round,1);next.context.intent=next.intent;next.intent.checked=true;await next.context.saveComment();
   assert.deepEqual(payloads(next)[0],payloads(f)[0]);assert.equal(next.storage.has(key+':submission'),false);

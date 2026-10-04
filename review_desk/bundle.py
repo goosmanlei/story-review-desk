@@ -80,6 +80,8 @@ def export(store, export_dir):
         framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
         from .material_versions import dump
         framework.update(dump(store))
+        from .material_plans import dump as dump_plans
+        framework.update(dump_plans(store))
         configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                           "events": store.configuration_events()}
         icon = store.configuration("SYSTEM")["body"]["site_favicon"]
@@ -122,7 +124,7 @@ def export(store, export_dir):
     hashes = {name: digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = file_hash(target / "assets" / name)
-    manifest = {"schema_version": 4, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -137,7 +139,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4):
+    if schema not in (1, 2, 3, 4, 5):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -159,6 +161,10 @@ def restore(store, export_dir):
         from .material_versions import TABLES
         if any(name not in framework for name in TABLES):
             raise ValueError('material round tables missing from schema 4 export')
+    if schema >= 5:
+        from .material_plans import TABLES as PLAN_TABLES
+        if any(name not in framework for name in PLAN_TABLES):
+            raise ValueError('material plan tables missing from schema 5 export')
     configurations = json.loads((target / "configurations.json").read_text()) if schema >= 2 else None
     if len(materials) != manifest["sources"] or len(comments["comments"]) != manifest["comments"] or len(comments["events"]) != manifest["events"]:
         raise ValueError("export count mismatch")
@@ -281,12 +287,15 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
             if schema >= 2:
                 from .production import FORMATS, validate_payload, references, current_records
+                dependencies_by_revision={}
+                for dependency in framework['dependencies']:
+                    dependencies_by_revision.setdefault(dependency['from_revision'],set()).add((dependency['to_revision'],dependency['role']))
                 for revision in framework["revisions"]:
                     payload = json.loads(revision["payload"])
                     if payload.get("format") in FORMATS:
                         validate_payload(store, revision["object_id"], objects[revision["object_id"]]["kind"], payload, inspect=False, check_current=False)
                         expected_deps = {(ref["revision_id"], role) for role, ref in references(payload)}
-                        actual_deps = {(d["to_revision"], d["role"]) for d in framework["dependencies"] if d["from_revision"] == revision["id"]}
+                        actual_deps = dependencies_by_revision.get(revision['id'],set())
                         if expected_deps != actual_deps:
                             raise ValueError("restored production dependencies differ from payload")
                 for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
@@ -299,6 +308,9 @@ def restore(store, export_dir):
             if schema >= 4:
                 from .material_versions import restore as restore_rounds
                 restore_rounds(store, framework)
+            if schema >= 5:
+                from .material_plans import restore as restore_plans
+                restore_plans(store, framework)
             if schema >= 2:
                 for record in configurations["records"]:
                     store.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?)", (record["scope"], record["schema_version"], record["version"], record["body"], record["updated_at"]))

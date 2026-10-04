@@ -8,7 +8,7 @@ const entityReviewMediaCount=items=>new Set(items.map(m=>m.record.id)).size;
 const entityReviewShort=(row,entity)=>row.payload.title.startsWith(entity.payload.title)?row.payload.title.slice(entity.payload.title.length).replace(/^[\s·：:—-]+/u,'')||row.payload.title:row.payload.title;
 function entityReviewFocus(row){focusProductionReview(entityReviewDetail(row))}
 function entityReviewComments(){const data=state.entityReview,targets=[...data.comment_targets,...(data.historicalTarget?[productionRef(data.historicalTarget)]:[])];return state.comments.filter(c=>targets.some(t=>t.object_id===c.target_object_id&&t.revision_id===c.target_revision_id))}
-function entityReviewCommentGroup(comment){const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id),label=row?.kind==='ENTITY'?'实体':row?.kind==='STATE'?'状态 · '+entityReviewShort(row,data.entity):row?.kind==='ASSET'?'素材 · '+row.payload.title:row?.kind==='REQUIREMENT'?'素材方案 · '+row.payload.title:row?.kind==='RELATION'?'关系 · '+row.payload.title:row?.kind==='CALL'?'实际生成 · '+row.payload.title:'历史整体意见';const round=typeof materialRecordRound==='function'&&['ASSET','REQUIREMENT','CALL'].includes(row?.kind)?comment.material_scopes?.[0]?.number||materialRecordRound(row):null;return label+(round?' · 版本 '+round:row&&row.id!==row.current_revision?' · 历史版本 '+row.version:'')}
+function entityReviewCommentGroup(comment){const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id),label=row?.kind==='ENTITY'?'实体':row?.kind==='STATE'?'状态 · '+entityReviewShort(row,data.entity):row?.kind==='ASSET'?'素材 · '+row.payload.title:row?.kind==='REQUIREMENT'?'素材方案 · '+row.payload.title:row?.kind==='RELATION'?'关系 · '+row.payload.title:row?.kind==='CALL'?'实际生成 · '+row.payload.title:'历史整体意见';const round=typeof materialRecordRound==='function'&&['ASSET','REQUIREMENT','CALL'].includes(row?.kind)?comment.material_plan_scopes?.[0]?.number||comment.material_scopes?.[0]?.number||materialRecordRound(row):null;return label+(round?' · 版本 '+round:row&&row.id!==row.current_revision?' · 历史版本 '+row.version:'')}
 function appendEntityReviewComments(parent,comments){
   const groups=new Map();for(const comment of comments){const key=entityReviewCommentGroup(comment);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(comment)}
   for(const [label,rows] of groups){nodeText('h4','entity-review-comment-group',`${label} · ${rows.length}`,parent);for(const row of rows)parent.append(commentCard(row))}
@@ -22,9 +22,10 @@ function entityMaterialRouteOwner(row,param){
   return owner||null;
 }
 function entityMaterialRoute(data,row,param){
+  if(param.has('material_round')&&Object.keys(data.legacy_material_versions||{}).length)data.material_versions=data.legacy_material_versions;
   const same=r=>r.object_id===row.object_id&&r.id===row.id;
   const entries=Object.entries(data.material_versions||{}).flatMap(([material_id,rounds])=>rounds.filter(round=>round.members.some(same)).map(round=>({material_id,round})));
-  const mid=param.get('material_id'),number=param.get('material_round');
+  const mid=param.get('material_id'),number=param.get(materialVersionParam(data));
   const choices=entries.filter(e=>(!mid||e.material_id===mid)&&(!number||String(e.round.number)===number));
   if((mid||number)&&!choices.length)throw new Error('此实体中的素材版本已不可用，请从实体内重新选择；原链接未改动。');
   const contexts=[...Object.values(data.materialContexts||{}),...data.media.map(item=>item.review_context)].filter(Boolean);
@@ -129,7 +130,7 @@ function entityReviewHasHistoricalContent(data,entity,form){
   return !!data.historicalTarget||!!data.historical||entity.id!==data.entity.id||
     !!form&&!data.states.some(row=>row.object_id===form.object_id&&row.id===form.id)||
     Object.values(data.localVersions||{}).some(row=>row.id!==row.current_revision)||
-    (data.requirements||[]).some(current=>{const {need}=materialRoundSelection(data.localVersions?.[current.object_id]||current,data);return need.object_id!==current.object_id||need.id!==current.id});
+    (data.requirements||[]).some(current=>{const {need}=materialRoundSelection(data.localVersions?.[current.object_id]||current,data);return !need||need.object_id!==current.object_id||need.id!==current.id});
 }
 function entityReviewWithdrawals(data,entity,form){
   // A historical acceptance contains its old scope, not today's entity payload.

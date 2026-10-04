@@ -15,16 +15,16 @@ function reviewBlockScope(host,kind){
   const blockIds=[...host.querySelectorAll('[data-block-id],[data-structure-block],[data-block]')].map(n=>n.dataset.blockId||n.dataset.structureBlock||n.dataset.block);
   const visual=host.querySelector('[data-visual-id]'),media=host.querySelector('[data-component-id]');
   let revisions=[revision];
-  let materialId=null,materialNumber=null;
+  let materialId=null,materialNumber=null,materialModel=null;
   let orderedBlockIds=blockIds;
   if(isProduction()){const row=(typeof materialVersions==='function'?Object.values(materialVersions()).flatMap(rs=>rs.flatMap(r=>r.members)):[]).find(r=>r.id===revision)||state.productionSelected;if(row?.id===revision)orderedBlockIds=productionTextBlocks(row).map(b=>b.id)}
-  if(isProduction()&&typeof materialVersions==='function'){for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid];const round=rounds.find(r=>r.number===selected)||rounds.find(r=>r.members.some(m=>m.id===revision));const row=round?.members.find(r=>r.id===revision);if(row){revisions=round.members.filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;break}}}
+  if(isProduction()&&typeof materialVersions==='function'){for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid];const round=rounds.find(r=>r.number===selected)||rounds.find(r=>r.members.some(m=>m.id===revision));const row=round?.members.find(r=>r.id===revision);if(row){revisions=round.model==='plan-v1'?[revision]:round.members.filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;materialModel=round.model;break}}}
   if(host.closest('.material-reference-dialog')){revisions=[revision];materialId=null;materialNumber=null}
-  return {revision,revisions,materialId,materialNumber,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
+  return {revision,revisions,materialId,materialNumber,materialModel,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
 }
 function reviewBlockComments(comments,scope){
   const selected=new Map();for(const c of comments){if(!(scope.revisions||[scope.revision]).includes(c.target_revision_id))continue;const a=c.anchor;let matches=false;
-    if(scope.materialId&&c.material_scopes&&!c.material_scopes.some(s=>s.material_id===scope.materialId&&s.number===scope.materialNumber))continue;
+    const scopes=scope.materialModel==='plan-v1'?c.material_plan_scopes:c.material_scopes;if(scope.materialId&&scopes?.length&&!scopes.some(s=>s.material_id===scope.materialId&&s.number===scope.materialNumber))continue;
     if(scope.kind==='text'){const order=scope.orderedBlockIds||scope.blockIds,start=order.indexOf(a.block_id),end=order.indexOf(a.end_block_id||a.block_id);matches=a.type==='global'||(!a.type||a.type==='text')&&scope.blockIds.some(id=>id===a.block_id||id===a.end_block_id||start>=0&&end>=0&&order.indexOf(id)>=Math.min(start,end)&&order.indexOf(id)<=Math.max(start,end))}
     else if(scope.kind==='image')matches=['visual','region'].includes(a.type)&&a.visual_id===scope.visualId&&(!scope.file||a.asset_file===scope.file);
     else matches=a.type==='time'&&a.component_id===scope.componentId&&(!scope.file||a.asset_file===scope.file)&&a.start_seconds<scope.to&&a.end_seconds>scope.from;

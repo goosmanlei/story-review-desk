@@ -61,6 +61,15 @@ def main():
         sub.add_argument("file", type=Path)
         if command == "production-import":
             sub.add_argument("--validate-only", action="store_true")
+    for command in ('production-breakdown','production-materials','production-context','production-summary'):
+        q=subs.add_parser(command)
+        for flag in ('episode','scene','media','status','search','object-id','revision-id'):q.add_argument('--'+flag)
+        if command=='production-materials':q.add_argument('--offset',type=int,default=0)
+    plan_export = subs.add_parser('material-plan-map')
+    plan_export.add_argument('--output', required=True, type=Path)
+    plan_migration = subs.add_parser('material-plan-migrate')
+    plan_migration.add_argument('file', type=Path)
+    plan_migration.add_argument('--validate-only', action='store_true')
     migration = subs.add_parser('material-round-migrate')
     migration.add_argument('file', type=Path)
     migration.add_argument('--validate-only', action='store_true')
@@ -122,6 +131,22 @@ def main():
             result = store.set_configuration(args.scope, json.loads(args.file.read_text()), args.expected_version)
         elif args.command == "objects":
             result = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
+        elif args.command in ('production-breakdown','production-materials','production-context','production-summary'):
+            from . import production_breakdown as bd
+            with production.read_scope(store):
+                if args.command=='production-breakdown':result=bd.catalog(store,args.episode)
+                elif args.command=='production-materials':result=bd.materials(store,args.episode,args.scene,args.media,args.search or '',args.status,max(0,args.offset))
+                elif args.command=='production-context':result=bd.context(store,args.object_id,args.revision_id)
+                else:result=bd.summary(store,args.object_id,args.revision_id)
+        elif args.command == 'material-plan-map':
+            from .material_plans import migration_plan
+            result = migration_plan(store)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2)+'\n')
+            result = {'output': str(args.output), 'gaps': len(result['gaps'])}
+        elif args.command == 'material-plan-migrate':
+            from .material_plans import migrate
+            result = migrate(store, json.loads(args.file.read_text()), args.validate_only)
         elif args.command == "production-get":
             result = production.snapshot(store, args.kind, args.object_id, args.revision_id)
         elif args.command == 'production-entity-review':

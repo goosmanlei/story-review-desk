@@ -101,6 +101,30 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]
+                if path == "/api/production/material-plan-map":
+                    from .material_plans import migration_plan
+                    with production.read_scope(store):
+                        return self._json(migration_plan(store))
+                if path == "/api/production/summary":
+                    from .production_breakdown import summary
+                    with production.read_scope(store):
+                        return self._json(summary(store,param('object_id'),param('revision_id')))
+                if path == "/api/production/breakdown":
+                    from .production_breakdown import catalog
+                    with production.read_scope(store):
+                        return self._json(catalog(store, param("episode")))
+                if path == '/api/production/index':
+                    from .production_breakdown import index
+                    with production.read_scope(store):
+                        return self._json(index(store,param('view'),param('object_id')))
+                if path == "/api/production/context":
+                    from .production_breakdown import context
+                    with production.read_scope(store):
+                        return self._json(context(store, param("object_id"), param("revision_id")))
+                if path == "/api/production/materials":
+                    from .production_breakdown import materials
+                    with production.read_scope(store):
+                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0))))
                 if path == "/api/production":
                     return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
                 if path == "/api/production/impact":
@@ -194,7 +218,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -216,10 +240,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
-        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
+        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate"):
             try:
                 value = self._input()
-                if self.path.endswith("import"):
+                if self.path.endswith('material-plan-migrate'):
+                    from .material_plans import migrate
+                    result=migrate(self.server.store,value['migration'],value.get('validate_only') is True)
+                elif self.path.endswith("import"):
                     result = production.import_records(self.server.store, value, value.get("validate_only") is True)
                 elif self.path.endswith("entity-decision"):
                     result = generation.decide(self.server.store, value)

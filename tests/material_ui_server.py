@@ -52,9 +52,9 @@ def main():
         need=f.need(slot=name);need['payload'].update(media_type=media,generation={'format':'generation-plan-v1','method':'generate','model':model,'parameters':{},'prompt':prompt,'inputs':inputs,'output':{'name':name+'方案','description':'隔离参考输入','review_criteria':['准确输入顺序']},'blockers':[]});f.put(need)
     need=p.record(f.store,'need-full-overall');comment(need,txt(need,'generation.model'),'旧模型定位评论',True)
     comment(need,txt(need,'generation.prompt'),'方案提示词意见');comment(need,{'type':'global'},'方案整块意见',True)
-    # Two rounds and historical plan/media scopes.
+    # Changed executed schemes have independent versions; comments do not version.
     need=p.record(f.store,'need-full-wide');old=p.record(f.store,'image-wide')
-    comment(old,{'type':'visual','visual_id':'original','asset_file':old['payload']['components'][0]['file']},'首条修订启动版本二',revision={'material_id':need['object_id'],'expected_round':1})
+    comment(old,{'type':'visual','visual_id':'original','asset_file':old['payload']['components'][0]['file']},'首个候选的评论，不创建方案版本')
     change(need['object_id'],generation={**need['payload']['generation'],'prompt':'第二轮修改后的完整提示词'})
     f.put(f.spec('draw-wide-next','CALL',method='manual',tool='fixture',status='submitted',inputs=[],outputs=[],model='fixture',prompt='已完成隔离绘制',parameters={},lineage={'i2i_depth':0,'references':[]}))
     change('image-wide',production=f.ref('draw-wide-next'))
@@ -69,7 +69,7 @@ def main():
     lineage={'i2i_depth':1,'references':[v['reference'] for v in multi['payload']['generation']['inputs']]}
     f.put(f.spec('draw-multi','CALL',method='manual',tool='fixture',status='submitted',inputs=inputs,outputs=[],model='fixture-multi',prompt='实际多参考调用',parameters={'quality':'test'},lineage=lineage))
     for i in (1,2):
-        if i==2:f.put(f.spec('draw-multi-second','CALL',method='manual',tool='fixture',status='submitted',inputs=inputs,outputs=[],model='fixture-second',prompt='同轮另一真实调用',parameters={'quality':'second'},lineage=lineage))
+        if i==2:f.put(f.spec('draw-multi-second','CALL',method='manual',tool='fixture',status='submitted',inputs=inputs,outputs=[],model='fixture-multi',prompt='实际多参考调用',parameters={'quality':'test'},lineage=lineage))
         f.put(f.spec('image-multi-'+str(i),'ASSET',media_type='image',subjects=[f.ref('songbook')],states=[f.ref('full')],components=p.record(f.store,'image-square')['payload']['components'],candidate_requirements=[f.ref('need-full-multi')],production=f.ref('draw-multi' if i==1 else 'draw-multi-second'),lineage=lineage,state_coverage=[{'state':f.ref('full'),'component_id':'original','role':'detail','detail':'隔离多参考'}]))
     legacy=p.record(f.store,'image-square')['payload'].copy();legacy.update(title='历史缺少真实调用',subjects=[],states=[],candidate_requirements=[],production=None);legacy.pop('state_coverage',None)
     f.store.put_object('legacy-no-call','ASSET',legacy)

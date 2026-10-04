@@ -6,7 +6,7 @@
 
 上传后文件保存在实例的 `export/assets/`，文件名包含内容 SHA-256；上传只是准备文件，保存配置才采用它。选择器也可使用预先放入该目录并通过验证的文件。替换／清空不删除原文件，避免破坏已引用的素材；这项功能不提供素材管理或删除系统。未采用的上传文件不会自动列入导出清单。
 
-公开字段为 `SYSTEM.site_favicon`，值是 `export/assets/` 下的单个文件名，空字符串表示默认。禁止 URL、绝对路径、目录穿越和符号链接。保存沿用 `expected_version` 检查及配置事件；旧 Schema 1—3 读取时补充空值，首次保存写为 Schema 4，不改其他配置。API 与 CLI 同样验证素材。
+公开字段为 `SYSTEM.site_favicon`，值是 `export/assets/` 下的单个文件名，空字符串表示默认。禁止 URL、绝对路径、目录穿越和符号链接。保存沿用 `expected_version` 检查及配置事件；旧 Schema 1—3 读取时补充空值，首次保存写为 Schema 5，不改其他配置。API 与 CLI 同样验证素材。
 
 ```json
 {"expected_version":4,"updates":{"site_favicon":"lantern-home-favicon.svg"}}

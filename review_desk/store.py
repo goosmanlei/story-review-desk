@@ -90,6 +90,8 @@ class Store:
         );
         """)
         self.db.execute('CREATE INDEX IF NOT EXISTS material_members_revision ON material_members(revision_id)')
+        from .material_plans import SCHEMA
+        self.db.executescript(SCHEMA)
         # Existing V1 instance databases are upgraded without rewriting source text.
         for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
             if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
@@ -381,6 +383,8 @@ class Store:
         value["anchor"] = json.loads(value["anchor"])
         scopes = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_comment_scopes WHERE comment_id=? ORDER BY material_id', (value['id'],))]
         if scopes:value['material_scopes'] = scopes
+        plans = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_plan_comments WHERE comment_id=? ORDER BY material_id', (value['id'],))]
+        if plans:value['material_plan_scopes'] = plans
         return value
 
     def comment(self, comment_id):
@@ -509,9 +513,17 @@ class Store:
         elif source_id is not None:
             raise ValueError("source_id is only valid for SOURCE targets")
         comment_id = value.get("id") or str(uuid.uuid4())
+        def matches(existing):
+            context=value.get('material_context')
+            if context is not None:
+                if not isinstance(context,dict):return False
+                key='material_plan_scopes' if context.get('model')=='plan-v1' else 'material_scopes'
+                if not any(scope['material_id']==context.get('material_id') and scope['number']==context.get('number') for scope in existing.get(key,[])):
+                    return False
+            return existing['target_object_id']==object_id and existing['target_revision_id']==revision_id and existing['anchor']==anchor and existing['body']==body
         existing = self.comment(comment_id)
         if existing:
-            if existing["target_object_id"] == object_id and existing["target_revision_id"] == revision_id and existing["anchor"] == anchor and existing["body"] == body:
+            if matches(existing):
                 return existing
             raise Conflict("comment id already used")
         stamp = now()
@@ -519,14 +531,20 @@ class Store:
             self.db.execute('BEGIN IMMEDIATE')
             existing = self.comment(comment_id)
             if existing:
-                if existing['target_object_id'] == object_id and existing['target_revision_id'] == revision_id and existing['anchor'] == anchor and existing['body'] == body:
+                if matches(existing):
                     return existing
                 raise Conflict('comment id already used')
             self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, "CREATE", body, stamp))
-            from .material_versions import feedback, comment_scope
-            comment_scope(self, self.comment(comment_id), value.get('material_context'), value.get('material_revision'))
-            feedback(self, self.comment(comment_id), value.get('material_revision'))
+            context = value.get('material_context')
+            if isinstance(context, dict) and context.get('model') == 'plan-v1':
+                from .material_plans import comment_scope
+                comment_scope(self, self.comment(comment_id), context)
+            else:
+                from .material_versions import comment_scope
+                comment_scope(self, self.comment(comment_id), context, value.get('material_revision'))
+            # Revision intent remains readable in old clients; comments never
+            # create a plan version or modify generation inputs.
         return self.comment(comment_id)
 
     def change_comment(self, comment_id, action, expected_version, body=None):

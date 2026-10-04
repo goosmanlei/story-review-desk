@@ -9,7 +9,7 @@ const isScript=()=>state.workspace==='story.script';
 const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
 const commentTarget=()=>state.reviewReferenceContext?{target_object_id:state.reviewReferenceContext.record.object_id,target_revision_id:state.reviewReferenceContext.record.id}:isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
-const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number])}`:key};
+const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number,...(context.model?[context.model]:[])])}`:key};
 const commentSaves=new Set();
 const commentRejections=new Map();
 const commentReceipts=new Map();
@@ -218,13 +218,12 @@ function renderWorkspaceNav(){
     ['production.approach','制作思路','思路','故事创作与生产制作方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与分集剧本'],
     ['settings.workspace','制作设定','设定','主体、空间与实体关系'],
-    ['materials.workspace','素材管理','素材','需求、制作与素材审阅'],
     ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
     ['project.configuration','系统管理','管理','故事项目与系统配置']
   ];
   for(const [id,title,index,description] of sections){
     const workspace=state.framework.workspaces.find(w=>w.id===id),active=workspace?.implemented;
-    const selected=state.workspace===id||(id==='story.sources'&&['story.outline','story.script'].includes(state.workspace));
+    const selected=state.workspace===id||(id==='settings.workspace'&&state.workspace==='materials.workspace')||(id==='story.sources'&&['story.outline','story.script'].includes(state.workspace));
     const button=el('button','workspace-button'+(selected?' active':'')+(active?'':' planned'));button.type='button';
     button.setAttribute('aria-current',selected?'page':'false');
     nodeText('span','nav-index',index,button);const labels=el('span','nav-labels');nodeText('b',null,title,labels);nodeText('small',null,active?description:`${description} · 待开放`,labels);button.append(labels);
@@ -233,6 +232,7 @@ function renderWorkspaceNav(){
 }
 
 function switchWorkspace(id,updateUrl=true){
+  if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   hideSelectionAction();
   if(id==='current')id='production.approach';
@@ -698,7 +698,7 @@ async function saveComment(){
   const text=textarea.value.trim();if(!text)return toast('请先填写修改意见');
   const editing=state.editing,draftText=textarea.value,payload={...commentTarget(),anchor:state.anchor,body:text};
   if(!editing&&typeof materialCommentContext==='function'){const context=materialCommentContext();if(context)payload.material_context=context}
-  if(!editing&&$('#material-revision-intent')?.checked)payload.material_revision=commentRevisionIntent();
+  if(!editing&&$('#material-revision-intent')?.checked){const intent=commentRevisionIntent();if(intent)payload.material_revision=intent}
   let submission,storedSubmission,sent=false,acknowledged=false,cleaned=false;
   commentSaves.add(key);updateCommentEditorControls();
   try{

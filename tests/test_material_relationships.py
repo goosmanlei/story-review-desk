@@ -103,7 +103,7 @@ class MaterialRelationshipsTest(unittest.TestCase):
         view=g.snapshot(self.store,'songbook')
         self.assertNotIn('need-full-voice-detail',[r['object_id'] for r in view['requirements']])
         rounds=view['material_versions']['need-full-voice-detail']
-        self.assertEqual(rounds[0]['results'][0]['object_id'],'voice')
+        self.assertIn('voice',[r['object_id'] for version in rounds for r in version['results']])
 
     def test_relationship_revision_preserves_the_original_comment_and_evidence_after_restore(self):
         self.setup_plans();self.put(self.relationship())

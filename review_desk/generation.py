@@ -43,10 +43,18 @@ def validate_plan(store, object_id, payload):
         p._text(issue, 'execution blocker')
     inputs = p._list(plan, 'inputs')
     scope = p.ref_record(store, payload['scope'])
-    if scope['kind'] != 'STATE' or not complete(scope):
-        raise ValueError('generation plan requires a complete state')
-    if payload['scope'] not in payload['states'] or scope['payload']['entity']['object_id'] not in {r['object_id'] for r in payload['entities']}:
-        raise ValueError('generation plan must include its state and owning entity')
+    if scope['kind'] == 'STATE':
+        if not complete(scope):
+            raise ValueError('generation plan requires a complete state')
+        if payload['scope'] not in payload['states'] or scope['payload']['entity']['object_id'] not in {r['object_id'] for r in payload['entities']}:
+            raise ValueError('generation plan must include its state and owning entity')
+    elif scope['kind'] not in ('INPUT_LOCK', 'STORY', 'EPISODE', 'PREPARATION', 'SHOT_DESIGN'):
+        raise ValueError('generation scope must be a complete state or production position')
+    from .material_plans import randomization
+    from .input_contracts import check_parameters
+    check_parameters(plan['model'],plan['parameters'])
+    strategy=randomization(plan)
+    if strategy['mode']=='random' and 'seed' in plan['parameters']:raise ValueError('random plan cannot set a fixed parameter seed')
     if plan['method'] == 'reuse' and len(inputs) != 1:
         raise ValueError('reuse requires one exact upstream input')
     seen = set()
@@ -307,7 +315,21 @@ def snapshot(store, entity_id, revision_id=None):
 
 def _snapshot(store, entity_id, revision_id=None):
     from . import entity_review as er, entity_relations as rel, material_review as media_review
-    rows=p.current_records(store)
+    # This reader needs state requirements, entity relations and exact usage
+    # locations. Shot-output plans and applicability edges are read by the
+    # breakdown page, not copied through every entity's acceptance calculation.
+    rows=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
+        FROM objects o JOIN revisions r ON r.id=o.current_revision
+        WHERE o.kind IN ('STATE','ASSET','REPRESENTATION','PREPARATION','SHOT_DESIGN')
+        OR (o.kind='RELATION' AND json_extract(r.payload,'$.relation_type')='entity')
+        OR (o.kind='REQUIREMENT' AND json_extract(r.payload,'$.scope.object_id') IN
+            (SELECT id FROM objects WHERE kind='STATE')) ORDER BY o.id""")]
+    rows=[r for r in rows if r['payload'].get('format') in p.FORMATS]
+    # Match the complete record projection used by current_records for assets.
+    for row in rows:
+        if row['kind']=='ASSET':
+            member=store.db.execute('SELECT number FROM material_plan_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(row['id'],row['object_id'])).fetchone() or store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(row['id'],row['object_id'])).fetchone()
+            row['material_version']=member[0] if member else None
     if revision_id:
         selected=p.record(store,revision_id=revision_id)
         legacy=selected['payload'].get('acceptance_model') not in (MODEL,CONTENT_MODEL)
@@ -362,15 +384,17 @@ def _snapshot(store, entity_id, revision_id=None):
     acceptance_mode='generation' if prep['complete'] else 'content'
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
-    from .material_versions import snapshot as material_snapshot, for_record as material_for_record
+    from .material_plans import snapshot as material_snapshot, memberships as plan_memberships
     for need in data['requirements']:
         need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
     material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
     for item in data['media']:
         # Shared media may have its production requirement on another entity.
         # Read that same round without extending this entity's acceptance scope.
-        for mid, rounds in material_for_record(store, item['record']).items():
-            if rounds:material_versions.setdefault(mid, rounds)
+        for mid in sorted({item['record']['object_id'],*[m['material_id'] for m in plan_memberships(store,item['record']['id'])]}):
+            if mid not in material_versions:
+                rounds=material_snapshot(store,mid)
+                if rounds:material_versions[mid]=rounds
     for rounds in material_versions.values():
         for round in rounds:
             for row in round['members']:
@@ -379,7 +403,14 @@ def _snapshot(store, entity_id, revision_id=None):
                     if row['id'] not in contexts:contexts[row['id']]=media_review.context(store,row)
                     for related in [contexts[row['id']]['call'], *contexts[row['id']]['requirements']]:
                         if related:targets[related['id']] = related
-    return {**base,**data,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    from .material_versions import memberships as legacy_memberships, snapshot as legacy_snapshot
+    legacy_versions={}
+    for row in [*data['requirements'],*[item['record'] for item in data['media']]]:
+        ids=[row['object_id']] if row['kind']=='REQUIREMENT' else sorted({m['material_id'] for m in legacy_memberships(store,row['id'])},key=lambda mid:(mid==row['object_id'],mid))
+        for mid in ids:
+            if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
+    if not any(material_versions.values()):material_versions=legacy_versions
+    return {**base,**data,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',
@@ -396,7 +427,13 @@ def readiness(store, requirement_id):
     plan=need['payload'].get('generation');issues=[];inputs=[];approvals=[]
     if not plan:issues.append('尚无生成方案')
     if need['payload'].get('status')=='withdrawn':issues.append('素材需求已撤回')
-    for entity in need['payload']['entities']:
+    scope=p.ref_record(store,need['payload']['scope'])
+    if scope['kind']!='STATE':
+        decisions=p.current_records(store,{'JUDGMENT'})
+        judgment=next((r for r in sorted(decisions,key=lambda r:(r['created_at'],r['id']),reverse=True) if r['payload'].get('target')==ref(need)),None)
+        if not judgment or judgment['payload']['verdict']!='accepted':issues.append('此准确制作方案尚未采纳')
+        else:approvals.append(ref(judgment))
+    for entity in need['payload']['entities'] if scope['kind']=='STATE' else []:
         a=accepted(store,entity['object_id'])
         if not a:issues.append(p.ref_record(store,entity)['payload']['title']+'：当前生成方案未采纳')
         elif ref(need) not in a['payload']['acceptance_scope']['requirements']:issues.append('素材方案不在当前采纳范围内')
@@ -419,7 +456,7 @@ def readiness(store, requirement_id):
                 if asset['payload'].get('placeholder'):raise ValueError('占位素材不能作为生成参考')
                 inputs.append({'asset':ref(asset),'component':component,'use':item['use'],**{k:selection[k] for k in ('crop','range') if k in selection}})
             except (KeyError,ValueError,OSError) as exc:issues.append(str(exc))
-    images=[v for v in inputs if v['component']['mime'].startswith('image/')]
+    images=[v for v in inputs if v['component']['mime'].startswith('image/')] if need['payload']['media_type']=='image' else []
     depths=[p.ref_record(store,v['asset'])['payload'].get('lineage',{}).get('i2i_depth') for v in images]
     if any(type(d) is not int for d in depths):issues.append('图像参考谱系未知，应回到可追溯的干净母版')
     depth=1+max((d for d in depths if type(d) is int),default=-1)
@@ -433,11 +470,13 @@ def package(store, requirement_id):
     if not ready['ready']:raise Conflict('；'.join(ready['issues']))
     plan=ready['plan']
     from .input_contracts import label_inputs, check
+    from .material_plans import randomization
     inputs=label_inputs(ready['inputs'])
     contract=check(plan['model'],plan['prompt'],inputs)
     if contract['issues']:raise Conflict('；'.join(contract['issues']))
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']),'acceptances':ready['acceptances'],
             'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
+            'randomization':randomization(plan),
             'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':inputs,'input_contract':contract,'i2i_depth':ready['i2i_depth'],
             'execution_note':'执行前重新检查有效采纳、参考文件、平台可用性及现有额度；此包不表示已经调用模型。'}
 
@@ -458,9 +497,10 @@ def validate_call(store, object_id, payload):
     except KeyError:old=None
     # Finishing a real submitted call keeps its already executed inputs, even
     # when the user has since revoked approval or revised the next plan.
-    executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed') LIMIT 1", (object_id,)).fetchone()
+    executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown') LIMIT 1", (object_id,)).fetchone()
     if executed:
-        for key in ('generation_requirement','generation_acceptances','method','tool','model','parameters','prompt','inputs'):
+        if old['payload'].get('actual_seed') is not None and payload.get('actual_seed')!=old['payload']['actual_seed']:raise Conflict('cannot rewrite actual random seed')
+        for key in ('generation_requirement','generation_acceptances','method','tool','model','parameters','prompt','inputs','randomization'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
     if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return
@@ -472,6 +512,8 @@ def validate_call(store, object_id, payload):
         raise Conflict('生成依据或采纳已变化')
     for field in ('model','parameters','prompt'):
         if manifest[field]!=payload.get(field):raise Conflict('实际生成输入不同于采纳方案：'+field)
+    from .material_plans import randomization
+    if manifest['randomization']!=randomization(payload):raise Conflict('实际随机策略不同于采纳方案')
     expected=[{'object_id':v['asset']['object_id'],'revision_id':v['asset']['revision_id'],'component_id':v['component']['id'],**{k:v[k] for k in ('crop','range') if k in v}} for v in manifest['inputs']]
     actual=[v for v in payload['inputs'] if v.get('component_id')]
     if expected!=actual:raise Conflict('实际生成参考不同于准备包')

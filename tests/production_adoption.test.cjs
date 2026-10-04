@@ -34,8 +34,8 @@ test('late A response cannot replace B selection or the adopted exact revision',
   const first=t.choose(form,'A'),second=t.choose(form,'B');
   t.resolve(t.requests[1],[asset('B')]);await second;
   t.resolve(t.requests[0],[asset('A')]);await first;
-  assert.equal(form.field('选择素材').value,'B');assert.equal(form.field('采用素材版本').value,'B-v1');
-  await form.button('确认采用此版本').onclick();
+  assert.equal(form.field('选择素材').value,'B');assert.equal(form.field('候选记录修订').value,'B-v1');
+  await form.button('确认采用此原件').onclick();
   assert.deepEqual(plain(t.posts[0].payload.asset),{object_id:'B',revision_id:'B-v1'});
 });
 
@@ -55,7 +55,7 @@ test('recovery: lost response recognizes only the exact created or updated head'
       assert.equal(url,'/api/production?kind=RELATION');reads++;
       const head=savedAdoption(sent);head.payload=Object.fromEntries(Object.entries(head.payload).reverse());return {records:[head]};
     };
-    await form.button('确认采用此版本').onclick();
+    await form.button('确认采用此原件').onclick();
     assert.equal(reads,1);assert.equal(t.posts.length,1);assert.equal(t.context.reloads,1);assert.ok(t.messages.includes('精确采用已保存'));
     assert.deepEqual(sent.payload.range,{start_seconds:.2,end_seconds:.8});assert.deepEqual(sent.payload.crop,{x:.1,y:.2,width:.5,height:.6});
   }
@@ -66,10 +66,10 @@ test('recovery: another id, content, or later head cannot be called this saved r
     const t=setup({adoption:null}),form=await loadedAdoption(t);let sent;
     t.context.api=async(url,options)=>{if(options?.method==='POST'){sent=JSON.parse(options.body);t.posts.push(sent);throw Error('lost response')}
       const head=savedAdoption(sent);change(head);return {records:[head]}};
-    await form.button('确认采用此版本').onclick();
+    await form.button('确认采用此原件').onclick();
     assert.equal(t.context.reloads,0);assert.ok(!t.messages.includes('精确采用已保存'));assert.ok(t.messages.some(v=>v.includes('采用已变化')));
     assert.equal(form.field('采用理由').value,'exact attempted selection');
-    await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,1);
+    await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,1);
   }
 });
 
@@ -78,8 +78,8 @@ test('recovery: a rejected write retries the original id and version without ele
     const t=setup({adoption}),form=await loadedAdoption(t);let attempt=0,first;
     t.context.api=async(url,options)=>{if(options?.method==='POST'){const request=JSON.parse(options.body);t.posts.push(request);if(!attempt++){first=request;throw Error('rejected before commit')}return {}}
       return {records:adoption?[{object_id:adoption.object_id,kind:'RELATION',version:adoption.version,payload:{relation_type:'adoption',scope:first.payload.scope,slot:first.payload.slot,reason:'previous'}}]:[]}};
-    await form.button('确认采用此版本').onclick();assert.equal(t.context.reloads,0);assert.equal(form.button('确认采用此版本').disabled,false);
-    await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,2);assert.deepEqual(t.posts[1],t.posts[0]);assert.equal(t.context.reloads,1);
+    await form.button('确认采用此原件').onclick();assert.equal(t.context.reloads,0);assert.equal(form.button('确认采用此原件').disabled,false);
+    await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,2);assert.deepEqual(t.posts[1],t.posts[0]);assert.equal(t.context.reloads,1);
   }
 });
 
@@ -87,16 +87,16 @@ test('uncertain: failed readback retains the snapshot and retry first resolves i
   const t=setup({adoption:null}),form=await loadedAdoption(t);let sent,reads=0;
   t.context.api=async(url,options)=>{if(options?.method==='POST'){sent=JSON.parse(options.body);t.posts.push(sent);throw Error('lost response')}
     if(!reads++)throw Error('readback unavailable');return {records:[savedAdoption(sent)]}};
-  await form.button('确认采用此版本').onclick();assert.equal(t.context.reloads,0);assert.equal(form.field('采用理由').value,'exact attempted selection');
-  await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,1);assert.equal(t.context.reloads,1);assert.ok(t.messages.includes('精确采用已保存'));
+  await form.button('确认采用此原件').onclick();assert.equal(t.context.reloads,0);assert.equal(form.field('采用理由').value,'exact attempted selection');
+  await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,1);assert.equal(t.context.reloads,1);assert.ok(t.messages.includes('精确采用已保存'));
 });
 
 test('uncertain: editing after an unknown result cannot relabel the old save as new content', {timeout:2000}, async()=>{
   const t=setup({adoption:null}),form=await loadedAdoption(t);let sent,reads=0;
   t.context.api=async(url,options)=>{if(options?.method==='POST'){sent=JSON.parse(options.body);t.posts.push(sent);throw Error('lost response')}
     if(!reads++)throw Error('readback unavailable');return {records:[savedAdoption(sent)]}};
-  await form.button('确认采用此版本').onclick();form.field('采用理由').value='a new judgment not yet saved';
-  await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,1);assert.equal(t.context.reloads,0);
+  await form.button('确认采用此原件').onclick();form.field('采用理由').value='a new judgment not yet saved';
+  await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,1);assert.equal(t.context.reloads,0);
   assert.equal(form.field('采用理由').value,'a new judgment not yet saved');assert.ok(t.messages.some(v=>v.includes('当前修改尚未提交')));assert.ok(!t.messages.includes('精确采用已保存'));
 });
 
@@ -105,7 +105,7 @@ test('uncertain: cancellation during readback prevents retry, reload and late er
   const reading=new Promise(resolve=>{started=resolve});
   t.context.api=async(url,options)=>{if(options?.method==='POST'){t.posts.push(JSON.parse(options.body));throw Error('lost response')}
     started();return new Promise(resolve=>{resolveRead=resolve})};
-  const save=form.button('确认采用此版本').onclick();await reading;
+  const save=form.button('确认采用此原件').onclick();await reading;
   for(const label of ['采用理由','入点秒（可选）','出点秒（可选）','裁切左边比例'])assert.equal(form.field(label).disabled,true);
   await form.button('取消').onclick();const next=t.open();resolveRead({records:[]});await save;
   assert.equal(t.posts.length,1);assert.equal(t.context.reloads,0);assert.deepEqual(t.messages,[]);assert.equal(next.box.isConnected,true);
@@ -115,7 +115,7 @@ test('recovery: missing or malformed current heads never authorize a stale updat
   for(const result of [{records:[]},{records:null}]){
     const t=setup(),form=await loadedAdoption(t);
     t.context.api=async(url,options)=>{if(options?.method==='POST'){t.posts.push(JSON.parse(options.body));throw Error('failed update')}return result};
-    await form.button('确认采用此版本').onclick();await form.button('确认采用此版本').onclick();
+    await form.button('确认采用此原件').onclick();await form.button('确认采用此原件').onclick();
     assert.equal(t.posts.length,1);assert.equal(t.context.reloads,0);assert.ok(!t.messages.includes('精确采用已保存'));assert.equal(form.field('采用理由').value,'exact attempted selection');
   }
 });
@@ -124,12 +124,12 @@ test('loading and failed replacement clear old options and cannot submit the old
   const t=setup(),form=t.open();form.field('采用理由').value='keep my reason';
   let pending=t.choose(form,'A');t.resolve(t.requests[0],[asset('A')]);await pending;
   pending=t.choose(form,'B');
-  assert.equal(form.field('采用素材版本').children.length,0);assert.equal(form.field('采用文件组成').children.length,0);
-  assert.equal(form.button('确认采用此版本').disabled,true);
-  await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);
+  assert.equal(form.field('候选记录修订').children.length,0);assert.equal(form.field('采用文件组成').children.length,0);
+  assert.equal(form.button('确认采用此原件').disabled,true);
+  await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
   t.requests[1].reject(Error('detail unavailable'));await pending;
-  assert.equal(form.button('确认采用此版本').disabled,true);assert.equal(form.field('采用理由').value,'keep my reason');
-  await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);assert.ok(t.messages.includes('detail unavailable'));
+  assert.equal(form.button('确认采用此原件').disabled,true);assert.equal(form.field('采用理由').value,'keep my reason');
+  await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);assert.ok(t.messages.includes('detail unavailable'));
 });
 
 test('A to B to A uses the newest request even when the asset identity matches again', {timeout:2000}, async()=>{
@@ -138,14 +138,14 @@ test('A to B to A uses the newest request even when the asset identity matches a
   t.resolve(t.requests[2],[asset('A','A-v2',2)]);await last;
   t.resolve(t.requests[0],[asset('A','A-v1',1)]);await first;
   t.requests[1].reject(Error('stale failure'));await middle;
-  assert.equal(form.field('采用素材版本').value,'A-v2');assert.deepEqual(t.messages,[]);
+  assert.equal(form.field('候选记录修订').value,'A-v2');assert.deepEqual(t.messages,[]);
 });
 
 test('clearing the asset cancels pending selection without issuing an empty detail query', {timeout:2000}, async()=>{
   const t=setup(),form=t.open(),pending=t.choose(form,'A');
   await t.choose(form,'');assert.equal(t.requests.length,1);
   t.resolve(t.requests[0],[asset('A')]);await pending;
-  assert.equal(form.field('采用素材版本').children.length,0);assert.equal(form.button('确认采用此版本').disabled,true);
+  assert.equal(form.field('候选记录修订').children.length,0);assert.equal(form.button('确认采用此原件').disabled,true);
 });
 
 test('cancel then reopen isolates both late success and late failure from the new editor', {timeout:2000}, async()=>{
@@ -153,24 +153,24 @@ test('cancel then reopen isolates both late success and late failure from the ne
     const t=setup(),old=t.open(),pending=t.choose(old,'A');await old.button('取消').onclick();
     const next=t.open(),loaded=t.choose(next,'B');t.resolve(t.requests[1],[asset('B')]);await loaded;
     if(fail)t.requests[0].reject(Error('closed failure'));else t.resolve(t.requests[0],[asset('A')]);await pending;
-    assert.equal(old.field('采用素材版本').children.length,0);assert.equal(next.field('采用素材版本').value,'B-v1');assert.deepEqual(t.messages,[]);
-    await old.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);
+    assert.equal(old.field('候选记录修订').children.length,0);assert.equal(next.field('候选记录修订').value,'B-v1');assert.deepEqual(t.messages,[]);
+    await old.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
   }
 });
 
 test('detached or superseded workspace editors cannot consume or submit stale details', {timeout:2000}, async()=>{
   for(const invalidate of [(t,f)=>f.box.remove(),t=>{t.context.state.workspace='story.sources'},t=>vm.runInContext('++productionReadEpoch',t.context)]){
     const t=setup(),form=t.open(),pending=t.choose(form,'A');invalidate(t,form);t.resolve(t.requests[0],[asset('A')]);await pending;
-    assert.equal(form.field('采用素材版本').children.length,0);await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);
+    assert.equal(form.field('候选记录修订').children.length,0);await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
   }
 });
 
 test('exact historical revision, component, crop, range and adoption version are preserved', {timeout:2000}, async()=>{
   const t=setup(),form=t.open(),pending=t.choose(form,'A');t.resolve(t.requests[0],[asset('A','A-v2',2),asset('A')]);await pending;
-  form.field('采用素材版本').value='A-v1';form.field('采用素材版本').onchange();form.field('采用文件组成').value='preview';
+  form.field('候选记录修订').value='A-v1';form.field('候选记录修订').onchange();form.field('采用文件组成').value='preview';
   form.field('采用理由').value='explicit old revision';form.field('入点秒（可选）').value='0.2';form.field('出点秒（可选）').value='0.8';
   for(const [label,value] of [['裁切左边比例','.1'],['裁切上边比例','.2'],['裁切宽度比例','.5'],['裁切高度比例','.6']])form.field(label).value=value;
-  await form.button('确认采用此版本').onclick();
+  await form.button('确认采用此原件').onclick();
   assert.equal(t.posts[0].object_id,'existing-adoption');assert.equal(t.posts[0].expected_version,3);
   assert.deepEqual(plain(t.posts[0].payload.asset),{object_id:'A',revision_id:'A-v1'});assert.equal(t.posts[0].payload.component_id,'preview');
   assert.deepEqual(plain(t.posts[0].payload.range),{start_seconds:0.2,end_seconds:0.8});assert.deepEqual(plain(t.posts[0].payload.crop),{x:0.1,y:0.2,width:0.5,height:0.6});
@@ -179,11 +179,11 @@ test('exact historical revision, component, crop, range and adoption version are
 
 test('submit validates asset identity and component membership and prevents duplicate pending saves', {timeout:2000}, async()=>{
   const t=setup(),form=t.open(),pending=t.choose(form,'A');t.resolve(t.requests[0],[asset('A')]);await pending;form.field('采用理由').value='fixture';
-  form.field('选择素材').value='B';await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);
-  form.field('选择素材').value='A';form.field('采用文件组成').value='unknown';await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,0);
+  form.field('选择素材').value='B';await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
+  form.field('选择素材').value='A';form.field('采用文件组成').value='unknown';await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
   form.field('采用文件组成').value='original';let release;
   t.context.api=(url,options)=>{t.posts.push(JSON.parse(options.body));return new Promise(resolve=>{release=resolve})};
-  const first=form.button('确认采用此版本').onclick();await Promise.resolve();await form.button('确认采用此版本').onclick();assert.equal(t.posts.length,1);
+  const first=form.button('确认采用此原件').onclick();await Promise.resolve();await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,1);
   await form.button('取消').onclick();const next=t.open();release({});await first;
   assert.equal(t.context.reloads,0);assert.equal(next.box.isConnected,true);assert.ok(!t.messages.includes('精确采用已保存'));
 });
