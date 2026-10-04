@@ -3,6 +3,7 @@
 This module stores reviewed production data. It never calls a model, extracts a
 particular story or decides whether the user's creative work is accepted.
 """
+from contextlib import contextmanager
 import copy
 import json
 import math
@@ -42,8 +43,30 @@ def record_view(row):
     return value
 
 
+@contextmanager
+def read_scope(store):
+    """One consistent read, with request-local raw row reuse only."""
+    if getattr(store, '_production_reads', None) is not None:
+        yield
+        return
+    owns_transaction = not store.db.in_transaction
+    if owns_transaction:
+        store.db.execute('BEGIN')
+    store._production_reads = {'records': {}, 'current': None}
+    try:
+        yield
+    finally:
+        del store._production_reads
+        if owns_transaction:
+            store.db.rollback()
+
+
 def record(store, object_id=None, revision_id=None):
-    if revision_id:
+    reads = getattr(store, '_production_reads', None)
+    key = (object_id, revision_id)
+    if reads is not None and key in reads['records']:
+        row = reads['records'][key]
+    elif revision_id:
         row = store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM revisions r
             JOIN objects o ON o.id=r.object_id WHERE r.id=?""", (revision_id,)).fetchone()
         if row and object_id and row["object_id"] != object_id:
@@ -53,6 +76,7 @@ def record(store, object_id=None, revision_id=None):
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
         raise KeyError("unknown production object or revision")
+    if reads is not None:reads['records'][key] = row
     value = record_view(row)
     memberships = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
     value['material_round_numbers'] = {v['material_id']: v['number'] for v in reversed(memberships)}
@@ -471,11 +495,16 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
 
 def current_records(store, kinds=None):
     result = []
-    for row in store.db.execute("SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision ORDER BY o.id"):
+    reads = getattr(store, '_production_reads', None)
+    if reads is not None and reads['current'] is not None:
+        rows = reads['current']
+    else:
+        rows = store.db.execute("SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision ORDER BY o.id").fetchall()
+        if reads is not None:reads['current'] = rows
+    for row in rows:
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
-            p = json.loads(row["payload"])
-            if p.get("format") in FORMATS:
-                value=record_view(row)
+            value=record_view(row)
+            if value["payload"].get("format") in FORMATS:
                 if value['kind']=='ASSET':
                     # Match the default detail card: associated material first,
                     # then its latest round containing this exact revision.
@@ -634,7 +663,17 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
                         if candidate['kind'] == 'ASSET' and candidate['id'] not in contexts:
                             contexts[candidate['id']] = context(store, candidate)
         return result
-    return {"records": current_records(store, {kind} if kind else None)}
+    rows = current_records(store, {kind} if kind else None)
+    # Only actual original results count. Round history belongs to the demand,
+    # not to a second list entry; missing/failed calls do not manufacture media.
+    material_assets = {}
+    for row in store.db.execute("""SELECT DISTINCT m.material_id,r.object_id FROM material_members m
+        JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id
+        WHERE o.kind='ASSET' AND coalesce(json_extract(r.payload,'$.placeholder'),0)=0
+        AND EXISTS(SELECT 1 FROM json_each(r.payload,'$.components') c
+                   WHERE json_extract(c.value,'$.role')='original') ORDER BY m.material_id,r.object_id"""):
+        material_assets.setdefault(row[0], []).append(row[1])
+    return {"records": rows, "material_assets": material_assets}
 
 
 def dependency_closure(store, revision_id, include_history=True):

@@ -224,20 +224,24 @@ function entityReviewMaterialModels(needs,items,data){
     return model;
   });
 }
+function entityMaterialCandidateOptions(data,model){
+  const key=model.material_id||model.need?.object_id||model.candidates[0]?.record.object_id;
+  return {multipleCards:true,selectedComponents:data.selectedComponents,selectComponent:id=>{const chosen=materialCandidateChoice(model.candidates,data.selectedCandidates?.[key]);if(!chosen)return;data.selectedComponents||={};data.selectedComponents[chosen.record.id]=id;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="原件与预览组成"]`)?.focus({preventScroll:true})},selectedCandidateId:data.selectedCandidates?.[key],selectCandidate:id=>{data.selectedCandidates||={};data.selectedCandidates[key]=id;state.selected=null;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="本轮候选"]`)?.focus({preventScroll:true})}};
+}
 function renderStateMaterials(parent,data,form,withdrawn=false){
   const needs=(data.requirements||[]).filter(r=>r.payload.scope.object_id===form.object_id&&r.payload.scope.revision_id===form.id).map(r=>data.localVersions?.[r.object_id]||r);
   const items=entityReviewMaterialItems(data,entityReviewStateMedia(data,form));
   if(!needs.length&&!items.length){if(!withdrawn)nodeText('p','production-meta',form.payload.reference_media==='none'?'仅被提及，无需生成素材':form.payload.reference_mode==='description'?'按状态描述随镜头生成':'此状态的素材方案待完善',parent);return}
   const grid=el('section','entity-review-materials');grid.setAttribute('aria-label','此状态的素材与生成方案');
   const change=row=>{data.localVersions||={};data.localVersions[row.object_id]=row};
-  for(const model of entityReviewMaterialModels(needs,items,data))renderMaterialCard(grid,model,{roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)},planVersion:(h,row)=>entityVersionControl(h,row,change),assetVersion:(h,item)=>entityVersionControl(h,item.record,change)});
+  for(const model of entityReviewMaterialModels(needs,items,data))renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model),roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)},planVersion:(h,row)=>entityVersionControl(h,row,change),assetVersion:(h,item)=>entityVersionControl(h,item.record,change)});
   parent.append(grid);
 }
 function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMedia'){
   const grid=el('section','entity-review-materials');parent.append(grid);
   const data=state.entityReview;
   for(const model of entityReviewMaterialModels([],entityReviewMaterialItems(data,items),data)){
-    const card=renderMaterialCard(grid,model,{roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)}});
+    const card=renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model),roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)}});
     if(selectionKey==='entityReviewHistoricalMedia')for(const pane of card.querySelectorAll('.entity-review-media-pane'))pane.dataset.commentMedia='true';
   }
 }
@@ -271,8 +275,9 @@ function locateEntityReviewComment(comment){
   }
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
   if(row.kind==='REPRESENTATION')data.historicalTarget=row;
+  data.selectedCandidates||={};for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
   // Expand any collapsed exact text before using the common locate behavior.
   for(const node of document.querySelectorAll('#production-blocks [data-block-id]'))if(node.dataset.blockId===comment.anchor.block_id){let parent=node.parentElement;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement}}
-  locateProductionComment(comment,true);return true;
+  if(materialPlanCommentNeedsHistory(row,comment))return openMaterialPlanHistory(row,comment).then(()=>true);locateProductionComment(comment,true);return true;
 }

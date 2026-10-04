@@ -19,6 +19,7 @@ function reviewBlockScope(host,kind){
   let orderedBlockIds=blockIds;
   if(isProduction()){const row=(typeof materialVersions==='function'?Object.values(materialVersions()).flatMap(rs=>rs.flatMap(r=>r.members)):[]).find(r=>r.id===revision)||state.productionSelected;if(row?.id===revision)orderedBlockIds=productionTextBlocks(row).map(b=>b.id)}
   if(isProduction()&&typeof materialVersions==='function'){for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid];const round=rounds.find(r=>r.number===selected)||rounds.find(r=>r.members.some(m=>m.id===revision));const row=round?.members.find(r=>r.id===revision);if(row){revisions=round.members.filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;break}}}
+  if(host.closest('.material-reference-dialog')){revisions=[revision];materialId=null;materialNumber=null}
   return {revision,revisions,materialId,materialNumber,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
 }
 function reviewBlockComments(comments,scope){
@@ -30,7 +31,18 @@ function reviewBlockComments(comments,scope){
     if(matches)selected.set(c.id,c);
   }return [...selected.values()];
 }
+function paintReviewCommentCounts(){
+  for(const host of document.querySelectorAll('.review-surface')){
+    const cue=host.querySelector(':scope > .review-cue');if(!cue)continue;
+    const count=reviewBlockComments(state.comments,reviewBlockScope(host,host.dataset.reviewKind)).length;
+    let number=cue.querySelector('.review-comment-count');
+    if(count){if(!number)number=nodeText('span','review-comment-count','',cue);number.textContent=count}
+    else number?.remove();
+    cue.setAttribute('aria-label','查看此块全部评论'+(count?' · '+count+' 条':''));
+  }
+}
 function openReviewBlockComments(host,kind){
+  host.reviewFocus?.();
   const scope=reviewBlockScope(host,kind);state.reviewCommentScope=scope;state.historyOpen=true;state.historyLimit=Number.MAX_SAFE_INTEGER;
   openPanel();renderComments();
 }
@@ -46,12 +58,13 @@ async function reviewWaveform(url){
     return {peaks,duration:buffer.duration};
   })();reviewWaveCache.set(url,promise);if(reviewWaveCache.size>12)reviewWaveCache.delete(reviewWaveCache.keys().next().value);return promise;
 }
-function reviewMediaPlayer(parent,component,record,selection={},review=true){
-  const from=selection.range?.start_seconds??0,to=selection.range?.end_seconds??component.duration_seconds,span=to-from;
+function reviewMediaPlayer(parent,component,record,selection={},review=true,options={}){
+  const from=selection.range?.start_seconds??0;
+  let to=selection.range?.end_seconds??component.duration_seconds??0,span=to-from;
   const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;box.dataset.reviewFile=component.file;box.dataset.reviewFrom=from;box.dataset.reviewTo=to;
-  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src='/api/production/files/'+encodeURIComponent(component.file);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
-  const focus=()=>{if(review)focusProductionReview({record,history:[record],uses:[]})};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
-  const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
+  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=options.src||'/api/production/files/'+encodeURIComponent(component.file);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
+  const focus=()=>{if(review){if(options.focus)options.focus();else focusProductionReview({record,history:[record],uses:[]})}};box.reviewFocus=focus;box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
+  const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){stopAt=to;if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
   const mute=productionButton(top,'静音',()=>{media.muted=!media.muted;mute.textContent=media.muted?'恢复声音':'静音'});box.append(top);
   const track=el('div','review-timeline');track.tabIndex=0;track.setAttribute('role','slider');track.setAttribute('aria-label',audio?'音频时间轴':'视频时间轴');track.setAttribute('aria-valuemin',String(from));track.setAttribute('aria-valuemax',String(to));
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 800 72');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('aria-hidden','true');track.append(svg);
@@ -62,7 +75,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true){
   const axis=el('div','review-time-axis');nodeText('span',null,from.toFixed(2)+' 秒',axis);nodeText('span',null,to.toFixed(2)+' 秒',axis);box.append(axis);
   const tools=el('div','review-range-tools'),start=el('input'),end=el('input');
   for(const [input,label] of [[start,'选段起点（秒）'],[end,'选段终点（秒）']]){input.type='number';input.step='.01';input.min=from;input.max=to;input.setAttribute('aria-label',label);const wrap=el('label');nodeText('span',null,label,wrap);wrap.append(input);tools.append(wrap)}
-  let range=null,stopAt=to,gesture=null;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>100*(v-from)/span;
+  let range=null,stopAt=to,gesture=null;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>span>0?100*(v-from)/span:0;
   const paint=()=>{
     const time=clamp(media.currentTime||from);clock.textContent=`${time.toFixed(2)} / ${to.toFixed(2)} 秒`;head.style.left=percent(time)+'%';track.setAttribute('aria-valuenow',String(time));track.setAttribute('aria-valuetext',time.toFixed(2)+' 秒');
     tools.hidden=!range;region.hidden=!range;aHandle.hidden=!range;bHandle.hidden=!range;play.textContent=media.paused?'播放':'暂停';
@@ -84,14 +97,15 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true){
   track.onkeydown=e=>{if(e.target!==track)return;if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();seek(e.key==='Home'?from:e.key==='End'?to:media.currentTime+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1))}else if(e.key===' '){e.preventDefault();play.click()}else if(e.key.toLowerCase()==='i'){e.preventDefault();select(clamp(media.currentTime),range?.[1]??to)}else if(e.key.toLowerCase()==='o'){e.preventDefault();select(range?.[0]??from,clamp(media.currentTime))}};
   track.title='点击定位，拖动选段；方向键定位，I / O 设起止点';
   for(const [handle,index] of [[aHandle,0],[bHandle,1]])handle.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const next=e.key==='Home'?from:e.key==='End'?to:range[index]+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1);select(index===0?next:range[0],index===1?next:range[1])};
-  media.onloadedmetadata=()=>seek(Number(media.dataset.reviewSeek??from));media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);paint()};media.onpause=paint;media.onerror=()=>{fallback.textContent='音频读取失败，请检查原文件';play.disabled=true};
+  const setDuration=duration=>{if(!to&&Number.isFinite(duration)){to=duration;span=to-from;stopAt=to;box.dataset.reviewTo=to;track.setAttribute('aria-valuemax',to);for(const input of [start,end])input.max=to;for(const handle of [aHandle,bHandle])handle.setAttribute('aria-valuemax',to);axis.lastElementChild.textContent=to.toFixed(2)+' 秒'}};
+  media.onloadedmetadata=()=>{setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);paint()};media.onpause=paint;media.onerror=()=>{fallback.textContent='音频读取失败，请检查原文件';play.disabled=true};
   box.reviewLocate=anchor=>{select(anchor.start_seconds,anchor.end_seconds);seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'})};
   if(review){
     reviewSurface(box,'audio');let commentKey='';
     box.reviewPaintComments=()=>{
-      const comments=state.comments.filter(c=>c.target_revision_id===record.id&&c.anchor.type==='time'&&c.anchor.component_id===component.id&&c.anchor.asset_file===component.file&&c.anchor.start_seconds<to&&c.anchor.end_seconds>from),key=JSON.stringify(comments);
+      const comments=reviewBlockComments(state.comments,reviewBlockScope(box,'audio')),key=JSON.stringify(comments);
       if(key!==commentKey){commentKey=key;markers.replaceChildren();for(const comment of comments){
-        const button=productionButton(markers,'',()=>locateComment(comment));button.append(reviewIcon());button.dataset.commentId=comment.id;button.style.left=percent(clamp(comment.anchor.start_seconds))+'%';button.title=comment.anchor.start_seconds.toFixed(2)+' 秒 · '+comment.body;button.setAttribute('aria-label','定位音频评论：'+comment.body);
+        const button=productionButton(markers,'',()=>{focus();if(options.locate)options.locate(comment);else locateComment(comment)});button.append(reviewIcon());button.dataset.commentId=comment.id;button.style.left=percent(clamp(comment.anchor.start_seconds))+'%';button.title=comment.anchor.start_seconds.toFixed(2)+' 秒 · '+comment.body;button.setAttribute('aria-label','定位音频评论：'+comment.body);
       }}
       for(const button of markers.children)button.classList.toggle('active',button.dataset.commentId===state.selected);
     };box.reviewPaintComments();
@@ -101,7 +115,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true){
   if(active?.type==='time'&&active.component_id===component.id&&active.asset_file===component.file&&from<=active.start_seconds&&active.end_seconds<=to){range=[active.start_seconds,active.end_seconds];media.dataset.reviewSeek=String(active.start_seconds)}
   paint();
   if(audio)reviewWaveform(media.src).then(({peaks,duration})=>{
-    if(!box.isConnected)return;fallback.hidden=true;const path=document.createElementNS(svg.namespaceURI,'path');let d='';
+    if(!box.isConnected)return;setDuration(duration);paint();fallback.hidden=true;const path=document.createElementNS(svg.namespaceURI,'path');let d='';
     const scale=Math.max(...peaks,.001);
     for(let i=0;i<400;i++){const t=from+i/399*span,j=Math.min(peaks.length-1,Math.floor(t/duration*peaks.length)),v=peaks[j]/scale*32;d+=`M${i*2},${36-v}V${36+v} `}path.setAttribute('d',d);svg.append(path);box.dataset.waveform='decoded';
   }).catch(()=>{fallback.textContent='波形不可用 · 可继续播放和选段';box.dataset.waveform='unavailable'});
@@ -121,3 +135,9 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();dialog.remove();if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }
+
+function pauseReviewMedia(root=document){for(const media of root.querySelectorAll('audio,video'))media.pause()}
+// Detached media can otherwise continue playing after a card/version change.
+if(typeof MutationObserver!=='undefined')new MutationObserver(changes=>{
+  for(const change of changes)for(const node of change.removedNodes)if(node.nodeType===1&&!node.isConnected){if(node.matches('audio,video'))node.pause();pauseReviewMedia(node)}
+}).observe(document.body,{childList:true,subtree:true});

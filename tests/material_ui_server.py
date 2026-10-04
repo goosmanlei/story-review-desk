@@ -4,13 +4,14 @@ PYTHONPATH=.:tests python3 tests/material_ui_server.py --port 39105
 """
 import argparse
 import io
+import shutil
 import struct
 import zlib
 from pathlib import Path
 from test_generation import GenerationTest
 from review_desk import production as p
 from review_desk.production_media import ingest
-from review_desk.server import ReviewServer
+from review_desk.server import ReviewServer, ReviewHandler
 from review_desk.review_text import production_text_blocks
 
 
@@ -21,7 +22,7 @@ def png(width,height):
 
 
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=39105);args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--port',type=int,default=39105);parser.add_argument('--source-audio',type=Path);parser.add_argument('--waveform-failure',action='store_true');args=parser.parse_args()
     f=GenerationTest();f.setUp();f.setup_plans();f.media();f.associate()
     def change(oid,**fields):f.change(oid,**fields)
     def comment(row,anchor,body,closed=False,revision=None):
@@ -58,9 +59,35 @@ def main():
     f.put(f.spec('draw-wide-next','CALL',method='manual',tool='fixture',status='submitted',inputs=[],outputs=[],model='fixture',prompt='已完成隔离绘制',parameters={},lineage={'i2i_depth':0,'references':[]}))
     change('image-wide',production=f.ref('draw-wide-next'))
     current=p.record(f.store,'image-wide');comment(current,{'type':'visual','visual_id':'original','asset_file':current['payload']['components'][0]['file']},'版本二整图意见')
+    # Additional entries exist only in this disposable browser fixture.
+    for media,suffix,content in [('project','json',b'{"timeline": [], "fixture": true}'),('document','txt','隔离样例的素材使用说明。'.encode())]:
+        c=ingest(f.root,io.BytesIO(content),'fixture.'+suffix)
+        f.put(f.spec('call-'+media,'CALL',method='manual',tool='fixture',status='submitted',inputs=[],outputs=[]))
+        f.put(f.spec('legacy-'+media,'ASSET',media_type=media,subjects=[],states=[],components=[c],production=f.ref('call-'+media),lineage={}))
+    multi=p.record(f.store,'need-full-multi');comment(multi,txt(multi,'generation.prompt'),'已生成卡的原方案提示词评论')
+    inputs=[{**v['reference'],**{k:v[k] for k in ('component_id','crop','range') if k in v}} for v in multi['payload']['generation']['inputs']]
+    lineage={'i2i_depth':1,'references':[v['reference'] for v in multi['payload']['generation']['inputs']]}
+    f.put(f.spec('draw-multi','CALL',method='manual',tool='fixture',status='submitted',inputs=inputs,outputs=[],model='fixture-multi',prompt='实际多参考调用',parameters={'quality':'test'},lineage=lineage))
+    for i in (1,2):
+        if i==2:f.put(f.spec('draw-multi-second','CALL',method='manual',tool='fixture',status='submitted',inputs=inputs,outputs=[],model='fixture-second',prompt='同轮另一真实调用',parameters={'quality':'second'},lineage=lineage))
+        f.put(f.spec('image-multi-'+str(i),'ASSET',media_type='image',subjects=[f.ref('songbook')],states=[f.ref('full')],components=p.record(f.store,'image-square')['payload']['components'],candidate_requirements=[f.ref('need-full-multi')],production=f.ref('draw-multi' if i==1 else 'draw-multi-second'),lineage=lineage,state_coverage=[{'state':f.ref('full'),'component_id':'original','role':'detail','detail':'隔离多参考'}]))
+    legacy=p.record(f.store,'image-square')['payload'].copy();legacy.update(title='历史缺少真实调用',subjects=[],states=[],candidate_requirements=[],production=None);legacy.pop('state_coverage',None)
+    f.store.put_object('legacy-no-call','ASSET',legacy)
+    gap=f.spec('legacy-gap-call','CALL',method='manual',tool='fixture',status='submitted',inputs=[{**f.ref('voice'),'component_id':'removed-original','range':{'start_seconds':.1,'end_seconds':.8}}],outputs=[],model='legacy-gap',parameters={},prompt='保留旧输入缺口')
+    f.store.put_object(gap['object_id'],'CALL',gap['payload']);legacy.update(title='历史文件组成缺口',production=f.ref('legacy-gap-call'));f.store.put_object('legacy-gap','ASSET',legacy)
+    if args.source_audio:
+        require_audio=args.source_audio.resolve();destination=f.root/'export/assets'/require_audio.name;shutil.copyfile(require_audio,destination)
+        f.store.put_source({'id':'source-audio','title':'既有声音原件 · 资料入口隔离验收','version_type':'original','origin':'test','source_url':'https://example.org/audio','collected_at':'2026-10-04','notes':'仅复用既有文件，不表示声音接受','assets':[],'blocks':[{'id':'a','text':'此资料沿用来源资料正文评论模型。'}],'media':{'kind':'audio','file':require_audio.name,'label':'既有原件','note':'声音未改动'}})
     f.store.close()
+    class FixtureHandler(ReviewHandler):
+        def do_GET(self):
+            if args.waveform_failure and self.path.split('?')[0]=='/static/review-ui.js':
+                raw=(Path(__file__).parents[1]/'review_desk/static/review-ui.js').read_bytes()+b"\nreviewWaveform=()=>Promise.reject(Error('isolated waveform failure'));\n"
+                self.send_response(200);self.send_header('Content-Type','text/javascript');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
+            super().do_GET()
     try:
         with ReviewServer(('127.0.0.1',args.port),f.root,{'id':'material-ui-test','title':'素材卡隔离验收'}) as server:
+            server.RequestHandlerClass=FixtureHandler
             print(f'http://127.0.0.1:{args.port}/?workspace=settings.workspace&production_object=songbook',flush=True)
             print('Instance: '+str(f.root),flush=True)
             server.serve_forever()

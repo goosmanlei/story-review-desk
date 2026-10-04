@@ -169,7 +169,7 @@ def accepted(store, entity_id, scope=None):
     return d if d and d['payload'].get('acceptance_model')==MODEL and d['payload']['verdict']=='accepted' and d['payload']['acceptance_scope']==scope and preparation(store,scope)['complete'] else None
 
 
-def content_scope(store, entity_id, previous=None):
+def content_scope(store, entity_id, previous=None, rows=None):
     """Only reinstate an existing, unchanged legacy acknowledgement.
 
     This scope deliberately carries no generation plans or generation permission.
@@ -180,7 +180,7 @@ def content_scope(store, entity_id, previous=None):
     scope = previous['payload'].get('acceptance_scope', {}) if previous else {}
     if set(scope) != {'entity', 'states', 'media'}:
         return None
-    return scope if scope == er.current_scope(store, entity_id) else None
+    return scope if scope == er.current_scope(store, entity_id, rows) else None
 
 
 def validate_content_decision(store, object_id, payload, check_current=True):
@@ -274,7 +274,15 @@ def decide(store, value):
 
 
 def snapshot(store, entity_id, revision_id=None):
+    # Cache only repeated reads inside one SQLite snapshot. Never retain a
+    # response or object head across requests, including imports and comments.
+    with p.read_scope(store):
+        return _snapshot(store, entity_id, revision_id)
+
+
+def _snapshot(store, entity_id, revision_id=None):
     from . import entity_review as er, entity_relations as rel, material_review as media_review
+    rows=p.current_records(store)
     if revision_id:
         selected=p.record(store,revision_id=revision_id)
         legacy=selected['payload'].get('acceptance_model')!=MODEL
@@ -294,9 +302,9 @@ def snapshot(store, entity_id, revision_id=None):
         if selected['object_id']!=decision_id(entity_id):raise ValueError('historical decision belongs to another entity')
         scope=selected['payload']['acceptance_scope']
     else:
-        selected=None;scope=current_scope(store,entity_id)
-    data=contents(store,scope);rows=p.current_records(store)
-    base=er.legacy_snapshot(store,entity_id)
+        selected=None;scope=current_scope(store,entity_id,rows)
+    data=contents(store,scope)
+    base=er.legacy_snapshot(store,entity_id,rows=rows)
     media=er.related_media(store,rows,entity_id,data['states'])
     data['media']=er.scope_contents(store,{'entity':scope['entity'],'states':scope['states'],'media':media})['media']
     contexts=media_review.enrich_media(store,data['media'])
@@ -304,7 +312,7 @@ def snapshot(store, entity_id, revision_id=None):
     for oid in {m['record']['object_id'] for m in data['media']}:
         for history in store.db.execute('SELECT id FROM revisions WHERE object_id=?',(oid,)):
             asset=p.record(store,revision_id=history[0])
-            contexts.setdefault(asset['id'],media_review.context(store,asset))
+            if asset['id'] not in contexts:contexts[asset['id']]=media_review.context(store,asset)
             if contexts[asset['id']]['call']:calls.append(contexts[asset['id']]['call'])
     targets={r['id']:r for r in [*base['comment_records'],data['entity'],*data['states'],*data['requirements'],*data['relationships'],*calls,*(m['record'] for m in data['media'])]}
     related_ids={r['object_id'] for r in [*data['requirements'],*data['relationships'],*calls]}
@@ -322,7 +330,7 @@ def snapshot(store, entity_id, revision_id=None):
             AND json_extract(r.payload,'$.target.object_id')=? ORDER BY r.created_at DESC,r.version DESC,r.id DESC""",(entity_id,)):
         h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict']})
     prep=preparation(store,scope)
-    compatible=content_scope(store,entity_id,d) if not revision_id else None
+    compatible=content_scope(store,entity_id,d,rows) if not revision_id else None
     content_accepted=d if compatible and d['payload']['verdict']=='accepted' else None
     acceptance_mode='generation' if prep['complete'] else 'content' if compatible else 'generation'
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
@@ -341,7 +349,7 @@ def snapshot(store, entity_id, revision_id=None):
             for row in round['members']:
                 targets[row['id']] = row
                 if row['kind'] == 'ASSET':
-                    contexts.setdefault(row['id'], media_review.context(store, row))
+                    if row['id'] not in contexts:contexts[row['id']]=media_review.context(store,row)
                     for related in [contexts[row['id']]['call'], *contexts[row['id']]['requirements']]:
                         if related:targets[related['id']] = related
     return {**base,**data,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),

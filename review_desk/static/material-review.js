@@ -26,7 +26,7 @@ function materialField(parent,row,field,label,tag='p'){
 function materialTextSurface(parent,row){
   const host=reviewSurface(el('div','entity-review-text'));host.dataset.productionBlocks=row.id;
   if(state.productionSelected?.id===row.id)host.id='production-blocks';
-  const focus=()=>focusProductionReview({record:row,history:[row],uses:[]});host.onpointerdown=focus;host.onfocusin=focus;parent.append(host);return host;
+  const focus=()=>{const dialog=host.closest('.material-reference-dialog');if(dialog?.reviewFocus)dialog.reviewFocus();else focusProductionReview({record:row,history:[row],uses:[]})};host.reviewFocus=focus;host.onpointerdown=focus;host.onfocusin=focus;parent.append(host);return host;
 }
 function materialParameters(host,row,prefix,model){
   const heading=nodeText('h4',null,'参数 · ',host),block=productionTextBlocks(row).find(b=>b.field===prefix+'.model');
@@ -37,9 +37,10 @@ function materialInputs(inputs,records=[]){
   const counts={};return inputs.flatMap((value,index)=>{
     const ref=value.reference||value,row=records.find(r=>r.id===ref.revision_id)||(state.productionRecords||[]).find(r=>r.id===ref.revision_id);
     // Only submitted media or explicit future media requirements are references.
-    if(!row||!['ASSET','REQUIREMENT'].includes(row.kind))return [];
-    const component=row.payload.components?.find(c=>c.id===value.component_id)||row.payload.components?.find(c=>c.role==='original');
-    if(row.kind==='ASSET'&&(!value.component_id||!component||!(/^(image|audio|video)\//.test(component.mime))))return [];
+    if(!row)return [{value,index,row:null,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
+    if(!['ASSET','REQUIREMENT'].includes(row.kind))return [];
+    const component=value.component_id?row.payload.components?.find(c=>c.id===value.component_id):row.payload.components?.find(c=>c.role==='original');
+    if(row.kind==='ASSET'&&(!value.component_id||!component))return [{value,index,row,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
     const type=component?.mime.split('/')[0]||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];if(!label)return [];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
   });
@@ -48,15 +49,15 @@ function renderMaterialInputs(host,inputs,records=[],need=null){
   const effective=materialInputs(inputs,records);if(!effective.length)return;
   nodeText('h4',null,'参考输入',host);
   for(const item of effective){
-    const line=el('div','material-input');materialReferenceLink(line,item.ref,item.label+' · '+item.row.payload.title);
-    const version=materialRecordRound(item.row)||item.row.version;nodeText('small','production-meta','版本 '+version+(item.value.component_id?' · '+item.value.component_id:'')+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 使用裁切区域':''),line);
+    const line=el('div','material-input');if(item.missing)nodeText('p','production-issue',item.label+' · 准确输入记录或文件组成缺失',line);else materialReferenceLink(line,item.ref,item.label+' · '+item.row.payload.title);
+    const version=item.row?(materialRecordRound(item.row)||item.row.version):'未知';nodeText('small','production-meta','版本 '+version+(item.value.component_id?' · '+item.value.component_id:'')+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 使用裁切区域':''),line);
     if(need)materialField(line,need,`generation.inputs.${item.index}.use`,null);else if(item.value.use)nodeText('p',null,item.value.use,line);
     host.append(line);
   }
 }
 function renderActualGeneration(parent,context){
-  const call=context?.call,box=el('section','material-actual-inputs');nodeText('h3',null,'本素材实际生成信息',box);
-  if(!call){nodeText('p','production-meta','未登记实际生成信息',box);parent.append(box);return}
+  const call=context?.call,box=el('section','material-actual-inputs');nodeText('h3',null,'生成内容',box);
+  if(!call){nodeText('p','production-meta','未登记真实调用，无法还原生成内容',box);parent.append(box);return}
   const host=materialTextSurface(box,call);
   materialParameters(host,call,'call',call.payload.model);
   renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[]);
@@ -140,6 +141,7 @@ function materialRoundModels(needs,items,data){
   return [...models,...extra];
 }
 function materialRevisionIntent(){
+  if(state.reviewReferenceContext)return null;
   if(!isProduction()||state.editing)return null;
   const row=state.productionSelected;if(!row)return null;
   const context=materialCommentContext();
@@ -151,6 +153,7 @@ function materialRevisionIntent(){
   }return null;
 }
 function materialCommentContext(){
+  if(state.reviewReferenceContext)return null;
   const row=state.productionSelected;if(!isProduction()||!row)return null;
   const data=isEntityReview()?state.entityReview:state.materialReview,card=state.materialCommentCard,matches=[];
   for(const [mid,rounds] of Object.entries(materialVersions())){const selected=data?.selectedMaterialRounds?.[mid]||rounds[0]?.number;if(rounds.find(r=>r.number===selected)?.members.some(r=>r.id===row.id))matches.push({material_id:mid,number:selected})}
@@ -184,7 +187,7 @@ function renderMaterialCard(parent,model,options={}){
   const box=el('article','material-card'),need=model.need;
   let items=model.candidates;
   box.dataset.materialKey=need?.object_id||model.material_id||items[0].record.object_id;
-  if(model.round){const focus=()=>focusMaterialCommentCard(model.material_id,model.round.number);box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
+  if(model.round){const focus=e=>{if(e?.target.closest('.material-reference,[data-review-dialog-trigger]'))return;focusMaterialCommentCard(model.material_id,model.round.number)};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,need?.payload.generation?.output.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title,heading);
   if(model.round)materialRoundControl(heading,model.material_id,model.rounds,model.round,options.roundChange);else if(need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
   if(options.selectCandidate&&items.length){
@@ -196,6 +199,7 @@ function renderMaterialCard(parent,model,options={}){
     }
     items=[chosen];
   }
+  if(options.selectedComponents)items=items.map(item=>{const component=item.components?.find(c=>c.id===options.selectedComponents[item.record.id]);return component?{...item,component}:item});
   if(need?.payload.status==='withdrawn')nodeText('p','production-meta','此素材需求已撤回',box);
   else if(!items.length)renderMaterialPlaceholder(box,need||model.identity);
   for(const item of items){
@@ -204,12 +208,23 @@ function renderMaterialCard(parent,model,options={}){
     if(item.components?.length>1){
       const select=el('select');select.setAttribute('aria-label','原件与预览组成');
       for(const c of item.components)select.append(new Option(`${c.role} · ${c.id}`,c.id));select.value=item.component.id;
-      if(options.selectComponent)select.id='production-component';select.onchange=()=>{options.selectComponent?.(select.value)};box.append(select);
+      if(options.selectComponent&&!options.multipleCards)select.id='production-component';select.onchange=()=>{options.selectComponent?.(select.value)};box.append(select);
     }
     materialMedia(box,item);renderActualGeneration(box,item.review_context);
   }
-  if(need)renderGenerationRecipe(box,need);
-  for(const related of options.relatedPlans||[]){nodeText("h3",null,related.payload.generation?.output.name||related.payload.title,box);renderGenerationRecipe(box,related)}
+  if(!items.length&&need)renderGenerationRecipe(box,need);
+  else if(items.length){
+    const requirements=[...new Map((need?[need]:items.flatMap(i=>i.review_context?.requirements||[])).map(r=>[r.id,r])).values()];
+    for(const requirement of requirements){
+      const info=el('section','material-requirements');nodeText('h3',null,'素材要求',info);
+      const host=materialTextSurface(info,requirement);
+      for(const block of requirement.payload.blocks||[]){const node=nodeText('p',null,block.text,host);node.dataset.blockId=block.id}
+      materialField(host,requirement,'generation.output.description','需求描述');
+      materialField(host,requirement,'generation.output.review_criteria','检查要点');
+      const history=productionButton(info,'查看原方案',()=>openMaterialPlanHistory(requirement));history.dataset.reviewDialogTrigger='true';
+      box.append(info);
+    }
+  }
   parent.append(box);return box;
 }
 function renderMaterialWorkspace(root,detail){
@@ -222,7 +237,7 @@ function renderMaterialWorkspace(root,detail){
   let round;if(rounds?.length){const number=detail.selectedMaterialRounds?.[mid]||Number(new URL(location.href).searchParams.get('material_round'));round=rounds.find(v=>v.number===number)||rounds.find(v=>v.members.some(m=>m.id===r.id))||rounds[0]}
   if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);url.searchParams.set('material_round',round.number);history.replaceState(null,'',url)}
   if(round&&round.plan&&detail.localPlans?.[round.plan.object_id]&&round.members.some(r=>r.id===detail.localPlans[round.plan.object_id].id))round={...round,plan:detail.localPlans[round.plan.object_id]};
-  const allCandidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===detail.componentId)||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||detail.review_context}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
+  const allCandidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===detail.componentId)||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||(row.id===r.id?detail.review_context:null)}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
   const candidateTarget=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target')||r.id,candidates=materialExactCandidates(detail,allCandidates,candidateTarget,round);
   renderMaterialCard(root,{need:round?.plan||null,identity:r,candidates,round,rounds,material_id:mid},{
     ...materialCandidateOptions(detail,candidates),
@@ -289,7 +304,7 @@ async function locateMaterialComment(comment){
     if(!current()||!selectCommentMaterialRound(detail,row,comment,materialId))return false;
     if(row.kind==='ASSET'&&(comment.anchor.component_id||comment.anchor.visual_id))detail.componentId=comment.anchor.component_id||comment.anchor.visual_id;
     if(row.kind==='REQUIREMENT'){detail.localPlans||={};detail.localPlans[row.object_id]=row}
-    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();locateProductionComment(comment,true);return true;
+    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();if(materialPlanCommentNeedsHistory(row,comment))await openMaterialPlanHistory(row,comment);else locateProductionComment(comment,true);return true;
   }catch(error){if(current())toast(error.message);return false}
   finally{if(materialCommentLocation===request)materialCommentLocation=null}
 }
@@ -307,6 +322,38 @@ function materialReferenceRequest(ref,source=false){
 function materialReferenceLink(parent,ref,title,source=false){
   const button=productionButton(parent,title,()=>openMaterialReference(ref,button,source));
   button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog');button.addEventListener('pointerdown',e=>e.stopPropagation());button.addEventListener('focusin',e=>e.stopPropagation());return button;
+}
+function materialPlanCommentNeedsHistory(row,comment){
+  if(row.kind!=='REQUIREMENT'||!row.payload.generation||comment.anchor.type!=='text')return false;
+  const block=productionTextBlocks(row).find(b=>b.id===comment.anchor.block_id);
+  return !!block&&/^generation\.(model|parameters|prompt|tool|inputs\.)/.test(block.field||'')&&!document.querySelector(`[data-production-blocks="${CSS.escape(row.id)}"] [data-block-id="${CSS.escape(block.id)}"]`);
+}
+async function openMaterialPlanHistory(row,comment=null){
+  const {dialog,body}=openReviewDialog('原方案 · '+row.payload.title,document.activeElement,'material-reference-dialog');
+  try{
+    const detail=await api('/api/production?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));if(!dialog.isConnected)return;
+    const session=referenceReviewSession(dialog,detail);dialog.reviewFocus=session.focus;
+    renderGenerationRecipe(body,detail.record);paintReviewCommentCounts();
+    if(comment){session.focus();state.selected=comment.id;const block=body.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`),surface=block?.closest('.review-surface')||body.querySelector('.review-surface');state.reviewCommentScope=reviewBlockScope(surface,'text');openPanel();renderComments();surface.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'})}
+  }catch(error){if(dialog.isConnected)nodeText('p','error',error.message,body)}
+}
+function referenceReviewSession(dialog,detail){
+  const fields=['productionSelected','productionDetail','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
+  const previous=Object.fromEntries(fields.map(key=>[key,state[key]])),panel=document.querySelector('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
+  const focus=()=>{
+    if(state.reviewReferenceContext?.dialog!==dialog){
+      for(const key of ['anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview'])state[key]=null;
+      state.previewExpanded=false;
+    }
+    state.reviewReferenceContext={dialog,record:detail.record};state.productionSelected=detail.record;state.productionDetail=detail;
+    if(panel.parentNode!==dialog)dialog.append(panel);
+  };
+  const locate=comment=>{focus();state.selected=comment.id;[...dialog.querySelectorAll('.review-media-player')].find(box=>box.dataset.reviewFile===comment.anchor.asset_file&&box.querySelector('[data-component-id]')?.dataset.componentId===comment.anchor.component_id)?.reviewLocate(comment.anchor);paintProductionReview();renderComments()};
+  dialog.addEventListener('close',()=>{
+    parent.insertBefore(panel,next?.parentNode===parent?next:null);Object.assign(state,previous);panel.hidden=hidden;
+    paintProductionReview();renderComments();panel.hidden=hidden;
+  },{once:true});
+  return {focus,locate};
 }
 async function openMaterialReference(ref,trigger,source=false){
   const request=materialReferenceRequest(ref,source);
@@ -327,20 +374,23 @@ async function openMaterialReference(ref,trigger,source=false){
     const row=detail.record,p=row.payload;body.replaceChildren();title.textContent=p.title+' · 版本 '+(materialRecordRound(row)||row.version);body.dataset.referenceRevision=row.id;
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
+      const session=components.some(c=>/^(audio|video)\//.test(c.mime))?referenceReviewSession(dialog,detail):null;
       if(!components.length)throw new Error('引用的文件组成不存在');
       for(const c of components){
         const url='/api/production/files/'+encodeURIComponent(c.file);
         if(c.mime.startsWith('image/')){const img=el('img');img.src=url;img.alt=p.title;img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+p.title);img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:p.title,alt:p.title},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
         else if(/^(audio|video)\//.test(c.mime)){
-          const media=el(c.mime.startsWith('audio/')?'audio':'video');media.controls=true;media.src=url;body.append(media);
-          if(ref.range){const {start_seconds:start,end_seconds:end}=ref.range;media.addEventListener('loadedmetadata',()=>{media.currentTime=start});media.addEventListener('timeupdate',()=>{if(media.currentTime>=end){media.pause();media.currentTime=start}});media.addEventListener('play',()=>{if(media.currentTime<start||media.currentTime>=end)media.currentTime=start});nodeText('p',null,`参考片段：${start}–${end} 秒`,body)}
+          reviewMediaPlayer(body,c,row,ref,true,session);
+          nodeText('p','production-meta',c.id+(ref.range?` · ${ref.range.start_seconds}–${ref.range.end_seconds} 秒`:''),body);
         }
         if(!c.mime.startsWith('audio/'))link('下载原文件',url,body);
       }
 
     }
     for(const b of (p.blocks||[]).filter(b=>!ref.block_ids?.length||ref.block_ids.includes(b.id)))nodeText('p','reference-text',b.text,body);
+    if(row.kind==='REQUIREMENT')nodeText('p','production-issue','此引用是尚未产出准确原件的素材需求',body);
     if(p.generation){nodeText('h3',null,'参数 · '+(p.generation.model||'模型未知'),body);nodeText('pre',null,row.review_parameter_text||JSON.stringify(p.generation.parameters,null,2),body);renderMaterialInputs(body,p.generation.inputs||[],row.review_input_records||[]);nodeText('h3',null,'提示词',body);nodeText('pre',null,p.generation.prompt,body)}
+    paintReviewCommentCounts();
   }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','error',error.message,body)}}
 }
 
