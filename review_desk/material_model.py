@@ -94,7 +94,11 @@ def projection(store,mid,number):
     sources={}
     for field in ('requirements','generation'):
         source=provenance.get(field)
-        if source:sources[field]=p.ref_record(store,source['record'])
+        if source:
+            exact=p.ref_record(store,source['record'])
+            inputs=exact['payload'].get('generation',{}).get('inputs',[]) if exact['kind']=='REQUIREMENT' else exact['payload'].get('inputs',[])
+            exact['review_input_records']=[p.ref_record(store,value.get('reference',value)) for value in inputs]
+            sources[field]=exact
     return {'canonical_material_id':storage.canonical_id(store,mid),'definition_id':row['definition_id'],
             'definition':storage.expand(store,row['definition_id']),'definition_provenance':provenance,
             'definition_gaps':gaps,'definition_records':{'requirement':sources.get('requirements'),
@@ -221,6 +225,7 @@ def migrate(store,document,validate_only=False,system_head=None,apply_archives=T
             if prior:
                 verify(store)
                 store.db.rollback();return {'already_applied':True,'id':document['id']}
+            storage.enable_constraints(store.db)
             for oid,head in document['expected_heads'].items():
                 actual=store.db.execute('SELECT current_revision FROM objects WHERE id=?',(oid,)).fetchone()
                 if not actual or actual[0]!=head:raise Conflict('relevant material head changed: '+oid)
@@ -337,7 +342,7 @@ def _verify(store):
             'aliases':store.db.execute('SELECT COUNT(*) FROM material_aliases').fetchone()[0]}
 
 
-def rollback(store,document,validate_only=False):
+def rollback(store,document,validate_only=False,require_legacy=False):
     """Undo only this exact delta; preserve unrelated subsequent business rows."""
     from contextlib import ExitStack
     from . import production as p,material_archives as archives
@@ -349,7 +354,13 @@ def rollback(store,document,validate_only=False):
         store._material_migrating=True
         try:
             if not store.db.execute('SELECT 1 FROM material_model_migrations WHERE id=?',(document['id'],)).fetchone():
-                store.db.rollback();return {'already_rolled_back':True,'id':document['id']}
+                if require_legacy:storage.cleanup_legacy_triggers(store.db)
+                if validate_only:store.db.rollback()
+                else:
+                    raw_model=store.db.execute("SELECT 1 FROM revisions WHERE json_type(payload,'$._material_fields') IS NOT NULL LIMIT 1").fetchone()
+                    if not raw_model and not store.db.execute('SELECT 1 FROM material_model_migrations LIMIT 1').fetchone():storage.cleanup_legacy_triggers(store.db)
+                    store.db.commit()
+                return {'already_rolled_back':True,'id':document['id']}
             for oid,head in document['expected_heads'].items():
                 current=store.db.execute('SELECT current_revision FROM objects WHERE id=?',(oid,)).fetchone()
                 if not current or current[0]!=head:raise Conflict('material changed after migration: '+oid)
@@ -393,8 +404,13 @@ def rollback(store,document,validate_only=False):
             for row in document['before_model_indices']['material_definition_versions']:
                 store.db.execute('INSERT INTO material_definition_versions VALUES (?,?,?,?,?)',tuple(row[k] for k in ('material_id','number','definition_id','provenance','gaps')))
             store.db.execute('DELETE FROM material_model_migrations WHERE id=?',(document['id'],))
+            if require_legacy:storage.cleanup_legacy_triggers(store.db)
             if validate_only:
                 store.db.rollback();return {'already_rolled_back':False,'validated_only':True,'id':document['id']}
+            # Retain model constraints for an originally encoded baseline; only
+            # the legacy raw representation permits the previous application.
+            raw_model=store.db.execute("SELECT 1 FROM revisions WHERE json_type(payload,'$._material_fields') IS NOT NULL LIMIT 1").fetchone()
+            if not raw_model and not store.db.execute('SELECT 1 FROM material_model_migrations LIMIT 1').fetchone():storage.cleanup_legacy_triggers(store.db)
             publish=files.enter_context(_staged_files(p.root_of(store),original_files))
             publish();store.db.commit()
             return {'already_rolled_back':False,'validated_only':False,'id':document['id']}
@@ -402,6 +418,21 @@ def rollback(store,document,validate_only=False):
             store.db.rollback();raise
         finally:
             store._material_migrating=False
+
+
+def prepare_legacy_runtime(db_path):
+    """Repair feature-only constructor DDL after an unsuccessful first migration."""
+    import sqlite3
+    from pathlib import Path
+    db=sqlite3.connect(Path(db_path).resolve().as_uri()+'?mode=rw',uri=True)
+    try:
+        db.execute('BEGIN IMMEDIATE')
+        removed=storage.cleanup_legacy_triggers(db)
+        db.commit()
+        return {'legacy_runtime_ready':True,'removed_material_triggers':removed}
+    except BaseException:
+        db.rollback();raise
+    finally:db.close()
 
 
 def refresh_identity(store,row):

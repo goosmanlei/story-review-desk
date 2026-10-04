@@ -56,9 +56,9 @@ python3 -m review_desk --instance PATH material-model-rollback migration.json --
 
 HTTP 对应 `GET /api/production/material-model-map`、`GET /api/production/material-model-verify`、`POST /api/production/material-model-migrate` 和 `POST /api/production/material-model-rollback`；POST 使用 `{migration:完整迁移文档,validate_only:布尔}`，migrate 另接受 `defer_archives`。
 
-Python `migration_plan(store, system_head=None, archive_paths=())` 生成准确增量；`migrate(store, document, validate_only=False, system_head=None, apply_archives=True)`、`rollback(store, document, validate_only=False)` 和 `verify(store)` 操作已有实例。可审阅发布包 `material-model-package-v1` 只包含内容节点 ID，并以相对路径和 SHA-256 绑定唯一内容图；`load_migration(path, content_path=None)` 校验后恢复完整迁移文档。
+Python `migration_plan(store, system_head=None, archive_paths=())` 生成准确增量；`migrate(store, document, validate_only=False, system_head=None, apply_archives=True)`、`rollback(store, document, validate_only=False, require_legacy=False)` 和 `verify(store)` 操作已有实例。可审阅发布包 `material-model-package-v1` 只包含内容节点 ID，并以相对路径和 SHA-256 绑定唯一内容图；`load_migration(path, content_path=None)` 校验后恢复完整迁移文档。
 
-迁移在独立副本准备与预演，正式发布依实例授权顺序执行。数据库改写同一事务，重复执行校验模型后返回已应用；相关头、版本索引或归档改变则整批回滚。无关新增对象、评论与采用得到保留。专用回滚只撤销准确增量；相关内容已继续修改时拒绝覆盖，不能用旧副本替换活库。文件采用暂存替换和异常恢复，数据库与文件不构成跨介质断电事务；正式切换使用延迟归档和发布编排处理这一边界。
+迁移在独立副本准备与预演，正式发布依实例授权顺序执行。数据库改写同一事务，重复执行校验模型后返回已应用；相关头、版本索引或归档改变则整批回滚。无关新增对象、评论与采用得到保留。专用回滚只撤销准确增量；相关内容已继续修改时拒绝覆盖，不能用旧副本替换活库。 正式旧镜像恢复使用 `require_legacy=True`，在逆向事务提交前拒绝仍含新编码素材的数据库，保留并发数据供向前恢复。回到原始 JSON 基线时同时移除本功能依赖新读取器的数据库触发器，保留其他触发器。若首次打开数据库后、迁移前即失败，可用 `prepare_legacy_runtime(db_path)` 清理这六个功能触发器；它只允许无已应用迁移且无引用载荷的数据库，否则拒绝启动旧读取器并要求向前恢复。文件采用暂存替换和异常恢复，数据库与文件不构成跨介质断电事务；正式切换使用延迟归档和发布编排处理这一边界。
 
 ## 验证入口
 

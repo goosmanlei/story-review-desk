@@ -21,7 +21,7 @@ const ready=(scope,count=1)=>({scope:record(scope,'EPISODE'),required_count:coun
 function fixture(){
   const host=new Node('main'),episodes=[record('episode-A','EPISODE'),record('episode-B','EPISODE')],records=episodes.flatMap(e=>['a','b'].map(letter=>record(e.object_id+'-prep-'+letter,'PREPARATION',{source:{object_id:e.object_id,revision_id:e.id,scene_id:'scene-'+letter}})));
   const messages=[],requests=[],reads=[],posts=[];
-  const context={state:{workspace:'production.workspace',screenplays:[{episodes}]},URL,URLSearchParams,location:{href:'http://fixture/?workspace=production.workspace'},document:{querySelectorAll:()=>[]},isProduction:()=>true,renderComments(){},toast:text=>messages.push(text),el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,cls);n.textContent=text;parent.append(n);return n},crypto:require('node:crypto').webcrypto};
+  const context={state:{workspace:'production.workspace',screenplays:[{episodes}]},URL,URLSearchParams,location:{href:'http://fixture/?workspace=production.workspace'},document:{querySelectorAll:()=>[],createElementNS:(namespace,tag)=>Object.assign(new Node(tag),{namespaceURI:namespace})},isProduction:()=>true,renderComments(){},toast:text=>messages.push(text),el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,cls);n.textContent=text;parent.append(n);return n},crypto:require('node:crypto').webcrypto};
   context.api=async(url,options)=>{
     if(options?.method==='POST')posts.push(JSON.parse(options.body));
     if(url==='/api/production')return {records};
@@ -32,7 +32,7 @@ function fixture(){
   context.$=selector=>selector==='#production-view'?host:host.all().find(n=>n.id===selector.slice(1));
   context.history={replaceState(_state,_title,url){context.location.href=String(url)}};
   context.Option=function(text,value){const n=new Node('option');n.textContent=text;n.value=value;return n};
-  vm.createContext(context);vm.runInContext(source,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);
   context.renderProductionReader=()=>{const root=context.$('#production-reader');root.replaceChildren();context.nodeText('p',null,context.state.productionSelected.object_id,root)};
   context.productionRefLink=()=>{};
   const byLabel=label=>host.all().find(n=>n.attrs['aria-label']===label),button=(label,root=host)=>root.all().find(n=>n.tag==='button'&&n.textContent===label),text=root=>root.all().map(n=>n.textContent||'').join('\n');

@@ -56,4 +56,13 @@ def production_text_blocks(payload):
         if isinstance(text,str) and text.strip() and text not in body and text not in seen:
             seen.add(text)
             blocks.append({'id':prefix+field.replace('.', '/'), 'text':text, 'field':field})
+    if payload.get('format') == 'production-shot-design-v1':
+        for index, item in enumerate(payload.get('sound') or []):
+            if isinstance(item, dict) and item.get('type') == 'source_action':
+                continue
+            name = 'text' if isinstance(item, str) or isinstance(item, dict) and item.get('text') else 'description'
+            text = item if isinstance(item, str) else item.get(name) if isinstance(item, dict) else None
+            if isinstance(text, str) and text.strip():
+                field = f'sound.{index}.{name}'
+                blocks.append({'id': prefix + field.replace('.', '/'), 'text': text, 'field': field})
     return blocks

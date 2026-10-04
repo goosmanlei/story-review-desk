@@ -115,3 +115,41 @@ class MaterialModelTest(unittest.TestCase):
             self.assertEqual(archives.read_bytes(dest/'production/requests/nested.json'),raw)
             self.assertEqual(storage.dump(other),storage.dump(self.store))
         finally:other.close()
+
+    def test_raw_legacy_rollback_removes_only_feature_triggers(self):
+        # A legacy baseline has no reference-encoded revisions or definition rows.
+        doc=model.migration_plan(self.store)
+        with self.store.db:self.store.db.execute('CREATE TRIGGER unrelated_audit AFTER INSERT ON objects BEGIN SELECT 1; END')
+        model.migrate(self.store,doc,apply_archives=False)
+        model.rollback(self.store,doc)
+        import sqlite3
+        raw=sqlite3.connect(self.store.db_path)
+        try:
+            names={r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+            self.assertIn('unrelated_audit',names);self.assertFalse(names&set(storage.TRIGGERS))
+            # No application UDF is registered on this old-writer connection.
+            with raw:raw.execute("INSERT INTO objects VALUES ('old-writer','ENTITY','old-revision',1,'then','then')");raw.execute("INSERT INTO revisions VALUES ('old-revision','old-writer',1,'{}','then')")
+        finally:raw.close()
+
+    def test_constructor_failure_cleans_feature_triggers_before_old_runtime(self):
+        from unittest.mock import patch
+        import sqlite3
+        target=self.root/'constructor-failure/review.sqlite3'
+        with patch('review_desk.material_storage.row_factory',side_effect=RuntimeError('injected codec startup failure')):
+            with self.assertRaisesRegex(RuntimeError,'injected'):Store(target)
+        raw=sqlite3.connect(target)
+        try:
+            names={r[0] for r in raw.execute("SELECT name FROM sqlite_master WHERE type='trigger'")}
+            self.assertFalse(names&set(storage.TRIGGERS))
+            with raw:raw.execute("INSERT INTO objects VALUES ('old-writer','ENTITY','old-revision',1,'then','then')");raw.execute("INSERT INTO revisions VALUES ('old-revision','old-writer',1,'{}','then')")
+        finally:raw.close()
+
+    def test_legacy_recovery_refuses_concurrent_encoded_material_without_partial_inverse(self):
+        doc=model.migration_plan(self.store);model.migrate(self.store,doc,apply_archives=False)
+        self.setup_plans()
+        before=self.store.revisions();indices=plans.dump(self.store);content=storage.dump(self.store)
+        with self.assertRaisesRegex(ValueError,'referenced material revisions'):
+            model.rollback(self.store,doc,require_legacy=True)
+        self.assertEqual(self.store.revisions(),before)
+        self.assertEqual(plans.dump(self.store),indices)
+        self.assertEqual(storage.dump(self.store),content)

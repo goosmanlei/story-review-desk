@@ -12,7 +12,7 @@ function setup(read){
  const records=[entity,form,second,submission],data={entity,states:[second,form],media:[],comment_targets:[entity,form,second].map(ref)};
  const ctx={state:{workspace:'settings.workspace',productionRecords:records,comments:[]},URL,URLSearchParams,location:{href:'http://local/?workspace=settings.workspace'},document:{querySelectorAll:()=>[]},api:read||(async()=>data),isProduction:()=>true,renderComments:()=>{}};
  ctx.history={replaceState:(_s,_t,url)=>{ctx.location.href=String(url)}};
- vm.createContext(ctx);vm.runInContext(code,ctx);ctx.renderProductionReader=()=>{};ctx.paintProductionReview=()=>{};
+ vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);vm.runInContext(code,ctx);ctx.renderProductionReader=()=>{};ctx.paintProductionReview=()=>{};
  for(const name of ['entityReviewStateMedia','entityReviewUnassignedMedia','entityReviewMediaCount'])ctx[name]=vm.runInContext(name,ctx);
  return {ctx,data};
 }

@@ -20,7 +20,7 @@ const ref=r=>({object_id:r.object_id,revision_id:r.id});
 function setup(){
   const ctx={URL,URLSearchParams,CSS:{escape:x=>x},console,setTimeout:()=>1,clearTimeout(){},location:{href:'http://isolated/?workspace=settings.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:()=>null,querySelectorAll:()=>[],createElement:tag=>new Element(tag),createElementNS:(_ns,tag)=>new Element(tag)}};
   ctx.Option=function(text,value){const e=new Element('option');e.textContent=text;e.value=value;return e};
-  vm.createContext(ctx);
+  vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);
   for(const name of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
   vm.runInContext('globalThis.state=state',ctx);ctx.state.workspace='settings.workspace';
   for(const fn of ['renderProductionReader','renderComments','paintProductionReview'])ctx[fn]=()=>{};

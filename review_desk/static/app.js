@@ -227,11 +227,20 @@ function renderWorkspaceNav(){
     const button=el('button','workspace-button'+(selected?' active':'')+(active?'':' planned'));button.type='button';
     button.setAttribute('aria-current',selected?'page':'false');
     nodeText('span','nav-index',index,button);const labels=el('span','nav-labels');nodeText('b',null,title,labels);nodeText('small',null,active?description:`${description} · 待开放`,labels);button.append(labels);
-    button.onclick=()=>switchWorkspace(id);nav.append(button);
+    button.onclick=()=>typeof navigateWorkspace==='function'?navigateWorkspace(id):switchWorkspace(id);nav.append(button);
   }
 }
 
+function storyDraftMetaKey(){
+  if(!['story.sources','story.outline'].includes(state.workspace))return null;
+  const ref=isStructure()?state.structureRevision:state.current?.target_revision_id;if(!ref)return null;
+  return 'review-story-editor:'+JSON.stringify([state.workspace,ref]);
+}
+function rememberStoryDraft(){const key=storyDraftMetaKey();if(!key||!state.anchor)return;try{localStorage.setItem(key,JSON.stringify({anchor:state.anchor,editing:state.editing,selected:state.selected,target:commentTarget()}))}catch{toast('本机草稿定位信息保存失败，当前输入仍保留。')}}
+function restoreStoryDraft(){const key=storyDraftMetaKey();if(!key||state.anchor)return;try{const saved=JSON.parse(localStorage.getItem(key)||'null');if(saved?.anchor&&JSON.stringify(saved.target)===JSON.stringify(commentTarget())&&(!saved.editing||state.comments.some(c=>c.id===saved.editing&&c.target_revision_id===saved.target.target_revision_id))){state.anchor=saved.anchor;state.editing=saved.editing||null;state.selected=saved.selected||null}}catch{}}
+function forgetStoryDraft(){const key=storyDraftMetaKey();if(key)localStorage.removeItem(key)}
 function switchWorkspace(id,updateUrl=true){
+  rememberStoryDraft();if(isScript())rememberScriptDraft();
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   hideSelectionAction();
@@ -240,22 +249,24 @@ function switchWorkspace(id,updateUrl=true){
   if(state.workspace!==id)cancelSourceChapterRestore();
   const previous=state.workspace,storyChild=['story.sources','story.outline','story.script'].includes(id);
   if(state.workspace!==id){state.reviewCommentScope=null;getSelection()?.removeAllRanges();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null}
-  state.workspace=id;renderWorkspaceNav();const source=id==='story.sources';
+  if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute();
+  state.workspace=id;
+  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);if(id==='story.outline'){const revision=resolveStructureRevision(state.structureRevision);if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision')}url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
+  if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
+  renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
   $('#story-workspace').hidden=!source;$('#screenplay-workspace').hidden=id!=='story.script';$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#approach-view').hidden=id!=='production.approach';
   $('#placeholder-view').hidden=storyChild||isProduction()||id==='project.configuration'||id==='production.approach';
   $('#production-view').hidden=!isProduction();
-  for(const [tab,selected] of [['#open-story-sources',source],['#open-story-structure',id==='story.outline'],['#open-story-script',id==='story.script']]){
-    const button=$(tab);button.classList.toggle('active',selected);button.setAttribute('aria-selected',String(selected));
-  }
   $('#comments-toggle').hidden=!storyChild&&!isProduction();closePanel();
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['制作设定','设'],'materials.workspace':['制作设定','设'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
-  if(id==='project.configuration')renderConfigurations();if(id==='production.approach')renderApproach();if(id==='story.outline'){renderStructureReader();renderComments()}
-  if(source){renderComments();scheduleSourceChapter()}
+  if(id==='project.configuration')renderConfigurations({preserve:true});if(id==='production.approach')Promise.resolve(renderApproach()).then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});if(id==='story.outline'){restoreStoryDraft();renderStructureReader();renderComments()}
+  if(source){restoreStoryDraft();renderDocument();renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
-  if(isProduction())loadProductionWorkspace().catch(e=>toast(e.message));else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
-  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);if(id==='story.outline'){const revision=resolveStructureRevision(state.structureRevision);if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision')}url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
+  if(isProduction())loadProductionWorkspace().then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>toast(e.message));else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
+
+  if(!isProduction()&&id!=='production.approach'&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition();
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
 }
 
@@ -271,18 +282,27 @@ function renderPlaceholder(id){
 
 function applyFavicon(){const previous=$("#site-favicon"),icon=state.configurations.favicon;if(previous&&icon){const link=document.createElement("link");link.id="site-favicon";link.rel="icon";link.type=icon.mime;link.href=icon.url;previous.replaceWith(link)}}
 
-function renderConfigurations(){
-  const root=$('#configuration-view');root.replaceChildren();
+function configurationDraft(scope,value){
+  if(typeof sessionStorage==='undefined')return null;
+  const key='review-configuration-draft:'+scope;
+  try{
+    if(value===undefined)return JSON.parse(sessionStorage.getItem(key)||'null');
+    if(value===null)sessionStorage.removeItem(key);else sessionStorage.setItem(key,JSON.stringify(value));
+  }catch{if(value!==undefined)toast('当前配置输入仍保留在页面中；本机会话保存失败，刷新后可能无法恢复。')}
+  return null;
+}
+function showConfigurationSection(){
+  for(const section of $('#configuration-view').querySelectorAll('[data-config-section]'))section.hidden=section.dataset.configSection!==state.configSection;
+}
+function renderConfigurations({preserve=false}={}){
+  const root=$('#configuration-view');
+  if(typeof configurationSectionFromRoute==='function')state.configSection=configurationSectionFromRoute();
+  if(preserve&&root.configurationMounted){showConfigurationSection();return}
+  root.replaceChildren();root.configurationMounted=true;
   const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
   nodeText('p',null,'当前故事实例 · 系统与故事项目配置',header);root.append(header);
-  const layout=el('div','configuration-layout'),sections=el('nav','configuration-sections');sections.setAttribute('aria-label','系统配置分组');
-  const article=el('article','config-page');
-  const showSection=()=>{for(const section of article.querySelectorAll('[data-config-section]'))section.hidden=section.dataset.configSection!==state.configSection;
-    for(const button of sections.querySelectorAll('button'))button.classList.toggle('active',button.dataset.section===state.configSection)};
-  for(const [id,label] of [['PROJECT','故事项目'],['SYSTEM','系统与 AI']]){
-    const button=nodeText('button',null,label,sections);button.type='button';button.dataset.section=id;button.onclick=()=>{state.configSection=id;showSection()};
-  }
-  layout.append(sections,article);root.append(layout);
+  const layout=el('div','configuration-layout configuration-layout-unified'),article=el('article','config-page');
+  layout.append(article);root.append(layout);
   const data=state.configurations;
   const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
   const same=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
@@ -293,7 +313,7 @@ function renderConfigurations(){
     const favicon=snapshot.values.SYSTEM.version===values.SYSTEM.version?snapshot:current;
     state.configurations={...current,...snapshot,values,favicon:favicon.favicon,favicon_assets:favicon.favicon_assets,favicon_error:favicon.favicon_error};
   };
-  for(const scope of ['SYSTEM','PROJECT']){let record=data.values[scope];const section=el('section','config-section');
+  for(const scope of ['SYSTEM','PROJECT']){const draft=configurationDraft(scope);let record=draft?.base?.scope===scope&&Number.isInteger(draft.base.version)&&draft.base.body?draft.base:data.values[scope];const initialBody={...record.body,...(draft?.updates||{})};const section=el('section','config-section');
     section.dataset.configSection=scope;
     nodeText('h2','section-title',scope==='SYSTEM'?'系统与 AI 配置':'故事项目配置',section);
     nodeText('p','config-explanation',scope==='SYSTEM'?'系统功能和 AI 能力的通用选项，随版本演进。':'当前故事实例的创作阶段与背景，仅影响本实例。',section);
@@ -304,17 +324,17 @@ function renderConfigurations(){
       const row=el('div','config-choice-row');for(const choice of choices){const label=el('label','config-choice');const input=el('input');input.type='radio';input.name=key;input.value=choice;input.checked=choice===selected;label.append(input,el('span',null,choice==='off'?'不适用':choice));row.append(label)}group.append(row)};
     for(const [key,spec] of Object.entries(fields)){
       if(spec.type==='model'||spec.type==='reasoning_effort'){const group=el('fieldset','config-choice-field');
-        radioChoices(group,key,spec.type==='model'?Object.keys(effortOptions):effortOptions[record.body.ai_polish_model],record.body[key]);
+        radioChoices(group,key,spec.type==='model'?Object.keys(effortOptions):effortOptions[initialBody.ai_polish_model]||[],initialBody[key]);
         if(spec.type==='model')group.addEventListener('change',()=>{const model=form.elements.ai_polish_model.value,allowed=effortOptions[model];const current=form.elements.ai_polish_effort.value;radioChoices(effortGroup,'ai_polish_effort',allowed,allowed.includes(current)?current:allowed.includes('medium')?'medium':allowed[0])});
         else effortGroup=group;form.append(group);continue}
       const label=el('label','config-field');nodeText('span',null,spec.label,label);
       let input;if(spec.type==='favicon'){
         input=el('select');const empty=el('option',null,'默认审阅台图标');empty.value='';input.append(empty);
         for(const name of data.favicon_assets||[]){const option=el('option',null,name);option.value=name;input.append(option)}
-        if(record.body[key]&&!Array.from(input.options).some(option=>option.value===record.body[key])){const option=el('option',null,`${record.body[key]}（不可用）`);option.value=record.body[key];input.append(option)}
-        input.value=record.body[key];
+        if(initialBody[key]&&!Array.from(input.options).some(option=>option.value===initialBody[key])){const option=el('option',null,`${initialBody[key]}（不可用）`);option.value=initialBody[key];input.append(option)}
+        input.value=initialBody[key];
         const preview=el('img');preview.width=32;preview.height=32;preview.alt='站点图标预览';
-        let unavailableFile=data.favicon_error?record.body[key]:'',errorStatus;
+        let unavailableFile=data.favicon_error?initialBody[key]:'',errorStatus;
         const show=()=>{preview.src=input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg'};show();input.onchange=show;
         const file=el('input');file.type='file';file.accept='.svg,.png,.ico';file.setAttribute('aria-label','上传站点图标');
         file.onchange=async()=>{const selected=file.files[0];if(!selected)return;if(selected.size>256*1024){toast('图标须在 256 KiB 以内');file.value='';return}uploading++;updateSave();
@@ -327,18 +347,21 @@ function renderConfigurations(){
         if(data.favicon_error){errorStatus=nodeText('small',null,'当前图标不可用，暂用默认图标。请选择其他图标或清空后保存。',label);errorStatus.setAttribute('role','status')}
         nodeText('small',null,'上传 SVG、PNG 或 PNG 编码的 ICO，至多 256 KiB。选择或清空后点保存配置。',label);
       }
-      else if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=record.body[key]}
-      else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=record.body[key]}
-      else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=record.body[key]}
+      else if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=initialBody[key]}
+      else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=initialBody[key]}
+      else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=initialBody[key]}
       if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
       input.name=key;input.setAttribute('aria-label',spec.label);label.append(input);form.append(label)}
     const save=nodeText('button','primary','保存配置',form);save.type='submit';
     const notice=nodeText('p','config-explanation','',form);notice.hidden=true;notice.setAttribute('role','status');
-    let saving=false,pendingRequest=null,confirmedBody=null;
+    let saving=false,pendingRequest=draft?.pendingRequest||null,confirmedBody=null;
     const ownsForm=()=>form.isConnected&&state.workspace==='project.configuration';
+    const rawValues=()=>Object.fromEntries(Object.keys(fields).map(key=>[key,String(form.elements[key].value)]));
+    const rawBody=body=>Object.fromEntries(Object.keys(fields).map(key=>[key,String(body[key])]));
     const inputValues=()=>Object.fromEntries(Object.entries(fields).map(([key,spec])=>[key,spec.type==='integer'?Number(form.elements[key].value):form.elements[key].value]));
     const savedValues=()=>confirmedBody&&Object.fromEntries(Object.keys(fields).map(key=>[key,confirmedBody[key]]));
-    const updateSave=()=>{save.disabled=saving||uploading>0||!!confirmedBody&&same(inputValues(),savedValues())};
+    const persistDraft=()=>{const updates=rawValues();configurationDraft(scope,!pendingRequest&&same(updates,rawBody(record.body))?null:{base:record,updates,pendingRequest})};
+    const updateSave=()=>{save.disabled=saving||uploading>0||!!confirmedBody&&same(rawValues(),rawBody(confirmedBody));persistDraft()};
     form.addEventListener('input',updateSave);form.addEventListener('change',updateSave);
     const message=text=>{if(ownsForm()){notice.hidden=false;notice.textContent=text;toast(text)}};
     const readAttempt=async request=>{
@@ -350,6 +373,7 @@ function renderConfigurations(){
     };
     form.onsubmit=async event=>{
       event.preventDefault();if(saving||save.disabled||!ownsForm())return;
+      if(Object.entries(fields).some(([key,spec])=>spec.type==='integer'&&!String(form.elements[key].value).trim()))return message('请填写数值，当前输入已保留');
       const updates=inputValues();saving=true;notice.hidden=true;updateSave();let committed=null,snapshot=null;
       try{
         if(pendingRequest){
@@ -359,7 +383,7 @@ function renderConfigurations(){
         }
         if(!committed){
           if(!pendingRequest||!same(updates,pendingRequest.updates))pendingRequest=JSON.parse(JSON.stringify({expected_version:record.version,updates,before:record.body,body:{...record.body,...updates}}));
-          snapshot=null;
+          snapshot=null;persistDraft();
           try{committed=await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:pendingRequest.expected_version,updates:pendingRequest.updates})})}
           catch(error){
             if(!ownsForm())return;
@@ -374,15 +398,15 @@ function renderConfigurations(){
         }
         rememberRecord(scope,committed);pendingRequest=null;
         const name=scope==='PROJECT'?'故事项目配置':'系统与 AI 配置';
-        if(ownsForm()){record=committed;confirmedBody=committed.body;versionNote.textContent=`配置版本 ${record.version} · Schema ${record.schema_version}`}
+        if(form.isConnected){record=committed;confirmedBody=committed.body;versionNote.textContent=`配置版本 ${record.version} · Schema ${record.schema_version}`}
         toast(`${name}已保存${ownsForm()&&!same(inputValues(),savedValues())?'；当前新输入尚未保存':''}`);
         try{snapshot||=await api('/api/configurations');rememberSnapshot(snapshot);applyFavicon()}
         catch(error){message(`${name}已保存；最新配置与图标暂未刷新：${error.message}。当前输入已保留。`)}
       }catch(error){message(error.message)}
-      finally{saving=false;if(ownsForm())updateSave()}
+      finally{saving=false;if(form.isConnected)updateSave()}
     };
     section.append(form);article.append(section)}
-  showSection()
+  showConfigurationSection()
 }
 
 function blockMarks(source,block,index){
@@ -456,13 +480,14 @@ function renderDocument(){
 }
 
 function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
-  cancelSourceChapterRestore();
-  state.reviewCommentScope=null;state.current=state.sources.find(s=>s.id===id)||state.sources[0];state.anchor=null;state.editing=null;state.selected=null;state.pending=null;state.sourceChapter=null;
+  const active=state.workspace==='story.sources';
+  if(active){rememberStoryDraft();cancelSourceChapterRestore();state.reviewCommentScope=null;state.anchor=null;state.editing=null;state.selected=null;state.pending=null;state.sourceChapter=null}
+  state.current=state.sources.find(s=>s.id===id)||state.sources[0];
   if(expandGroup&&state.current?.group)state.expandedGroups.add(state.current.group);
   if(sourceChapters(state.current).length)state.expandedSources.add(state.current.id);
-  $('#selection-action').hidden=true;
+  if(active)$('#selection-action').hidden=true;
   if(updateUrl&&state.current){const url=new URL(location.href);url.searchParams.set('source',state.current.id);url.searchParams.delete('source_chapter');history.replaceState(history.state,'',url);sourceChapterRouteKey=sourceReadingRoute(url).key}
-  renderSources();renderDocument();renderComments();if(!keepScroll)$('#source-view').scrollTop=0;
+  if(active)restoreStoryDraft();renderSources();renderDocument();if(active)renderComments();if(!keepScroll)$('#source-view').scrollTop=0;
 }
 
 function offsetIn(block,node,offset){const range=document.createRange();range.selectNodeContents(block);range.setEnd(node,offset);return chars(range.toString()).length}
@@ -578,10 +603,10 @@ function toggleCommentsFromReader(){
   }
 }
 let commentAction=0;
-function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){
   const key=draftKey();
-  try{if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}}
+  try{if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}forgetStoryDraft()}
   catch{toast('本机草稿未能完全清除，取消未完成。当前输入仍保留，请复制留存后重试。');return}
   if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)
 }
@@ -696,6 +721,7 @@ async function saveComment(){
   const textarea=$('#comment-editor-text'),key=draftKey();
   if(!key||!textarea||textarea.disabled||textarea.readOnly||commentSaves.has(key))return;
   const text=textarea.value.trim();if(!text)return toast('请先填写修改意见');
+  const editorMetaKey=isScript()?scriptDraftMetaKey(scriptEpisode()):storyDraftMetaKey();
   const editing=state.editing,draftText=textarea.value,payload={...commentTarget(),anchor:state.anchor,body:text};
   if(!editing&&typeof materialCommentContext==='function'){const context=materialCommentContext();if(context)payload.material_context=context}
   if(!editing&&$('#material-revision-intent')?.checked){const intent=commentRevisionIntent();if(intent)payload.material_revision=intent}
@@ -724,9 +750,11 @@ async function saveComment(){
     const sameSubmission=localStorage.getItem(key+':submission')===storedSubmission,storedDraft=localStorage.getItem(key);
     const ownDraft=sameSubmission&&(storedDraft===draftText||storedDraft===null);
     const stillHere=ownDraft&&draftKey()===key&&$('#comment-editor-text')?.value===draftText;
-    if(ownDraft){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}
+    if(ownDraft){
+      if(editorMetaKey){const meta=JSON.parse(localStorage.getItem(editorMetaKey)||'null');if(meta&&JSON.stringify(meta.anchor)===JSON.stringify(payload.anchor)&&(meta.editing||null)===(editing||null))localStorage.removeItem(editorMetaKey)}
+      localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}
     cleaned=true;
-    if(stillHere){if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments()}
+    if(stillHere){if(isScript())forgetScriptDraft();forgetStoryDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments()}
     if(stillHere&&payload.material_revision){const url=new URL(location.href);url.searchParams.delete('material_round');history.replaceState(history.state,'',url);if(isEntityReview())await reloadEntityReview();else if(isMaterialReview())await openProductionRecord(state.materialReview.record.object_id)}
     await refreshComments();toast('评论已保存');
   }catch(error){
@@ -808,7 +836,6 @@ async function init(){try{
   });
   $('#brand-home').onclick=()=>location.assign('/');
   $('#screenplay-comments').onclick=togglePanel;
-  $('#open-story-script').onclick=()=>switchWorkspace('story.script');
   $('#comments-toggle').onclick=toggleCommentsFromReader;$('#comments-close').onclick=closePanel;
   document.addEventListener('keydown',event=>{
     const panel=$('#comment-panel');if(event.key!=='Escape'||panel.hidden)return;

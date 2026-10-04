@@ -21,7 +21,7 @@ function setup(options={}){
     el:tag=>new Element(tag),Option:function(text,value){const option=new Element('option');option.textContent=text;option.value=value;return option},
     nodeText:(tag,cls,text,parent)=>{const node=new Element(tag);node.textContent=text;parent.append(node);return node},toast:message=>messages.push(message),
     api:(url,options)=>{if(options?.method==='POST'){posts.push(JSON.parse(options.body));return Promise.resolve({})}return new Promise((resolve,reject)=>requests.push({url,resolve,reject}))}};
-  vm.createContext(context);vm.runInContext(source,context);context.loadProductionWorkspace=async()=>{context.reloads++};context.reloads=0;
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);context.loadProductionWorkspace=async()=>{context.reloads++};context.reloads=0;
   const row={requirement:{payload:{title:'Input',media_type:'video',scope:{object_id:'shot',revision_id:'shot-exact'},slot:'main',usage:'generation_input'}},adoption:options.adoption===undefined?{object_id:'existing-adoption',version:3}:options.adoption};
   const open=()=>{context.showProductionAdoption(root,row);const box=root.children.at(-1);return {box,field:label=>box.all().find(node=>node.attrs['aria-label']===label),button:label=>box.all().find(node=>node.tag==='button'&&node.textContent===label)}};
   const choose=(form,id)=>{form.field('选择素材').value=id;return form.field('选择素材').onchange()};

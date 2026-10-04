@@ -6,7 +6,7 @@
 .production-filter-chip[aria-pressed=true]{border-color:#8f3930;background:#f7ece5;color:#81382f}.production-filter-chip[aria-pressed=true] .production-filter-count{background:#903d34;color:white}
 .production-board.entity-review-board,.production-board.unified-management{grid-template-columns:240px minmax(0,1fr);gap:18px;align-items:start}
 .production-reader.unified-card-host{padding:0;border:1px solid var(--desk-line);border-radius:0;background:#f8f4e9;min-width:0}
-.unified-card{display:grid;grid-template-columns:minmax(240px,.8fr) minmax(320px,1.3fr);min-width:0;align-items:start}
+.unified-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));min-width:0;align-items:start}
 .unified-card-context,.unified-card-material{min-width:0;padding:20px;overflow-wrap:anywhere}
 .unified-card-context{border-right:1px solid var(--desk-line)}
 .unified-card-material{background:#fcfaf4;position:sticky;top:80px;max-height:calc(100dvh - 100px);overflow:auto;overscroll-behavior:contain}
@@ -37,8 +37,8 @@
 .breakdown-shot-materials .material-small-card,.breakdown-shared-group .material-small-card{margin:8px 0}
 .breakdown-levels{border:0;padding:0 0 12px;display:flex;gap:14px;flex-wrap:wrap;position:sticky;top:0;background:#fffdf7;z-index:1}.breakdown-levels legend{font-size:13px;font-weight:600;margin-bottom:8px}.breakdown-levels label{display:flex;align-items:center;gap:4px;font-size:13px}
 .breakdown-shared-group{margin:12px 0 20px}.shot-generation-prompt{font-family:inherit;font-size:14px;line-height:1.8;white-space:pre-wrap;overflow-wrap:anywhere}.prompt-reference{color:#8f3930;text-decoration:underline;cursor:pointer}
-@media(min-width:1850px){.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:350px minmax(0,1fr)}.entity-small-list,.material-index>.material-small-list{grid-template-columns:repeat(2,minmax(0,1fr))}.entity-small-card .production-entity-avatar{width:30px;height:30px}}
-@media(max-width:1250px){.unified-card{grid-template-columns:minmax(210px,.85fr) minmax(260px,1.2fr)}.unified-card-context,.unified-card-material{padding:14px}.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:190px minmax(0,1fr);gap:10px}.breakdown-scene-layout{grid-template-columns:195px minmax(0,1fr)}.breakdown-row{gap:12px;grid-template-columns:minmax(0,1fr) minmax(200px,.8fr);padding:14px 10px}}
+@media(min-width:1850px){.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:350px minmax(0,1fr)}.entity-small-list,.material-index>.material-small-list{grid-template-columns:1fr}.entity-small-card .production-entity-avatar{width:30px;height:30px}}
+@media(max-width:1250px){.unified-card{grid-template-columns:repeat(2,minmax(0,1fr))}.unified-card-context,.unified-card-material{padding:14px}.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:190px minmax(0,1fr);gap:10px}.breakdown-scene-layout{grid-template-columns:195px minmax(0,1fr)}.breakdown-row{gap:12px;grid-template-columns:minmax(0,1fr) minmax(200px,.8fr);padding:14px 10px}}
 @media(max-width:1050px){.unified-card{grid-template-columns:1fr}.unified-card-context{border-right:0;border-bottom:1px solid var(--desk-line)}.unified-card-material{position:static;max-height:none;overflow:visible}.production-board.entity-review-board .production-index{position:sticky;top:80px;max-height:75dvh}.breakdown-row{grid-template-columns:1fr}.breakdown-shot-materials{border-top:1px solid var(--desk-line);padding-top:15px}}
 @media(max-width:700px){.production-tabs{margin-bottom:16px}.production-board.entity-review-board,.production-board.unified-management{display:block}.production-index,.production-board.entity-review-board .production-index{position:static;max-height:260px;overflow:auto;margin-bottom:14px}.production-toolbar input[type=search]{min-width:0;width:100%}.production-filter-group{display:block}.production-filter-options{gap:6px}.unified-card-dialog{width:98vw;max-width:98vw}.unified-card-dialog .unified-card-material{max-height:none}.unified-card-context,.unified-card-material{padding:12px}.unified-card{display:block}.breakdown-scene-layout{display:block;height:auto;min-height:0;position:static}.breakdown-scene-list{max-height:210px}.breakdown-scenes>header{padding:12px}.breakdown-body{overflow:visible;max-height:none}.breakdown-scene{padding-inline:7px}.breakdown-scene>.text-reader-head{margin-inline:-7px;padding:14px}.breakdown-row{display:block;padding:12px 8px}.breakdown-shot-materials{margin-top:18px}.breakdown-levels{position:static}.breakdown-episode-tabs .source-button{flex-basis:145px}.material-small-preview{flex-basis:50px;width:50px;height:45px}}
 
@@ -52,3 +52,34 @@
   #story-workspace .text-reader-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
 }
 @media(max-width:700px){#story-creation-shell:has(>#story-workspace:not([hidden])){padding-bottom:0}}
+
+/* Shared compact cards and clearly separated reading regions. */
+.material-small-card{padding:7px 9px!important;gap:9px;min-height:56px;border-radius:0!important}
+.material-small-preview{flex-basis:44px;width:44px;height:42px}
+.material-small-copy{flex:1}.material-small-copy strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.material-small-copy small{margin-top:2px}
+.unified-card-context>.entity-review-basics,.unified-card-context>.entity-relations,.unified-card-context>.production-entity-context,.entity-review-selected-state{border:1px solid var(--desk-line);padding:14px;margin:16px 0;background:#fffcf5}
+.entity-review-selected-state>.entity-review-local-heading{margin-top:0}.entity-state-materials{border-top:1px solid var(--desk-line);margin-top:16px;padding-top:10px}
+.unified-card .production-entity-options{max-height:230px;overflow:auto;gap:4px}.unified-card .production-entity-options button{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 9px;min-height:32px;text-align:left;margin:0}.production-entity-options button small{white-space:nowrap;margin:0}
+.unified-card .relation-graph-viewport{max-height:none;border:0;border-radius:0;background:transparent;overflow:auto}.unified-card .relation-graph{min-width:0;width:100%;display:block}.relation-text{box-sizing:border-box;background:#fffcf5}.relation-node[role=button]{cursor:pointer}.relation-node[role=button]:hover .relation-node-box,.relation-node[role=button]:focus .relation-node-box{stroke:#903d34;stroke-width:2}
+.entity-review-version,.material-card select,.relation-text select,.shot-generation-content select{font:inherit;font-size:12px;color:var(--desk-ink);background:#fffdf7;border:1px solid var(--desk-line);border-radius:0;padding:6px 26px 6px 8px;max-width:100%;min-height:32px}
+.breakdown-scene{border:0;padding:0 16px 18px}.breakdown-scene>.breakdown-scene-head{display:block;margin:0 -16px 20px;padding:16px 20px;background:#f8f4e9;color:var(--desk-ink);border-bottom:1px solid var(--desk-line)}
+.breakdown-scene-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}.breakdown-scene-head .production-meta{margin:6px 0}.breakdown-scene-head .entity-review-text{font-size:13px;line-height:1.6}.breakdown-scene-head .entity-review-text p{margin:6px 0}
+.breakdown-levels{position:static;padding:8px 0 0;margin:0;background:transparent;align-items:center;gap:10px}.breakdown-levels .production-filter-label{min-width:0}.breakdown-levels .production-filter-chip{margin:0}
+.breakdown-row{grid-template-columns:repeat(2,minmax(0,1fr));gap:0;padding:0;background:#fffdf7;border:1px solid var(--desk-line);scroll-margin-top:240px}.breakdown-shot-copy{padding:20px}.breakdown-shot-materials{padding:20px;background:#efece2;border-left:1px solid var(--desk-line);height:100%;box-sizing:border-box}
+@media(max-width:1050px){.breakdown-row{grid-template-columns:1fr}.breakdown-shot-materials{border-left:0;border-top:1px solid var(--desk-line)}.unified-card-context>.entity-review-basics,.unified-card-context>.entity-relations,.unified-card-context>.production-entity-context,.entity-review-selected-state{padding:12px}}
+@media(max-width:700px){.breakdown-scene>.breakdown-scene-head{top:var(--workspace-topbar-height,70px);margin-inline:-8px;padding:12px}.breakdown-scene{padding-inline:8px}.breakdown-row{padding:0}.breakdown-shot-copy,.breakdown-shot-materials{padding:14px}.breakdown-shot-materials{margin:0}.unified-card .relation-graph{min-width:0;width:100%;display:block}}
+
+.production-reader .review-reference-button,.review-dialog .review-reference-button,.breakdown-body .review-reference-button{font:inherit;font-size:12px;line-height:1.4;padding:6px 10px;color:var(--desk-ink);background:#fffdf7;border:1px solid var(--desk-line);border-radius:0;text-decoration:none;cursor:pointer;white-space:normal}
+.review-reference-button:hover{border-color:#903d34!important}.review-reference-button:focus-visible{outline:2px solid #903d34;outline-offset:2px}
+.breakdown-episode-tabs{position:sticky;top:70px;z-index:4;background:#ebe7dc;margin:0;padding:12px 0}.breakdown-scene-layout{top:158px;height:calc(100dvh - 175px)}
+@media(max-width:700px){.breakdown-episode-tabs{top:122px;padding:8px 0}.breakdown-episode-tabs .source-button{min-height:44px}.breakdown-scene>.breakdown-scene-head{top:184px}.breakdown-scene-layout{height:auto;position:static}.breakdown-scene-head .entity-review-text{max-height:100px;overflow:auto}}
+.production-index .material-small-card{display:flex;align-items:center;gap:9px}.production-index .material-small-card .material-small-preview{margin:0;flex:0 0 44px}.production-index .material-small-card .material-small-copy{min-width:0;text-align:left}.production-index .material-small-card small{white-space:normal}
+/* Keep the desktop scene pane inside the viewport. A separate page footer
+   must not push its sticky scene header underneath the episode strip. */
+@media(min-width:701px){
+  #production-view:has(.breakdown-scene-layout){display:flex;flex-direction:column;height:calc(100dvh - 70px);min-height:0;padding:0 0 16px;box-sizing:border-box}
+  #production-view:has(.breakdown-scene-layout) .breakdown-episode-tabs{position:static;flex:0 0 auto}
+  #production-view:has(.breakdown-scene-layout) .breakdown-scene-layout{position:relative;top:0;flex:1 1 auto;height:auto;min-height:0}
+  .workspace-main:has(#production-view:not([hidden]) .breakdown-scene-layout) .workspace-footer{display:none}
+}
+@media(max-width:700px){.breakdown-episode-tabs .source-button{height:44px;min-height:44px;padding:8px 10px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}

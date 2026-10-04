@@ -11,7 +11,7 @@ function fixture(){
   const root=new Node('main'),requests=[],reads=[],posts=[],messages=[];
   const record={object_id:'asset',id:'exact-old-asset',payload:{title:'Original candidate'}},context={state:{workspace:'materials.workspace',productionSelected:record},crypto:require('node:crypto').webcrypto,el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const node=new Node(tag,cls);node.textContent=text;parent.append(node);return node},toast:text=>messages.push(text),api:(url,options)=>{posts.push(JSON.parse(options.body));return new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}))},fetch:url=>new Promise((resolve,reject)=>reads.push({url,resolve,reject}))};
   context.Option=function(text,value){const node=new Node('option');node.textContent=text;node.value=value;return node};
-  vm.createContext(context);vm.runInContext(source,context);context.reloads=0;context.loadProductionWorkspace=async()=>{context.reloads++};
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);context.reloads=0;context.loadProductionWorkspace=async()=>{context.reloads++};
   const open=()=>{context.showProductionJudgment(root);const box=root.children.at(-1),field=label=>box.all().find(node=>node.attrs['aria-label']===label),button=label=>box.all().find(node=>node.tag==='button'&&node.textContent===label);field('审阅结果').value='passed';field('审阅者').value='Technical reviewer';field('结论依据').value='Exact original candidate assessment';return {box,field,button,notice:()=>box.all().find(node=>node.attrs.role==='status')}};
   return {context,root,record,requests,reads,posts,messages,open};
 }

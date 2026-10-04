@@ -31,7 +31,7 @@ function fixture(){
   c.$=selector=>selector==='#production-view'?host:host.all().find(n=>n.id===selector.slice(1));
   c.history={replaceState(_a,_b,url){c.location.href=String(url)},pushState(_a,_b,url){c.location.href=String(url)}};
   c.isProduction=()=>true;c.reviewSurface=node=>node;
-  vm.createContext(c);
+  vm.createContext(c);require('./load_review_helpers.cjs')(c);
   for(const name of ['production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
   c.renderComments=()=>{};c.paintProductionReview=()=>{};c.paintReviewCommentCounts=()=>{};c.rememberProductionDraft=()=>{};c.restoreProductionDraft=()=>{};
   c.productionEntityIcon=()=>new Element('svg');c.materialReferenceLink=(parent,ref,label)=>{const n=c.nodeText('a',null,label,parent);n.reference=ref;return n};

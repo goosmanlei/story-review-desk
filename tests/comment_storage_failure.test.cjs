@@ -41,11 +41,11 @@ for(const workspace of ['story.sources','story.outline','materials.workspace'])f
 }
 
 for(const event of ['pointerdown','focusin'])test(`material card ${event} removes an unanchored editor and retains both exact drafts`,()=>{
-  const f=fixture(),key=f.material(1),data=f.context.state.materialReview,root=actualEditor(f);
+  const f=fixture(),key=f.material(1),data=f.context.state.materialReview,root=actualEditor(f);require('./load_review_helpers.cjs')(f.context);
   data.history=[];data.material_versions.other=data.material_versions.need;data.selectedMaterialRounds.other=1;
   f.context.state.materialCommentCard={data,material_id:'need',number:1};
   f.context.Option=function(text,value){const option=new Element('option');option.textContent=text;option.value=value;return option};
-  f.context.renderMaterialPlaceholder=()=>{};f.context.renderGenerationRecipe=()=>{};
+  f.context.renderMaterialPlaceholder=()=>{};f.context.renderGenerationRecipe=()=>{};f.context.reviewSurface=host=>host;f.context.productionTextBlocks=()=>[];
   const model=mid=>({material_id:mid,need:{object_id:mid,payload:{title:mid}},round:{number:1},rounds:[{number:1}],candidates:[]});
   const first=f.context.renderMaterialCard(root,model('need')),second=f.context.renderMaterialCard(root,model('other'));
   f.storage.set(key,'card A opinion');f.context.renderComments();

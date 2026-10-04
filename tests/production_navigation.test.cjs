@@ -9,7 +9,7 @@ function setup(records,api){
     location:{href:'http://localhost/?workspace=settings.workspace'},document:{querySelectorAll:()=>[]},
     api,isProduction:()=>true,renderComments:()=>{}};
   context.history={replaceState:(_state,_title,url)=>{context.location.href=String(url)}};
-  vm.createContext(context);vm.runInContext(source,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);
   context.renderProductionReader=()=>{};
   return context;
 }

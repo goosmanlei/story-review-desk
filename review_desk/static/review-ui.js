@@ -18,7 +18,15 @@ function reviewBlockScope(host,kind){
   let materialId=null,materialNumber=null,materialModel=null;
   let orderedBlockIds=blockIds;
   if(isProduction()){const row=(typeof materialVersions==='function'?Object.values(materialVersions()).flatMap(rs=>rs.flatMap(r=>r.members)):[]).find(r=>r.id===revision)||state.productionSelected;if(row?.id===revision)orderedBlockIds=productionTextBlocks(row).map(b=>b.id)}
-  if(isProduction()&&typeof materialVersions==='function'){for(const [mid,rounds] of Object.entries(materialVersions())){const selected=(isEntityReview()?state.entityReview.selectedMaterialRounds:state.materialReview.selectedMaterialRounds)?.[mid];const round=rounds.find(r=>r.number===selected)||rounds.find(r=>r.members.some(m=>m.id===revision));const row=round?.members.find(r=>r.id===revision);if(row){revisions=round.model==='plan-v1'?[revision]:round.members.filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;materialModel=round.model;break}}}
+  if(isProduction()&&typeof materialVersions==='function'){
+    const commentRows=round=>typeof materialVersionCommentRows==='function'?materialVersionCommentRows(round):round?.members||[];
+    const data=isEntityReview()?state.entityReview:state.materialReview,active=state.materialCommentCard;
+    const entries=Object.entries(materialVersions()).sort(([a],[b])=>(b===active?.material_id)-(a===active?.material_id));
+    for(const [mid,rounds] of entries){
+      const selected=data?.selectedMaterialRounds?.[mid],round=rounds.find(r=>r.number===selected)||rounds.find(r=>commentRows(r).some(m=>m.id===revision)),row=commentRows(round).find(r=>r.id===revision);
+      if(row){revisions=round.model==='plan-v1'?[revision]:commentRows(round).filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;materialModel=round.model;break}
+    }
+  }
   if(host.closest('.material-reference-dialog')){revisions=[revision];materialId=null;materialNumber=null}
   return {revision,revisions,materialId,materialNumber,materialModel,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
 }
@@ -105,7 +113,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
     box.reviewPaintComments=()=>{
       const comments=reviewBlockComments(state.comments,reviewBlockScope(box,'audio')),key=JSON.stringify(comments);
       if(key!==commentKey){commentKey=key;markers.replaceChildren();for(const comment of comments){
-        const button=productionButton(markers,'',()=>{focus();if(options.locate)options.locate(comment);else locateComment(comment)});button.append(reviewIcon());button.dataset.commentId=comment.id;button.style.left=percent(clamp(comment.anchor.start_seconds))+'%';button.title=comment.anchor.start_seconds.toFixed(2)+' 秒 · '+comment.body;button.setAttribute('aria-label','定位音频评论：'+comment.body);
+        const button=productionButton(markers,'',()=>{focus();if(options.locate)options.locate(comment);else locateComment(comment)});button.append(reviewIcon());button.dataset.commentId=comment.id;button.style.left=percent(clamp(comment.anchor.start_seconds))+'%';button.title=comment.anchor.start_seconds.toFixed(2)+' 秒 · '+comment.body;button.setAttribute('aria-label',(audio?'定位音频评论：':'定位视频评论：')+comment.body);
       }}
       for(const button of markers.children)button.classList.toggle('active',button.dataset.commentId===state.selected);
     };box.reviewPaintComments();

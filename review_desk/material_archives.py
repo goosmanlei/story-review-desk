@@ -4,6 +4,8 @@ A container is never served as the historic file. Its checksum describes its own
 bytes; legacy consumers receive reconstructed bytes checked against the old SHA.
 """
 import difflib
+import base64
+import zlib
 import json
 import re
 from pathlib import Path
@@ -108,6 +110,9 @@ def resolver(path):
         elif set(node)=={'array'}:value=[get(v,visiting) for v in node['array']]
         elif set(node)=={'object'}:value={k:get(v,visiting) for k,v in node['object']}
         elif set(node)=={'archive_recipe'}:value=node['archive_recipe']
+        elif set(node)=={'archive_recipe_zlib'}:
+            packed=json.loads(zlib.decompress(base64.b64decode(node['archive_recipe_zlib'],validate=True)))
+            value=[packed['tokens'][i] for i in packed['order']] if isinstance(packed,dict) else packed
         else:raise ValueError('invalid archive content node')
         visiting.remove(key);cache[key]=value
         return value

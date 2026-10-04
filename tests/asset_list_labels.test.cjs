@@ -1,29 +1,32 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../review_desk/static/production.js'),'utf8');
-// Execute the actual index renderer. The DOM records labels and click callbacks;
-// no browser layout, HTTP or other workspaces are simulated as passing here.
-function render(records){
-  const nodes=[],opened=[],index={replaceChildren(){nodes.length=0},get childElementCount(){return nodes.length}};
-  const ctx={workspaceRows:records,matches:()=>true,workspace:records[0]?.kind==='CALL'?'production.workspace':'materials.workspace',productionGroups:{'materials.workspace':['ASSET'],'production.workspace':['CALL']},
-    productionKinds:{ASSET:'原件',CALL:'调用'},productionLabels:{},contexts:new Map(records.map(r=>[r.object_id,{}])),
-    childrenByEntity:new Map(),flatFilters:false,state:{},index,openProductionRecord:id=>opened.push(id),
-    productionButton(parent,text,onclick){const n={textContent:text,onclick,children:[],dataset:{},classList:{toggle(){}}};nodes.push(n);return n},
-    nodeText(tag,_class,text,parent){const n={tag,textContent:text};if(parent===index)nodes.push(n);else parent.children.push(n);return n}};
-  vm.createContext(ctx);const start=source.indexOf('  const renderIndex=()=>{'),end=source.indexOf('  const refreshIndex=()=>{',start);
+class Element{constructor(tag){Object.assign(this,{tag,children:[],dataset:{},attrs:{},classList:{toggle(){},add(){}}})}append(...nodes){this.children.push(...nodes)}replaceChildren(){this.children=[]}setAttribute(k,v){this.attrs[k]=v}get childElementCount(){return this.children.length}all(){return [this,...this.children.flatMap(n=>n.all())]}}
+// Execute the actual index renderer and shared card; DOM checks do not certify layout.
+function render(records,episodes=[]){
+  const opened=[],index=new Element('nav');
+  const ctx={workspaceRows:records,matches:()=>true,workspace:records[0]?.kind==='ASSET'?'materials.workspace':'production.workspace',productionGroups:{'materials.workspace':['ASSET'],'production.workspace':['CALL','PREPARATION','SHOT_DESIGN']},
+    productionKinds:{ASSET:'原件',CALL:'调用',PREPARATION:'场',SHOT_DESIGN:'镜'},productionLabels:{},contexts:new Map(records.map(r=>[r.object_id,{episode:(r.payload.episode||r.payload.source)?.object_id,episodeRevision:(r.payload.episode||r.payload.source)?.revision_id,scene:r.payload.scene_id||r.payload.source?.scene_id,number:r.payload.number}])),
+    childrenByEntity:new Map(),flatFilters:false,state:{},episodes,index,openProductionRecord:id=>opened.push(id),el:tag=>new Element(tag),productionEntityIcon:()=>new Element('svg'),
+    productionButton(parent,text,onclick){const n=new Element('button');n.textContent=text;n.onclick=onclick;parent.append(n);return n},
+    nodeText(tag,_class,text,parent){const n=new Element(tag);n.textContent=text;parent.append(n);return n}};
+  vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),ctx);const start=source.indexOf('  const renderIndex=()=>{'),end=source.indexOf('  const refreshIndex=()=>{',start);
   assert.ok(start>=0&&end>start);vm.runInContext(source.slice(start,end)+'\nglobalThis.draw=renderIndex;',ctx);ctx.draw();
-  return {buttons:nodes.filter(n=>n.onclick),opened};
+  return {buttons:index.all().filter(n=>n.tag==='button'),opened,title:button=>button.all().find(n=>n.tag==='strong')?.textContent,subtitle:button=>button.all().find(n=>n.tag==='small')?.textContent};
 }
 test('asset list shows evidenced material round independently of record revision and keeps navigation',()=>{
-  const {buttons,opened}=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,payload:{title:'Older result'}}]);
-  assert.equal(buttons[0].children[0].textContent.trim(),'已生成');buttons[0].onclick();assert.deepEqual(opened,['old-result']);
+  const f=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,payload:{title:'Older result'}}]);
+  assert.equal(f.subtitle(f.buttons[0]),'已生成');f.buttons[0].onclick();assert.deepEqual(f.opened,['old-result']);assert.equal(f.buttons[0].className,'material-small-card');
 });
 test('asset list without a positive integer material round does not invent a version or empty label',()=>{
   for(const material_version of [undefined,null,0,-1,'2']){
-    const {buttons}=render([{object_id:'legacy',kind:'ASSET',version:9,material_version,payload:{title:'Legacy original'}}]);
-    assert.equal(buttons[0].textContent,'Legacy original');assert.equal(buttons[0].children[0].textContent,'未生成');
+    const f=render([{object_id:'legacy',kind:'ASSET',version:9,material_version,payload:{title:'Legacy original'}}]);
+    assert.equal(f.title(f.buttons[0]),'Legacy original');assert.equal(f.subtitle(f.buttons[0]),'未生成');
   }
 });
 test('other production records retain their record revision label',()=>{
-  const {buttons}=render([{object_id:'call',kind:'CALL',version:4,payload:{title:'Actual call'}}]);
-  assert.equal(buttons[0].children[0].textContent.trim(),'修订 4');
+  const f=render([{object_id:'call',kind:'CALL',version:4,payload:{title:'Actual call'}}]);assert.equal(f.subtitle(f.buttons[0]),'修订 4');assert.equal(f.buttons[0].className,'material-small-card');
+});
+test('history scene and shot records use shared cards with exact global location codes',()=>{
+ const records=[{object_id:'scene',kind:'PREPARATION',version:5,payload:{title:'01-01 米铺门口',source:{object_id:'ep',revision_id:'ep-old',scene_id:'s012'}}},{object_id:'shot',kind:'SHOT_DESIGN',version:3,payload:{title:'E02-004 河街开场',episode:{object_id:'ep',revision_id:'ep-old'},scene_id:'s012',number:4}}],episodes=[{object_id:'ep',id:'ep-current',payload:{number:99}},{object_id:'ep',id:'ep-old',payload:{number:2}}],before=JSON.stringify(records),f=render(records,episodes);
+ assert.deepEqual(f.buttons.map(f.title),['S012 · 米铺门口','SH004 · 河街开场']);assert.deepEqual(f.buttons.map(f.subtitle),['E02 / S012 · 修订 5','E02 / S012 / SH004 · 修订 3']);assert.ok(f.buttons.every(b=>b.className==='material-small-card'));f.buttons[1].onclick();assert.deepEqual(f.opened,['shot']);assert.equal(JSON.stringify(records),before);
 });
