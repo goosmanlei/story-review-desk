@@ -1,6 +1,6 @@
 # 实体生成准备与统一审阅
 
-实体采纳认可基础设定、直接关系、全部完整状态及逐素材生成方案，允许 Codex 按依赖顺序准备生成。采纳不自动调用模型，不等于接受生成结果；新增候选和新评论不撤销方案采纳。实体、关系、状态、需求或显式参考方案换版后，当前方案重新待认可。
+实体采纳认可基础设定、直接关系、全部完整状态及已有素材方案。描述或方案尚未完整时也可采纳当前内容，生成前仍须完善并明确认可完整方案；准备完整的方案采纳允许 Codex 按依赖顺序准备生成。采纳不自动调用模型，不等于接受生成结果；新增候选和新评论不撤销方案采纳。实体、关系、状态、需求或显式参考方案换版后，当前方案重新待认可。
 
 ## 对象与数据流
 
@@ -27,13 +27,13 @@ flowchart LR
 
 `method` 为 `generate` 或 `reuse`。每项输入含 `reference:{object_id,revision_id}`、`use`，可引用准确 ASSET 及 `component_id,crop?,range?`，或引用准确 REQUIREMENT 的未来产出。后者必须先通过既有采用关系明确选定原件才可执行；不会自动取最新候选。复用方式必须引用同媒体类型的前置需求或文件。循环、错误类型、空的模型／提示词、缺少输出说明及无效参数结构被拒绝。方案可有明确的执行阻断（平台未核验等），这些不伪装成可执行状态。
 
-ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的完整描述；既有剧本事实和来源保留，新增造型／布局等是待用户采纳的制作选择。`production_blockers` 列出尚未解决且阻碍内容采纳的问题，普通未知不自动阻断。未完善描述或素材方案时，实体聚合列出准确缺项。
+ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的完整描述；既有剧本事实和来源保留，新增造型／布局等是待用户采纳的制作选择。`production_blockers` 列出尚未解决且阻碍生成准备的问题，普通未知不自动阻断。未完善描述或素材方案时，实体聚合列出准确缺项，页面称为“生成前待完善”，不因此禁用内容采纳。
 
 ## 采纳、取消与并发
 
 新模型 `entity-generation-v1` 的范围为 `{entity,relationships,states,requirements,dependencies}`，全部为准确修订。`dependencies` 递归锁定方案引用，未来原件的具体选择在执行输入中另存。生成结果不进入采纳范围。决策使用每个实体唯一的 JUDGMENT 身份，采纳和取消分别形成 `accepted`、`revoked` 新修订。取消指明被取消的决策；不得删除记录或通过更换判断 ID 绕过取消。
 
-`POST /api/production/entity-decision` 与 CLI `production-entity-decide FILE` 接受 `{entity_id,action:accept|revoke,expected_version,scope,decision_ref?,actor,reason}`。读接口给出当前 `decision_version` 与完整范围；写操作在既有原子导入事务中检查版本和范围。重复或过期请求返回 409，不静默认可新内容。普通 judgment 导入同样执行校验，无绕过入口。
+`POST /api/production/entity-decision` 与 CLI `production-entity-decide FILE` 接受 `{entity_id,action:accept|revoke,expected_version,scope,decision_ref?,acceptance_mode?,actor,reason}`。读接口给出当前 `decision_version`、`decision_scope` 和 `acceptance_mode`；写操作在既有原子导入事务中检查版本和范围。`content` 仅认可准确内容，`generation` 还要求准备完整；内容认可的具体语义与旧记录兼容见[素材卡与关系契约](materials-and-relationships.md)。重复或过期请求返回 409，不静默认可新内容。普通 judgment 导入同样执行校验，无绕过入口。
 
 `GET /api/production/entity-review?entity_id=ID[&revision_id=SHA]` 返回现有实体、状态、媒体和评论，并增加 `requirements,preparation,decision_version,can_revoke`；`preparation` 含方案缺项及完整性。历史采纳通过准确决策修订读取冻结内容。旧 `entity-current-v1` 只表示过去的内容认可，不作为生成许可；可以携带 `revoke_target` 作为 `decision_ref` 取消，方案缺项不阻止取消。详见[素材卡与关系契约](materials-and-relationships.md)。
 

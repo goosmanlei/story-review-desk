@@ -69,7 +69,7 @@ class MaterialRelationshipsTest(unittest.TestCase):
         self.assertFalse(er.snapshot(self.store,'songbook',current['id'])['can_revoke'])
         g.decide(self.store,{'entity_id':'songbook','action':'revoke','decision_ref':g.ref(current),'expected_version':current['version'],'actor':'测试','reason':'取消内容认可'});view=er.snapshot(self.store,'songbook')
         self.change('full',production_description='改过的完整描述')
-        self.assertFalse(er.snapshot(self.store,'songbook')['can_accept'])
+        self.assertTrue(er.snapshot(self.store,'songbook')['can_accept'])
         with self.assertRaises(Conflict):
             g.decide(self.store,{'entity_id':'songbook','action':'accept','expected_version':view['decision_version'],
                 'scope':view['decision_scope'],'acceptance_mode':'content','actor':'测试','reason':'过期内容'})

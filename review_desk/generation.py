@@ -188,6 +188,32 @@ def validate_content_decision(store, object_id, payload, check_current=True):
     scope = payload.get('acceptance_scope')
     if payload.get('acceptance_model') != CONTENT_MODEL or payload.get('verdict') not in ('accepted', 'revoked'):
         raise ValueError('unsupported content decision')
+    if isinstance(scope, dict) and 'media' not in scope:
+        # Content acknowledgement uses the same exact scope as generation, but
+        # does not require preparation and can never authorize execution.
+        validate_decision(store, object_id, {**payload, 'acceptance_model': MODEL, 'verdict': 'accepted'}, False)
+        eid = scope['entity']['object_id']
+        previous_ref = payload.get('previous_decision')
+        previous = p.ref_record(store, previous_ref, {'JUDGMENT'}) if previous_ref else None
+        if previous and (previous['payload'].get('acceptance_model') not in (MODEL, CONTENT_MODEL, er.ACCEPTANCE_MODEL)
+                         or previous['payload']['target']['object_id'] != eid):
+            raise ValueError('previous content decision belongs to another entity or model')
+        if payload['verdict'] == 'revoked' and (not previous
+                or previous['payload'].get('acceptance_model') != CONTENT_MODEL
+                or previous['payload']['verdict'] != 'accepted'
+                or previous['payload']['acceptance_scope'] != scope):
+            raise ValueError('revoke must name the exact accepted content decision')
+        if check_current:
+            current = decision(store, eid)
+            if (ref(current) if current else None) != previous_ref:
+                raise Conflict('采纳记录已有变化，请刷新后操作。')
+            if payload['verdict'] == 'accepted':
+                if scope != current_scope(store, eid):
+                    raise Conflict('设定、关系或生成方案已有更新，请刷新后采纳。')
+                if current and current['payload']['verdict'] == 'accepted' and current['payload']['acceptance_scope'] == scope:
+                    raise Conflict('当前内容已采纳。')
+        return
+    # Preserve the original validation contract for historical legacy cycles.
     er.validate_current_acceptance(store, {**payload, 'acceptance_model': er.ACCEPTANCE_MODEL, 'verdict': 'accepted'}, False)
     eid = scope['entity']['object_id']
     if object_id != decision_id(eid):
@@ -267,9 +293,8 @@ def decide(store, value):
              'blocks':[{'id':'decision','text':value['reason']}], 'target':scope['entity'],'verdict':'accepted' if action=='accept' else 'revoked',
              'acceptance_model':model,'acceptance_scope':scope,'actor':value['actor'],'reason':value['reason']}
     if model==CONTENT_MODEL:
-        if not old:raise Conflict('没有可重新认可的旧内容范围。')
-        payload['title']=p.ref_record(store,scope['entity'])['payload']['title']+' · '+('重新认可原内容' if action=='accept' else '取消内容认可')
-    if action=='revoke' or model==CONTENT_MODEL:payload['previous_decision']=ref(old)
+        payload['title']=p.ref_record(store,scope['entity'])['payload']['title']+' · '+('采纳当前内容' if action=='accept' else '取消内容认可')
+    if old and (action=='revoke' or model==CONTENT_MODEL):payload['previous_decision']=ref(old)
     return p.judge(store,{'object_id':decision_id(eid),'expected_version':value['expected_version'],'payload':payload})
 
 
@@ -285,7 +310,7 @@ def _snapshot(store, entity_id, revision_id=None):
     rows=p.current_records(store)
     if revision_id:
         selected=p.record(store,revision_id=revision_id)
-        legacy=selected['payload'].get('acceptance_model')!=MODEL
+        legacy=selected['payload'].get('acceptance_model') not in (MODEL,CONTENT_MODEL)
         legacy_cancel=selected['payload'].get('acceptance_model') in (MODEL,CONTENT_MODEL) and 'media' in selected['payload'].get('acceptance_scope',{})
         if legacy or legacy_cancel:
             if legacy_cancel and selected['object_id']!=decision_id(entity_id):raise ValueError('historical decision belongs to another entity')
@@ -322,7 +347,7 @@ def _snapshot(store, entity_id, revision_id=None):
         if not rid or rid in targets:continue
         r=p.record(store,c['target_object_id'],rid)
         if r['object_id'] in related_ids or rel.for_entity([r],entity_id):targets[rid]=r
-    d=decision(store,entity_id);a=selected if selected and selected['payload']['verdict']=='accepted' else (accepted(store,entity_id,scope) if not revision_id else None)
+    d=decision(store,entity_id);a=selected if selected and selected['payload'].get('acceptance_model')==MODEL and selected['payload']['verdict']=='accepted' else (accepted(store,entity_id,scope) if not revision_id else None)
     revoke=d if not revision_id and d and d['payload']['verdict']=='accepted' else None
     history=[]
     for row in store.db.execute("""SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT'
@@ -331,8 +356,10 @@ def _snapshot(store, entity_id, revision_id=None):
         h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict']})
     prep=preparation(store,scope)
     compatible=content_scope(store,entity_id,d,rows) if not revision_id else None
-    content_accepted=d if compatible and d['payload']['verdict']=='accepted' else None
-    acceptance_mode='generation' if prep['complete'] else 'content' if compatible else 'generation'
+    content_decision=selected if revision_id else d
+    content_accepted=content_decision if content_decision and content_decision['payload']['verdict']=='accepted' and (
+        compatible or (content_decision['payload'].get('acceptance_model')==CONTENT_MODEL and content_decision['payload']['acceptance_scope']==scope)) else None
+    acceptance_mode='generation' if prep['complete'] else 'content'
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     from .material_versions import snapshot as material_snapshot, for_record as material_for_record
@@ -356,8 +383,8 @@ def _snapshot(store, entity_id, revision_id=None):
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',
-            'acceptance_mode':acceptance_mode,'decision_scope':compatible if acceptance_mode=='content' else scope,
-            'can_accept':not revision_id and not a and not revoke and (prep['complete'] or bool(compatible)),
+            'acceptance_mode':acceptance_mode,'decision_scope':scope,
+            'can_accept':not revision_id and not a and not revoke,
             'can_revoke':bool(revoke),'revoke_target':ref(revoke) if revoke else None,
             'decision_version':d['version'] if d and d['object_id']==decision_id(entity_id) else 0,'preparation':prep,'history':history,
             'previous_accepted':None,'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
