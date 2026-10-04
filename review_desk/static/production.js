@@ -180,7 +180,7 @@ async function loadProductionWorkspace({onReadStart}={}){
     clearFilters=productionButton(toolbar,'清除筛选',()=>{search.value='';for(const key of Object.keys(filters))filters[key]='';refreshIndex()});
     filterPanel.append(toolbar);
   }else{toolbar.append(search);filterPanel.append(toolbar)}
-  const kindOptions=workspace==='materials.workspace'?[['','全部'],['ungenerated','未生成'],['generated','已生成']]:[['','全部类型'],...productionGroups[workspace].map(kind=>[kind,productionKinds[kind]])];
+  const kindOptions=workspace==='materials.workspace'?[['','全部'],['ungenerated','未生成'],['generated','已生成']]:[['','全部类型'],...productionGroups[workspace].filter(kind=>workspace!=='production.workspace'||result.records.some(r=>r.kind===kind)).map(kind=>[kind,productionKinds[kind]])];
   const categoryRows=productionWorkspaceRows(result.records,workspace,result.material_assets),categoryById=new Map(result.records.map(r=>[r.object_id,r]));
   const categories=flatFilters?[...new Set(categoryRows.filter(r=>r.kind==='ENTITY').map(r=>r.payload.entity_type))]:workspace==='materials.workspace'?['image','audio','video','project','document'].filter(type=>categoryRows.some(r=>productionFilterMediaTypes(r,categoryById).includes(type))):[];
   const categoryOptions=[['',flatFilters?'全部实体':'全部内容'],...categories.map(value=>[value,productionLabels[value]||categoryRows.find(r=>r.payload.entity_type===value)?.payload.entity_type_label||({image:'图像',audio:'声音',video:'视频',project:'工程',document:'说明文件'})[value]])];
