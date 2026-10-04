@@ -289,6 +289,90 @@ class IndependentMaterialContractTest(unittest.TestCase):
         self.assertTrue(plans.belongs(self.store, source['id'], 'alias', number))
         plans.validate(self.store)
 
+    def test_archive_scope_reads_its_uncommitted_writer_without_borrowing_other_instances(self):
+        self.store.db.commit()
+        self.store.db.execute('BEGIN EXCLUSIVE')
+        raw = b'{"prompt":"uncommitted transaction-local fixture"}\r\n'
+        container = archives.encode(self.store, raw)
+        path = self.root / 'export/assets/transaction.json'
+        path.parent.mkdir(parents=True)
+        path.write_text(json.dumps(container))
+        blocked = sqlite3.connect(self.store.db_path, timeout=0)
+        try:
+            with self.assertRaisesRegex(sqlite3.OperationalError, 'locked'):
+                blocked.execute('SELECT COUNT(*) FROM material_content').fetchone()
+            with tempfile.TemporaryDirectory() as other_dir, tempfile.TemporaryDirectory() as unknown_dir:
+                other_root = Path(other_dir)
+                other = Store(other_root / '.runtime/review.sqlite3')
+                try:
+                    other_path = other_root / 'export/assets/transaction.json'
+                    other_path.parent.mkdir(parents=True)
+                    other_path.write_text(json.dumps(container))
+                    unknown_path = Path(unknown_dir) / 'transaction.json'
+                    unknown_path.write_text(json.dumps(container))
+                    with archives.read_scope(self.store):
+                        self.assertEqual(archives.read_bytes(path), raw)
+                        with self.assertRaisesRegex(ValueError, 'content graph is missing|missing archive content'):
+                            archives.read_bytes(other_path)
+                        with self.assertRaisesRegex(ValueError, 'outside a known instance'):
+                            archives.read_bytes(unknown_path)
+                        self.assertEqual(archives.read_bytes(path), raw)
+                        self.assertTrue(self.store.db.in_transaction)
+                        self.assertEqual(self.store.db.execute('SELECT 1').fetchone()[0], 1)
+                finally:
+                    other.close()
+        finally:
+            blocked.close()
+            self.store.db.rollback()
+
+    def test_archive_scope_exception_rolls_back_and_does_not_reuse_cached_uncommitted_nodes(self):
+        before = self.store.db.execute('SELECT COUNT(*) FROM material_content').fetchone()[0]
+        path = self.root / 'export/assets/rolled-back.json'
+        path.parent.mkdir(parents=True)
+        with self.assertRaisesRegex(RuntimeError, 'abort independent fixture'):
+            with archives.read_scope(self.store), self.store.db:
+                raw = b'{"prompt":"must disappear after rollback"}'
+                path.write_text(json.dumps(archives.encode(self.store, raw)))
+                self.assertEqual(archives.read_bytes(path), raw)
+                raise RuntimeError('abort independent fixture')
+        self.assertFalse(self.store.db.in_transaction)
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM material_content').fetchone()[0], before)
+        with self.assertRaisesRegex(ValueError, 'content graph is missing|missing archive content'):
+            archives.read_bytes(path)
+        with archives.read_scope(self.store):
+            with self.assertRaisesRegex(ValueError, 'missing or corrupt material content'):
+                archives.read_bytes(path)
+        self.assertEqual(self.store.db.execute('SELECT 1').fetchone()[0], 1)
+
+    def test_nested_archive_scopes_restore_outer_instance_after_inner_exception(self):
+        def archive_file(store, root, label):
+            raw = json.dumps({'prompt': label}).encode()
+            path = root / 'export/assets/nested.json'
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(archives.encode(store, raw)))
+            store.db.commit()
+            return path, raw
+        outer_path, outer_raw = archive_file(self.store, self.root, 'outer instance')
+        with tempfile.TemporaryDirectory() as other_dir:
+            other_root = Path(other_dir)
+            other = Store(other_root / '.runtime/review.sqlite3')
+            try:
+                inner_path, inner_raw = archive_file(other, other_root, 'inner instance')
+                self.store.db.execute('BEGIN EXCLUSIVE')
+                with archives.read_scope(self.store):
+                    self.assertEqual(archives.read_bytes(outer_path), outer_raw)
+                    with self.assertRaisesRegex(RuntimeError, 'inner scope failure'):
+                        with archives.read_scope(other):
+                            self.assertEqual(archives.read_bytes(inner_path), inner_raw)
+                            raise RuntimeError('inner scope failure')
+                    # The outer connection is still the only reader that can
+                    # read its exclusively locked DB after the inner scope exits.
+                    self.assertEqual(archives.read_bytes(outer_path), outer_raw)
+                    self.assertEqual(self.store.db.execute('SELECT 1').fetchone()[0], 1)
+            finally:
+                self.store.db.rollback()
+                other.close()
+
 
 if __name__ == '__main__':
     unittest.main()

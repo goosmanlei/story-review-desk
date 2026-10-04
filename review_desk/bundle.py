@@ -304,7 +304,11 @@ def restore(store, export_dir):
             restored_comments.append({**comment, "target_object_id": object_id, "target_revision_id": revision_id})
         config = store.db_path.parent.parent / 'config'
         archive_files={r['path']:_bytes(json.loads(r['container'])) for r in framework['material_archive_files']} if schema>=6 else {}
-        with _staged_files(config, layout_files) as publish, _staged_files(store.db_path.parent.parent,archive_files) as publish_archives, store.db:
+        # A large restore can spill pages and hold an exclusive rollback-journal
+        # lock. Archive verification must read the same uncommitted content on
+        # this connection, not open a second reader of the destination database.
+        from .material_archives import read_scope as archive_read_scope
+        with archive_read_scope(store), _staged_files(config, layout_files) as publish, _staged_files(store.db_path.parent.parent,archive_files) as publish_archives, store.db:
             if schema >= 6:material_storage.restore_content(store,framework)
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))

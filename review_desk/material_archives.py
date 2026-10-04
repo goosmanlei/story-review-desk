@@ -9,11 +9,24 @@ import zlib
 import json
 import re
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
 from .store import canonical,digest
 from . import material_storage as storage
 
 FORMAT='material-archive-reference-v1'
 TOKEN=re.compile(r'"(?:[^"\\]|\\.)*"|[^\"]+',re.S)
+
+
+_ACTIVE_READER=ContextVar('material_archive_reader',default=None)
+
+
+@contextmanager
+def read_scope(store):
+    """Use the caller's transaction for this instance's immutable content."""
+    token=_ACTIVE_READER.set((store,{}))
+    try:yield
+    finally:_ACTIVE_READER.reset(token)
 
 
 def encode(store,data):
@@ -86,6 +99,12 @@ def resolver(path):
     import sqlite3
     root=instance_root(path)
     database=root/'.runtime/review.sqlite3'
+    active=_ACTIVE_READER.get()
+    if active is not None and active[0].db_path.resolve()==database.resolve():
+        store,cache=active
+        def scoped_get(key):return storage.expand(store,key,cache=cache)
+        scoped_get.close=lambda:None
+        return scoped_get
     connection=None;rows=None;cache={}
     if database.is_file():
         connection=sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)
