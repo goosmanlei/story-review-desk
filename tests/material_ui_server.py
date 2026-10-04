@@ -81,7 +81,7 @@ def main():
     f.store.close()
     class FixtureHandler(ReviewHandler):
         def do_GET(self):
-            if args.waveform_failure and self.path.split('?')[0]=='/static/review-ui.js':
+            if args.waveform_failure and self.path.split('?')[0]=='/review-ui.js':
                 raw=(Path(__file__).parents[1]/'review_desk/static/review-ui.js').read_bytes()+b"\nreviewWaveform=()=>Promise.reject(Error('isolated waveform failure'));\n"
                 self.send_response(200);self.send_header('Content-Type','text/javascript');self.send_header('Content-Length',str(len(raw)));self.end_headers();self.wfile.write(raw);return
             super().do_GET()
