@@ -57,15 +57,14 @@ class UIProjectionRequirementsTest(unittest.TestCase):
                              for context in data['shared'] for m in context['materials']))
         self.assertEqual(data['shots'][0]['context']['adoptions'], [])
 
-    def test_explicit_entity_and_state_applicability_expose_material_without_inventing_adoption(self):
+    def test_entity_and_state_applicability_do_not_invent_shot_material_use(self):
         self.scene_and_state()
         self.applicability('entity-on-scene', 'songbook', 'scene')
         self.applicability('state-on-shot', 'full', 'shot')
         data = ui.scene(self.store, 'scene')
         scene = next(c for c in data['shared'] if c['record']['kind'] == 'PREPARATION')
         for context in (scene, data['shots'][0]['context']):
-            self.assertEqual([m['object_id'] for m in context['materials']], ['need-full-overall'])
-            self.assertEqual(context['materials'][0]['association'], 'applicable')
+            self.assertEqual(context['materials'], [])
             self.assertEqual(context['adoptions'], [])
 
     def test_historical_scene_keeps_its_old_shot_after_current_shot_moves(self):

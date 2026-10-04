@@ -527,7 +527,10 @@ def current_records(store, kinds=None):
     if reads is not None and reads['current'] is not None:
         rows = reads['current']
     else:
-        rows = store.db.execute("SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision ORDER BY o.id").fetchall()
+        query="SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision"
+        values=sorted(kinds) if kinds and reads is None else []
+        if values:query+=" WHERE o.kind IN ("+','.join('?' for _ in values)+")"
+        rows = store.db.execute(query+" ORDER BY o.id",values).fetchall()
         if reads is not None:reads['current'] = rows
     for row in rows:
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
@@ -630,6 +633,9 @@ def remove_unreferenced_requirements(store, removals):
             raise Conflict('cannot remove a material with revision feedback')
         if store.db.execute("SELECT 1 FROM material_plan_members WHERE material_id=? AND role!='plan'", (oid,)).fetchone():
             raise Conflict('cannot remove material with actual calls or candidates')
+        store.db.execute('DELETE FROM material_definition_versions WHERE material_id=?', (oid,))
+        store.db.execute('DELETE FROM material_aliases WHERE alias_id=?', (oid,))
+        if store.db.execute('SELECT 1 FROM material_aliases WHERE material_id=?',(oid,)).fetchone():raise Conflict('cannot remove an explicitly shared material')
         store.db.execute('DELETE FROM material_plan_members WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM material_plan_versions WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM material_members WHERE material_id=?', (oid,))
@@ -674,6 +680,10 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             LEFT JOIN sources s ON s.id=r.object_id AND s.revision=json_extract(r.payload,'$.source_revision')
             WHERE d.from_revision=? ORDER BY r.object_id,r.id""", (selected['id'],))]
         result = {"record": selected, "history": history, "uses": uses, "reference_titles": reference_titles}
+        if selected["kind"]=="REQUIREMENT":
+            from .material_storage import identity
+            selected["material_identity"]=identity(store,selected["object_id"])
+            result["material_identity"]=selected["material_identity"]
         if selected["kind"] == "ASSET":
             from .material_review import context
             result["review_context"] = context(store, selected)

@@ -12,7 +12,18 @@ def context(store, asset):
         for value in call['payload'].get('inputs', []):
             if value.get('revision_id'):
                 inputs.append(p.ref_record(store, value))
-    return {'call': call, 'requirements': plans, 'inputs': inputs}
+    from .material_storage import canonical_id
+    from .material_model import definition
+    unique={}
+    for plan in plans:
+        unique.setdefault(canonical_id(store,plan['object_id']),plan)
+    if call:
+        _,provenance,_=definition(store,call)
+        evidence=provenance.get('requirements')
+        if evidence:
+            exact=p.ref_record(store,evidence['record'])
+            unique[canonical_id(store,exact['object_id'])]=exact
+    return {'call': call, 'requirements': list(unique.values()), 'associated_requirements':plans, 'inputs': inputs}
 
 
 def enrich_media(store, media):

@@ -1,51 +1,65 @@
-# 素材、方案版本与候选
+# 素材、完整定义与候选
 
-素材是一项持续存在的制作需求。需求不因生成次数、评论或选择候选而换身份；方案版本固定如何制作，候选记录一次真实制作得到的成果，文件是候选的原件、预览或工程组成。
+素材是一项持续存在的制作需求。实体或状态通过明确关联使用素材；相同素材可以由多个状态复用。只有准确的 `reuse` 来源、相同完整要求及输出规格能够证明共享身份。同名、相同文件或同一实体不足以合并。原需求 ID、准确修订及状态差异继续保存，采用仍逐使用位置记录。
 
-例如，同一角色状态的整体参考用相同模型、参数、提示词和准确输入生成两次，属于同一版本的两个候选。改提示词后再生成属于新版本。评论“手指需要修正”只产生评论，执行者实际修改方案时才形成相应版本。
+素材版本包含一份完整定义：素材要求（用途、正文块、规格等）、检查项、输出规格，以及制作方法、模型、提示词、参数、有序准确输入和随机策略。输入锁定对象修订、文件组成和必要裁切或时间范围；顺序变化也改变定义。相同定义的重复调用可以产生多个候选，实际随机种子属于调用证据；改变显式固定种子会改变定义。
 
-## 版本的边界
+## 创建与冻结
 
-版本签名包含制作方法、模型、参数、提示词、有序的准确参考输入及随机策略。参考须锁定对象修订、文件组成，以及必要裁切或时间范围；引用的顺序也影响方案。随机策略为 `randomization:{mode:"random"}` 或 `{mode:"fixed",seed:整数}`。随机模式下，调用的 `actual_seed` 或平台返回的 seed 是调用证据，不因随机结果不同而新建版本；改变显式固定种子属于方案变化。
+首次实际 submitted、completed、failed 或 unknown 调用固定完整定义。提交前的草稿可在同一准备版本继续修改；冻结后修改任何要求或制作方案进入另一个版本。不能修改同一实际调用的方案、准确需求来源或已记录的实际种子。失败或未知调用仍固定定义，没有真实原件便没有候选。
 
-实际提交前的草稿修改仍属于准备中的版本，底层不可变修订继续保存。首次 submitted、completed、failed 或 unknown 实际调用将方案固定。其后模型、参数、提示词或准确输入变化进入另一方案版本；相同已固定方案的再调用进入同版本。不能改写已提交调用的方案或已记录的实际种子。
+候选身份由实际调用 ID 和原件 SHA-256 集合决定。相同调用与原件的标签、说明或用途补全沿用候选；另一调用即使输出相同文件也保留另一候选。一个调用的不同结果只服务各自明确关联的需求，不能因共用调用扩大用途。
 
-失败与结果未知的调用保留真实状态，并固定已执行方案；没有原件就没有候选。重试回执复用原调用身份。候选身份由实际调用 ID 和原件 SHA-256 集合决定；相同调用与原件的元数据、文件标签或用途补全沿用候选。另一调用即使输出相同文件，也保留另一候选。一个调用的不同输出只关联各自明确的需求，不因共用调用而互相扩散用途。
+`material_plan_versions` 保存素材版号与冻结状态，`material_plan_members` 保存准确的需求、调用及结果成员，`material_candidate_members` 保存候选身份。完整定义存于 `material_definitions`，每个版本由 `material_definition_versions` 绑定定义及取证来源。相同字段和子结构在 `material_content` 按内容哈希只保存一份；历史修订的存储引用由 Store 还原，调用者仍收到原逻辑 JSON 和原 revision ID。
 
-`REQUIREMENT` 是需求；`material_plan_versions` 固定方案，`material_plan_members` 连接其准确需求修订、调用与产出；`material_candidate_members` 连接候选与原件记录修订。`ASSET` 保留既有产出记录身份及不可变修订，修订号不冒充素材版号。没有需求归属的历史原件仍可独立阅读。
+## 共享身份与阅读接口
 
-## 阅读、评论与采用
+素材列表按规范 ID 去重。`material_identity` 返回规范 `id`、原 `aliases` 以及 `associations`：准确需求引用、原标题、scope、states、复用证据和旧版本归属。旧 ID 查询仍可用；旧 ID 与版号共同保持原含义，不把旧版号直接解释为规范素材的同号版本。需求发生实质变化时，写入入口重新核对证据并解除不再成立的共享关联。
 
-共用素材卡一次预览一个候选，版本、候选、文件组成可以分别选择。候选显示真实调用和准确输入；尚无结果的版本显示方案与待补输入，绝不套用旧候选冒充本版结果。缺失历史方案时保留实际调用及原件，不用当前方案补写过去。
+每个版本返回 `definition`、`definition_id`、`definition_provenance`、`definition_gaps` 和 `definition_records`。后者只包含真正存在的准确 requirement/call 记录，方便正文与评论锚点共用原身份。历史没有要求或输出时明确标记缺口；引用方案与实际调用不同则同时保留真实方案和差异，不用最新方案补写历史。
 
-选择版本或候选只改变阅读上下文。页面链接保存准确对象修订、素材、版本和候选；刷新可恢复。旧 `material_round` 链接读取旧轮次，未认识或不存在的准确引用明确报错，不自动跳到最新内容。
+场次镜头中的素材只由明确需求归属、计划参考、真实调用输入和准确采用建立关联；上级内容或同场状态适用性不自动传播为镜头素材。`placement_level` 表示真实归属层级（story、episode、scene、shot、entity 或 state），`usage_evidence` 解释该镜头为何关联它。
 
-评论继续使用 `/api/comments`，绑定准确对象修订及文字、图像区域或时间锚点。新素材评论可附：
+## 评论与采用
+
+页面链接保存准确对象修订、素材、版本及候选；旧轮次与旧别名链接沿原身份解析。不存在的准确引用报错，不自动跳最新。版本切换只改变阅读上下文。
+
+评论使用 `/api/comments`，继续绑定准确修订和原文字、图像区域或时间锚点，可附：
 
 ```json
-{"material_context":{"material_id":"需求ID","number":1,"model":"plan-v1"}}
+{"material_context":{"material_id":"需求ID","number":2,"model":"plan-v1"}}
 ```
 
-服务端核对目标确实属于此素材版本。相同评论 ID 重试要求正文、锚点和版本上下文一致。评论新增、编辑、关闭、重开以及选择候选均不创建方案版本。旧 `material_revision` 请求仍可读取和幂等恢复其原有意见，新的写入不再以反馈推动轮次。
+服务端仅允许目标是该版本准确成员，或该版本完整定义已验证的要求、检查项、输出、制作方案来源。来源可不在旧成员表；这不会扩大候选归属或改变原成员。`comment_records` 和 `comment_targets` 包含这些准确来源。同评论 ID 重试必须保持正文、锚点和版本上下文一致。评论及选择候选均不创建版本。
 
-认可当前制作内容、审阅一个候选、采用一个候选，是独立记录。采用使用 `RELATION.relation_type=adoption`，锁定使用位置的准确修订、需求槽位、候选记录修订、component_id 和必要 range/crop。追加候选、移动当前镜头或更新排序都不会修改既有采用与组合。
+认可实体内容、审阅候选与采用候选分别记录。采用使用 `RELATION.relation_type=adoption`，锁定使用位置准确修订、需求槽位、候选修订、component_id 和必要 range/crop。共享素材不会将一个状态的采用复制到其他状态。
 
-## 旧轮次迁移
+## 归档、导出与恢复
 
-旧四张轮次表完整保留。迁移从不可变的实际 CALL 和 ASSET 取证，再处理需求方案；不把旧“收到意见建轮”编号强行一对一改成新版本。一个旧轮可能映射多个方案，多个旧轮也可能归同一方案。
+受管 JSON 请求、回执和制作归档使用 `material-archive-reference-v1` 保存原字节重建配方。字符串与嵌套 JSON 字符串引用同一内容图；空白、键序、Unicode 转义、重复键与数字原写法均可恢复。容器物理哈希与原文件逻辑哈希分开；HTTP（含 Range）、媒体校验和后台脚本经 `material_archives.read_bytes/read_json` 得到原字节。图片、音频和视频原件不作转换。
 
-`material-plan-map` 生成 `material-plan-migration-v1`：`mapping` 逐条列出旧素材、旧轮号、准确修订对应的新版本和候选；`comment_mapping` 保留原评论目标、旧范围及原锚点；`gaps` 列出无法证明方案归属的历史。缺失完整调用方案、同一调用出现冲突方案以及没有版本归属的旧记录单列证据缺口；它们仍可阅读，不能标成已证实一致。
+Schema 6 导出在 `objects.json` 保存物理引用和全部旧身份、修订、版本、评论、事件、采用、依赖；唯一 `material-content.json` 保存共享内容，manifest 校验其物理哈希。恢复时先校验内容图，再还原并校验旧 revision 身份、原件哈希、完整定义绑定与评论资格。空实例恢复兼容 Schema 1—6。旧格式保持原证据，不自动推断缺失定义；要输出完整新模型需先完成对应迁移。Git 已提交历史不作重写。
+
+## 隔离迁移与回滚
+
+旧轮次到方案的迁移保留 `material-plan-map/material-plan-migrate`。本次完整定义与物理存储迁移使用独立接口：
 
 ```bash
-python3 -m review_desk --instance PATH material-plan-map --output migration.json
-python3 -m review_desk --instance PATH material-plan-migrate migration.json --validate-only
-python3 -m review_desk --instance PATH material-plan-migrate migration.json
+python3 -m review_desk --instance PATH material-model-map --output migration.json
+python3 -m review_desk --instance PATH material-model-migrate migration.json --validate-only
+python3 -m review_desk --instance PATH material-model-migrate migration.json
+python3 -m review_desk --instance PATH material-model-verify
+python3 -m review_desk --instance PATH material-model-rollback migration.json --validate-only
 ```
 
-对应 HTTP 为 `GET /api/production/material-plan-map` 与 `POST /api/production/material-plan-migrate`，后者请求为 `{migration:迁移文档,validate_only:true或false}`。先在隔离副本生成、审阅和预演，再按实例的正式发布规则操作。写入同一事务，重复执行无新增，冲突整批回滚；无关并发评论得到保留。读取映射不提交索引。
+`--archive-list` 可向 map 传入实例根目录相对的受管 JSON 路径列表。`material-model-migrate --defer-archives` 只执行数据库事务，供正式 Git 归档切换前的短写窗口使用。新服务兼容旧原始 JSON，并可从实例活库解析稍后到达的归档容器。
 
-## 导出与验证
+HTTP 对应 `GET /api/production/material-model-map`、`GET /api/production/material-model-verify`、`POST /api/production/material-model-migrate` 和 `POST /api/production/material-model-rollback`；POST 使用 `{migration:完整迁移文档,validate_only:布尔}`，migrate 另接受 `defer_archives`。
 
-Schema 5 导出同时包含新四张索引表、旧四张轮次表、全部不可变修订、评论正文与事件、认可、采用、准确依赖和受管原件。空实例恢复兼容 Schema 1—5，校验方案签名证据、候选身份、评论成员资格和全部文件哈希；旧格式不会自动伪造方案迁移。
+Python `migration_plan(store, system_head=None, archive_paths=())` 生成准确增量；`migrate(store, document, validate_only=False, system_head=None, apply_archives=True)`、`rollback(store, document, validate_only=False)` 和 `verify(store)` 操作已有实例。可审阅发布包 `material-model-package-v1` 只包含内容节点 ID，并以相对路径和 SHA-256 绑定唯一内容图；`load_migration(path, content_path=None)` 校验后恢复完整迁移文档。
 
-`tests/test_material_plans.py` 覆盖同方案多候选、草稿与冻结边界、随机策略、输入变化、失败／未知调用、评论幂等、用途补全及 Schema 5 恢复。`tests/test_material_versions.py` 使用显式旧写入夹具验证旧格式历史；它不是当前版本创建规则。实例迁移还必须验证完整导出到空实例，以及真实浏览器的版本、候选、预览、评论与采用。
+迁移在独立副本准备与预演，正式发布依实例授权顺序执行。数据库改写同一事务，重复执行校验模型后返回已应用；相关头、版本索引或归档改变则整批回滚。无关新增对象、评论与采用得到保留。专用回滚只撤销准确增量；相关内容已继续修改时拒绝覆盖，不能用旧副本替换活库。文件采用暂存替换和异常恢复，数据库与文件不构成跨介质断电事务；正式切换使用延迟归档和发布编排处理这一边界。
+
+## 验证入口
+
+`tests/test_material_plans.py` 覆盖版本、候选、冻结、随机策略及评论；`tests/test_material_model.py` 覆盖事务冲突、延迟归档、回滚、字节恢复、发布包和 Schema 6 恢复；独立 `tests/test_ui_material_independent.py` 覆盖完整签名、共享身份、冻结来源及篡改拒绝。实例交付另需完整导出到空实例、原媒体与归档字节比较，以及真实浏览器中的版本、预览、评论和采用；自动化结果不替代页面验收。

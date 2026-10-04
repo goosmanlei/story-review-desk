@@ -65,6 +65,15 @@ def main():
         q=subs.add_parser(command)
         for flag in ('episode','scene','media','status','search','object-id','revision-id'):q.add_argument('--'+flag)
         if command=='production-materials':q.add_argument('--offset',type=int,default=0)
+    model_export=subs.add_parser('material-model-map')
+    model_export.add_argument('--output',required=True,type=Path)
+    model_export.add_argument('--archive-list',type=Path)
+    for command in ('material-model-migrate','material-model-rollback'):
+        model_command=subs.add_parser(command)
+        model_command.add_argument('file',type=Path)
+        model_command.add_argument('--validate-only',action='store_true')
+        if command=='material-model-migrate':model_command.add_argument('--defer-archives',action='store_true')
+    subs.add_parser('material-model-verify')
     plan_export = subs.add_parser('material-plan-map')
     plan_export.add_argument('--output', required=True, type=Path)
     plan_migration = subs.add_parser('material-plan-migrate')
@@ -138,6 +147,18 @@ def main():
                 elif args.command=='production-materials':result=bd.materials(store,args.episode,args.scene,args.media,args.search or '',args.status,max(0,args.offset))
                 elif args.command=='production-context':result=bd.context(store,args.object_id,args.revision_id)
                 else:result=bd.summary(store,args.object_id,args.revision_id)
+        elif args.command == 'material-model-map':
+            from .material_model import migration_plan
+            result=migration_plan(store,archive_paths=json.loads(args.archive_list.read_text()) if args.archive_list else [])
+            args.output.write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
+            result={'output':str(args.output),'id':result['id'],**result['counts']}
+        elif args.command in ('material-model-migrate','material-model-rollback'):
+            from .material_model import migrate, rollback, load_migration
+            document=load_migration(args.file)
+            result=(rollback(store,document,args.validate_only) if args.command.endswith('rollback') else migrate(store,document,args.validate_only,apply_archives=not args.defer_archives))
+        elif args.command == 'material-model-verify':
+            from .material_model import verify
+            result=verify(store)
         elif args.command == 'material-plan-map':
             from .material_plans import migration_plan
             result = migration_plan(store)
@@ -162,7 +183,8 @@ def main():
             from .material_versions import migrate
             result = migrate(store, json.loads(args.file.read_text()), args.validate_only)
         elif args.command == "production-import":
-            result = production.import_records(store, json.loads(args.file.read_text()), args.validate_only)
+            from .material_archives import read_json
+            result = production.import_records(store, read_json(args.file), args.validate_only)
         elif args.command == "production-adopt":
             result = production.adopt(store, json.loads(args.file.read_text()))
         elif args.command == "production-judge":

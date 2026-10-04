@@ -83,12 +83,14 @@ class AssetListRoundTest(unittest.TestCase):
         export(f.store, export_path)
         document_path = export_path / 'objects.json'
         document = json.loads(document_path.read_text())
+        document["revisions"]=f.store.revisions()
         for table in mv.TABLES:
             document.pop(table)
         document_path.write_text(json.dumps(document, ensure_ascii=False))
         manifest_path = export_path / 'manifest.json'
         manifest = json.loads(manifest_path.read_text())
         manifest['schema_version'] = 3
+        manifest['files'].pop('material-content.json',None)
         manifest['files']['objects.json'] = hashlib.sha256(document_path.read_bytes()).hexdigest()
         manifest_path.write_text(json.dumps(manifest))
         legacy_root = f.root / 'legacy'

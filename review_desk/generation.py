@@ -385,9 +385,14 @@ def _snapshot(store, entity_id, revision_id=None):
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     from .material_plans import snapshot as material_snapshot, memberships as plan_memberships
+    from .material_storage import identity as material_identity
     for need in data['requirements']:
+        need['material_identity']=material_identity(store,need['object_id'])
         need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
     material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
+    for need in data['requirements']:
+        mid=need['material_identity']['id']
+        if mid not in material_versions:material_versions[mid]=material_snapshot(store,mid)
     for item in data['media']:
         # Shared media may have its production requirement on another entity.
         # Read that same round without extending this entity's acceptance scope.
@@ -397,7 +402,7 @@ def _snapshot(store, entity_id, revision_id=None):
                 if rounds:material_versions[mid]=rounds
     for rounds in material_versions.values():
         for round in rounds:
-            for row in round['members']:
+            for row in [*round['members'],*[v for v in round.get('definition_records',{}).values() if v]]:
                 targets[row['id']] = row
                 if row['kind'] == 'ASSET':
                     if row['id'] not in contexts:contexts[row['id']]=media_review.context(store,row)
@@ -500,7 +505,7 @@ def validate_call(store, object_id, payload):
     executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown') LIMIT 1", (object_id,)).fetchone()
     if executed:
         if old['payload'].get('actual_seed') is not None and payload.get('actual_seed')!=old['payload']['actual_seed']:raise Conflict('cannot rewrite actual random seed')
-        for key in ('generation_requirement','generation_acceptances','method','tool','model','parameters','prompt','inputs','randomization'):
+        for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
     if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return

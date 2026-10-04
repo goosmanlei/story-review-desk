@@ -92,6 +92,13 @@ class Store:
         self.db.execute('CREATE INDEX IF NOT EXISTS material_members_revision ON material_members(revision_id)')
         from .material_plans import SCHEMA
         self.db.executescript(SCHEMA)
+        from .material_storage import SCHEMA as CONTENT_SCHEMA, row_factory
+        from .material_storage import hydrate
+        self.db.create_function("material_sha256",1,lambda text:digest(text.encode()),deterministic=True)
+        self.db.create_function("material_revision_sha256",3,lambda oid,version,payload:digest(canonical({"object_id":oid,"version":version,"payload":json.loads(hydrate(self,payload))}).encode()))
+        self.db.create_function("material_model_migrating",0,lambda:int(getattr(self,"_material_migrating",False)))
+        self.db.executescript(CONTENT_SCHEMA)
+        self.db.row_factory = row_factory(self)
         # Existing V1 instance databases are upgraded without rewriting source text.
         for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
             if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
@@ -159,6 +166,9 @@ class Store:
         version = current["version"] if current else 0
         if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
             raise Conflict("object version or kind changed")
+        if kind == "CALL":
+            from .generation import validate_call
+            validate_call(self, object_id, payload)
         new_version = version + 1
         revision_id = digest(canonical({"object_id": object_id, "version": new_version, "payload": payload}).encode())
         refs = []
@@ -174,9 +184,20 @@ class Store:
             self.db.execute("UPDATE objects SET current_revision=?,version=?,updated_at=? WHERE id=?", (revision_id, new_version, stamp, object_id))
         else:
             self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
-        self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, canonical(payload), stamp))
+        self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, self._encode_material(payload), stamp))
         self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
+        if kind in ("REQUIREMENT", "CALL", "ASSET"):
+            from .material_plans import register
+            from .production import record
+            row=record(self, revision_id=revision_id)
+            from .material_model import refresh_identity
+            refresh_identity(self,row)
+            register(self, row)
         return {"id": object_id, "kind": kind, "revision": revision_id, "version": new_version}
+
+    def _encode_material(self, payload):
+        from .material_storage import encode
+        return encode(self, payload)
 
     def configuration(self, scope):
         if scope not in ("SYSTEM", "PROJECT"):

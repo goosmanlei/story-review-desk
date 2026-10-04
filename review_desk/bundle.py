@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .store import Store, canonical, digest
-from .production_media import file_hash
+from .production_media import file_hash, physical_file_hash
 
 
 def _bytes(value):
@@ -37,15 +37,19 @@ def _staged_files(target, files):
         (stage / 'new').mkdir()
         (stage / 'previous').mkdir()
         for name, data in files.items():
+            if Path(name).is_absolute() or '..' in Path(name).parts:raise ValueError('unsafe staged metadata path')
             destination = target / name
             if destination.is_symlink() or (destination.exists() and not destination.is_file()):
                 raise ValueError('bundle metadata destination is not a regular file: ' + name)
+            (stage / 'new' / name).parent.mkdir(parents=True,exist_ok=True)
+            (stage / 'previous' / name).parent.mkdir(parents=True,exist_ok=True)
             (stage / 'new' / name).write_bytes(data)
             if destination.exists():
                 shutil.copyfile(destination, stage / 'previous' / name)
 
         def publish():
             for name in files:
+                (target/name).parent.mkdir(parents=True,exist_ok=True)
                 changed.append(name)
                 (stage / 'new' / name).replace(target / name)
 
@@ -73,6 +77,7 @@ def _staged_files(target, files):
 def export(store, export_dir):
     target = Path(export_dir)
     target.mkdir(parents=True, exist_ok=True)
+    archive_files={}
     store.db.execute('SAVEPOINT export_snapshot')
     try:
         materials = store.sources()
@@ -82,6 +87,23 @@ def export(store, export_dir):
         framework.update(dump(store))
         from .material_plans import dump as dump_plans
         framework.update(dump_plans(store))
+        from . import material_storage, material_archives
+        complete_model=not store.db.execute('SELECT 1 FROM material_plan_versions p LEFT JOIN material_definition_versions d ON d.material_id=p.material_id AND d.number=p.number WHERE d.definition_id IS NULL LIMIT 1').fetchone()
+        # New registered metadata uses the same lossless physical representation
+        # at publication. Real image/audio/video originals are never rewritten.
+        for revision in framework['revisions'] if complete_model else []:
+            for component in json.loads(revision['payload']).get('components',[]):
+                if component.get('role')!='metadata' or component.get('mime')!='application/json':continue
+                name=component['file'];path=target/'assets'/name
+                if path.is_file() and not material_archives.reference(path) and name not in archive_files:
+                    raw=path.read_bytes()
+                    if digest(raw)!=component['sha256'] or len(raw)!=component['bytes']:raise ValueError('metadata original differs before compaction')
+                    container=material_archives.encode(store,raw)
+                    archive_files[name]=_bytes(container)
+                    store.db.execute('INSERT INTO material_archive_files VALUES (?,?) ON CONFLICT(path) DO UPDATE SET container=excluded.container',('export/assets/'+name,canonical(container)))
+        material_data=material_storage.dump(store)
+        physical_revisions=material_storage.physical_revisions(store)
+        if complete_model:framework.update({k:v for k,v in material_data.items() if k!="material_content"})
         configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                           "events": store.configuration_events()}
         icon = store.configuration("SYSTEM")["body"]["site_favicon"]
@@ -112,9 +134,11 @@ def export(store, export_dir):
         if not (target / "assets" / name).is_file():
             raise ValueError("missing asset: " + name)
     material_bytes, comment_bytes = _bytes(materials), _bytes(comments)
+    if complete_model:framework["revisions"]=physical_revisions
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
     files = {"materials.json": material_bytes, "comments.json": comment_bytes,
              "objects.json": framework_bytes, "configurations.json": configuration_bytes}
+    if complete_model:files["material-content.json"]=_bytes({"format":"material-content-v1","material_content":material_data["material_content"]})
     layout = target.parent / 'config/entity-relationship-layout.json'
     if layout.exists():
         value = json.loads(layout.read_text())
@@ -123,13 +147,14 @@ def export(store, export_dir):
         files['entity-relationship-layout.json'] = _bytes(value)
     hashes = {name: digest(data) for name, data in files.items()}
     for name in asset_names:
-        hashes["assets/" + name] = file_hash(target / "assets" / name)
-    manifest = {"schema_version": 5, "sources": len(materials), "comments": len(comments["comments"]),
+        hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
+    manifest = {"schema_version": 6 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
     # a caught staging/replacement failure leaves the previous bundle intact.
     files['manifest.json'] = _bytes(manifest)
+    files={**{'assets/'+name:data for name,data in archive_files.items()},**files}
     with _staged_files(target, files) as publish:
         publish()
     return manifest
@@ -139,20 +164,21 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5):
+    if schema not in (1, 2, 3, 4, 5, 6):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
         required.update(('objects.json', 'configurations.json'))
+    if schema >= 6:required.add("material-content.json")
     if not isinstance(manifest.get('files'), dict) or not required <= manifest['files'].keys():
         raise ValueError('required core file missing from export manifest')
     for name, expected in manifest["files"].items():
         path = target / name
         if name.startswith("assets/"):
             _safe_asset(name[7:])
-        elif name not in (("materials.json", "comments.json") if schema == 1 else ("materials.json", "comments.json", "objects.json", "configurations.json", "entity-relationship-layout.json")):
+        elif name not in (("materials.json", "comments.json") if schema == 1 else ("materials.json", "comments.json", "objects.json", "configurations.json", "entity-relationship-layout.json", "material-content.json")):
             raise ValueError("unexpected export file")
-        if path.is_symlink() or file_hash(path) != expected:
+        if path.is_symlink() or physical_file_hash(path) != expected:
             raise ValueError("export checksum mismatch: " + name)
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
@@ -179,6 +205,15 @@ def restore(store, export_dir):
     # Validate in a separate in-memory store before any destination write.
     test = Store(":memory:")
     try:
+        from . import material_storage
+        if schema >= 6:
+            content=json.loads((target/"material-content.json").read_text())
+            if content.get("format")!="material-content-v1":raise ValueError("invalid material content format")
+            framework["material_content"]=content["material_content"]
+            if any(name not in framework for name in material_storage.TABLES):raise ValueError("material model tables missing")
+            material_storage.restore_content(test,framework)
+            physical_revisions=framework["revisions"]
+            framework["revisions"]=[{**row,"payload":material_storage.hydrate(test,row["payload"])} for row in physical_revisions]
         for source in materials:
             test.put_source(source)
             for asset in source["assets"]:
@@ -268,14 +303,16 @@ def restore(store, export_dir):
                 raise ValueError("invalid comment status/version")
             restored_comments.append({**comment, "target_object_id": object_id, "target_revision_id": revision_id})
         config = store.db_path.parent.parent / 'config'
-        with _staged_files(config, layout_files) as publish, store.db:
+        archive_files={r['path']:_bytes(json.loads(r['container'])) for r in framework['material_archive_files']} if schema>=6 else {}
+        with _staged_files(config, layout_files) as publish, _staged_files(store.db_path.parent.parent,archive_files) as publish_archives, store.db:
+            if schema >= 6:material_storage.restore_content(store,framework)
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))
             if schema >= 2:
                 for obj in framework["objects"]:
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], obj["created_at"], obj["updated_at"]))
                 for revision in framework["revisions"]:
-                    store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], revision["created_at"]))
+                    store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], store._encode_material(json.loads(revision["payload"])), revision["created_at"]))
                 for dep in framework["dependencies"]:
                     store.db.execute("INSERT INTO dependencies VALUES (?,?,?)", (dep["from_revision"], dep["to_revision"], dep["role"]))
             else:
@@ -298,8 +335,10 @@ def restore(store, export_dir):
                         actual_deps = dependencies_by_revision.get(revision['id'],set())
                         if expected_deps != actual_deps:
                             raise ValueError("restored production dependencies differ from payload")
-                for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
-                    validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
+                from .production import read_scope
+                with read_scope(store):
+                    for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
+                        validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
             for c in restored_comments:
                 store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
@@ -310,12 +349,19 @@ def restore(store, export_dir):
                 restore_rounds(store, framework)
             if schema >= 5:
                 from .material_plans import restore as restore_plans
-                restore_plans(store, framework)
+                restore_plans(store, framework,validate_after=schema<6)
+            if schema >= 6:
+                material_storage.restore_indices(store,framework)
+                from .material_plans import validate as validate_plans
+                validate_plans(store)
+                from .material_model import verify
+                verify(store)
             if schema >= 2:
                 for record in configurations["records"]:
                     store.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?)", (record["scope"], record["schema_version"], record["version"], record["body"], record["updated_at"]))
                 for event in configurations["events"]:
                     store.db.execute("INSERT INTO configuration_events VALUES (?,?,?,?,?)", (event["id"], event["scope"], event["version"], event["body"], event["at"]))
+            publish_archives()
             publish()
     except BaseException:
         # A busy COMMIT can leave the transaction open on older sqlite3

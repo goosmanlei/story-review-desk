@@ -18,12 +18,18 @@ MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
          ".txt": "text/plain", ".zip": "application/zip"}
 
 
-def file_hash(path):
+def physical_file_hash(path):
     h = hashlib.sha256()
     with Path(path).open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def file_hash(path):
+    from .material_archives import reference, read_bytes
+    if reference(path):return hashlib.sha256(read_bytes(path)).hexdigest()
+    return physical_file_hash(path)
 
 
 def asset_path(root, name):
@@ -79,7 +85,8 @@ def probe(path):
             result.update(sample_rate=int(audio["sample_rate"]), channels=int(audio["channels"]))
     elif suffix == ".json":
         try:
-            json.loads(path.read_text())
+            from .material_archives import read_bytes
+            json.loads(read_bytes(path))
         except (UnicodeError, ValueError) as exc:
             raise ValueError("invalid JSON file") from exc
     elif suffix == ".blend":
@@ -140,7 +147,8 @@ def validate_component(root, component, inspect=True):
             "original", "preview", "thumbnail", "project", "dependency", "metadata"):
         raise ValueError("invalid media component")
     path = asset_path(root, component.get("file"))
-    if not path.is_file() or type(component.get("bytes")) is not int or path.stat().st_size != component["bytes"]:
+    from .material_archives import logical_size
+    if not path.is_file() or type(component.get("bytes")) is not int or logical_size(path) != component["bytes"]:
         raise ValueError("missing media or byte size mismatch")
     if file_hash(path) != component.get("sha256") or path.stem != component["sha256"]:
         raise ValueError("media checksum mismatch")
