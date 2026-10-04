@@ -2,7 +2,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),crypto=require('node:crypto');
 function fixture({storage=new Map(),fetch:transport}={}){
   const textarea={value:'',disabled:false,readOnly:false},intent={checked:false,disabled:false},messages=[],requests=[],buttons=[{},{}];
-  const editor={querySelector:s=>s==='textarea'?textarea:s==='#material-revision-intent'?context.intent:s==='[data-comment-submit]'?buttons[0]:buttons[1],querySelectorAll:()=>buttons};
+  const editor={children:[],append(node){this.children.push(node)},querySelector:s=>s==='textarea'?textarea:s==='#material-revision-intent'?context.intent:s==='[data-comment-submit]'?buttons[0]:s==='[data-polish]'?buttons[1]:editor.children.find(node=>node.className?.split(' ').includes(s.slice(1)))||null,querySelectorAll:()=>buttons};
   const nodes={'#comment-editor-text':textarea,'.comment-editor':editor,'#toast':{classList:{add(){},remove(){}},set textContent(v){messages.push(v)}}};
   class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={}}append(...children){this.children.push(...children)}setAttribute(){} }
   const context={crypto,URL,console,setTimeout:()=>1,clearTimeout(){},intent,

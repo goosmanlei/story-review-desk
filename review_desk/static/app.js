@@ -1,7 +1,7 @@
 const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplaySummaries:new Map(),screenplayVersion:null,screenplayEpisode:null,screenplayScene:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
-const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});const data=await response.json();if(!response.ok)throw Error(data.error||`HTTP ${response.status}`);return data};
+const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});let data;try{data=await response.json()}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
 const isStructure=()=>state.workspace==='story.outline';
@@ -11,14 +11,39 @@ const commentTarget=()=>isProduction()?{target_object_id:state.productionSelecte
 const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number])}`:key};
 const commentSaves=new Set();
-function pendingCommentSubmission(key){
-  try{const value=JSON.parse(localStorage.getItem(key+':submission'));return value?.id&&value.payload?value:null}catch{return null}
+const commentRejections=new Map();
+const commentReceipts=new Map();
+function pendingCommentSubmission(key,strict=false){
+  try{
+    const stored=localStorage.getItem(key+':submission'),value=JSON.parse(stored);
+    if(!value?.id||!value.payload){commentRejections.delete(key);commentReceipts.delete(key);return null}
+    const receipt=commentReceipts.get(key);if(receipt?.stored===stored)return {...value,acknowledged:true,local_receipt_only:!value.acknowledged};commentReceipts.delete(key);
+    const known=commentRejections.get(key);if(known?.stored===stored)return {...value,rejection:known.rejection};commentRejections.delete(key);return value;
+  }catch(error){if(strict)throw error;return null}
 }
-function appendCommentSubmissionNotice(editor,key){
-  if(!editor||!key||state.editing||!pendingCommentSubmission(key)||editor.querySelector('.comment-submission-notice'))return;
-  const notice=nodeText('p','comment-help comment-submission-notice','上次提交尚未确认。原样重试可确认保存；修改内容后提交会作为一条新评论。',editor);
+function appendCommentSubmissionNotice(editor,key,knownReceipt=null){
+  if(!editor||!key)return;
+  const pending=knownReceipt||pendingCommentSubmission(key);if(!pending||(state.editing&&!pending.acknowledged))return;
+  const message=pending.acknowledged?'此评论已保存，但本机草稿尚未清除。原样再次保存只会重试清理，不会重复发送；修改内容后将按新内容提交。'+(pending.local_receipt_only?' 保存成功状态暂仅在当前页面，刷新后需用保留的原请求重新确认。':''):[400,409].includes(pending.rejection?.status)?`上次提交被拒绝（HTTP ${pending.rejection.status}）：${pending.rejection.message} 原草稿与圈选仍保留，请先核对相关内容后再提交。`:'上次提交尚未确认。原样重试可确认保存；修改内容后提交会作为一条新评论。';
+  const notice=editor.querySelector('.comment-submission-notice')||nodeText('p','comment-help comment-submission-notice','',editor);notice.textContent=message;
   notice.setAttribute('role','status');
 }
+function markCommentSubmissionRejected(key,stored,submission,error){
+  // Another tab may already own a newer attempt, even with the same server ID.
+  try{if(localStorage.getItem(key+':submission')!==stored)return}catch{return false}
+  const rejection={status:error.status,message:error.message};
+  try{localStorage.setItem(key+':submission',JSON.stringify({...submission,rejection}));commentRejections.delete(key);return true}catch{commentRejections.set(key,{stored,rejection});return false}
+}
+function rememberCommentReceipt(key,stored,submission){
+  // Keep the successful response even if persisting its local receipt fails.
+  const receipt={...submission,acknowledged:true};commentReceipts.set(key,{stored,submission});
+  try{
+    if(localStorage.getItem(key+':submission')!==stored)return stored;
+    const saved=JSON.stringify(receipt);localStorage.setItem(key+':submission',saved);
+    commentReceipts.set(key,{stored:saved,submission});return saved;
+  }catch{return stored}
+}
+
 function commentRevisionIntent(){
   if(state.editing)return null;
   return (typeof materialRevisionIntent==='function'?materialRevisionIntent():null)||pendingCommentSubmission(draftKey())?.payload.material_revision||null;
@@ -337,6 +362,10 @@ function renderConfigurations(){
           try{committed=await api(`/api/configurations/${scope}`,{method:'PATCH',body:JSON.stringify({expected_version:pendingRequest.expected_version,updates:pendingRequest.updates})})}
           catch(error){
             if(!ownsForm())return;
+            if(error.status===400||error.status===409){
+              pendingRequest=null;
+              throw Error(error.status===409?'本次保存未完成：配置版本已有变化。当前输入已保留，请核对最新配置后再保存。':`本次配置未保存：${error.message}。当前输入已保留，请修改后再保存。`);
+            }
             let result;try{result=await readAttempt(pendingRequest)}catch(readError){throw Error(`${readError.message}；保存结果待确认，当前输入已保留`)}
             if(!result.record)throw Error(`${error.message}；尚未确认保存，当前输入已保留`);
             committed=result.record;snapshot=result.snapshot;
@@ -547,7 +576,12 @@ function toggleCommentsFromReader(){
 }
 let commentAction=0;
 function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
-function abandonDraft(message){const key=draftKey();if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission')}if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)}
+function abandonDraft(message){
+  const key=draftKey();
+  try{if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}}
+  catch{toast('本机草稿未能完全清除，取消未完成。当前输入仍保留，请复制留存后重试。');return}
+  if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)
+}
 
 // Every comment editor binds here. Buttons own validation and submission state;
 // shortcuts invoke those same actions, and never handle unrelated inputs.
@@ -660,28 +694,44 @@ async function saveComment(){
   const editing=state.editing,draftText=textarea.value,payload={...commentTarget(),anchor:state.anchor,body:text};
   if(!editing&&typeof materialCommentContext==='function'){const context=materialCommentContext();if(context)payload.material_context=context}
   if(!editing&&$('#material-revision-intent')?.checked)payload.material_revision=commentRevisionIntent();
-  let submission,storedSubmission,sent=false;
+  let submission,storedSubmission,sent=false,acknowledged=false,cleaned=false;
   commentSaves.add(key);updateCommentEditorControls();
   try{
     try{
-      localStorage.setItem(key,draftText);
-      if(!editing){
-        const pending=pendingCommentSubmission(key);
-        submission=pending&&JSON.stringify(pending.payload)===JSON.stringify(payload)?pending:{id:crypto.randomUUID(),payload};
-        storedSubmission=JSON.stringify(submission);localStorage.setItem(key+':submission',storedSubmission);
+      const pending=pendingCommentSubmission(key,true),samePayload=pending&&JSON.stringify(pending.payload)===JSON.stringify(payload)&&(!editing?!pending.editing:pending.editing===editing);
+      if(samePayload&&pending.acknowledged){
+        submission=pending;storedSubmission=localStorage.getItem(key+':submission');acknowledged=true;
+      }else{
+        localStorage.setItem(key,draftText);
+        submission=editing?{id:editing,editing,payload}:samePayload?{id:pending.id,payload:pending.payload}:{id:crypto.randomUUID(),payload};
+        submission.attempt_id=crypto.randomUUID();
+        storedSubmission=JSON.stringify(submission);localStorage.setItem(key+':submission',storedSubmission);commentRejections.delete(key);commentReceipts.delete(key);
       }
-    }catch{throw Error('本机草稿保存失败，评论尚未发送。当前输入仍保留，请复制留存后重试。')}
-    if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
-    else{sent=true;await api('/api/comments',{method:'POST',body:JSON.stringify({id:submission.id,...submission.payload})})}
-    const sameSubmission=editing||localStorage.getItem(key+':submission')===storedSubmission;
-    const stillHere=sameSubmission&&draftKey()===key&&$('#comment-editor-text')?.value===draftText;
-    if(sameSubmission&&localStorage.getItem(key)===draftText){localStorage.removeItem(key);localStorage.removeItem(key+':discussion')}
-    if(!editing&&sameSubmission)localStorage.removeItem(key+':submission');
+    }catch{
+      const receipt=commentReceipts.get(key);if(receipt&&JSON.stringify(receipt.submission.payload)===JSON.stringify(payload)){acknowledged=true;submission=receipt.submission;throw Error('无法核对本机草稿')}
+      throw Error('本机草稿保存失败，评论尚未发送。当前输入仍保留，请复制留存后重试。')
+    }
+    if(!acknowledged){
+      if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
+      else{sent=true;await api('/api/comments',{method:'POST',body:JSON.stringify({id:submission.id,...submission.payload})})}
+      acknowledged=true;storedSubmission=rememberCommentReceipt(key,storedSubmission,submission);
+    }
+    const sameSubmission=localStorage.getItem(key+':submission')===storedSubmission,storedDraft=localStorage.getItem(key);
+    const ownDraft=sameSubmission&&(storedDraft===draftText||storedDraft===null);
+    const stillHere=ownDraft&&draftKey()===key&&$('#comment-editor-text')?.value===draftText;
+    if(ownDraft){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}
+    cleaned=true;
     if(stillHere){if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments()}
     if(stillHere&&payload.material_revision){const url=new URL(location.href);url.searchParams.delete('material_round');history.replaceState(null,'',url);if(isEntityReview())await reloadEntityReview();else if(isMaterialReview())await openProductionRecord(state.materialReview.record.object_id)}
     await refreshComments();toast('评论已保存');
-  }catch(error){if(sent&&draftKey()===key)appendCommentSubmissionNotice($('.comment-editor'),key);toast(error.message)}
-  finally{commentSaves.delete(key);updateCommentEditorControls()}
+  }catch(error){
+    if(acknowledged){
+      if(!cleaned&&draftKey()===key&&$('#comment-editor-text')===textarea&&textarea.value===draftText)appendCommentSubmissionNotice($('.comment-editor'),key,pendingCommentSubmission(key)||{...submission,acknowledged:true,local_receipt_only:true});
+      toast(cleaned?'评论已保存，但页面未能更新，请刷新后查看。':'评论已保存，但本机草稿未能完全清除。当前输入仍保留；本机记录不可用时，请勿刷新后另建同一条评论。');
+    }else{
+      let message=error.message;if(sent&&submission&&[400,409].includes(error.status)&&markCommentSubmissionRejected(key,storedSubmission,submission,error)===false)message+=' 拒绝状态未能写入本机；原草稿仍保留，请复制留存。';if(sent&&draftKey()===key)appendCommentSubmissionNotice($('.comment-editor'),key);toast(message)
+    }
+  }finally{commentSaves.delete(key);updateCommentEditorControls()}
 }
 const sameDraft=(key,text,target)=>draftKey()===key&&$('#comment-editor-text')?.value.trim()===text&&(!target||JSON.stringify(commentTarget())===JSON.stringify(target));
 function renderPolishFeedback(key,text,target){

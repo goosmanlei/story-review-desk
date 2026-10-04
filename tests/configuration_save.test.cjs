@@ -17,7 +17,7 @@ function fixture(){
   const root=new Node('main'),requests=[],messages=[];
   const data={values:{PROJECT:{scope:'PROJECT',version:1,schema_version:4,body:{story_background:'Original story background'}},SYSTEM:{scope:'SYSTEM',version:1,schema_version:4,body:{ai_context_max_chars:12000,site_favicon:'old.svg'}}},catalog:{scopes:{PROJECT:{story_background:{type:'long_text',label:'故事背景'}},SYSTEM:{ai_context_max_chars:{type:'integer',label:'AI 参考上下文字数上限'},site_favicon:{type:'favicon',label:'站点图标'}}},model_efforts:{}},favicon_assets:['old.svg'],favicon:{url:'/old-icon',mime:'image/svg+xml'}};
   const toast={classList:{add(){},remove(){}},set textContent(value){messages.push(value)}};
-  const context={document:{createElement:tag=>new Node(tag),addEventListener(){},querySelector:selector=>selector==='#configuration-view'?root:selector==='#toast'?toast:null},setTimeout:()=>0,clearTimeout(){},console,fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({ok:true,json:async()=>data}),reject}))};
+  const context={document:{createElement:tag=>new Node(tag),addEventListener(){},querySelector:selector=>selector==='#configuration-view'?root:selector==='#toast'?toast:null},setTimeout:()=>0,clearTimeout(){},console,fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({ok:true,json:async()=>data}),respond:(status,data)=>resolve({ok:status>=200&&status<300,status,json:async()=>data}),reject}))};
   context.FileReader=class{readAsDataURL(){this.result='data:image/svg+xml;base64,dGVzdA==';queueMicrotask(()=>this.onload())}};
   vm.createContext(context);vm.runInContext(source,context);vm.runInContext('globalThis.state=state;',context);context.state.workspace='project.configuration';context.state.configurations=plain(data);context.renderConfigurations();
   const form=scope=>root.all().find(node=>node.tag==='form'&&node.dataset.scope===scope),save=form=>form.all().find(node=>node.tag==='button'&&node.type==='submit'),notice=form=>form.all().find(node=>node.attrs.role==='status');
@@ -72,4 +72,27 @@ test('favicon upload and clear retain save locking and unsaved icon selection',a
 test('navigation during unknown-result lookup never posts again or changes the new form',async()=>{
   const f=fixture(),old=f.form('PROJECT');f.input(old,'story_background','original');const saving=f.submit(old);await flush();f.requests[0].reject(Error('lost'));await flush();f.context.renderConfigurations();const next=f.form('PROJECT');f.input(next,'story_background','new form input');f.requests.at(-1).resolve(f.snapshot());await saving;
   assert.equal(next.elements.story_background.value,'new form input');assert.equal(f.requests.filter(request=>request.options.method==='PATCH').length,1);assert.deepEqual(f.messages,[]);
+});
+test('HTTP 409 is a known rejected write, keeps the old version and live input, and never reads back as unknown',async()=>{
+ const f=fixture(),form=f.form('PROJECT');f.input(form,'story_background','my unique input');let saving=f.submit(form);await flush();f.requests[0].respond(409,{error:'configuration version changed; refresh before saving'});await saving;
+ assert.equal(f.requests.length,1);assert.equal(f.form('PROJECT'),form);assert.equal(form.elements.story_background.value,'my unique input');assert.match(f.notice(form).textContent,/本次保存未完成.*版本已有变化/);assert.doesNotMatch(f.notice(form).textContent,/待确认|尚未确认|已保存/);assert.equal(f.context.state.configurations.values.PROJECT.version,1);
+ saving=f.submit(form);await flush();assert.equal(f.requests.length,2);assert.equal(f.requests[1].options.method,'PATCH');assert.equal(JSON.parse(f.requests[1].options.body).expected_version,1);f.requests[1].respond(409,{error:'conflict'});await saving;assert.equal(f.requests.length,2);assert.doesNotMatch(f.notice(form).textContent,/待确认/);
+});
+test('HTTP 400 preserves input and accepts an explicit corrected operation at the original version',async()=>{
+ const f=fixture(),form=f.form('PROJECT');f.input(form,'story_background','invalid technical input');let saving=f.submit(form);await flush();f.requests[0].respond(400,{error:'technical validation rejection'});await saving;
+ assert.equal(f.requests.length,1);assert.match(f.notice(form).textContent,/本次配置未保存.*validation rejection/);assert.doesNotMatch(f.notice(form).textContent,/待确认|尚未确认/);assert.equal(form.elements.story_background.value,'invalid technical input');
+ f.input(form,'story_background','explicit corrected input');saving=f.submit(form);await flush();const next=f.requests.at(-1);assert.equal(next.options.method,'PATCH');assert.equal(JSON.parse(next.options.body).expected_version,1);assert.equal(JSON.parse(next.options.body).updates.story_background,'explicit corrected input');await f.finish(next,saving);
+});
+test('known rejection after an absent-write readback clears pending status without raising the version',async()=>{
+ const f=fixture(),form=f.form('PROJECT');f.input(form,'story_background','same operation');let saving=f.submit(form);await flush();f.requests[0].reject(Error('lost'));await flush();f.requests[1].resolve(f.snapshot());await saving;
+ saving=f.submit(form);await flush();assert.equal(f.requests[2].url,'/api/configurations');f.requests[2].resolve(f.snapshot());await flush();f.requests[3].respond(409,{error:'concurrent writer'});await saving;assert.equal(f.requests.length,4);assert.doesNotMatch(f.notice(form).textContent,/待确认|尚未确认/);
+ saving=f.submit(form);await flush();assert.equal(f.requests[4].options.method,'PATCH');assert.equal(JSON.parse(f.requests[4].options.body).expected_version,1);f.requests[4].respond(409,{error:'conflict'});await saving;
+});
+test('HTTP 503 can still be a lost success and uses the original exact readback comparison',async()=>{
+ const f=fixture(),form=f.form('PROJECT');f.input(form,'story_background','possibly committed');const saving=f.submit(form);await flush();const first=f.requests[0];first.respond(503,{error:'upstream unavailable'});await flush();assert.equal(f.requests[1].url,'/api/configurations');f.requests[1].resolve(f.snapshot(f.committed(first)));await saving;
+ assert.equal(f.requests.filter(r=>r.options.method==='PATCH').length,1);assert.equal(f.context.state.configurations.values.PROJECT.version,2);assert.match(f.messages.at(-1),/已保存/);
+});
+test('a late HTTP 409 never labels or reconstructs a newly opened configuration form',async()=>{
+ const f=fixture(),old=f.form('PROJECT');f.input(old,'story_background','old attempt');const saving=f.submit(old);await flush();f.context.renderConfigurations();const current=f.form('PROJECT');f.input(current,'story_background','new owner unique input');f.requests[0].respond(409,{error:'conflict'});await saving;
+ assert.equal(f.form('PROJECT'),current);assert.equal(current.elements.story_background.value,'new owner unique input');assert.equal(f.notice(current).hidden,true);assert.equal(f.requests.length,1);assert.deepEqual(f.messages,[]);
 });
