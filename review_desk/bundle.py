@@ -213,6 +213,7 @@ def restore(store, export_dir):
             if any(name not in framework for name in material_storage.TABLES):raise ValueError("material model tables missing")
             material_storage.restore_content(test,framework)
             physical_revisions=framework["revisions"]
+            physical_by_id={row["id"]:row["payload"] for row in physical_revisions}
             framework["revisions"]=[{**row,"payload":material_storage.hydrate(test,row["payload"])} for row in physical_revisions]
         for source in materials:
             test.put_source(source)
@@ -316,7 +317,7 @@ def restore(store, export_dir):
                 for obj in framework["objects"]:
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], obj["created_at"], obj["updated_at"]))
                 for revision in framework["revisions"]:
-                    store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], store._encode_material(json.loads(revision["payload"])), revision["created_at"]))
+                    store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], physical_by_id[revision["id"]] if schema >= 6 else revision["payload"], revision["created_at"]))
                 for dep in framework["dependencies"]:
                     store.db.execute("INSERT INTO dependencies VALUES (?,?,?)", (dep["from_revision"], dep["to_revision"], dep["role"]))
             else:

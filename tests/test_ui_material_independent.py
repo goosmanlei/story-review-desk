@@ -1,6 +1,7 @@
 """Independent task-0009 regressions; no browser or production instance writes."""
 import copy
 import json
+import shutil
 import sqlite3
 import tempfile
 import unittest
@@ -11,7 +12,8 @@ from review_desk import material_model as model
 from review_desk import material_plans as plans
 from review_desk import material_storage as storage
 from review_desk import production
-from review_desk.store import Conflict, Store, canonical
+from review_desk.bundle import export, restore
+from review_desk.store import Conflict, Store, canonical, digest
 
 
 class IndependentMaterialContractTest(unittest.TestCase):
@@ -142,6 +144,75 @@ class IndependentMaterialContractTest(unittest.TestCase):
         original = json.dumps(payload, ensure_ascii=True, indent=2) + '\r\n'
         encoded = storage.encode(self.store, payload, raw=original)
         self.assertEqual(storage.hydrate(self.store, encoded), original)
+
+    def legacy_bundle(self):
+        payload = {
+            'format': 'production-call-v1', 'title': '旧格式原始字节',
+            'blocks': [{'id': 'call', 'text': '保留转义与缩进'}],
+            'method': 'generation', 'tool': 'independent-fixture',
+            'status': 'failed', 'inputs': [], 'outputs': [], 'lineage': {},
+            'prompt': '独立恢复夹具，无外部调用。',
+        }
+        self.store.put_object('legacy-call', 'CALL', payload)
+        row = production.record(self.store, 'legacy-call')
+        original = json.dumps(payload, ensure_ascii=True, indent=3) + '\r\n'
+        target = self.root / 'legacy-export'
+        export(self.store, target)
+        framework = json.loads((target / 'objects.json').read_text())
+        for revision in framework['revisions']:
+            revision['payload'] = original
+        for table in storage.TABLES:
+            framework.pop(table, None)
+        data = (json.dumps(framework, ensure_ascii=False, indent=2) + '\n').encode()
+        (target / 'objects.json').write_bytes(data)
+        manifest = json.loads((target / 'manifest.json').read_text())
+        manifest['schema_version'] = 5
+        manifest['files']['objects.json'] = digest(data)
+        manifest['files'].pop('material-content.json')
+        (target / 'material-content.json').unlink()
+        (target / 'manifest.json').write_text(json.dumps(manifest))
+        return target, row, original
+
+    def test_legacy_schema5_restore_preserves_noncanonical_revision_bytes(self):
+        source, row, original = self.legacy_bundle()
+        destination = self.root / 'legacy-restored'
+        shutil.copytree(source, destination / 'export')
+        other = Store(destination / '.runtime/review.sqlite3')
+        try:
+            restore(other, destination / 'export')
+            restored = other.db.execute('SELECT id,payload FROM revisions').fetchone()
+            self.assertEqual(restored['id'], row['id'])
+            self.assertEqual(restored['payload'].encode(), original.encode())
+            self.assertEqual(storage.physical_revisions(other)[0]['payload'].encode(), original.encode())
+            # Insertion still invokes the revision checksum trigger.
+            changed = json.loads(original)
+            changed['prompt'] = '不同内容不能继承旧修订身份'
+            with self.assertRaises(sqlite3.IntegrityError):
+                with other.db:
+                    other.db.execute('UPDATE revisions SET payload=? WHERE id=?', (json.dumps(changed), row['id']))
+            self.assertEqual(other.db.execute('SELECT payload FROM revisions').fetchone()[0], original)
+        finally:
+            other.close()
+
+    def test_legacy_schema5_restore_rejects_rehashed_bundle_with_wrong_revision_identity(self):
+        source, _, original = self.legacy_bundle()
+        framework = json.loads((source / 'objects.json').read_text())
+        changed = json.loads(original)
+        changed['prompt'] = '外层文件哈希有效也不能改写旧修订'
+        framework['revisions'][0]['payload'] = json.dumps(changed, ensure_ascii=True, indent=3) + '\r\n'
+        data = json.dumps(framework).encode()
+        (source / 'objects.json').write_bytes(data)
+        manifest = json.loads((source / 'manifest.json').read_text())
+        manifest['files']['objects.json'] = digest(data)
+        (source / 'manifest.json').write_text(json.dumps(manifest))
+        other = Store(self.root / 'tampered-restore/.runtime/review.sqlite3')
+        try:
+            with self.assertRaisesRegex(ValueError, 'revision checksum mismatch'):
+                restore(other, source)
+            self.assertEqual(other.objects(), [])
+            self.assertEqual(other.db.execute('SELECT COUNT(*) FROM material_content').fetchone()[0], 0)
+        finally:
+            other.close()
 
     def test_wrong_material_comment_membership_rolls_back_atomically(self):
         first = self.need('first')
