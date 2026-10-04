@@ -11,6 +11,16 @@ import json
 NOTE_FIELDS = ('facts', 'choices', 'unknowns')
 
 
+def generation_parameter_text(payload):
+    return json.dumps(payload['generation'].get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)
+
+
+def call_parameter_text(payload):
+    parameters = {key: value for key, value in payload.get('parameters', {}).items()
+                  if not (key == 'prompt' and value == payload.get('prompt'))}
+    return json.dumps(parameters, ensure_ascii=False, sort_keys=True, indent=2)
+
+
 def production_text_blocks(payload):
     blocks = list(payload.get('blocks') or [])
     body = '\n'.join(block['text'] for block in blocks)
@@ -31,14 +41,14 @@ def production_text_blocks(payload):
     plan = payload.get('generation') or {}
     if plan:
         extra += [('generation.tool', plan.get('tool')), ('generation.model', plan.get('model')),
-                  ('generation.parameters', json.dumps(plan.get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)),
+                  ('generation.parameters', generation_parameter_text(payload)),
                   ('generation.prompt', plan.get('prompt')),
                   ('generation.output.description', plan.get('output', {}).get('description')),
                   ('generation.output.review_criteria', '\n'.join(plan.get('output', {}).get('review_criteria', [])))]
         extra += [(f'generation.inputs.{i}.use', value.get('use')) for i,value in enumerate(plan.get('inputs', []))]
     if payload.get('format') == 'production-call-v1':
         extra += [('call.model', payload.get('model')),
-                  ('call.parameters', json.dumps({k:v for k,v in payload.get('parameters', {}).items() if not (k=='prompt' and v==payload.get('prompt'))}, ensure_ascii=False, sort_keys=True, indent=2)),
+                  ('call.parameters', call_parameter_text(payload)),
                   ('call.prompt', payload.get('prompt'))]
     for field,text in extra:
         if isinstance(text,str) and text.strip() and text not in body and text not in seen:

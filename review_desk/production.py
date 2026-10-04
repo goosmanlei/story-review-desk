@@ -12,6 +12,7 @@ import re
 import shutil
 
 from .store import Conflict, canonical
+from .review_text import generation_parameter_text, call_parameter_text
 from .production_media import asset_path, validate_component
 from . import production_states as full_states
 
@@ -37,9 +38,9 @@ def record_view(row):
     if value['payload'].get('generation'):
         # Use the exact server projection for numeric JSON (1.0 / exponents),
         # whose browser serialization can otherwise change comment offsets.
-        value['review_parameter_text'] = json.dumps(value['payload']['generation'].get('parameters', {}), ensure_ascii=False, sort_keys=True, indent=2)
+        value['review_parameter_text'] = generation_parameter_text(value['payload'])
     if value["kind"] == "CALL":
-        value["review_call_parameter_text"] = json.dumps({k:v for k,v in value['payload'].get('parameters', {}).items() if not (k=='prompt' and v==value['payload'].get('prompt'))}, ensure_ascii=False, sort_keys=True, indent=2)
+        value["review_call_parameter_text"] = call_parameter_text(value['payload'])
     return value
 
 

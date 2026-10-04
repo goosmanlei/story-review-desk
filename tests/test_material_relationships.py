@@ -128,12 +128,19 @@ class MaterialRelationshipsTest(unittest.TestCase):
 
     def test_material_provenance_stays_on_exact_call_and_fields_are_commentable(self):
         self.setup_plans();plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan.pop('tool')
+        plan['parameters']={'prompt':plan['prompt'],'pitch':1.0,'epsilon':1e-7,'nested':{'中文':'原参数'}}
         self.change('need-full-overall',generation=plan);self.decide();manifest=g.package(self.store,'need-full-overall')
         self.assertNotIn('tool',manifest)
         call=self.spec('actual','CALL',method='generation',tool='external-cli',status='submitted',inputs=[],outputs=[],
                        generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
                        **{k:manifest[k] for k in ('model','parameters','prompt')})
         self.put(call);original=self.ref('actual');component=self.media()
+        saved=p.record(self.store,'actual');parameters=next(b for b in production_text_blocks(saved['payload']) if b.get('field')=='call.parameters')
+        self.assertEqual(saved['review_call_parameter_text'],parameters['text'])
+        self.assertIn('1.0',parameters['text']);self.assertIn('1e-07',parameters['text'])
+        self.assertNotIn('prompt',parameters['text']);self.assertEqual(saved['payload']['parameters'],plan['parameters'])
+        parameter_anchor={'type':'text','block_id':parameters['id'],'end_block_id':parameters['id'],'start':0,'end':len(parameters['text']),'quote':parameters['text']}
+        self.store.create_comment({'target_object_id':'actual','target_revision_id':original['revision_id'],'anchor':parameter_anchor,'body':'保留准确参数字符'})
         self.put(self.spec('result','ASSET',media_type='audio',subjects=[self.ref('songbook')],states=[self.ref('full')],components=[component],production=original,lineage={}))
         self.change('actual',status='completed',outputs=[self.ref('result')])
         read=p.snapshot(self.store,object_id='result');self.assertEqual(read['review_context']['call']['id'],original['revision_id'])
