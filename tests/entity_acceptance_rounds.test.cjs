@@ -63,6 +63,13 @@ test('content compatibility mode without generation requirements keeps its exist
   f.data.historical=true;assert.equal(f.render().disabled,true);
 });
 
+test('incomplete current preparation posts its exact content scope while old plans remain read-only',async()=>{
+  const f=setup();f.data.acceptance_mode='content';f.data.preparation={complete:false,issues:[{message:'前置方案已变化，需复核'}]};
+  const button=f.render();assert.equal(button.disabled,false);assert.match(button.title,/生成前仍需完善/);
+  await button.onclick();assert.equal(f.requests[0].payload.acceptance_mode,'content');assert.deepEqual(f.requests[0].payload.scope,f.data.scope);
+  f.data.decisionSave=null;f.context.switchMaterialRound(f.data,'need',1);assert.equal(f.render().disabled,true);
+});
+
 test('a queued old button callback cannot judge a newer historical display or a different entity',async()=>{
   const f=setup(),button=f.render();assert.equal(button.disabled,false);const click=button.onclick();f.context.switchMaterialRound(f.data,'need',1);await click;assert.equal(f.requests.length,0);
   f.context.switchMaterialRound(f.data,'need',2);const next=f.render().onclick();f.context.state.entityReview={...f.data};await next;assert.equal(f.requests.length,0);
