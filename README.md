@@ -78,7 +78,7 @@ git push origin main
 
 完整状态描述实体此刻同时存在的外观、服装、伤势等，保留一个整体参考槽位，并允许增加细节、角度或声音补充。准确状态与文件组成的覆盖关系由后台工具维护，页面用于审阅、评论、版本选择及缺项检查；缺少整体参考、状态归属错误或转换依据不完整时，不能输出就绪包。旧局部状态和实际制作输入不改写，具体迁移与并发保护见制作契约。
 
-批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 仅在必要输入齐备时生成包含原件的目录包。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
+批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 在必要输入齐备且完整包的准确依赖与全部原件均有效时生成目录包；已采用的可选原件或历史输入缺失也会阻断导出。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
 
 已有数据库继续使用对象、修订和依赖表；素材轮次增加四张索引表，保留原有业务记录。当前导出使用 Schema 4，包含轮次、准确评论范围及历史生产修订的原件组成；恢复需支持该格式的系统，并在空实例执行。旧 Schema 1—3 的恢复保持兼容。导出和恢复不包含凭据，也不替代实际打开工程、观看与听辨作品。
 
