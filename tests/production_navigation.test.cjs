@@ -139,3 +139,12 @@ test('an entity with only historical partial states stays readable without inven
   assert.equal(ctx.state.productionEntityDetail.record,entity);
   assert.equal(ctx.state.productionChildDetail,null);
 });
+
+test('historical call references still navigate to their exact detail after removal from material list facets',async()=>{
+ const call=row('old-call','CALL',{title:'Executed call'},'exact-call');
+ const ctx=setup([],async()=>({record:call,history:[call],uses:[]}));const routes=[];ctx.switchWorkspace=workspace=>routes.push(workspace);
+ await ctx.openProductionRecord('old-call','exact-call',true);assert.deepEqual(routes,['materials.workspace']);
+ assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),'exact-call');
+ ctx.state.workspace='materials.workspace';await ctx.openProductionRecord('old-call','exact-call',false);
+ assert.equal(ctx.state.productionSelected.id,'exact-call');
+});
