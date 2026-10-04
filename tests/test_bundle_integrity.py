@@ -86,9 +86,10 @@ class BundleIntegrityTest(unittest.TestCase):
         self.assertEqual(self.destination.comments()[0]['body'], 'Original opinion')
 
     def test_all_supported_schemas_require_their_core_files_and_still_restore(self):
-        for schema in (1, 2, 3, 4):
+        for schema in (1, 2, 3, 4, 5, 6):
             manifest = export(self.source, self.bundle)
             manifest['schema_version'] = schema
+            if schema<6:manifest['files'].pop('material-content.json',None)
             if schema == 1:
                 for name in ('objects.json', 'configurations.json'):
                     del manifest['files'][name]

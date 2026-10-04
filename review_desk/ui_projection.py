@@ -36,7 +36,21 @@ def material_entries(store):
         entries.append({'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],
                         'media_type':value['media_type'],'generated':bool(real),'preview':preview,
                         'slot':value.get('slot'),'scope':scope,'locations':locations,'entity_ids':list(owners)})
-    return entries
+    from .material_storage import canonical_id, identity
+    merged={}
+    for item in entries:
+        mid=canonical_id(store,item['object_id'])
+        if mid not in merged or item['object_id']==mid:
+            previous=merged.get(mid)
+            merged[mid]={**item,'canonical_material_id':mid,'material_identity':identity(store,mid)}
+            if previous:
+                merged[mid]['locations']+=previous['locations']
+                merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+previous['entity_ids']))
+        else:
+            merged[mid]['locations']+=item['locations']
+            merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+item['entity_ids']))
+            merged[mid]['generated']|=item['generated']
+    return list(merged.values())
 
 
 def entity_summaries(store, entities, entries):
@@ -53,7 +67,8 @@ def entity_summaries(store, entities, entries):
             accepted=bool(g.accepted(store,eid,scope) or g.content_scope(store,eid,decision,rows) or
                 decision['payload'].get('acceptance_model')==g.CONTENT_MODEL and decision['payload']['acceptance_scope']==scope)
         statuses[eid]='accepted' if accepted else 'unaccepted'
-    return {'entity_material_counts':counts,'entity_statuses':statuses}
+    return {'entity_material_counts':counts,'entity_statuses':statuses,
+            'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
 def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None):
@@ -74,6 +89,8 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
     result=[item for item in values if matches(item,chosen)]
     focused=None
     if focus:
+        from .material_storage import canonical_id
+        focus=canonical_id(store,focus)
         focused=next((item for item in values if item['object_id']==focus),None)
         if focused is None:
             mids=[r['material_id'] for r in store.db.execute('SELECT DISTINCT m.material_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=?',(focus,))]
@@ -128,28 +145,53 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
             contexts.append(b.context(store,row['object_id'],row['id']))
     all_entries={i['object_id']:i for i in material_entries(store)}
     def enrich(context):
-        scoped=context['record'];direct={r['object_id'] for r in b.exact_scoped(store,'REQUIREMENT',scoped['id'])}
-        needs={r['object_id']:(r,'mounted' if r['object_id'] in direct else 'applicable') for r in context['requirements']}
-        # Only explicit scope/applicability supplies material placement. A state
-        # occurring in a scene alone does not make all its media shared there.
-        for link in context['relations']:
-            if link['payload']['relation_type']!='applicability':continue
-            subject=p.ref_record(store,link['payload']['subject'])
-            if subject['kind']=='ASSET':needs.setdefault(subject['object_id'],(subject,'applicable'))
-            elif subject['kind'] in ('ENTITY','STATE'):
-                forms=[subject] if subject['kind']=='STATE' else [r for r in b.rows(store,'STATE') if r['payload'].get('entity')==b.ref(subject)]
-                for form in forms:
-                    for need in b.exact_scoped(store,'REQUIREMENT',form['id']):
-                        if need['payload'].get('status')!='withdrawn':needs.setdefault(need['object_id'],(need,'applicable'))
+        from .material_storage import canonical_id
+        from . import material_plans
+        scoped=context['record'];needs={}
+        def add(row,relation,evidence):
+            if row['kind'] not in ('REQUIREMENT','ASSET'):return
+            mid=canonical_id(store,row['object_id'])
+            if row['kind']=='ASSET':
+                mids={canonical_id(store,v['object_id']) for v in row['payload'].get('candidate_requirements',[])}
+                if len(mids)==1:mid=next(iter(mids))
+            if mid in needs:
+                needs[mid][2].append(evidence)
+            else:needs[mid]=[row,relation,[evidence]]
         for need in context['requirements']:
+            add(need,'mounted' if need['payload']['scope']==b.ref(scoped) else 'applicable',
+                {'kind':'direct_requirement','record':b.ref(need),'scope':b.ref(scoped)})
             need['review_input_records']=[p.ref_record(store,v['reference']) for v in need['payload'].get('generation',{}).get('inputs',[])]
+            for value in need['payload'].get('generation',{}).get('inputs',[]):
+                add(p.ref_record(store,value['reference']),'planned_input',
+                    {'kind':'planned_input','record':b.ref(need),'reference':value})
+            for membership in material_plans.memberships(store,need['id']):
+                for call_ref in store.db.execute("SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=? AND role='call'",(membership['material_id'],membership['number'])):
+                    call=p.record(store,revision_id=call_ref[0])
+                    for value in call['payload'].get('inputs',[]):
+                        exact=value.get('reference',value)
+                        add(p.ref_record(store,exact),'actual_input',
+                            {'kind':'actual_input','record':b.ref(call),'reference':value})
+        for link in context['relations']:
+            if link['payload']['relation_type']=='applicability':
+                subject=p.ref_record(store,link['payload']['subject'])
+                # A state/entity applicability link expresses suitability, not
+                # the use of every material attached to that state/entity.
+                add(subject,'applicable',{'kind':'direct_requirement','record':b.ref(link),'scope':b.ref(scoped)})
+        for adoption in context['adoptions']:
+            add(p.ref_record(store,adoption['payload']['asset']),'adoption',
+                {'kind':'adoption','record':b.ref(adoption),'selection':adoption['payload']})
         context['materials']=[]
-        for row,relation in needs.values():
-            item=all_entries.get(row['object_id'])
+        levels={'STORY':'story','INPUT_LOCK':'story','EPISODE':'episode','PREPARATION':'scene','SHOT_DESIGN':'shot','ENTITY':'entity','STATE':'state'}
+        for mid,(row,relation,evidence) in needs.items():
+            item=all_entries.get(mid)
             if not item:
                 value=row['payload'];item={'object_id':row['object_id'],'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder'),'preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
+            placement=row['payload'].get('scope') or item.get('scope')
+            owner=p.ref_record(store,placement) if placement else scoped
             context['materials'].append({**item,'id':row['id'],'title':row['payload']['title'],'association':relation,
-                'placement':b.ref(scoped),'placement_title':scoped['payload']['title'], 'record':row})
+                'canonical_material_id':mid,'usage_evidence':evidence,
+                'placement':b.ref(owner),'placement_level':levels.get(owner['kind'],'shot'),
+                'placement_title':owner['payload']['title'],'record':row})
         context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
         return context
     return {'scene':selected,'shared':[enrich(c) for c in reversed(contexts)],

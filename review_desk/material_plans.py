@@ -86,9 +86,14 @@ def known(row):
     return bool(method and value.get('model') and not any(word in str(value['model']).lower() for word in ('unknown','未知','待选','未提供')) and isinstance(value.get('parameters'),dict) and value.get('prompt'))
 
 
-def signature(row):
+def legacy_signature(row):
     # Incomplete historical calls never become falsely identical plans.
     return digest(canonical(scheme(row['payload'], row['kind'])).encode()) if known(row) else 'unknown:'+row['object_id']
+
+
+def signature(row, store=None):
+    from .material_model import signature as complete_signature
+    return complete_signature(row, store)
 
 
 def memberships(store, revision_id):
@@ -108,10 +113,10 @@ def bind(store, mid, number, row):
 
 
 def version(store, mid, row, freeze=False):
-    fp = signature(row)
+    fp = signature(row,store)
     if row['kind']=='REQUIREMENT':
         previous=store.db.execute("SELECT m.number,r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='plan' AND r.version<? ORDER BY r.version DESC LIMIT 1",(mid,row['version'])).fetchone()
-        if previous and signature(p.record(store,revision_id=previous['id']))==fp:
+        if previous and signature(p.record(store,revision_id=previous['id']),store)==fp:
             # An executed version stores resolved exact media, while its draft
             # may name future needs. Editing a title/association cannot create a
             # version merely because these two representations differ.
@@ -129,6 +134,8 @@ def version(store, mid, row, freeze=False):
         n = last['number'] + 1 if last else 1
         store.db.execute('INSERT INTO material_plan_versions VALUES (?,?,?,?,?)', (mid, n, fp, 0, evidence))
     bind(store, mid, n, row)
+    from .material_model import bind_definition
+    bind_definition(store,mid,n,row)
     if freeze:
         store.db.execute('UPDATE material_plan_versions SET frozen=1 WHERE material_id=? AND number=?', (mid, n))
     return n
@@ -138,7 +145,7 @@ def call_version(store, mid, row):
     previous = store.db.execute("SELECT m.number FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND r.object_id=? AND m.role='call' ORDER BY r.version LIMIT 1", (mid, row['object_id'])).fetchone()
     if previous:
         prior=store.db.execute('SELECT fingerprint FROM material_plan_versions WHERE material_id=? AND number=?',(mid,previous[0])).fetchone()
-        if prior[0]!=signature(row):
+        if prior[0]!=signature(row,store) and prior[0]!=legacy_signature(row):
             n=version(store,mid,row,freeze=True)
             store.db.execute("UPDATE material_plan_versions SET evidence='historical-call-scheme-conflict' WHERE material_id=? AND number=?",(mid,n))
             return n
@@ -156,7 +163,7 @@ def register(store, row):
     elif row['kind'] == 'CALL':
         if value['status'] == 'planned':
             return
-        mid = (value.get('generation_requirement') or {}).get('object_id')
+        mid = (value.get('generation_requirement') or value.get('prepared_plan') or {}).get('object_id')
         if mid:
             call_version(store, mid, row)
         for member in store.db.execute("SELECT DISTINCT m.material_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=?", (row['object_id'],)).fetchall():
@@ -176,10 +183,20 @@ def register(store, row):
             bind(store, mid, n, row)
 
 
+def belongs(store,revision_id,mid,number):
+    if any(v['material_id']==mid and v['number']==number for v in memberships(store,revision_id)):
+        return True
+    row=store.db.execute('SELECT provenance FROM material_definition_versions WHERE material_id=? AND number=?',(mid,number)).fetchone()
+    if not row:return False
+    provenance=json.loads(row[0])
+    return any(isinstance(v,dict) and v.get('record',{}).get('revision_id')==revision_id
+               for key,v in provenance.items() if key in ('requirements','checks','output','generation'))
+
+
 def comment_scope(store, comment, context):
     if not isinstance(context, dict) or set(context) != {'material_id', 'number', 'model'} or context['model'] != 'plan-v1':
         raise ValueError('plan comment context requires material_id, number and model=plan-v1')
-    if not any(v['material_id'] == context['material_id'] and v['number'] == context['number'] for v in memberships(store, comment['target_revision_id'])):
+    if not belongs(store,comment['target_revision_id'],context['material_id'],context['number']):
         raise Conflict('评论不属于所阅读的素材方案版本')
     store.db.execute('INSERT INTO material_plan_comments VALUES (?,?,?)', (comment['id'], context['material_id'], context['number']))
 
@@ -188,7 +205,7 @@ def snapshot(store, mid):
     result = []
     for v in store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? ORDER BY number DESC', (mid,)):
         rows = [p.record(store, revision_id=r[0]) for r in store.db.execute('SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=? ORDER BY revision_id', (mid, v['number']))]
-        plans = sorted([r for r in rows if r['kind'] == 'REQUIREMENT' and (not v['frozen'] or signature(r)==v['fingerprint'])], key=lambda r: r['version'])
+        plans = sorted([r for r in rows if r['kind'] == 'REQUIREMENT' and (not v['frozen'] or (signature(r,store)==v['fingerprint'] or legacy_signature(r)==v['fingerprint']))], key=lambda r: r['version'])
         for plan in plans:
             plan['review_input_records'] = [p.ref_record(store, item['reference']) for item in plan['payload'].get('generation', {}).get('inputs', [])]
         candidates = {}
@@ -196,8 +213,9 @@ def snapshot(store, mid):
             if row['kind'] == 'ASSET' and identity(row['payload']):
                 row['candidate_id'] = identity(row['payload'])
                 candidates[row['candidate_id']] = row
-        result.append({**dict(v), 'model': 'plan-v1', 'state': 'produced' if candidates else 'preparing',
-                       'plan': plans[-1] if plans else None, 'scheme': next((scheme(r['payload'],r['kind']) for r in rows if r['kind'] in ('CALL','REQUIREMENT') and signature(r)==v['fingerprint']), None), 'results': list(candidates.values()), 'members': rows, 'feedback': []})
+        from .material_model import projection
+        result.append({**dict(v), **projection(store,mid,v['number']), 'model': 'plan-v1', 'state': 'produced' if candidates else 'preparing',
+                       'plan': plans[-1] if plans else None, 'scheme': next((scheme(r['payload'],r['kind']) for r in rows if r['kind'] in ('CALL','REQUIREMENT') and (signature(r,store)==v['fingerprint'] or legacy_signature(r)==v['fingerprint'])), None), 'results': list(candidates.values()), 'members': rows, 'feedback': []})
     return result
 
 
@@ -249,14 +267,14 @@ def migration_plan(store):
         store.db.execute('RELEASE plan_migration')
 
 
-def restore(store, data):
+def restore(store, data, validate_after=True):
     for t in TABLES:
         for row in data[t]:
             cols = [v[1] for v in store.db.execute('PRAGMA table_info('+t+')')]
             if set(row) != set(cols):
                 raise ValueError('invalid plan index columns: '+t)
             store.db.execute('INSERT INTO '+t+' ('+','.join(cols)+') VALUES ('+','.join('?' for _ in cols)+')', tuple(row[c] for c in cols))
-    validate(store)
+    if validate_after:validate(store)
 
 
 def validate(store):
@@ -264,11 +282,11 @@ def validate(store):
         if type(v['number']) is not int or v['number'] < 1 or v['frozen'] not in (0, 1) or p.record(store, v['material_id'])['kind'] not in ('REQUIREMENT', 'ASSET'):
             raise ValueError('invalid plan version')
         rows = [p.record(store, revision_id=r[0]) for r in store.db.execute('SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=?', (v['material_id'], v['number']))]
-        matching = [r for r in rows if r['kind'] in ('CALL', 'REQUIREMENT') and signature(r) == v['fingerprint']]
+        matching = [r for r in rows if r['kind'] in ('CALL', 'REQUIREMENT') and (signature(r,store) == v['fingerprint'] or legacy_signature(r) == v['fingerprint'])]
         if not matching:
             raise ValueError('plan fingerprint lacks exact source evidence')
         for row in rows:
-            if row['kind'] == 'CALL' and signature(row) != v['fingerprint']:
+            if row['kind'] == 'CALL' and signature(row,store) != v['fingerprint'] and legacy_signature(row) != v['fingerprint']:
                 raise ValueError('different executed schemes share a version')
             if row['kind'] == 'REQUIREMENT' and row['object_id'] != v['material_id']:
                 raise ValueError('plan revision belongs to a different material')
@@ -286,7 +304,7 @@ def validate(store):
             raise ValueError('candidate index differs from actual originals')
     for v in store.db.execute('SELECT * FROM material_plan_comments'):
         c = store.comment(v['comment_id'])
-        if not any(m['material_id'] == v['material_id'] and m['number'] == v['number'] for m in memberships(store, c['target_revision_id'])):
+        if not belongs(store,c['target_revision_id'],v['material_id'],v['number']):
             raise ValueError('plan comment scope differs from exact anchor')
 
 

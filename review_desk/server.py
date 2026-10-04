@@ -52,7 +52,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
     def _file(self, path, mime):
         if not path.is_file():
             return self._json({"error": "not found"}, 404)
-        size, start, end = path.stat().st_size, 0, path.stat().st_size - 1
+        from .material_archives import reference, read_bytes
+        import io
+        reconstructed = read_bytes(path) if reference(path) else None
+        size = len(reconstructed) if reconstructed is not None else path.stat().st_size
+        start, end = 0, size - 1
         partial = self.headers.get("Range")
         if partial:
             match = re.fullmatch(r"bytes=(\d*)-(\d*)", partial)
@@ -78,7 +82,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        with path.open("rb") as stream:
+        with (io.BytesIO(reconstructed) if reconstructed is not None else path.open("rb")) as stream:
             stream.seek(start)
             remaining = end - start + 1
             while remaining > 0:
@@ -88,9 +92,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self.wfile.write(chunk)
                 remaining -= len(chunk)
 
-    def _input(self):
+    def _input(self, maximum=20_000_000):
         length = int(self.headers.get("Content-Length", "0"))
-        if length <= 0 or length > 20_000_000:
+        if length <= 0 or length > maximum:
             raise ValueError("request too large")
         return json.loads(self.rfile.read(length))
 
@@ -101,6 +105,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]
+                if path == "/api/production/material-model-map":
+                    from .material_model import migration_plan
+                    return self._json(migration_plan(store))
+                if path == "/api/production/material-model-verify":
+                    from .material_model import verify
+                    return self._json(verify(store))
                 if path == "/api/production/material-plan-map":
                     from .material_plans import migration_plan
                     with production.read_scope(store):
@@ -224,7 +234,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -246,10 +256,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
-        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate"):
+        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate", "/api/production/material-model-migrate", "/api/production/material-model-rollback"):
             try:
-                value = self._input()
-                if self.path.endswith('material-plan-migrate'):
+                value = self._input(128_000_000 if '/material-model-' in self.path else 20_000_000)
+                if '/material-model-' in self.path:
+                    from .material_model import migrate,rollback
+                    result=(rollback(self.server.store,value['migration'],value.get('validate_only') is True) if self.path.endswith('rollback') else migrate(self.server.store,value['migration'],value.get('validate_only') is True,apply_archives=value.get('defer_archives') is not True))
+                elif self.path.endswith('material-plan-migrate'):
                     from .material_plans import migrate
                     result=migrate(self.server.store,value['migration'],value.get('validate_only') is True)
                 elif self.path.endswith("import"):
