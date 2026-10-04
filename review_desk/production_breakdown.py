@@ -51,7 +51,11 @@ def index(store, view, object_id=None):
         selected=p.record(store,object_id)
         allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'} if view=='settings' else {'SHOT_DESIGN','REQUIREMENT','ASSET','CALL','JUDGMENT'}
         if selected['kind'] in allowed:values.append(selected)
-    return {'records':values,'material_assets':{}}
+    result={'records':values,'material_assets':{}}
+    if view=='settings':
+        from .ui_projection import entity_summaries, material_entries
+        result.update(entity_summaries(store,[r for r in values if r['kind']=='ENTITY'],material_entries(store)))
+    return result
 
 
 def ancestors(store, row):

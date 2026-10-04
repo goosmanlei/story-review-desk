@@ -15,9 +15,10 @@ function setup(){
  const ctx={URL,URLSearchParams,CSS:{escape:x=>x},console,setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace&production_object=previous&material_round=2&material_target=previous'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?root:null,querySelectorAll:()=>[],createElement:tag=>new Element(tag)},fetch:async url=>{requests.push(url);return {ok:true,json:async()=>detail}}};
  ctx.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};vm.createContext(ctx);
  ctx.document.createElementNS=(_namespace,tag)=>new Element(tag);
- for(const name of ['app.js','production.js','material-review.js','entity-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
+ for(const name of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
  vm.runInContext('globalThis.state=state;',ctx);ctx.state.workspace='materials.workspace';ctx.state.productionRecords=[plan,a,b];ctx.state.materialReview={record:{object_id:'previous'}};
  ctx.renderComments=()=>{};ctx.paintProductionReview=()=>{};ctx.focusMaterialRoundControl=()=>{};
+ // Load the same shared card and draft-context dependencies as index.html.
  // Keep the real navigation, workspace/card renderer, round/candidate controls
  // and focus callbacks. Substitute only media internals and text decoration.
  ctx.reviewSurface=host=>host;ctx.materialMedia=(parent,item)=>{const n=new Element('media');n.dataset.reviewRevision=item.record.id;n.dataset.objectId=item.record.object_id;n.onfocus=()=>ctx.focusProductionReview({record:item.record,history:[item.record],uses:[]});parent.append(n)};

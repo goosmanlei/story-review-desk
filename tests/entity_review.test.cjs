@@ -1,7 +1,7 @@
 const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-const code=['production.js','material-review.js','entity-review.js'].map(f=>fs.readFileSync(path.join(__dirname,'../review_desk/static',f),'utf8')).join('\n');
+const code=['production.js','material-review.js','entity-review.js','production-breakdown.js'].map(f=>fs.readFileSync(path.join(__dirname,'../review_desk/static',f),'utf8')).join('\n');
 const row=(id,kind,payload={},revision=id+'-v1')=>({object_id:id,id:revision,current_revision:revision,kind,payload,version:1});
 const entity=row('person','ENTITY',{title:'人物'});
 const form=row('form','STATE',{title:'人物 · 基础',state_model:'complete-v1',entity:{object_id:'person'},sources:[{scene_id:'s001'}]});

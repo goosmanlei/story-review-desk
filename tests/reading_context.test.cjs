@@ -95,3 +95,15 @@ for(const scoped of [false,true])test(`storage failure: reader toggle preserves 
 });
 test('reader toggle never copies another exact target editor into a new source or revision',()=>{for(const changed of ['id','target_revision_id']){const f=fixture();f.state.anchor=region;f.context.renderComments();const input=f.root.querySelector('#comment-editor-text');input.value='A unique input';f.context.closePanel();f.state.current={...f.state.current,[changed]:'different-exact-target'};f.context.toggleCommentsFromReader();assert.notEqual(f.root.querySelector('#comment-editor-text'),input);assert.equal(f.root.querySelector('#comment-editor-text').value,'')}});
 test('scope reset preserves a live plan comment draft when storage has failed',()=>{const f=fixture();Object.assign(f.state,{workspace:'materials.workspace',anchor:{type:'global'},productionSelected:{object_id:'plan',id:'plan-rev'}});const row=f.state.productionSelected;f.state.materialReview={record:{object_id:'need'},history:[],material_versions:{need:[{number:2,state:'preparing',members:[row],plan:row}]},selectedMaterialRounds:{need:2}};f.context.renderComments();f.context.localStorage.setItem=()=>{throw Error('storage failure')};const input=f.root.querySelector('#comment-editor-text');input.value='unsaved material opinion';assert.doesNotThrow(()=>input.listeners.input());assert.match(f.messages.at(-1),/本机草稿保存失败.*当前输入仍保留/);assert.equal(f.root.querySelector('#material-revision-intent'),null);f.state.reviewCommentScope={kind:'text'};f.context.closePanel();f.context.toggleCommentsFromReader();assert.equal(f.root.querySelector('#comment-editor-text').value,'unsaved material opinion');assert.equal(f.root.querySelector('#material-revision-intent'),null)});
+
+test('structure reread and revision return retain independent scroll positions and exact document targets',()=>{
+ const f=fixture();f.state.workspace='story.outline';
+ const reader=f.nodes.get('#structure-reader');
+ f.context.renderStructureReader();reader.scrollTop=480;
+ f.context.renderStructureReader();assert.equal(reader.scrollTop,480);
+ f.state.structure.revisions.push({id:'structure-other',version:2,payload:{title:'Another structure',sections:[],responses:[]},created_at:'fixture'});
+ f.state.structureRevision='structure-other';f.context.renderStructureReader();assert.equal(reader.scrollTop,0);assert.match(reader.textContent,/Another structure/);reader.scrollTop=95;
+ f.state.structureRevision='structure-rev';f.context.renderStructureReader();assert.equal(reader.scrollTop,480);assert.equal(reader.dataset.readingRevision,'structure-rev');
+ f.state.structureRevision='structure-other';f.context.renderStructureReader();assert.equal(reader.scrollTop,95);
+ assert.equal(f.nodes.get('#structure-index').querySelector('h2').textContent,'故事结构');
+});
