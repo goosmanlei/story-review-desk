@@ -139,8 +139,8 @@ test('time comment location scopes a repeated component id to the exact asset re
 });
 
 test('refreshing a media comment keeps the explicitly selected state',async()=>{
- const {ctx}=setup();ctx.location.href='http://local/?production_entity=person&entity_state=later&production_object=voice';
- const voice=row('voice','ASSET',{title:'声音'});await ctx.openEntityReview('person',{record:voice},0,null);
+ const {ctx,data}=setup();ctx.location.href='http://local/?production_entity=person&entity_state=later&production_object=voice';
+ const voice=row('voice','ASSET',{title:'声音',components:[]});data.media.push({id:'voice',record:voice,state:null});await ctx.openEntityReview('person',{record:voice},0,null);
  assert.equal(ctx.state.productionChildDetail.record,second);
  assert.equal(new URL(ctx.location.href).searchParams.get('entity_state'),'later');
 });

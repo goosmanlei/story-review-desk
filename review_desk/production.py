@@ -421,6 +421,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                         p["target"]["revision_id"] != new["id"] or
                         change["action"] != "keep" or p["verdict"] != "impact_resolved"):
                     raise ValueError("state title review requires only a title change and the exact new state target")
+        from .production_changes import validate as validate_change
+        validate_change(store, object_id, p, check_current)
     elif kind == "RELATION" and p.get("relation_type") == "entity":
         from .entity_relations import validate
         validate(store, p)
@@ -599,7 +601,18 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             selected['review_input_records'] = [ref_record(store, v['reference']) for v in selected['payload'].get('generation', {}).get('inputs', [])]
         elif selected['kind']=='CALL':
             selected['review_input_records'] = [ref_record(store, v.get('reference', v)) for v in selected['payload'].get('inputs', [])]
-        result = {"record": selected, "history": history, "uses": uses}
+        # Names belong to the referenced revision, not the current object head.
+        # SOURCE titles live in their documents; require its content fingerprint
+        # to match the exact SOURCE revision before using that title.
+        reference_titles = [dict(row) for row in store.db.execute("""SELECT DISTINCT
+                r.object_id,r.id AS revision_id,
+                CASE WHEN o.kind='SOURCE' THEN json_extract(s.document,'$.title')
+                     ELSE json_extract(r.payload,'$.title') END AS title
+            FROM dependencies d JOIN revisions r ON r.id=d.to_revision
+            JOIN objects o ON o.id=r.object_id
+            LEFT JOIN sources s ON s.id=r.object_id AND s.revision=json_extract(r.payload,'$.source_revision')
+            WHERE d.from_revision=? ORDER BY r.object_id,r.id""", (selected['id'],))]
+        result = {"record": selected, "history": history, "uses": uses, "reference_titles": reference_titles}
         if selected["kind"] == "ASSET":
             from .material_review import context
             result["review_context"] = context(store, selected)
@@ -657,22 +670,33 @@ def impact(store, revision_id):
             "affected": list({(r["revision_id"], r["role"]): r for r in affected}.values()), "decisions": judgments}
 
 
-def stale_inputs(store, target_revision, judgments=None):
+def upstream_changes(store, target_revision, judgments=None):
+    from .production_changes import exact, review
     values = dependency_closure(store, target_revision, include_history=False)
+    target = record(store, revision_id=target_revision)
     judgments = judgments if judgments is not None else current_records(store, {"JUDGMENT"})
-    stale = []
+    changes = []
     for value in values.values():
         if value["kind"] not in CHANGE_KINDS or value["id"] == value["current_revision"]:
             continue
-        kept = any((j["payload"]["target"]["revision_id"] == target_revision or
-                    j["payload"].get("change", {}).get("scope") == "state_title_only") and
-                   j["payload"].get("change", {}).get("old", {}).get("revision_id") == value["id"] and
-                   j["payload"].get("change", {}).get("new", {}).get("revision_id") == value["current_revision"] and
-                   j["payload"].get("change", {}).get("action") == "keep" for j in judgments)
-        if not kept:
-            stale.append({"object_id": value["object_id"], "used_revision": value["id"],
-                          "current_revision": value["current_revision"], "action": "needs_review"})
-    return stale
+        old = exact(value)
+        new = {"object_id": value["object_id"], "revision_id": value["current_revision"]}
+        result = review(judgments, exact(target), old, new)
+        naming = review(judgments, new, old, new, 'state_title_only')
+        # An explicit local rework/replace takes precedence over a naming-only
+        # exemption; an unresolved legacy group cannot be silently waived.
+        effective = result['decision']
+        kept = (effective['payload']['change']['action'] == 'keep' if effective else
+                not result['decisions'] and naming['decision'] is not None and
+                naming['decision']['payload']['change']['action'] == 'keep')
+        changes.append({"object_id": value["object_id"], "used_revision": value["id"],
+                        "current_revision": value["current_revision"], "action": "keep" if kept else "needs_review",
+                        **result})
+    return changes
+
+
+def stale_inputs(store, target_revision, judgments=None):
+    return [change for change in upstream_changes(store, target_revision, judgments) if change['action'] != 'keep']
 
 
 def asset_coverage(store, asset):
@@ -760,6 +784,7 @@ def _input_readiness(store, scope, validate_file):
         adoption = uses.get((p["scope"]["object_id"], p["slot"]))
         issues = []
         pending_changes = []
+        change_reviews = []
         asset = None
         if not adoption:
             issues.append("missing_adoption")
@@ -794,18 +819,24 @@ def _input_readiness(store, scope, validate_file):
                 if spec.get("native_4k") and (component.get("role") != "original" or
                         asset["payload"].get("verification", {}).get("native_4k_passed") is not True):
                     issues.append("native_4k_not_verified")
-                adoption_changes = stale_inputs(store, adoption["id"], judgments)
+                adoption_reviews = [{'target': {'object_id': adoption['object_id'], 'revision_id': adoption['id']}, **change}
+                                    for change in upstream_changes(store, adoption["id"], judgments)]
+                change_reviews.extend(adoption_reviews)
+                adoption_changes = [change for change in adoption_reviews if change['action'] != 'keep']
                 if adoption_changes:
                     issues.append("upstream_needs_review")
-                    pending_changes.extend({'target': {'object_id': adoption['object_id'], 'revision_id': adoption['id']}, **change} for change in adoption_changes)
+                    pending_changes.extend(adoption_changes)
             except (ValueError, KeyError, OSError) as exc:
                 issues.append(str(exc))
-        requirement_changes = stale_inputs(store, requirement["id"], judgments)
+        requirement_reviews = [{'target': {'object_id': requirement['object_id'], 'revision_id': requirement['id']}, **change}
+                               for change in upstream_changes(store, requirement["id"], judgments)]
+        change_reviews.extend(requirement_reviews)
+        requirement_changes = [change for change in requirement_reviews if change['action'] != 'keep']
         if requirement_changes:
             issues.append("requirement_needs_review")
-            pending_changes.extend({'target': {'object_id': requirement['object_id'], 'revision_id': requirement['id']}, **change} for change in requirement_changes)
+            pending_changes.extend(requirement_changes)
         reviews = [r for r in judgments if asset and r["payload"]["target"]["revision_id"] == asset["id"]]
-        rows.append({"requirement": requirement, "adoption": adoption, "asset": asset, "issues": issues, "reviews": reviews, 'pending_changes': pending_changes})
+        rows.append({"requirement": requirement, "adoption": adoption, "asset": asset, "issues": issues, "reviews": reviews, 'pending_changes': pending_changes, 'change_reviews': change_reviews})
     return {"scope": subject, "requirements": rows, "state_coverage": coverage,
             "required_count": sum(r["requirement"]["payload"]["required"] for r in rows),
             "missing_count": sum(r["requirement"]["payload"]["required"] and bool(r["issues"]) for r in rows),
