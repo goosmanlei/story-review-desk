@@ -153,3 +153,34 @@ class MaterialModelTest(unittest.TestCase):
         self.assertEqual(self.store.revisions(),before)
         self.assertEqual(plans.dump(self.store),indices)
         self.assertEqual(storage.dump(self.store),content)
+
+    def test_large_schema6_restore_reads_metadata_on_own_spilled_transaction(self):
+        import sqlite3
+        from unittest.mock import patch
+        self.setup_plans();self.generate()
+        raw=json.dumps({'prompt':'archive-lock-regression-'*8192},ensure_ascii=False).encode()
+        name=digest(raw)+'.json';path=self.root/'export/assets'/name;path.write_bytes(raw)
+        asset=p.record(self.store,'generated')['payload']
+        self.change('generated',components=[*asset['components'],{'id':'request','role':'metadata',
+            'file':name,'sha256':digest(raw),'bytes':len(raw),'mime':'application/json'}])
+        export(self.store,self.root/'export')
+        dest=self.root/'spill-restore';shutil.copytree(self.root/'export',dest/'export')
+        other=Store(dest/'.runtime/review.sqlite3');other.db.execute('PRAGMA cache_size=1')
+        other.db.execute('PRAGMA cache_spill=2')
+        resolver=archives.resolver;locked=[]
+        def observe(path):
+            if archives._ACTIVE_READER.get() is not None and not locked:
+                second=sqlite3.connect(other.db_path,timeout=0)
+                try:
+                    with self.assertRaisesRegex(sqlite3.OperationalError,'locked'):
+                        second.execute('SELECT count(*) FROM material_content').fetchone()
+                    locked.append(True)
+                finally:second.close()
+            return resolver(path)
+        try:
+            with patch.object(archives,'resolver',side_effect=observe):restore(other,dest/'export')
+            self.assertEqual(locked,[True])
+            self.assertEqual(archives.read_bytes(dest/'export/assets'/name),raw)
+            self.assertEqual(other.revisions(),self.store.revisions())
+            self.assertIsNone(archives._ACTIVE_READER.get())
+        finally:other.close()
