@@ -61,6 +61,17 @@ class MaterialModelTest(unittest.TestCase):
         encoded=storage.encode(self.store,row['payload'],raw)
         self.assertEqual(storage.hydrate(self.store,encoded),raw)
         self.assertNotIn(row['payload']['generation']['prompt'],encoded)
+        with self.store.db:self.store.db.execute('UPDATE revisions SET payload=? WHERE id=?',(encoded,row['id']))
+        export(self.store,self.root/'export')
+        dest=self.root/'layout-restore';shutil.copytree(self.root/'export',dest/'export')
+        other=Store(dest/'.runtime/review.sqlite3')
+        try:
+            restore(other,dest/'export')
+            self.assertEqual(p.record(other,revision_id=row['id'])['id'],row['id'])
+            self.assertEqual(other.db.execute('SELECT payload FROM revisions WHERE id=?',(row['id'],)).fetchone()[0],raw)
+            self.assertEqual(storage.physical_revisions(other),storage.physical_revisions(self.store))
+            model.verify(other)
+        finally:other.close()
 
     def test_archive_container_reads_from_live_db_before_export_graph(self):
         self.setup_plans()
