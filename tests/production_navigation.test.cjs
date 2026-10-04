@@ -15,6 +15,24 @@ function setup(records,api){
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
 
+test('history type filters expose only loaded kinds and retain accurately supplemented records',()=>{
+  const baseline=['INPUT_LOCK','PREPARATION','ASSEMBLY','DELIVERABLE'].map(kind=>row(kind.toLowerCase(),kind));
+  const declaration=source.split('\n').find(line=>line.trim().startsWith('const kindOptions='));
+  assert.ok(declaration,'test must exercise the actual history filter options');
+  for(const [records,expected] of [
+    [baseline,['','PREPARATION','ASSEMBLY','DELIVERABLE']],
+    [[...baseline,row('linked-shot','SHOT_DESIGN',{},'exact-shot-revision')],['','PREPARATION','SHOT_DESIGN','ASSEMBLY','DELIVERABLE']],
+    [[...baseline,row('linked-requirement','REQUIREMENT',{},'exact-requirement-revision')],['','PREPARATION','REQUIREMENT','ASSEMBLY','DELIVERABLE']],
+    [[],['']],
+  ]){
+    const before=JSON.stringify(records),ctx=setup(records);ctx.workspace='production.workspace';ctx.result={records};
+    const options=plain(vm.runInContext('(()=>{'+declaration+'return kindOptions})()',ctx));
+    assert.deepEqual(options.map(option=>option[0]),expected);
+    assert.ok(options.every(([kind])=>!kind||records.some(record=>record.kind===kind)));
+    assert.equal(JSON.stringify(records),before);
+  }
+});
+
 test('withdrawn entities and states leave current lists without deleting historical rows',()=>{
   const a=row('a','ENTITY'),old=row('old','ENTITY',{status:'withdrawn'});
   const current=row('current','STATE',{state_model:'complete-v1',entity:{object_id:'a'}});
