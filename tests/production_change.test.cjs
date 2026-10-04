@@ -86,7 +86,7 @@ test('known absent request retries the same id and exact payload; conflict can r
 test('foreign payload, wrong id or later version is never adopted as this saved judgment',async()=>{
   for(const mutate of [head=>head.payload.reason='someone else',head=>head.version++,head=>head.object_id='another-id']){
     const f=fixture(),form=f.open();let saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Error('lost'));await flush();const head=saved(f.posts[0]);mutate(head);f.reads[0].resolve(response(200,{record:head}));await saving;assert.match(form.notice().textContent,/已有不同内容/);assert.equal(form.box.isConnected,true);assert.ok(!f.messages.some(s=>s.includes('结论已保存')));
-    saving=form.button('保存变更处理').onclick();await flush();f.reads[1].resolve(response(200,{record:head}));await saving;assert.equal(f.posts.length,1);
+    saving=form.button('保存变更处理').onclick();await saving;assert.equal(f.reads.length,1);assert.equal(f.posts.length,1);
   }
 });
 test('changed input after unknown result cannot describe the old saved request as new input',async()=>{
@@ -180,4 +180,97 @@ test('saved judgment and failed actual list refresh show both saved feedback and
  f.context.api=(url,options)=>url==='/api/production'?Promise.reject(Error('list unavailable')):original(url,options);
  const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await saving;
  assert.equal(f.posts.length,1);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('页面尚未完整更新')));assert.match(f.text(f.host),/制作记录读取失败/);assert.doesNotMatch(f.text(f.host),/正在读取/);
+});
+
+const decisionRecord=(version=3,action='keep',id='existing-decision')=>({object_id:id,id:id+'-r'+version,kind:'JUDGMENT',version,payload:{format:'production-judgment-v1',title:'upstream · 变更复核',blocks:[{id:'decision',text:'Existing explicit reason'}],target:plain(change.target),verdict:'impact_resolved',actor:'Original recorded actor',reason:'Existing explicit reason',change:{old:{object_id:change.object_id,revision_id:change.used_revision},new:{object_id:change.object_id,revision_id:change.current_revision},action}}});
+function editDecision(f,record=decisionRecord()){
+ f.context.showProductionChange(f.host,{...plain(change),decision:record});return f.form(f.host.children.at(-1));
+}
+test('existing change conclusion opens recorded fields and updates the same ID at its exact version',async()=>{
+ const f=fixture(),form=editDecision(f);
+ assert.equal(form.field('变更处理').value,'keep');assert.equal(form.field('复核者').value,'Original recorded actor');assert.equal(form.field('复核依据').value,'Existing explicit reason');
+ form.field('变更处理').value='rework';form.field('复核依据').value='Explicit rework after revisiting the change';
+ const saving=form.button('保存变更处理').onclick();await flush();
+ assert.equal(f.posts[0].object_id,'existing-decision');assert.equal(f.posts[0].expected_version,3);assert.equal(f.posts[0].payload.change.action,'rework');
+ f.requests[0].resolve({});await saving;assert.equal(form.box.isConnected,false);
+});
+test('lost response on an updated conclusion recognizes expected version plus one, not only version one',async()=>{
+ const f=fixture(),form=editDecision(f);form.field('变更处理').value='rework';
+ const saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Error('lost after commit'));await flush();
+ f.reads[0].resolve(response(200,{record:{...saved(f.posts[0]),version:4}}));await saving;
+ assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,false);assert.ok(f.messages.some(text=>text.includes('已保存')));
+});
+test('a stale window keeps its version and unique input on 409 without misreporting unknown outcome',async()=>{
+ const f=fixture(),form=editDecision(f);form.field('变更处理').value='rework';form.field('复核依据').value='Unique stale-window text';
+ let saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Object.assign(Error('version conflict'),{status:409}));await flush();
+ await saving;assert.equal(f.reads.length,0);
+ assert.equal(form.field('复核依据').value,'Unique stale-window text');assert.match(form.notice().textContent,/本次保存未完成/);assert.doesNotMatch(form.notice().textContent,/待确认|尚未确认/);
+ saving=form.button('保存变更处理').onclick();await saving;assert.equal(f.reads.length,0);
+ assert.equal(f.posts.length,1);assert.equal(f.posts[0].expected_version,3);assert.equal(form.box.isConnected,true);
+});
+test('first-create uniqueness rejection remains a conflict even when that attempted ID is absent or lookup fails',async()=>{
+ for(const lookup of ['absent','failed']){
+  const f=fixture(),form=f.open();const saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Object.assign(Error('another window created the conclusion'),{status:409}));await flush();
+  await saving;assert.equal(f.reads.length,0);assert.match(form.notice().textContent,/本次保存未完成/);assert.doesNotMatch(form.notice().textContent,/待确认|尚未确认/);assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,true);
+ }
+});
+test('legacy consolidation shows original statements and references every exact head in the explicit save',async()=>{
+ const f=fixture(),a=decisionRecord(1,'keep','legacy-a'),b=decisionRecord(2,'rework','legacy-b');b.payload.actor='Second recorded actor';b.payload.reason='Old differing reason';
+ f.context.showProductionChange(f.host,{...plain(change),conflict:true,decision:null,decisions:[a,b]});const form=f.form(f.host.children.at(-1));
+ assert.match(f.text(form.box),/多份旧结论/);assert.match(f.text(form.box),/Original recorded actor/);assert.match(f.text(form.box),/Second recorded actor/);assert.match(f.text(form.box),/Old differing reason/);
+ form.field('变更处理').value='replace';form.field('复核者').value='Explicit consolidation reviewer';form.field('复核依据').value='Chosen common conclusion after reading both';
+ const saving=form.button('保存统一结论').onclick();await flush();assert.deepEqual(f.posts[0].payload.change.resolves,[{object_id:'legacy-a',revision_id:'legacy-a-r1'},{object_id:'legacy-b',revision_id:'legacy-b-r2'}]);assert.equal(f.posts[0].expected_version,0);
+ f.requests[0].resolve({});await saving;
+});
+test('revising a consolidated conclusion preserves its exact legacy references and version',async()=>{
+ const f=fixture(),old=decisionRecord(2,'keep','unified');old.payload.change.resolves=[{object_id:'legacy-a',revision_id:'a-r1'},{object_id:'legacy-b',revision_id:'b-r2'}];
+ const form=editDecision(f,old);form.field('变更处理').value='rework';const saving=form.button('保存变更处理').onclick();await flush();
+ assert.equal(f.posts[0].expected_version,2);assert.deepEqual(f.posts[0].payload.change.resolves,old.payload.change.resolves);f.requests[0].resolve({});await saving;
+});
+test('readiness keeps a cleared change editable through its existing exact-version details',async()=>{
+ const f=fixture();await f.context.loadProductionWorkspace();const readiness=ready('episode-A');readiness.inputs_ready=true;readiness.missing_count=0;readiness.requirements[0].pending_changes=[];readiness.requirements[0].issues=[];readiness.requirements[0].change_reviews=[{...plain(change),action:'keep',decision:decisionRecord()}];
+ const rendering=f.context.renderProductionReadiness(f.host,f.episodes[0],{isCurrent:()=>true});await flush();f.requests.at(-1).resolve(readiness);await rendering;
+ assert.match(f.text(f.host),/已复核：保留原引用/);await f.button('修改变更处理').onclick();const form=f.form(f.host.all().find(n=>n.className==='production-editor'));assert.equal(form.field('复核依据').value,'Existing explicit reason');
+ form.field('变更处理').value='rework';const saving=form.button('保存变更处理').onclick();await flush();assert.equal(f.posts[0].object_id,'existing-decision');assert.equal(f.posts[0].expected_version,3);f.requests.at(-1).resolve({});await flush();f.requests.at(-1).resolve(ready('episode-A'));await saving;
+});
+
+test('a newly saved uncached judgment history opens the exact generic record instead of a source-only popup',async()=>{
+ const f=fixture();await f.context.loadProductionWorkspace();const readiness=ready('episode-A'),decision=decisionRecord(2,'rework','new-uncached-judgment');
+ readiness.requirements[0].change_reviews=[{...plain(change),decision}];const rendering=f.context.renderProductionReadiness(f.host,f.episodes[0],{isCurrent:()=>true});await flush();f.requests.at(-1).resolve(readiness);await rendering;
+ assert.equal(f.context.state.productionRecords.some(r=>r.object_id===decision.object_id),false);
+ const opens=[];f.context.openProductionRecord=(...args)=>opens.push(args);f.context.productionRefLink=()=>{throw Error('must not route known judgment through unknown-source fallback')};
+ await f.button('查看处理历史').onclick();assert.deepEqual(opens,[['new-uncached-judgment','new-uncached-judgment-r2',true]]);
+ const legacy=decisionRecord(1,'keep','old-uncached-judgment');f.context.showProductionChange(f.host,{...plain(change),conflict:true,decisions:[legacy,decision]});const box=f.host.children.at(-1);
+ const oldLinks=box.all().filter(n=>n.tag==='button'&&n.textContent==='查看这份旧记录与历史');assert.equal(oldLinks.length,2);await oldLinks[0].onclick();assert.deepEqual(opens[1],['old-uncached-judgment','old-uncached-judgment-r1',true]);
+});
+
+test('a definitive first 409 never adopts another window identical payload and stays rejected on retry',async()=>{
+ const f=fixture(),form=editDecision(f);const saving=form.button('保存变更处理').onclick();await flush();
+ f.context.fetch=async()=>response(200,{record:{...saved(f.posts[0]),version:4}});
+ f.requests[0].reject(Object.assign(Error('another window saved identical content'),{status:409}));await saving;
+ assert.equal(form.box.isConnected,true);assert.match(form.notice().textContent,/本次保存未完成/);assert.ok(!f.messages.some(s=>s.includes('已保存')));
+ f.context.fetch=async()=>{throw Error('readback unavailable')};await form.button('保存变更处理').onclick();
+ assert.match(form.notice().textContent,/本次保存未完成/);assert.doesNotMatch(form.notice().textContent,/待确认/);assert.equal(f.posts.length,1);
+});
+test('a definitive 400 permits corrected input with original optimistic version and no unknown-outcome claim',async()=>{
+ const f=fixture(),form=editDecision(f);let saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Object.assign(Error('invalid field'),{status:400}));await saving;
+ assert.match(form.notice().textContent,/本次复核未保存/);assert.doesNotMatch(form.notice().textContent,/待确认/);assert.equal(f.reads.length,0);
+ form.field('复核依据').value='Corrected explicit reason';saving=form.button('保存变更处理').onclick();await flush();assert.equal(f.posts[1].expected_version,3);assert.equal(f.posts[1].object_id,'existing-decision');f.requests[1].resolve({});await saving;assert.equal(form.box.isConnected,false);
+});
+test('generic judgment history displays each exact change action in the existing conclusion field',()=>{
+ const f=fixture();f.context.reviewSurface=node=>node;f.context.openPanel=()=>{};f.context.renderProductionTransitions=()=>{};
+ for(const [action,expected] of [['keep','保留原引用'],['rework','需要返工'],['replace','需要替换'],['needs_review','待复核'],[null,'通过']]){
+  const value=decisionRecord(action==='keep'?1:2,action);value.current_revision=value.id;
+  if(!action){delete value.payload.change;value.payload.verdict='passed'}
+  const fields=[];f.context.productionFields=(_root,rows)=>fields.push(...rows);f.context.state.productionSelected=value;
+  f.context.renderProductionRecord(new Node('main'),{record:value,history:[value],uses:[]});
+  assert.equal(fields.find(([key])=>key==='审阅结论')[1],expected);
+ }
+});
+
+test('a rejected retry of an earlier unknown operation preserves that earlier uncertainty until exact recovery',async()=>{
+ const f=fixture(),form=editDecision(f);let saving=form.button('保存变更处理').onclick();await flush();f.requests[0].reject(Error('initial connection lost'));await flush();f.reads[0].reject(Error('initial readback unavailable'));await saving;
+ saving=form.button('保存变更处理').onclick();await flush();f.reads[1].resolve(response(200,{record:decisionRecord(3)}));await flush();f.requests[1].reject(Object.assign(Error('retry rejected'),{status:409}));await flush();f.reads[2].reject(Error('readback still unavailable'));await saving;
+ assert.match(form.notice().textContent,/本次重试被拒绝/);assert.match(form.notice().textContent,/上次复核结果仍待确认/);assert.equal(f.posts.length,2);assert.deepEqual(f.posts[0],f.posts[1]);
+ saving=form.button('保存变更处理').onclick();await flush();f.reads[3].resolve(response(200,{record:{...saved(f.posts[0]),version:4}}));await saving;assert.equal(f.posts.length,2);assert.equal(form.box.isConnected,false);
 });
