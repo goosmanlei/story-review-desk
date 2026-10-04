@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 function fixture(){
  const visuals=[],ctx={URLSearchParams,state:{productionRecords:[]},ResizeObserver:class{observe(){}disconnect(){}},requestAnimationFrame(){},link(){}};
  const img={addEventListener(){}},stage={style:{},dataset:{},querySelector:()=>img},viewport={classList:{add(){}}};
- ctx.el=()=>({dataset:{},append(){},addEventListener(){},querySelector:s=>s==='.structure-visual-stage'?stage:viewport});ctx.renderStructureVisual=v=>{visuals.push(v);return stage};vm.createContext(ctx);
+ ctx.el=()=>({dataset:{},append(){},addEventListener(){},querySelector:s=>s==='.structure-visual-stage'?stage:viewport});ctx.renderStructureVisual=v=>{visuals.push(v);return stage};vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);
  for(const name of ['production.js','material-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
  const row=(object,id,title)=>({object_id:object,id,kind:'ASSET',current_revision:id,payload:{title,media_type:'image',production:{object_id:'call-'+id,revision_id:'call-'+id+'-r1'},components:[{id:'original',role:'original',mime:'image/png',sha256:id,file:id+'.png',width:160,height:90}]}});
  const a=row('a','a-r1','Candidate A'),b=row('b','b-r1','Candidate B'),range={start_seconds:1,end_seconds:2},crop={x:0,y:0,width:.5,height:.5};

@@ -19,7 +19,7 @@ function fixture(records=[],screenplays=[],sources=[]){
     nodeText:(tag,cls,text,parent)=>{const node=new Element(tag,cls);node.textContent=text;parent.append(node);return node},
     toast:()=>{},openPanel:()=>{},link:(text,url,parent)=>{const node=new Element('a');node.textContent=text;node.href=url;parent.append(node);return node},
     reviewSurface:node=>node};
-  vm.createContext(context);vm.runInContext(source,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);
   context.openProductionRecord=(...args)=>calls.push({type:'record',args});
   context.materialReferenceLink=(parent,reference,label,sourceOnly)=>{const node=new Element('button');node.textContent=label;node.reference=reference;node.sourceOnly=sourceOnly;parent.append(node);calls.push({type:'reference',reference,label,sourceOnly});return node};
   context.productionFields=()=>{};context.productionList=()=>{};context.renderProductionTransitions=()=>{};
@@ -107,4 +107,9 @@ test('details with different projections do not install global name caches or is
   assert.deepEqual(f.root.children.map(node=>node.textContent),['First name','Second name']);
   assert.equal(f.context.productionName({object_id:'assembly',revision_id:'v1'}),'assembly');
   assert.equal(f.state.productionRecords[0].payload.title,'Current third name');
+});
+test('displayed dependency and source labels normalize location codes while exact records stay unchanged',()=>{
+ const asset=record('asset','asset-v1','E2-004 河口素材','ASSET'),episode=record('ep','ep-v1','第2集 灯火','EPISODE'),f=fixture([asset],[{episodes:[episode]}]);const before=JSON.stringify([asset,episode]);
+ assert.equal(f.context.productionName(ref(asset)),'E02 / SH004 河口素材');f.context.productionRefLink(f.root,ref(asset),'参考图 · E2-004 河口素材');assert.equal(f.root.children[0].textContent,'参考图 · E02 / SH004 河口素材');assert.deepEqual(f.root.children[0].reference,ref(asset));
+ f.context.productionRefLink(f.root,{...ref(episode),scene_id:'s003',block_ids:['b']});assert.equal(f.root.children[1].textContent,'E02 灯火 · S003');assert.equal(JSON.stringify([asset,episode]),before);
 });

@@ -4,15 +4,14 @@ const scriptEpisode=()=>scriptVersion()?.episodes.find(e=>e.object_id===state.sc
 const scriptScene=()=>scriptEpisode()?.payload.scenes.find(s=>s.id===state.screenplayScene);
 const scriptVersionLabel=(version,index)=>'版本'+(version.payload.title.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u)?.[1]||String(index+1));
 const durationLabel=seconds=>Math.floor(seconds/60)+'分'+(seconds%60?String(seconds%60).padStart(2,'0')+'秒':'');
-const episodeCode=episode=>'E'+String(episode.payload.number).padStart(2,'0');
+const episodeCode=episode=>reviewPositionLabel('episode',episode.payload.number);
 function sceneCode(scene){
   const numbered=scene.id.match(/^s0*(\d+)$/iu);
-  if(numbered)return 'S'+numbered[1].padStart(2,'0');
-  const index=scriptVersion()?.episodes.flatMap(episode=>episode.payload.scenes).findIndex(item=>item===scene);
-  return index<0?'场次':'S'+String(index+1).padStart(2,'0');
+  if(numbered)return reviewPositionLabel('scene',numbered[1]);
+  return reviewPositionLabel('scene',scene.id)||'场次';
 }
-const sceneTitle=scene=>scene.heading.replace(/^\d+-\d+\s*/u,'');
-const episodeTitle=episode=>episode.payload.title.replace(/^第\d+集\s*/u,'')||episode.payload.title;
+const sceneTitle=scene=>reviewPositionText(scene.heading.replace(/^\d+-\d+\s*/u,''));
+const episodeTitle=episode=>episode.payload.title.replace(/^第\s*\d+\s*集\s*/u,'')||episode.payload.title;
 const scriptReadingPositions=new Map();
 function styleScriptReader(){
   $('.screenplay-scene-side')?.classList.add('text-reader-index');
@@ -88,13 +87,14 @@ function chooseScript(versionId,episodeId,sceneId=null,updateUrl=true){
   const scene=episode?.payload.scenes.find(s=>s.id===sceneId)||episode?.payload.scenes[0]||null;
   const changedEpisode=episode?.id!==scriptEpisode()?.id,changedScene=changedEpisode||scene?.id!==state.screenplayScene;
   const reader=$('#screenplay-reader');
+  if(changedEpisode&&isScript())rememberScriptDraft();
   if(reader.dataset.readingKey)scriptReadingPositions.set(reader.dataset.readingKey,Number(reader.scrollTop)||0);
   state.screenplayVersion=version?.object_id||null;state.screenplayEpisode=episode?.object_id||null;state.screenplayScene=scene?.id||null;
-  if(changedEpisode){
+  if(changedEpisode&&isScript()){
     state.anchor=null;state.editing=null;state.selected=null;state.preview=null;state.suggestion=null;state.pending=null;
     restoreScriptDraft();
   }
-  getSelection()?.removeAllRanges();hideSelectionAction();
+  if(isScript()){getSelection()?.removeAllRanges();hideSelectionAction()}
   if(updateUrl){const url=scriptUrl();if(url.href!==location.href)history.pushState(null,'',url)}
   if(!changedScene&&reader.dataset.readingKey===episode?.id+':'+(scene?.id||''))return;
   renderScriptIndex();renderScriptReader();if(isScript())renderComments();
@@ -164,10 +164,10 @@ function renderScriptReader(){
   nodeText('span',null,episodeSceneRange(episode)+' · '+data.scenes.length+' 场 · 预计正片 '+durationLabel(data.estimated_seconds),heading);
   const summary=state.screenplaySummaries.get(episode.object_id+':'+episode.id);
   if(summary)nodeText('p','screenplay-summary',summary,overview);
-  $('#screenplay-head').textContent=scene?scene.heading:'选择左侧场次阅读正文';
+  $('#screenplay-head').textContent=scene?sceneCode(scene)+' '+sceneTitle(scene):'选择左侧场次阅读正文';
   $('#screenplay-detail').textContent=scene?scene.location+' · '+scene.time+' · 预计 '+durationLabel(scene.estimated_seconds):'本集场次按原剧本顺序排列';
   if(scene){
-    const text=el('section','source-text');text.id='screenplay-text';reviewSurface(text);text.setAttribute('aria-label',scene.heading+'完整正文');
+    const text=el('section','source-text');text.id='screenplay-text';reviewSurface(text);text.setAttribute('aria-label',sceneCode(scene)+' '+sceneTitle(scene)+'完整正文');
     const source={id:episode.object_id,target_revision_id:episode.id,blocks:data.blocks};
     const indexes=new Map(data.blocks.map((block,index)=>[block.id,index]));
     for(const id of scene.block_ids){const index=indexes.get(id);if(index!==undefined)text.append(renderBlock(source,data.blocks[index],index))}
@@ -178,7 +178,7 @@ function renderScriptReader(){
 function appendScriptCommentScope(card,comment){
   const episode=scriptEpisode(),first=sceneForBlock(episode,comment.anchor.block_id),last=sceneForBlock(episode,comment.anchor.end_block_id);
   if(!first)return;
-  const line=nodeText('small','screenplay-comment-scope',first===last?first.heading:first.heading+' → '+(last?.heading||'后续场次'),card);
+  const line=nodeText('small','screenplay-comment-scope',first===last?sceneCode(first)+' '+sceneTitle(first):sceneCode(first)+' '+sceneTitle(first)+' → '+(last?sceneCode(last)+' '+sceneTitle(last):'后续场次'),card);
   if(last&&last!==first){
     const button=nodeText('button','screenplay-comment-end','定位引用结尾',card);
     button.type='button';button.onclick=()=>locateScriptComment(comment,true);

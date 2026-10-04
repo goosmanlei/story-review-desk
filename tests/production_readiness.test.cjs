@@ -16,7 +16,7 @@ async function render(changes={}){
   const context={state:{productionSelected:r,productionRecords:[]},el:(tag,cls)=>new Element(tag,cls),
     nodeText:(tag,cls,text,parent)=>{const node=new Element(tag,cls);node.textContent=text;parent.append(node);return node},
     api:async url=>{requests.push(url);return data},materialRecordRound:()=>1,toast:text=>messages.push(text)};
-  vm.createContext(context);vm.runInContext(source,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);
   context.productionRefLink=(parent,ref,label)=>{const node=new Element('a');node.textContent=label;node.reference=ref;parent.append(node)};
   await context.renderProductionReadiness(root,r);
   const button=root.all().find(node=>node.tag==='button'&&node.textContent==='下载逐镜输入清单');

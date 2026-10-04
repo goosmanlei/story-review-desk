@@ -13,11 +13,12 @@ class Node{
   get elements(){const groups=new Map();for(const node of this.all().filter(node=>node.name)){if(!groups.has(node.name))groups.set(node.name,[]);groups.get(node.name).push(node)}return Object.fromEntries([...groups].map(([key,nodes])=>[key,nodes.length===1?nodes[0]:{get value(){return nodes.find(node=>node.checked)?.value||''}}]))}
   get options(){return this.children}
 }
-function fixture(){
+function fixture(session){
   const root=new Node('main'),requests=[],messages=[];
   const data={values:{PROJECT:{scope:'PROJECT',version:1,schema_version:4,body:{story_background:'Original story background'}},SYSTEM:{scope:'SYSTEM',version:1,schema_version:4,body:{ai_context_max_chars:12000,site_favicon:'old.svg'}}},catalog:{scopes:{PROJECT:{story_background:{type:'long_text',label:'故事背景'}},SYSTEM:{ai_context_max_chars:{type:'integer',label:'AI 参考上下文字数上限'},site_favicon:{type:'favicon',label:'站点图标'}}},model_efforts:{}},favicon_assets:['old.svg'],favicon:{url:'/old-icon',mime:'image/svg+xml'}};
   const toast={classList:{add(){},remove(){}},set textContent(value){messages.push(value)}};
   const context={document:{createElement:tag=>new Node(tag),addEventListener(){},querySelector:selector=>selector==='#configuration-view'?root:selector==='#toast'?toast:null},setTimeout:()=>0,clearTimeout(){},console,fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,resolve:data=>resolve({ok:true,json:async()=>data}),respond:(status,data)=>resolve({ok:status>=200&&status<300,status,json:async()=>data}),reject}))};
+  if(session)context.sessionStorage={getItem:key=>session.get(key)||null,setItem:(key,value)=>session.set(key,String(value)),removeItem:key=>session.delete(key)};
   context.FileReader=class{readAsDataURL(){this.result='data:image/svg+xml;base64,dGVzdA==';queueMicrotask(()=>this.onload())}};
   vm.createContext(context);vm.runInContext(source,context);vm.runInContext('globalThis.state=state;',context);context.state.workspace='project.configuration';context.state.configurations=plain(data);context.renderConfigurations();
   const form=scope=>root.all().find(node=>node.tag==='form'&&node.dataset.scope===scope),save=form=>form.all().find(node=>node.tag==='button'&&node.type==='submit'),notice=form=>form.all().find(node=>node.attrs.role==='status');
@@ -34,7 +35,7 @@ test('same-form input written after submit survives and the next operation uses 
   saving=f.submit(form);await flush();const next=f.requests.at(-1);assert.equal(JSON.parse(next.options.body).expected_version,saved.version);assert.equal(JSON.parse(next.options.body).updates.story_background,'unique later text');await f.finish(next,saving);
 });
 test('saving PROJECT preserves an unsaved SYSTEM field and the visible group',async()=>{
-  const f=fixture(),project=f.form('PROJECT'),system=f.form('SYSTEM');f.input(project,'story_background','submitted');const saving=f.submit(project);await flush();f.root.all().find(node=>node.textContent==='系统与 AI').onclick();f.input(system,'ai_context_max_chars','13579');await f.finish(f.requests[0],saving);
+  const f=fixture(),project=f.form('PROJECT'),system=f.form('SYSTEM');f.input(project,'story_background','submitted');const saving=f.submit(project);await flush();f.context.state.configSection='SYSTEM';f.context.showConfigurationSection();f.input(system,'ai_context_max_chars','13579');await f.finish(f.requests[0],saving);
   assert.equal(f.form('SYSTEM'),system);assert.equal(system.elements.ai_context_max_chars.value,'13579');assert.equal(f.context.state.configSection,'SYSTEM');assert.equal(system.parent.hidden,false);
 });
 test('a returned page owns its new form and a late old save never rebases that form',async()=>{
@@ -95,4 +96,26 @@ test('HTTP 503 can still be a lost success and uses the original exact readback 
 test('a late HTTP 409 never labels or reconstructs a newly opened configuration form',async()=>{
  const f=fixture(),old=f.form('PROJECT');f.input(old,'story_background','old attempt');const saving=f.submit(old);await flush();f.context.renderConfigurations();const current=f.form('PROJECT');f.input(current,'story_background','new owner unique input');f.requests[0].respond(409,{error:'conflict'});await saving;
  assert.equal(f.form('PROJECT'),current);assert.equal(current.elements.story_background.value,'new owner unique input');assert.equal(f.notice(current).hidden,true);assert.equal(f.requests.length,1);assert.deepEqual(f.messages,[]);
+});
+
+test('workspace remount preserves both live configuration forms and unsubmitted input',()=>{
+ const f=fixture(),project=f.form('PROJECT'),system=f.form('SYSTEM');f.input(project,'story_background','project draft');f.input(system,'ai_context_max_chars','12345');f.context.state.workspace='story.sources';f.context.state.workspace='project.configuration';f.context.renderConfigurations({preserve:true});
+ assert.equal(f.form('PROJECT'),project);assert.equal(f.form('SYSTEM'),system);assert.equal(project.elements.story_background.value,'project draft');assert.equal(system.elements.ai_context_max_chars.value,'12345');
+});
+test('refresh restores unsubmitted fields with their original base and cannot adopt a concurrent version',async()=>{
+ const session=new Map(),f=fixture(session);f.input(f.form('PROJECT'),'story_background','exact old draft');f.input(f.form('SYSTEM'),'ai_context_max_chars','13579');
+ const refreshed=fixture(session);refreshed.context.state.configurations.values.PROJECT={...refreshed.data.values.PROJECT,version:2,body:{story_background:'other writer'}};refreshed.context.renderConfigurations();
+ assert.equal(refreshed.form('PROJECT').elements.story_background.value,'exact old draft');assert.equal(Number(refreshed.form('SYSTEM').elements.ai_context_max_chars.value),13579);const saving=refreshed.submit(refreshed.form('PROJECT'));await flush();assert.equal(JSON.parse(refreshed.requests[0].options.body).expected_version,1);refreshed.requests[0].respond(409,{error:'conflict'});await saving;assert.equal(refreshed.form('PROJECT').elements.story_background.value,'exact old draft');
+});
+test('refresh retains an unknown operation and recognizes its exact committed result before another PATCH',async()=>{
+ const session=new Map(),f=fixture(session),form=f.form('PROJECT');f.input(form,'story_background','unknown operation');const saving=f.submit(form);await flush();const first=f.requests[0];first.reject(Error('lost'));await flush();f.requests[1].reject(Error('read offline'));await saving;
+ const refreshed=fixture(session),next=refreshed.submit(refreshed.form('PROJECT'));await flush();assert.equal(refreshed.requests[0].url,'/api/configurations');refreshed.requests[0].resolve(refreshed.snapshot(f.committed(first)));await next;
+ assert.equal(refreshed.requests.filter(r=>r.options.method==='PATCH').length,0);assert.equal(session.has('review-configuration-draft:PROJECT'),false);assert.equal(refreshed.context.state.configurations.values.PROJECT.version,2);
+});
+test('a successful save finishing while another workspace is open leaves the retained form usable',async()=>{
+ const f=fixture(new Map()),form=f.form('PROJECT');f.input(form,'story_background','submitted while open');const saving=f.submit(form);await flush();f.context.state.workspace='story.sources';await f.finish(f.requests[0],saving);f.context.state.workspace='project.configuration';f.context.renderConfigurations({preserve:true});
+ assert.equal(f.form('PROJECT'),form);assert.equal(f.save(form).disabled,true);f.input(form,'story_background','next change');const second=f.submit(form);await flush();const request=f.requests.at(-1);assert.equal(JSON.parse(request.options.body).expected_version,2);await f.finish(request,second);
+});
+test('refresh retains an intentionally empty unsaved numeric input instead of inventing zero',()=>{
+ const session=new Map(),first=fixture(session);first.input(first.form('SYSTEM'),'ai_context_max_chars','');const refreshed=fixture(session);assert.equal(refreshed.form('SYSTEM').elements.ai_context_max_chars.value,'');
 });

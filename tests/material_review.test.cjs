@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
-const ctx={URLSearchParams,state:{productionRecords:[]}};vm.createContext(ctx);
+const ctx={URLSearchParams,state:{productionRecords:[]}};vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);
 for(const f of ['production.js','material-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',f),'utf8'),ctx);
 const need=(id,revision=id+'-v1',media='image')=>({object_id:id,id:revision,current_revision:revision,payload:{media_type:media}});
 const item=(id,refs,media='image')=>({id,record:{object_id:id,id:id+'-v1',payload:{media_type:media,candidate_requirements:refs}}});
@@ -125,7 +125,7 @@ test('review workspaces have no manual-entry forms or workflow navigation',()=>{
  for(const forbidden of ['showProductionImport','showProductionUpload','showProductionEditor','showProductionStateNeed','showProductionCoverage','剧本依据 → 制作设定 → 实际素材 → 镜头输入'])assert.ok(!source.includes(forbidden),forbidden);
 });
 
-const ui={...ctx,document:{addEventListener(){}}};vm.createContext(ui);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8'),ui);
+const ui={...ctx,document:{addEventListener(){}}};vm.createContext(ui);require('./load_review_helpers.cjs')(ui);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8'),ui);
 test('block scope aggregates all live statuses and anchor kinds, excludes other blocks and versions, deduplicates',()=>{
  const c=(id,r,anchor,status='OPEN')=>({id,target_revision_id:r,anchor,status});
  const rows=[c('a','r',{type:'text',block_id:'prompt'}),c('b','r',{type:'global'},'CLOSED'),c('c','r',{type:'text',block_id:'other'}),c('d','old',{type:'text',block_id:'prompt'}),c('a','r',{type:'text',block_id:'prompt'})];

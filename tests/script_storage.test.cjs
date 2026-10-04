@@ -21,10 +21,10 @@ function fixture(){
  const root=new Element('main'),nodes=new Map(),storage=new Map(),messages=[],requests=[];
  for(const id of ['source-view','comment-panel','comment-body','open-count','comments-toggle','screenplay-comments','toast']){const node=new Element();node.id=id;root.append(node);nodes.set('#'+id,node)}
  Object.defineProperty(nodes.get('#toast'),'textContent',{set:v=>messages.push(v),get:()=>messages.at(-1)||''});
- const context={URL,console,setTimeout:()=>0,clearTimeout(){},getSelection:()=>({removeAllRanges(){}}),window:{getSelection:()=>({isCollapsed:true})},location:{href:'http://fixture/'},history:{pushState(){},replaceState(){}},
+ const context={URL,console,setTimeout:()=>0,clearTimeout(){},getSelection:()=>({removeAllRanges(){}}),window:{addEventListener(){},getSelection:()=>({isCollapsed:true})},location:{href:'http://fixture/'},history:{pushState(){},replaceState(){}},
  document:{addEventListener(){},querySelector:s=>nodes.get(s)||root.querySelector(s),querySelectorAll:s=>root.querySelectorAll(s),createElement:tag=>new Element(tag),createTextNode:text=>{const node=new Element('text');node.textContent=text;return node}},
  localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},fetch:(...args)=>{requests.push(args);throw Error('unexpected HTTP')}};
- vm.createContext(context);for(const name of ['app.js','screenplay.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),context);
+ vm.createContext(context);for(const name of ['navigation.js','app.js','screenplay.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),context);
  vm.runInContext('globalThis.state=state;globalThis.key=draftKey;hideSelectionAction=()=>{};globalThis.reviewSurface=node=>node;',context);
  return {root,nodes,storage,messages,requests,context,state:context.state};
 }

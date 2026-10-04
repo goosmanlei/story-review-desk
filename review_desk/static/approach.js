@@ -47,12 +47,7 @@ function restoreApproachAnchor() {
 async function renderApproach() {
   const host = $('#approach-body');
   const selected = new URL(location.href).searchParams.get('tab') === 'materials' ? 'materials' : 'story';
-  for (const button of document.querySelectorAll('[data-approach-tab]')) {
-    const active = button.dataset.approachTab === selected;
-    button.setAttribute('aria-selected', String(active));
-    button.tabIndex = active ? 0 : -1;
-    button.classList.toggle('active', active);
-  }
+  if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   host.setAttribute('aria-labelledby', `approach-tab-${selected}`);
   // Hash navigation must keep the mounted text and its browser reading position.
   if (host.dataset.tab === selected) { restoreApproachAnchor(); return; }
@@ -129,18 +124,10 @@ window.addEventListener('resize', scheduleApproachIndex);
 window.addEventListener('hashchange', restoreApproachAnchor);
 
 function selectApproachTab(tab, focus = false) {
+  if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
   const url = new URL(location.href); url.searchParams.set('workspace', 'production.approach'); url.searchParams.set('tab', tab); url.hash = '';
   if (url.href !== location.href) history.pushState(null, '', url);
-  renderApproach();
+  if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
+  renderApproach().then(()=>{if(typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});
   if (focus) $(`#approach-tab-${tab}`).focus();
-}
-
-for (const button of document.querySelectorAll('[data-approach-tab]')) {
-  button.onclick = () => selectApproachTab(button.dataset.approachTab);
-  button.onkeydown = event => {
-    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-    event.preventDefault();
-    const tab = event.key === 'Home' ? 'story' : event.key === 'End' ? 'materials' : button.dataset.approachTab === 'story' ? 'materials' : 'story';
-    selectApproachTab(tab, true);
-  };
 }

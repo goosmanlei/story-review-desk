@@ -8,6 +8,7 @@ import base64
 import copy
 import json
 import sqlite3
+import zlib
 from .store import canonical, digest
 
 FIELDS = {'blocks', 'purpose', 'specification', 'generation', 'method', 'model',
@@ -60,6 +61,30 @@ BEGIN SELECT RAISE(ABORT,'material revision logical checksum mismatch'); END;
 '''
 
 
+TRIGGERS=('material_content_immutable','material_content_checksum','material_revision_insert',
+          'material_revision_update','material_frozen_version_update','material_frozen_definition_update')
+
+
+def enable_constraints(db):
+    statement=''
+    for line in SCHEMA[SCHEMA.index('CREATE TRIGGER'):].splitlines(keepends=True):
+        statement+=line
+        if sqlite3.complete_statement(statement):db.execute(statement);statement=''
+
+
+def cleanup_legacy_triggers(db):
+    """Only a fully raw, unapplied database can be returned to an older writer."""
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_model_migrations'").fetchone() and db.execute('SELECT 1 FROM material_model_migrations LIMIT 1').fetchone():
+        raise ValueError('applied material migration requires exact rollback before legacy runtime')
+    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revisions'").fetchone() and db.execute("SELECT 1 FROM revisions WHERE json_type(payload,'$._material_fields') IS NOT NULL LIMIT 1").fetchone():
+        raise ValueError('referenced material revisions cannot be read by legacy runtime')
+    removed=[]
+    for name in TRIGGERS:
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",(name,)).fetchone():
+            db.execute('DROP TRIGGER '+name);removed.append(name)
+    return removed
+
+
 def intern(store, value):
     """Merkle JSON: equal leaf text and equal subtrees occupy one physical row."""
     if isinstance(value, dict):
@@ -76,7 +101,13 @@ def intern(store, value):
 
 def intern_recipe(store,pieces):
     # A recipe contains only references and lexical edits, never definition text.
-    body=canonical({'archive_recipe':pieces});key=digest(body.encode())
+    tokens=[];indices={};order=[]
+    for part in pieces:
+        value=canonical(part)
+        if value not in indices:indices[value]=len(tokens);tokens.append(part)
+        order.append(indices[value])
+    packed=base64.b64encode(zlib.compress(canonical({'tokens':tokens,'order':order}).encode('utf-8'),9)).decode('ascii')
+    body=canonical({'archive_recipe_zlib':packed});key=digest(body.encode())
     store.db.execute('INSERT OR IGNORE INTO material_content VALUES (?,?)',(key,body))
     return key
 
@@ -104,6 +135,11 @@ def expand(store, key, visiting=None, cache=None):
             result=[expand(store, v, visiting, cache) for v in value['array']]
             cache[key]=result
             return copy.deepcopy(result)
+        if set(value) == {'archive_recipe_zlib'}:
+            packed=json.loads(zlib.decompress(base64.b64decode(value['archive_recipe_zlib'],validate=True)))
+            result=[packed['tokens'][i] for i in packed['order']] if isinstance(packed,dict) else packed
+            cache[key]=result
+            return copy.deepcopy(result)
         if set(value) == {'archive_recipe'}:
             cache[key]=value['archive_recipe']
             return copy.deepcopy(value['archive_recipe'])
@@ -128,19 +164,20 @@ def encode(store, payload, raw=None):
     return canonical(encoded)
 
 
-def hydrate(store, raw):
+def hydrate(store, raw, resolve=None):
     if not isinstance(raw,str) or '"'+MARKER+'"' not in raw:
         return raw
     value=json.loads(raw)
     if MARKER not in value:return raw
     key=value.pop(MARKER)
     raw=value.pop('_material_raw',None)
-    fields=expand(store,key)
+    resolve=resolve or (lambda key:expand(store,key))
+    fields=resolve(key)
     if set(fields)&set(value):raise ValueError('overlapping material content fields')
     result={**value,**fields}
     if raw:
         from .material_archives import decode
-        original=decode(expand(store,raw),lambda key:expand(store,key)).decode('utf-8')
+        original=decode(resolve(raw),resolve).decode('utf-8')
         if json.loads(original)!=result:raise ValueError('raw material layout differs from definition')
         return original
     return canonical(result)

@@ -97,14 +97,25 @@ class Store:
         self.db.create_function("material_sha256",1,lambda text:digest(text.encode()),deterministic=True)
         self.db.create_function("material_revision_sha256",3,lambda oid,version,payload:digest(canonical({"object_id":oid,"version":version,"payload":json.loads(hydrate(self,payload))}).encode()))
         self.db.create_function("material_model_migrating",0,lambda:int(getattr(self,"_material_migrating",False)))
-        self.db.executescript(CONTENT_SCHEMA)
-        self.db.row_factory = row_factory(self)
-        # Existing V1 instance databases are upgraded without rewriting source text.
-        for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
-            if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
-                self._insert_object(row["id"], "SOURCE", {"source_revision": row["revision"]})
-        if "target_object_id" not in {row["name"] for row in self.db.execute("PRAGMA table_info(comments)")}:
-            self._migrate_comments()
+        try:
+            self.db.executescript(CONTENT_SCHEMA)
+            self.db.row_factory = row_factory(self)
+            # Existing V1 instance databases are upgraded without rewriting source text.
+            for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
+                if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():
+                    self._insert_object(row["id"], "SOURCE", {"source_revision": row["revision"]})
+            if "target_object_id" not in {row["name"] for row in self.db.execute("PRAGMA table_info(comments)")}:
+                self._migrate_comments()
+        except BaseException:
+            self.db.rollback()
+            try:
+                from .material_storage import cleanup_legacy_triggers
+                cleanup_legacy_triggers(self.db)
+                self.db.commit()
+            except BaseException:
+                self.db.rollback()
+            self.db.close()
+            raise
 
     def _migrate_comments(self):
         """Add exact object/revision anchors while preserving old source comments/events."""

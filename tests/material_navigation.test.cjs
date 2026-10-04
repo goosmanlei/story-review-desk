@@ -13,7 +13,7 @@ function setup(){
  const detail={record:b,history:[b],review_context:{call:callB,requirements:[plan]},review_contexts:{[a.id]:{call:callA,requirements:[plan]},[oldA.id]:{call:callA,requirements:[plan]},[b.id]:{call:callB,requirements:[plan]}},material_versions:{need:rounds}};
  const root=new Element('main'),requests=[];
  const ctx={URL,URLSearchParams,CSS:{escape:x=>x},console,setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace&production_object=previous&material_round=2&material_target=previous'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?root:null,querySelectorAll:()=>[],createElement:tag=>new Element(tag)},fetch:async url=>{requests.push(url);return {ok:true,json:async()=>detail}}};
- ctx.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};vm.createContext(ctx);
+ ctx.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);
  ctx.document.createElementNS=(_namespace,tag)=>new Element(tag);
  for(const name of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
  vm.runInContext('globalThis.state=state;',ctx);ctx.state.workspace='materials.workspace';ctx.state.productionRecords=[plan,a,b];ctx.state.materialReview={record:{object_id:'previous'}};
@@ -69,7 +69,7 @@ for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'a
  f.rounds.splice(0,f.rounds.length,{number:1,state:'produced',plan:f.plan,members:[f.plan,f.a,f.b],results:[f.b]});
  const before=JSON.stringify(f.rounds);await f.ctx.openProductionRecord(f.a.object_id,explicit?f.a.id:null);
  assert.equal(f.roundControl().value,1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text').map(n=>n.dataset.revision),[f.a.id]);
- assert.equal(f.nodes('select').filter(n=>n.attributes['aria-label']==='本轮候选').length,0);assert.equal(JSON.stringify(f.rounds),before);
+ assert.equal(f.nodes('select').filter(n=>n.attributes['aria-label']==='本轮候选').length,1);assert.equal(f.nodes('select').find(n=>n.attributes['aria-label']==='本轮候选').disabled,true);assert.equal(JSON.stringify(f.rounds),before);
  f.ctx.crypto=require('node:crypto').webcrypto;f.ctx.toast=()=>{};
  await f.nodes('button').find(n=>n.textContent==='记录本版本审阅结论').onclick();
  assert.equal(f.ctx.state.productionSelected.id,f.a.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.a.id);

@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="/production.css">
   <link rel="stylesheet" href="/review-ui.css">
   <link rel="stylesheet" href="/unified-review.css">
+  <link rel="stylesheet" href="/navigation.css">
 </head>
 <body>
   <div class="layout">
@@ -23,10 +24,10 @@
       <div class="sidebar-foot"><i></i><div><b id="instance-title">加载中…</b><span>本机独立实例 · 业务数据可公开同步</span></div></div>
     </aside>
     <main id="reader" class="workspace-main" tabindex="-1">
-      <header class="workspace-topbar"><div class="view-context"><span id="view-symbol">故</span><div><small>当前视图</small><b id="view-title">故事创作</b></div></div></header>
+      <header class="workspace-topbar"><div class="view-context"><span id="view-symbol">故</span><div><small>当前视图</small><b id="view-title">故事创作</b></div></div><nav id="workspace-subnav" class="workspace-subnav" role="tablist" aria-label="当前视图子页面"></nav></header>
       <div class="workspace-content">
         <section id="story-creation-shell" class="workspace-view" aria-labelledby="story-workspace-title">
-          <header class="story-workspace-heading"><h1 id="story-workspace-title">故事创作</h1><div class="story-mode-tabs" role="tablist" aria-label="故事创作方式"><button type="button" class="active" role="tab" aria-selected="true" aria-controls="story-workspace" id="open-story-sources">故事采编</button><button type="button" role="tab" aria-selected="false" aria-controls="structure-workspace" id="open-story-structure">故事结构</button><button type="button" role="tab" aria-selected="false" aria-controls="screenplay-workspace" id="open-story-script">剧本创作</button></div></header>
+          <h1 id="story-workspace-title">故事创作</h1>
           <section id="story-workspace" role="tabpanel" aria-labelledby="open-story-sources">
             <p class="story-reader-guide">阅读本故事已登记的原始依据、派生整理与辅助资料。正文、出处、版本类型与素材来源分别核对。</p>
             <div class="text-reader">
@@ -53,10 +54,6 @@
         </section>
         <div id="configuration-view" class="workspace-view" hidden></div><section id="approach-view" class="workspace-view" hidden>
           <header class="approach-heading"><small>从故事到影像</small><h1>制作思路</h1><p>理解每一步为什么做、依据什么、交付什么，以及发现问题时回到哪里修订。</p></header>
-          <div class="approach-tabs" role="tablist" aria-label="制作思路">
-            <button id="approach-tab-story" data-approach-tab="story" type="button" role="tab" aria-controls="approach-body" aria-selected="true">故事创作</button>
-            <button id="approach-tab-materials" data-approach-tab="materials" type="button" role="tab" aria-controls="approach-body" aria-selected="false" tabindex="-1">生产制作</button>
-          </div>
           <div class="approach-layout">
             <aside id="approach-sidebar" class="approach-sidebar text-reader-index" hidden>
               <header><small>阅读目录</small><h2 id="approach-index-title">故事创作</h2><p>选择章节，阅读对应的方法与例子。</p></header>
@@ -76,6 +73,7 @@
     <div id="comment-body"></div>
   </aside>
   <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/navigation.js" defer></script>
   <script src="/approach.js" defer></script>
   <script src="/app.js" defer></script>
   <script src="/structure.js" defer></script>

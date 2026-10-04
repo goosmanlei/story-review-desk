@@ -71,6 +71,7 @@ function resolveStructureRevision(id){
   return revisions.some(revision=>revision.id===id)?id:revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
 }
 function chooseStructureRevision(id,updateUrl=true){
+  if(typeof rememberStoryDraft==='function')rememberStoryDraft();
   const revision=resolveStructureRevision(id),changed=revision!==state.structureRevision;
   if(changed){
     if(isStructure()){
@@ -84,7 +85,7 @@ function chooseStructureRevision(id,updateUrl=true){
     if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision');
     if(url.href!==location.href)history.pushState(null,'',url);
   }
-  if(changed&&isStructure()){renderStructureReader();renderComments()}
+  if(changed&&isStructure()){if(typeof restoreStoryDraft==='function')restoreStoryDraft();renderStructureReader();renderComments()}
 }
 function structureBlocks(doc){return doc.sections.flatMap(s=>[{id:`heading-${s.id}`,text:s.title},...s.blocks])}
 function structureVisuals(doc){return doc.sections.flatMap(s=>s.visuals||[])}
@@ -288,4 +289,3 @@ document.addEventListener('scroll',event=>{if(event.target===$('#structure-reade
 for(const type of ['wheel','pointerdown','touchstart'])document.addEventListener(type,cancelStructureChapterRestore,{capture:true,passive:true});
 document.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' ','Escape'].includes(event.key))cancelStructureChapterRestore()},{capture:true});
 window.addEventListener('resize',()=>{revealStructureVersion($('#structure-status .structure-versions'));scheduleStructureIndex()});
-window.addEventListener('DOMContentLoaded',()=>{$('#open-story-sources').onclick=()=>switchWorkspace('story.sources');$('#open-story-structure').onclick=()=>switchWorkspace('story.outline')});

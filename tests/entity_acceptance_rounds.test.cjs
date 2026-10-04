@@ -8,7 +8,7 @@ function setup(){
   const scope={entity:ref(entity),states:[form,other].map(ref),requirements:[plan,same].map(ref),dependencies:[],relationships:[]};
   const data={entity,states:[form,other],requirements:[plan,same],relationships:[],media:[],comment_records:[],comment_targets:[],usages:{},can_accept:true,can_revoke:false,acceptance_mode:'generation',decision_version:0,scope,decision_scope:scope,material_versions:{need:makeRounds(plan,old),'same-need':makeRounds(same,same)}};
   const requests=[],messages=[],toast={classList:{add(){},remove(){}},set textContent(value){messages.push(value)}},context={URL,URLSearchParams,console,setTimeout:()=>1,clearTimeout(){},location:{href:'http://isolated/?workspace=settings.workspace'},history:{replaceState(){}},document:{addEventListener(){},querySelector:s=>s==='#toast'?toast:null,querySelectorAll:()=>[],createElement:tag=>new Element(tag)}};
-  vm.createContext(context);for(const file of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);for(const file of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),context);
   vm.runInContext('globalThis.state=state;',context);Object.assign(context.state,{workspace:'settings.workspace',entityReview:data,productionEntityDetail:{record:entity},productionChildDetail:{record:form},productionSelected:plan});
   for(const fn of ['entityVersionControl','reviewTextBlocks','entitySources','renderEntityRelations','renderComments','paintProductionReview'])context[fn]=()=>{};
   context.entityReviewScope=()=>'';context.productionEntityIcon=()=>new Element('svg');const realReload=context.reloadEntityReview;context.reloadEntityReview=async()=>{};
@@ -44,9 +44,12 @@ test('accept, revoke and reaccept retain their existing action and version seman
   }
 });
 
-test('mixed historical sections remain protected until every selected plan is current',()=>{
-  const f=setup();f.context.switchMaterialRound(f.data,'need',1);f.context.selectEntityReviewState(f.other);assert.equal(f.render().disabled,true);
-  f.context.switchMaterialRound(f.data,'same-need',1);assert.equal(f.render().disabled,true);f.context.switchMaterialRound(f.data,'need',2);assert.equal(f.render().disabled,false);
+test('each state restores its historical selection and protects acceptance until its displayed plan is current',()=>{
+  const f=setup();f.context.switchMaterialRound(f.data,'need',1);assert.equal(f.render().disabled,true);
+  f.context.selectEntityReviewState(f.other);assert.equal(f.render().disabled,false);assert.equal(f.data.selectedMaterialRounds.need,undefined);
+  f.context.switchMaterialRound(f.data,'same-need',1);assert.equal(f.render().disabled,false);
+  f.context.selectEntityReviewState(f.form);assert.equal(f.data.selectedMaterialRounds.need,1);assert.equal(f.render().disabled,true);
+  f.context.switchMaterialRound(f.data,'need',2);assert.equal(f.render().disabled,false);
   f.context.state.productionEntityDetail.record={...f.entity,id:'old-entity'};assert.equal(f.render().disabled,true);f.context.state.productionEntityDetail.record=f.entity;
   f.data.localVersions={relation:{id:'old-relation',current_revision:'current-relation'}};assert.equal(f.render().disabled,true);
 });

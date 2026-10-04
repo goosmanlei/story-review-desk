@@ -1,0 +1,15 @@
+/* One fixed subpage bar; the title and tabs stay on the same row at every width. */
+.workspace-topbar { justify-content: flex-start; flex-wrap: nowrap; gap: 28px; }
+.workspace-topbar .view-context { flex: 0 0 auto; }
+.workspace-subnav { display: flex; align-items: stretch; flex: 1 1 auto; min-width: 0; gap: 5px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; }
+.workspace-subnav .workspace-subtab { flex: 0 0 auto; min-height: 38px; padding: 7px 15px; border: 1px solid transparent; border-bottom: 2px solid transparent; background: transparent; color: var(--desk-muted); font: inherit; font-size: 13px; white-space: nowrap; }
+.workspace-subnav .workspace-subtab:hover { color: var(--desk-ink); background: rgba(255,255,255,.45); }
+.workspace-subnav .workspace-subtab.active { color: var(--desk-ink); border-bottom-color: var(--desk-red); font-weight: 700; }
+.workspace-subnav .workspace-subtab:focus-visible { outline: 2px solid var(--desk-red); outline-offset: -2px; }
+.configuration-layout-unified { grid-template-columns: minmax(0,1fr); }
+@media(max-width:700px) {
+  .workspace-topbar { gap: 12px; }
+  .workspace-topbar .view-context { gap: 7px; }
+  .workspace-subnav { gap: 2px; }
+  .workspace-subnav .workspace-subtab { min-height: 36px; padding: 7px 11px; font-size: 12px; }
+}
