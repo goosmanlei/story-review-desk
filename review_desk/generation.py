@@ -418,7 +418,7 @@ def _snapshot(store, entity_id, revision_id=None):
             'can_accept':not revision_id and not a and not revoke,
             'can_revoke':bool(revoke),'revoke_target':ref(revoke) if revoke else None,
             'decision_version':d['version'] if d and d['object_id']==decision_id(entity_id) else 0,'preparation':prep,'history':history,
-            'previous_accepted':None,'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
+            'adoptions':[r for r in p.current_records(store,{'RELATION'}) if r['payload'].get('relation_type')=='adoption'],'previous_accepted':None,'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
 
 
 def readiness(store, requirement_id):

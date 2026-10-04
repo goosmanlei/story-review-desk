@@ -2,32 +2,60 @@
 const STRUCTURE_SECTIONS={theme:'方向与主题',characters:'人物塑造',relationships:'人物关系',spaces:'空间关系',storylines:'故事线',timeline:'时间线'};
 let structureDrawing=null;
 let structureIndexFrame=0,structureIndexObserver=null;
+const structureReadingPositions=new Map(),structureVisualSizes=new Map();
+let structureChapterRestore=null;
+function cancelStructureChapterRestore(){structureChapterRestore=null}
+function rememberStructurePosition(){
+  const reader=$('#structure-reader');
+  if(reader?.dataset.readingRevision)structureReadingPositions.set(reader.dataset.readingRevision,Number(reader.scrollTop)||0);
+}
+function revealStructureVersion(versions){
+  if(!versions?.clientWidth)return;
+  const active=versions.querySelector('.active');if(!active)return;
+  const list=versions.getBoundingClientRect(),button=active.getBoundingClientRect();
+  // Move only this horizontal strip. scrollIntoView would also move the page
+  // and the sticky structure frame away from the current reading position.
+  if(button.left<list.left+8)versions.scrollLeft+=button.left-list.left-8;
+  else if(button.right>list.left+versions.clientWidth-8)versions.scrollLeft+=button.right-list.left-versions.clientWidth+8;
+}
+function restoreStructureChapter(){
+  const pending=structureChapterRestore;if(!pending)return;
+  const {reader,section,revision,anchor,selected}=pending;
+  if(!isStructure()||reader!==$('#structure-reader')||!reader.contains(section)||revision!==state.structureRevision||anchor!==state.anchor||selected!==state.selected){cancelStructureChapterRestore();return}
+  const header=reader.querySelector('.structure-document-head'),offset=(header?.getBoundingClientRect().height||0)+20;
+  reader.scrollTo({top:Math.max(0,reader.scrollTop+section.getBoundingClientRect().top-reader.getBoundingClientRect().top-offset),behavior:'instant'});
+  // Keep a clicked chapter anchored while original images change the layout.
+  // Wheel/touch/keyboard/pointer input gives control back to the reader.
+  if([...reader.querySelectorAll('img')].every(img=>img.complete))cancelStructureChapterRestore();
+}
+function scrollStructureSection(section){
+  const reader=$('#structure-reader');if(!section||!reader)return;
+  structureChapterRestore={reader,section,revision:state.structureRevision,anchor:state.anchor,selected:state.selected};
+  restoreStructureChapter();scheduleStructureIndex();
+}
 function scheduleStructureIndex(){
   if(structureIndexFrame)return;
-  structureIndexFrame=requestAnimationFrame(()=>{structureIndexFrame=0;syncStructureIndex()});
+  structureIndexFrame=requestAnimationFrame(()=>{structureIndexFrame=0;restoreStructureChapter();syncStructureIndex()});
 }
 function syncStructureIndex(){
   if(!isStructure())return;
   const reader=$('#structure-reader'),index=$('#structure-index'),sections=[...reader.querySelectorAll('.structure-section')];
   if(!sections.length)return;
-  const barBottom=$('.workspace-topbar').getBoundingClientRect().bottom,indexRect=index.getBoundingClientRect();
-  let readingTop=Math.max(0,barBottom)+20;
-  // The horizontal chapter menu also covers the manuscript on narrow screens.
-  const indexStyle=getComputedStyle(index);
-  if(indexStyle.display==='flex')readingTop=Math.max(readingTop,(parseFloat(indexStyle.top)||0)+indexRect.height+20);
-  reader.style.setProperty('--structure-scroll-offset',`${readingTop}px`);
+  const readerRect=reader.getBoundingClientRect();
+  const header=reader.querySelector('.structure-document-head'),offset=(header?.getBoundingClientRect().height||0)+20;
+  const readingTop=readerRect.top+offset;
+  reader.style.setProperty('--structure-scroll-offset',`${offset}px`);
   let current=sections[0];
   for(const section of sections){if(section.getBoundingClientRect().top<=readingTop+1)current=section;else break}
-  const page=document.scrollingElement;
-  if(page.scrollTop>0&&page.scrollTop+window.innerHeight>=page.scrollHeight-2)current=sections.at(-1);
+  if(reader.scrollTop>0&&reader.scrollTop+reader.clientHeight>=reader.scrollHeight-2)current=sections.at(-1);
   for(const button of index.querySelectorAll('button')){
     const active=button.getAttribute('aria-controls')===current.id,changed=active&&!button.classList.contains('active');
     button.classList.toggle('active',active);
     if(active)button.setAttribute('aria-current','location');else button.removeAttribute('aria-current');
-    if(changed&&index.scrollWidth>index.clientWidth){
-      const rect=button.getBoundingClientRect();
-      if(rect.left<indexRect.left)index.scrollLeft+=rect.left-indexRect.left;
-      else if(rect.right>indexRect.right)index.scrollLeft+=rect.right-indexRect.right;
+    if(changed){
+      const directory=index.querySelector('.structure-chapters')||index,rect=button.getBoundingClientRect(),edge=directory.getBoundingClientRect();
+      if(rect.top<edge.top)directory.scrollTop+=rect.top-edge.top;
+      else if(rect.bottom>edge.bottom)directory.scrollTop+=rect.bottom-edge.bottom;
     }
   }
 }
@@ -121,7 +149,11 @@ function renderStructureVisual(visual,preview=false){
   const figure=reviewSurface(el('figure','structure-figure'),'image'),head=el('div','structure-figure-head');
   nodeText('strong',null,visual.title,head);nodeText('span',null,visual.kind==='diagram'?'结构图':'图片',head);figure.append(head);
   const viewport=el('div','structure-visual-viewport'),stage=el('div','structure-visual-stage');stage.dataset.visualId=visual.id;figure.dataset.reviewFile=visual.file;
-  const img=el('img');img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
+  const img=el('img'),size=structureVisualSizes.get(visual.file)||visual;
+  if(Number(size.width)>0&&Number(size.height)>0){img.width=Number(size.width);img.height=Number(size.height)}
+  img.addEventListener('load',()=>{if(img.naturalWidth&&img.naturalHeight){structureVisualSizes.set(visual.file,{width:img.naturalWidth,height:img.naturalHeight});img.width=img.naturalWidth;img.height=img.naturalHeight}scheduleStructureIndex()});
+  img.addEventListener('error',scheduleStructureIndex);
+  img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
   if(preview){
     img.classList.add('structure-image-trigger');img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
     img.onclick=()=>openStructureImage(visual,img);
@@ -133,11 +165,17 @@ function renderStructureVisual(visual,preview=false){
   const whole=nodeText('button',null,'评论整图',actions);whole.type='button';whole.onclick=()=>startDraft({type:'visual',visual_id:visual.id,asset_file:visual.file});figure.append(actions);return figure;
 }
 function renderStructureReader(){
-  hideSelectionAction();
+  cancelStructureChapterRestore();hideSelectionAction();
   structureIndexObserver?.disconnect();
   if(!state.structure)return;
-  const status=$('#structure-status'),index=$('#structure-index'),reader=$('#structure-reader');status.replaceChildren();index.replaceChildren();reader.replaceChildren();
+  const status=$('#structure-status'),index=$('#structure-index'),reader=$('#structure-reader');
+  rememberStructurePosition();
+  const versionScroll=Number(status.querySelector('.structure-versions')?.scrollLeft)||0;
+  const directoryScroll=Number(index.querySelector('.structure-chapters')?.scrollTop)||0;
+  status.replaceChildren();index.replaceChildren();reader.replaceChildren();
+  index.classList.add('text-reader-index');
   const selection=state.structure.selection,active=structureRevision();
+  reader.dataset.readingRevision=active?.id||'';
   $('#structure-workspace .structure-layout').hidden=!active;
   $('#comments-toggle').hidden=!active;
   if(!selection){
@@ -162,17 +200,19 @@ function renderStructureReader(){
     nodeText('p','structure-empty',`${label}等待 Codex 准备完整结构稿。`,status);return;
   }
   if(state.structure.direction_changed){const alert=nodeText('p','structure-alert','所选方向已更新。当前结构稿仍引用原方向修订；请核对并导入针对新方向的完整结构稿。',status);alert.setAttribute('role','alert')}
-  const versions=el('div','structure-versions');nodeText('span',null,'阅读版本：',versions);
-  for(const revision of state.structure.revisions){const button=nodeText('button',revision.id===state.structureRevision?'active':'','',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
-  status.append(versions);nodeText('p','revision-count-help','评论数包含已关闭评论。',status);
+  const versions=el('nav','structure-versions');versions.setAttribute('aria-label','结构稿版本');
+  for(const revision of state.structure.revisions){const button=nodeText('button','source-button'+(revision.id===state.structureRevision?' active':''),'',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
+  status.append(versions);versions.scrollLeft=versionScroll;revealStructureVersion(versions);
   if(!active){nodeText('p','structure-empty','请选择一个结构稿版本继续阅读。',status);return}
   const doc=active.payload;
+  const directoryHead=el('header');nodeText('small',null,'STORY STRUCTURE',directoryHead);nodeText('h2',null,'故事结构',directoryHead);nodeText('p',null,'章节目录 · 版本评论数包含已关闭评论。',directoryHead);index.append(directoryHead);
+  const chapters=el('div','structure-chapters');index.append(chapters);
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}
   const basisSelection=state.structure.selection_history?.find(item=>item.id===doc.direction_selection_revision);
   const basisSource=basisSelection?.payload.source_id;
-  const title=el('header','structure-document-head');nodeText('small',null,`STORY STRUCTURE · 第 ${active.version} 稿`,title);nodeText('h2',null,doc.title,title);nodeText('p',null,`本稿依据「${structureSourceTitle(basisSource||'来源未知')}」的修订 ${basisSelection?.payload.source_revision.slice(0,16)||'UNKNOWN'} · ${active.created_at}`,title);reader.append(title);
+  const title=el('header','structure-document-head text-reader-head'),titleText=el('div');title.append(titleText);nodeText('small',null,`STORY STRUCTURE · 第 ${active.version} 稿`,titleText);nodeText('h2',null,doc.title,titleText);nodeText('p',null,`本稿依据「${structureSourceTitle(basisSource||'来源未知')}」的修订 ${basisSelection?.payload.source_revision.slice(0,16)||'UNKNOWN'} · ${active.created_at}`,titleText);reader.append(title);
   for(const section of doc.sections){
-    const nav=nodeText('button',null,STRUCTURE_SECTIONS[section.id],index);nav.type='button';nav.setAttribute('aria-controls',`structure-section-${section.id}`);nav.onclick=()=>document.getElementById(nav.getAttribute('aria-controls'))?.scrollIntoView({behavior:'smooth',block:'start'});
+    const nav=nodeText('button','source-button',STRUCTURE_SECTIONS[section.id],chapters);nav.type='button';nav.setAttribute('aria-controls',`structure-section-${section.id}`);nav.onclick=()=>scrollStructureSection(document.getElementById(nav.getAttribute('aria-controls')));
     const area=el('section','structure-section');area.id=`structure-section-${section.id}`;nodeText('small',null,STRUCTURE_SECTIONS[section.id].toUpperCase(),area);
     area.append(structureBlockElement('h2',{id:`heading-${section.id}`,text:section.title},active));
     const content=reviewSurface(el('div','structure-review-text'));for(const block of section.blocks)content.append(structureBlockElement('p',block,active));area.append(content);
@@ -183,7 +223,7 @@ function renderStructureReader(){
   else nodeText('p',null,'本稿尚无关联意见处理说明。',tail);
   const allOpen=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN');nodeText('p',null,`待决意见 ${allOpen.length} 条；新稿不会自动关闭原稿意见。`,tail);
   const overall=nodeText('button',null,'添加整体意见',tail);overall.type='button';overall.onclick=()=>startDraft({type:'global'});
-  reader.append(tail);paintStructureRegions();watchStructureIndex();
+  reader.append(tail);reader.scrollTop=structureReadingPositions.get(active.id)||0;chapters.scrollTop=directoryScroll;paintStructureRegions();watchStructureIndex();
 }
 async function chooseStructureDirection(id){
   const data=state.structure,current=data.selection;
@@ -215,13 +255,22 @@ function selectedStructureAnchor(){
 function structurePoint(event,stage){const rect=stage.getBoundingClientRect();return{x:Math.max(0,Math.min(1,(event.clientX-rect.left)/rect.width)),y:Math.max(0,Math.min(1,(event.clientY-rect.top)/rect.height))}}
 function structureRect(a,b){return[{x:Math.min(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.min(a.y,b.y)},{x:Math.max(a.x,b.x),y:Math.max(a.y,b.y)},{x:Math.min(a.x,b.x),y:Math.max(a.y,b.y)}]}
 function structureArea(points){return Math.abs(points.reduce((sum,p,i)=>sum+p.x*points[(i+1)%points.length].y-points[(i+1)%points.length].x*p.y,0))/2}
-document.addEventListener('pointerdown',event=>{const stage=event.target.closest('.structure-visual-stage');if(!stage||stage.dataset.visualId!==state.drawMode)return;event.preventDefault();const overlay=stage.querySelector('svg');overlay.setPointerCapture(event.pointerId);structureDrawing={stage,visual:state.drawMode,points:[structurePoint(event,stage)],rect:event.shiftKey,pointer:event.pointerId,workspace:state.workspace,target:commentTarget(),reader:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':'#source-view'),source:state.workspace==='story.sources'?{id:state.current?.id,revision:state.current?.target_revision_id}:null};paintStructureRegions()});
-document.addEventListener('pointermove',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const stage=structureDrawing.stage;const point=structurePoint(event,stage),last=structureDrawing.points.at(-1);if(Math.hypot(point.x-last.x,point.y-last.y)<.002)return;structureDrawing.points.push(point);if(structureDrawing.points.length>260)structureDrawing.points=structureDrawing.points.filter((_,i)=>i%2===0);paintStructureRegions()});
+function structureDrawingReader(){return isProduction()?(state.unifiedCardRoot||$('#production-reader')):$(isStructure()?'#structure-reader':'#source-view')}
+document.addEventListener('pointerdown',event=>{
+  // A media focus repaint can detach the clicked comment polygon. The event
+  // path still owns its original stage, including inside a modal card.
+  const stage=event.composedPath?.().find(node=>node.matches?.('.structure-visual-stage'))||event.target.closest?.('.structure-visual-stage');
+  if(!stage||stage.dataset.visualId!==state.drawMode)return;
+  const visual=stage.dataset.visualId;stage.closest('.entity-review-media-pane')?.reviewFocus?.();
+  event.preventDefault();const overlay=stage.querySelector('svg');overlay.setPointerCapture(event.pointerId);
+  structureDrawing={stage,visual,points:[structurePoint(event,stage)],rect:event.shiftKey,pointer:event.pointerId,workspace:state.workspace,target:commentTarget(),reader:structureDrawingReader(),source:state.workspace==='story.sources'?{id:state.current?.id,revision:state.current?.target_revision_id}:null};paintStructureRegions();
+},true);
+document.addEventListener('pointermove',event=>{if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;const stage=structureDrawing.stage;const point=structurePoint(event,stage),last=structureDrawing.points.at(-1);if(Math.hypot(point.x-last.x,point.y-last.y)<.002)return;structureDrawing.points.push(point);if(structureDrawing.points.length>260)structureDrawing.points=structureDrawing.points.filter((_,i)=>i%2===0);paintStructureRegions()},true);
 document.addEventListener('pointerup',event=>{
   if(!structureDrawing||event.pointerId!==structureDrawing.pointer)return;
   const drawing=structureDrawing,stage=drawing.stage;
   structureDrawing=null;state.drawMode=null;stage.classList.remove('drawing');
-  if(state.workspace!==drawing.workspace||!drawing.target.target_revision_id||JSON.stringify(commentTarget())!==JSON.stringify(drawing.target)||drawing.reader!==$(isProduction()?'#production-reader':isStructure()?'#structure-reader':'#source-view')||!drawing.reader?.contains(stage)){paintStructureRegions();return}
+  if(state.workspace!==drawing.workspace||!drawing.target.target_revision_id||JSON.stringify(commentTarget())!==JSON.stringify(drawing.target)||drawing.reader!==structureDrawingReader()||!drawing.reader?.contains(stage)){paintStructureRegions();return}
   let visual;
   if(drawing.source){
     const source=state.current;
@@ -232,8 +281,11 @@ document.addEventListener('pointerup',event=>{
     if(!asset){paintStructureRegions();toast('原图已不可用，请重新打开资料后圈选');return}
     visual={id:asset.file,file:asset.file};
   }else visual=(isProduction()?productionVisuals():structureVisuals(structureRevision().payload)).find(v=>v.id===drawing.visual);
-  drawing.points.push(structurePoint(event,stage));let points=drawing.points;if(drawing.rect)points=structureRect(points[0],points.at(-1));const xs=points.map(p=>p.x),ys=points.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);if(width<.008||height<.008){toast('圈选区域太小，请重新拖动');paintStructureRegions();return}if(points.length<4||structureArea(points)<width*height*.06)points=structureRect({x:Math.min(...xs),y:Math.min(...ys)},{x:Math.max(...xs),y:Math.max(...ys)});points=points.map(p=>({x:Math.round(p.x*10000)/10000,y:Math.round(p.y*10000)/10000}));startDraft({type:'region',visual_id:visual.id,asset_file:visual.file,points});paintStructureRegions()});
+  if(!visual){paintStructureRegions();return}
+  drawing.points.push(structurePoint(event,stage));let points=drawing.points;if(drawing.rect)points=structureRect(points[0],points.at(-1));const xs=points.map(p=>p.x),ys=points.map(p=>p.y),width=Math.max(...xs)-Math.min(...xs),height=Math.max(...ys)-Math.min(...ys);if(width<.008||height<.008){toast('圈选区域太小，请重新拖动');paintStructureRegions();return}if(points.length<4||structureArea(points)<width*height*.06)points=structureRect({x:Math.min(...xs),y:Math.min(...ys)},{x:Math.max(...xs),y:Math.max(...ys)});points=points.map(p=>({x:Math.round(p.x*10000)/10000,y:Math.round(p.y*10000)/10000}));startDraft({type:'region',visual_id:visual.id,asset_file:visual.file,points});paintStructureRegions()},true);
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&state.drawMode){state.drawMode=null;structureDrawing=null;document.querySelectorAll('.structure-visual-stage').forEach(s=>s.classList.remove('drawing'));paintStructureRegions()}});
-document.addEventListener('scroll',scheduleStructureIndex,{capture:true,passive:true});
-window.addEventListener('resize',scheduleStructureIndex);
+document.addEventListener('scroll',event=>{if(event.target===$('#structure-reader'))rememberStructurePosition();scheduleStructureIndex()},{capture:true,passive:true});
+for(const type of ['wheel','pointerdown','touchstart'])document.addEventListener(type,cancelStructureChapterRestore,{capture:true,passive:true});
+document.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','PageUp','PageDown','Home','End',' ','Escape'].includes(event.key))cancelStructureChapterRestore()},{capture:true});
+window.addEventListener('resize',()=>{revealStructureVersion($('#structure-status .structure-versions'));scheduleStructureIndex()});
 window.addEventListener('DOMContentLoaded',()=>{$('#open-story-sources').onclick=()=>switchWorkspace('story.sources');$('#open-story-structure').onclick=()=>switchWorkspace('story.outline')});

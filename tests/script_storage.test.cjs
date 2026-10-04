@@ -81,3 +81,30 @@ test('normal cancel still clears only current body and metadata through actual c
  const f=setup();f.context.startDraft(anchor);const key=f.context.key();f.storage.set(key,'body');f.storage.set(key+':submission','pending');f.storage.set('other-draft','keep');
  f.root.all().find(n=>n.textContent==='取消本次评论').onclick();assert.equal(f.state.anchor,null);assert.equal(f.root.querySelector('#comment-editor-text'),null);assert.equal(f.storage.has(key),false);assert.equal(f.storage.has(key+':submission'),false);assert.equal(f.storage.has('review-script-editor:revision-A'),false);assert.equal(f.storage.get('other-draft'),'keep');
 });
+
+test('same scene, episode and version clicks preserve the live editor and reading position',()=>{
+ const f=setup(),reader=f.nodes.get('#screenplay-reader');f.context.startDraft(anchor);
+ const input=f.root.querySelector('#comment-editor-text');input.value='live unsaved exact text';reader.scrollTop=310;
+ const paragraph=reader.children[0];
+ f.nodes.get('#screenplay-scene-index').children[0].onclick();
+ f.nodes.get('#screenplay-episodes').children[0].onclick();
+ f.nodes.get('#screenplay-index').children[0].onclick();
+ assert.equal(reader.children[0],paragraph);assert.equal(reader.scrollTop,310);
+ assert.equal(f.root.querySelector('#comment-editor-text'),input);assert.equal(input.value,'live unsaved exact text');
+});
+test('scene positions restore by exact episode revision and scene without crossing versions',()=>{
+ const f=setup(),reader=f.nodes.get('#screenplay-reader');reader.scrollTop=370;
+ f.nodes.get('#screenplay-episodes').children[1].onclick();assert.equal(reader.scrollTop,0);reader.scrollTop=90;
+ f.nodes.get('#screenplay-episodes').children[0].onclick();assert.equal(reader.scrollTop,370);
+ f.context.renderScriptReader();assert.equal(reader.scrollTop,370);
+ f.state.screenplays[0].episodes[0].id='new-revision-A';f.context.renderScriptReader();assert.equal(reader.scrollTop,0);
+ f.nodes.get('#screenplay-episodes').children[1].onclick();assert.equal(reader.scrollTop,90);
+});
+test('clicking the active episode or version leaves a later scene selected',()=>{
+ const f=setup(),ep=f.state.screenplays[0].episodes[0];
+ ep.payload.blocks.push({id:'block-later',text:'Later exact scene'});
+ ep.payload.scenes.push({id:'s-later',heading:'Later scene',location:'Fixture',time:'Night',estimated_seconds:10,block_ids:['block-later']});
+ f.context.chooseScript('script',ep.object_id,'s-later');
+ f.nodes.get('#screenplay-episodes').children[0].onclick();f.nodes.get('#screenplay-index').children[0].onclick();
+ assert.equal(f.state.screenplayScene,'s-later');assert.match(f.nodes.get('#screenplay-reader').textContent,/Later exact scene/);
+});

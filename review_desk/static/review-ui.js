@@ -123,16 +123,24 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
 }
 
 // Shared modal chrome; closing never changes the review target or draft.
-let reviewDialogSerial=0;
+let reviewDialogSerial=0,reviewDialogBackPending=false;
+const reviewDialogStack=[];
+if(typeof window!=='undefined')window.addEventListener('popstate',event=>{
+  if(reviewDialogBackPending){reviewDialogBackPending=false;event.stopImmediatePropagation();return}
+  const dialog=reviewDialogStack.at(-1);if(!dialog)return;
+  event.stopImmediatePropagation();dialog.closedByHistory=true;dialog.close();
+},{capture:true});
 function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   const dialog=el('dialog','review-dialog '+className),header=el('header','review-dialog-header');
   const title=nodeText('h2',null,label,header);title.id='review-dialog-'+(++reviewDialogSerial);dialog.setAttribute('aria-labelledby',title.id);
+  const dialogId=reviewDialogSerial;
   const close=productionButton(header,'×',()=>dialog.close());close.className='review-dialog-close';close.setAttribute('aria-label',closeLabel);close.title='关闭（Esc）';close.autofocus=true;
   const body=el('div','review-dialog-body');dialog.append(header,body);
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});
   dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();dialog.remove();if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
+  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
+  history.pushState({...history.state,reviewDialog:dialogId},'',location.href);reviewDialogStack.push(dialog);
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }
 
