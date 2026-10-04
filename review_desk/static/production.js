@@ -87,7 +87,6 @@ function productionRefLink(parent,ref,label,referenceTitles=[]){
   if(state.productionRecords.some(r=>r.object_id===ref.object_id&&['ASSET','REQUIREMENT'].includes(r.kind)))return materialReferenceLink(parent,ref,label||productionName(ref,referenceTitles));
   const b=productionButton(parent,label||productionName(ref,referenceTitles),()=>openProductionRecord(ref.object_id,ref.revision_id,true));b.className='production-ref';b.title=`${ref.object_id} · ${ref.revision_id}`;
 }
-async function showProductionSource(ref,trigger=document.activeElement){return openMaterialReference(ref,trigger,true)}
 // Browsing follows stable entity identity; the selected record remains an exact revision.
 function productionEntityIds(record,byId=new Map((state.productionRecords||[]).map(r=>[r.object_id,r]))){
   if(!record)return [];

@@ -29,16 +29,16 @@
 .entity-review-version{max-width:180px;font-size:12px}
 .entity-review-sources{display:flex;flex-wrap:wrap;gap:7px 14px;font-size:12px;margin:8px 0 14px}
 .entity-review-sources a{color:#617461}
-.entity-review-more{position:relative;font-size:13px}.entity-review-more summary{cursor:pointer}.entity-review-more[open]{padding:10px;background:#f5f7f2;border:1px solid #d4dfd6;border-radius:6px}
-.entity-review-more button{display:block;margin-top:6px}
-.entity-review-recipe{padding:18px;border:1px solid #d7dfd2;border-radius:10px;margin:14px 0;background:#fff}
-.entity-review-recipe h4{margin-top:0}
-.entity-review-recipe pre{white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.8 ui-monospace,monospace}
-.entity-review-recipe summary{cursor:pointer;color:#365c40;font-size:14px;padding:10px 0}
-.entity-review-recipe .review-surface{margin-bottom:8px}
-.entity-review-recipe .review-surface p{margin:8px 0}
+
+
+
+
+
+
+
+
 .entity-review-materials{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;align-items:start}
-.entity-review-material-group{min-width:0}.entity-review-material-group .entity-review-media-pane{margin-bottom:20px}
+
 .entity-review-missing-image{display:grid;place-content:center;text-align:center;gap:12px;background:#eef1e9;border:1px dashed #bac8b6;border-radius:8px;max-height:400px;margin:12px 0;padding:20px;box-sizing:border-box}
 .entity-review-missing-image svg{width:48px;height:48px;justify-self:center;color:#81967c}
 .entity-review-missing-image small{color:#687661}
@@ -46,11 +46,11 @@
 .entity-review-missing-audio svg{width:24px;height:24px}.entity-review-missing-audio span{flex:1}.entity-review-missing-audio small{color:#687661}
 .entity-review-generation-issues{color:#915224;padding:10px 14px;background:#fbf5eb;border-radius:6px;font-size:13px}
 .entity-review-generation-issues p{margin:4px 0}
-.entity-review-header .entity-review-status,.entity-review-scope{display:none}
+
 .entity-review-description{margin-top:16px}
-@media(max-width:600px){.review-surface{padding:23px 12px 12px}.entity-review-recipe{padding:12px}.review-audio-controls{gap:7px}.review-range-tools input{width:95px}.entity-review-missing-image{max-height:300px}}
+@media(max-width:600px){.review-surface{padding:23px 12px 12px}.review-audio-controls{gap:7px}.review-range-tools input{width:95px}.entity-review-missing-image{max-height:300px}}
 .entity-review-sources summary{cursor:pointer;list-style:none;color:#5e7665}
-.entity-review-sources summary::after{content:' ▾'}
+.entity-review-sources summary::after{content:" ▾"}
 .entity-review-sources details[open]{padding:8px;border:1px solid #dde4d7;border-radius:6px;flex-basis:100%}
 .entity-review-sources details[open] summary{margin-bottom:8px}
 .entity-review-sources details button{font-size:12px;margin:3px}

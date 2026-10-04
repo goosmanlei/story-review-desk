@@ -55,9 +55,9 @@ button { border-radius: 0; }
 .view-context { display: flex; align-items: center; gap: 12px; }
 .view-context > span { width: 31px; height: 31px; display: grid; place-items: center; background: var(--desk-red); color: #f8f4e9; font: 700 10px/1 Arial,sans-serif; }
 .view-context small,.view-context b { display: block; }.view-context small { color: var(--desk-muted); font-size: 10px; }.view-context b { margin-top: 3px; font-size: 13px; }
-.top-actions { gap: 12px; color: var(--desk-muted); font-size: 11px; }
-.top-actions button { padding: 8px 11px; border: 1px solid var(--desk-line); border-radius: 0; background: rgba(248,244,233,.65); color: #474941; font-size: 11px; }
-.top-actions button:hover { border-color: var(--desk-red); color: var(--desk-red); }
+
+
+
 .workspace-content { width: min(1320px,calc(100% - 64px)); margin: 0 auto; }
 .workspace-view { min-height: calc(100dvh - 70px); padding: 48px 0 30px; }
 .story-workspace-heading { padding-bottom: 18px; border-bottom: 1px solid var(--desk-ink); }
