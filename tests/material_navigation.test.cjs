@@ -20,7 +20,7 @@ function setup(){
  ctx.renderComments=()=>{};ctx.paintProductionReview=()=>{};ctx.focusMaterialRoundControl=()=>{};
  // Keep the real navigation, workspace/card renderer, round/candidate controls
  // and focus callbacks. Substitute only media internals and text decoration.
- ctx.materialMedia=(parent,item)=>{const n=new Element('media');n.dataset.reviewRevision=item.record.id;n.dataset.objectId=item.record.object_id;n.onfocus=()=>ctx.focusProductionReview({record:item.record,history:[item.record],uses:[]});parent.append(n)};
+ ctx.reviewSurface=host=>host;ctx.materialMedia=(parent,item)=>{const n=new Element('media');n.dataset.reviewRevision=item.record.id;n.dataset.objectId=item.record.object_id;n.onfocus=()=>ctx.focusProductionReview({record:item.record,history:[item.record],uses:[]});parent.append(n)};
  ctx.renderActualGeneration=(parent,context)=>{const n=new Element('call');n.dataset.revision=context?.call?.id;parent.append(n)};
  ctx.reviewTextBlocks=(parent,r)=>{const n=new Element('text');n.dataset.revision=r.id;n.textContent=r.payload.blocks[0].text;parent.append(n)};
  const nodes=tag=>root.all().filter(n=>n.tag===tag),roundControl=()=>nodes('select').find(n=>n.attributes['aria-label']==='素材版本');

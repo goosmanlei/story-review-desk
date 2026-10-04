@@ -120,3 +120,8 @@
 /* Keep SOURCE region coordinates on the painted image, without contain padding. */
 #source-view .structure-visual-stage{width:fit-content;max-width:100%;margin-inline:auto}
 #source-view .structure-visual-stage img{width:auto;max-width:100%;height:auto;max-height:350px}
+
+.review-surface>.review-cue{width:auto;min-width:28px;height:26px;padding:3px 5px;gap:4px;align-items:center;pointer-events:auto}
+.review-cue svg{width:18px;height:18px;flex:none}
+.review-comment-count{font-size:12px;font-variant-numeric:tabular-nums;line-height:1}
+.material-reference-dialog .comment-panel{position:relative;inset:auto;width:auto;max-width:none;max-height:65vh;box-shadow:none;margin:12px 24px 24px;border:1px solid #d8e1d6}

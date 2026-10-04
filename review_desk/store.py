@@ -89,6 +89,7 @@ class Store:
           FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
         );
         """)
+        self.db.execute('CREATE INDEX IF NOT EXISTS material_members_revision ON material_members(revision_id)')
         # Existing V1 instance databases are upgraded without rewriting source text.
         for row in self.db.execute("SELECT id,revision FROM sources ORDER BY id").fetchall():
             if not self.db.execute("SELECT 1 FROM objects WHERE id=?", (row["id"],)).fetchone():

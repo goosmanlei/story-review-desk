@@ -98,12 +98,14 @@ test('materials count current identities and show only genuine missing state dem
  const shotDemand={...need('shot-need'),kind:'REQUIREMENT',payload:{media_type:'video',scope:{object_id:'shot',revision_id:'shot-v1'}}};
  const relation={object_id:'rel',kind:'RELATION',payload:{relation_type:'entity'}};
  const records=[form,demand,oldDemand,shotDemand,relation];
- assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['need']);
+ assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['need','old-need','shot-need']);
  const asset={object_id:'asset',kind:'ASSET',payload:{media_type:'image',components:[{id:'original'}],candidate_requirements:[ref(demand)]}};
  records.push(asset);
- assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['asset']);
+ assert.deepEqual(Array.from(ctx.productionWorkspaceRows(records,'materials.workspace'),r=>r.object_id),['need','old-need','shot-need']);
+ assert.equal(ctx.productionWorkspaceRows(records,'materials.workspace')[0].material_generated,false);
+ asset.payload.components[0].role='original';assert.equal(ctx.productionWorkspaceRows(records,'materials.workspace')[0].material_generated,true);
  asset.payload.placeholder=true;
- assert.ok(ctx.productionWorkspaceRows(records,'materials.workspace').includes(demand));
+ assert.ok(ctx.productionWorkspaceRows(records,'materials.workspace').some(r=>r.object_id===demand.object_id&&!r.material_generated));
 });
 
 test('content facets include actual calls, review conclusions and adoption through their material',()=>{
@@ -203,4 +205,11 @@ test('a shared asset uses its producing requirement rounds on another state inst
  assert.equal(cards.length,1);assert.equal(cards[0].material_id,'foreign-plan');assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
  data.selectedMaterialRounds['foreign-plan']=1;cards=ctx.materialRoundModels([],[original],data);
  assert.equal(cards[0].round.number,1);assert.equal(cards[0].need,plan);assert.deepEqual(cards[0].candidates[0].range,original.range);
+});
+
+test('missing exact file composition is reported instead of falling back to another original',()=>{
+ const row={id:'r',object_id:'asset',kind:'ASSET',payload:{media_type:'audio',components:[{id:'original',role:'original',mime:'audio/wav'}]}};
+ const inputs=[{object_id:'asset',revision_id:'r',component_id:'removed',range:{start_seconds:2,end_seconds:4}}];
+ const gap=ctx.materialInputs(inputs,[row])[0];assert.equal(gap.missing,true);assert.equal(gap.ref.component_id,'removed');assert.equal(gap.ref.range.end_seconds,4);
+ assert.equal(ctx.materialInputs([{object_id:'lost',revision_id:'old'}],[])[0].missing,true);
 });

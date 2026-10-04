@@ -116,7 +116,7 @@ test('the actual material workspace and card renderer retain the explicitly loca
  // Paint the actual workspace and card, substituting only embedded media and
  // generation details which do not decide the card or round to display.
  f.ctx.Option=function(text,value){const node=new Element('option');node.textContent=text;node.value=value;return node};
- f.ctx.materialMedia=()=>{};f.ctx.renderActualGeneration=()=>{};const root=new Element('main');f.ctx.renderMaterialWorkspace(root,loaded);
+ f.ctx.reviewSurface=host=>host;f.ctx.materialMedia=()=>{};f.ctx.renderActualGeneration=()=>{};const root=new Element('main');f.ctx.renderMaterialWorkspace(root,loaded);
  const card=root.all().find(node=>node.className==='material-card');assert.ok(card);assert.equal(card.dataset.materialKey,'other');
  const selectedRound=card.all().find(node=>node.tag==='select');assert.equal(selectedRound.value,1);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
  assert.equal(f.ctx.state.materialCommentCard.material_id,'other');assert.equal(f.ctx.state.editing,c.id);assert.equal(loaded.selectedMaterialRounds.need,2);

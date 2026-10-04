@@ -4,7 +4,7 @@
 
 首页为“制作思路”，默认“故事创作”，另可切换“生产制作”；旧 `workspace=current` 链接兼容进入新页。方法内容由故事实例的 `content/production-approach.json` 提供，通用系统只做阅读展示，不维护工作统计或执行进度。存储格式、清理清单和验收入口见[制作思路说明](docs/production-approach.md)。
 
-素材卡按修订轮次统一方案与产出，并保留真实调用、历史原件与准确评论；接口、迁移与验证见 [素材轮次](docs/material-versions.md)。
+素材卡按修订轮次与候选显示一份相应生成内容，保留独立可读的历史方案、真实调用、原件与准确评论；接口、迁移与验证见 [素材轮次](docs/material-versions.md)。
 
 ## 启动一个故事实例
 
@@ -27,7 +27,7 @@ Python 服务对套接字读写设置两秒空闲超时，浏览器只预连而�
 
 ## 数据访问与公开同步
 
-导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框、资料总数或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放/下载；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
+导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框、资料总数或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放；音频不显示下载入口，受管文件与后台导出保持可用；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
 
 ```bash
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo import-sources /path/to/new-sources.json
@@ -68,7 +68,7 @@ git push origin main
 
 ## 制作数据与真实媒体
 
-制作设定审阅实体、完整状态、来源及关联素材；素材管理预览、比较和审阅实际原件；全剧制作按集／场／镜检查必要输入、显式采用版本和登记时间线。审阅通过不会自动采用，新候选不会覆盖旧采用。文字评论沿用原规则，图像区域和音视频时间段绑定精确修订与文件。完整关系图、用户路径、载荷、HTTP／CLI、迁移及恢复说明见 [docs/production.md](docs/production.md)。
+制作设定审阅实体、完整状态、来源及关联素材；素材管理按具体需求组织未生成、真实结果和历史版本，预览、比较和审阅原件；全剧制作按集／场／镜检查必要输入、显式采用版本和登记时间线。审阅通过不会自动采用，新候选不会覆盖旧采用。文字评论沿用原规则，图像区域和音视频时间段绑定精确修订与文件。完整关系图、用户路径、载荷、HTTP／CLI、迁移及恢复说明见 [docs/production.md](docs/production.md)。
 
 制作设定以实体为入口，平铺角色、场景、道具、歌曲及实体数量。左侧只列实体并标出完整状态数，实体基础信息默认显示在卡片上方，下方平铺完整状态；打开实体默认选中按剧情来源排序的首个完整状态，并标为基础状态。搜索也匹配所属状态及设定；历史状态链接仍打开准确版本，评论继续绑定实际阅读的记录。未关联实体的项目共用设定单列，不计入实体数量。
 

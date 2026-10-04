@@ -173,13 +173,13 @@ def validate_current_acceptance(store, payload, check_current=True):
         raise Conflict('内容已有更新，请刷新后采纳当前版本。')
 
 
-def legacy_snapshot(store, entity_id, revision_id=None):
+def legacy_snapshot(store, entity_id, revision_id=None, rows=None):
     """Read current versions, or the exact content of an earlier acceptance.
 
 This operation is read-only. No submission, initialization or other workflow
 transition is required before viewing, commenting or accepting output.
 """
-    rows = p.current_records(store)
+    rows = p.current_records(store) if rows is None else rows
     scope = current_scope(store, entity_id, rows)
     decisions = []
     for row in store.db.execute("SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT' AND json_extract(r.payload,'$.acceptance_model')=? ORDER BY r.created_at DESC,r.id DESC", (ACCEPTANCE_MODEL,)):

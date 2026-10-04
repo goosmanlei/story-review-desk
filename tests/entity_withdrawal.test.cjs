@@ -36,7 +36,7 @@ test('old v1 remains unchanged while a proven current withdrawal is stated separ
  assert.match(view.text,/此实体当前已撤回/);assert.doesNotMatch(view.text,/此状态已撤回|此状态的素材方案待完善/);assert.equal(JSON.stringify([oldEntity,oldForm]),before);assert.equal(oldEntity.payload.status,undefined);assert.equal(oldForm.payload.merged_into,undefined);assert.equal(view.accept.disabled,true);
 });
 test('old acceptance without the current payload does not infer withdrawal from historical or a newer head id',()=>{
- const f=setup(),old=row('old-entity','ENTITY',{entity_type:'prop'},'entity-v1');old.current_revision='unloaded-v2';f.data.entity=old;f.data.historical=true;f.context.state.productionEntityDetail.record=old;f.context.state.productionChildDetail=null;f.data.media=[];
+ const f=setup();f.context.CSS={escape:s=>s};const old=row('old-entity','ENTITY',{entity_type:'prop'},'entity-v1');old.current_revision='unloaded-v2';f.data.entity=old;f.data.historical=true;f.context.state.productionEntityDetail.record=old;f.context.state.productionChildDetail=null;f.data.media=[];
  const view=f.render();assert.doesNotMatch(view.text,/已撤回|归并至/);assert.match(view.accept.title,/历史内容/);assert.doesNotMatch(view.accept.title,/切回.*再采纳/);assert.equal(view.accept.disabled,true);
 });
 test('an explicitly withdrawn historical version is not labeled as the current entity status after reactivation',()=>{
@@ -57,19 +57,19 @@ test('active current records retain their completion hints, original media secti
  await view.accept.onclick();assert.equal(f.requests.length,1);assert.equal(JSON.parse(f.requests[0].options.body).action,'accept');
 });
 test('withdrawn latest material round stays neutral while its real selector still reveals the exact old plan and both originals',()=>{
- const f=setup(),old=row('need','REQUIREMENT',{media_type:'image',generation:{model:'technical-model',parameters:{},inputs:[],prompt:'旧方案提示词保留',output:{name:'原整体图',description:'原方案说明'}}},'need-v1');
+ const f=setup();f.context.CSS={escape:s=>s};const old=row('need','REQUIREMENT',{media_type:'image',generation:{model:'technical-model',parameters:{},inputs:[],prompt:'旧方案提示词保留',output:{name:'原整体图',description:'原方案说明'}}},'need-v1');
  const withdrawn=row('need','REQUIREMENT',{media_type:'image',status:'withdrawn'},'need-v2');old.current_revision=withdrawn.id;
  for(const asset of f.assets)Object.assign(asset.payload,{media_type:'image',production:{object_id:'call'},components:[{id:'original',role:'original',mime:'image/png',sha256:asset.id}],candidate_requirements:[ref(old)]});
  f.data.material_versions={need:[{number:2,plan:withdrawn,members:[withdrawn],results:[]},{number:1,plan:old,members:[old,...f.assets],results:f.assets}]};
  const shown=[];f.context.materialMedia=(_host,item)=>shown.push(item.record.id);f.context.renderActualGeneration=()=>{};
  const first=new Element('main');f.realRenderMedia(first,f.data.media,null);assert.match(first.textContent,/此素材需求已撤回/);assert.match(first.textContent,/此版本未附生成方案/);assert.doesNotMatch(first.textContent,/未生成|生成方案待完善/);assert.equal(shown.length,0);
  const select=first.all().find(n=>n.attrs['aria-label']==='素材版本');assert.ok(select);select.value='1';select.onchange();assert.equal(f.data.selectedMaterialRounds.need,1);
- const history=new Element('main');f.realRenderMedia(history,f.data.media,null);assert.match(history.textContent,/旧方案提示词保留/);assert.doesNotMatch(history.textContent,/此素材需求已撤回|此版本未附生成方案/);assert.deepEqual(shown,f.assets.map(a=>a.id));assert.ok(history.all().some(n=>n.dataset.productionBlocks===old.id));assert.equal(old.payload.status,undefined);
+ const history=new Element('main');f.realRenderMedia(history,f.data.media,null);assert.match(history.textContent,/原方案说明|查看原方案/);assert.doesNotMatch(history.textContent,/旧方案提示词保留/);assert.equal(old.payload.generation.prompt,'旧方案提示词保留');assert.doesNotMatch(history.textContent,/此素材需求已撤回|此版本未附生成方案/);assert.deepEqual(shown,[f.assets[0].id]);const candidate=history.all().find(n=>n.attrs['aria-label']==='本轮候选');assert.ok(candidate);candidate.value=f.assets[1].id;candidate.onchange();const second=new Element('main');f.realRenderMedia(second,f.data.media,null);assert.deepEqual(shown,f.assets.map(a=>a.id));assert.ok(history.all().some(n=>n.dataset.productionBlocks===old.id));assert.equal(old.payload.status,undefined);
 });
 test('a withdrawn plan with an existing recipe and result retains its exact commentable fields and original',()=>{
  const f=setup(),need=row('need','REQUIREMENT',{status:'withdrawn',media_type:'image',generation:{model:'technical',parameters:{},inputs:[],prompt:'原方案仍可评论',output:{name:'准确旧方案'}}});
  const item={record:f.assets[0],component:{id:'original'}};const shown=[];f.context.materialMedia=(_host,value)=>shown.push(value);f.context.renderActualGeneration=()=>{};
- const parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[item]});assert.match(parent.textContent,/此素材需求已撤回/);assert.match(parent.textContent,/原方案仍可评论/);assert.deepEqual(shown,[item]);assert.ok(parent.all().some(n=>n.dataset.productionBlocks===need.id));assert.doesNotMatch(parent.textContent,/此版本未附生成方案/);
+ const parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[item]});assert.match(parent.textContent,/此素材需求已撤回/);assert.match(parent.textContent,/查看原方案/);assert.doesNotMatch(parent.textContent,/原方案仍可评论/);assert.equal(need.payload.generation.prompt,'原方案仍可评论');assert.deepEqual(shown,[item]);assert.ok(parent.all().some(n=>n.dataset.productionBlocks===need.id));assert.doesNotMatch(parent.textContent,/此版本未附生成方案/);
 });
 test('an active material without a recipe or result keeps its actionable placeholder and preparation message',()=>{
  const f=setup(),need=row('need','REQUIREMENT',{media_type:'image'}),parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[]});

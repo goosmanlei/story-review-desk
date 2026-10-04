@@ -4,7 +4,7 @@ const source=fs.readFileSync(path.join(__dirname,'../review_desk/static/producti
 // no browser layout, HTTP or other workspaces are simulated as passing here.
 function render(records){
   const nodes=[],opened=[],index={replaceChildren(){nodes.length=0},get childElementCount(){return nodes.length}};
-  const ctx={workspaceRows:records,matches:()=>true,workspace:'materials.workspace',productionGroups:{'materials.workspace':['ASSET','CALL']},
+  const ctx={workspaceRows:records,matches:()=>true,workspace:records[0]?.kind==='CALL'?'production.workspace':'materials.workspace',productionGroups:{'materials.workspace':['ASSET'],'production.workspace':['CALL']},
     productionKinds:{ASSET:'原件',CALL:'调用'},productionLabels:{},contexts:new Map(records.map(r=>[r.object_id,{}])),
     childrenByEntity:new Map(),flatFilters:false,state:{},index,openProductionRecord:id=>opened.push(id),
     productionButton(parent,text,onclick){const n={textContent:text,onclick,children:[],dataset:{},classList:{toggle(){}}};nodes.push(n);return n},
@@ -14,13 +14,13 @@ function render(records){
   return {buttons:nodes.filter(n=>n.onclick),opened};
 }
 test('asset list shows evidenced material round independently of record revision and keeps navigation',()=>{
-  const {buttons,opened}=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,payload:{title:'Older result'}}]);
-  assert.equal(buttons[0].children[0].textContent.trim(),'版本 1');buttons[0].onclick();assert.deepEqual(opened,['old-result']);
+  const {buttons,opened}=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,payload:{title:'Older result'}}]);
+  assert.equal(buttons[0].children[0].textContent.trim(),'已生成');buttons[0].onclick();assert.deepEqual(opened,['old-result']);
 });
 test('asset list without a positive integer material round does not invent a version or empty label',()=>{
   for(const material_version of [undefined,null,0,-1,'2']){
     const {buttons}=render([{object_id:'legacy',kind:'ASSET',version:9,material_version,payload:{title:'Legacy original'}}]);
-    assert.equal(buttons[0].textContent,'Legacy original');assert.equal(buttons[0].children.length,0);
+    assert.equal(buttons[0].textContent,'Legacy original');assert.equal(buttons[0].children[0].textContent,'未生成');
   }
 });
 test('other production records retain their record revision label',()=>{
