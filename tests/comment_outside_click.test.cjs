@@ -21,6 +21,7 @@ class Element{
   closest(selectors){for(let node=this;node;node=node.parentNode)if(selectors.split(',').some(s=>node.matches(s)))return node;return null}
   setAttribute(key,value){this.attrs[key]=String(value)}
   getAttribute(key){return this.attrs[key]}
+  get classList(){return {add:(...names)=>{this.className=[...new Set([...this.className.split(' ').filter(Boolean),...names])].join(' ')},remove:(...names)=>{this.className=this.className.split(' ').filter(name=>!names.includes(name)).join(' ')}}}
   querySelectorAll(selector){return this.children.flatMap(n=>[...(n.matches(selector)?[n]:[]),...n.querySelectorAll(selector)])}
   querySelector(selector){return selector.startsWith(':scope > ')?this.children.find(n=>n.matches(selector.slice(9)))||null:this.querySelectorAll(selector)[0]||null}
   getBoundingClientRect(){return {top:100,bottom:500,left:0,width:400,height:400}}
@@ -161,7 +162,7 @@ for(const stale of ['removed','hidden'])test(`closing comments falls back inside
   f.c.closePanel();assert.equal(f.c.document.activeElement,f.dialogClose);assert.equal(f.dialogClose.focusOptions.preventScroll,true);
 });
 
-for(const width of [1024,1440])for(const type of ['text','time'])test(`exact reference ${type} location at ${width}px sees the correct panel state before seeking`,async()=>{
+for(const width of [390,1199,1200,1440])for(const type of ['text','time'])test(`exact reference ${type} location at ${width}px sees the correct panel state before seeking`,async()=>{
   const f=await dialogFixture(width),calls=[],anchor=type==='text'?{type,block_id:'original-block',start:0,end:5,quote:'Exact'}:{type,component_id:'original',asset_file:'exact-original.mp4',start_seconds:7.25,end_seconds:8.5};
   const record={object_id:'historical-asset',id:'historical-revision'};
   f.c.state.reviewReferenceContext={dialog:f.dialog,record};f.c.paintProductionReview=()=>calls.push('paint');
@@ -174,12 +175,108 @@ for(const width of [1024,1440])for(const type of ['text','time'])test(`exact ref
   assert.equal(f.material.children[0],f.media);assert.equal(f.media.src,'/api/production/files/exact-original.mp4');assert.equal(f.media.currentTime,7.25);
 });
 
-for(const width of [1024,1440])test(`production comment routing at ${width}px reveals the reader before forwarding the exact material anchor`,async()=>{
+for(const width of [390,1199,1200,1440])test(`production comment routing at ${width}px reveals the reader before forwarding the exact material anchor`,async()=>{
   const f=await dialogFixture(width),comment={id:'material-comment',target_revision_id:'old-r1',material_scopes:[{material_id:'need',number:1}],anchor:{type:'region',component_id:'original',asset_file:'old.png',points:[{x:.1,y:.2},{x:.6,y:.2},{x:.6,y:.7}]}};
   f.c.state.workspace='production.workspace';let located=false;
   f.c.locateProductionComment=value=>{assert.equal(value,comment);assert.equal(f.panel.hidden,width<1200);located=true};
   f.trigger.focus();f.c.openPanel();f.c.locateComment(comment);
   assert.equal(located,true);assert.equal(f.panel.hidden,width<1200);
+});
+
+async function ordinaryLocationFixture(width,kind,{atEnd=false,missingTarget=false}={}){
+  const f=await fixture(),calls=[];f.c.window.innerWidth=width;
+  const blockId=kind==='source'?'paragraph':kind==='structure'?'structure-original':atEnd?'script-end':'script-start';
+  const block=new Element('p'),mark=new Element('span');mark.className='comment-mark selected';block.append(mark);
+  let selector,comment;
+  if(kind==='source'){
+    block.id='block-'+blockId;f.node('#source-view').append(block);
+    comment={id:'source-comment',target_object_id:'source',target_revision_id:'source-r1',anchor:{type:'text',block_id:blockId,end_block_id:blockId,start:0,end:5,quote:'Exact'}};
+    if(missingTarget)block.remove();
+  }else if(kind==='structure'){
+    f.c.state.workspace='story.outline';f.c.state.structureRevision='structure-new';
+    f.c.state.structure={current_revision:'structure-new',revisions:[{id:'structure-new'},{id:'structure-old'}]};
+    f.c.chooseStructureRevision=(revision,updateUrl)=>{calls.push(['structure-version',revision,updateUrl]);f.c.state.structureRevision=revision};
+    f.c.renderStructureReader=()=>calls.push(['structure-render']);
+    selector='[data-structure-block="'+blockId+'"]';
+    comment={id:'structure-comment',target_object_id:'story-structure',target_revision_id:'structure-old',anchor:{type:'text',block_id:blockId,end_block_id:blockId,start:0,end:5,quote:'Exact'}};
+  }else{
+    vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/screenplay.js'),'utf8'),f.c,{filename:'screenplay.js'});
+    const old={object_id:'historical-episode',id:'episode-old',payload:{scenes:[{id:'scene-start',block_ids:['script-start']},{id:'scene-end',block_ids:['script-end']}]}};
+    f.c.state.workspace='story.script';f.c.state.screenplays=[{object_id:'version-new',episodes:[{object_id:'current-episode',id:'episode-new',payload:{scenes:[]}}]},{object_id:'version-old',episodes:[old]}];
+    f.c.state.screenplayVersion='version-new';f.c.state.screenplayEpisode='current-episode';f.c.state.screenplayScene='scene-new';
+    f.c.chooseScript=(version,episode,scene)=>{calls.push(['script-version',version,episode,scene]);f.c.state.screenplayVersion=version;f.c.state.screenplayEpisode=episode;f.c.state.screenplayScene=scene};
+    f.c.renderScriptReader=()=>calls.push(['script-render']);
+    selector='#screenplay-reader [data-block-id="'+blockId+'"]';
+    comment={id:'script-comment',target_object_id:old.object_id,target_revision_id:old.id,anchor:{type:'text',block_id:'script-start',end_block_id:'script-end',start:0,end:5,quote:'Exact\nending'}};
+  }
+  if(selector){
+    f.body.append(block);const query=f.c.document.querySelector;
+    f.c.document.querySelector=value=>value===selector?(missingTarget?null:block):query(value);
+  }
+  const editor=f.node('#comment-editor-text');editor.tagName='TEXTAREA';editor.value='Unsaved exact opinion';f.panel.append(editor);
+  f.c.state.anchor={type:'text',block_id:'draft-block',end_block_id:'draft-block',start:0,end:5,quote:'Draft'};
+  const key=f.c.draftKeyNow();f.storage.set(key,editor.value);f.storage.set(key+':discussion','true');
+  f.c.openPanel();editor.focus();const close=f.c.closePanel;
+  f.c.closePanel=()=>{
+    // The close action must preserve the current editor. Existing location
+    // renderers are separate lifecycle boundaries and can rebuild their DOM.
+    const priorStorage=[...f.storage.entries()],priorEditor=f.node('#comment-editor-text'),priorValue=priorEditor.value;
+    close();calls.push(['close']);
+    assert.equal(f.node('#comment-editor-text'),priorEditor);assert.equal(priorEditor.value,priorValue);
+    assert.deepEqual([...f.storage.entries()],priorStorage);
+  };
+  mark.scrollIntoView=options=>{
+    assert.equal(f.panel.hidden,width<1200,'successful location reveals the exact target before scrolling');
+    if(width<1200){assert.equal(f.c.document.activeElement,f.node('#comments-toggle'));assert.equal(f.node('#comments-toggle').focusOptions.preventScroll,true)}
+    assert.equal(options.behavior,'smooth');assert.equal(options.block,'center');
+    calls.push(['scroll',blockId,comment.target_revision_id]);
+  };
+  return {...f,kind,comment,block,mark,calls,editor,key,locate(){return kind==='script'&&atEnd?f.c.locateScriptComment(comment,true):f.c.locateComment(comment)}};
+}
+
+for(const width of [390,1199,1200,1440])for(const route of ['source','structure','script-start','script-end'])test(`ordinary ${route} location at ${width}px reveals its exact target and keeps the draft`,async()=>{
+  const kind=route.startsWith('script')?'script':route,atEnd=route==='script-end',f=await ordinaryLocationFixture(width,kind,{atEnd});
+  f.locate();
+  assert.equal(f.calls.filter(call=>call[0]==='scroll').length,1);
+  assert.equal(f.calls.filter(call=>call[0]==='close').length,width<1200?1:0);
+  assert.equal(f.panel.hidden,width<1200);assert.equal(f.c.state.selected,f.comment.id);
+  for(const trigger of ['#comments-toggle','#screenplay-comments'])assert.equal(f.node(trigger).getAttribute('aria-expanded'),String(width>=1200));
+  if(width>=1200)assert.equal(f.c.document.activeElement,f.editor,'wide location must not run the narrow focus handoff');
+  if(kind==='structure')assert.deepEqual(f.calls.find(call=>call[0]==='structure-version'),['structure-version','structure-old',true]);
+  if(kind==='script')assert.deepEqual(f.calls.find(call=>call[0]==='script-version'),['script-version','version-old','historical-episode',atEnd?'scene-end':'scene-start']);
+  assert.equal(f.storage.get(f.key),'Unsaved exact opinion');assert.equal(f.storage.get(f.key+':discussion'),'true');
+  assert.equal(f.editor.value,'Unsaved exact opinion');
+});
+
+for(const kind of ['source','structure','script'])for(const failure of ['revision','target','invalid-anchor'])test(`failed ordinary ${kind} ${failure} location keeps the open panel and focus`,async()=>{
+  const f=await ordinaryLocationFixture(390,kind,{missingTarget:failure==='target'});
+  if(failure==='revision')f.comment.target_revision_id='missing-revision';
+  if(failure==='invalid-anchor')f.comment.anchor_state={valid:false,reason:'fixture exact anchor is unavailable'};
+  f.locate();
+  assert.equal(f.panel.hidden,false);assert.equal(f.c.document.activeElement,f.editor);
+  assert.equal(f.calls.some(call=>call[0]==='close'||call[0]==='scroll'),false);
+  assert.equal(f.node('#comments-toggle').getAttribute('aria-expanded'),'true');
+  assert.equal(f.storage.get(f.key),'Unsaved exact opinion');assert.equal(f.editor.value,'Unsaved exact opinion');
+});
+
+test('a narrow SOURCE location for a different source keeps its comment panel open',async()=>{
+  const f=await ordinaryLocationFixture(1199,'source');f.comment.target_object_id='another-source';
+  f.locate();assert.equal(f.panel.hidden,false);assert.equal(f.c.document.activeElement,f.editor);
+  assert.equal(f.calls.some(call=>call[0]==='scroll'||call[0]==='close'),false);
+});
+
+test('direct narrow script end location with a missing endpoint keeps the panel open',async()=>{
+  const f=await ordinaryLocationFixture(1199,'script',{atEnd:true,missingTarget:true});
+  f.locate();assert.equal(f.panel.hidden,false);assert.equal(f.c.document.activeElement,f.editor);
+  assert.equal(f.calls.some(call=>call[0]==='scroll'||call[0]==='close'),false);
+});
+
+test('narrow successful location restores focus even if comment rendering already moved it to BODY',async()=>{
+  const f=await ordinaryLocationFixture(390,'source'),render=f.c.renderComments;
+  f.c.renderComments=()=>{render();f.c.document.activeElement=f.body};
+  f.locate();assert.equal(f.c.document.activeElement,f.node('#comments-toggle'));
+  assert.equal(f.node('#comments-toggle').focusOptions.preventScroll,true);
+  assert.equal(f.storage.get(f.key),'Unsaved exact opinion');
 });
 
 async function unifiedCloseFixture(){

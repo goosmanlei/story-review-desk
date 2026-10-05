@@ -838,6 +838,13 @@ async function previewPolish(){
 }
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
 function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
+function revealLocatedComment(){
+  if(window.innerWidth<1200){
+    const panel=$('#comment-panel');
+    closePanel();
+    if(panel.parentNode===document.body)$('#comments-toggle').focus({preventScroll:true});
+  }
+}
 function locateSourceComment(comment){
   const source=state.current,anchor=comment.anchor,type=anchor.type||'text';
   if(state.workspace!=='story.sources'||(comment.target_object_id||comment.source_id)!==source?.id){toast('请先打开原资料，再定位这条评论');return false}
@@ -846,13 +853,14 @@ function locateSourceComment(comment){
   state.selected=comment.id;renderDocument();renderComments();
   const root=$('#source-view'),target=type==='text'?root.querySelector(`#block-${escapeSelector(anchor.block_id)}`):['visual','region'].includes(type)?root.querySelector(`[data-visual-id="${escapeSelector(anchor.visual_id)}"]`):type==='global'?root:null;
   if(!target||(['visual','region'].includes(type)&&target.closest('figure')?.dataset.reviewFile!==anchor.asset_file)){toast('原引用已失效；评论仍保留');return false}
+  revealLocatedComment();
   (target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});
   target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return true;
 }
 function locateComment(comment){
   const panel=$('#comment-panel');
   if(window.innerWidth<1200&&panel.parentNode?.matches?.('.unified-card-dialog'))closePanel();
-  if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
+  if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}revealLocatedComment();(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
