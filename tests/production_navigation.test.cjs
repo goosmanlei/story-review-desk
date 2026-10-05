@@ -107,6 +107,32 @@ test('legacy fragments do not count as current complete forms but keep their own
 function recordApi(records){return async url=>{const params=new URL(url,'http://localhost').searchParams;const record=records.find(r=>r.object_id===params.get('object_id')&&(!params.get('revision_id')||r.id===params.get('revision_id')));assert.ok(record,url);return {record,history:records.filter(r=>r.object_id===record.object_id),uses:[]}}}
 const complete=(id,entity,scene)=>row(id,'STATE',{state_model:'complete-v1',entity:{object_id:entity},sources:[{scene_id:scene,block_ids:[scene+'-b001']}]});
 
+function recordButtons(ctx,ids){
+  const buttons=ids.map(objectId=>({dataset:objectId?{objectId}:{},attrs:{},active:false,setAttribute(k,v){this.attrs[k]=v}}));
+  for(const button of buttons)button.classList={toggle:(_name,value)=>{button.active=value}};
+  ctx.document.querySelectorAll=selector=>selector==='#production-index button'?buttons:[];
+  return buttons;
+}
+test('record navigation keeps visual and accessible selection on the exact displayed object',async()=>{
+  const a=row('a','PREPARATION'),b=row('b','PREPARATION'),old={...b,id:'b-old'};
+  const ctx=setup([a,b],recordApi([a,b,old]));ctx.state.workspace='production.workspace';
+  const buttons=recordButtons(ctx,['a','b',null]);
+  for(const [objectId,revisionId,selected] of [['a',null,0],['b',null,1],['b','b-old',1],['a',null,0]]){
+    await ctx.openProductionRecord(objectId,revisionId);
+    assert.equal(ctx.state.productionSelected.id,revisionId||objectId+'-current');
+    assert.deepEqual(buttons.slice(0,2).map(b=>[b.active,b.attrs['aria-pressed']]),[0,1].map(i=>[i===selected,String(i===selected)]));
+    assert.equal(buttons[2].attrs['aria-pressed'],undefined);
+  }
+});
+test('a late record response cannot move either selection marker from the newer record',async()=>{
+  const a=row('a','PREPARATION'),b=row('b','PREPARATION');let release;
+  const ctx=setup([a,b],url=>new URL(url,'http://localhost').searchParams.get('object_id')==='a'?new Promise(resolve=>{release=()=>resolve({record:a,history:[a]})}):Promise.resolve({record:b,history:[b]}));
+  ctx.state.workspace='production.workspace';const buttons=recordButtons(ctx,['a','b']);
+  const older=ctx.openProductionRecord('a');await ctx.openProductionRecord('b');release();await older;
+  assert.equal(ctx.state.productionSelected,b);
+  assert.deepEqual(buttons.map(b=>[b.active,b.attrs['aria-pressed']]),[[false,'false'],[true,'true']]);
+});
+
 test('opening an entity shows its basic information and defaults to the earliest complete state',async()=>{
   const entity=row('bag','ENTITY'),late=complete('a-filled','bag','s002'),base=complete('z-empty','bag','s001');
   const ctx=setup([entity,late,base],recordApi([entity,late,base]));

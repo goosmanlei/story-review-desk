@@ -356,7 +356,11 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
   state.productionEntityId=owner;state.productionEntityDetail=entityDetail;state.productionChildDetail=childDetail;
   const materialTarget=state.materialReview&&materialRows(detail).find(r=>r.id===url.searchParams.get('material_target'));
   focusProductionReview(materialTarget?{record:materialTarget,history:[materialTarget],uses:[]}:detail,false);
-  for(const button of document.querySelectorAll('#production-index button'))button.classList.toggle('active',button.dataset.objectId===(state.workspace==='settings.workspace'?owner:detail.record.object_id));
+  for(const button of document.querySelectorAll('#production-index button')){
+    const selected=button.dataset.objectId===(state.workspace==='settings.workspace'?owner:detail.record.object_id);
+    button.classList.toggle('active',selected);
+    if(button.dataset.objectId)button.setAttribute('aria-pressed',String(selected));
+  }
   renderProductionReader();renderComments();
 }
 function focusProductionReview(detail,paint=true){
