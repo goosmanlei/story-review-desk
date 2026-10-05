@@ -190,7 +190,17 @@ def row_factory(store):
             index=names.index('payload')
             raw=row[index]
             if isinstance(raw,str) and '"'+MARKER+'"' in raw:
-                values=list(row);values[index]=hydrate(store,raw);row=tuple(values)
+                scope=getattr(store,'_production_reads',None)
+                cache=scope.setdefault('hydrated_payloads',{}) if scope is not None else None
+                if cache is not None and raw in cache:
+                    hydrated=cache[raw]
+                else:
+                    hydrated=hydrate(store,raw)
+                    if cache is not None:cache[raw]=hydrated
+                # Share immutable text only. Each record projection still parses
+                # its own payload; the complete raw envelope distinguishes both
+                # historical associations and preserved original JSON layouts.
+                values=list(row);values[index]=hydrated;row=tuple(values)
         return sqlite3.Row(cursor,row)
     return factory
 
