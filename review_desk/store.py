@@ -456,15 +456,21 @@ class Store:
             raise Conflict("anchor quote differs from target revision")
         return blocks
 
-    def validate_target(self, object_id, revision_id, anchor):
+    def validate_target(self, object_id, revision_id, anchor, *, _source_cache=None):
         obj = self.db.execute("SELECT * FROM objects WHERE id=?", (object_id,)).fetchone()
         revision = self.db.execute("SELECT * FROM revisions WHERE id=?", (revision_id,)).fetchone()
         if not obj or not revision or revision["object_id"] != object_id:
             raise ValueError("unknown object or mismatched revision")
         payload = json.loads(revision["payload"])
         if obj["kind"] == "SOURCE":
-            source = self.source(object_id)
-            if payload.get("source_revision") != digest(canonical(source).encode()):
+            if _source_cache is not None and object_id in _source_cache:
+                source, source_revision = _source_cache[object_id]
+            else:
+                source = self.source(object_id)
+                source_revision = digest(canonical(source).encode())
+                if _source_cache is not None:
+                    _source_cache[object_id] = source, source_revision
+            if payload.get("source_revision") != source_revision:
                 raise Conflict("source revision differs from anchored object revision")
             blocks, visuals = source["blocks"], source.get("assets", [])
         elif obj["kind"] == "STORY" and object_id == "story-structure":
@@ -520,12 +526,21 @@ class Store:
             raise ValueError("unknown anchor type")
         return {"object": dict(obj), "revision": dict(revision), "blocks": blocks, "visuals": visuals, "source": source}
 
-    def anchor_state(self, object_id, revision_id, anchor):
+    def anchor_state(self, object_id, revision_id, anchor, *, _source_cache=None):
         try:
-            self.validate_target(object_id, revision_id, anchor)
+            self.validate_target(object_id, revision_id, anchor, _source_cache=_source_cache)
             return {"valid": True}
         except (ValueError, Conflict, KeyError, TypeError) as exc:
             return {"valid": False, "reason": str(exc)}
+
+    def comment_anchor_states(self, comments):
+        # Only immutable source content is shared within this response. Each
+        # exact revision, anchor and media original is still validated; nothing
+        # is retained on the store or reused by subsequent reads or writes.
+        source_cache = {}
+        return [{**comment, "anchor_state": self.anchor_state(
+            comment["target_object_id"], comment["target_revision_id"],
+            comment["anchor"], _source_cache=source_cache)} for comment in comments]
 
     def create_comment(self, value):
         import uuid
