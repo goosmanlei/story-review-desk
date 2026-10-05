@@ -578,8 +578,47 @@ function watchTextSelection(){
   window.addEventListener('blur',()=>{selectionPointer=null;hideSelectionAction()});
 }
 
+function preserveCommentReaderLine(){
+  const panel=$('#comment-panel');
+  if(panel.parentNode?.matches?.('.unified-card-dialog')&&typeof preserveUnifiedCommentReader==='function')return preserveUnifiedCommentReader(panel.parentNode);
+  if(panel.parentNode!==document.body||!(window.innerWidth>=1200)||$('#story-creation-shell').hidden)return ()=>{};
+  const reader=['#source-view','#structure-reader','#screenplay-reader'].map($).find(r=>r.getClientRects().length);
+  if(!reader)return ()=>{};
+  const visibleTop=()=>Math.max(70,reader.getBoundingClientRect().top,reader.querySelector('.structure-document-head')?.getBoundingClientRect().bottom||0);
+  const top=visibleTop(),bottom=Math.min(window.innerHeight,reader.getBoundingClientRect().bottom);
+  if(bottom<=top)return ()=>{};
+  const selected=[...reader.querySelectorAll('.comment-mark.selected')].find(mark=>{const r=mark.getBoundingClientRect();return r.top>=top&&r.top<bottom});
+  if(selected){const offset=selected.getBoundingClientRect().top-top;return ()=>{reader.scrollTop+=selected.getBoundingClientRect().top-visibleTop()-offset}}
+  const paragraph=[...reader.querySelectorAll('.source-text p,.structure-section p')].find(p=>{const r=p.getBoundingClientRect();return r.bottom>top+2&&r.top<bottom});
+  if(!paragraph){
+    const image=[...reader.querySelectorAll('img')].find(img=>{const r=img.getBoundingClientRect();return img.complete&&r.height>0&&r.bottom>top+2&&r.top<bottom});
+    if(!image)return ()=>{};
+    const rect=image.getBoundingClientRect(),fraction=Math.max(0,(top-rect.top)/rect.height),offset=rect.top+fraction*rect.height-top;
+    return ()=>{const next=image.getBoundingClientRect();reader.scrollTop+=next.top+fraction*next.height-visibleTop()-offset};
+  }
+  const rect=paragraph.getBoundingClientRect(),x=rect.left+Math.min(8,rect.width/2);
+  let anchor=paragraph;
+  // A point in a blank line can resolve to a newline above the clipped edge.
+  // Choose a fully visible glyph so repeated open/close does not drift by a line.
+  for(let y=Math.max(top,rect.top)+8;y<Math.min(bottom,top+180);y+=8){
+    const caret=document.caretPositionFromPoint?.(x,y),range=caret?document.createRange():document.caretRangeFromPoint?.(x,y);
+    if(caret)range.setStart(caret.offsetNode,caret.offset);
+    const text=range?.startContainer;
+    if(text?.nodeType!==Node.TEXT_NODE||!paragraph.contains(text)||!/\S/.test(text.textContent[range.startOffset]||''))continue;
+    range.setEnd(text,Math.min(text.length,range.startOffset+1));
+    const glyph=range.getBoundingClientRect();if(glyph.height&&glyph.top>=top&&glyph.bottom<=bottom){anchor=range;break}
+  }
+  const before=anchor.getBoundingClientRect().top-top;
+  // Keep the same visible text through line wrapping, rather than the old pixel scroll offset.
+  return ()=>{reader.scrollTop+=anchor.getBoundingClientRect().top-visibleTop()-before};
+}
 function setPanelOpen(open){
-  $('#comment-panel').hidden=!open;
+  const panel=$('#comment-panel'),dialog=panel.parentNode?.matches?.('.unified-card-dialog')?panel.parentNode:null,opening=open&&panel.hidden,restore=panel.hidden===open?preserveCommentReaderLine():()=>{};
+  if(opening&&dialog&&!panel.contains(document.activeElement))dialog.commentReturnFocus=document.activeElement;
+  const returnFocus=!open&&dialog&&panel.contains(document.activeElement);
+  panel.hidden=!open;restore();
+  if(opening&&dialog&&window.innerWidth<1200)$('#comments-close').focus({preventScroll:true});
+  if(returnFocus){const target=dialog.commentReturnFocus;((target?.isConnected&&dialog.contains(target)&&target.getClientRects().length)?target:dialog.querySelector('.review-dialog-close'))?.focus({preventScroll:true})}
   for(const trigger of ['#comments-toggle','#screenplay-comments'])$(trigger).setAttribute('aria-expanded',String(open));
 }
 function openPanel(){setPanelOpen(true)}
@@ -810,7 +849,10 @@ function locateSourceComment(comment){
   (target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});
   target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return true;
 }
-function locateComment(comment){if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
+function locateComment(comment){
+  const panel=$('#comment-panel');
+  if(window.innerWidth<1200&&panel.parentNode?.matches?.('.unified-card-dialog'))closePanel();
+  if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
 
 async function init(){try{
   const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
@@ -842,11 +884,15 @@ async function init(){try{
     event.preventDefault();const focusInside=panel.contains(document.activeElement);closePanel();
     if(focusInside)$('#comments-toggle').focus();
   });
-  document.addEventListener('pointerdown',event=>{
+  let commentActionAtPointerDown=commentAction;
+  document.addEventListener('pointerdown',()=>{commentActionAtPointerDown=commentAction},{capture:true});
+  // Finish hit testing before docked comments change the reader layout.
+  // A region drag can open a fresh draft on pointerup, before its trailing click.
+  document.addEventListener('click',event=>{
     const panel=$('#comment-panel');
-    if(panel.hidden||event.target.closest?.('.material-reference,[data-review-dialog-trigger]')||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#screenplay-comments').contains(event.target))return;
+    if(panel.hidden||(event.detail>0&&commentActionAtPointerDown!==commentAction)||event.target.closest?.('dialog,.review-cue,.material-reference,[data-review-dialog-trigger]')||panel.contains(event.target)||$('#comments-toggle').contains(event.target)||$('#screenplay-comments').contains(event.target))return;
     closePanel();
-  });
+  },{capture:true});
   $('#selection-action').addEventListener('mousedown',event=>event.preventDefault());$('#selection-action').onclick=()=>{if(state.pending)startDraft(state.pending)};
   watchTextSelection();
   document.addEventListener('scroll',scheduleSourceChapter,{capture:true,passive:true});

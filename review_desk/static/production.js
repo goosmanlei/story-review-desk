@@ -549,12 +549,19 @@ async function renderProductionReadiness(root,r,options={}){
   if(options.replaceSection)options.replaceSection.replaceWith(section);else{if(options.replace)root.replaceChildren();root.append(section)}
 }
 function showProductionAdoption(parent,row){
-  const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','候选记录修订');components.setAttribute('aria-label','采用文件组成');assets.append(new Option('选择一个实际素材',''));for(const r of [...new Map((row.candidates||state.productionRecords).filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type).map(r=>[r.object_id,r])).values()])assets.append(new Option(reviewPositionText(r.payload.title),r.object_id));
-  const workspace=state.workspace,readEpoch=productionReadEpoch;
-  let history=[],requestEpoch=0,closed=false,loading=false,saving=false,confirm,pendingRequest=null;
-  const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionReadEpoch===readEpoch;
+  const p=row.requirement.payload,box=el('div','production-editor'),assets=el('select'),versions=el('select'),components=el('select');assets.setAttribute('aria-label','选择素材');versions.setAttribute('aria-label','候选记录修订');components.setAttribute('aria-label','采用文件组成');
+  const workspace=state.workspace,loadEpoch=productionLoadEpoch,readEpoch=productionReadEpoch;
+  let history=[],requestEpoch=0,closed=false,loading=false,loadingAssets=row.candidates==null,saving=false,confirm,pendingRequest=null;
+  const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionLoadEpoch===loadEpoch&&productionReadEpoch===readEpoch;
+  const renderAssets=records=>{
+    if(!Array.isArray(records))throw Error('素材列表暂无法读取，请关闭后重试');
+    const items=[...new Map(records.filter(r=>r.kind==='ASSET'&&r.payload.media_type===p.media_type).map(r=>[r.object_id,r])).values()];
+    assets.replaceChildren(new Option(items.length?'选择一个实际素材':'暂无这种类型的实际素材',''));
+    for(const item of items)assets.append(new Option(reviewPositionText(item.payload.title),item.object_id));
+  };
+  if(loadingAssets)assets.append(new Option('正在读取可用素材…',''));else renderAssets(row.candidates);
   const selectedAsset=()=>history.find(r=>r.object_id===assets.value&&r.id===versions.value);
-  const updateControls=()=>{const asset=selectedAsset();assets.disabled=saving;versions.disabled=loading||saving||!history.length;components.disabled=loading||saving||!asset;confirm.disabled=loading||saving||!asset?.payload.components.some(c=>c.id===components.value);for(const input of [reason,start,end,...Object.values(cropFields)])input.disabled=saving};
+  const updateControls=()=>{const asset=selectedAsset();assets.disabled=loadingAssets||saving;versions.disabled=loadingAssets||loading||saving||!history.length;components.disabled=loadingAssets||loading||saving||!asset;confirm.disabled=loadingAssets||loading||saving||!asset?.payload.components.some(c=>c.id===components.value);for(const input of [reason,start,end,...Object.values(cropFields)])input.disabled=saving};
   const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
   const samePayload=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
   const readAttempt=async request=>{
@@ -569,7 +576,7 @@ function showProductionAdoption(parent,row){
   const changed=()=>Error('采用已变化，未覆盖现有判断。请刷新并核对当前采用后再操作');
   const renderComponents=()=>{components.replaceChildren();const entries=selectedAsset()?.payload.components||[];for(const c of entries){const label=({original:'原件',preview:'预览',thumbnail:'缩略图',metadata:'说明文件'})[c.role]||'文件',peers=entries.filter(v=>v.role===c.role);components.append(new Option(label+(peers.length>1?' '+(peers.indexOf(c)+1):''),c.id))}updateControls()};
   assets.onchange=async()=>{
-    if(!isOpen()||saving)return;
+    if(!isOpen()||loadingAssets||saving)return;
     const assetId=assets.value,epoch=++requestEpoch,isCurrent=()=>isOpen()&&epoch===requestEpoch&&assets.value===assetId;
     history=[];versions.replaceChildren();components.replaceChildren();loading=!!assetId;updateControls();if(!assetId)return;
     try{const result=await api('/api/production?object_id='+encodeURIComponent(assetId));if(!isCurrent())return;
@@ -581,7 +588,7 @@ function showProductionAdoption(parent,row){
   const reason=el('input');reason.placeholder='采用或换版理由';reason.setAttribute('aria-label','采用理由');box.append(reason);const start=el('input'),end=el('input');for(const [input,label] of [[start,'入点秒（可选）'],[end,'出点秒（可选）']]){input.type='number';input.step='.01';input.min='0';input.placeholder=label;input.setAttribute('aria-label',label);box.append(input)}
   const cropFields={};if(p.media_type==='image'||p.media_type==='video'){nodeText('p',null,'局部采用可填写裁切比例：左上角为 0,0，整张图为宽 1、高 1。留空采用完整画面。',box);for(const [key,label] of Object.entries({x:'裁切左边比例',y:'裁切上边比例',width:'裁切宽度比例',height:'裁切高度比例'})){const input=el('input');input.type='number';input.min='0';input.max='1';input.step='.01';input.placeholder=label;input.setAttribute('aria-label',label);cropFields[key]=input;box.append(input)}}
   confirm=productionButton(box,'确认采用此原件',async()=>{
-    if(!isOpen()||loading||saving)return;
+    if(!isOpen()||loadingAssets||loading||saving)return;
     const asset=selectedAsset();if(!asset||!asset.payload.components.some(c=>c.id===components.value)||!reason.value.trim())throw Error('请选择确切素材版本和文件组成并填写理由');
     const payload={format:'production-relation-v1',title:p.title+' · 采用',blocks:[{id:'adoption',text:reason.value}],relation_type:'adoption',scope:p.scope,slot:p.slot,asset:productionRef(asset),component_id:components.value,usage:p.usage,reason:reason.value};if(start.value!==''||end.value!=='')payload.range={start_seconds:Number(start.value),end_seconds:Number(end.value)};if(Object.values(cropFields).some(input=>input.value!=='')){if(Object.values(cropFields).some(input=>input.value===''))throw Error('裁切需同时填写左、上、宽、高四项');payload.crop=Object.fromEntries(Object.entries(cropFields).map(([key,input])=>[key,Number(input.value)]))}
     saving=true;updateControls();
@@ -612,6 +619,15 @@ function showProductionAdoption(parent,row){
     catch(error){if(isOpen())throw error}finally{saving=false;if(isOpen())updateControls()}
   });
   productionButton(box,'取消',()=>{closed=true;++requestEpoch;box.remove()});parent.append(box);updateControls();
+  if(loadingAssets)(async()=>{
+    try{
+      // The history index intentionally omits assets. Read the complete current
+      // inventory only when choosing an adoption; exact revisions load below.
+      const result=await api('/api/production?kind=ASSET');if(!isOpen())return;
+      renderAssets(result.records);
+    }catch(error){if(isOpen()){assets.replaceChildren(new Option('素材读取失败，请关闭后重试',''));toast(error.message)}}
+    finally{if(isOpen()){loadingAssets=false;updateControls()}}
+  })();
 }
 
 function showProductionChange(parent,change,options={}){

@@ -156,7 +156,7 @@ function renderStructureVisual(visual,preview=false){
   img.addEventListener('error',scheduleStructureIndex);
   img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
   if(preview){
-    img.classList.add('structure-image-trigger');img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
+    img.classList.add('structure-image-trigger');img.dataset.reviewDialogTrigger='';img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
     img.onclick=()=>openStructureImage(visual,img);
     img.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();openStructureImage(visual,img)}};
   }

@@ -124,10 +124,13 @@ test('editing a carried exact text in one material version is not restored into 
 
 function modalFixture(ctx,f){
   const panel=new Element('aside'),outer=new Element('main'),dialog=new Element('dialog'),body=new Element('div');outer.append(panel);
-  ctx.document.querySelector=s=>s==='#comment-panel'?panel:null;
+  const triggers=['#comments-toggle','#screenplay-comments'].map(selector=>[selector,new Element('button')]);
+  // index.html starts with comments hidden and both existing toggles collapsed.
+  panel.hidden=true;for(const [,button] of triggers){button.setAttribute('aria-expanded','false');outer.append(button)}
+  const nodes=new Map([['#comment-panel',panel],...triggers]);ctx.document.querySelector=s=>nodes.get(s)||null;
   ctx.openReviewDialog=()=>({dialog,body});ctx.renderUnifiedCard=()=>{};
   const result={detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},entity_review:f.data,form:f.form};
-  return {panel,outer,dialog,body,result};
+  return {panel,outer,dialog,body,result,triggers:triggers.map(([,button])=>button)};
 }
 test('a pending modal read cannot reactivate its card after browser navigation changes workspace',async()=>{
   const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f);let release;
@@ -150,10 +153,12 @@ test('saving the restored outer draft cannot overwrite a closed modal draft',asy
   const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f);
   ctx.restoreProductionDraft();ctx.state.anchor={type:'global'};ctx.state.editing='outer-comment';
   ctx.fetch=async()=>({ok:true,json:async()=>m.result});await ctx.openUnifiedMaterial(ref(f.need),null);
+  ctx.setPanelOpen(true);
   ctx.state.anchor={type:'global'};ctx.state.editing='inner-comment';const innerKey=ctx.productionDraftKey();
   m.dialog.isConnected=false;m.dialog.listeners.close();
   assert.equal(ctx.state.editing,'outer-comment');ctx.rememberProductionDraft();
   assert.equal(ctx.state.productionDraftContexts[innerKey].editing,'inner-comment');
+  assert.equal(m.panel.hidden,true);for(const button of m.triggers)assert.equal(button.attributes['aria-expanded'],'false');
 });
 test('an exact historical shot link preserves its requested revision in the all-shot scene reader',async()=>{
   const ctx=setup(),source={object_id:'episode',revision_id:'episode-1',scene_id:'scene'};
@@ -286,9 +291,11 @@ test('actual unified dialog close restores the outer revision and draft before a
   const outerAnchor={type:'global'};Object.assign(ctx.state,{workspace:'materials.workspace',entityReview:null,materialReview:null,productionSelected:newer,anchor:outerAnchor});
   m.result={detail:{record:old,history:[old],uses:[],material_versions:{}},entity_review:null};
   ctx.fetch=async()=>({ok:true,json:async()=>m.result});await ctx.openUnifiedMaterial(ref(old),null);
+  ctx.setPanelOpen(true);
   const g=installImageGesture(ctx,old,m.body);ctx.state.drawMode='original';g.emit('pointerdown');
   m.dialog.isConnected=false;m.dialog.listeners.close();
   assert.equal(ctx.state.productionSelected.id,'image-new');assert.equal(ctx.state.anchor,outerAnchor);
+  assert.equal(m.panel.hidden,true);for(const button of m.triggers)assert.equal(button.attributes['aria-expanded'],'false');
   g.emit('pointerup',40,40);assert.equal(ctx.state.productionSelected.id,'image-new');assert.equal(ctx.state.anchor,outerAnchor);
 });
 test('an exact withdrawn entity material remains readable outside the active entity list',async()=>{
