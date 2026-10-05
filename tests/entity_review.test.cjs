@@ -145,3 +145,9 @@ test('refreshing a media comment keeps the explicitly selected state',async()=>{
  assert.equal(ctx.state.productionChildDetail.record,second);
  assert.equal(new URL(ctx.location.href).searchParams.get('entity_state'),'later');
 });
+test('fresh entity link keeps its explicit state without a redundant owner parameter',async()=>{
+ const {ctx}=setup();ctx.location.href='http://local/?production_object=person&entity_state=later';
+ await ctx.openEntityReview('person',{record:entity},0,null);
+ assert.equal(ctx.state.productionChildDetail.record,second);
+ assert.equal(new URL(ctx.location.href).searchParams.get('entity_state'),'later');
+});
