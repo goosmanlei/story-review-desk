@@ -1,6 +1,10 @@
 /* Production readers share app.js comments, drafts, keyboard handling and API. */
 const productionKinds={ENTITY:'实体',STATE:'实体状态',REPRESENTATION:'制作设定',INPUT_LOCK:'剧本依据',PREPARATION:'集场检查',SHOT_DESIGN:'镜头设计',REQUIREMENT:'素材需求',ASSET:'实际素材',CALL:'实际制作',RELATION:'明确采用',JUDGMENT:'审阅结论',ASSEMBLY:'动态分镜组合',DELIVERABLE:'输出与工程'};
 const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION'],'materials.workspace':['REQUIREMENT','ASSET'],'production.workspace':['PREPARATION','SHOT_DESIGN','REQUIREMENT','ASSEMBLY','DELIVERABLE']};
+// An explicitly linked change decision is readable here without adding all
+// judgments to the default history index or moving material reviews to it.
+const productionChangeHistory=r=>r.kind==='JUDGMENT'&&r.payload.change&&(r.payload.change.scope||'target')==='target';
+const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='production.workspace'&&productionChangeHistory(r);
 const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',pending:'待审',passed:'通过',changes_requested:'需修改',rejected:'未通过',accepted:'用户接受',impact_resolved:'影响已处理'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';
@@ -298,17 +302,29 @@ async function loadProductionWorkspace({onReadStart}={}){
   const openFilteredScope=()=>{const row=firstMatchingRow();if(row)openProductionRecord(row.object_id).catch(e=>toast(e.message));else{++productionReadEpoch;state.productionSelected=null;reader.replaceChildren();const url=new URL(location.href);url.searchParams.delete('production_object');url.searchParams.delete('production_revision');history.replaceState(history.state,'',url);nodeText('p',null,'当前范围没有此类记录，请调整记录类型。',reader);renderComments()}};
   search.oninput=refreshIndex;sceneFilter.onchange=()=>{filters.scene=sceneFilter.value;refreshIndex();clearScopeReview();openFilteredScope()};episodeFilter.onchange=()=>{filters.episode=episodeFilter.value;filters.scene='';if(!workspaceRows.some(r=>matches(r))){filters.kind=workspaceRows.some(r=>r.kind==='PREPARATION'&&(!filters.episode||contexts.get(r.object_id).episode===filters.episode))?'PREPARATION':'';filterSelects.kind.value=filters.kind}renderScenes();openFilteredScope()};renderScenes();
   indexReady=true;
-  const candidate=(requested&&(productionGroups[workspace].includes(requested.kind)||workspace==='materials.workspace'||(flatFilters&&typeof entityMaterialRouteOwner==='function'&&entityMaterialRouteOwner(requested,param)))?requested:null)||(flatFilters?result.records.find(r=>r.kind==='ENTITY'&&r.object_id===param.get('production_entity')):null)||firstMatchingRow();
+  const candidate=(requested&&(productionWorkspaceCanRead(workspace,requested)||(flatFilters&&typeof entityMaterialRouteOwner==='function'&&entityMaterialRouteOwner(requested,param)))?requested:null)||(flatFilters?result.records.find(r=>r.kind==='ENTITY'&&r.object_id===param.get('production_entity')):null)||firstMatchingRow();
   if(candidate){const reading=openProductionRecord(candidate.object_id,selected===candidate.object_id?param.get('production_revision'):null);onReadStart?.({workspace,loadEpoch:epoch,readEpoch:productionReadEpoch});await reading}else{state.productionSelected=null;nodeText('p',null,'此入口已开放，当前实例尚未登记生产数据。',reader);renderComments()}
 }
 async function openProductionRecord(objectId,revisionId=null,navigate=false,entityId=null){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();const workspaceAtStart=state.workspace,epoch=++productionReadEpoch;
   let detail=await api('/api/production?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{})}));
   if(epoch!==productionReadEpoch||state.workspace!==workspaceAtStart)return;
-  if(navigate&&state.workspace!=='materials.workspace'&&!productionGroups[state.workspace]?.includes(detail.record.kind)){const workspace=Object.keys(productionGroups).find(k=>productionGroups[k].includes(detail.record.kind))||(['CALL','JUDGMENT'].includes(detail.record.kind)?'materials.workspace':state.workspace);const url=new URL(location.href);url.searchParams.set('production_object',objectId);url.searchParams.set('production_revision',detail.record.id);history.replaceState(history.state,'',url);switchWorkspace(workspace);return}
+  const changeHistory=state.workspace==='production.workspace'&&productionChangeHistory(detail.record),needsWorkspaceRoute=!productionWorkspaceCanRead(state.workspace,detail.record);
+  if(navigate&&(needsWorkspaceRoute||changeHistory)){
+    const workspace=changeHistory?state.workspace:Object.keys(productionGroups).find(k=>productionGroups[k].includes(detail.record.kind))||(['CALL','JUDGMENT'].includes(detail.record.kind)?'materials.workspace':state.workspace);
+    const url=new URL(location.href),previousTab=url.searchParams.get('production_tab');
+    url.searchParams.set('workspace',workspace);url.searchParams.set('production_object',objectId);url.searchParams.set('production_revision',detail.record.id);url.hash='';
+    if(changeHistory){url.searchParams.set('production_tab','history');for(const key of ['production_entity','entity_state','material_id','material_version','material_round','material_target'])url.searchParams.delete(key)}
+    if(url.href!==location.href){
+      if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
+      if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute();
+      history.pushState(null,'',url);
+    }
+    if(needsWorkspaceRoute||changeHistory&&previousTab!=='history'){switchWorkspace(workspace,false);return}
+  }
   const materialOwner=!navigate&&state.workspace==='settings.workspace'&&typeof entityMaterialRouteOwner==='function'?entityMaterialRouteOwner(detail.record,new URL(location.href).searchParams):null;
   if(materialOwner){await openEntityReview(materialOwner,detail,epoch,revisionId);return}
-  if(!isProduction()||state.workspace!=='materials.workspace'&&!productionGroups[state.workspace].includes(detail.record.kind))return;
+  if(!isProduction()||!productionWorkspaceCanRead(state.workspace,detail.record))return;
   const byId=new Map(state.productionRecords.map(r=>[r.object_id,r]));
   if(detail.record.kind==='REPRESENTATION'){
     // Resolve historical state ownership for the exact representation being read.
