@@ -57,11 +57,11 @@ function restoreEntityMaterialRoute(data,route){
   focusProductionReview(entityReviewDetail(row),false);
 }
 async function openEntityReview(owner,detail,epoch,exactRevision){
-  const workspace=state.workspace,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner;
+  const workspace=state.workspace,cardRoot=state.unifiedCardRoot||null,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner;
   const reviewRevision=same?url.searchParams.get('entity_acceptance'):null;
   const query=new URLSearchParams({entity_id:owner,...(reviewRevision?{revision_id:reviewRevision}:{})});
   const data=await api('/api/production/entity-review?'+query);
-  if(epoch!==productionReadEpoch||!isProduction()||state.workspace!==workspace||workspace==='settings.workspace'&&!state.unifiedCardRoot&&state.productionVisibleEntities&&!state.productionVisibleEntities.has(owner)&&!(exactRevision&&data.entity.payload.status==='withdrawn'))return;
+  if(epoch!==productionReadEpoch||(state.unifiedCardRoot||null)!==cardRoot||!isProduction()||state.workspace!==workspace||workspace==='settings.workspace'&&!state.unifiedCardRoot&&state.productionVisibleEntities&&!state.productionVisibleEntities.has(owner)&&!(exactRevision&&data.entity.payload.status==='withdrawn'))return;
   const materialRoute=['ASSET','REQUIREMENT','CALL'].includes(detail.record.kind)?entityMaterialRoute(data,detail.record,url.searchParams):null;
   const rows=[data.entity,...data.states],match=rows.find(r=>r.id===detail.record.id);
   data.historicalTarget=exactRevision&&!match&&['ENTITY','STATE'].includes(detail.record.kind)?detail.record:null;
@@ -78,7 +78,11 @@ async function openEntityReview(owner,detail,epoch,exactRevision){
   url.searchParams.set('production_entity',owner);if(form)url.searchParams.set('entity_state',form.object_id);history.replaceState(history.state,'',url);
   if(materialRoute)restoreEntityMaterialRoute(data,materialRoute);
   else focusProductionReview(entityReviewDetail(exactRevision&&detail.record.kind==='ENTITY'?state.productionEntityDetail.record:form||data.entity),false);
-  for(const button of document.querySelectorAll('#production-index button'))button.classList.toggle('active',button.dataset.objectId===owner);
+  if(!state.unifiedCardRoot)for(const button of document.querySelectorAll('#production-index button')){
+    const selected=button.dataset.objectId===owner;
+    button.classList.toggle('active',selected);
+    if(button.dataset.objectId)button.setAttribute('aria-pressed',String(selected));
+  }
   renderProductionReader();renderComments();
 }
 async function reloadEntityReview(revision=null){

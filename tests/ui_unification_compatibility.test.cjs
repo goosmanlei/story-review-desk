@@ -318,3 +318,53 @@ test('an exact withdrawn entity response still loses to a newer filter request e
   vm.runInContext('productionReadEpoch++',ctx);ctx.state.productionSelected=null;ctx.state.entityReview=null;
   release();await pending;assert.equal(ctx.state.productionSelected,null);assert.equal(ctx.state.entityReview,null);
 });
+
+// Append to tests/ui_unification_compatibility.test.cjs; reuse its existing fixtures.
+function ux010SelectionFixture(){
+  const ctx=setup(),f=fixture(ctx),other=row('other-entity','ENTITY',undefined,{entity_type:'prop'}),otherForm=row('other-form','STATE',undefined,{entity:ref(other),state_model:'complete-v1'});
+  const otherData={entity:other,states:[otherForm],media:[],requirements:[],relationships:[],comment_records:[],comment_targets:[]};
+  ctx.state.productionRecords.push(other,otherForm);ctx.state.productionEntityId=f.entity.object_id;
+  ctx.state.productionVisibleEntities=new Set([f.entity.object_id,other.object_id]);
+  ctx.location.href='http://isolated/?workspace=settings.workspace&production_tab=entities&production_entity='+f.entity.object_id+'&production_object='+f.form.object_id;
+  const cards=[f.entity,other].map(record=>{const button=new Element('button');button.dataset.objectId=record.object_id;button.active=record===f.entity;button.classList.toggle=(name,value)=>{if(name==='active')button.active=!!value};button.setAttribute('aria-pressed',String(record===f.entity));return button});
+  const unrelated=new Element('button');cards.push(unrelated);ctx.document.querySelectorAll=selector=>selector==='#production-index button'?cards:[];
+  const records=[...ctx.state.productionRecords],details=new Map(records.map(record=>[record.id,record]));
+  ctx.ux010Read=async url=>{const p=new URL(url,'http://isolated');if(p.pathname==='/api/production/entity-review')return structuredClone(p.searchParams.get('entity_id')===other.object_id?otherData:f.data);const record=p.searchParams.has('revision_id')?details.get(p.searchParams.get('revision_id')):records.find(r=>r.object_id===p.searchParams.get('object_id'));assert.ok(record,'unexpected record '+url);return {record,history:[record],uses:[]}};
+  ctx.fetch=async url=>({ok:true,json:async()=>ctx.ux010Read(url)});
+  const markers=()=>cards.map(button=>({id:button.dataset.objectId,active:button.active,pressed:button.attributes['aria-pressed']}));
+  const snapshot=()=>({owner:ctx.state.productionEntityId,selected:ctx.state.productionSelected.id,url:ctx.location.href,markers:markers()});
+  const expectOwner=owner=>{assert.equal(ctx.state.productionEntityId,owner);assert.equal(new URL(ctx.location.href).searchParams.get('production_entity'),owner);for(const b of cards.filter(b=>b.dataset.objectId)){assert.equal(b.active,b.dataset.objectId===owner);assert.equal(b.attributes['aria-pressed'],String(b.dataset.objectId===owner))}assert.equal(unrelated.attributes['aria-pressed'],undefined)};
+  return {ctx,f,other,otherForm,otherData,cards,details,markers,snapshot,expectOwner};
+}
+const ux010Deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve}};
+const ux010Drain=()=>new Promise(resolve=>setImmediate(resolve));
+test('UX010 entity selection synchronizes both markers while exact historical targets retain their owner',async()=>{
+  const x=ux010SelectionFixture(),{ctx}=x;await ctx.openProductionRecord(x.other.object_id);x.expectOwner(x.other.object_id);assert.equal(ctx.state.productionSelected.id,x.otherForm.id);
+  for(const current of [x.other,x.otherForm]){const old={...current,id:current.id+'-old',version:0};x.details.set(old.id,old);await ctx.openProductionRecord(current.object_id,old.id);x.expectOwner(x.other.object_id);assert.equal(ctx.state.productionSelected.id,old.id);assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),old.id)}
+  await ctx.openProductionRecord(x.f.entity.object_id);x.expectOwner(x.f.entity.object_id);
+});
+for(const stage of ['record','aggregate'])test('UX010 failed '+stage+' read preserves completed reader and selection',async()=>{
+  const x=ux010SelectionFixture(),read=x.ctx.ux010Read,before=x.snapshot();x.ctx.ux010Read=url=>url.includes(stage==='record'?'object_id=other-entity':'entity_id=other-entity')?Promise.reject(Error('expected read failure')):read(url);
+  await assert.rejects(x.ctx.openProductionRecord(x.other.object_id),/expected read failure/);assert.deepEqual(x.snapshot(),before);
+});
+for(const stage of ['record','aggregate'])test('UX010 stale '+stage+' success cannot replace newer reader or either marker',async()=>{
+  const x=ux010SelectionFixture(),read=x.ctx.ux010Read,held=ux010Deferred();x.ctx.ux010Read=url=>url.includes(stage==='record'?'object_id=other-entity':'entity_id=other-entity')?held.promise:read(url);
+  const pending=x.ctx.openProductionRecord(x.other.object_id);await ux010Drain();await x.ctx.openProductionRecord(x.f.entity.object_id);const newest=x.snapshot();held.resolve(stage==='record'?{record:x.other}:structuredClone(x.otherData));await pending;assert.deepEqual(x.snapshot(),newest);
+});
+function ux010ModalFixture(){
+  const x=ux010SelectionFixture(),{ctx,f}=x,m=modalFixture(ctx,f);
+  Object.assign(ctx.state,{entityReview:x.otherData,productionSelected:x.otherForm,productionDetail:{record:x.otherForm},productionChildDetail:{record:x.otherForm},productionEntityDetail:{record:x.other},productionEntityId:x.other.object_id});
+  for(const b of x.cards.filter(b=>b.dataset.objectId)){b.active=b.dataset.objectId===x.other.object_id;b.setAttribute('aria-pressed',String(b.active))}
+  ctx.location.href='http://isolated/?workspace=settings.workspace&production_tab=entities&production_entity='+x.other.object_id+'&production_object='+x.otherForm.object_id;
+  const before=x.snapshot(),read=ctx.ux010Read;ctx.ux010Read=url=>url.includes('/api/production/card?')?Promise.resolve({...m.result,params:new URLSearchParams(),explicit:true}):read(url);
+  const open=()=>ctx.openUnifiedMaterial(ref(f.need),null),close=()=>{m.dialog.isConnected=false;m.dialog.listeners.close()};return {...x,m,before,open,close};
+}
+test('UX010 modal entity refresh does not alter the outer list and closing restores its reader',async()=>{
+  const x=ux010ModalFixture();await x.open();assert.deepEqual(x.markers(),x.before.markers);await x.ctx.reloadEntityReview();assert.equal(x.ctx.state.entityReview.entity.object_id,x.f.entity.object_id);assert.deepEqual(x.markers(),x.before.markers);x.close();assert.deepEqual(x.snapshot(),x.before);
+});
+test('UX010 modal refresh completing after close cannot overwrite the restored outer context',async()=>{
+  const x=ux010ModalFixture();await x.open();const held=ux010Deferred();x.ctx.ux010Read=()=>held.promise;const pending=x.ctx.reloadEntityReview();x.close();assert.deepEqual(x.snapshot(),x.before);held.resolve(structuredClone(x.f.data));await pending;assert.deepEqual(x.snapshot(),x.before);
+});
+test('UX010 outer refresh completing after a modal opens cannot overwrite the inner context',async()=>{
+  const x=ux010ModalFixture(),read=x.ctx.ux010Read,held=ux010Deferred();x.ctx.ux010Read=url=>url.includes('/entity-review?')?held.promise:read(url);const pending=x.ctx.reloadEntityReview();await x.open();const inner=x.snapshot();held.resolve(structuredClone(x.otherData));await pending;assert.deepEqual(x.snapshot(),inner);assert.equal(x.ctx.state.entityReview.entity.object_id,x.f.entity.object_id);x.close();assert.deepEqual(x.snapshot(),x.before);
+});
