@@ -195,5 +195,8 @@ function locateScriptComment(comment,atEnd=false){
   if(state.screenplayEpisode!==episode.object_id||state.screenplayScene!==scene.id)chooseScript(version.object_id,episode.object_id,scene.id);
   state.selected=comment.id;renderScriptReader();renderComments();
   const block=$('#screenplay-reader [data-block-id="'+escapeSelector(blockId)+'"]');
-  if(block)(block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'});
+  if(block){
+    revealLocatedComment();
+    (block.querySelector('.comment-mark.selected')||block).scrollIntoView({behavior:'smooth',block:'center'});
+  }
 }
