@@ -35,6 +35,7 @@ def material_entries(store):
         preview=next((c for a in real for c in a['payload']['components'] if c['role']=='original' and c['mime'].startswith('image/')),None)
         entries.append({'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],
                         'media_type':value['media_type'],'generated':bool(real),'preview':preview,
+                        'generation_scope':'history' if row['kind']=='REQUIREMENT' else 'exact',
                         'slot':value.get('slot'),'scope':scope,'locations':locations,'entity_ids':list(owners)})
     from .material_storage import canonical_id, identity
     merged={}
@@ -46,10 +47,13 @@ def material_entries(store):
             if previous:
                 merged[mid]['locations']+=previous['locations']
                 merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+previous['entity_ids']))
+                merged[mid]['generated']|=previous['generated']
+                merged[mid]['preview']=merged[mid]['preview'] or previous['preview']
         else:
             merged[mid]['locations']+=item['locations']
             merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+item['entity_ids']))
             merged[mid]['generated']|=item['generated']
+            merged[mid]['preview']=merged[mid]['preview'] or item['preview']
     return list(merged.values())
 
 
@@ -185,7 +189,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
         for mid,(row,relation,evidence) in needs.items():
             item=all_entries.get(mid)
             if not item:
-                value=row['payload'];item={'object_id':row['object_id'],'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder'),'preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
+                value=row['payload'];item={'object_id':row['object_id'],'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder') and any(c['role']=='original' for c in value.get('components',[])),'generation_scope':'exact','preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
             placement=row['payload'].get('scope') or item.get('scope')
             owner=p.ref_record(store,placement) if placement else scoped
             context['materials'].append({**item,'id':row['id'],'title':row['payload']['title'],'association':relation,

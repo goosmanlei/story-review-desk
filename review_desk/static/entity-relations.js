@@ -30,7 +30,7 @@ function renderEntityRelations(root,data){
     make('rect',{x:x-80,y:y-25,width:160,height:50,rx:4,class:'relation-node-box'+(central?' central':'')},null,g);
     const icon=productionEntityIcon(record.payload.entity_type);icon.setAttribute('x',x-70);icon.setAttribute('y',y-12);icon.setAttribute('width',24);icon.setAttribute('height',24);g.append(icon);
     make('text',{x:x+12,y:y+5,'text-anchor':'middle',class:'relation-node-name'},record.payload.title,g);make('title',{},record.payload.title,g);
-    if(!central){g.setAttribute('role','button');g.setAttribute('tabindex','0');g.setAttribute('aria-label','打开实体：'+record.payload.title);g.dataset.relatedEntity=record.object_id;
+    if(!central){g.dataset.reviewDialogTrigger='';g.setAttribute('role','button');g.setAttribute('tabindex','0');g.setAttribute('aria-label','打开实体：'+record.payload.title);g.dataset.relatedEntity=record.object_id;
       const open=()=>openUnifiedMaterial(reference||{object_id:record.object_id,revision_id:record.id},g);
       g.ondblclick=e=>{e.preventDefault();e.stopPropagation();open()};g.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();open()}};
     }return g;

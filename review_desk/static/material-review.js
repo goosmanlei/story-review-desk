@@ -362,7 +362,7 @@ function referenceReviewSession(dialog,detail){
   const locate=comment=>{focus();state.selected=comment.id;[...dialog.querySelectorAll('.review-media-player')].find(box=>box.dataset.reviewFile===comment.anchor.asset_file&&box.querySelector('[data-component-id]')?.dataset.componentId===comment.anchor.component_id)?.reviewLocate(comment.anchor);paintProductionReview();renderComments()};
   dialog.addEventListener('close',()=>{
     parent.insertBefore(panel,next?.parentNode===parent?next:null);Object.assign(state,previous);panel.hidden=hidden;
-    paintProductionReview();renderComments();panel.hidden=hidden;
+    paintProductionReview();renderComments();setPanelOpen(!hidden);
   },{once:true});
   return {focus,locate};
 }

@@ -21,8 +21,18 @@
 .material-small-preview img{width:100%;height:100%;object-fit:contain}.material-small-preview svg{width:27px;height:27px}
 .material-small-copy{display:block;min-width:0}.material-small-copy strong{font-size:13px;font-weight:600;display:block}.material-small-copy small{display:block;font-size:11px;color:#65695e;margin-top:4px}
 .entity-small-card{min-width:0;margin:0!important;white-space:normal}.entity-small-card small{display:block}.entity-material-counts{font-variant-numeric:tabular-nums}
-.unified-card-dialog{width:min(1420px,96vw);max-width:96vw;padding:0}.unified-card-dialog>.review-dialog-body{padding:0;max-height:80dvh;overflow:auto}.unified-card-dialog .unified-card-material{top:0;max-height:80dvh}
-.unified-card-dialog .comment-panel{position:fixed;z-index:5}
+.unified-card-dialog{width:min(1420px,96vw);max-width:96vw;max-height:88dvh;padding:0;overflow:hidden}
+.unified-card-dialog[open]{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
+.unified-card-dialog>.review-dialog-header{grid-column:1/-1;grid-row:1}
+.unified-card-dialog>.review-dialog-body{grid-column:1;grid-row:2;min-width:0;min-height:0;padding:0;max-height:80dvh;overflow:auto}
+.unified-card-dialog .unified-card-material{top:0;max-height:80dvh}
+.unified-card-dialog>.comment-panel{grid-column:1;grid-row:2;position:relative;inset:auto;z-index:3;min-width:0;min-height:0;width:auto;max-width:none;max-height:80dvh;box-shadow:none}
+@media(min-width:1200px){
+  .unified-card-dialog:has(> .comment-panel:not([hidden])){width:min(1780px,96vw);grid-template-columns:minmax(0,1fr) 360px}
+  .unified-card-dialog>.comment-panel{grid-column:2;border-left:1px solid var(--desk-line)}
+}
+@media(max-width:1199px){.unified-card-dialog:has(> .comment-panel:not([hidden]))>.review-dialog-body{visibility:hidden}}
+@media(max-width:1800px){.unified-card-dialog .unified-card-material .entity-review-local-heading>h3{flex-basis:100%}}
 .breakdown-episode-tabs{margin:16px 0}.breakdown-episode-tabs .source-button{flex:0 0 155px;min-height:64px;margin:0;white-space:normal}
 .breakdown-scene-layout{display:grid;grid-template-columns:245px minmax(0,1fr);gap:0;border:1px solid var(--desk-line);height:calc(100dvh - 90px);min-height:400px;position:sticky;top:70px}
 .breakdown-scenes{min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--desk-line)}.breakdown-scenes>header{padding:20px}.breakdown-scenes h2{font-size:19px;margin:0}

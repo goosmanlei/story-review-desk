@@ -3,9 +3,10 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../review_desk/static/production.js'),'utf8');
 const plain=value=>JSON.parse(JSON.stringify(value));
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const asset=(object_id,id=object_id+'-v1',version=1)=>({object_id,id,version,kind:'ASSET',payload:{title:object_id,media_type:'video',components:[{id:'original',role:'original'},{id:'preview',role:'preview'}]}});
 class Element{
-  constructor(tag){this.tag=tag;this.children=[];this.attrs={};this._value='';this.disabled=false;this.parent=null}
+  constructor(tag,cls=''){this.tag=tag;this.className=cls;this.children=[];this.attrs={};this._value='';this.disabled=false;this.parent=null}
   get isConnected(){return this.root===true||!!this.parent?.isConnected}
   append(...nodes){for(const node of nodes){node.parent=this;this.children.push(node);if(this.tag==='select'&&this.children.length===1)this._value=node.value}}
   replaceChildren(...nodes){for(const child of this.children)child.parent=null;this.children=[];this._value='';this.append(...nodes)}
@@ -16,18 +17,79 @@ class Element{
 }
 function setup(options={}){
   const root=new Element('main');root.root=true;
-  const requests=[],posts=[],messages=[];
-  const context={state:{workspace:'production.workspace',productionRecords:[asset('A'),asset('B')]},crypto:{randomUUID:()=>String(posts.length)},
-    el:tag=>new Element(tag),Option:function(text,value){const option=new Element('option');option.textContent=text;option.value=value;return option},
+  const requests=[],posts=[],postUrls=[],messages=[];
+  const context={state:{workspace:'production.workspace',productionRecords:[{object_id:'history-scene',id:'history-scene-r1',kind:'PREPARATION',payload:{title:'History scene'}}]},crypto:{randomUUID:()=>String(posts.length)},
+    el:(tag,cls)=>new Element(tag,cls),Option:function(text,value){const option=new Element('option');option.textContent=text;option.value=value;return option},
     nodeText:(tag,cls,text,parent)=>{const node=new Element(tag);node.textContent=text;parent.append(node);return node},toast:message=>messages.push(message),
-    api:(url,options)=>{if(options?.method==='POST'){posts.push(JSON.parse(options.body));return Promise.resolve({})}return new Promise((resolve,reject)=>requests.push({url,resolve,reject}))}};
+    api:(url,options)=>{if(options?.method==='POST'){posts.push(JSON.parse(options.body));postUrls.push(url);return Promise.resolve({})}return new Promise((resolve,reject)=>requests.push({url,resolve,reject}))}};
   vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);context.loadProductionWorkspace=async()=>{context.reloads++};context.reloads=0;
-  const row={requirement:{payload:{title:'Input',media_type:'video',scope:{object_id:'shot',revision_id:'shot-exact'},slot:'main',usage:'generation_input'}},adoption:options.adoption===undefined?{object_id:'existing-adoption',version:3}:options.adoption};
-  const open=()=>{context.showProductionAdoption(root,row);const box=root.children.at(-1);return {box,field:label=>box.all().find(node=>node.attrs['aria-label']===label),button:label=>box.all().find(node=>node.tag==='button'&&node.textContent===label)}};
+  const row={requirement:{object_id:'need',id:'need-exact',kind:'REQUIREMENT',payload:{title:'Input',media_type:'video',scope:{object_id:'shot',revision_id:'shot-exact'},slot:'main',usage:'generation_input',purpose:'Technical input',required:true}},issues:[],adoption:options.adoption===undefined?{object_id:'existing-adoption',version:3}:options.adoption};
+  // Existing history/save tests use the real explicit-candidate entry contract.
+  // Lazy tests deliberately omit this field and use a history-only page index.
+  if(!options.lazy)row.candidates=options.candidates??[asset('A'),asset('B')];
+  const form=box=>({box,field:label=>box.all().find(node=>node.attrs['aria-label']===label),button:label=>box.all().find(node=>node.tag==='button'&&node.textContent===label)});
+  const open=()=>{context.showProductionAdoption(root,row);return form(root.children.at(-1))};
   const choose=(form,id)=>{form.field('选择素材').value=id;return form.field('选择素材').onchange()};
   const resolve=(request,records)=>request.resolve({history:records});
-  return {context,root,requests,posts,messages,open,choose,resolve,row};
+  return {context,root,requests,posts,postUrls,messages,open,choose,resolve,row,form};
 }
+
+test('history-only readiness opens the real lazy selector and posts the chosen historical file with the original contract', {timeout:2000}, async()=>{
+  const t=setup({lazy:true,adoption:null}),scope={object_id:'shot',id:'shot-exact',kind:'SHOT_DESIGN'};t.context.state.productionSelected=scope;
+  const rendering=t.context.renderProductionReadiness(t.root,scope);
+  assert.equal(t.requests[0].url,'/api/production/readiness?scope=shot');
+  t.requests[0].resolve({requirements:[t.row],required_count:1,missing_count:1,inputs_ready:false,package_available:false});await rendering;
+  assert.equal(t.requests.length,1,'opening readiness alone does not fetch the asset inventory');
+  assert.equal(t.context.state.productionRecords.some(r=>r.kind==='ASSET'),false);assert.equal(Object.hasOwn(t.row,'candidates'),false);
+  await t.root.all().find(n=>n.tag==='button'&&n.textContent==='选择素材版本').onclick();
+  const form=t.form(t.root.all().find(n=>n.className==='production-editor'));
+  assert.equal(t.requests[1].url,'/api/production?kind=ASSET');assert.equal(form.field('选择素材').disabled,true);assert.equal(form.button('确认采用此原件').disabled,true);
+  form.field('采用理由').value='explicit old revision';await t.choose(form,'A');await form.button('确认采用此原件').onclick();
+  assert.equal(t.requests.length,2);assert.equal(t.posts.length,0,'loading cannot issue detail or adoption writes');
+  const a2=asset('A','A-v2',2),otherMedia=asset('audio');otherMedia.payload.media_type='audio';const placeholder=asset('placeholder');placeholder.payload.placeholder=true;
+  t.requests[1].resolve({records:[a2,asset('B'),a2,otherMedia,{...asset('not-asset'),kind:'REQUIREMENT'},placeholder]});await flush();
+  assert.deepEqual(form.field('选择素材').children.map(n=>n.value),['','A','B','placeholder'],'same-media inventory is deduplicated without silently removing placeholder capability');
+  assert.equal(form.field('选择素材').disabled,false);assert.equal(form.field('选择素材').value,'');assert.equal(form.button('确认采用此原件').disabled,true);
+  const choosing=t.choose(form,'A');assert.equal(t.requests[2].url,'/api/production?object_id=A');t.resolve(t.requests[2],[a2,asset('A')]);await choosing;
+  form.field('候选记录修订').value='A-v1';form.field('候选记录修订').onchange();form.field('采用文件组成').value='preview';
+  form.field('入点秒（可选）').value='.2';form.field('出点秒（可选）').value='.8';
+  for(const [label,value] of [['裁切左边比例','.1'],['裁切上边比例','.2'],['裁切宽度比例','.5'],['裁切高度比例','.6']])form.field(label).value=value;
+  await form.button('确认采用此原件').onclick();
+  assert.deepEqual(t.postUrls,['/api/production/adopt']);assert.deepEqual(t.posts,[{object_id:'adoption-0',expected_version:0,payload:{format:'production-relation-v1',title:'Input · 采用',blocks:[{id:'adoption',text:'explicit old revision'}],relation_type:'adoption',scope:{object_id:'shot',revision_id:'shot-exact'},slot:'main',asset:{object_id:'A',revision_id:'A-v1'},component_id:'preview',usage:'generation_input',reason:'explicit old revision',range:{start_seconds:.2,end_seconds:.8},crop:{x:.1,y:.2,width:.5,height:.6}}}]);
+  assert.equal(t.context.reloads,1);assert.equal(t.context.state.productionRecords.some(r=>r.kind==='ASSET'),false,'inventory does not change page navigation records');
+});
+
+for(const candidates of [[],[asset('A')]])test(`explicit ${candidates.length}-candidate scope never expands to the global inventory`,()=>{
+  const t=setup({candidates});t.context.state.productionRecords.push(asset('B'));const form=t.open();
+  assert.deepEqual(form.field('选择素材').children.map(n=>n.value),['',...candidates.map(r=>r.object_id)]);assert.equal(t.requests.length,0);assert.equal(form.button('确认采用此原件').disabled,true);
+});
+
+for(const fail of [false,true])test(`cancel/reopen isolates a late ${fail?'failed':'successful'} inventory from the new editor`,{timeout:2000},async()=>{
+  const t=setup({lazy:true}),old=t.open();await old.button('取消').onclick();const next=t.open();next.field('采用理由').value='new editor reason';
+  t.requests[1].resolve({records:[asset('B')]});await flush();
+  if(fail)t.requests[0].reject(Error('closed inventory failure'));else t.requests[0].resolve({records:[asset('A')]});await flush();
+  assert.deepEqual(next.field('选择素材').children.map(n=>n.value),['','B']);assert.equal(next.field('采用理由').value,'new editor reason');assert.deepEqual(t.messages,[]);
+  assert.equal(old.field('选择素材').children.length,1);await old.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
+});
+
+for(const [name,invalidate] of Object.entries({detached:(_t,f)=>f.box.remove(),workspace:t=>{t.context.state.workspace='story.sources'},read:t=>vm.runInContext('++productionReadEpoch',t.context),load:t=>vm.runInContext('++productionLoadEpoch',t.context)}))test(`initial inventory cannot populate or submit after ${name} ownership changes`,{timeout:2000},async()=>{
+  for(const fail of [false,true]){
+    const t=setup({lazy:true}),form=t.open();invalidate(t,form);
+    if(fail)t.requests[0].reject(Error('obsolete inventory failure'));else t.requests[0].resolve({records:[asset('A')]});await flush();
+    assert.equal(form.field('选择素材').children.length,1);assert.equal(form.button('确认采用此原件').disabled,true);assert.deepEqual(t.messages,[]);
+    await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
+  }
+});
+
+for(const response of ['network',null,{},[{kind:'ASSET',payload:null}]])test(`failed or malformed inventory ${JSON.stringify(response)} preserves input without falling back to the page index`,{timeout:2000},async()=>{
+  const t=setup({lazy:true});t.context.state.productionRecords.push(asset('stale-page-asset'));const form=t.open();form.field('采用理由').value='keep this reason';
+  if(response==='network')t.requests[0].reject(Error('inventory unavailable'));else t.requests[0].resolve({records:response});await flush();
+  assert.deepEqual(form.field('选择素材').children.map(n=>n.value),['']);assert.equal(form.field('候选记录修订').children.length,0);assert.equal(form.field('采用文件组成').children.length,0);
+  assert.equal(form.field('采用理由').value,'keep this reason');assert.equal(form.button('确认采用此原件').disabled,true);assert.equal(t.messages.length,1);
+  await form.button('确认采用此原件').onclick();assert.equal(t.posts.length,0);
+  await form.button('取消').onclick();const next=t.open();t.requests[1].resolve({records:[asset('A')]});await flush();
+  assert.deepEqual(next.field('选择素材').children.map(n=>n.value),['','A']);assert.equal(next.field('选择素材').disabled,false);
+});
 
 test('late A response cannot replace B selection or the adopted exact revision', {timeout:2000}, async()=>{
   const t=setup(),form=t.open();form.field('采用理由').value='technical fixture';

@@ -145,6 +145,103 @@ test('8.2/C.2 historical candidate link selects its owning material in the list'
   assert.deepEqual(host.querySelectorAll('[data-material-id]').map(n=>[n.dataset.materialId,n.getAttribute('aria-pressed')]),[['need','true']]);
 });
 
+test('history result summaries explain D3 once while preserving an exact historical open',async()=>{
+  const {host,opened}=await materialListFixture('historical-candidate');
+  const statusGroups=host.all().filter(n=>n.attributes.role==='group'&&n.attributes['aria-label']?.includes('含历史版本'));
+  assert.equal(statusGroups.length,1);
+  const card=host.querySelectorAll('[data-material-id]')[0];
+  assert.match(card.textContent,/有生成结果/);
+  assert.doesNotMatch(card.textContent,/含历史版本|已生成/,'the filter group already states the list-wide range');
+  assert.deepEqual(opened,['historical-candidate']);
+  assert.equal(card.dataset.materialId,'need');
+});
+
+for(const workspace of ['settings.workspace','production.workspace'])test(`scene cards expose each supplied generation scope without rebinding ${workspace} links`,async()=>{
+  const {c,reader}=fixture(),media=workspace==='production.workspace'?'video':'audio';
+  const scene=row('scene','PREPARATION'),shot=row('shot','SHOT_DESIGN',{number:1,duration_frames:120,fps:24});
+  const items=[
+    {object_id:'historical-need',id:'historical-need-r3',title:'Changed current plan',media_type:media,generated:true,generation_scope:'history'},
+    {object_id:'exact-empty',id:'exact-empty-r1',title:'An exact record',media_type:media,generated:false,generation_scope:'exact'},
+    {object_id:'old-projection',id:'old-projection-r1',title:'An older projection',media_type:media,generated:true}
+  ];
+  c.state.workspace=workspace;c.state.breakdownData={episode:'episode'};
+  c.location.href='http://fixture/?workspace='+workspace;
+  c.api=async()=>({scene,shared:[],shots:[{record:shot,context:{requirements:[],materials:items,entities:[],states:[]}}]});
+  c.breakdownShotText=()=>{};c.breakdownSelect=()=>{};vm.runInContext('breakdownEpoch=9',c);
+  const opened=[];c.openUnifiedMaterial=reference=>opened.push(reference);
+  c.state.breakdownVideoSelections={'historical-need-r3':{number:1,candidate:'old-original-r1'}};
+  await c.showBreakdownScene(scene,reader,new Element('nav'),9);
+  const cards=reader.querySelectorAll('[data-material-id]');
+  assert.deepEqual(cards.map(n=>n.dataset.materialId),items.map(i=>i.object_id));
+  assert.match(cards[0].textContent,/有生成结果（含历史版本）/);
+  assert.match(cards[1].textContent,/未生成/);assert.doesNotMatch(cards[1].textContent,/历史/);
+  assert.match(cards[2].textContent,/已生成/);assert.doesNotMatch(cards[2].textContent,/历史/);
+  for(const card of cards)assert.equal(card.dataset.reviewDialogTrigger,'');
+  await cards[0].onclick();await cards[1].onclick();
+  assert.equal(opened[0].revision_id,'historical-need-r3');
+  assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),'old-original-r1');
+  assert.equal(opened[1].revision_id,'exact-empty-r1');assert.equal(opened[1].params,null);
+});
+
+test('unowned demand sees a real older plan result without replacing its exact current reader',()=>{
+  const {c,reader}=fixture(),{need,asset,round}=material();
+  need.payload.scope={object_id:'scene',revision_id:'scene-r1'};
+  const current={...need,id:'need-r2',version:2};
+  const data={record:current,history:[current,need],candidate_records:[],material_versions:{need:[
+    {number:2,model:'plan-v1',plan:current,members:[current],results:[]},round]}};
+  c.state.entityReview=null;c.state.unifiedScope=null;c.state.materialReview=data;
+  const opened=[];c.renderMaterialWorkspace=(_right,detail)=>opened.push(detail.record);
+  c.renderUnifiedCard(reader);
+  const card=reader.querySelectorAll('[data-material-id]')[0];
+  assert.match(card.textContent,/有生成结果（含历史版本）/);
+  assert.equal(card.dataset.materialId,need.object_id);assert.equal(card.getAttribute('aria-pressed'),'true');
+  assert.deepEqual(opened,[current]);assert.equal(data.material_versions.need[0].results.length,0);
+  assert.equal(data.material_versions.need[1].results[0].id,asset.id);
+});
+
+for(const candidateKind of ['placeholder','preview-only','call'])test(`unowned demand does not count ${candidateKind} as an original result`,()=>{
+  const {c,reader}=fixture(),{need,asset}=material();
+  need.payload.scope={object_id:'scene',revision_id:'scene-r1'};
+  const candidate=candidateKind==='call'?row('attempt','CALL',{status:'failed'}):structuredClone(asset);
+  if(candidateKind==='placeholder')candidate.payload.placeholder=true;
+  if(candidateKind==='preview-only')candidate.payload.components=candidate.payload.components.filter(v=>v.role!=='original');
+  const data={record:need,history:[need],candidate_records:[candidate],material_versions:{}};
+  c.state.entityReview=null;c.state.materialReview=data;c.renderMaterialWorkspace=()=>{};
+  c.renderUnifiedCard(reader);
+  const card=reader.querySelectorAll('[data-material-id]')[0];
+  assert.match(card.textContent,/无生成结果（含历史版本）/);assert.doesNotMatch(card.textContent,/有生成结果|已生成/);
+  assert.equal(data.candidate_records[0],candidate,'history remains available despite its not being a real original');
+});
+
+for(const variant of ['original','placeholder','preview-only'])test(`unowned exact ${variant} asset never borrows a result from another historical revision`,()=>{
+  const {c,reader}=fixture(),{asset}=material(),exact=structuredClone(asset);
+  exact.id='exact-'+variant;
+  if(variant==='placeholder')exact.payload.placeholder=true;
+  if(variant==='preview-only')exact.payload.components=exact.payload.components.filter(v=>v.role!=='original');
+  const data={record:exact,history:[exact,asset],candidate_records:[asset],material_versions:{}};
+  c.state.entityReview=null;c.state.materialReview=data;const rendered=[];
+  c.renderMaterialWorkspace=(_right,detail)=>rendered.push(detail.record.id);
+  c.renderUnifiedCard(reader);
+  const card=reader.querySelectorAll('[data-material-id]')[0];
+  assert.match(card.textContent,variant==='original'?/已生成/:/未生成/);
+  assert.doesNotMatch(card.textContent,/历史|有生成结果|无生成结果/);
+  assert.deepEqual(rendered,[exact.id]);assert.equal(data.history[1].id,asset.id);
+});
+
+test('entity state material cards continue to follow the selected model instead of all its historical rounds',()=>{
+  const {c,reader}=fixture(),{need,asset,round}=material();
+  const current={...need,id:'need-r2'},empty={number:2,model:'plan-v1',plan:current,members:[current],results:[]};
+  const data={unifiedCollecting:true,unifiedMaterialId:need.object_id,material_versions:{need:[empty,round]}};
+  c.state.entityReview=data;
+  c.renderUnifiedModels(reader,[{need:current,material_id:need.object_id,round:empty,rounds:[empty,round],candidates:[]}],data);
+  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/未生成/);
+  assert.doesNotMatch(reader.textContent,/历史|有生成结果|无生成结果/);
+  reader.replaceChildren();data.unifiedGroups=[];
+  c.renderUnifiedModels(reader,[{need,material_id:need.object_id,round,rounds:[empty,round],candidates:[{record:asset}]}],data);
+  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/已生成/);
+  assert.equal(data.material_versions.need[0].results.length,0,'viewing the old model cannot populate the current plan');
+});
+
 function entityFilterFixture({exactMaterial=false}={}){
   const f=fixture(),{c,host}=f;
   const a=row('a-entity','ENTITY',{entity_type:'prop'}),b=row('b-entity','ENTITY',{entity_type:'character'});
