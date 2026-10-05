@@ -25,6 +25,71 @@ class MaterialModelTest(unittest.TestCase):
     decide=fixtures.PlanVersionsTest.decide
     generate=fixtures.PlanVersionsTest.generate
 
+    def test_expand_repeated_children_are_independent_at_every_returned_position(self):
+        shared={'parts':[{'labels':['original']}]}
+        value={'left':shared,'right':shared,'rows':[shared,{'nested':shared}]}
+        key=storage.intern(self.store,value);self.store.db.commit()
+        for options in ({},{'cache':{}}):
+            with self.subTest(explicit_cache=bool(options)),p.read_scope(self.store):
+                first=storage.expand(self.store,key,**options)
+                second=storage.expand(self.store,key,**options)
+                positions=[first['left'],first['right'],first['rows'][0],first['rows'][1]['nested']]
+                self.assertEqual(len({id(item) for item in positions}),4)
+                self.assertEqual(len({id(item['parts'][0]['labels']) for item in positions}),4)
+                positions[0]['parts'][0]['labels'].append('local edit')
+                positions[1]['parts'].append({'labels':['another edit']})
+                self.assertEqual(positions[2],shared);self.assertEqual(positions[3],shared)
+                self.assertEqual(second,value)
+                self.assertEqual(storage.expand(self.store,key,**options),value)
+            self.assertFalse(hasattr(self.store,'_production_reads'))
+
+    def test_expand_recipe_and_inline_values_return_independent_mutable_trees(self):
+        import base64,zlib
+        def node(value):
+            body=canonical(value);key=digest(body.encode())
+            self.store.db.execute('INSERT OR IGNORE INTO material_content VALUES (?,?)',(key,body))
+            return key
+        token={'content':'token','encoding':'text','edits':[[0,0,'x']]}
+        pieces=[token,token]
+        cases=[(storage.intern_recipe(self.store,pieces),pieces),
+               (node({'archive_recipe':pieces}),pieces),
+               (node({'archive_recipe_zlib':base64.b64encode(zlib.compress(canonical(pieces).encode())).decode()}),pieces),
+               (node({'value':pieces}),pieces)]
+        self.store.db.commit()
+        for key,expected in cases:
+            with self.subTest(key=key):
+                cache={};first=storage.expand(self.store,key,cache=cache)
+                self.assertEqual(first,expected)
+                self.assertIsNot(first[0],first[1])
+                self.assertIsNot(first[0]['edits'],first[1]['edits'])
+                first[0]['edits'][0].append('local edit')
+                self.assertEqual(first[1],token)
+                self.assertEqual(storage.expand(self.store,key,cache=cache),expected)
+
+    def test_expand_failed_parent_is_not_cached_and_preserves_callers_visiting_set(self):
+        def node(value):
+            body=canonical(value);key=digest(body.encode())
+            self.store.db.execute('INSERT OR IGNORE INTO material_content VALUES (?,?)',(key,body))
+            return key
+        leaf=storage.intern(self.store,{'value':['valid child']})
+        failures=[(node({'array':[leaf,'f'*64]}),'missing or corrupt material content'),
+                  (node({'object':[['same',leaf],['same',leaf]]}),'duplicate material object key'),
+                  (node({'unsupported':leaf}),'invalid material content node')]
+        self.store.db.commit()
+        for key,message in failures:
+            with self.subTest(key=key):
+                cache={};visiting={'caller-parent'}
+                for _ in range(2):
+                    with self.assertRaisesRegex(ValueError,message):storage.expand(self.store,key,visiting,cache)
+                    self.assertNotIn(key,cache)
+                    self.assertEqual(visiting,{'caller-parent'})
+                self.assertEqual(storage.expand(self.store,leaf,visiting,cache),{'value':['valid child']})
+                self.assertEqual(visiting,{'caller-parent'})
+        visiting={leaf}
+        with self.assertRaisesRegex(ValueError,'cyclic material content reference'):
+            storage.expand(self.store,leaf,visiting,{})
+        self.assertEqual(visiting,{leaf})
+
     def test_read_scope_reuses_hydrated_text_with_independent_record_projections(self):
         from unittest.mock import patch
         self.setup_plans()
