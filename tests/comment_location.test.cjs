@@ -3,7 +3,7 @@ const files=['app.js','production.js','material-review.js','entity-review.js'];
 const flush=()=>new Promise(resolve=>setImmediate(resolve));
 // Actual navigation and edit callbacks with controlled HTTP responses. Rendering
 // and scrolling are substitutes here; real gestures remain browser acceptance.
-class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){},remove(){},toggle(){}}}append(...nodes){this.children.push(...nodes)}setAttribute(){}addEventListener(){}all(){return this.children.flatMap(node=>[node,...node.all()])}}
+class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.attributes={};this.classList={add(){},remove(){},toggle(){}}}append(...nodes){this.children.push(...nodes)}setAttribute(k,v){this.attributes[k]=v}addEventListener(){}all(){return this.children.flatMap(node=>[node,...node.all()])}}
 const row=(object,kind,id=object+'-v1',payload={})=>({object_id:object,id,kind,current_revision:id,version:1,payload:{title:object,...payload}});
 function setup(){
  const plan=row('need','REQUIREMENT','shared-plan',{scope:{object_id:'form'}}),oldCall=row('call','CALL','call-old'),newCall=row('call','CALL','call-new');
@@ -118,6 +118,6 @@ test('the actual material workspace and card renderer retain the explicitly loca
  f.ctx.Option=function(text,value){const node=new Element('option');node.textContent=text;node.value=value;return node};
  f.ctx.reviewSurface=host=>host;f.ctx.materialMedia=()=>{};f.ctx.renderActualGeneration=()=>{};const root=new Element('main');f.ctx.renderMaterialWorkspace(root,loaded);
  const card=root.all().find(node=>node.className==='material-card');assert.ok(card);assert.equal(card.dataset.materialKey,'other');
- const selectedRound=card.all().find(node=>node.tag==='select');assert.equal(selectedRound.value,1);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
+ const selectedRound=card.all().find(node=>node.attributes['aria-label']==='素材版本');assert.equal(selectedRound.children.find(node=>node.attributes['aria-pressed']==='true').dataset.choiceId,1);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
  assert.equal(f.ctx.state.materialCommentCard.material_id,'other');assert.equal(f.ctx.state.editing,c.id);assert.equal(loaded.selectedMaterialRounds.need,2);
 });

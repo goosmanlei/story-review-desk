@@ -39,9 +39,9 @@ async function fixture(href=base,{internal=true,settle=true}={}){
     window:{innerHeight:800,addEventListener:(name,fn)=>listeners[name]=fn,scrollBy:value=>{pageY+=value.top;scrolls.push({container:'window',top:pageY,visible:!nodes.get('#story-workspace').hidden})},scrollTo(_x,y){pageY=y}},
     getSelection:()=>({removeAllRanges(){}}),getComputedStyle:()=>({overflowY:internal?'auto':'visible'}),
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
-  vm.createContext(context);vm.runInContext(app,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);
   const framework={workspaces:['story.sources','story.outline','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
-  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}}[url])}};
+  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}}[url])}};
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;globalThis.saves=commentSaves;
     applyFavicon=()=>{};renderWorkspaceNav=()=>{};closePanel=()=>{};openPanel=()=>{};hideSelectionAction=()=>{};watchTextSelection=()=>{};
     chooseScript=()=>{};resolveStructureRevision=()=>null;chooseStructureRevision=()=>{};

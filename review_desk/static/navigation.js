@@ -1,3 +1,11 @@
+function businessCode(row){return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
+function businessTitle(row,title=row?.payload?.title||row?.title||''){const code=businessCode(row),positioned=row?.business_scene_id?String(title).replace(/^\d+-\d+\s*/,reviewPositionLabel('scene',row.business_scene_id)+' · '):title,text=reviewPositionText(positioned);return code&&!text.startsWith(code+' · ')?code+' · '+text:text}
+function renderBusinessCodeCatalog(root){
+  const header=el('header','management-heading');nodeText('h1',null,'编号前缀',header);root.append(header);
+  const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
+  const table=el('table','business-code-table'),head=el('tr');for(const title of ['类型','前缀','示例','唯一性范围'])nodeText('th',null,title,head);table.append(head);
+  for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);
+}
 /* View labels and tabs share the existing workspace/URL routing contract. */
 function reviewPositionLabel(kind,value){
   const prefix=({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',PREPARATION:'S',shot:'SH',SH:'SH',SHOT_DESIGN:'SH'})[kind];
@@ -52,11 +60,11 @@ function navigateWorkspace(id){
     }else switchWorkspace(id);
   }
 }
-function configurationSectionFromRoute(){return new URL(location.href).searchParams.get('config_section')==='SYSTEM'?'SYSTEM':'PROJECT'}
+function configurationSectionFromRoute(){const section=new URL(location.href).searchParams.get('config_section');return ['SYSTEM','CODES'].includes(section)?section:'PROJECT'}
 function selectConfigurationSection(section){
-  const url=new URL(location.href);url.searchParams.set('workspace','project.configuration');url.searchParams.set('config_section',section==='SYSTEM'?'SYSTEM':'PROJECT');
+  const url=new URL(location.href);url.searchParams.set('workspace','project.configuration');url.searchParams.set('config_section',['SYSTEM','CODES'].includes(section)?section:'PROJECT');
   if(url.href!==location.href)history.pushState(null,'',url);
-  state.configSection=configurationSectionFromRoute();showConfigurationSection();renderWorkspaceTabs();
+  state.configSection=configurationSectionFromRoute();renderConfigurations({preserve:true});renderWorkspaceTabs();
 }
 function selectProductionTab(tab){
   if(tab===productionTab())return;
@@ -78,7 +86,7 @@ function workspaceTabItems(){
   if(['story.sources','story.outline','story.script'].includes(workspace))return [
     ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','剧本创作','screenplay-workspace']
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
-  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
+  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['CODES','编号前缀']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
     const options=workspace==='production.workspace'?[['shots','镜头制作'],['history','组合与历史']]:[['breakdown','制作拆解'],['entities','实体管理'],['materials','素材管理']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));

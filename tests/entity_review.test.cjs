@@ -36,8 +36,9 @@ test('switching one version back to current cannot accept another still historic
  assert.equal(ctx.entityReviewHasHistoricalContent(data,oldEntity,form),true);
  assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,oldState),true);
  assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),false);
- data.localVersions={recipe:{id:'old-recipe',current_revision:'new-recipe'}};
- assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),true);
+ data.localVersions={recipe:{kind:'REQUIREMENT',id:'old-recipe',current_revision:'new-recipe'}};
+ assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),false);
+ data.localVersions={state:{kind:'STATE',id:'old',current_revision:'new'}};assert.equal(ctx.entityReviewHasHistoricalContent(data,entity,form),true);
 });
 test('whole-entity content remains constant when selecting a different form or comment target',async()=>{
  const {ctx,data}=setup();await ctx.openEntityReview('person',{record:entity},0,null);

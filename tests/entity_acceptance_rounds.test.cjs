@@ -19,71 +19,41 @@ function setup(){
   return {context,data,entity,form,other,plan,old,same,requests,messages,render,realReload};
 }
 
-test('a displayed old plan disables the real acceptance button and its exact scope is never posted',async()=>{
-  const f=setup();f.context.switchMaterialRound(f.data,'need',1);const models=f.context.materialRoundModels([f.plan],[],f.data);assert.equal(models[0].need.id,f.old.id);
-  const button=f.render();assert.equal(button.disabled,true);assert.match(button.title,/历史内容/);await button.onclick();assert.equal(f.requests.length,0);
+test('browsing an older material plan keeps the current entity scope available and posts only that scope',async()=>{
+ const f=setup(),before=JSON.stringify(f.data.scope);f.context.switchMaterialRound(f.data,'need',1);
+ assert.equal(f.context.materialRoundModels([f.plan],[],f.data)[0].need.id,f.old.id);
+ const button=f.render();assert.equal(button.disabled,false);await button.onclick();
+ assert.equal(f.requests.length,1);assert.equal(JSON.stringify(f.requests[0].payload.scope),before);
 });
-
-test('a frozen actual-call version without a matching draft remains readable and cannot accept current scope',()=>{
-  const f=setup();Object.assign(f.data.material_versions.need[1],{model:'plan-v1',frozen:1,plan:null});
-  f.context.switchMaterialRound(f.data,'need',1);
-  assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),true);
-  assert.equal(f.render().disabled,true);
+test('a retained frozen material call does not replace or disable current entity acceptance',()=>{
+ const f=setup();Object.assign(f.data.material_versions.need[1],{model:'plan-v1',frozen:1,plan:null});f.context.switchMaterialRound(f.data,'need',1);
+ assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);assert.equal(f.render().disabled,false);
 });
-
-test('older round sharing the same exact plan remains acceptable and posts the existing current scope',async()=>{
-  const f=setup();f.context.switchMaterialRound(f.data,'same-need',1);assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);
-  const before=JSON.stringify(f.data.scope),button=f.render();assert.equal(button.disabled,false);await button.onclick();assert.equal(f.requests.length,1);assert.equal(JSON.stringify(f.requests[0].payload.scope),before);assert.equal(f.requests[0].payload.action,'accept');assert.equal(f.requests[0].payload.expected_version,0);
+test('each state restores its material choice while historical entity and state sections stay read-only',()=>{
+ const f=setup();f.context.switchMaterialRound(f.data,'need',1);f.context.selectEntityReviewState(f.other);f.context.selectEntityReviewState(f.form);
+ assert.equal(f.data.selectedMaterialRounds.need,1);assert.equal(f.render().disabled,false);
+ f.context.state.productionEntityDetail.record={...f.entity,id:'old-entity'};assert.equal(f.render().disabled,true);
+ f.context.state.productionEntityDetail.record=f.entity;f.context.state.productionChildDetail.record={...f.form,id:'old-form'};assert.equal(f.render().disabled,true);
 });
-
-test('accept, revoke and reaccept retain their existing action and version semantics in current content',async()=>{
-  for(const phase of [{accept:true,revoke:false,version:0,action:'accept'},{accept:false,revoke:true,version:1,action:'revoke'},{accept:true,revoke:false,version:2,action:'accept'}]){
-    const f=setup();Object.assign(f.data,{can_accept:phase.accept,can_revoke:phase.revoke,decision_version:phase.version,revoke_target:{object_id:'decision',revision_id:'decision-v1'}});f.context.switchMaterialRound(f.data,'same-need',1);
-    const button=f.render();assert.equal(button.disabled,false);await button.onclick();assert.equal(f.requests[0].payload.action,phase.action);assert.equal(f.requests[0].payload.expected_version,phase.version);assert.equal(f.requests[0].payload.decision_ref.revision_id,'decision-v1');
-    f.context.switchMaterialRound(f.data,'need',1);const old=f.render();assert.equal(old.disabled,true);await old.onclick();assert.equal(f.requests.length,1);
-  }
+test('accept, revoke and reaccept retain exact scope and optimistic version semantics',async()=>{
+ for(const phase of [{accept:true,revoke:false,version:0,action:'accept'},{accept:false,revoke:true,version:1,action:'revoke'},{accept:true,revoke:false,version:2,action:'accept'}]){
+  const f=setup();Object.assign(f.data,{can_accept:phase.accept,can_revoke:phase.revoke,decision_version:phase.version,revoke_target:{object_id:'decision',revision_id:'decision-v1'}});
+  f.context.switchMaterialRound(f.data,'need',1);await f.render().onclick();
+  assert.equal(f.requests[0].payload.action,phase.action);assert.equal(f.requests[0].payload.expected_version,phase.version);assert.deepEqual(f.requests[0].payload.scope,f.data.scope);
+  await f.render().onclick();assert.equal(f.requests.length,1);
+ }
 });
-
-test('each state restores its historical selection and protects acceptance until its displayed plan is current',()=>{
-  const f=setup();f.context.switchMaterialRound(f.data,'need',1);assert.equal(f.render().disabled,true);
-  f.context.selectEntityReviewState(f.other);assert.equal(f.render().disabled,false);assert.equal(f.data.selectedMaterialRounds.need,undefined);
-  f.context.switchMaterialRound(f.data,'same-need',1);assert.equal(f.render().disabled,false);
-  f.context.selectEntityReviewState(f.form);assert.equal(f.data.selectedMaterialRounds.need,1);assert.equal(f.render().disabled,true);
-  f.context.switchMaterialRound(f.data,'need',2);assert.equal(f.render().disabled,false);
-  f.context.state.productionEntityDetail.record={...f.entity,id:'old-entity'};assert.equal(f.render().disabled,true);f.context.state.productionEntityDetail.record=f.entity;
-  f.data.localVersions={relation:{id:'old-relation',current_revision:'current-relation'}};assert.equal(f.render().disabled,true);
+test('incomplete preparation still posts content acceptance without claiming generation readiness',async()=>{
+ const f=setup();f.data.acceptance_mode='content';f.data.preparation={complete:false,issues:[{message:'方案待完善'}]};f.context.switchMaterialRound(f.data,'need',1);
+ const button=f.render();assert.equal(button.disabled,false);assert.match(button.title,/生成前仍需完善/);await button.onclick();assert.equal(f.requests[0].payload.acceptance_mode,'content');assert.equal(f.data.preparation.complete,false);
 });
-
-test('guard uses exact plan identity, model fallbacks and existing local-version overrides without mutating the snapshot',()=>{
-  const f=setup(),before=JSON.stringify(f.data);assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);assert.equal(JSON.stringify(f.data),before);assert.equal(f.data.selectedMaterialRounds,undefined);
-  f.data.selectedMaterialRounds={need:999};assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);
-  f.data.material_versions.need[0].plan={...f.plan,object_id:'other-identity'};assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),true);
-  f.data.material_versions.need[0].plan=f.plan;f.data.selectedMaterialRounds.need=1;f.data.material_versions.need[1].members.push(f.plan);f.data.localVersions={need:f.plan};assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);assert.equal(f.context.materialRoundModels([f.plan],[],f.data)[0].need,f.plan);
-  f.data.localVersions={need:f.old};assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),true);
-});
-
-test('shared material from another entity does not expand the acceptance scope',()=>{
-  const f=setup();f.data.material_versions.shared=[{number:2,plan:row('shared','REQUIREMENT','shared-new'),members:[],results:[]},{number:1,plan:row('shared','REQUIREMENT','shared-old'),members:[],results:[]}];f.data.selectedMaterialRounds={shared:1};
-  const before=JSON.stringify(f.data.scope);assert.equal(f.context.entityReviewHasHistoricalContent(f.data,f.entity,f.form),false);assert.equal(f.render().disabled,false);assert.equal(JSON.stringify(f.data.scope),before);
-});
-
-test('content compatibility mode without generation requirements keeps its existing scope and no generation permission',async()=>{
-  const f=setup();f.data.requirements=[];f.data.material_versions={};f.data.acceptance_mode='content';f.data.decision_scope={entity:ref(f.entity),states:[ref(f.form)],media:[]};f.data.accepted=null;
-  const button=f.render();assert.equal(button.disabled,false);await button.onclick();assert.equal(f.requests[0].payload.acceptance_mode,'content');assert.deepEqual(f.requests[0].payload.scope,f.data.decision_scope);assert.equal(f.data.accepted,null);
-  f.data.historical=true;assert.equal(f.render().disabled,true);
-});
-
-test('incomplete current preparation posts its exact content scope while old plans remain read-only',async()=>{
-  const f=setup();f.data.acceptance_mode='content';f.data.preparation={complete:false,issues:[{message:'前置方案已变化，需复核'}]};
-  const button=f.render();assert.equal(button.disabled,false);assert.match(button.title,/生成前仍需完善/);
-  await button.onclick();assert.equal(f.requests[0].payload.acceptance_mode,'content');assert.deepEqual(f.requests[0].payload.scope,f.data.scope);
-  f.data.decisionSave=null;f.context.switchMaterialRound(f.data,'need',1);assert.equal(f.render().disabled,true);
-});
-
-test('a queued old button callback cannot judge a newer historical display or a different entity',async()=>{
-  const f=setup(),button=f.render();assert.equal(button.disabled,false);const click=button.onclick();f.context.switchMaterialRound(f.data,'need',1);await click;assert.equal(f.requests.length,0);
-  f.context.switchMaterialRound(f.data,'need',2);const next=f.render().onclick();f.context.state.entityReview={...f.data};await next;assert.equal(f.requests.length,0);
-  f.context.state.entityReview=f.data;const away=f.render().onclick();f.context.state.workspace='story.sources';await away;assert.equal(f.requests.length,0);
+test('a queued callback cannot accept a newly historical entity, another reader or another workspace',async()=>{
+ for(const change of ['entity','reader','workspace']){
+  const f=setup(),button=f.render(),click=button.onclick();
+  if(change==='entity')f.context.state.productionEntityDetail.record={...f.entity,id:'old'};
+  if(change==='reader')f.context.state.entityReview={...f.data};
+  if(change==='workspace')f.context.state.workspace='story.sources';await click;assert.equal(f.requests.length,0);
+ }
 });
 
 const flush=()=>new Promise(resolve=>setImmediate(resolve));

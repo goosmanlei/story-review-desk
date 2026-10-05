@@ -4,7 +4,7 @@ const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION']
 // An explicitly linked change decision is readable here without adding all
 // judgments to the default history index or moving material reviews to it.
 const productionChangeHistory=r=>r.kind==='JUDGMENT'&&r.payload.change&&(r.payload.change.scope||'target')==='target';
-const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='production.workspace'&&productionChangeHistory(r);
+const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='settings.workspace'&&r.kind==='RELATION'&&r.payload.relation_type==='entity'||workspace==='production.workspace'&&productionChangeHistory(r);
 const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',pending:'待审',passed:'通过',changes_requested:'需修改',rejected:'未通过',accepted:'用户接受',impact_resolved:'影响已处理'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';
@@ -76,7 +76,7 @@ function productionName(ref,referenceTitles=[]){
   if(typeof title==='string'&&title)return reviewPositionText(title);
   const detailRows=[state.productionSelected,...[state.productionDetail,state.productionEntityDetail,state.productionChildDetail].flatMap(detail=>detail?[detail.record,...(detail.history||[])]:[])].filter(Boolean);
   const row=[...(state.productionRecords||[]),...(ref.revision_id?detailRows:[]),...(state.screenplays||[]).flatMap(s=>s.episodes||[]),...(state.screenplays||[])].find(matches);
-  if(row?.payload.title)return reviewPositionText(row.payload.title);
+  if(row?.payload.title)return businessTitle(row);
   const source=(state.sources||[]).find(source=>source.id===ref.object_id&&(!ref.revision_id||source.target_revision_id===ref.revision_id));
   return source?.title?reviewPositionText(source.title):ref.object_id;
 }
@@ -86,7 +86,7 @@ function productionBasisSummary(record){
   return `剧本依据：${label?'版本'+label[1]:title} · 已确认 · ${p.episodes.length} 集`;
 }
 function productionRefLink(parent,ref,label,referenceTitles=[]){
-  if(label)label=reviewPositionText(label);
+  if(label)label=businessTitle(ref,label);
   if(!ref?.object_id||!ref.revision_id)return;
   const basis=state.productionRecords?.find(r=>r.object_id===ref.object_id&&r.kind==='INPUT_LOCK');
   if(basis){nodeText('span','production-ref',basis.id===ref.revision_id?productionBasisSummary(basis):(label||'剧本依据')+' · 历史版本',parent);return}
@@ -273,7 +273,7 @@ async function loadProductionWorkspace({onReadStart}={}){
         const version=workspace==='materials.workspace'?(r.material_generated?'已生成':'未生成'):r.kind==='ASSET'?(Number.isInteger(r.material_version)&&r.material_version>0?'版本 '+r.material_version:''):'修订 '+r.version;
         const title=r.kind==='PREPARATION'?breakdownSceneTitle(r):r.kind==='SHOT_DESIGN'?breakdownShotTitle(r):reviewPositionText(r.payload.title);
         const subtitle=flatFilters?Object.entries(counts).map(([type,n])=>`${productionMediaLabels[type]||type} ${n}`).join(' · ')||'暂无素材需求':[productionLabels[r.payload.entity_type]||position,version].filter(Boolean).join(' · ');
-        const b=reviewSmallCard(entityList,{title,icon:r.payload.entity_type||r.payload.media_type||({PREPARATION:'space',SHOT_DESIGN:'video',ASSEMBLY:'video',DELIVERABLE:'project'})[r.kind]||'document',preview:flatFilters?result.entity_previews?.[r.object_id]:r.payload.components?.find(c=>c.role==='original'&&c.mime?.startsWith('image/')),subtitle},()=>openProductionRecord(r.object_id),selected);b.dataset.objectId=r.object_id;b.classList.toggle('active',selected);
+        const b=reviewSmallCard(entityList,{title:businessTitle(r,title),icon:r.payload.entity_type||r.payload.media_type||({PREPARATION:'space',SHOT_DESIGN:'video',ASSEMBLY:'video',DELIVERABLE:'project'})[r.kind]||'document',preview:flatFilters?result.entity_previews?.[r.object_id]:r.payload.components?.find(c=>c.role==='original'&&c.mime?.startsWith('image/')),subtitle},()=>openProductionRecord(r.object_id),selected);b.dataset.objectId=r.object_id;b.classList.toggle('active',selected);
         if(flatFilters){b.classList.add('entity-small-card');b.dataset.entityType=r.payload.entity_type}
 
       }
@@ -335,12 +335,12 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
   if(state.materialReview&&(state.materialReview.record.object_id!==objectId||revisionId&&revisionId!==state.materialReview.record.id)){url.searchParams.delete('material_round');url.searchParams.delete('material_target');history.replaceState(null,'',url)}
   const preferred=entityId||url.searchParams.get('production_entity')||state.productionEntityId;
   const owner=owners.includes(preferred)?preferred:owners[0]||null;
-  if(state.workspace==='settings.workspace'&&owner&&typeof openEntityReview==='function'&&(detail.record.kind!=='REPRESENTATION'||detail.record.payload.review_model==='entity-review-v1')){
+  if(state.workspace==='settings.workspace'&&owner&&detail.record.kind!=='RELATION'&&typeof openEntityReview==='function'&&(detail.record.kind!=='REPRESENTATION'||detail.record.payload.review_model==='entity-review-v1')){
     await openEntityReview(owner,detail,epoch,revisionId);return;
   }
   state.entityReview=null;state.materialReview=state.workspace==='materials.workspace'&&['ASSET','REQUIREMENT'].includes(detail.record.kind)?detail:null;if(state.materialReview)detail.explicitRevision=!!revisionId;
   let entityDetail=null,childDetail=null;
-  if(state.workspace==='settings.workspace'&&owner){
+  if(state.workspace==='settings.workspace'&&owner&&detail.record.kind!=='RELATION'){
     const read=async record=>record?api('/api/production?'+new URLSearchParams({object_id:record.object_id,revision_id:record.id})):null;
     entityDetail=detail.record.kind==='ENTITY'?detail:await read(byId.get(owner));
     if(detail.record.kind==='ENTITY'){
@@ -390,6 +390,15 @@ function productionMedia(parent,component,review=true){
   if(!component.mime.startsWith('audio/'))link(`下载 ${component.role} · ${component.file.slice(0,12)}…`,url,parent);nodeText('p','production-meta',`${component.mime} · ${component.bytes.toLocaleString()} bytes · SHA-256 ${component.sha256}`,parent);
 }
 function renderProductionReader(){
+  const restore=preserveCardPosition();try{return renderProductionReaderContent()}finally{restore()}
+}
+function preserveCardPosition(){
+  if(typeof window==='undefined')return ()=>{};
+  const selectors=['#production-reader','.review-dialog-body','.unified-card-material','.production-entity-options','.review-choice-buttons','.relation-graph-viewport'];
+  const offsets=selectors.map(selector=>[selector,[...document.querySelectorAll(selector)].map(node=>[node.scrollLeft,node.scrollTop])]),x=window.scrollX,y=window.scrollY;
+  return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
+}
+function renderProductionReaderContent(){
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;root.replaceChildren();
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
   if(typeof isMaterialReview==='function'&&isMaterialReview()){renderUnifiedCard(root);return}
@@ -405,8 +414,9 @@ function renderProductionRecord(root,detail,entityCard=false){
   const r=detail.record,p=r.payload,activate=action=>()=>{focusProductionReview(detail);return action()},referenceTitles=detail.reference_titles||[];
   const review=entityCard?el('details','production-entity-review'):root;
   if(entityCard)nodeText('summary',null,'实体版本与评论',review);
-  nodeText('small','production-pill',entityCard?'实体基础信息 · '+productionLabels[p.entity_type]:productionKinds[r.kind],root);nodeText('h2',null,reviewPositionText(p.title),root);
+  nodeText('small','production-pill',entityCard?'实体基础信息 · '+productionLabels[p.entity_type]:p.relation_type==='entity'?'实体关系':productionKinds[r.kind],root);nodeText('h2',null,businessTitle(r,p.title),root);
   const bar=el('div','production-toolbar'),versions=el('select');versions.setAttribute('aria-label',entityCard?'选择实体版本':'选择精确版本');for(const v of detail.history){const option=new Option(`${['ASSET','REQUIREMENT','CALL'].includes(r.kind)?'记录修订':'版本'} ${v.version}${v.id===r.current_revision?' · 当前':''}`,v.id);option.title=v.created_at;versions.append(option)}versions.value=r.id;versions.onchange=()=>openProductionRecord(r.object_id,versions.value).catch(e=>toast(e.message));bar.append(versions);
+  if(p.relation_type==='entity'){versions.remove();nodeText('small','production-meta',`记录修订 ${r.version}${p.explanation_removed?' · 旧说明已清理':''}`,bar)}
   productionButton(bar,'整体意见',activate(()=>startDraft({type:'global'})));productionButton(bar,'查看评论',activate(openPanel));productionButton(bar,'查看所选修订的影响',async()=>{const data=await api('/api/production/impact?revision_id='+r.id);const section=el('section');nodeText('h3',null,`受影响的当前引用 ${data.affected.length}`,section);for(const use of data.affected)productionRefLink(section,use,`${productionKinds[use.kind]||use.kind} · ${use.title}`);if(!data.affected.length)nodeText('p',null,'没有查到当前下游引用。',section);root.append(section);section.scrollIntoView({block:'center'})});review.append(bar);if(entityCard)root.append(review);
   const blocks=reviewSurface(el('div'));blocks.dataset.productionBlocks=r.id;if(state.productionSelected?.id===r.id)blocks.id='production-blocks';blocks.onpointerdown=()=>focusProductionReview(detail);blocks.onfocusin=()=>focusProductionReview(detail);for(const b of p.blocks){const para=nodeText('p',null,b.text,blocks);para.dataset.blockId=b.id}root.append(blocks);
   if(productionCompleteState(r)){

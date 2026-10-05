@@ -80,9 +80,19 @@ def export(store, export_dir):
     archive_files={}
     store.db.execute('SAVEPOINT export_snapshot')
     try:
+        from .business_codes import allocate_comments
+        allocate_comments(store)
         materials = store.sources()
         comments = {"comments": store.comments(), "events": store.events()}
         framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
+        from . import business_codes
+        from .relation_explanations import dump as dump_redactions
+        framework["relation_redacted_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM relation_redacted_comments ORDER BY comment_id")]
+        framework["relation_explanation_redactions"] = dump_redactions(store)
+        framework["relation_explanation_latest_only"] = bool(store.db.execute("SELECT latest_only FROM relation_explanation_policy WHERE id=1 AND latest_only=1").fetchone())
+        framework["business_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM business_comments ORDER BY number")]
+        framework["business_codes"] = business_codes.dump(store)
+        framework["business_candidates"] = [dict(row) for row in store.db.execute("SELECT * FROM business_candidates ORDER BY material_id,version,number")]
         from .material_versions import dump
         framework.update(dump(store))
         from .material_plans import dump as dump_plans
@@ -148,7 +158,7 @@ def export(store, export_dir):
     hashes = {name: digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
-    manifest = {"schema_version": 6 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -164,7 +174,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6):
+    if schema not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -191,6 +201,8 @@ def restore(store, export_dir):
         from .material_plans import TABLES as PLAN_TABLES
         if any(name not in framework for name in PLAN_TABLES):
             raise ValueError('material plan tables missing from schema 5 export')
+    if schema >= 7 and not {'business_codes','business_candidates','business_comments','relation_explanation_redactions','relation_redacted_comments','relation_explanation_latest_only'} <= set(framework):
+        raise ValueError('numbering and explanation policy missing from schema 7 export')
     configurations = json.loads((target / "configurations.json").read_text()) if schema >= 2 else None
     if len(materials) != manifest["sources"] or len(comments["comments"]) != manifest["comments"] or len(comments["events"]) != manifest["events"]:
         raise ValueError("export count mismatch")
@@ -243,12 +255,17 @@ def restore(store, export_dir):
             for obj in objects.values():
                 if obj["current_revision"] not in revisions or revisions[obj["current_revision"]]["object_id"] != obj["id"]:
                     raise ValueError("invalid current revision")
+            redactions={r["revision_id"]:r for r in framework.get("relation_explanation_redactions",[])}
+            if len(redactions)!=len(framework.get("relation_explanation_redactions",[])) or not set(redactions)<=revisions.keys():raise ValueError("invalid redaction locators")
             for revision in revisions.values():
                 if revision["object_id"] not in objects:
                     raise ValueError("orphan revision")
                 payload = json.loads(revision["payload"])
                 if digest(canonical({"object_id": revision["object_id"], "version": revision["version"], "payload": payload}).encode()) != revision["id"]:
-                    raise ValueError("revision checksum mismatch")
+                    if revision["id"] not in redactions:raise ValueError("revision checksum mismatch")
+                    from .relation_explanations import verify_row
+                    if objects[revision["object_id"]]["current_revision"]==revision["id"]:raise ValueError("current explanation cannot be redacted")
+                    verify_row(revision,redactions[revision["id"]])
                 if objects[revision["object_id"]]["kind"] == "SOURCE" and payload.get("source_revision") != digest(canonical(test.source(revision["object_id"])).encode()):
                     raise ValueError("source revision mismatch")
                 if revision["object_id"] == "story-structure":
@@ -344,11 +361,22 @@ def restore(store, export_dir):
                 with read_scope(store):
                     for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
                         validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
+            for redaction in framework.get("relation_explanation_redactions",[]) if framework else []:
+                store.db.execute("INSERT INTO relation_explanation_redactions VALUES (?,?,?,?)",tuple(redaction[k] for k in ("revision_id","object_id","payload_sha256","facts_sha256")))
+            for comment_locator in framework.get("relation_redacted_comments",[]) if framework else []:
+                store.db.execute("INSERT INTO relation_redacted_comments VALUES (?,?,?,?)",tuple(comment_locator[k] for k in ("comment_id","object_id","revision_id","anchor_sha256")))
+            if framework and framework.get("relation_explanation_latest_only"):
+                store.db.execute("INSERT OR REPLACE INTO relation_explanation_policy VALUES (1,1)")
+            from .business_codes import restore as restore_codes
+            restore_codes(store,framework.get("business_codes",[]) if framework else [],framework.get("business_candidates",[]) if framework else [],framework.get("business_comments",[]) if framework else [])
             for c in restored_comments:
-                store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
+                from .relation_explanations import retained_comment
+                if not retained_comment(store,c):store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
             for e in comments["events"]:
                 store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))
+            from .business_codes import allocate_comments
+            allocate_comments(store)
             if schema >= 4:
                 from .material_versions import restore as restore_rounds
                 restore_rounds(store, framework)

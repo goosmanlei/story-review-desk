@@ -226,7 +226,7 @@ class CommentSourceReuseTest(unittest.TestCase):
             self.assertEqual([len(rows) for rows in results], [3, 2, 2, 0])
             self.assertEqual(results[1], results[2])
             self.assertTrue(all(row["anchor_state"]["valid"] for rows in results for row in rows))
-            self.assertEqual([{k: v for k, v in row.items() if k != "anchor_state"} for row in results[0]], before[0])
+            self.assertEqual([{k: v for k, v in row.items() if k not in ("anchor_state","business_code")} for row in results[0]], before[0])
             self.assertEqual((server.store.comments(), server.store.events(), server.store.revisions()), before)
 
 

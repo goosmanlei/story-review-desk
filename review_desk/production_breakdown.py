@@ -50,7 +50,8 @@ def index(store, view, object_id=None):
     if object_id and not any(r['object_id']==object_id for r in values):
         selected=p.record(store,object_id)
         allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'} if view=='settings' else {'SHOT_DESIGN','REQUIREMENT','ASSET','CALL','JUDGMENT'}
-        if selected['kind'] in allowed:values.append(selected)
+        if selected['kind'] in allowed or (view=='settings' and selected['kind']=='RELATION' and selected['payload'].get('relation_type')=='entity'):
+            values.append(selected)
     result={'records':values,'material_assets':{}}
     if view=='settings':
         from .ui_projection import entity_summaries, material_entries

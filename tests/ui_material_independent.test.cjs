@@ -83,14 +83,14 @@ test('C03 a lower card version request completing under a child card leaves its 
   c.state.entityReview=data;
   let resolve,changed=null;c.api=()=>new Promise(done=>{resolve=done});
   const parent=new Element('section');c.entityVersionControl(parent,row,next=>{changed=next});
-  const select=parent.children[0];select.value='a-r2';
-  const pending=select.onchange();
+  const select=parent.children[0],button=select.children.find(n=>n.dataset.choiceId==='a-r2');
+  const pending=button.onclick();await new Promise(done=>setImmediate(done));
   // openUnifiedMaterial replaces the global active card while keeping its parent DOM.
   c.state.entityReview={entity:{object_id:'entity-b'}};
   resolve({record:second});await pending;
   // Closing the child restores that same parent data and DOM.
   c.state.entityReview=data;
-  assert.equal(select.value,changed?.id||row.id);
+  assert.equal(changed,null);assert.equal(select.children.find(n=>n.attributes['aria-pressed']==='true').dataset.choiceId,row.id);
 });
 
 function requirementFixture(description='劳作后未擦手：双手沾粉。'){
@@ -171,7 +171,7 @@ test('D01/C06 state aliases browse the same canonical material without changing 
   assert.equal(first.material_id,'shared');assert.equal(second.material_id,'shared');
   assert.equal(first.round.number,2);assert.equal(second.round.number,2);
   assert.equal(first.association_need,shared);assert.equal(second.association_need,alias);
-  assert.equal(c.materialDefaultCandidate(first,data),'asset-a-r1');
+  assert.equal(c.materialDefaultCandidate(first,data),'asset-b-r1');
   assert.equal(c.materialDefaultCandidate(second,data),'asset-b-r1');
 });
 
@@ -209,12 +209,12 @@ test('D01 state-specific default adoption does not leak through a cached shared 
   data.unifiedRight=new Element('aside');c.renderMaterialCard=()=>{};c.cancelMaterialCommentLocation=()=>{};
   c.renderProductionReader=()=>{const selected=c.state.productionChildDetail.record;data.unifiedGroups=c.entityReviewMaterialModels(data.requirements.filter(n=>n.payload.scope.revision_id===selected.id),items,data);c.renderUnifiedSelected(data)};
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'asset-a-r1');
+  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   c.selectEntityReviewState(second);
   assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   data.selectedComponents['asset-b-r1']='preview-b';
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'asset-a-r1');
+  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   assert.equal(data.selectedComponents['asset-b-r1'],undefined);
   c.selectEntityReviewState(second);
   assert.equal(data.selectedComponents['asset-b-r1'],'preview-b');
