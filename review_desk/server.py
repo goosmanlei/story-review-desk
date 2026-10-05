@@ -203,7 +203,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/api/comments":
             comments = store.comments(query.get("source_id", [None])[0], query.get("target_object_id", [None])[0], query.get("target_revision_id", [None])[0])
-            return self._json([{**comment, "anchor_state": store.anchor_state(comment["target_object_id"], comment["target_revision_id"], comment["anchor"])} for comment in comments])
+            return self._json(store.comment_anchor_states(comments))
         if path == "/api/comments/context":
             return self._json(store.context())
         if path == "/api/screenplays":
