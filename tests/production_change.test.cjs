@@ -183,6 +183,71 @@ test('saved judgment and failed actual list refresh show both saved feedback and
 });
 
 const decisionRecord=(version=3,action='keep',id='existing-decision')=>({object_id:id,id:id+'-r'+version,kind:'JUDGMENT',version,payload:{format:'production-judgment-v1',title:'upstream · 变更复核',blocks:[{id:'decision',text:'Existing explicit reason'}],target:plain(change.target),verdict:'impact_resolved',actor:'Original recorded actor',reason:'Existing explicit reason',change:{old:{object_id:change.object_id,revision_id:change.used_revision},new:{object_id:change.object_id,revision_id:change.current_revision},action}}});
+function historyRouteFixture(href='http://fixture/?workspace=production.workspace&production_tab=history'){
+ const f=fixture(),c=f.context,old=decisionRecord(1,'keep'),latest=decisionRecord(2,'rework'),originalApi=c.api;
+ const stack=[href],positions=[],reads=[],switches=[];let cursor=0;
+ c.location.href=href;c.state.workspace=new URL(href).searchParams.get('workspace');
+ c.history={replaceState(_s,_t,url){c.location.href=stack[cursor]=String(url)},pushState(_s,_t,url){stack.splice(++cursor);stack.push(String(url));c.location.href=String(url)}};
+ c.rememberWorkspacePosition=()=>positions.push({url:c.location.href,scroll:c.$('#production-reader')?.scrollTop});
+ c.rememberWorkspaceRoute=()=>{};
+ c.productionTab=()=>new URL(c.location.href).searchParams.get('production_tab')||'history';c.productionTabs=()=>{};
+ c.api=async(url,options)=>{
+  reads.push(url);const params=new URL(url,'http://fixture').searchParams;
+  if(url.startsWith('/api/production/index?'))return {records:[...f.records,...(params.get('object_id')===latest.object_id?[latest]:[])]};
+  if(url.startsWith('/api/production?')&&params.get('object_id')===latest.object_id)return {record:params.get('revision_id')===old.id?old:latest,history:[latest,old],uses:[]};
+  return originalApi(url,options);
+ };
+ c.switchWorkspace=(workspace,updateUrl)=>{switches.push({workspace,updateUrl});c.state.workspace=workspace;return c.loadProductionWorkspace()};
+ const pop=async direction=>{cursor+=direction;c.location.href=stack[cursor];c.state.workspace=new URL(c.location.href).searchParams.get('workspace');await c.loadProductionWorkspace()};
+ return {...f,old,latest,stack,positions,routeReads:reads,switches,pop};
+}
+
+test('the actual change-history button stays in production history and preserves the exact source entry',async()=>{
+ const f=historyRouteFixture();await f.context.loadProductionWorkspace();
+ const sourceUrl=f.context.location.href,sourceId=f.context.state.productionSelected.id;
+ f.context.$('#production-reader').scrollTop=375;
+ const readiness=ready('episode-A');readiness.requirements[0].change_reviews=[{...plain(change),decision:f.latest}];
+ const rendering=f.context.renderProductionReadiness(f.host,f.episodes[0],{isCurrent:()=>true});await flush();f.requests.at(-1).resolve(readiness);await rendering;
+ await f.button('查看处理历史').onclick();
+ assert.equal(f.context.state.workspace,'production.workspace');assert.equal(f.context.state.productionSelected.id,f.latest.id);
+ assert.deepEqual(f.switches,[]);assert.equal(f.stack.length,2);assert.equal(f.stack[0],sourceUrl);
+ assert.deepEqual(f.positions,[{url:sourceUrl,scroll:375}]);
+ const route=new URL(f.context.location.href);assert.equal(route.searchParams.get('production_tab'),'history');assert.equal(route.searchParams.get('production_revision'),f.latest.id);
+ await f.context.openProductionRecord(f.old.object_id,f.old.id);assert.equal(f.stack.length,2);assert.equal(f.context.state.productionSelected.id,f.old.id);
+ const exactOldUrl=f.context.location.href;await f.pop(-1);assert.equal(f.context.state.productionSelected.id,sourceId);assert.equal(f.context.location.href,sourceUrl);
+ await f.pop(1);assert.equal(f.context.state.productionSelected.id,f.old.id);assert.equal(f.context.location.href,exactOldUrl);assert.equal(f.stack.length,2);
+ const refreshed=historyRouteFixture(exactOldUrl);await refreshed.context.loadProductionWorkspace();assert.equal(refreshed.context.state.productionSelected.id,f.old.id);
+ assert.ok(refreshed.routeReads.some(url=>url.includes('index?')&&url.includes('object_id='+f.old.object_id)));
+ assert.ok(refreshed.routeReads.some(url=>url.includes('revision_id='+f.old.id)));assert.equal(refreshed.stack.length,1);
+ assert.ok(!refreshed.byLabel('记录类型').children.some(option=>option.value==='JUDGMENT'),'explicit history does not expand the default list kinds');
+});
+
+test('ordinary change history can leave shot mode without overwriting the source route',async()=>{
+ const f=historyRouteFixture();await f.context.loadProductionWorkspace();
+ f.context.history.replaceState(null,'','http://fixture/?workspace=production.workspace&production_tab=shots&breakdown_scene=scene-A');
+ const source=f.context.location.href;await f.context.openProductionRecord(f.latest.object_id,f.latest.id,true);await flush();
+ assert.deepEqual(f.switches,[{workspace:'production.workspace',updateUrl:false}]);assert.equal(f.stack[0],source);
+ assert.equal(f.context.state.productionSelected.id,f.latest.id);assert.equal(new URL(f.context.location.href).searchParams.get('production_tab'),'history');
+});
+
+test('material judgments and title-only decisions retain their established workspace ownership',async()=>{
+ const f=historyRouteFixture();await f.context.loadProductionWorkspace();
+ for(const row of [{...f.latest,payload:{...f.latest.payload,change:null}},{...f.latest,payload:{...f.latest.payload,change:{...f.latest.payload.change,scope:'state_title_only'}}}]){
+  f.context.api=async()=>({record:row,history:[row],uses:[]});const calls=[];f.context.switchWorkspace=(workspace,updateUrl)=>calls.push({workspace,updateUrl});
+  f.context.state.workspace='production.workspace';await f.context.openProductionRecord(row.object_id,row.id,true);
+  assert.deepEqual(calls,[{workspace:'materials.workspace',updateUrl:false}]);
+ }
+ f.context.state.workspace='materials.workspace';f.context.location.href='http://fixture/?workspace=materials.workspace';f.context.api=async()=>({record:f.latest,history:[f.latest],uses:[]});
+ f.context.switchWorkspace=()=>{throw Error('material judgments must not be moved to production history')};
+ await f.context.openProductionRecord(f.latest.object_id,f.latest.id,true);assert.equal(f.context.state.productionSelected.id,f.latest.id);assert.equal(f.context.state.workspace,'materials.workspace');
+});
+
+test('a late change-history read cannot add a route after leaving its originating workspace',async()=>{
+ const f=historyRouteFixture();await f.context.loadProductionWorkspace();const source=f.context.location.href;
+ let release;f.context.api=()=>new Promise(resolve=>{release=resolve});
+ const pending=f.context.openProductionRecord(f.latest.object_id,f.latest.id,true);f.context.state.workspace='story.sources';release({record:f.latest});await pending;
+ assert.equal(f.context.location.href,source);assert.equal(f.stack.length,1);assert.deepEqual(f.positions,[]);assert.deepEqual(f.switches,[]);
+});
 function editDecision(f,record=decisionRecord()){
  f.context.showProductionChange(f.host,{...plain(change),decision:record});return f.form(f.host.children.at(-1));
 }

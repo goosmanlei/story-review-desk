@@ -8,7 +8,7 @@ function setup(records,api){
   const context={state:{workspace:'settings.workspace',productionRecords:records},URL,URLSearchParams,
     location:{href:'http://localhost/?workspace=settings.workspace'},document:{querySelectorAll:()=>[]},
     api,isProduction:()=>true,renderComments:()=>{}};
-  context.history={replaceState:(_state,_title,url)=>{context.location.href=String(url)}};
+  context.history={replaceState:(_state,_title,url)=>{context.location.href=String(url)},pushState:(_state,_title,url)=>{context.location.href=String(url)}};
   vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);
   context.renderProductionReader=()=>{};
   return context;
