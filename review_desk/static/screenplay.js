@@ -50,8 +50,9 @@ const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id;
 function rememberScriptDraft(){
   const episode=scriptEpisode();
   if(!episode||!state.anchor)return;
+  if(typeof markActiveCommentDraft==='function')markActiveCommentDraft();
   try{localStorage.setItem(scriptDraftMetaKey(episode),JSON.stringify({anchor:state.anchor,editing:state.editing}))}
-  catch{toast('本机草稿定位信息保存失败。当前仍可编辑，刷新后可能无法恢复原位置。')}
+  catch{if(typeof rememberCommentDraftFailure==='function')rememberCommentDraftFailure();toast('本机草稿定位信息保存失败。当前仍可编辑，刷新后可能无法恢复原位置。')}
 }
 function forgetScriptDraft(){
   const episode=scriptEpisode();if(!episode)return;
@@ -60,6 +61,8 @@ function forgetScriptDraft(){
 }
 function restoreScriptDraft(){
   const episode=scriptEpisode();if(!episode||state.anchor)return;
+  const fallback=typeof fallbackCommentDraftMeta==='function'?fallbackCommentDraftMeta():null;
+  if(fallback){state.anchor=fallback.anchor;state.editing=fallback.editing||null;state.selected=fallback.selected||null;return}
   let raw,saved;
   try{raw=localStorage.getItem(scriptDraftMetaKey(episode))}
   catch{toast('本机草稿定位信息读取失败，本集正文仍可阅读。');return}
