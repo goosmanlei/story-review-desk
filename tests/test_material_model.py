@@ -25,6 +25,72 @@ class MaterialModelTest(unittest.TestCase):
     decide=fixtures.PlanVersionsTest.decide
     generate=fixtures.PlanVersionsTest.generate
 
+    def test_read_scope_reuses_hydrated_text_with_independent_record_projections(self):
+        from unittest.mock import patch
+        self.setup_plans()
+        original=p.record(self.store,'need-full-overall')
+        raw=self.store.db.execute('SELECT payload AS stored_payload FROM revisions WHERE id=?',(original['id'],)).fetchone()[0]
+        def read():
+            return self.store.db.execute("SELECT ? AS payload,'REQUIREMENT' AS kind",(raw,)).fetchone()
+        with patch.object(storage,'hydrate',wraps=storage.hydrate) as hydrated:
+            with p.read_scope(self.store):
+                first=p.record_view(read());second=p.record_view(read())
+                self.assertEqual(hydrated.call_count,1)
+                self.assertEqual(first['payload'],original['payload'])
+                first['payload']['generation']['prompt']='temporary projection annotation'
+                self.assertEqual(second['payload'],original['payload'])
+                self.assertEqual(p.record_view(read())['payload'],original['payload'])
+            self.assertFalse(hasattr(self.store,'_production_reads'))
+            self.assertFalse(self.store.db.in_transaction)
+            with p.read_scope(self.store):read()
+            self.assertEqual(hydrated.call_count,2)
+            read();read()
+            self.assertEqual(hydrated.call_count,4)
+
+    def test_read_scope_keeps_envelopes_original_layouts_and_custom_resolvers_distinct(self):
+        self.setup_plans()
+        payload=p.record(self.store,'need-full-overall')['payload']
+        renamed={**payload,'title':'different title'}
+        relocated={**payload,'scope':{'object_id':'different-scope','revision_id':'different-revision'}}
+        layout=json.dumps(payload,ensure_ascii=True,indent=3)+'\r\n'
+        examples=[(storage.encode(self.store,value),canonical(value)) for value in (payload,renamed,relocated)]
+        examples.append((storage.encode(self.store,payload,layout),layout))
+        self.store.db.commit()
+        fields={key:value for key,value in payload.items() if key in storage.FIELDS}
+        with p.read_scope(self.store):
+            for raw,expected in [*examples,*reversed(examples)]:
+                self.assertEqual(self.store.db.execute('SELECT ? AS payload',(raw,)).fetchone()[0],expected)
+            # A direct custom resolver must not inherit the row factory's memo.
+            resolved=storage.hydrate(self.store,examples[0][0],resolve=lambda key:{**fields,'purpose':'custom resolution'})
+            self.assertEqual(json.loads(resolved)['purpose'],'custom resolution')
+            self.assertEqual(self.store.db.execute('SELECT ? AS payload',(examples[0][0],)).fetchone()[0],examples[0][1])
+
+    def test_failed_hydration_is_not_cached_and_scope_cleanup_allows_retry(self):
+        from unittest.mock import patch
+        self.setup_plans()
+        payload=p.record(self.store,'need-full-overall')['payload']
+        raw=storage.encode(self.store,payload);key=json.loads(raw)[storage.MARKER]
+        correct=self.store.db.execute('SELECT body FROM material_content WHERE id=?',(key,)).fetchone()[0]
+        # Inject physical corruption only in this disposable fixture database.
+        with self.store.db:
+            self.store.db.execute('DROP TRIGGER material_content_immutable')
+            self.store.db.execute('UPDATE material_content SET body=? WHERE id=?',('{"value":"corrupt"}',key))
+        missing=canonical({'format':'production-requirement-v1',storage.MARKER:'f'*64})
+        for invalid in (missing,raw):
+            with self.subTest(raw=invalid[:80]):
+                with patch.object(storage,'hydrate',wraps=storage.hydrate) as hydrated:
+                    with self.assertRaisesRegex(ValueError,'missing or corrupt material content'):
+                        with p.read_scope(self.store):
+                            with self.assertRaisesRegex(ValueError,'missing or corrupt material content'):
+                                self.store.db.execute('SELECT ? AS payload',(invalid,)).fetchone()
+                            self.store.db.execute('SELECT ? AS payload',(invalid,)).fetchone()
+                    self.assertEqual(hydrated.call_count,2)
+                self.assertFalse(hasattr(self.store,'_production_reads'))
+                self.assertFalse(self.store.db.in_transaction)
+        with self.store.db:self.store.db.execute('UPDATE material_content SET body=? WHERE id=?',(correct,key))
+        with p.read_scope(self.store):
+            self.assertEqual(json.loads(self.store.db.execute('SELECT ? AS payload',(raw,)).fetchone()[0]),payload)
+
     def test_migration_defer_archive_and_rollback_preserve_unrelated_comment(self):
         self.setup_plans();self.generate()
         target=self.root/'production/requests/original.json';target.parent.mkdir(parents=True)
