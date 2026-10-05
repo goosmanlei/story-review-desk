@@ -5,7 +5,6 @@ relationship fields remain ordinary JSON. SQLite rows hydrate payload columns at
 our Store boundary, so all consumers (including comments) see exact old records.
 """
 import base64
-import copy
 import json
 import sqlite3
 import zlib
@@ -116,7 +115,21 @@ def expand(store, key, visiting=None, cache=None):
     if cache is None:
         scope=getattr(store,'_production_reads',None)
         cache=scope.setdefault('material_content',{}) if scope is not None else {}
-    if key in cache:return copy.deepcopy(cache[key])
+    return _clone_json_tree(_expand_cached(store,key,visiting,cache))
+
+
+def _clone_json_tree(value):
+    # Copy each occurrence, not each identity. deepcopy's memo would preserve
+    # aliases when two positions use the same cached child node.
+    if isinstance(value,dict):return {key:_clone_json_tree(item) for key,item in value.items()}
+    if isinstance(value,list):return [_clone_json_tree(item) for item in value]
+    return value
+
+
+def _expand_cached(store,key,visiting,cache):
+    # Internal nodes are shared only while constructing immutable-by-contract
+    # content. Never expose or mutate them; expand returns an independent tree.
+    if key in cache:return cache[key]
     visiting = set() if visiting is None else visiting
     if key in visiting:
         raise ValueError('cyclic material content reference')
@@ -128,21 +141,21 @@ def expand(store, key, visiting=None, cache=None):
         if set(value) == {'object'}:
             pairs=value['object']
             if len({p[0] for p in pairs})!=len(pairs):raise ValueError('duplicate material object key')
-            result={k: expand(store, v, visiting, cache) for k, v in pairs}
+            result={k: _expand_cached(store, v, visiting, cache) for k, v in pairs}
             cache[key]=result
-            return copy.deepcopy(result)
+            return result
         if set(value) == {'array'}:
-            result=[expand(store, v, visiting, cache) for v in value['array']]
+            result=[_expand_cached(store, v, visiting, cache) for v in value['array']]
             cache[key]=result
-            return copy.deepcopy(result)
+            return result
         if set(value) == {'archive_recipe_zlib'}:
             packed=json.loads(zlib.decompress(base64.b64decode(value['archive_recipe_zlib'],validate=True)))
             result=[packed['tokens'][i] for i in packed['order']] if isinstance(packed,dict) else packed
             cache[key]=result
-            return copy.deepcopy(result)
+            return result
         if set(value) == {'archive_recipe'}:
             cache[key]=value['archive_recipe']
-            return copy.deepcopy(value['archive_recipe'])
+            return value['archive_recipe']
         if set(value) == {'value'}:
             cache[key]=value['value']
             return value['value']
