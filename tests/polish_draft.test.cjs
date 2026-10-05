@@ -19,6 +19,45 @@ function fixture(){
 }
 function failStorage(f){f.ctx.localStorage.setItem=()=>{throw Error('quota exceeded')}}
 function edit(f,value){f.input().value=value;try{f.input().listeners.input()}catch{}}
+for(const failure of ['set','get'])test(`${failure} failure cannot replace the live draft or its selection during comment repaint`,()=>{
+ const f=fixture();if(failure==='set')failStorage(f);edit(f,'  only live opinion\n');f.input().setSelectionRange(3,9,'backward');
+ if(failure==='get')f.ctx.localStorage.getItem=()=>{throw Error('read denied')};
+ assert.doesNotThrow(()=>f.ctx.renderComments());assert.equal(f.input().value,'  only live opinion\n');
+ assert.deepEqual([f.input().selectionStart,f.input().selectionEnd,f.input().selectionDirection],[3,9,'backward']);assert.equal(f.requests.length,0);
+});
+for(const failedKey of ['body','meta'])test(`${failedKey} write failure restores the exact source draft after leaving and returning`,()=>{
+ const f=fixture(),original={...f.ctx.state.current},set=f.ctx.localStorage.setItem;
+ f.ctx.localStorage.setItem=(key,value)=>{if(failedKey==='body'?key===f.key:key.startsWith('review-story-editor:'))throw Error('quota');set(key,value)};
+ edit(f,'only original source input');f.ctx.rememberStoryDraft();f.ctx.state.current={id:'other',target_revision_id:'other-rev'};f.ctx.state.anchor=null;f.ctx.restoreStoryDraft();f.ctx.renderComments();assert.equal(f.input(),null);
+ f.ctx.state.current=original;f.ctx.restoreStoryDraft();f.ctx.renderComments();assert.equal(f.input().value,'only original source input');assert.equal(f.requests.length,0);
+});
+test('a later successful input supersedes the failed-write fallback before leaving',()=>{
+ const f=fixture(),set=f.ctx.localStorage.setItem,original={...f.ctx.state.current};failStorage(f);edit(f,'failed old');
+ f.ctx.localStorage.setItem=set;edit(f,'durable newer');f.ctx.rememberStoryDraft();f.ctx.state.current={id:'B',target_revision_id:'B-rev'};f.ctx.state.anchor=null;f.ctx.renderComments();
+ f.ctx.state.current=original;f.ctx.restoreStoryDraft();f.ctx.renderComments();assert.equal(f.input().value,'durable newer');assert.equal(f.storage.get(f.key),'durable newer');
+});
+for(const cancel of [false,true])test(`an older failed anchor cannot reclaim a newer ${cancel?'cancelled':'active'} draft on return`,()=>{
+ const f=fixture(),set=f.ctx.localStorage.setItem,original={...f.ctx.state.current};failStorage(f);edit(f,'older anchor');f.ctx.rememberStoryDraft();
+ f.ctx.localStorage.setItem=set;f.ctx.state.anchor={type:'global'};f.ctx.rememberStoryDraft();f.ctx.renderComments();edit(f,'newer anchor');
+ if(cancel){f.ctx.renderDocument=()=>{};f.ctx.abandonDraft('cancelled')}
+ f.ctx.state.current={id:'B',target_revision_id:'B-rev'};f.ctx.state.anchor=null;f.ctx.renderComments();
+ f.ctx.state.current=original;f.ctx.restoreStoryDraft();f.ctx.renderComments();
+ if(cancel)assert.equal(f.input(),null);else{assert.equal(f.ctx.state.anchor.type,'global');assert.equal(f.input().value,'newer anchor')}
+});
+test('failed-write source fallback never follows the same legacy key into another exact revision',()=>{
+ const f=fixture(),original={...f.ctx.state.current};failStorage(f);edit(f,'unique old revision');f.ctx.rememberStoryDraft();
+ f.ctx.state.current={...original,target_revision_id:'another-revision'};f.ctx.state.anchor=null;f.ctx.restoreStoryDraft();f.ctx.renderComments();assert.equal(f.input(),null);
+ f.ctx.state.current=original;f.ctx.restoreStoryDraft();f.ctx.renderComments();assert.equal(f.input().value,'unique old revision');
+});
+test('successful cancellation removes a failed-write fallback and cannot revive it on the same anchor',()=>{
+ const f=fixture(),anchor=f.ctx.state.anchor;failStorage(f);edit(f,'cancel me');f.ctx.renderDocument=()=>{};f.ctx.abandonDraft('cancelled');assert.equal(f.input(),null);
+ f.ctx.state.anchor=anchor;f.ctx.renderComments();assert.equal(f.input().value,'');assert.equal(f.requests.length,0);
+});
+test('failed explicit suggestion apply retains original text and suggestion, then successful apply replaces the fallback',()=>{
+ const f=fixture(),set=f.ctx.localStorage.setItem;failStorage(f);edit(f,'original unique input');f.ctx.state.suggestion='[MOCK] chosen suggestion';f.ctx.renderComments();
+ const apply=()=>f.root.all().find(n=>n.tag==='button'&&n.textContent==='采用到草稿').onclick();apply();assert.equal(f.input().value,'original unique input');assert.equal(f.ctx.state.suggestion,'[MOCK] chosen suggestion');
+ f.ctx.localStorage.setItem=set;apply();assert.equal(f.input().value,'[MOCK] chosen suggestion');assert.equal(f.ctx.state.suggestion,null);f.ctx.renderComments();assert.equal(f.input().value,'[MOCK] chosen suggestion');assert.equal(f.requests.length,0);
+});
 for(const success of [true,false])test(`storage failure before suggestion ${success?'success':'failure'} keeps the unique raw input and selection`,async()=>{
  const f=fixture();failStorage(f);edit(f,'  unique unsaved opinion  ');f.input().setSelectionRange(3,9,'backward');const p=f.ctx.polishComment();f.pending.shift()(preview);await tick();f.pending.shift()(success?{suggestion:'[MOCK] suggestion'}:{error:'[MOCK] failure'},success);await p;
  assert.equal(f.input().value,'  unique unsaved opinion  ');assert.equal(f.input().selectionStart,3);assert.equal(f.input().selectionEnd,9);assert.equal(f.input().selectionDirection,'backward');assert.equal(f.storage.get(f.key),'old durable text');assert.equal(f.requests[0].body.body,'unique unsaved opinion');assert.equal(f.requests[1].body.expected_context_sha256,preview.context_sha256);assert.equal(f.root.querySelector('[data-polish]').disabled,false);

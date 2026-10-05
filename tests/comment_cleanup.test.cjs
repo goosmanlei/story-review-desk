@@ -11,7 +11,7 @@ class Element{
 function editor(f){
  const root=new Element('main');for(const id of ['comment-body','comment-panel','open-count','comments-toggle','screenplay-comments','toast']){const n=new Element('div');n.id=id;root.append(n)}
  f.context.document={querySelector:s=>root.querySelector(s),createElement:tag=>new Element(tag),createTextNode:text=>{const n=new Element('text');n.textContent=text;return n}};
- const start=source.indexOf('function renderComments(){'),end=source.indexOf('\nasync function refreshComments(){',start);vm.runInContext(source.slice(start,end),f.context);
+ const start=source.indexOf('function renderComments('),end=source.indexOf('\nasync function refreshComments(){',start);vm.runInContext(source.slice(start,end),f.context);
  if(f.context.state.materialReview)f.context.state.materialReview.history=[];f.context.renderComments();return root;
 }
 const notice=root=>root.querySelector('.comment-submission-notice')?.textContent||'';

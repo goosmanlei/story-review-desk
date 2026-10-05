@@ -17,7 +17,7 @@ function actualEditor(f){
   const root=new Element('main');
   for(const id of ['comment-body','comment-panel','open-count','comments-toggle','screenplay-comments','toast']){const node=new Element('div');node.id=id;root.append(node)}
   f.context.document={querySelector:s=>root.querySelector(s),createElement:tag=>new Element(tag),createTextNode:text=>{const node=new Element('text');node.textContent=text;return node}};
-  const start=source.indexOf('function renderComments(){'),end=source.indexOf('\nasync function refreshComments(){',start);vm.runInContext(source.slice(start,end),f.context);
+  const start=source.indexOf('function renderComments('),end=source.indexOf('\nasync function refreshComments(){',start);vm.runInContext(source.slice(start,end),f.context);
   return root;
 }
 for(const workspace of ['story.sources','story.outline','materials.workspace'])for(const failure of ['draft','submission']){
