@@ -100,10 +100,10 @@ test('10.4 candidate without a real call reports the gap and never fills it from
   const {c,reader,need,context,asset}=videoFixture();delete context.video_details[need.object_id].review_contexts[asset.id];c.breakdownPrompt(reader,need,context);
   assert.match(reader.textContent,/未登记真实调用/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
 });
-test('5.7/10.4 empty current video version stays empty until the user selects the historical version',()=>{
+test('video defaults to the last generated version and keeps a manually selected empty version empty',async()=>{
   const {c,reader,need,call,round,context}=videoFixture();context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
-  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');version.value=1;version.onchange();assert.ok(reader.textContent.includes(call.payload.prompt));assert.equal(c.state.breakdownVideoSelections[need.id].number,1);
+  c.breakdownPrompt(reader,need,context);assert.ok(reader.textContent.includes(call.payload.prompt));const pending=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await pending.children.find(n=>n.dataset.choiceId===2).onclick();assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
+  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();assert.ok(reader.textContent.includes(call.payload.prompt));assert.equal(c.state.breakdownVideoSelections[need.id].number,1);
 });
 test('10.1/10.4 row material opens the exact video version and candidate chosen beside its prompt',async()=>{
   const {c,reader,need,asset,call,round,context}=videoFixture();
@@ -114,8 +114,8 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
   c.state.workspace='production.workspace';c.state.breakdownData={episode:'episode'};c.api=async()=>({scene,shared:[],shots:[{record:shot,context}]});c.breakdownSelect=()=>{};vm.runInContext('breakdownEpoch=7',c);
   const opened=[];c.openUnifiedMaterial=reference=>opened.push(reference);
   await c.showBreakdownScene(scene,reader,new Element('nav'),7);
-  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');version.value=1;version.onchange();
-  const candidate=reader.all().find(n=>n.attributes['aria-label']==='视频候选');candidate.value=other.id;candidate.onchange();
+  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
+  const candidate=reader.all().find(n=>n.attributes['aria-label']==='视频候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
   await reader.querySelectorAll('[data-material-id]')[0].onclick();
   assert.equal(opened.length,1);assert.equal(opened[0].object_id,need.object_id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
 });

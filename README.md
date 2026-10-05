@@ -82,7 +82,7 @@ git push origin main
 
 批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 在必要输入齐备且完整包的准确依赖与全部原件均有效时生成目录包；已采用的可选原件或历史输入缺失也会阻断导出。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
 
-已有对象、修订、依赖和旧轮次记录继续保留。方案版本、候选及评论范围使用对应索引；完整素材定义集中保存，历史内容与受管归档按准确引用还原。完成完整定义迁移的实例使用 Schema 6 导出，包含唯一 `material-content.json`、准确版本绑定和归档路径索引；尚未完成该迁移的旧实例继续导出 Schema 5。恢复须使用支持相应格式的系统，并在空实例执行；兼容旧 Schema 1—5，校验历史身份、修订、评论、依赖与原件。完整契约见[素材、完整定义与候选](docs/material-versions.md)。导出和恢复不包含凭据，也不替代实际打开工程、观看与听辨作品。
+已有对象、修订、依赖和旧轮次记录继续保留。方案版本、候选及评论范围使用对应索引；完整素材定义集中保存，历史内容与受管归档按准确引用还原。完成完整定义迁移的实例使用 Schema 7 导出，包含唯一 `material-content.json`、准确版本绑定和归档路径索引；尚未完成该迁移的旧实例继续导出 Schema 5。恢复须使用支持相应格式的系统，并在空实例执行；兼容旧 Schema 1—6，校验历史身份、修订、评论、依赖与原件。完整契约见[素材、完整定义与候选](docs/material-versions.md)。导出和恢复不包含凭据，也不替代实际打开工程、观看与听辨作品。
 
 `tests/test_complete_states.py` 验证完整形态、状态转换、整体与细节覆盖、就绪阻断和读取依赖并发保护；`tests/test_production.py` 验证原子批量导入、并发、来源、状态并存、一材多用、显式换版、变更复核、谱系、精确媒体评论和恢复；`tests/test_production_api.py` 验证真实 HTTP 上传、Range、来源及冲突响应。真实故事数据和浏览器操作证据归故事实例；测试夹具不计作媒体成果。
 
@@ -93,3 +93,6 @@ git push origin main
 运行自动测试：`NO_PROXY=127.0.0.1,localhost no_proxy=127.0.0.1,localhost PYTHONPATH=. python3 -m unittest discover -s tests -v`；导航及审阅聚合前端测试使用 `node --test tests/*.test.cjs`。本机 HTTP 用例直连环回地址，避免被环境代理转发。
 
 制作设定与素材管理共用素材卡；直接关系、历史采纳取消及准确实际生成信息见 [素材卡与关系契约](docs/materials-and-relationships.md)。
+## 业务对象与历史读取
+
+业务编号、版本与候选选择，以及关系旧说明清理后的读取与恢复规则见 [编号规则](docs/business-codes.md)、[实体和素材审阅](docs/materials-and-relationships.md)、[素材版本与导出](docs/material-versions.md)。系统管理的编号说明直接读取同一前缀定义。

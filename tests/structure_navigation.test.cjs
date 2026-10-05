@@ -25,9 +25,9 @@ async function fixture(href='http://isolated/?workspace=story.outline',data={cur
     window:{addEventListener:(name,handler)=>listeners[name]=handler,scrollTo(){}},getSelection:()=>({removeAllRanges(){}}),
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},
     versions:new Element()};
-  vm.createContext(context);vm.runInContext(app,context);vm.runInContext(structure,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);vm.runInContext(structure,context);
   const framework={workspaces:['story.outline','story.sources','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
-  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':[{id:'source',target_revision_id:'source-revision',blocks:[]}],'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':data,'/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}}[url])}};
+  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':[{id:'source',target_revision_id:'source-revision',blocks:[]}],'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':data,'/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}}[url])}};
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;
     applyFavicon=()=>{};renderWorkspaceNav=()=>{};closePanel=()=>{};openPanel=()=>{};hideSelectionAction=()=>{};scheduleSourceChapter=()=>{};watchTextSelection=()=>{};
     chooseSource=id=>{state.current=state.sources.find(source=>source.id===id)};chooseScript=()=>{};

@@ -476,6 +476,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         from .production_breakdown import validate_relation
         validate_relation(store, p)
     elif kind == "RELATION" and p.get("relation_type") == "entity":
+        if check_current and p.get("explanation_removed"):
+            raise ValueError("removed historical explanation cannot become a current relation")
         from .entity_relations import validate
         validate(store, p)
     elif kind == "RELATION":

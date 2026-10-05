@@ -32,6 +32,7 @@ class Store:
         self.db = sqlite3.connect(str(self.db_path))
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
+        self.db.execute("PRAGMA secure_delete=ON")
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS sources (
           id TEXT PRIMARY KEY, document TEXT NOT NULL, revision TEXT NOT NULL
@@ -106,6 +107,10 @@ class Store:
                     self._insert_object(row["id"], "SOURCE", {"source_revision": row["revision"]})
             if "target_object_id" not in {row["name"] for row in self.db.execute("PRAGMA table_info(comments)")}:
                 self._migrate_comments()
+            from .business_codes import initialize
+            initialize(self)
+            from .relation_explanations import initialize as initialize_relationship_policy
+            initialize_relationship_policy(self)
         except BaseException:
             self.db.rollback()
             try:
@@ -148,6 +153,9 @@ class Store:
         with self.db:
             self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, 1, stamp, stamp))
             self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, 1, canonical(payload), stamp))
+            if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='business_codes'").fetchone():
+                from .business_codes import allocate
+                allocate(self, object_id, kind, payload)
         return revision_id
 
     def objects(self):
@@ -197,6 +205,11 @@ class Store:
             self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
         self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, self._encode_material(payload), stamp))
         self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
+        if kind == 'RELATION' and payload.get('relation_type') == 'entity':
+            from .relation_explanations import supersede
+            supersede(self, object_id, current['current_revision'] if current else None)
+        from .business_codes import allocate, allocate_candidates
+        allocate(self, object_id, kind, payload)
         if kind in ("REQUIREMENT", "CALL", "ASSET"):
             from .material_plans import register
             from .production import record
@@ -204,6 +217,7 @@ class Store:
             from .material_model import refresh_identity
             refresh_identity(self,row)
             register(self, row)
+            allocate_candidates(self, revision_id)
         return {"id": object_id, "kind": kind, "revision": revision_id, "version": new_version}
 
     def _encode_material(self, payload):
@@ -527,6 +541,8 @@ class Store:
         return {"object": dict(obj), "revision": dict(revision), "blocks": blocks, "visuals": visuals, "source": source}
 
     def anchor_state(self, object_id, revision_id, anchor, *, _source_cache=None):
+        if self.db.execute("SELECT 1 FROM relation_explanation_redactions WHERE revision_id=?",(revision_id,)).fetchone():
+            return {"valid":False,"reason":"旧关系说明已清理；评论及原文引用保留，不能定位或替换为最新说明。"}
         try:
             self.validate_target(object_id, revision_id, anchor, _source_cache=_source_cache)
             return {"valid": True}
@@ -582,6 +598,8 @@ class Store:
                     return existing
                 raise Conflict('comment id already used')
             self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
+            from .business_codes import allocate_comments
+            allocate_comments(self)
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, "CREATE", body, stamp))
             context = value.get('material_context')
             if isinstance(context, dict) and context.get('model') == 'plan-v1':

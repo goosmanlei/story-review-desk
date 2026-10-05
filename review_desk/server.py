@@ -40,6 +40,9 @@ class ReviewServer(HTTPServer):
 
 class ReviewHandler(BaseHTTPRequestHandler):
     def _json(self, value, status=200):
+        from .business_codes import annotate
+        if self.command == 'GET' and urlsplit(self.path).path != '/api/production/package':
+            value = annotate(self.server.store, value)
         data = json.dumps(value, ensure_ascii=False).encode()
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -102,6 +105,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
         parsed = urlsplit(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
         store = self.server.store
+        if path == '/api/business-codes':
+            from .business_codes import catalog, display_dump
+            return self._json({**catalog(), 'objects':display_dump(store)})
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]

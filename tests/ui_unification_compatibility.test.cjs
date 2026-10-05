@@ -17,6 +17,16 @@ class Element {
 }
 const row=(object_id,kind,id=object_id+'-1',payload={})=>({object_id,kind,id,current_revision:id,version:1,created_at:'2026-10-04T00:00:00Z',payload:{title:object_id,blocks:[],...payload}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
+test('an exact entity relation is readable in settings without admitting adoption relations',()=>{
+  const ctx=setup();
+  assert.equal(vm.runInContext("productionWorkspaceCanRead('settings.workspace',{kind:'RELATION',payload:{relation_type:'entity'}})",ctx),true);
+  assert.equal(vm.runInContext("productionWorkspaceCanRead('settings.workspace',{kind:'RELATION',payload:{relation_type:'adoption'}})",ctx),false);
+});
+test('shared candidates use the chosen material round number in both small and large cards',()=>{
+  const ctx=setup(),f=fixture(ctx);f.model.identity={...f.need,business_code:'M004'};f.model.need=null;f.model.round.business_code='M841 / MV001';
+  assert.equal(ctx.materialModelCode(f.model),'M841');
+  assert.equal(ctx.modelSmallItem(f.model).business_code,'M841');
+});
 function setup(){
   const ctx={URL,URLSearchParams,CSS:{escape:x=>x},console,setTimeout:()=>1,clearTimeout(){},location:{href:'http://isolated/?workspace=settings.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:()=>null,querySelectorAll:()=>[],createElement:tag=>new Element(tag),createElementNS:(_ns,tag)=>new Element(tag)}};
   ctx.Option=function(text,value){const e=new Element('option');e.textContent=text;e.value=value;return e};
@@ -39,11 +49,10 @@ function fixture(ctx){
   return {entity,form,need,older,newer,items,round,data,model};
 }
 
-test('current version uses its explicitly adopted candidate and exact component before newer results',()=>{
+test('current version defaults to its latest candidate without changing adoption or selected components',()=>{
   const ctx=setup(),f=fixture(ctx);
   f.data.adoptions=[{payload:{scope:ref(f.form),slot:'overall',asset:ref(f.older),component_id:'original'}}];
-  assert.equal(ctx.materialDefaultCandidate(f.model,f.data),f.older.id);
-  assert.equal(f.data.selectedComponents[f.older.id],'original');
+  const before=JSON.stringify(f.data.adoptions);assert.equal(ctx.materialDefaultCandidate(f.model,f.data),f.newer.id);assert.equal(f.data.selectedComponents,undefined);assert.equal(JSON.stringify(f.data.adoptions),before);
 });
 test('without adoption the newest result wins independently of object ID or array order',()=>{
   const ctx=setup(),f=fixture(ctx);
@@ -55,7 +64,7 @@ test('adoption from another state with the same slot does not select this requir
   f.data.adoptions=[{payload:{scope:{object_id:'other-form',revision_id:'other-form-1'},slot:'overall',asset:ref(f.older),component_id:'original'}}];
   assert.equal(ctx.materialDefaultCandidate(f.model,f.data),f.newer.id);
 });
-test('the entity material renderer displays the adopted file component, not the first file',()=>{
+test('the entity material renderer uses the candidate original and preserves adopted alternate-file metadata',()=>{
   const ctx=setup(),f=fixture(ctx);
   const second={...f.older.payload.components[0],id:'alternate',sha256:'alternate'};f.older.payload.components.push(second);f.round.results=[f.older];
   const media=[{record:f.older,component:f.older.payload.components[0],component_id:'original',state:ref(f.form)}];
@@ -64,15 +73,25 @@ test('the entity material renderer displays the adopted file component, not the 
   f.data.selectedCandidates={need:ctx.materialDefaultCandidate(model,f.data)};
   let visibleComponent;ctx.reviewSurface=host=>host;ctx.materialMedia=(_root,item)=>{visibleComponent=item.component.id};ctx.renderActualGeneration=()=>{};
   ctx.renderMaterialCard(new Element('main'),model,ctx.entityMaterialCandidateOptions(f.data,model));
-  assert.equal(visibleComponent,'alternate');
+  assert.equal(visibleComponent,'original');assert.equal(f.data.adoptions[0].payload.component_id,'alternate');
 });
 test('a preparing current version never borrows its historical adopted result',()=>{
   const ctx=setup(),f=fixture(ctx);
   f.data.adoptions=[{payload:{scope:ref(f.form),slot:'overall',asset:ref(f.older),component_id:'original'}}];
   f.data.material_versions.need.unshift({number:2,model:'plan-v1',plan:f.need,members:[f.need],results:[]});
-  const models=ctx.materialRoundModels([f.need],f.items,f.data);
+  f.data.selectedMaterialRounds={need:2};const models=ctx.materialRoundModels([f.need],f.items,f.data);
   assert.equal(models[0].round.number,2);assert.equal(models[0].candidates.length,0);
   assert.equal(ctx.materialDefaultCandidate(models[0],f.data),null);
+});
+test('ordinary demand cards choose the last generated version while exact and manual targets retain the empty version',()=>{
+  const ctx=setup(),f=fixture(ctx),latest={...f.need,id:'need-2',current_revision:'need-2',version:2};
+  f.data.requirements=[latest];f.data.material_versions.need.unshift({number:2,model:'plan-v1',plan:latest,members:[latest],results:[]});
+  const empty=new URLSearchParams();
+  assert.equal(ctx.entityMaterialRoute(f.data,latest,empty,{defaultSelection:true}).selected.round.number,1);
+  assert.equal(ctx.entityMaterialRoute(f.data,latest,empty).selected.round.number,2);
+  assert.equal(ctx.entityMaterialRoute(f.data,latest,new URLSearchParams({material_version:2}),{defaultSelection:true}).selected.round.number,2);
+  assert.equal(ctx.entityMaterialRoute(f.data,latest,new URLSearchParams({material_target:'need-2'}),{defaultSelection:true}).selected.round.number,2);
+  assert.equal(f.data.selectedMaterialRounds,undefined);
 });
 for(const version of ['999','not-a-version','0'])test(`an explicit invalid version ${version} is rejected without changing the URL`,()=>{
   const ctx=setup(),f=fixture(ctx),url=ctx.location.href;
@@ -100,7 +119,7 @@ test('same-entity version responses cannot replace a newer choice when they arri
   f.data.versions={[f.entity.object_id]:[{id:'old',version:1},{id:f.entity.id,version:2}]};
   ctx.fetch=url=>new Promise(resolve=>requests.push({url,resolve:value=>resolve({ok:true,json:async()=>value})}));let control;
   ctx.entityVersionControl({append:n=>control=n},f.entity,r=>shown.push(r.id));
-  control.value='old';const first=control.onchange();control.value=f.entity.id;const last=control.onchange();
+  const first=control.children.find(n=>n.dataset.choiceId==='old').onclick();await new Promise(done=>setImmediate(done));const last=control.children.find(n=>n.dataset.choiceId===f.entity.id).onclick();await new Promise(done=>setImmediate(done));
   requests[1].resolve({record:f.entity});await last;requests[0].resolve({record:{...f.entity,id:'old'}});await first;
   assert.deepEqual(shown,[f.entity.id]);
 });
@@ -109,7 +128,7 @@ test('a response to a detached entity version control cannot restore its obsolet
   f.data.versions={[f.entity.object_id]:[{id:'old',version:1},{id:f.entity.id,version:2}]};
   ctx.fetch=()=>new Promise(resolve=>{release=value=>resolve({ok:true,json:async()=>value})});
   ctx.entityVersionControl({append:n=>control=n},f.entity,r=>shown.push(r.id));
-  control.value='old';const request=control.onchange();control.isConnected=false;
+  const request=control.children.find(n=>n.dataset.choiceId==='old').onclick();await new Promise(done=>setImmediate(done));control.isConnected=false;
   release({record:{...f.entity,id:'old'}});await request;assert.deepEqual(shown,[]);
 });
 test('editing a carried exact text in one material version is not restored into another version',()=>{
@@ -195,11 +214,9 @@ function genericMaterialFixture(ctx){
   return {scope,detail,rounds,old1,new1,old2,new2,shown,render,plan};
 }
 function descendants(node){return [node,...(node.children||[]).flatMap(descendants)]}
-test('a non-entity demand defaults to its adopted candidate, exact file and range',()=>{
+test('a non-entity demand defaults to the latest candidate original without copying adoption range',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);f.render();
-  assert.equal(f.shown.length,1);assert.equal(f.shown[0].record.id,f.old2.id);
-  assert.equal(f.shown[0].component.id,'alternate');
-  assert.deepEqual(JSON.parse(JSON.stringify(f.shown[0].range)),{start_seconds:.5,end_seconds:1.5});
+  assert.equal(f.shown.length,1);assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(f.shown[0].component.id,'original');assert.equal(f.shown[0].range,undefined);
 });
 test('switching a non-entity demand to an older version picks that version newest result and comment scope',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);f.render();
@@ -215,16 +232,16 @@ test('switching a non-entity demand to an empty version keeps its plan and never
   assert.equal(f.shown.length,0);assert.equal(ctx.state.productionSelected.id,plan.id);
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:3,model:'plan-v1'});
 });
-test('selecting a non-entity candidate focuses its exact revision without changing the material comment version',()=>{
+test('selecting a non-entity candidate focuses its exact revision without changing the material comment version',async()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx),root=f.render();
   const candidates=descendants(root).find(n=>n.attributes?.['aria-label']==='本轮候选');
-  candidates.value=f.new2.id;candidates.onchange();f.render();
+  await candidates.children.find(n=>n.dataset.choiceId===f.old2.id).onclick();await descendants(f.render()).find(n=>n.attributes?.['aria-label']==='本轮候选').children.find(n=>n.dataset.choiceId===f.new2.id).onclick();f.render();
   assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(ctx.state.productionSelected.id,f.new2.id);
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:2,model:'plan-v1'});
   assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),f.new2.id);
 });
 test('an explicit non-entity file choice can replace the adopted default without reverting on repaint',()=>{
-  const ctx=setup(),f=genericMaterialFixture(ctx),root=f.render();
+  const ctx=setup(),f=genericMaterialFixture(ctx);f.detail.selectedCandidateId=f.old2.id;f.detail.selectedComponents={[f.old2.id]:'alternate'};const root=f.render();
   const components=descendants(root).find(n=>n.attributes?.['aria-label']==='原件与预览组成');
   assert.equal(components.value,'alternate');components.value='original';components.onchange();f.render();
   assert.equal(f.shown[0].record.id,f.old2.id);assert.equal(f.shown[0].component.id,'original');

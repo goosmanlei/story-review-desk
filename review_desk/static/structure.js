@@ -211,7 +211,7 @@ function renderStructureReader(){
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}
   const basisSelection=state.structure.selection_history?.find(item=>item.id===doc.direction_selection_revision);
   const basisSource=basisSelection?.payload.source_id;
-  const title=el('header','structure-document-head text-reader-head'),titleText=el('div');title.append(titleText);nodeText('small',null,`STORY STRUCTURE · 第 ${active.version} 稿`,titleText);nodeText('h2',null,doc.title,titleText);nodeText('p',null,`本稿依据「${structureSourceTitle(basisSource||'来源未知')}」的修订 ${basisSelection?.payload.source_revision.slice(0,16)||'UNKNOWN'} · ${active.created_at}`,titleText);reader.append(title);
+  const title=el('header','structure-document-head text-reader-head'),titleText=el('div');title.append(titleText);nodeText('small',null,`STORY STRUCTURE · 第 ${active.version} 稿`,titleText);nodeText('h2',null,businessTitle({object_id:'story-structure'},doc.title),titleText);nodeText('p',null,`本稿依据「${structureSourceTitle(basisSource||'来源未知')}」的修订 ${basisSelection?.payload.source_revision.slice(0,16)||'UNKNOWN'} · ${active.created_at}`,titleText);reader.append(title);
   for(const section of doc.sections){
     const nav=nodeText('button','source-button',STRUCTURE_SECTIONS[section.id],chapters);nav.type='button';nav.setAttribute('aria-controls',`structure-section-${section.id}`);nav.onclick=()=>scrollStructureSection(document.getElementById(nav.getAttribute('aria-controls')));
     const area=el('section','structure-section');area.id=`structure-section-${section.id}`;nodeText('small',null,STRUCTURE_SECTIONS[section.id].toUpperCase(),area);

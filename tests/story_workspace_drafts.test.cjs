@@ -18,9 +18,9 @@ async function fixture({href='http://fixture/?workspace=story.sources&source=sou
  document:{addEventListener(){},querySelector:selector=>selector==='#comment-editor-text'?null:node(selector),querySelectorAll:()=>[],createElement:()=>new Node()},
  window:{addEventListener:(name,fn)=>listeners[name]=fn,scrollTo(){}},getSelection:()=>({removeAllRanges(){}}),
  localStorage:{getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,String(value)),removeItem:key=>storage.delete(key)}};
- vm.createContext(c);for(const name of ['app.js','structure.js','screenplay.js'])vm.runInContext(fs.readFileSync(path.join(root,name),'utf8'),c,{filename:name});
+ vm.createContext(c);require('./load_review_helpers.cjs')(c);for(const name of ['app.js','structure.js','screenplay.js'])vm.runInContext(fs.readFileSync(path.join(root,name),'utf8'),c,{filename:name});
  const ep=n=>({object_id:'episode-'+n,id:'episode-r'+n,payload:{number:n,title:'第'+n+'集',scenes:[{id:'s00'+n,block_ids:['script-block']}],blocks:[{id:'script-block',text:'script'}]}});
- const data={'/api/instance':{title:'Fixture'},'/api/sources?with_revision=1':[{id:'source',target_revision_id:'source-r1',blocks:[{id:'source-block',text:'source'}]},{id:'other-source',target_revision_id:'other-source-r1',blocks:[{id:'other-source-block',text:'other'}]}],'/api/comments':[],
+ const data={'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Fixture'},'/api/sources?with_revision=1':[{id:'source',target_revision_id:'source-r1',blocks:[{id:'source-block',text:'source'}]},{id:'other-source',target_revision_id:'other-source-r1',blocks:[{id:'other-source-block',text:'other'}]}],'/api/comments':[],
  '/api/framework':{workspaces:['story.sources','story.outline','story.script','project.configuration','production.approach'].map(id=>({id,implemented:true}))},'/api/configurations':{},'/api/story-structure':{current_revision:'structure-r2',revisions:[{id:'structure-r2',version:2},{id:'structure-r1',version:1}]},'/api/screenplays':{versions:[{object_id:'script',payload:{title:'剧本一'},episodes:[ep(1),ep(2)]}]},'/api/screenplay-summaries':{episodes:[]}};
  c.fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>plain(data[url])}};
  vm.runInContext(`globalThis.state=state;globalThis.draftKeyNow=draftKey;globalThis.targetNow=commentTarget;

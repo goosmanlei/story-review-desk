@@ -128,7 +128,7 @@ function renderSources(preserveScroll=true){
   const addSource=(source,parent)=>{
     const button=el('button','source-button'+(source.id===state.current?.id?' active':''));button.type='button';
     button.dataset.sourceId=source.id;button.setAttribute('aria-current',source.id===state.current?.id?'true':'false');
-    const title=source.group==='story-refinements'?source.title.replace(/^(故事精修([一二三四五六七八九十百零\d]+)[：:].*?)\s*第\2版$/,'$1'):source.title;
+    const title=businessTitle(source,source.group==='story-refinements'?source.title.replace(/^(故事精修([一二三四五六七八九十百零\d]+)[：:].*?)\s*第\2版$/,'$1'):source.title);
     const chapters=sourceChapters(source),open=state.expandedSources.has(source.id);
     if(chapters.length){
       button.classList.add('source-version-toggle');button.setAttribute('aria-expanded',String(open));button.setAttribute('aria-controls',`source-chapters-${source.id}`);
@@ -326,6 +326,7 @@ function showConfigurationSection(){
 function renderConfigurations({preserve=false}={}){
   const root=$('#configuration-view');
   if(typeof configurationSectionFromRoute==='function')state.configSection=configurationSectionFromRoute();
+  if(state.configSection==='CODES'){root.replaceChildren();root.configurationMounted=false;renderBusinessCodeCatalog(root);return}
   if(preserve&&root.configurationMounted){showConfigurationSection();return}
   root.replaceChildren();root.configurationMounted=true;
   const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
@@ -482,10 +483,10 @@ function renderDocument(){
     nodeText('p','empty','等待 Codex 准备资料后，可在这里阅读和评论。',root);return;
   }
   $('#reader-kind').textContent=source.version_type;
-  $('#reader-head-title').textContent=source.title;
+  $('#reader-head-title').textContent=businessTitle(source);
   $('#reader-head-detail').textContent=`${source.origin} · 采集于 ${source.collected_at}`;
   const doc=el('article','document');nodeText('div','overline','SOURCE DOCUMENT / 资料原文',doc);
-  nodeText('h2',null,source.title,doc);nodeText('span','type-pill',source.version_type,doc);
+  nodeText('h2',null,businessTitle(source),doc);nodeText('span','type-pill',source.version_type,doc);
   const meta=el('div','source-meta');
   for(const [label,value] of [['出处',source.origin],['采集日期',source.collected_at],['版本说明',source.edition||'—']]){const item=el('div');nodeText('b',null,label,item);nodeText('span',null,value,item);meta.append(item)}
   const item=el('div');nodeText('b',null,'来源页面',item);link('打开来源页面 ↗',source.source_url,item);meta.append(item);doc.append(meta);
@@ -720,7 +721,7 @@ async function editComment(comment){
 }
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
-  nodeText('small',null,(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
+  nodeText('small',null,(comment.business_code?comment.business_code+' · ':'')+(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
   nodeText('q',null,anchorLabel(comment.anchor),card);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
@@ -896,7 +897,8 @@ function locateComment(comment){
   if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}revealLocatedComment();(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
 
 async function init(){try{
-  const [instance,sources,comments,framework,configurations,structure,screenplays,summaries]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]);
+  const [instance,sources,comments,framework,configurations,structure,screenplays,summaries,codes]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]})),api('/api/business-codes')]);
+  state.businessCodeCatalog=codes;state.businessCodes=new Map(codes.objects.map(row=>[row.object_id,row.display_code||row.prefix+String(row.number).padStart(3,'0')]));
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
   const initialUrl=new URL(location.href);
   state.structureRevision=resolveStructureRevision(initialUrl.searchParams.get('structure_revision'));

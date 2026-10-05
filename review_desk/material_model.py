@@ -300,7 +300,11 @@ def _verify(store):
     for revision in store.revisions():
         payload=json.loads(revision['payload'])
         if digest(canonical({'object_id':revision['object_id'],'version':revision['version'],'payload':payload}).encode())!=revision['id']:
-            raise ValueError('hydrated revision identity changed: '+revision['id'])
+            from .relation_explanations import verify_row
+            removed=store.db.execute('SELECT * FROM relation_explanation_redactions WHERE revision_id=?',(revision['id'],)).fetchone()
+            if not removed or store.db.execute('SELECT 1 FROM objects WHERE current_revision=?',(revision['id'],)).fetchone():
+                raise ValueError('hydrated revision identity changed: '+revision['id'])
+            verify_row(revision,dict(removed))
     for alias in store.db.execute('SELECT * FROM material_aliases'):
         if alias['alias_id']==alias['material_id']:raise ValueError('self material alias')
         row=p.record(store,alias['alias_id']);source=reuse_source(store,row);seen={row['object_id']}

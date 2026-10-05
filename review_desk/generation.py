@@ -354,6 +354,16 @@ def _snapshot(store, entity_id, revision_id=None):
     base=er.legacy_snapshot(store,entity_id,rows=rows)
     media=er.related_media(store,rows,entity_id,data['states'])
     data['media']=er.scope_contents(store,{'entity':scope['entity'],'states':scope['states'],'media':media})['media']
+    # Retained states and cross-entity coverage are browsing context only.
+    # They never enter the current generation/acceptance scope.
+    retained_states=[r for r in rows if r['kind']=='STATE' and r['payload'].get('entity',{}).get('object_id')==entity_id and r['id'] not in {v['id'] for v in data['states']}]
+    for item in data['media']:
+        asset=item['record']
+        refs=[v['state'] for v in asset['payload'].get('state_coverage',[]) if v.get('component_id')==item['component_id']]
+        if not refs:refs=asset['payload'].get('states',[])
+        owned=[r for r in refs if p.ref_record(store,r,{'STATE'})['payload']['entity']['object_id']==entity_id]
+        if not item.get('state') and len({r['revision_id'] for r in owned})==1:item['review_state']=owned[0]
+        item['associated_states']=[{'state':p.ref_record(store,r,{'STATE'}),'entity':p.ref_record(store,p.ref_record(store,r,{'STATE'})['payload']['entity'],{'ENTITY'})} for r in refs]
     contexts=media_review.enrich_media(store,data['media'])
     calls=[c['call'] for c in contexts.values() if c['call']]
     for oid in {m['record']['object_id'] for m in data['media']}:
@@ -361,7 +371,7 @@ def _snapshot(store, entity_id, revision_id=None):
             asset=p.record(store,revision_id=history[0])
             if asset['id'] not in contexts:contexts[asset['id']]=media_review.context(store,asset)
             if contexts[asset['id']]['call']:calls.append(contexts[asset['id']]['call'])
-    targets={r['id']:r for r in [*base['comment_records'],data['entity'],*data['states'],*data['requirements'],*data['relationships'],*calls,*(m['record'] for m in data['media'])]}
+    targets={r['id']:r for r in [*base['comment_records'],data['entity'],*data['states'],*retained_states,*data['requirements'],*data['relationships'],*calls,*(m['record'] for m in data['media'])]}
     related_ids={r['object_id'] for r in [*data['requirements'],*data['relationships'],*calls]}
     # Keep opinions on withdrawn relationships and earlier actual inputs discoverable.
     for c in store.comments():
@@ -383,7 +393,7 @@ def _snapshot(store, entity_id, revision_id=None):
         compatible or (content_decision['payload'].get('acceptance_model')==CONTENT_MODEL and content_decision['payload']['acceptance_scope']==scope)) else None
     acceptance_mode='generation' if prep['complete'] else 'content'
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
-              for r in [data['entity'],*data['states'],*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
+              for r in [data['entity'],*data['states'],*retained_states,*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     from .material_plans import snapshot as material_snapshot, memberships as plan_memberships
     from .material_storage import identity as material_identity
     for need in data['requirements']:
@@ -415,7 +425,7 @@ def _snapshot(store, entity_id, revision_id=None):
         for mid in ids:
             if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
     if not any(material_versions.values()):material_versions=legacy_versions
-    return {**base,**data,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    return {**base,**data,'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',

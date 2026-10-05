@@ -135,10 +135,10 @@ test('block scope aggregates all live statuses and anchor kinds, excludes other 
  const audio=[c('t','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:1,end_seconds:3}),c('outside','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:8,end_seconds:9}),c('file','r',{type:'time',component_id:'original',asset_file:'b.wav',start_seconds:1,end_seconds:3})];
  assert.deepEqual(Array.from(ui.reviewBlockComments(audio,{revision:'r',kind:'audio',componentId:'original',file:'a.wav',from:0,to:5}),c=>c.id),['t']);
 });
-test('effective inputs retain source order and type numbering, ignore storyline context',()=>{
+test('effective inputs retain source order and type numbering, include exact storyline context',()=>{
  const refs=[{kind:'ENTITY',id:'person',object_id:'person',payload:{}},{kind:'ASSET',id:'i',object_id:'i',payload:{components:[{id:'original',mime:'image/png'}]}},{kind:'ASSET',id:'a',object_id:'a',payload:{components:[{id:'original',mime:'audio/wav'}]}},{kind:'ASSET',id:'j',object_id:'j',payload:{components:[{id:'original',mime:'image/png'}]}}];
  const inputs=refs.map(r=>({object_id:r.object_id,revision_id:r.id,component_id:r.kind==='ASSET'?'original':undefined}));
- const items=ctx.materialInputs(inputs,refs);assert.deepEqual(Array.from(items,i=>i.label),['图片1','音频1','图片2']);assert.deepEqual(Array.from(items,i=>i.index),[1,2,3]);assert.equal(ctx.materialInputs([],refs).length,0);
+ const items=ctx.materialInputs(inputs,refs);assert.deepEqual(Array.from(items,i=>i.label),['实体','图片1','音频1','图片2']);assert.deepEqual(Array.from(items,i=>i.index),[0,1,2,3]);assert.equal(ctx.materialInputs([],refs).length,0);
 });
 
 test('carried text revisions keep comments inside the selected material round',()=>{
@@ -164,7 +164,7 @@ test('a preparing round owns its older results without showing duplicate current
  const pending={number:2,plan:demand,results:[],members:[demand]};
  const data={material_versions:{demand:[pending,first]}};
  const cards=ctx.materialRoundModels([demand],[{record:old}],data);
- assert.equal(cards.length,1);assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ assert.equal(cards.length,1);assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds.demand=1;
  const history=ctx.materialRoundModels([demand],[{record:old}],data);
  assert.equal(history.length,1);assert.equal(history[0].candidates[0].record.id,old.id);
@@ -186,7 +186,7 @@ test('a pending material round keeps earlier results inside history instead of c
  const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
  const data={material_versions:{portrait:[pending,old]}};
  let cards=ctx.materialRoundModels([plan],[media],data);
- assert.equal(cards.length,1);assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ assert.equal(cards.length,1);assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds.portrait=1;cards=ctx.materialRoundModels([plan],[media],data);
  assert.equal(cards.length,1);assert.equal(cards[0].candidates[0].record.id,'old-image');
 });
@@ -203,7 +203,7 @@ test('a shared asset uses its producing requirement rounds on another state inst
  const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
  const data={material_versions:{'foreign-plan':[pending,old]}};
  let cards=ctx.materialRoundModels([],[original],data);
- assert.equal(cards.length,1);assert.equal(cards[0].material_id,'foreign-plan');assert.equal(cards[0].round.number,2);assert.equal(cards[0].candidates.length,0);
+ assert.equal(cards.length,1);assert.equal(cards[0].material_id,'foreign-plan');assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds['foreign-plan']=1;cards=ctx.materialRoundModels([],[original],data);
  assert.equal(cards[0].round.number,1);assert.equal(cards[0].need,plan);assert.deepEqual(cards[0].candidates[0].range,original.range);
 });
@@ -214,3 +214,11 @@ test('missing exact file composition is reported instead of falling back to anot
  const gap=ctx.materialInputs(inputs,[row])[0];assert.equal(gap.missing,true);assert.equal(gap.ref.component_id,'removed');assert.equal(gap.ref.range.end_seconds,4);
  assert.equal(ctx.materialInputs([{object_id:'lost',revision_id:'old'}],[])[0].missing,true);
 });
+
+ test('default round uses the largest generated version and candidate numbers survive metadata edits',()=>{
+  const original={role:'original'},asset=(id,n,time)=>({record:{id,candidate_number:n,created_at:time,payload:{components:[original]}}});
+  const one=asset('one',1,'2026-10-05'),two=asset('two',2,'2026-10-04');assert.equal(ctx.materialCandidateChoice([one,two],null),two);
+  assert.equal(ctx.materialCandidateChoice([one,two],'one'),one);
+  const rounds=[{number:9,results:[]},{number:2,results:[two.record]},{number:7,results:[one.record]}];assert.equal(ctx.materialDefaultRound(rounds).number,7);
+  for(const r of rounds)r.results=[];assert.equal(ctx.materialDefaultRound(rounds).number,9);
+ });
