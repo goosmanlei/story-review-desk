@@ -61,7 +61,7 @@ function restoreEntityMaterialRoute(data,route){
   focusProductionReview(entityReviewDetail(row),false);
 }
 async function openEntityReview(owner,detail,epoch,exactRevision){
-  const workspace=state.workspace,cardRoot=state.unifiedCardRoot||null,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner;
+  const workspace=state.workspace,cardRoot=state.unifiedCardRoot||null,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner||!url.searchParams.has('production_entity')&&url.searchParams.get('production_object')===owner;
   const reviewRevision=same?url.searchParams.get('entity_acceptance'):null;
   const query=new URLSearchParams({entity_id:owner,...(reviewRevision?{revision_id:reviewRevision}:{})});
   const data=await api('/api/production/entity-review?'+query);
