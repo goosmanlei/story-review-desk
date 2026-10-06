@@ -370,7 +370,7 @@ function focusProductionReview(detail,paint=true){
   state.productionSelected=r;state.productionDetail=detail;
   const url=new URL(location.href);url.searchParams.set('production_object',r.object_id);url.searchParams.set('production_revision',r.id);
   if(typeof isEntityReview==='function'&&isEntityReview()){
-    if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
+    if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&r.id===r.current_revision&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
     const context=['ASSET','REQUIREMENT','CALL'].includes(r.kind)?materialCommentContext():null;
     if(context){url.searchParams.set('material_id',context.material_id);url.searchParams.set(context.model==='plan-v1'?'material_version':'material_round',context.number)}
     else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version')}

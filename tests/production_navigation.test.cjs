@@ -68,6 +68,15 @@ test('old state links keep exact state and entity identity, without replacing th
   assert.equal(url.searchParams.get('production_entity'),'bag');
 });
 
+test('shared entity card retains an exact older revision even without legacy history flags',()=>{
+  const current=row('state','STATE'),old={...current,id:'retired-old',cleaned_target:true};
+  const ctx=setup([current]);ctx.isEntityReview=()=>true;ctx.state.entityReview={};
+  ctx.focusProductionReview({record:old},false);
+  assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),old.id);
+  ctx.focusProductionReview({record:current},false);
+  assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),null);
+});
+
 test('historical representation resolves the referenced state, not its newer parent',async()=>{
   const oldOwner=row('old-owner','ENTITY'),newOwner=row('new-owner','ENTITY');
   const current=row('state','STATE',{entity:{object_id:'new-owner'}});
