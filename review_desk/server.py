@@ -128,7 +128,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/breakdown":
                     from .production_breakdown import catalog
                     with production.read_scope(store):
-                        return self._json(catalog(store, param("episode")))
+                        return self._json(catalog(store, param("episode"), param("object_id"), param("revision_id")))
                 if path == '/api/production/index':
                     from .production_breakdown import index
                     with production.read_scope(store):
@@ -163,7 +163,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                         ref['scene_id'] = param('scene_id')
                     if param('block_ids'):
                         ref['block_ids'] = param('block_ids').split(',')
-                    return self._json(production.source_excerpt(store, ref))
+                    return self._json(production.source_excerpt(store, ref, full_scene=param("full_scene")=="1"))
                 if path == "/api/production/readiness":
                     return self._json(production.readiness(store, param("scope")))
                 if path == "/api/production/package":

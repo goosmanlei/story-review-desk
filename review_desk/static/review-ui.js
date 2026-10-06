@@ -139,6 +139,8 @@ if(typeof window!=='undefined')window.addEventListener('popstate',event=>{
   event.stopImmediatePropagation();dialog.closedByHistory=true;dialog.close();
 },{capture:true});
 function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
+  const readingPositions=[...document.querySelectorAll('.breakdown-body,.breakdown-scene-list,.review-dialog-body,.unified-card-material')].map(node=>({node,top:node.scrollTop,left:node.scrollLeft})),windowPosition=typeof window!=='undefined'?{x:window.scrollX,y:window.scrollY}:null;
+  const restoreReading=()=>{for(const p of readingPositions)if(p.node.isConnected){p.node.scrollTop=p.top;p.node.scrollLeft=p.left}if(windowPosition)window.scrollTo(windowPosition.x,windowPosition.y)};
   const dialog=el('dialog','review-dialog '+className),header=el('header','review-dialog-header');
   const title=nodeText('h2',null,label,header);title.id='review-dialog-'+(++reviewDialogSerial);dialog.setAttribute('aria-labelledby',title.id);
   const dialogId=reviewDialogSerial;
@@ -147,7 +149,7 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});
   dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true})},{once:true});
+  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true});restoreReading()},{once:true});
   history.pushState({...history.state,reviewDialog:dialogId},'',location.href);reviewDialogStack.push(dialog);
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }

@@ -157,15 +157,7 @@ def card(store, object_id, revision_id=None, entity_id=None):
 def scene(store, object_id, revision_id=None, shot_revision=None):
     selected=p.record(store,object_id,revision_id)
     if selected['kind']!='PREPARATION':raise ValueError('scene reader requires a scene')
-    # Exact parents prevent current rearrangements from rebinding historical shots.
-    shots=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM revisions r JOIN objects o ON o.id=r.object_id
-        WHERE o.kind='SHOT_DESIGN' AND json_extract(r.payload,'$.parent.revision_id')=?
-        AND NOT EXISTS(SELECT 1 FROM revisions n WHERE n.object_id=r.object_id AND n.version>r.version AND json_extract(n.payload,'$.parent.revision_id')=?)""",(selected['id'],selected['id']))]
-    shots.sort(key=lambda r:(r['payload']['number'],r['object_id']))
-    if shot_revision:
-        exact=p.record(store,revision_id=shot_revision)
-        if exact['kind']!='SHOT_DESIGN' or exact['payload'].get('parent')!=b.ref(selected):raise ValueError('exact shot does not belong to the selected scene')
-        shots=[exact if r['object_id']==exact['object_id'] else r for r in shots]
+    shots=b.scene_shots(store,selected,p.record(store,revision_id=shot_revision) if shot_revision else None)
     chain=b.ancestors(store,selected);contexts=[]
     for reference in chain:
         row=p.ref_record(store,reference)
@@ -219,8 +211,41 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
             context['materials'].append({**item,'id':row['id'],'title':row['payload']['title'],'association':relation,
                 'canonical_material_id':mid,'usage_evidence':evidence,
                 'placement':b.ref(owner),'placement_level':levels.get(owner['kind'],'shot'),
-                'placement_title':owner['payload']['title'],'record':row})
+                'placement_title':owner['payload']['title'],'record':row,
+                'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
         context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
         return context
     return {'scene':selected,'shared':[enrich(c) for c in reversed(contexts)],
             'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id']))} for r in shots]}
+
+
+
+def material_classification(store, row, item, placement):
+    """Classify from actual object relations; names carry no type information."""
+    entities={};scopes=[]
+    def add(value):
+        if not value:return
+        record=p.ref_record(store,value)
+        if record['kind']=='STATE':add(record['payload']['entity'])
+        elif record['kind']=='ENTITY':entities[record['object_id']]=record
+        elif record['kind'] in b.POSITIONS:scopes.append(record)
+    add(row['payload'].get('scope'))
+    for value in row['payload'].get('subjects',[]):add(value)
+    for value in row['payload'].get('state_coverage',[]):add(value['state'])
+    for value in row['payload'].get('candidate_requirements',[]):
+        add(p.ref_record(store,value)['payload'].get('scope'))
+    for eid in item.get('entity_ids',[]):
+        if eid not in entities:add(b.ref(p.record(store,eid)))
+    labels={'character':'角色','space':'场景','prop':'道具','song':'歌曲'}
+    if len(entities)>1:kind='shared';label='共有'
+    elif entities:
+        entity=next(iter(entities.values()));kind=entity['payload']['entity_type']
+        label=labels.get(kind) or entity['payload'].get('entity_type_label') or '其他'
+    else:
+        kinds={r['kind'] for r in scopes} or {placement['kind']}
+        kind=next(iter(kinds)) if len(kinds)==1 else 'shared'
+        label={'SHOT_DESIGN':'镜头','PREPARATION':'场景','EPISODE':'分集','INPUT_LOCK':'全剧','STORY':'全剧','shared':'共有'}.get(kind,'其他')
+    kind={'PREPARATION':'space','SHOT_DESIGN':'shot','EPISODE':'episode','INPUT_LOCK':'story','STORY':'story'}.get(kind,kind)
+    media=row['payload']['media_type']
+    return {'key':media+':'+kind,'label':{'image':'图像','audio':'音频','video':'视频','project':'工程','document':'文档'}.get(media,media)+'—'+label,
+            'entity_refs':[b.ref(r) for r in entities.values()],'placement_refs':[b.ref(r) for r in scopes]}

@@ -36,32 +36,22 @@ function fixture(){
     throw Error('unexpected API '+url);
   };
   vm.runInContext('breakdownEpoch=1',c);
+  c.scrollBreakdownTarget=()=>{};c.rememberBreakdownPosition=()=>{};c.requestAnimationFrame=()=>1;c.window={scrollY:0,addEventListener(){},removeEventListener(){},scrollTo(){}};
   return {c,host,a,b,requested};
 }
 
-test('F-R01 manual scene navigation clears an old exact shot before refresh while retaining accurate comment focus',async()=>{
-  const {c,b,requested}=fixture();
-  await c.showBreakdownScene(b,new Element('article'),new Element('nav'),1);
+test('manual scene route replaces an old exact shot and clears material selection before refresh',async()=>{
+  const {c,b}=fixture();let loaded=0;c.loadProductionBreakdown=async()=>{loaded++};c.history.pushState=c.history.replaceState;
+  await c.breakdownNavigate({breakdown_episode:'episode',breakdown_scene:b.object_id,breakdown_object:b.object_id,breakdown_revision:b.id});
   const params=new URL(c.location.href).searchParams;
-  assert.equal(params.get('breakdown_scene'),b.object_id);
-  for(const key of ['breakdown_object','breakdown_revision','material_id','material_version','material_target'])assert.equal(params.has(key),false,key);
-  assert.equal(params.get('production_object'),b.object_id);
-  assert.equal(params.get('production_revision'),b.id);
-  assert.equal(c.state.productionSelected.id,b.id);
-  await c.loadProductionBreakdown();
-  assert.deepEqual(requested,['scene-b','scene-b']);
+  assert.equal(params.get('breakdown_scene'),b.object_id);assert.equal(params.get('breakdown_object'),b.object_id);assert.equal(params.get('breakdown_revision'),b.id);
+  for(const key of ['production_object','production_revision','material_id','material_version','material_target'])assert.equal(params.has(key),false,key);
+  assert.equal(loaded,1);
 });
 
-test('P02 dynamically exposing actual entity ownership preserves an explicitly empty selection',async()=>{
-  const {c}=fixture(),parent=new Element('header');
-  c.state.breakdownLevels=[];
-  c.state.breakdownSceneData={shots:[{context:{materials:[{placement_level:'entity'}]}}]};
-  c.breakdownScopeFilters(parent,()=>{});
-  const buttons=parent.querySelectorAll('button');
-  assert.deepEqual(buttons.map(b=>b.textContent),['剧','集','场','镜','实体']);
-  assert.ok(buttons.every(b=>b.getAttribute('aria-pressed')==='false'));
-  await buttons.at(-1).onclick();
-  assert.deepEqual(Array.from(c.state.breakdownLevels),['entity']);
+test('removed ownership controls cannot filter explicitly linked material identities',()=>{
+  const {c}=fixture();c.state.breakdownLevels=[];const items=[{object_id:'entity-material',media_type:'image',classification:{key:'image:character',label:'图像—角色'}}];
+  assert.equal(c.breakdownScopeFilters,undefined);assert.equal(c.groupedShotMaterials(items)[0].items[0].object_id,'entity-material');
 });
 
 test('C04 a real video image preview is used when the original itself is not an image',()=>{

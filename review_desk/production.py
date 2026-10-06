@@ -131,7 +131,7 @@ def source_check(store, ref):
     return source
 
 
-def source_excerpt(store, ref):
+def source_excerpt(store, ref, full_scene=False):
     """Read the exact cited text without following the object's current head."""
     source = source_check(store, ref)
     payload = source['payload']
@@ -145,6 +145,9 @@ def source_excerpt(store, ref):
         blocks = [b for section in payload['sections'] for b in section.get('blocks', [])]
     scene = next((s for s in payload.get('scenes', []) if s['id'] == ref.get('scene_id')), None)
     ids = ref.get('block_ids') or (scene or {}).get('block_ids')
+    if full_scene and not scene:raise ValueError('full scene reading requires an exact scene reference')
+    cited_ids=list(ref.get('block_ids') or [])
+    if full_scene:ids=scene['block_ids']
     if ids:
         blocks = [b for b in blocks if b['id'] in ids]
     screenplay = None
@@ -156,7 +159,8 @@ def source_excerpt(store, ref):
                 break
     return {'reference': ref, 'kind': source['kind'], 'title': payload.get('title', source['object_id']),
             'screenplay':screenplay, 'episode_number':payload.get('number') if source['kind']=='EPISODE' else None,
-            'scene': scene, 'blocks': blocks, 'is_current': source['id'] == source['current_revision']}
+            'scene': scene, 'blocks': blocks, 'is_current': source['id'] == source['current_revision'],
+            **({'highlight_block_ids':cited_ids,'full_scene':True} if full_scene else {})}
 
 
 def _text(value, label):

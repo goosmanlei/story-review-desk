@@ -39,6 +39,7 @@ function fixture(){
   c.productionTextBlocks=row=>Object.entries(row.payload.generation?{'generation.prompt':row.payload.generation.prompt}:{'call.prompt':row.payload.prompt}).filter(([,text])=>typeof text==='string').map(([field,text])=>({id:field,field,text}));
   c.materialReferenceRequest=ref=>({url:'/?revision='+ref.revision_id});
   c.openMaterialReference=()=>{};c.toast=message=>{throw Error(message)};
+  c.scrollBreakdownTarget=()=>{};c.rememberBreakdownPosition=()=>{};c.requestAnimationFrame=()=>1;c.window={scrollY:0,addEventListener(){},removeEventListener(){},scrollTo(){}};
   return {c,host,reader};
 }
 const row=(object_id,kind,payload={},id=object_id+'-r1')=>({object_id,id,current_revision:id,kind,version:1,created_at:'2026-10-04',payload:{title:object_id,blocks:[],...payload}});

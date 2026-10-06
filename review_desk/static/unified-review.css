@@ -33,7 +33,7 @@
 }
 @media(max-width:1199px){.unified-card-dialog:has(> .comment-panel:not([hidden]))>.review-dialog-body{visibility:hidden}}
 @media(max-width:1800px){.unified-card-dialog .unified-card-material .entity-review-local-heading>h3{flex-basis:100%}}
-.breakdown-episode-tabs{margin:16px 0}.breakdown-episode-tabs .source-button{flex:0 0 155px;min-height:64px;margin:0;white-space:normal}
+.breakdown-episode-tabs{margin:16px 0}.breakdown-episode-tabs .source-button:not(.screenplay-episode){flex:0 0 155px;min-height:64px;margin:0;white-space:normal}
 .breakdown-scene-layout{display:grid;grid-template-columns:245px minmax(0,1fr);gap:0;border:1px solid var(--desk-line);height:calc(100dvh - 90px);min-height:400px;position:sticky;top:70px}
 .breakdown-scenes{min-height:0;display:flex;flex-direction:column;border-right:1px solid var(--desk-line)}.breakdown-scenes>header{padding:20px}.breakdown-scenes h2{font-size:19px;margin:0}
 .breakdown-scene-list{overflow:auto;min-height:0;padding:10px;overscroll-behavior:contain}.breakdown-scene-list .source-button{width:100%;margin:0 0 8px;min-width:0}
@@ -50,7 +50,7 @@
 @media(min-width:1850px){.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:350px minmax(0,1fr)}.entity-small-list,.material-index>.material-small-list{grid-template-columns:1fr}.entity-small-card .production-entity-avatar{width:30px;height:30px}}
 @media(max-width:1250px){.unified-card{grid-template-columns:repeat(2,minmax(0,1fr))}.unified-card-context,.unified-card-material{padding:14px}.production-board.entity-review-board,.production-board.unified-management{grid-template-columns:190px minmax(0,1fr);gap:10px}.breakdown-scene-layout{grid-template-columns:195px minmax(0,1fr)}.breakdown-row{gap:12px;grid-template-columns:minmax(0,1fr) minmax(200px,.8fr);padding:14px 10px}}
 @media(max-width:1050px){.unified-card{grid-template-columns:1fr}.unified-card-context{border-right:0;border-bottom:1px solid var(--desk-line)}.unified-card-material{position:static;max-height:none;overflow:visible}.production-board.entity-review-board .production-index{position:sticky;top:80px;max-height:75dvh}.breakdown-row{grid-template-columns:1fr}.breakdown-shot-materials{border-top:1px solid var(--desk-line);padding-top:15px}}
-@media(max-width:700px){.production-tabs{margin-bottom:16px}.production-board.entity-review-board,.production-board.unified-management{display:block}.production-index,.production-board.entity-review-board .production-index{position:static;max-height:260px;overflow:auto;margin-bottom:14px}.production-toolbar input[type=search]{min-width:0;width:100%}.production-filter-group{display:block}.production-filter-options{gap:6px}.unified-card-dialog{width:98vw;max-width:98vw}.unified-card-dialog .unified-card-material{max-height:none}.unified-card-context,.unified-card-material{padding:12px}.unified-card{display:block}.breakdown-scene-layout{display:block;height:auto;min-height:0;position:static}.breakdown-scene-list{max-height:210px}.breakdown-scenes>header{padding:12px}.breakdown-body{overflow:visible;max-height:none}.breakdown-scene{padding-inline:7px}.breakdown-scene>.text-reader-head{margin-inline:-7px;padding:14px}.breakdown-row{display:block;padding:12px 8px}.breakdown-shot-materials{margin-top:18px}.breakdown-levels{position:static}.breakdown-episode-tabs .source-button{flex-basis:145px}.material-small-preview{flex-basis:50px;width:50px;height:45px}}
+@media(max-width:700px){.production-tabs{margin-bottom:16px}.production-board.entity-review-board,.production-board.unified-management{display:block}.production-index,.production-board.entity-review-board .production-index{position:static;max-height:260px;overflow:auto;margin-bottom:14px}.production-toolbar input[type=search]{min-width:0;width:100%}.production-filter-group{display:block}.production-filter-options{gap:6px}.unified-card-dialog{width:98vw;max-width:98vw}.unified-card-dialog .unified-card-material{max-height:none}.unified-card-context,.unified-card-material{padding:12px}.unified-card{display:block}.breakdown-scene-layout{display:block;height:auto;min-height:0;position:static}.breakdown-scene-list{max-height:210px}.breakdown-scenes>header{padding:12px}.breakdown-body{overflow:visible;max-height:none}.breakdown-scene{padding-inline:7px}.breakdown-scene>.text-reader-head{margin-inline:-7px;padding:14px}.breakdown-row{display:block;padding:12px 8px}.breakdown-shot-materials{margin-top:18px}.breakdown-levels{position:static}.breakdown-episode-tabs .source-button:not(.screenplay-episode){flex-basis:145px}.material-small-preview{flex-basis:50px;width:50px;height:45px}}
 
 .breakdown-scene>.text-reader-head{position:sticky;top:0;z-index:2}
 
@@ -82,7 +82,7 @@
 .production-reader .review-reference-button,.review-dialog .review-reference-button,.breakdown-body .review-reference-button{font:inherit;font-size:12px;line-height:1.4;padding:6px 10px;color:var(--desk-ink);background:#fffdf7;border:1px solid var(--desk-line);border-radius:0;text-decoration:none;cursor:pointer;white-space:normal}
 .review-reference-button:hover{border-color:#903d34!important}.review-reference-button:focus-visible{outline:2px solid #903d34;outline-offset:2px}
 .breakdown-episode-tabs{position:sticky;top:70px;z-index:4;background:#ebe7dc;margin:0;padding:12px 0}.breakdown-scene-layout{top:158px;height:calc(100dvh - 175px)}
-@media(max-width:700px){.breakdown-episode-tabs{top:122px;padding:8px 0}.breakdown-episode-tabs .source-button{min-height:44px}.breakdown-scene>.breakdown-scene-head{top:184px}.breakdown-scene-layout{height:auto;position:static}.breakdown-scene-head .entity-review-text{max-height:100px;overflow:auto}}
+@media(max-width:700px){.breakdown-episode-tabs{top:122px;padding:8px 0}.breakdown-episode-tabs .source-button:not(.screenplay-episode){min-height:44px}.breakdown-scene>.breakdown-scene-head{top:184px}.breakdown-scene-layout{height:auto;position:static}.breakdown-scene-head .entity-review-text{max-height:100px;overflow:auto}}
 .production-index .material-small-card{display:flex;align-items:center;gap:9px}.production-index .material-small-card .material-small-preview{margin:0;flex:0 0 44px}.production-index .material-small-card .material-small-copy{min-width:0;text-align:left}.production-index .material-small-card small{white-space:normal}
 /* Keep the desktop scene pane inside the viewport. A separate page footer
    must not push its sticky scene header underneath the episode strip. */
@@ -92,7 +92,7 @@
   #production-view:has(.breakdown-scene-layout) .breakdown-scene-layout{position:relative;top:0;flex:1 1 auto;height:auto;min-height:0}
   .workspace-main:has(#production-view:not([hidden]) .breakdown-scene-layout) .workspace-footer{display:none}
 }
-@media(max-width:700px){.breakdown-episode-tabs .source-button{height:44px;min-height:44px;padding:8px 10px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+@media(max-width:700px){.breakdown-episode-tabs .source-button:not(.screenplay-episode){height:44px;min-height:44px;padding:8px 10px;line-height:18px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
 
 /* Version and candidate choices occupy independent, bounded rows. */
 .review-choice-buttons{display:flex;flex-wrap:nowrap;gap:6px;max-width:100%;min-width:0;overflow-x:auto;overscroll-behavior:contain;padding:3px 0;scrollbar-width:thin}
@@ -122,3 +122,21 @@
 .management-card-list{min-width:0}.management-card-group{margin:20px 0 24px;min-width:0}.management-card-group>h3{font-size:16px;margin:0 0 12px}.management-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.management-card-grid .material-small-card{margin:0!important;min-width:0}.review-pagination{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:24px 0}.review-pagination label{display:flex;align-items:center;gap:6px}.review-pagination select{font:inherit;padding:6px;background:#fffdf7}.pagination-basis{color:var(--desk-muted);font-size:11px}
 @media(max-width:1050px){.management-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:650px){.management-card-grid{grid-template-columns:1fr}.review-pagination{gap:6px}.review-pagination button{padding:7px}.management-card-group{margin:18px 0}.management-card-grid .material-small-preview{flex-basis:44px;width:44px;height:42px}}
+
+/* Shared episode cards, two-level exact directory and a bounded material column. */
+.breakdown-episode-tabs .screenplay-episode{height:auto;white-space:normal;overflow:visible;text-overflow:clip}
+.breakdown-directory-heading{display:flex;align-items:stretch;gap:3px;min-width:0}
+.breakdown-directory-heading>.source-button{flex:1;min-width:0}
+.breakdown-directory-toggle{flex:0 0 22px;border:0;background:transparent;padding:0;font:inherit;cursor:pointer}
+.breakdown-directory-shots{padding-left:24px}.breakdown-directory-shots .source-button{font-size:12px;padding:7px 8px;white-space:normal;overflow-wrap:anywhere}
+.breakdown-directory-scene{margin-bottom:12px}.breakdown-scene-list [aria-current=location]{background:#e3ebdf;border-color:#789376;box-shadow:inset 3px 0 #789376}
+.breakdown-shot-heading{display:flex;gap:8px 12px;align-items:baseline;flex-wrap:wrap;min-width:0}
+.breakdown-shot-copy h3{margin:0}.breakdown-shot-copy>header{margin-bottom:16px;flex-wrap:wrap}
+.breakdown-shot-copy>header>small{flex:0 0 auto}
+.breakdown-row{grid-template-columns:minmax(0,1fr) 300px;scroll-margin-top:calc(var(--breakdown-header-height,62px) + 12px)}
+.breakdown-shot-materials{padding:14px}.breakdown-material-group h5{font-size:12px;color:var(--desk-muted);margin:16px 0 6px;font-weight:600}
+.reference-highlight{background:#fff0b9;border-left:3px solid #b98823;padding:8px 12px;scroll-margin-block:30px}
+@media(max-width:1050px){.breakdown-row{grid-template-columns:1fr}}
+@media(max-width:700px){.breakdown-episode-tabs{position:static}.breakdown-scene>.breakdown-scene-head{position:static;top:auto}.breakdown-row{scroll-margin-top:calc(var(--workspace-topbar-height,122px) + 12px)}}
+
+.breakdown-scene-head .breakdown-scene-heading{margin:0}.breakdown-scene-heading .review-reference-button{margin:0}

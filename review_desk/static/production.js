@@ -465,6 +465,7 @@ function locateProductionComment(comment,local=false){
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
   if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
   if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
+  if(typeof productionTab==='function'&&['breakdown','shots'].includes(productionTab())&&state.productionSelected?.kind==='PREPARATION'&&comment.anchor.type==='text'&&!document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"] [data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]'))return openBreakdownSceneNotes(state.productionSelected,comment);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
   // Component ids can repeat across state references and unassigned candidates.
