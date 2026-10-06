@@ -107,7 +107,7 @@ def scene_shots(store, scene, exact=None):
     return sorted(shots,key=lambda r:(r['payload']['number'],r['object_id']))
 
 
-def catalog(store, episode=None, object_id=None, revision_id=None):
+def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
     locks = rows(store, 'INPUT_LOCK')
     target=p.record(store,object_id,revision_id) if object_id else None
     exact_scene=None;exact_shot=None
@@ -144,9 +144,17 @@ def catalog(store, episode=None, object_id=None, revision_id=None):
         scenes.sort(key=lambda r:(order.get(r['payload']['source']['scene_id'],len(order)),r['object_id']))
         shots=[shot for sc in scenes for shot in scene_shots(store,sc,
                exact_shot if exact_shot and exact_shot['payload']['parent']==ref(sc) else None)]
+        targets=[*scenes,*shots]
+        if view=='shots':
+            from .material_plans import snapshot
+            for shot in shots:
+                for need in context(store,shot['object_id'],shot['id'])['requirements']:
+                    if need['payload']['media_type']=='video':
+                        for version in snapshot(store,need['object_id']):
+                            targets.extend([*version['members'],*filter(None,version.get('definition_records',{}).values())])
         entries.append({'object_id':ep['object_id'],'id':ep['id'],'number':ep['payload']['number'],
             'title':ep['payload']['title'],'scenes':[{'id':s['id'],'title':s.get('heading',s['id'])} for s in ep['payload']['scenes']],
-            'comment_targets':[ref(r) for r in [*scenes,*shots]]})
+            'comment_targets':list({r['id']:ref(r) for r in targets}.values())})
         if ep['id']==chosen['id']:chosen_scenes=scenes;chosen_shots=shots
     return {'lock':lock,'episodes':entries,'episode':chosen['object_id'],
             'scenes':chosen_scenes,'shots':chosen_shots,'target':ref(target) if target else None}

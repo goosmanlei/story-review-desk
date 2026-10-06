@@ -23,6 +23,14 @@ class BreakdownTest(unittest.TestCase):
         self.put(self.spec('shot','SHOT_DESIGN',episode=self.ref('episode'),parent=self.ref('scene'),scene_id='scene',source=self.source,
             number=1,purpose='a',framing='b',spatial='c',action_start='d',action_end='e',continuity='f',fps=24,duration_frames=120,sound=[],entities=[],states=[]))
 
+    def test_scene_without_redundant_review_text_keeps_source_and_history(self):
+        self.scene_shot();old=p.record(self.store,'scene');payload=copy.deepcopy(old['payload']);payload['blocks']=[]
+        self.put({'object_id':'scene','kind':'PREPARATION','expected_version':old['version'],'payload':payload})
+        self.assertEqual(p.record(self.store,'scene')['payload']['source'],old['payload']['source'])
+        self.assertEqual(p.record(self.store,revision_id=old['id'])['payload']['blocks'],old['payload']['blocks'])
+        entity=self.entity();entity['payload']['blocks']=[]
+        with self.assertRaises(ValueError):self.put(entity)
+
     def test_direct_parent_and_exact_historical_context_survive_reorder(self):
         self.scene_shot();old=self.ref('shot');self.put(self.requirement(scope='shot'))
         self.media();self.put(self.adoption(scope='shot'))

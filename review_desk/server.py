@@ -128,7 +128,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/breakdown":
                     from .production_breakdown import catalog
                     with production.read_scope(store):
-                        return self._json(catalog(store, param("episode"), param("object_id"), param("revision_id")))
+                        return self._json(catalog(store, param("episode"), param("object_id"), param("revision_id"),param('view')))
                 if path == '/api/production/index':
                     from .production_breakdown import index
                     with production.read_scope(store):
@@ -262,10 +262,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
-        if self.path in ("/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate", "/api/production/material-model-migrate", "/api/production/material-model-rollback"):
+        if self.path in ("/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate", "/api/production/material-model-migrate", "/api/production/material-model-rollback"):
             try:
                 value = self._input(128_000_000 if '/material-model-' in self.path else 20_000_000)
-                if '/material-model-' in self.path:
+                if self.path.endswith('shot-reference'):
+                    from .shot_references import select
+                    result=select(self.server.store,value)
+                elif '/material-model-' in self.path:
                     from .material_model import migrate,rollback
                     result=(rollback(self.server.store,value['migration'],value.get('validate_only') is True) if self.path.endswith('rollback') else migrate(self.server.store,value['migration'],value.get('validate_only') is True,apply_archives=value.get('defer_archives') is not True))
                 elif self.path.endswith('material-plan-migrate'):

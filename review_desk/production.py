@@ -258,7 +258,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         raise ValueError("unsupported production format/kind")
     _text(payload.get("title"), "title")
     blocks = _list(payload, "blocks")
-    if not blocks or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
+    if (not blocks and kind!='PREPARATION') or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
         raise ValueError("reviewable text blocks are required")
     if len({b["id"] for b in blocks}) != len(blocks):
         raise ValueError("duplicate reviewable block id")

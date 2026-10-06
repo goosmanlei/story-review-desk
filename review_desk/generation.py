@@ -455,7 +455,12 @@ def readiness(store, requirement_id):
         else:approvals.append(ref(a))
     if plan:
         issues.extend(plan.get('blockers',[]))
-        for item in plan['inputs']:
+        from .shot_references import applies, slots
+        exact_slots=slots(store,plan['inputs']) if applies(store,need) else None
+        for index,item in enumerate(plan['inputs']):
+            if exact_slots is not None and exact_slots[index]['issues']:
+                issues.extend('参考 '+str(index+1)+'：'+issue for issue in exact_slots[index]['issues'])
+                continue
             target=p.ref_record(store,item['reference']);selection=item
             if target['kind']=='REQUIREMENT':
                 if target['id']!=target['current_revision']:
@@ -518,8 +523,17 @@ def validate_call(store, object_id, payload):
         for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
-    if not payload.get('generation_requirement') or payload.get('status') not in ('submitted','completed'):return
+    if payload.get('status') not in ('submitted','completed','failed','unknown'):return
+    if not payload.get('generation_requirement'):
+        if payload.get('prepared_plan'):
+            from .shot_references import applies
+            if applies(store,p.ref_record(store,payload['prepared_plan'])):
+                raise Conflict('新镜头调用必须提供准确生成依据并通过统一生产校验')
+        return
     need=p.ref_record(store,payload['generation_requirement'],{'REQUIREMENT'})
+    if payload['status'] in ('failed','unknown'):
+        from .shot_references import applies
+        if not applies(store,need):return
     manifest=package(store,need['object_id'])
     if manifest['inputs'] and not manifest['input_contract']['verified']:
         raise Conflict('参考输入的模型契约尚未核实，不能登记新执行调用')

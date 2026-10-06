@@ -241,7 +241,7 @@ function renderMaterialCard(parent,model,options={}){
     if(call){renderActualGeneration(box,{call,inputs:call.review_input_records||[]});nodeText('p','production-meta','此版本有调用记录，尚无已确认的原件结果。',box)}
     else nodeText('p','production-meta','此版本的历史方案未记录完整。',box);
   }
-  parent.append(box);return box;
+  parent.append(box);if(typeof renderShotReferenceChoice==='function')renderShotReferenceChoice(box,model,items[0]);return box;
 }
 function renderMaterialWorkspace(root,detail){
   if(detail.record.kind==='REQUIREMENT')return renderMaterialDemand(root,detail);

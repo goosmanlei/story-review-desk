@@ -214,8 +214,20 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
                 'placement_title':owner['payload']['title'],'record':row,
                 'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
         context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
+        from .shot_references import slots,inputs_for
+        for detail in context['video_details'].values():
+            targets=[detail['record'],*detail.get('history',[])]
+            for rounds in detail.get('material_versions',{}).values():
+                for version in rounds:targets.extend([version.get('plan'),*version.get('definition_records',{}).values()])
+            for actual in detail.get('review_contexts',{}).values():targets.append(actual.get('call'))
+            for row in targets:
+                if row and row['kind'] in ('REQUIREMENT','CALL'):
+                    row['review_shot_slots']=slots(store,inputs_for(store,row))
         return context
-    return {'scene':selected,'shared':[enrich(c) for c in reversed(contexts)],
+    source=selected['payload'].get('source',{})
+    episode=p.ref_record(store,source) if source else None
+    source_scene=next((s for s in (episode or {}).get('payload',{}).get('scenes',[]) if s['id']==source.get('scene_id')),None)
+    return {'scene':selected,'source_scene':source_scene,'shared':[enrich(c) for c in reversed(contexts)],
             'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id']))} for r in shots]}
 
 

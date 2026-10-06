@@ -132,9 +132,11 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
 
 // Shared modal chrome; closing never changes the review target or draft.
 let reviewDialogSerial=0,reviewDialogBackPending=false;
+let reviewDialogReturnCallbacks=[];
+function afterReviewDialogReturn(action){if(reviewDialogBackPending)reviewDialogReturnCallbacks.push(action);else action()}
 const reviewDialogStack=[];
 if(typeof window!=='undefined')window.addEventListener('popstate',event=>{
-  if(reviewDialogBackPending){reviewDialogBackPending=false;event.stopImmediatePropagation();return}
+  if(reviewDialogBackPending){reviewDialogBackPending=false;event.stopImmediatePropagation();const callbacks=reviewDialogReturnCallbacks;reviewDialogReturnCallbacks=[];for(const action of callbacks)action();return}
   const dialog=reviewDialogStack.at(-1);if(!dialog)return;
   event.stopImmediatePropagation();dialog.closedByHistory=true;dialog.close();
 },{capture:true});
