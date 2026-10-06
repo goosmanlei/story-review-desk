@@ -32,7 +32,7 @@ function modelSmallItem(model){
 function unifiedModelSelection(models,data){
   const target=state.productionSelected,card=state.materialCommentCard;
   const explicit=models.find(m=>card?.data===data&&materialModelKey(m)===card.material_id&&materialVersionCommentRows(m.round).some(r=>r.id===target?.id))||models.find(m=>data.localVersions&&m.round?.members.some(r=>data.localVersions[r.object_id]?.id===r.id));
-  const current=models.find(m=>materialModelKey(m)===data.unifiedMaterialId)||models.find(m=>[m.need,m.identity].some(row=>row?.material_identity?.id===data.unifiedMaterialId||row?.material_identity?.aliases?.includes(data.unifiedMaterialId)));
+  const current=models.find(m=>materialModelKey(m)===data.unifiedMaterialId);
   const rank=m=>{const row=m.need||m.identity||m.candidates[0]?.record;return (row?.payload.media_type==='image'?0:row?.payload.media_type==='audio'?10:20)+(row?.payload.slot==='overall'?0:1)};
   return explicit||current||[...models].sort((a,b)=>rank(a)-rank(b))[0];
 }

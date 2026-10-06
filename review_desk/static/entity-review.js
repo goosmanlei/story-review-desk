@@ -265,8 +265,9 @@ function entityReviewMaterialModels(needs,items,data){
   const associations=new Map(),sharedNeeds=[];
   for(const need of needs){
     const canonical=need.material_identity?.id,exact=card?.data===data&&card.material_id===need.object_id||data.localVersions?.[need.object_id];
+    const alias=card?.data===data&&card.material_id!==need.object_id&&need.material_identity?.aliases?.includes(card.material_id)?[(data.requirements||[]).find(r=>r.object_id===card.material_id),...(data.material_versions?.[card.material_id]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===card.material_id):null;
     const shared=canonical&&[(data.requirements||[]).find(r=>r.object_id===canonical),...(data.material_versions?.[canonical]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===canonical);
-    const current=!exact&&canonical&&canonical!==need.object_id?shared||need:need;
+    const current=alias||(!exact&&canonical&&canonical!==need.object_id?shared||need:need);
     if(!associations.has(current.object_id)){associations.set(current.object_id,need);sharedNeeds.push(current)}
   }
   return materialRoundModels(sharedNeeds,items,modelData).map(model=>{
