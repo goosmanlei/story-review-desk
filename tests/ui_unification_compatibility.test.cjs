@@ -392,3 +392,16 @@ test('shared requirement cards prefer their actual identity over an earlier lega
   assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams(),{defaultSelection:true}).selected.material_id,'need');
   assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams({material_id:'legacy',material_version:1})).selected.material_id,'legacy');
 });
+test('an exact shared alias retains its own round and members inside the unified card',()=>{
+  const ctx=setup(),f=fixture(ctx),alias={...f.need,object_id:'legacy-voice',id:'legacy-plan',material_identity:{id:'need',aliases:['need','legacy-voice']}};
+  f.need.material_identity=alias.material_identity;f.data.requirements=[f.need,alias];
+  const old={...f.round,number:1,plan:alias,members:[alias,f.older],results:[f.older]};
+  f.data.material_versions['legacy-voice']=[old];f.data.selectedMaterialRounds={'legacy-voice':1};
+  ctx.state.materialCommentCard={data:f.data,material_id:'legacy-voice',number:1};ctx.state.productionSelected=alias;
+  const models=ctx.entityReviewMaterialModels([f.need],f.items,f.data);
+  const selected=ctx.unifiedModelSelection(models,f.data);
+  assert.equal(selected.material_id,'legacy-voice');assert.equal(selected.round.number,1);
+  assert.deepEqual(selected.round.members.map(r=>r.id),['legacy-plan',f.older.id]);
+  assert.equal(selected.candidates.length,1);assert.equal(selected.candidates[0].record.id,f.older.id);
+  assert.ok(models.some(m=>m.material_id==='need'),'other current state material remains available');
+});
