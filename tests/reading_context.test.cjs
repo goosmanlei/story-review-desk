@@ -105,5 +105,5 @@ test('structure reread and revision return retain independent scroll positions a
  f.state.structureRevision='structure-other';f.context.renderStructureReader();assert.equal(reader.scrollTop,0);assert.match(reader.textContent,/Another structure/);reader.scrollTop=95;
  f.state.structureRevision='structure-rev';f.context.renderStructureReader();assert.equal(reader.scrollTop,480);assert.equal(reader.dataset.readingRevision,'structure-rev');
  f.state.structureRevision='structure-other';f.context.renderStructureReader();assert.equal(reader.scrollTop,95);
- assert.equal(f.nodes.get('#structure-index').querySelector('h2').textContent,'故事结构');
+ assert.equal(f.nodes.get('#structure-index').querySelector('h2').textContent,'章节目录');
 });

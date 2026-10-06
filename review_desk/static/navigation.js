@@ -1,7 +1,6 @@
 function businessCode(row){return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
 function businessTitle(row,title=row?.payload?.title||row?.title||''){const code=businessCode(row),positioned=row?.business_scene_id?String(title).replace(/^\d+-\d+\s*/,reviewPositionLabel('scene',row.business_scene_id)+' · '):title,text=reviewPositionText(positioned);return code&&!text.startsWith(code+' · ')?code+' · '+text:text}
 function renderBusinessCodeCatalog(root){
-  const header=el('header','management-heading');nodeText('h1',null,'编号前缀',header);root.append(header);
   const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
   const table=el('table','business-code-table'),head=el('tr');for(const title of ['类型','前缀','示例','唯一性范围'])nodeText('th',null,title,head);table.append(head);
   for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);
@@ -94,6 +93,7 @@ function workspaceTabItems(){
   return [];
 }
 function renderWorkspaceTabs(){
+  renderPageHeading();
   const root=document.querySelector('#workspace-subnav');if(!root)return;
   const focused=root.contains(document.activeElement)?document.activeElement.id:null,scroll=root.scrollLeft;
   root.replaceChildren();root.setAttribute('aria-label',({'production.approach':'制作思路','story.sources':'故事创作','settings.workspace':'制作设定','production.workspace':'全剧制作','project.configuration':'系统管理'})[workspaceGroup(state.workspace)]+'子页面');
@@ -109,5 +109,32 @@ function renderWorkspaceTabs(){
   }
   root.scrollLeft=scroll;
   if(focused)document.getElementById(focused)?.focus({preventScroll:true});
+}
+function workspacePageDescriptor(workspace,params){
+  if(workspace==='production.approach')return params.get('tab')==='materials'
+    ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']
+    :['从资料到故事','故事创作方法','了解采编、结构、小说与剧本的创作步骤，以及审阅意见如何推动修订。'];
+  const story={
+    'story.sources':['SOURCE EVIDENCE','故事采编','阅读原始依据与整理稿，核对出处和版本；圈选原文提出审阅意见。'],
+    'story.outline':['STORY STRUCTURE','故事结构','按稿次阅读人物、关系与故事线，结合图文审阅整体设计。'],
+    'story.script':['STORY → SCREENPLAY','剧本集场阅读与审阅','按版本、分集、场次阅读完整剧本并评论；预计时长是制作估算。']
+  };if(story[workspace])return story[workspace];
+  if(workspace==='project.configuration')return ({
+    PROJECT:['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'],
+    SYSTEM:['SYSTEM & AI','系统与 AI','管理站点图标与评论润色选项；修改后统一保存配置。'],
+    CODES:['BUSINESS CODES','编号前缀','查阅对象编号的前缀、示例和唯一性范围，识别准确的版本与候选。']
+  })[params.get('config_section')]||['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'];
+  const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'?(params.get('production_tab')==='history'?'history':'shots'):(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
+  return ({
+    breakdown:['STORY → PRODUCTION','制作拆解','按集场阅读逐镜设计，核对剧情依据及本镜关联的实体与素材。'],
+    entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、完整状态和关系，评论或采纳当前内容。'],
+    materials:['MATERIAL LIBRARY','素材管理','按集场查看素材方案、版本与真实候选，预览原件并审阅准确内容。'],
+    shots:['SHOT PRODUCTION','镜头制作','按集场检查镜头方案，明确选择上游参考并审阅本镜视频候选。'],
+    history:['COMPOSITION & HISTORY','组合与历史','查阅组合记录、准确采用及制作历史，核对成片所需的输入与缺项。']
+  })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
+}
+function renderPageHeading(){
+  const parts=workspacePageDescriptor(state.workspace,new URL(location.href).searchParams);
+  for(const [index,id] of ['page-marker','page-title','page-purpose'].entries()){const node=document.getElementById(id);if(node)node.textContent=parts[index]}
 }
 if(typeof window!=='undefined')window.addEventListener?.('pagehide',rememberWorkspacePosition);

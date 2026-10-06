@@ -240,7 +240,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]

@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="/review-ui.css">
   <link rel="stylesheet" href="/unified-review.css">
   <link rel="stylesheet" href="/navigation.css">
+  <link rel="stylesheet" href="/desk-theme.css">
 </head>
 <body>
   <div class="layout">
@@ -26,17 +27,15 @@
     <main id="reader" class="workspace-main" tabindex="-1">
       <header class="workspace-topbar"><div class="view-context"><span id="view-symbol">故</span><div><small>当前视图</small><b id="view-title">故事创作</b></div></div><nav id="workspace-subnav" class="workspace-subnav" role="tablist" aria-label="当前视图子页面"></nav></header>
       <div class="workspace-content">
-        <section id="story-creation-shell" class="workspace-view" aria-labelledby="story-workspace-title">
-          <h1 id="story-workspace-title">故事创作</h1>
+        <header class="page-heading" aria-labelledby="page-title"><small id="page-marker"></small><h1 id="page-title"></h1><p id="page-purpose"></p></header>
+        <section id="story-creation-shell" class="workspace-view" aria-labelledby="page-title">
           <section id="story-workspace" role="tabpanel" aria-labelledby="open-story-sources">
-            <p class="story-reader-guide">阅读本故事已登记的原始依据、派生整理与辅助资料。正文、出处、版本类型与素材来源分别核对。</p>
             <div class="text-reader">
-              <aside id="source-section" class="text-reader-index"><header><small>SOURCE EVIDENCE</small><h2>故事采编</h2><p>不同版本的原始资料及整理说明；评论数包含已关闭评论。</p></header><nav id="source-list" aria-label="资料"></nav><footer>选择左侧版本，核对正文、出处与图片；圈选原文可添加意见。</footer></aside>
+              <aside id="source-section" class="text-reader-index"><header><h2>资料目录</h2><p>评论数包含已关闭评论。</p></header><nav id="source-list" aria-label="资料"></nav></aside>
               <div class="source-reader-main"><header class="text-reader-head"><div><small id="reader-kind">SOURCE DOCUMENT</small><h2 id="reader-head-title">选择一份采编资料</h2><p id="reader-head-detail">原文与整理稿分别标注</p></div></header><div id="source-view" class="text-reader-scroll" aria-live="polite"></div></div>
             </div>
           </section>
           <section id="screenplay-workspace" role="tabpanel" aria-labelledby="open-story-script" hidden>
-            <header class="screenplay-page-heading"><p>STORY → SCREENPLAY</p><h2>剧本集场阅读与审阅</h2><span>按版本、分集、场次阅读完整剧本；圈选正文可继续评论与润色。预计时长是制作估算。</span></header>
             <div class="screenplay-board">
               <nav id="screenplay-index" class="screenplay-versions" aria-label="剧本版本"></nav>
               <nav id="screenplay-episodes" class="screenplay-episodes" aria-label="剧本分集"></nav>
@@ -53,7 +52,6 @@
           </section>
         </section>
         <div id="configuration-view" class="workspace-view" hidden></div><section id="approach-view" class="workspace-view" hidden>
-          <header class="approach-heading"><small>从故事到影像</small><h1>制作思路</h1><p>理解每一步为什么做、依据什么、交付什么，以及发现问题时回到哪里修订。</p></header>
           <div class="approach-layout">
             <aside id="approach-sidebar" class="approach-sidebar text-reader-index" hidden>
               <header><small>阅读目录</small><h2 id="approach-index-title">故事创作</h2><p>选择章节，阅读对应的方法与例子。</p></header>

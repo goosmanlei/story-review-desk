@@ -20,8 +20,8 @@ FIELDS = {
         "site_favicon": {"label": "站点图标（favicon）", "type": "favicon", "default": ""},
         "ai_polish_model": {"label": "评论润色模型", "type": "model", "default": "gpt-4.1-mini"},
         "ai_polish_effort": {"label": "推理强度", "type": "reasoning_effort", "default": "off"},
-        "ai_polish_api_key_env": {"label": "润色 API Key 环境变量名", "type": "env_name", "default": "OPENAI_API_KEY"},
-        "ai_context_max_chars": {"label": "AI 参考上下文字数上限", "type": "integer", "default": 12000},
+        "ai_polish_api_key_env": {"label": "API Key 环境变量名", "type": "env_name", "default": "OPENAI_API_KEY"},
+        "ai_context_max_chars": {"label": "AI 参考上下文字数上限", "type": "integer", "default": 12000, "min": 1000, "max": 30000},
     },
     "PROJECT": {
         "current_stage": {"label": "当前创作阶段", "type": "stage", "default": "STORY_COMPILATION"},
@@ -55,7 +55,7 @@ def validate(scope, body):
             if not isinstance(value, str) or len(value) > (8000 if spec["type"] == "long_text" else 200):
                 raise ValueError("invalid configuration text: " + name)
         elif spec["type"] == "integer":
-            if type(value) is not int or not 1000 <= value <= 30000:
+            if type(value) is not int or not spec["min"] <= value <= spec["max"]:
                 raise ValueError("invalid AI context limit")
         elif spec["type"] == "env_name":
             if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", value):

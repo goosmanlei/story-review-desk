@@ -167,8 +167,7 @@ async function loadProductionWorkspace({onReadStart}={}){
     if(workspace!=='production.workspace'){switchWorkspace('production.workspace');return}
   }
   const host=$('#production-view');host.replaceChildren();
-  const heading=el('header','production-heading'),title=el('div');nodeText('h1',null,{'settings.workspace':'制作设定','materials.workspace':'素材管理','production.workspace':'全剧制作'}[workspace],title);
-  nodeText('p',null,{'settings.workspace':'直接审阅实体、完整状态和关联素材，通过评论提出意见，也可采纳当前版本。','materials.workspace':'查看原件、候选和实际制作记录；审阅结论与具体采用分别保存。','production.workspace':'按集场查看镜头与输入，检查素材缺项及准确采用版本。'}[workspace],title);heading.append(title);host.append(heading);if(typeof productionTabs==='function')productionTabs(host);
+  if(typeof productionTabs==='function')productionTabs(host);
   const inputLocks=result.records.filter(r=>r.kind==='INPUT_LOCK');
   if(workspace==='production.workspace'){
     const basis=el('div','production-basis');basis.setAttribute('aria-label','剧本依据');
