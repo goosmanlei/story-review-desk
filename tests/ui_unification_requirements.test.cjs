@@ -88,23 +88,24 @@ function videoFixture(){
   const need=row('video-need','REQUIREMENT',{media_type:'video',slot:'video',generation:{model:'plan-model',prompt:'CURRENT PLAN must not replace history',inputs:[],parameters:{}}});
   const call=row('actual-call','CALL',{model:'actual-model',prompt:'先看🧵 @图片1，再保留两行\n末行。',inputs:[{...ref(input),component_id:'original'}],parameters:{}});
   const asset=row('video-result','ASSET',{media_type:'video',components:[{id:'original',role:'original',mime:'video/mp4'}],production:ref(call)});
+  call.review_shot_slots=[{index:0,input_key:'key',material_id:'input-material',number:3,candidate:ref(input),candidate_number:2,record:input,component:input.payload.components[0],issues:[]}];
   const round={number:1,model:'plan-v1',plan:need,members:[need,call,asset],results:[asset]};
   const context={adoptions:[],video_details:{[need.object_id]:{record:need,material_versions:{[need.object_id]:[round]},review_contexts:{[asset.id]:{call,inputs:[input],requirements:[need]}}}}};
   return {...f,input,need,call,asset,round,context};
 }
-test('10.2/10.4 selected generated video renders actual prompt and exact references without changing text',()=>{
+test('10.2/10.4 selected generated video renders actual prompt and exact references without changing text',async()=>{
   const {c,reader,need,call,input,context}=videoFixture();c.breakdownPrompt(reader,need,context);
   const prompt=reader.all().find(n=>n.className==='shot-generation-prompt');assert.equal(prompt.textContent,call.payload.prompt);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
   const inline=prompt.all().find(n=>n.tag==='a');assert.equal(inline.textContent,'@图片1');assert.equal(inline.href,'/?revision='+input.id);
-  const above=reader.all().find(n=>n.reference);assert.equal(above.reference.revision_id,input.id);assert.equal(above.reference.component_id,'original');
+  const opened=[];c.openUnifiedMaterial=ref=>opened.push(ref);await reader.querySelectorAll('[data-material-id]')[0].onclick();assert.equal(opened[0].revision_id,input.id);assert.equal(opened[0].component_id,'original');assert.equal(opened[0].params.get('material_version'),'3');assert.equal(opened[0].params.get('material_target'),input.id);
 });
 test('10.4 candidate without a real call reports the gap and never fills it from the plan',()=>{
   const {c,reader,need,context,asset}=videoFixture();delete context.video_details[need.object_id].review_contexts[asset.id];c.breakdownPrompt(reader,need,context);
   assert.match(reader.textContent,/未登记真实调用/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
 });
-test('video defaults to the last generated version and keeps a manually selected empty version empty',async()=>{
+test('video defaults to latest empty version and exact manual old version retains its actual prompt',async()=>{
   const {c,reader,need,call,round,context}=videoFixture();context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  c.breakdownPrompt(reader,need,context);assert.ok(reader.textContent.includes(call.payload.prompt));const pending=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await pending.children.find(n=>n.dataset.choiceId===2).onclick();assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
+  c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();assert.ok(reader.textContent.includes(call.payload.prompt));assert.equal(c.state.breakdownVideoSelections[need.id].number,1);
 });
 test('10.1/10.4 row material opens the exact video version and candidate chosen beside its prompt',async()=>{
@@ -118,7 +119,7 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
   await c.showBreakdownScene(scene,reader,new Element('nav'),7);
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
   const candidate=reader.all().find(n=>n.attributes['aria-label']==='视频候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
-  await reader.querySelectorAll('[data-material-id]')[0].onclick();
+  await reader.querySelectorAll('[data-material-id]').find(n=>n.dataset.materialId===need.object_id).onclick();
   assert.equal(opened.length,1);assert.equal(opened[0].object_id,other.object_id);assert.equal(opened[0].revision_id,other.id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
 });
 
@@ -373,4 +374,47 @@ test('explicit state outranks a material default form and the owner reaches the 
   assert.equal(f.c.state.productionChildDetail.record.object_id,other.object_id);
   let requested;f.c.api=async url=>{requested=new URL(url,'http://fixture');return {detail:{record:f.a},entity_review:null}};
   await f.c.readUnifiedCard(f.a.object_id,'a-old',params);assert.equal(requested.searchParams.get('entity_id'),f.a.object_id);assert.equal(requested.searchParams.get('revision_id'),'a-old');
+});
+
+function shotChoiceFixture(){
+  const f=fixture(),{need,asset,round}=material(),dialog={isConnected:true},box=new Element('section');box.closest=()=>dialog;
+  const callbacks=[],source={onSaved:result=>callbacks.push(result)};
+  const context={dialog,source,need:row('video','REQUIREMENT'),slot:{material_id:'need',canonical_material_id:'need',index:0,input_key:'ordered-slot'},number:1,pageActive:()=>true};
+  f.c.state.shotReferenceContext=context;f.c.crypto={randomUUID:require('node:crypto').randomUUID};
+  return {...f,box,context,dialog,callbacks,model:{material_id:'need',round},item:{record:asset,component:asset.payload.components[0]},button:()=>box.all().find(n=>n.tag==='button')};
+}
+test('shot reference browsing adds no writes and ordinary cards expose no selection operation',()=>{
+  const f=shotChoiceFixture(),calls=[];f.c.api=(...args)=>calls.push(args);
+  f.c.renderShotReferenceChoice(f.box,f.model,f.item);assert.equal(calls.length,0);
+  f.c.state.shotReferenceContext=null;const ordinary=new Element('section');ordinary.closest=()=>f.dialog;
+  f.c.renderShotReferenceChoice(ordinary,f.model,f.item);assert.equal(ordinary.children.length,0);
+});
+test('shot reference unknown save retries keep operation identity and changed choices get a new one',async()=>{
+  const f=shotChoiceFixture(),requests=[];f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));throw Error('response lost')};
+  f.c.renderShotReferenceChoice(f.box,f.model,f.item);await f.button().onclick();await f.button().onclick();
+  assert.equal(requests[0].id,requests[1].id);assert.equal(f.context.source.saved,undefined);assert.ok(f.box.textContent.includes('保存失败'));
+  const other={...f.item,record:{...f.item.record,id:'other-result'}};f.box.replaceChildren();f.c.renderShotReferenceChoice(f.box,f.model,other);await f.button().onclick();assert.notEqual(requests[0].id,requests[2].id);
+});
+test('late save refreshes only the active page and never paints a closed dialog',async()=>{
+  for(const active of [true,false]){const f=shotChoiceFixture();let finish;f.context.pageActive=()=>active;f.c.api=()=>new Promise(resolve=>finish=resolve);
+    f.c.renderShotReferenceChoice(f.box,f.model,f.item);const promise=f.button().onclick();await Promise.resolve();f.dialog.isConnected=false;finish({number:2});await promise;
+    assert.equal(f.callbacks.length,active?1:0);assert.equal(f.button().textContent,'正在保存…');
+  }
+});
+test('absent reference candidates cannot save and frozen versions explain the new plan',()=>{
+  const f=shotChoiceFixture();f.context.frozen=true;f.c.renderShotReferenceChoice(f.box,f.model,null);assert.equal(f.button().disabled,true);assert.ok(f.box.textContent.includes('建立新制作版本'));
+});
+test('an exact shot video candidate mismatch never falls back to another result',()=>{
+  const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_plan=1&shot_candidate=missing';c.breakdownPrompt(reader,need,context);
+  assert.ok(reader.textContent.includes('准确视频候选不属于此制作版本'));assert.ok(!reader.textContent.includes('真实生成内容'));
+});
+test('saved reference routing waits for the modal history entry to return',()=>{
+  const {c}=fixture();let pop;c.window.addEventListener=(name,handler)=>{if(name==='popstate')pop=handler};
+  const source=fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8');vm.runInContext(source.slice(source.indexOf('let reviewDialogSerial='),source.indexOf('function openReviewDialog(')),c);
+  vm.runInContext('reviewDialogBackPending=true',c);let changed=false;c.afterReviewDialogReturn(()=>changed=true);assert.equal(changed,false);pop({stopImmediatePropagation(){}});assert.equal(changed,true);
+});
+test('reference save refresh keeps the draft attached to the original immutable text',async()=>{
+  const {c}=fixture(),old=row('video','REQUIREMENT'),anchor={type:'text',quote:'original'};c.state.workspace='production.workspace';c.state.anchor=anchor;c.state.productionSelected=old;c.state.breakdownVideoSelections={};
+  c.loadProductionBreakdown=async()=>{c.state.anchor=null;c.state.productionSelected=row('scene','PREPARATION')};c.document.querySelector=()=>({focus(){c.state.anchor=null}});
+  await c.refreshShotReference({need:{...old,payload:{scope:{object_id:'shot'}}}},{index:0},{number:2});assert.equal(c.state.anchor,anchor);assert.equal(c.state.productionSelected,old);assert.ok(c.location.href.includes('shot_plan=2'));
 });

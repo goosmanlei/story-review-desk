@@ -116,14 +116,20 @@ def version(store, mid, row, freeze=False):
     fp = signature(row,store)
     if row['kind']=='REQUIREMENT':
         previous=store.db.execute("SELECT m.number,r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='plan' AND r.version<? ORDER BY r.version DESC LIMIT 1",(mid,row['version'])).fetchone()
-        if previous and signature(p.record(store,revision_id=previous['id']),store)==fp:
+        locked=previous and store.db.execute('SELECT frozen FROM material_plan_versions WHERE material_id=? AND number=?',(mid,previous['number'])).fetchone()[0]
+        if previous and signature(p.record(store,revision_id=previous['id']),store)==fp and not (row['payload'].get('shot_reference_operation') and locked):
             # An executed version stores resolved exact media, while its draft
             # may name future needs. Editing a title/association cannot create a
             # version merely because these two representations differ.
             bind(store,mid,previous['number'],row)
+            if not locked:
+                from .material_model import bind_definition
+                bind_definition(store,mid,previous['number'],row)
             return previous['number']
     existing = store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? AND fingerprint=? ORDER BY number DESC LIMIT 1', (mid, fp)).fetchone()
     last = store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? ORDER BY number DESC LIMIT 1', (mid,)).fetchone()
+    if row['kind']=='REQUIREMENT' and row['payload'].get('shot_reference_operation') and existing and existing['frozen']:
+        existing=None
     evidence = 'exact-plan' if known(row) else ('unconfigured-plan' if row['kind']=='REQUIREMENT' else 'historical-scheme-incomplete')
     if existing:
         n = existing['number']
