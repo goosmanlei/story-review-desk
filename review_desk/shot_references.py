@@ -41,6 +41,7 @@ def slot(store, value, index):
             elif len({pair[0] for pair in pairs})==1:result['material_id']=next(iter(pairs))[0]
         from .material_storage import canonical_id
         result['canonical_material_id']=canonical_id(store,result['material_id']) if result['material_id'] else None
+        if result['material_id']:result.update(mp.card_counts(store,[result['material_id']])[result['material_id']])
         if not result['number']:result['issues'].append('尚未选定素材版本')
         if target['kind']!='ASSET':
             result['issues'].append('尚未选定候选')

@@ -4,7 +4,7 @@ class Element{constructor(tag){Object.assign(this,{tag,children:[],dataset:{},at
 // Execute the actual index renderer and shared card; DOM checks do not certify layout.
 function render(records,episodes=[]){
   const opened=[],index=new Element('nav');
-  const ctx={workspaceRows:records,matches:()=>true,workspace:records[0]?.kind==='ASSET'?'materials.workspace':'production.workspace',productionGroups:{'materials.workspace':['ASSET'],'production.workspace':['CALL','PREPARATION','SHOT_DESIGN']},
+  const ctx={result:{material_card_counts:Object.fromEntries(records.filter(r=>r.card_counts).map(r=>[r.object_id,r.card_counts]))},workspaceRows:records,matches:()=>true,workspace:records[0]?.kind==='ASSET'?'materials.workspace':'production.workspace',productionGroups:{'materials.workspace':['ASSET'],'production.workspace':['CALL','PREPARATION','SHOT_DESIGN']},
     productionKinds:{ASSET:'原件',CALL:'调用',PREPARATION:'场',SHOT_DESIGN:'镜'},productionLabels:{},contexts:new Map(records.map(r=>[r.object_id,{episode:(r.payload.episode||r.payload.source)?.object_id,episodeRevision:(r.payload.episode||r.payload.source)?.revision_id,scene:r.payload.scene_id||r.payload.source?.scene_id,number:r.payload.number}])),
     childrenByEntity:new Map(),flatFilters:false,state:{},episodes,index,openProductionRecord:id=>opened.push(id),el:tag=>new Element(tag),productionEntityIcon:()=>new Element('svg'),
     productionButton(parent,text,onclick){const n=new Element('button');n.textContent=text;n.onclick=onclick;parent.append(n);return n},
@@ -13,14 +13,14 @@ function render(records,episodes=[]){
   assert.ok(start>=0&&end>start);vm.runInContext(source.slice(start,end)+'\nglobalThis.draw=renderIndex;',ctx);ctx.draw();
   return {buttons:index.all().filter(n=>n.tag==='button'),opened,title:button=>button.all().find(n=>n.tag==='strong')?.textContent,subtitle:button=>button.all().find(n=>n.tag==='small')?.textContent};
 }
-test('asset list shows evidenced material round independently of record revision and keeps navigation',()=>{
-  const f=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,payload:{title:'Older result'}}]);
-  assert.equal(f.subtitle(f.buttons[0]),'已生成');f.buttons[0].onclick();assert.deepEqual(f.opened,['old-result']);assert.equal(f.buttons[0].className,'material-small-card');
+test('asset card totals are independent of selected version and record revision, with navigation',()=>{
+  const f=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,card_counts:{version_count:2,candidate_count:3},payload:{title:'Older result'}}]);
+  assert.equal(f.subtitle(f.buttons[0]),'版本 2 个 · 候选 3 个');f.buttons[0].onclick();assert.deepEqual(f.opened,['old-result']);assert.equal(f.buttons[0].className,'material-small-card');
 });
 test('asset list without a positive integer material round does not invent a version or empty label',()=>{
   for(const material_version of [undefined,null,0,-1,'2']){
     const f=render([{object_id:'legacy',kind:'ASSET',version:9,material_version,payload:{title:'Legacy original'}}]);
-    assert.equal(f.title(f.buttons[0]),'Legacy original');assert.equal(f.subtitle(f.buttons[0]),'未生成');
+    assert.equal(f.title(f.buttons[0]),'Legacy original');assert.equal(f.subtitle(f.buttons[0]),'版本未登记 · 候选未登记');
   }
 });
 test('other production records retain their record revision label',()=>{

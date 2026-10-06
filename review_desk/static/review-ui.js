@@ -148,10 +148,14 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   const dialogId=reviewDialogSerial;
   const close=productionButton(header,'×',()=>dialog.close());close.className='review-dialog-close';close.setAttribute('aria-label',closeLabel);close.title='关闭（Esc）';close.autofocus=true;
   const body=el('div','review-dialog-body');dialog.append(header,body);
+  // Native modal dialogs make the rest of the document inert. Keep the text
+  // selection action in the active top layer, including stacked source cards.
+  const selectionAction=document.querySelector?.('#selection-action'),selectionParent=selectionAction?.parentNode,selectionNext=selectionAction?.nextSibling;
+  if(selectionAction){selectionAction.hidden=true;dialog.append(selectionAction)}
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});
   dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true});restoreReading()},{once:true});
+  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();if(selectionAction&&selectionParent){selectionAction.hidden=true;selectionParent.insertBefore(selectionAction,selectionNext?.parentNode===selectionParent?selectionNext:null)}reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true});restoreReading()},{once:true});
   history.pushState({...history.state,reviewDialog:dialogId},'',location.href);reviewDialogStack.push(dialog);
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }

@@ -7,8 +7,12 @@ function reviewSmallCard(parent,item,activate,selected=false){
   const button=productionButton(parent,'',()=>activate(button));button.className='material-small-card';button.setAttribute('aria-pressed',String(selected));button.title=item.title;
   const preview=el('span','material-small-preview');
   if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src='/api/production/files/'+encodeURIComponent(item.preview.file);img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
-  button.append(preview);const content=el('span','material-small-copy');if(item.business_code)nodeText('span','small-card-code',item.business_code,content);nodeText('strong',null,item.title,content);
-  if(item.subtitle)nodeText('small',null,item.subtitle,content);button.append(content);return button;
+  if(item.preview?.mime?.startsWith('image/'))button.append(preview);
+  const content=el('span','material-small-copy'),heading=el('span','small-card-title'),icon=productionEntityIcon(item.icon);
+  const type=productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
+  const name=nodeText('strong',null,item.title,heading);name.title=item.title;
+  if(item.business_code)nodeText('span','small-card-code',item.business_code,heading);content.append(heading);
+  if(item.subtitle)nodeText('small','small-card-metrics',item.subtitle,content);button.append(content);return button;
 }
 function materialPositionText(item,value=item.title){
   const scope=item.placement||item.record?.payload.scope||item.scope;
@@ -18,16 +22,20 @@ function materialPositionText(item,value=item.title){
   const scene=location?.scene||(owner?.kind==='PREPARATION'&&(owner.payload.source?.scene_id||owner.payload.scene_id));
   const title=String(value??'');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,reviewPositionLabel('scene',scene)+' · ')):reviewPositionText(title);
 }
+function materialCountText(item){
+  const count=(key,label)=>Number.isInteger(item[key])&&item[key]>=0?`${label} ${item[key]} 个`:`${label}未登记`;
+  return count('version_count','版本')+' · '+count('candidate_count','候选');
+}
 function materialSmallCard(parent,item,activate,selected=false,{includesHistory=false,showHistoryScope=false,subtitle=null}={}){
-  const generated=includesHistory?(item.generated?'有生成结果':'无生成结果')+(showHistoryScope?'（含历史版本）':''):(item.generated?'已生成':'未生成');
-  const button=reviewSmallCard(parent,{...item,title:materialPositionText(item),business_code:businessCode(item),icon:item.media_type,subtitle:subtitle??[productionMediaLabels[item.media_type]||item.media_type,generated].filter(Boolean).join(' · ')},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
+  const counts=materialCountText(item);
+  const button=reviewSmallCard(parent,{...item,title:materialPositionText(item),business_code:businessCode(item),icon:item.media_type,subtitle:[counts,subtitle].filter(Boolean).join(' · ')},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
   if(item.placement_title){const text=materialPositionText(item,item.placement_title);button.title+=' · '+text}
   return button;
 }
 
 function modelSmallItem(model){
   const row=model.need||model.identity||model.candidates[0]?.record,real=(model.candidates||[]).filter(i=>!i.record.payload.placeholder&&i.record.payload.components.some(c=>c.role==='original'));
-  return {business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
+  return {...model.cardCounts,business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
 }
 function unifiedModelSelection(models,data){
   const target=state.productionSelected,card=state.materialCommentCard;
@@ -75,7 +83,7 @@ function renderUnifiedCard(root){
     else nodeText('p','production-meta','历史原件未登记实体或制作位置归属',left);
     const row=state.materialReview.record,includesHistory=row.kind==='REQUIREMENT';
     const results=includesHistory?materialRows(state.materialReview):[row],generated=results.some(r=>r.kind==='ASSET'&&!r.payload.placeholder&&r.payload.components?.some(c=>c.role==='original'));
-    materialSmallCard(left,{object_id:row.object_id,id:row.id,title:row.payload.title,media_type:row.payload.media_type,slot:row.payload.slot,generated},trigger=>openUnifiedMaterial({object_id:row.object_id,revision_id:row.id},trigger),true,{includesHistory,showHistoryScope:true});
+    materialSmallCard(left,{...state.materialReview.material_card_counts?.[row.object_id],object_id:row.object_id,id:row.id,title:row.payload.title,media_type:row.payload.media_type,slot:row.payload.slot,generated},trigger=>openUnifiedMaterial({object_id:row.object_id,revision_id:row.id},trigger),true,{includesHistory,showHistoryScope:true});
     renderMaterialWorkspace(right,state.materialReview);
   }
   paintProductionReview();

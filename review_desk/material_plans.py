@@ -207,6 +207,27 @@ def comment_scope(store, comment, context):
     store.db.execute('INSERT INTO material_plan_comments VALUES (?,?,?)', (comment['id'], context['material_id'], context['number']))
 
 
+def card_counts(store, material_ids=None):
+    """Registered versions and distinct real candidates per exact version.
+
+    Missing registration stays unknown; neither files nor failed calls create
+    candidates. Canonical aliases do not duplicate a version/candidate pair.
+    """
+    aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
+    canonical_id = lambda mid: aliases.get(mid, mid)
+    versions = {}; candidates = {}
+    for row in store.db.execute('SELECT material_id,number FROM material_plan_versions'):
+        mid = canonical_id(row['material_id'])
+        versions.setdefault(mid, set()).add(row['number'])
+    for row in store.db.execute("SELECT m.material_id,m.number,c.candidate_id FROM material_plan_members m JOIN material_candidate_members c ON c.revision_id=m.revision_id WHERE m.role='result'"):
+        mid = canonical_id(row['material_id'])
+        candidates.setdefault(mid, set()).add((row['number'], row['candidate_id']))
+    ids = versions if material_ids is None else material_ids
+    return {mid: {'version_count': len(versions[canonical_id(mid)]) if canonical_id(mid) in versions else None,
+                  'candidate_count': len(candidates.get(canonical_id(mid), set())) if canonical_id(mid) in versions else None}
+            for mid in ids}
+
+
 def snapshot(store, mid):
     result = []
     for v in store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? ORDER BY number DESC', (mid,)):

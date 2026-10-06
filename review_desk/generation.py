@@ -425,7 +425,8 @@ def _snapshot(store, entity_id, revision_id=None):
         for mid in ids:
             if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
     if not any(material_versions.values()):material_versions=legacy_versions
-    return {**base,**data,'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    from .material_plans import card_counts
+    return {**base,**data,'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',
