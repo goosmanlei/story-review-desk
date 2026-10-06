@@ -7,7 +7,7 @@ function reviewSmallCard(parent,item,activate,selected=false){
   const button=productionButton(parent,'',()=>activate(button));button.className='material-small-card';button.setAttribute('aria-pressed',String(selected));button.title=item.title;
   const preview=el('span','material-small-preview');
   if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src='/api/production/files/'+encodeURIComponent(item.preview.file);img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
-  button.append(preview);const content=el('span','material-small-copy');nodeText('strong',null,item.title,content);
+  button.append(preview);const content=el('span','material-small-copy');if(item.business_code)nodeText('span','small-card-code',item.business_code,content);nodeText('strong',null,item.title,content);
   if(item.subtitle)nodeText('small',null,item.subtitle,content);button.append(content);return button;
 }
 function materialPositionText(item,value=item.title){
@@ -20,7 +20,7 @@ function materialPositionText(item,value=item.title){
 }
 function materialSmallCard(parent,item,activate,selected=false,{includesHistory=false,showHistoryScope=false}={}){
   const generated=includesHistory?(item.generated?'有生成结果':'无生成结果')+(showHistoryScope?'（含历史版本）':''):(item.generated?'已生成':'未生成');
-  const button=reviewSmallCard(parent,{...item,title:businessTitle(item,materialPositionText(item)),icon:item.media_type,subtitle:[productionMediaLabels[item.media_type]||item.media_type,generated].filter(Boolean).join(' · ')},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
+  const button=reviewSmallCard(parent,{...item,title:materialPositionText(item),business_code:businessCode(item),icon:item.media_type,subtitle:[productionMediaLabels[item.media_type]||item.media_type,generated].filter(Boolean).join(' · ')},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
   if(item.placement_title){const text=materialPositionText(item,item.placement_title);button.title+=' · '+text}
   return button;
 }
@@ -41,7 +41,7 @@ function renderUnifiedModels(parent,models,data){
   data.unifiedGroups||=[];data.unifiedGroups.push(...models);
   const list=el('div','material-small-list');list.setAttribute('aria-label','状态素材');parent.append(list);
   for(const model of models){const key=materialModelKey(model);materialSmallCard(list,modelSmallItem(model),()=>{
-    rememberProductionDraft();data.unifiedMaterialId=key;state.materialCommentCard=null;data.localVersions={};
+    rememberProductionDraft();data.unifiedMaterialId=key;state.materialCommentCard=null;data.localVersions=Object.fromEntries(Object.entries(data.localVersions||{}).filter(([,r])=>['ENTITY','STATE'].includes(r.kind)));
     const row=model.candidates.find(i=>i.record.id===(data.selectedCandidates?.[key]||materialDefaultCandidate(model,data)))?.record||model.need||model.identity;
     if(model.round)state.materialCommentCard={data,material_id:key,number:model.round.number};
     focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft();renderProductionReader();renderComments();
@@ -75,13 +75,13 @@ function renderUnifiedCard(root){
     else nodeText('p','production-meta','历史原件未登记实体或制作位置归属',left);
     const row=state.materialReview.record,includesHistory=row.kind==='REQUIREMENT';
     const results=includesHistory?materialRows(state.materialReview):[row],generated=results.some(r=>r.kind==='ASSET'&&!r.payload.placeholder&&r.payload.components?.some(c=>c.role==='original'));
-    materialSmallCard(left,{object_id:row.object_id,id:row.id,title:row.payload.title,media_type:row.payload.media_type,slot:row.payload.slot,generated},()=>{},true,{includesHistory,showHistoryScope:true});
+    materialSmallCard(left,{object_id:row.object_id,id:row.id,title:row.payload.title,media_type:row.payload.media_type,slot:row.payload.slot,generated},trigger=>openUnifiedMaterial({object_id:row.object_id,revision_id:row.id},trigger),true,{includesHistory,showHistoryScope:true});
     renderMaterialWorkspace(right,state.materialReview);
   }
   paintProductionReview();
 }
 async function readUnifiedCard(objectId,revisionId=null,params=null){
-  const result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{})}));
+  const result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}));
   result.params=params||new URLSearchParams();result.explicit=!!revisionId;validateUnifiedReference(result);return result;
 }
 function materialSavedDraft(result){
@@ -101,9 +101,9 @@ function activateUnifiedCard(result){
   state.entityReview=result.entity_review;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
   state.productionEntityId=state.entityReview?.entity.object_id||null;state.productionChildDetail=null;state.productionEntityDetail=null;
   if(state.entityReview){
-    const data=state.entityReview;data.states.sort(productionStateOrder);state.productionEntityDetail=entityReviewDetail(data.entity);
-    const form=result.form||data.states[0];state.productionChildDetail=form?entityReviewDetail(form):null;
-    if(['ASSET','REQUIREMENT','CALL'].includes(row.kind)){const route=entityMaterialRoute(data,row,params,{defaultSelection:result.defaultSelection});const target=params.get('material_target');if(target){const exact=materialVersionCommentRows(route.selected?.round).find(r=>r.id===target);if(!exact)throw Error('准确候选不属于所选素材版本');route.row=exact}restoreEntityMaterialRoute(data,route);data.unifiedMaterialId=route.selected?.material_id||row.object_id}
+    const data=state.entityReview;if(result.explicit&&!result.defaultSelection&&['ENTITY','STATE'].includes(row.kind)){data.localVersions||={};data.localVersions[row.object_id]=row;}if(params.get('production_entity')&&params.get('production_entity')!==data.entity.object_id)throw Error('准确实体不属于此素材');data.states.sort(productionStateOrder);state.productionEntityDetail=entityReviewDetail(result.explicit&&!result.defaultSelection&&row.kind==='ENTITY'?row:data.entity);
+    const wanted=params.get('entity_state'),ownedStates=[...data.states,...(data.retained_states||[])],wantedForm=ownedStates.find(r=>r.object_id===wanted);if(wanted&&!wantedForm&&result.form?.object_id!==wanted)throw Error('准确状态不属于此实体');const form=(wanted?(result.form?.object_id===wanted?result.form:wantedForm):result.form)||data.states[0];state.productionChildDetail=form?entityReviewDetail(form):null;
+    if(['ASSET','REQUIREMENT','CALL'].includes(row.kind)){const route=entityMaterialRoute(data,row,params,{defaultSelection:result.defaultSelection});const target=params.get('material_target');if(target){const exact=materialVersionCommentRows(route.selected?.round).find(r=>r.id===target);if(!exact)throw Error('准确候选不属于所选素材版本');route.row=exact}restoreEntityMaterialRoute(data,route);if(wanted&&form)state.productionChildDetail=entityReviewDetail(form);data.unifiedMaterialId=route.selected?.material_id||row.object_id}
     else focusProductionReview(entityReviewDetail(row.kind==='STATE'?row:form||row),false);
   }else{
     detail.explicitRevision=result.explicit&&!result.defaultSelection;detail.adoptionContext=result.adoption_context;
@@ -157,7 +157,9 @@ async function openUnifiedMaterial(ref,trigger){
   const {dialog,body}=openReviewDialog('实体与素材',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview()},{once:true});
-  try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;result.defaultSelection=!!ref.defaultSelection;
+  try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;
+    while(typeof reviewDialogStack!=='undefined'&&reviewDialogStack.at(-1)!==dialog&&dialog.isConnected){const upper=reviewDialogStack.at(-1);await new Promise(resolve=>upper.addEventListener('close',resolve,{once:true}));if(!dialog.isConnected||!owns())return;}
+    result.defaultSelection=!!ref.defaultSelection;
     state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);renderProductionReader();renderComments();
   }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','production-issue',error.message,body)}}
 }

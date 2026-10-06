@@ -307,3 +307,15 @@ test('nested unified cards restore each owning reader and its own comment visibi
   f.close(f.dialogs[0]);assert.equal(f.panel.parentNode,f.body);assert.equal(f.panel.hidden,true);assert.equal(f.c.state.productionSelected,original);
   assert.equal(f.node('#comments-toggle').getAttribute('aria-expanded'),'false');
 });
+
+test('a late lower-card response waits for the newer upper card and returns to its own reader',async()=>{
+  const f=await unifiedCloseFixture(),held={},stack=[];f.c.reviewDialogStack=stack;
+  const open=f.c.openReviewDialog;f.c.openReviewDialog=(...args)=>{const result=open(...args);stack.push(result.dialog);return result};
+  f.c.readUnifiedCard=(object_id,id)=>new Promise(resolve=>held[object_id]=()=>resolve({record:{object_id,id}}));
+  const original={object_id:'manager',id:'manager'};f.c.state.productionSelected=original;
+  const first=f.c.openUnifiedMaterial({object_id:'first',revision_id:'first-old'}),second=f.c.openUnifiedMaterial({object_id:'second',revision_id:'second-old'});
+  held.second();await second;assert.equal(f.c.state.productionSelected.object_id,'second');
+  held.first();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.c.state.productionSelected.object_id,'second');
+  stack.pop();f.close(f.dialogs[1]);await first;assert.equal(f.c.state.productionSelected.id,'first-old');assert.equal(f.panel.parentNode,f.dialogs[0]);
+  stack.pop();f.close(f.dialogs[0]);assert.equal(f.c.state.productionSelected,original);assert.equal(f.panel.parentNode,f.body);
+});

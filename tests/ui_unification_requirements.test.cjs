@@ -13,6 +13,7 @@ class Element {
   getAttribute(key){return this.attributes[key]}
   addEventListener(){}
   focus(){}
+  scrollIntoView(){}
   all(){return this.children.flatMap(node=>[node,...node.all()])}
   get childNodes(){return this.children}
   get childElementCount(){return this.children.length}
@@ -32,7 +33,7 @@ function fixture(){
   c.history={replaceState(_a,_b,url){c.location.href=String(url)},pushState(_a,_b,url){c.location.href=String(url)}};
   c.isProduction=()=>true;c.reviewSurface=node=>node;
   vm.createContext(c);require('./load_review_helpers.cjs')(c);
-  for(const name of ['production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
+  for(const name of ['production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js','management-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
   c.renderComments=()=>{};c.paintProductionReview=()=>{};c.paintReviewCommentCounts=()=>{};c.rememberProductionDraft=()=>{};c.restoreProductionDraft=()=>{};
   c.productionEntityIcon=()=>new Element('svg');c.materialReferenceLink=(parent,ref,label)=>{const n=c.nodeText('a',null,label,parent);n.reference=ref;return n};
   c.productionTextBlocks=row=>Object.entries(row.payload.generation?{'generation.prompt':row.payload.generation.prompt}:{'call.prompt':row.payload.prompt}).filter(([,text])=>typeof text==='string').map(([field,text])=>({id:field,field,text}));
@@ -117,12 +118,13 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
   const candidate=reader.all().find(n=>n.attributes['aria-label']==='视频候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
   await reader.querySelectorAll('[data-material-id]')[0].onclick();
-  assert.equal(opened.length,1);assert.equal(opened[0].object_id,need.object_id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
+  assert.equal(opened.length,1);assert.equal(opened[0].object_id,other.object_id);assert.equal(opened[0].revision_id,other.id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
 });
 
+function mockManagementModal(c){c.openUnifiedMaterial=async ref=>{const result=await c.readUnifiedCard(ref.object_id,ref.revision_id,ref.params);c.activateUnifiedCard(result);c.renderProductionReader()}}
 async function materialListFixture(linked){
   const f=fixture(),{c}=f,{need,asset}=material(),candidate={...asset,object_id:'historical-candidate',id:'historical-candidate-r1'};
-  const item={object_id:need.object_id,id:need.id,title:'A material',media_type:'image',generated:true};
+  const item={canonical_material_id:need.object_id,object_id:need.object_id,id:need.id,title:'A material',media_type:'image',generated:true};
   if(linked)c.location.href+='&production_object='+linked+'&production_revision='+linked+'-r1';
   const opened=[];
   c.api=async url=>{
@@ -132,17 +134,17 @@ async function materialListFixture(linked){
       const record=target===candidate.object_id?candidate:need;
       return {entity_review:null,scope:null,adoption_context:null,detail:{record,history:[record],uses:[],material_versions:{need:[{number:1,model:'plan-v1',plan:need,members:[need,candidate],results:[candidate]}]}}};
     }
-    return {items:[item],total:1,offset:0,limit:40,facets:{media:{'':1,image:1},status:{'':1,generated:1},episode:{'':1},scene:{'':1}}};
+    return {items:[item],total:1,display_total:1,groups:[{key:'unassigned',level:'unassigned',material_ids:[item.object_id]}],offset:0,limit:40,facets:{media:{'':1,image:1},status:{'':1,generated:1},episode:{'':1},scene:{'':1}}};
   };
   c.renderProductionReader=()=>{};
-  await c.loadProductionMaterials();return {...f,opened};
+  mockManagementModal(c);await c.loadProductionMaterials();return {...f,opened};
 }
-test('8.2 automatic first material and direct demand links set the visible list selection',async()=>{
-  for(const linked of [null,'need']){const {host,opened}=await materialListFixture(linked);assert.deepEqual(opened,['need']);assert.deepEqual(host.querySelectorAll('[data-material-id]').map(n=>n.getAttribute('aria-pressed')),['true'])}
+test('management does not open a default large card; exact demand links open a modal',async()=>{
+  for(const linked of [null,'need']){const {host,opened}=await materialListFixture(linked);assert.deepEqual(opened,linked?['need']:[]);assert.deepEqual(host.querySelectorAll('[data-material-id]').map(n=>n.getAttribute('aria-pressed')),['false'])}
 });
-test('8.2/C.2 historical candidate link selects its owning material in the list',async()=>{
+test('historical candidate opens exactly without changing the current page cards',async()=>{
   const {host,opened}=await materialListFixture('historical-candidate');assert.deepEqual(opened,['historical-candidate']);
-  assert.deepEqual(host.querySelectorAll('[data-material-id]').map(n=>[n.dataset.materialId,n.getAttribute('aria-pressed')]),[['need','true']]);
+  assert.deepEqual(host.querySelectorAll('[data-material-id]').map(n=>n.dataset.materialId),['need']);
 });
 
 test('history result summaries explain D3 once while preserving an exact historical open',async()=>{
@@ -312,7 +314,7 @@ async function focusedMaterialListFixture({explicitMaterial=false,outside=false,
   const f=fixture(),{c}=f,{need,asset,round}=material();
   const candidate={...asset,object_id:'historical-candidate',id:'historical-candidate-r1'};
   const currentNeed={...need,id:'need-r2',version:2};
-  const target={object_id:need.object_id,id:currentNeed.id,title:'Linked material',media_type:'image',generated:true};
+  const target={canonical_material_id:need.object_id,object_id:need.object_id,id:currentNeed.id,title:'Linked material',media_type:'image',generated:true};
   const firstPage=Array.from({length:40},(_,i)=>({object_id:'first-'+i,id:'first-'+i+'-r1',title:'First '+i,media_type:'image',generated:true}));
   const listed=[],opened=[];let nextRender=null;
   c.location.href+='&production_object='+candidate.object_id+'&production_revision='+candidate.id;
@@ -329,45 +331,45 @@ async function focusedMaterialListFixture({explicitMaterial=false,outside=false,
       return {entity_review:null,scope:null,adoption_context:null,detail:{record,history:[record],uses:[],material_versions:versions}};
     }
     listed.push(Object.fromEntries(params));
-    const focused=params.has('focus'),offset=focused&&!outside?40:Number(params.get('offset'));
-    const items=empty?[]:focused&&!outside?[target]:firstPage;
-    const total=empty?0:outside?40:41;
-    return {items,total,offset,limit:40,focused_outside:focused&&outside?target:null,facets:{media:{'':total,image:total},status:{'':total,generated:total},episode:{'':total},scene:{'':total}}};
+    const items=empty?[]:outside?firstPage:[...firstPage,target];
+    const total=items.length;
+    return {items,total,display_total:total,groups:total?[{key:'all',level:'unassigned',material_ids:items.map(i=>i.object_id)}]:[],facets:{media:{'':total,image:total},status:{'':total,generated:total},episode:{'':total},scene:{'':total}}};
   };
   c.renderProductionReader=()=>{nextRender?.();nextRender=null};
-  await c.loadProductionMaterials();
+  mockManagementModal(c);await c.loadProductionMaterials();
   return {...f,need,candidate,listed,opened,rendered:()=>new Promise(resolve=>{nextRender=resolve})};
 }
-test('8.2/C.2 exact historical links beyond the first 40 materials focus the owning page and keep the old candidate',async()=>{
-  for(const explicitMaterial of [false,true]){
-    const f=await focusedMaterialListFixture({explicitMaterial});
-    assert.equal(f.listed[0].focus,explicitMaterial?'need':'historical-candidate');
-    assert.equal(f.listed[0].offset,'0');
-    assert.deepEqual(f.host.querySelectorAll('[data-material-id]').map(n=>[n.dataset.materialId,n.getAttribute('aria-pressed')]),[['need','true']]);
+test('exact historical links beyond the first page open the old candidate without resetting pagination',async()=>{
+  for(const explicitMaterial of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial});
+    assert.equal(f.listed[0].grouped,'1');assert.equal(f.listed[0].focus,undefined);
+    assert.equal(f.host.querySelectorAll('[data-material-id]').length,30);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);
     assert.deepEqual(f.opened,[{object_id:f.candidate.object_id,revision_id:f.candidate.id}]);
     if(explicitMaterial)assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
   }
 });
-test('8.2 focused material page uses the server offset for later ordinary pagination',async()=>{
-  const f=await focusedMaterialListFixture();
-  const previous=f.host.all().find(n=>n.tag==='button'&&n.textContent==='上一页');assert.ok(previous);
-  const rendered=f.rendered();await previous.onclick();await rendered;
-  assert.equal(f.listed[1].offset,'0');assert.equal(f.listed[1].focus,undefined);
-  assert.equal(f.host.querySelectorAll('[data-material-id]').length,40);
-  assert.equal(f.opened[1].object_id,'first-0');
+test('pagination changes only the group/card collection and does not automatically read another material',async()=>{
+  const f=await focusedMaterialListFixture();const next=f.host.all().find(n=>n.tag==='button'&&n.textContent==='下一页');assert.ok(next);await next.onclick();
+  assert.equal(f.listed.length,1);assert.equal(f.host.querySelectorAll('[data-material-id]').length,11);
+  assert.equal(f.opened.length,1);assert.equal(f.c.state.productionSelected.id,f.candidate.id);
 });
-test('5.6/8.2/C.2 a linked old candidate outside filters remains selected without changing filtered counts',async()=>{
-  for(const empty of [false,true]){
-    const f=await focusedMaterialListFixture({explicitMaterial:true,outside:true,empty});
-    assert.equal(f.listed[0].search,'excluded');assert.equal(f.listed[0].focus,'need');
-    const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,(empty?0:40)+' 项素材');
-    assert.ok(f.host.textContent.includes('当前链接素材（筛选外）'));
-    const selected=f.host.querySelectorAll('[data-material-id]').filter(n=>n.getAttribute('aria-pressed')==='true');
-    assert.deepEqual(selected.map(n=>n.dataset.materialId),['need']);
+test('a linked old candidate outside filters remains exact without changing unique or display counts',async()=>{
+  for(const empty of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial:true,outside:true,empty});
+    assert.equal(f.listed[0].search,'excluded');const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,`素材数 ${empty?0:40} · 展示项数 ${empty?0:40}`);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
-    await selected[0].onclick();assert.equal(f.opened.at(-1).revision_id,f.candidate.id);
-    assert.equal(f.c.state.productionSelected.id,f.candidate.id);
-    assert.equal(new URL(f.c.location.href).searchParams.get('material_target'),f.candidate.id);
   }
+});
+
+test('explicit entity revision and state identity survive unified-card activation',()=>{
+  const f=entityFilterFixture(),old={...f.a,id:'a-old',current_revision:f.a.id,version:1};
+  const data=f.review(f.a);f.c.activateUnifiedCard({detail:{record:old,history:[old]},entity_review:data,form:null,params:new URLSearchParams({entity_state:f.aForm.object_id}),explicit:true});
+  assert.equal(f.c.state.productionEntityDetail.record.id,'a-old');assert.equal(f.c.state.productionChildDetail.record.object_id,f.aForm.object_id);assert.equal(data.localVersions[f.a.object_id].id,'a-old');
+});
+test('explicit state outranks a material default form and the owner reaches the exact card API',async()=>{
+  const f=entityFilterFixture(),data=f.review(f.a),other=row('other-state','STATE',{entity:ref(f.a),state_model:'complete-v1'});data.states.push(other);
+  f.c.entityMaterialRoute=()=>({row:f.asset,selected:{material_id:'need'}});f.c.restoreEntityMaterialRoute=()=>{f.c.state.productionChildDetail={record:f.aForm}};
+  const params=new URLSearchParams({production_entity:f.a.object_id,entity_state:other.object_id});f.c.activateUnifiedCard({detail:{record:f.asset,history:[f.asset]},entity_review:data,form:f.aForm,params,explicit:true});
+  assert.equal(f.c.state.productionChildDetail.record.object_id,other.object_id);
+  let requested;f.c.api=async url=>{requested=new URL(url,'http://fixture');return {detail:{record:f.a},entity_review:null}};
+  await f.c.readUnifiedCard(f.a.object_id,'a-old',params);assert.equal(requested.searchParams.get('entity_id'),f.a.object_id);assert.equal(requested.searchParams.get('revision_id'),'a-old');
 });

@@ -117,3 +117,8 @@
 
 .relation-node-code{font-size:17px;fill:#65756a}.relation-node-name{font-size:20px}
 .relation-text .relation-caption{font-size:20px}.relation-text .business-code{font-size:17px}.relation-sources{font-size:18px}.relation-sources button{font-size:18px}
+/* The same card in grids, side lists and the left side of a large card. */
+.material-small-card{min-height:84px;box-sizing:border-box}.small-card-code{display:block;font-size:11px;color:var(--desk-muted);font-variant-numeric:tabular-nums}.material-small-copy strong{line-height:1.4}.small-card-metrics{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--desk-muted);margin-top:3px}
+.management-card-list{min-width:0}.management-card-group{margin:20px 0 24px;min-width:0}.management-card-group>h3{font-size:16px;margin:0 0 12px}.management-card-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.management-card-grid .material-small-card{margin:0!important;min-width:0}.review-pagination{display:flex;align-items:center;justify-content:center;gap:10px;flex-wrap:wrap;margin:24px 0}.review-pagination label{display:flex;align-items:center;gap:6px}.review-pagination select{font:inherit;padding:6px;background:#fffdf7}.pagination-basis{color:var(--desk-muted);font-size:11px}
+@media(max-width:1050px){.management-card-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:650px){.management-card-grid{grid-template-columns:1fr}.review-pagination{gap:6px}.review-pagination button{padding:7px}.management-card-group{margin:18px 0}.management-card-grid .material-small-preview{flex-basis:44px;width:44px;height:42px}}
