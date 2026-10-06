@@ -743,6 +743,7 @@ function renderComments({replaceDraft=false}={}){
   const retained=replaceDraft?null:liveCommentDraft()||commentDraftFallbacks.get(commentDraftIdentity());
   if(typeof paintReviewCommentCounts==='function')paintReviewCommentCounts();
   if(isScript())renderScriptCommentCounts();
+  if(typeof renderBreakdownCommentCounts==='function')renderBreakdownCommentCounts();
   const available=hasCommentTarget();$('#comments-toggle').hidden=!available;$('#screenplay-comments').hidden=!isScript()||!available;
   if(!available){closePanel();$('#comment-body').replaceChildren();$('#open-count').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');

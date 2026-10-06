@@ -34,6 +34,7 @@ function setup(){
   for(const name of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
   vm.runInContext('globalThis.state=state',ctx);ctx.state.workspace='settings.workspace';
   for(const fn of ['renderProductionReader','renderComments','paintProductionReview'])ctx[fn]=()=>{};
+  ctx.scrollBreakdownTarget=()=>{};ctx.rememberBreakdownPosition=()=>{};ctx.requestAnimationFrame=()=>1;ctx.window={scrollY:0,addEventListener(){},removeEventListener(){},scrollTo(){}};
   return ctx;
 }
 function fixture(ctx){
@@ -184,8 +185,8 @@ test('an exact historical shot link preserves its requested revision in the all-
   const scene=row('scene','PREPARATION',undefined,{source});
   const current=row('shot','SHOT_DESIGN','shot-current',{parent:ref(scene),source,number:1,fps:24,duration_frames:120});
   const original={...current,id:'shot-original',version:1,payload:{...current.payload,title:'Original shot design'}};
-  const sceneData={scene,shared:[],shots:[{record:current,context:{requirements:[],materials:[]}}]};
-  ctx.state.breakdownData={episode:'episode'};ctx.state.productionRecords=[scene,current];
+  const sceneData={scene,shared:[],shots:[{record:original,context:{requirements:[],materials:[]}}]};
+  ctx.state.breakdownData={episode:'episode',shots:[original]};ctx.state.productionRecords=[scene,current];
   ctx.document.createTextNode=text=>({textContent:text});ctx.reviewSurface=host=>host;ctx.paintReviewCommentCounts=()=>{};
   ctx.fetch=async url=>({ok:true,json:async()=>String(url).includes('/api/production/scene?')?sceneData:{record:original,history:[current,original],uses:[]}});
   const params=new URLSearchParams({breakdown_object:'shot',breakdown_revision:'shot-original'});
@@ -384,4 +385,10 @@ test('UX010 modal refresh completing after close cannot overwrite the restored o
 });
 test('UX010 outer refresh completing after a modal opens cannot overwrite the inner context',async()=>{
   const x=ux010ModalFixture(),read=x.ctx.ux010Read,held=ux010Deferred();x.ctx.ux010Read=url=>url.includes('/entity-review?')?held.promise:read(url);const pending=x.ctx.reloadEntityReview();await x.open();const inner=x.snapshot();held.resolve(structuredClone(x.otherData));await pending;assert.deepEqual(x.snapshot(),inner);assert.equal(x.ctx.state.entityReview.entity.object_id,x.f.entity.object_id);x.close();assert.deepEqual(x.snapshot(),x.before);
+});
+test('shared requirement cards prefer their actual identity over an earlier legacy alias',()=>{
+  const ctx=setup(),f=fixture(ctx),row={...f.need,current_revision:f.need.id,material_identity:{id:'need',aliases:['legacy','need']}};
+  f.data.material_versions={legacy:[f.round],need:[f.round]};
+  assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams(),{defaultSelection:true}).selected.material_id,'need');
+  assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams({material_id:'legacy',material_version:1})).selected.material_id,'legacy');
 });

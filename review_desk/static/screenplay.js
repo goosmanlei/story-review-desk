@@ -102,6 +102,15 @@ function chooseScript(versionId,episodeId,sceneId=null,updateUrl=true){
   if(!changedScene&&reader.dataset.readingKey===episode?.id+':'+(scene?.id||''))return;
   renderScriptIndex();renderScriptReader();if(isScript())renderComments();
 }
+function renderEpisodeCard(parent,episode,active,count,onchoose){
+  const button=el('button','screenplay-episode source-button'+(active?' active':''));button.type='button';button.dataset.episodeId=episode.object_id;
+  button.setAttribute('aria-current',active?'page':'false');
+  const top=el('span','screenplay-episode-meta');button.append(top);
+  nodeText('b',null,episodeCode(episode),top);nodeText('span',null,episodeSceneRange(episode),top);
+  nodeText('strong',null,episodeTitle(episode),button);
+  nodeText('small','screenplay-episode-count','评论 '+count,button).title='包含已关闭评论';
+  button.onclick=onchoose;parent.append(button);return button;
+}
 function renderScriptIndex(){
   styleScriptReader();
   const versions=$('#screenplay-index'),episodes=$('#screenplay-episodes');
@@ -116,15 +125,8 @@ function renderScriptIndex(){
   }
   for(const episode of scriptVersion()?.episodes||[]){
     const active=episode.object_id===state.screenplayEpisode;
-    const button=el('button','screenplay-episode source-button'+(active?' active':''));button.type='button';button.dataset.episodeId=episode.object_id;
-    button.setAttribute('aria-current',active?'page':'false');
-    const top=el('span','screenplay-episode-meta');button.append(top);
-    nodeText('b',null,episodeCode(episode),top);nodeText('span',null,episodeSceneRange(episode),top);
-    nodeText('strong',null,episodeTitle(episode),button);
-    const count=nodeText('small','screenplay-episode-count','评论 '+scriptEpisodeComments(episode).length,button);
-    count.title='包含已关闭评论';
-    button.onclick=()=>{if(episode.object_id!==state.screenplayEpisode)chooseScript(state.screenplayVersion,episode.object_id)};
-    episodes.append(button);
+    const button=renderEpisodeCard(episodes,episode,active,scriptEpisodeComments(episode).length,
+      ()=>{if(episode.object_id!==state.screenplayEpisode)chooseScript(state.screenplayVersion,episode.object_id)});
   }
   versions.scrollLeft=versionScroll;episodes.scrollLeft=episodeScroll;
   for(const bar of [versions,episodes]){

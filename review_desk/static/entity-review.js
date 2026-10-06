@@ -32,7 +32,8 @@ function entityMaterialRoute(data,row,param,{defaultSelection=false}={}){
   const known=[...entityReviewRows(data),...contexts.flatMap(context=>[context.call,...(context.requirements||[])].filter(Boolean))];
   if(!entries.length&&!known.some(same))throw new Error('此准确素材版本不属于当前实体，请核对原链接。');
   const stateId=param.get('entity_state');
-  let selected=choices.find(e=>e.round.plan?.payload.scope?.object_id===stateId)||choices[0]||null;
+  const preferred=mid||(defaultSelection?row.material_identity?.id:null)||row.object_id;
+  let selected=(stateId?choices.find(e=>e.round.plan?.payload.scope?.object_id===stateId):null)||choices.find(e=>e.material_id===preferred)||choices[0]||null;
   if(defaultSelection&&row.kind==='REQUIREMENT'&&row.id===row.current_revision&&selected&&!number&&!param.has('material_target')){
     selected={material_id:selected.material_id,round:materialDefaultRound(data.material_versions[selected.material_id])};
     row=selected.round.plan||row;

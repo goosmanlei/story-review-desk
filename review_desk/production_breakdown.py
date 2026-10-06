@@ -93,23 +93,63 @@ def ancestors(store, row):
     return result
 
 
-def catalog(store, episode=None):
+def scene_shots(store, scene, exact=None):
+    """Latest shot revision bound to this immutable parent, with exact override."""
+    shots=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
+        FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='SHOT_DESIGN'
+        AND json_extract(r.payload,'$.parent.revision_id')=? AND NOT EXISTS(
+            SELECT 1 FROM revisions n WHERE n.object_id=r.object_id AND n.version>r.version
+            AND json_extract(n.payload,'$.parent.revision_id')=?)""",(scene['id'],scene['id']))]
+    if exact:
+        if exact['kind']!='SHOT_DESIGN' or exact['payload'].get('parent')!=ref(scene):
+            raise ValueError('exact shot does not belong to the selected scene')
+        shots=[r for r in shots if r['object_id']!=exact['object_id']]+[exact]
+    return sorted(shots,key=lambda r:(r['payload']['number'],r['object_id']))
+
+
+def catalog(store, episode=None, object_id=None, revision_id=None):
     locks = rows(store, 'INPUT_LOCK')
-    if not locks:
-        return {'episodes': [], 'scenes': [], 'shots': [], 'lock': None}
-    lock = locks[-1]
+    target=p.record(store,object_id,revision_id) if object_id else None
+    exact_scene=None;exact_shot=None
+    if target:
+        if target['kind']=='SHOT_DESIGN':
+            exact_shot=target
+            if not target['payload'].get('parent'):
+                raise ValueError('historical shot has no exact scene parent; refusing current substitution')
+            exact_scene=p.ref_record(store,target['payload']['parent'],{'PREPARATION'})
+        elif target['kind']=='PREPARATION':exact_scene=target
+        else:raise ValueError('breakdown target must be a scene or shot')
+    lock=locks[-1] if locks else None
+    if exact_scene and exact_scene['payload'].get('input_lock'):
+        lock=p.ref_record(store,exact_scene['payload']['input_lock'],{'INPUT_LOCK'})
+    if not lock:return {'episodes': [], 'scenes': [], 'shots': [], 'lock': None}
     episodes = [p.ref_record(store, r, {'EPISODE'}) for r in lock['payload']['episodes']]
+    if exact_scene:
+        source=exact_scene['payload']['source'];episode=source['object_id']
+        exact_episode=p.ref_record(store,source,{'EPISODE'})
+        episodes=[exact_episode if e['object_id']==episode else e for e in episodes]
+        if not any(e['object_id']==episode for e in episodes):episodes.append(exact_episode)
     chosen = next((e for e in episodes if e['object_id'] == episode), None) if episode else episodes[0]
-    if chosen is None:
-        raise KeyError('episode outside current production input')
-    scenes = rows(store, 'PREPARATION', "json_extract(r.payload,'$.source.object_id')=?", (chosen['object_id'],))
-    for scene in scenes:
-        source=next((s for s in chosen['payload']['scenes'] if s['id']==scene['payload']['source']['scene_id']),{})
-        scene['source_meta']={k:source[k] for k in ('location','time','heading') if k in source}
-    shots = rows(store, 'SHOT_DESIGN', "json_extract(r.payload,'$.episode.object_id')=?", (chosen['object_id'],))
-    shots.sort(key=lambda r: (r['payload']['scene_id'], r['payload']['number'], r['object_id']))
-    return {'lock': lock, 'episodes': [{'object_id': e['object_id'], 'id': e['id'], 'number': e['payload']['number'], 'title': e['payload']['title'], 'scenes': [{'id':s['id'],'title':s.get('heading',s['id'])} for s in e['payload']['scenes']]} for e in episodes],
-            'episode': chosen['object_id'], 'scenes': scenes, 'shots': shots}
+    if chosen is None:raise KeyError('episode outside exact production input')
+    entries=[];chosen_scenes=[];chosen_shots=[]
+    for ep in episodes:
+        scenes=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
+            FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='PREPARATION'
+            AND json_extract(r.payload,'$.source.object_id')=? AND json_extract(r.payload,'$.source.revision_id')=?
+            AND NOT EXISTS(SELECT 1 FROM revisions n WHERE n.object_id=r.object_id AND n.version>r.version
+                AND json_extract(n.payload,'$.source.revision_id')=?)""",(ep['object_id'],ep['id'],ep['id']))]
+        if exact_scene and ep['object_id']==episode:
+            scenes=[r for r in scenes if r['object_id']!=exact_scene['object_id']]+[exact_scene]
+        order={s['id']:i for i,s in enumerate(ep['payload']['scenes'])}
+        scenes.sort(key=lambda r:(order.get(r['payload']['source']['scene_id'],len(order)),r['object_id']))
+        shots=[shot for sc in scenes for shot in scene_shots(store,sc,
+               exact_shot if exact_shot and exact_shot['payload']['parent']==ref(sc) else None)]
+        entries.append({'object_id':ep['object_id'],'id':ep['id'],'number':ep['payload']['number'],
+            'title':ep['payload']['title'],'scenes':[{'id':s['id'],'title':s.get('heading',s['id'])} for s in ep['payload']['scenes']],
+            'comment_targets':[ref(r) for r in [*scenes,*shots]]})
+        if ep['id']==chosen['id']:chosen_scenes=scenes;chosen_shots=shots
+    return {'lock':lock,'episodes':entries,'episode':chosen['object_id'],
+            'scenes':chosen_scenes,'shots':chosen_shots,'target':ref(target) if target else None}
 
 
 def context(store, object_id, revision_id=None):

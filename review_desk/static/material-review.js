@@ -331,12 +331,13 @@ async function locateMaterialComment(comment){
 // Preview exact references without changing the reader, selection, or draft.
 let materialReferenceCount=0;
 function materialReferenceRequest(ref,source=null){
+  if(!ref?.object_id||!ref?.revision_id)throw Error("剧情依据缺少准确对象或修订，未替换为最新剧本");
   // Story revisions share exact references with production records, but have a
   // separate reader that validates the cited scene and limits the text blocks.
   const known=(state.productionRecords||[]).find(r=>r.object_id===ref.object_id);
-  const isSource=!!(source===true||['EPISODE','SOURCE','STORY'].includes(known?.kind)||ref.scene_id||ref.block_ids?.length||source===null&&!(state.productionRecords||[]).some(r=>r.object_id===ref.object_id));
+  const isSource=!!(source===true||source==='full_scene'||['EPISODE','SOURCE','STORY'].includes(known?.kind)||ref.scene_id||ref.block_ids?.length||source===null&&!(state.productionRecords||[]).some(r=>r.object_id===ref.object_id));
   const query=new URLSearchParams({object_id:ref.object_id,revision_id:ref.revision_id});
-  if(isSource){if(ref.scene_id)query.set('scene_id',ref.scene_id);if(ref.block_ids?.length)query.set('block_ids',ref.block_ids.join(','))}
+  if(isSource){if(source==='full_scene')query.set('full_scene','1');if(ref.scene_id)query.set('scene_id',ref.scene_id);if(ref.block_ids?.length)query.set('block_ids',ref.block_ids.join(','))}
   return {isSource,url:'/api/production'+(isSource?'/source':'')+'?'+query};
 }
 function materialReferenceLink(parent,ref,title,source=false){
@@ -376,10 +377,10 @@ function referenceReviewSession(dialog,detail){
   return {focus,locate};
 }
 async function openMaterialReference(ref,trigger,source=false){
-  const request=materialReferenceRequest(ref,source);
-  const {dialog,title,body}=openReviewDialog(request.isSource?'剧情依据':'参考输入',trigger,'material-reference-dialog');
+  const {dialog,title,body}=openReviewDialog(source?'剧情依据':'参考输入',trigger,'material-reference-dialog');
   nodeText('p',null,'读取中…',body);
   try{
+    const request=materialReferenceRequest(ref,source);
     const detail=await api(request.url);
     if(!dialog.isConnected)return;
     if(request.isSource){
@@ -388,7 +389,10 @@ async function openMaterialReference(ref,trigger,source=false){
       title.textContent='剧情依据 · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
       body.dataset.referenceScene=detail.scene?.id||'';
       if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene.id)+' · '+detail.scene.heading.replace(/^\d+-\d+\s*/,''),body);
-      for(const block of detail.blocks)nodeText('p','reference-text',block.text,body);
+      const highlighted=new Set(detail.highlight_block_ids||[]);
+      for(const block of detail.blocks){const line=nodeText('p','reference-text',block.text,body);line.dataset.referenceBlock=block.id;if(highlighted.has(block.id)){line.classList.add('reference-highlight');line.setAttribute('aria-label','本镜剧情依据')}}
+      if(detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
+      body.querySelector('.reference-highlight')?.scrollIntoView({block:'center'});
       return;
     }
     const row=detail.record,p=row.payload;body.replaceChildren();const versions=[...new Set(Object.values(detail.material_versions||{}).flatMap(rs=>rs.filter(r=>r.members.some(m=>m.id===row.id)).map(r=>r.number)))];title.textContent=businessTitle(row)+' · '+(versions.length===1?'素材版本 '+versions[0]:'记录修订 '+row.version);body.dataset.referenceRevision=row.id;
