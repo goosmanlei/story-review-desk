@@ -26,7 +26,7 @@ function syncApproachIndex() {
     const active = link.hash === `#${current.id}`, changed = active && !link.classList.contains('active');
     link.classList.toggle('active', active);
     if (active) link.setAttribute('aria-current', 'location'); else link.removeAttribute('aria-current');
-    if (changed) {
+    if (changed && getComputedStyle(index).display !== 'flex' && !index.contains(document.activeElement)) {
       const item = link.getBoundingClientRect(), menu = index.getBoundingClientRect();
       if (item.top < menu.top) index.scrollTop += item.top - menu.top;
       else if (item.bottom > menu.bottom) index.scrollTop += item.bottom - menu.bottom;
@@ -42,6 +42,17 @@ function restoreApproachAnchor() {
   const target = document.getElementById(location.hash.slice(1));
   if (target?.classList.contains('approach-section') && $('#approach-body').contains(target)) target.scrollIntoView({block: 'start'});
   scheduleApproachIndex();
+  // Workspace/browser scroll restoration runs after rendering. Only rescue a
+  // partially covered anchor heading; keep deeper saved reading positions.
+  const href = location.href;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (location.href !== href || $('#approach-view').hidden || !target) return;
+    syncApproachIndex();
+    const top = target.getBoundingClientRect().top;
+    const offset = parseFloat($('#approach-body').style.getPropertyValue('--approach-scroll-offset'));
+    if (top >= 0 && top < offset) target.scrollIntoView({block: 'start'});
+    scheduleApproachIndex();
+  }));
 }
 
 async function renderApproach() {
@@ -119,7 +130,10 @@ async function renderApproach() {
   } catch (error) { host.textContent = `制作方法加载失败：${error.message}。刷新可重试；已有故事与审阅数据不受影响。`; }
 }
 
-document.addEventListener('scroll', scheduleApproachIndex, {capture: true, passive: true});
+document.addEventListener('scroll', event => {
+  // Moving the horizontal directory is navigation intent, not reading progress.
+  if (!$('#approach-index').contains(event.target)) scheduleApproachIndex();
+}, {capture: true, passive: true});
 window.addEventListener('resize', scheduleApproachIndex);
 window.addEventListener('hashchange', restoreApproachAnchor);
 
