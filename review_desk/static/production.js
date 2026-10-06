@@ -160,6 +160,7 @@ async function loadProductionWorkspace({onReadStart}={}){
   catch(error){if(state.workspace===workspace&&epoch===productionLoadEpoch&&readEpoch===productionReadEpoch&&loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
   if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
+  if(workspace==='settings.workspace'&&result.entity_state_counts)return loadEntityManagement(result,{epoch,onReadStart});
   const param=new URL(location.href).searchParams,selected=param.get('production_object'),requested=result.records.find(r=>r.object_id===selected);
   if(requested?.kind==='INPUT_LOCK'){
     const url=new URL(location.href);url.searchParams.delete('production_object');url.searchParams.delete('production_revision');history.replaceState(history.state,'',url);
@@ -273,7 +274,7 @@ async function loadProductionWorkspace({onReadStart}={}){
         const version=workspace==='materials.workspace'?(r.material_generated?'已生成':'未生成'):r.kind==='ASSET'?(Number.isInteger(r.material_version)&&r.material_version>0?'版本 '+r.material_version:''):'修订 '+r.version;
         const title=r.kind==='PREPARATION'?breakdownSceneTitle(r):r.kind==='SHOT_DESIGN'?breakdownShotTitle(r):reviewPositionText(r.payload.title);
         const subtitle=flatFilters?Object.entries(counts).map(([type,n])=>`${productionMediaLabels[type]||type} ${n}`).join(' · ')||'暂无素材需求':[productionLabels[r.payload.entity_type]||position,version].filter(Boolean).join(' · ');
-        const b=reviewSmallCard(entityList,{title:businessTitle(r,title),icon:r.payload.entity_type||r.payload.media_type||({PREPARATION:'space',SHOT_DESIGN:'video',ASSEMBLY:'video',DELIVERABLE:'project'})[r.kind]||'document',preview:flatFilters?result.entity_previews?.[r.object_id]:r.payload.components?.find(c=>c.role==='original'&&c.mime?.startsWith('image/')),subtitle},()=>openProductionRecord(r.object_id),selected);b.dataset.objectId=r.object_id;b.classList.toggle('active',selected);
+        const b=reviewSmallCard(entityList,{title,business_code:businessCode(r),icon:r.payload.entity_type||r.payload.media_type||({PREPARATION:'space',SHOT_DESIGN:'video',ASSEMBLY:'video',DELIVERABLE:'project'})[r.kind]||'document',preview:flatFilters?result.entity_previews?.[r.object_id]:r.payload.components?.find(c=>c.role==='original'&&c.mime?.startsWith('image/')),subtitle},()=>openProductionRecord(r.object_id),selected);b.dataset.objectId=r.object_id;b.classList.toggle('active',selected);
         if(flatFilters){b.classList.add('entity-small-card');b.dataset.entityType=r.payload.entity_type}
 
       }

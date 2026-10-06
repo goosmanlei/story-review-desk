@@ -34,7 +34,7 @@
 | 向上汇总 | `/api/production/summary?object_id=ID&revision_id=SHA` | `production-summary --object-id ID --revision-id SHA` |
 | 实体／历史目录 | `/api/production/index?view=settings或history&object_id=可选ID` | 按类型的既有 production-list |
 
-CLI 均以 `python3 -m review_desk --instance PATH` 为前缀。素材列表每页 40 项，返回 total、offset、limit；按 offset 递增读取。列表按持续存在的需求计数，同一需求的多个版本和候选不重复计数。无已知需求关联的历史原件独立保留。
+CLI 均以 `python3 -m review_desk --instance PATH` 为前缀。旧 CLI 素材列表每页 40 项，返回 total、offset、limit，按 offset 递增读取；管理页面使用 `grouped=1` 投影与[共用三列行分页](small-cards.md)，两种接口口径分开。列表按持续存在的需求计数，同一需求的多个版本和候选不重复计数。无已知需求关联的历史原件独立保留。
 
 写入复用 `production-import` 和 `/api/production/import`，expected_version 与 expected_heads 在同一事务校验。批内准确引用可使用 `@前序对象ID`，提交时解析成不可变修订。校验模式执行同样的读取和校验后回滚。文件登记、审阅及采用继续复用现有接口，见 [制作契约](production.md)和[版本与迁移](material-versions.md)。
 

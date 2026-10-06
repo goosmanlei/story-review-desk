@@ -54,11 +54,17 @@ def material_entries(store):
             merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+item['entity_ids']))
             merged[mid]['generated']|=item['generated']
             merged[mid]['preview']=merged[mid]['preview'] or item['preview']
-    return list(merged.values())
+    from .list_associations import material_uses
+    return material_uses(store, list(merged.values()))
+
+
+def management_episodes(store):
+    return [{'object_id':r['object_id'],'number':r['payload']['number']} for r in b.rows(store,'EPISODE')
+            if isinstance(r['payload'].get('number'),int) and r['payload']['number']>0]
 
 
 def entity_summaries(store, entities, entries):
-    counts={row['object_id']:{} for row in entities};statuses={}
+    counts={row['object_id']:{} for row in entities};statuses={};adoption_statuses={}
     for item in entries:
         for eid in set(item['entity_ids']):
             if eid in counts:counts[eid][item['media_type']]=counts[eid].get(item['media_type'],0)+1
@@ -71,11 +77,17 @@ def entity_summaries(store, entities, entries):
             accepted=bool(g.accepted(store,eid,scope) or g.content_scope(store,eid,decision,rows) or
                 decision['payload'].get('acceptance_model')==g.CONTENT_MODEL and decision['payload']['acceptance_scope']==scope)
         statuses[eid]='accepted' if accepted else 'unaccepted'
-    return {'entity_material_counts':counts,'entity_statuses':statuses,
+        adoption_statuses[eid]='accepted' if accepted else 'stale' if decision and decision['payload']['verdict']=='accepted' else 'unaccepted'
+    from .entity_review import full_states
+    from .list_associations import entity_locations
+    rows = rows if rows is not None else p.current_records(store)
+    return {'management_episodes':management_episodes(store),'entity_material_counts':counts,'entity_statuses':statuses,'entity_adoption_statuses':adoption_statuses,
+            'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
+            'entity_locations':entity_locations(store,entities,rows),
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None):
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False):
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
     values=material_entries(store);chosen={'episode':episode,'scene':scene,'media':media,'status':status}
@@ -91,6 +103,12 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
              'scene':sorted({l['scene'] for i in values for l in i['locations'] if l.get('scene') and (not episode or l['episode']==episode)})}
     facets={key:{value:sum(matches(i,{**chosen,key:value}) for i in values) for value in ['',*opts]} for key,opts in options.items()}
     result=[item for item in values if matches(item,chosen)]
+    if grouped:
+        from .list_associations import material_groups
+        result.sort(key=lambda i:(i['canonical_material_id'],i['id']))
+        groups=material_groups(store,result,episode,scene)
+        return {'management_episodes':management_episodes(store),'items':result,'total':len(result),'groups':groups,
+                'display_total':sum(len(group['material_ids']) for group in groups),'facets':facets}
     focused=None
     if focus:
         from .material_storage import canonical_id
@@ -104,7 +122,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
             'focused_outside':focused if focused is not None and focused not in result else None}
 
 
-def card(store, object_id, revision_id=None):
+def card(store, object_id, revision_id=None, entity_id=None):
     from . import entity_review
     detail=p.snapshot(store,object_id=object_id,revision_id=revision_id);row=detail['record'];scope=row['payload'].get('scope');form=None;owner=None
     if row['kind']=='ENTITY':owner=row
@@ -123,7 +141,13 @@ def card(store, object_id, revision_id=None):
     if scoped and scoped['kind']=='STATE':form=scoped
     elif scoped and scoped['kind']=='ENTITY':owner=scoped
     if form:owner=p.ref_record(store,form['payload']['entity'])
-    entity=entity_review.snapshot(store,owner['object_id']) if owner else None
+    entity=entity_review.snapshot(store,entity_id or owner['object_id']) if entity_id or owner else None
+    if entity_id:
+        allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
+        if row['object_id'] not in allowed:
+            raise ValueError('准确对象不属于所请求的实体')
+        if form and form['payload']['entity']['object_id']!=entity_id:
+            form=None
     if entity:
         entity['adoptions']=b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='adoption'")
     return {'detail':detail,'entity_review':entity,'form':form,'scope':scoped,

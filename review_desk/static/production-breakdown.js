@@ -51,7 +51,7 @@ function breakdownPrompt(parent,need,context){
   const candidates=(round?.results||[]).map(record=>({record,components:record.payload.components,component:record.payload.components.find(c=>c.role==='original')||record.payload.components[0]}));
   const model={need:round?(round.definition_records?round.definition_records.requirement:round.plan):need,identity:need,candidates,round,rounds,material_id:need.object_id};
   const selected=materialCandidateChoice(candidates,saved.candidate||materialDefaultCandidate(model,{adoptions:context.adoptions}));
-  const selection={number:round?.number,candidate:selected?.record.id};state.breakdownVideoSelections[need.id]=selection;
+  const selection={number:round?.number,candidate:selected?.record.id,reference:productionRef(selected?.record||model.need||round?.definition_records?.call||need)};state.breakdownVideoSelections[need.id]=selection;
   const section=el('section','shot-generation-content');parent.append(section);
   const repaint=()=>{rememberProductionDraft();section.remove();breakdownPrompt(parent,need,context);paintReviewCommentCounts()};
   const bar=el('div','production-toolbar');section.append(bar);
@@ -108,7 +108,7 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null){
   function renderMaterials(){for(const {item,materials} of rows){
     materials.replaceChildren();nodeText('h4',null,productionTab()==='shots'?'本镜视频':'本镜素材',materials);
     const items=[...new Map((item.context.materials||[]).map(i=>[i.canonical_material_id||i.object_id,i])).values()].filter(i=>(productionTab()!=='shots'||i.media_type==='video')&&state.breakdownLevels.includes(i.placement_level||breakdownLevel({kind:i.placement_kind})||'shot'));
-    for(const item of items)materialSmallCard(materials,item,trigger=>{const choice=state.breakdownVideoSelections?.[item.id],params=choice?.number?new URLSearchParams({material_id:item.object_id,material_version:choice.number,...(choice.candidate?{material_target:choice.candidate}:{})}):null;openUnifiedMaterial({object_id:item.object_id,revision_id:item.id,params,defaultSelection:!choice},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
+    for(const item of items)materialSmallCard(materials,item,trigger=>{const choice=state.breakdownVideoSelections?.[item.id],params=choice?.number?new URLSearchParams({material_id:item.object_id,material_version:choice.number,...(choice.candidate?{material_target:choice.candidate}:{})}):null;openUnifiedMaterial({...choice?.reference,object_id:choice?.reference?.object_id||item.object_id,revision_id:choice?.reference?.revision_id||item.id,params,defaultSelection:!choice},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
     if(!items.length)nodeText('p','production-meta',state.breakdownLevels.length?'暂无符合归属的素材':'未选择素材归属',materials);
   }}
   renderMaterials();body.scrollTop=state.breakdownMemory[scene.object_id]||0;
@@ -132,29 +132,8 @@ function flatFilterGroup(parent,key,label,options,selected,counts,onchange){
   const group=el('div','production-filter-group');group.setAttribute('role','group');group.setAttribute('aria-label',label);nodeText('span','production-filter-label',label,group);const choices=el('div','production-filter-options');group.append(choices);
   for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;nodeText('span',null,title,button);nodeText('b','production-filter-count',String(counts?.[value]||0),button)}parent.append(group);
 }
-async function loadProductionMaterials(){
-  state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const epoch=++breakdownEpoch,workspace=state.workspace,host=$('#production-view'),params=new URL(location.href).searchParams;
-  ++breakdownSelectionEpoch;++productionLoadEpoch;++productionReadEpoch;state.productionEntityId=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
-  const catalog=await api('/api/production/breakdown');if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
-  state.productionRecords=[catalog.lock,...catalog.scenes,...catalog.shots].filter(Boolean);
-  const filters=Object.fromEntries(['episode','scene','media','status','search'].map(k=>[k,params.get('material_'+k)||'']));let request=0,offset=0,initial=true;
-  const panel=el('section','production-filters'),toolbar=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;toolbar.append(search);productionButton(toolbar,'清除筛选',()=>{for(const k in filters)filters[k]='';search.value='';offset=0;refresh()});panel.append(toolbar);const facets=el('div');panel.append(facets);host.append(panel);
-  const layout=el('div','production-board unified-management'),index=el('nav','production-index material-index'),reader=el('article','production-reader');reader.id='production-reader';layout.append(index,reader);host.append(layout);
-  async function refresh(){const token=++request,restore=initial;initial=false;rememberProductionDraft();++productionReadEpoch;state.materialReview=null;state.entityReview=null;
-    breakdownRoute(Object.fromEntries(Object.entries(filters).map(([k,v])=>['material_'+k,v])));const result=await api('/api/production/materials?'+new URLSearchParams({...filters,offset,...(restore&&params.get('production_object')?{focus:params.get('material_id')||params.get('production_object')}:{})}));if(token!==request||epoch!==breakdownEpoch)return;offset=result.offset??offset;
-    facets.replaceChildren();const change=key=>value=>{filters[key]=value;if(key==='episode')filters.scene='';offset=0;refresh()};
-    const titles={media:'媒体类型',status:'生成结果（含历史版本）',episode:'所属集',scene:'所属场'};
-    for(const key of ['media','status','episode','scene']){const options=Object.keys(result.facets[key]).map(v=>[v,!v?'全部':key==='media'?productionMediaLabels[v]:key==='status'?(v==='generated'?'有结果':'无结果'):breakdownFacetTitle(key,v,catalog)]);flatFilterGroup(facets,key,titles[key],options,filters[key],result.facets[key],change(key))}
-    index.replaceChildren();nodeText('p','production-filter-summary',`${result.total} 项素材`,index);
-    for(const media of Object.keys(productionMediaLabels)){const items=result.items.filter(i=>i.media_type===media);if(!items.length)continue;nodeText('h3',null,productionMediaLabels[media],index);const list=el('div','material-small-list');index.append(list);for(const item of items)materialSmallCard(list,item,()=>{for(const b of index.querySelectorAll('[data-material-id]'))b.setAttribute('aria-pressed',String(b.dataset.materialId===item.object_id));openBreakdownMaterial(item,reader)},false,{includesHistory:true})}
-    if(result.focused_outside){nodeText('h3',null,'当前链接素材（筛选外）',index);materialSmallCard(index,result.focused_outside,()=>openBreakdownMaterial({object_id:params.get('production_object'),id:params.get('production_revision')||null},reader,null,true),true,{includesHistory:true})}
-    if(offset)productionButton(index,'上一页',()=>{offset=Math.max(0,offset-result.limit);refresh()});if(offset+result.limit<result.total)productionButton(index,'下一页',()=>{offset+=result.limit;refresh()});
-    reader.replaceChildren();if(!result.total&&!result.focused_outside){nodeText('p','production-meta','没有符合筛选条件的素材',reader);state.productionSelected=null;renderComments();return}
-    const linked=restore&&params.get('production_object'),selected=linked||result.items[0]?.object_id;for(const button of index.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===selected));await openBreakdownMaterial(linked?{object_id:linked,id:params.get('production_revision')||null}:result.items[0],reader,null,restore);
-    const active=state.entityReview?.unifiedMaterialId||state.materialCommentCard?.material_id||Object.keys(state.materialReview?.material_versions||{})[0]||state.materialReview?.record.object_id||selected;for(const button of index.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===active));
-  }
-  let timer;search.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{filters.search=search.value;offset=0;refresh()},150)};await refresh();
-}
+async function loadProductionMaterials(){return loadMaterialManagement()}
+
 function renderMaterialAdoptionControls(reader,detail){
   if(!detail.adoptionContext)return;
   reader.querySelector('[data-adoption-controls]')?.remove();
