@@ -223,7 +223,7 @@ function renderEntityReview(root){
   renderEntityRelations(root,data);
   if(data.historicalCall)renderActualGeneration(root,{call:data.historicalCall,inputs:[]});
   if(data.historicalRelation){const old=el('section');nodeText('h3',null,'历史关系',old);reviewTextBlocks(old,data.historicalRelation);root.append(old)}
-  const nav=el('section','production-entity-context');nav.setAttribute('aria-label','选择状态');const currentStates=[...new Map((data.currentStates||data.states).filter(r=>productionCompleteState(r)&&r.payload.status!=='withdrawn').map(r=>[r.object_id,r])).values()],historyCount=data.states.filter(r=>!currentStates.some(s=>s.object_id===r.object_id)).length;nodeText('h3','production-entity-title',`完整状态 · ${currentStates.length}`+(historyCount?`（历史保留 ${historyCount}）`:''),nav);const choices=el('div','production-entity-options');
+  const nav=el('section','production-entity-context');nav.setAttribute('aria-label','选择状态');const currentStates=[...new Map((data.currentStates||data.states).filter(r=>productionCompleteState(r)&&r.payload.status!=='withdrawn').map(r=>[r.object_id,r])).values()],historyCount=data.states.filter(r=>!currentStates.some(s=>s.object_id===r.object_id)).length;nodeText('h3','production-entity-title',`实体状态 · ${currentStates.length}`+(historyCount?`（历史保留 ${historyCount}）`:''),nav);const choices=el('div','production-entity-options');
   for(const [index,row] of data.states.entries()){
     const needs=(data.requirements||[]).filter(r=>r.payload.scope.revision_id===row.id),button=productionButton(choices,'',()=>selectEntityReviewState(row));nodeText('span',null,((data.retained_states||[]).some(r=>r.id===row.id)?'历史保留 · ':index===0?'基础状态 · ':'')+businessTitle(row,entityReviewShort(row,entity)),button);button.title=entityReviewShort(row,entity)+' · '+entityReviewScope(row);if(needs.length)nodeText('small',null,needs.length+' 项素材',button);button.setAttribute('aria-pressed',String(row.object_id===form?.object_id));button.dataset.stateId=row.object_id;
   }nav.append(choices);if(data.states.length||!withdrawnEntity)root.append(nav);
@@ -270,6 +270,7 @@ function entityReviewMaterialModels(needs,items,data){
     if(!associations.has(current.object_id)){associations.set(current.object_id,need);sharedNeeds.push(current)}
   }
   return materialRoundModels(sharedNeeds,items,modelData).map(model=>{
+    model.cardCounts=data.material_card_counts?.[materialModelKey(model)];
     model.association_need=associations.get(model.material_id||model.need?.object_id);
     const target=Object.values(data.localVersions||{}).find(row=>row.kind==='ASSET'&&model.round?.members.some(r=>r.id===row.id&&r.object_id===row.object_id));
     if(target)model.candidates=materialExactCandidates({record:target,review_context:data.materialContexts?.[target.id]},model.candidates,target.id,model.round);

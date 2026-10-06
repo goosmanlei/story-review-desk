@@ -54,6 +54,9 @@ def material_entries(store):
             merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+item['entity_ids']))
             merged[mid]['generated']|=item['generated']
             merged[mid]['preview']=merged[mid]['preview'] or item['preview']
+    from .material_plans import card_counts
+    metrics = card_counts(store, merged)
+    for mid, item in merged.items():item.update(metrics[mid])
     from .list_associations import material_uses
     return material_uses(store, list(merged.values()))
 
@@ -64,9 +67,12 @@ def management_episodes(store):
 
 
 def entity_summaries(store, entities, entries):
-    counts={row['object_id']:{} for row in entities};statuses={};adoption_statuses={}
+    counts={row['object_id']:{} for row in entities};statuses={};adoption_statuses={};seen=set()
     for item in entries:
         for eid in set(item['entity_ids']):
+            key=(eid,item.get('canonical_material_id',item['object_id']))
+            if key in seen:continue
+            seen.add(key)
             if eid in counts:counts[eid][item['media_type']]=counts[eid].get(item['media_type'],0)+1
     rows=None
     for entity in entities:
@@ -208,6 +214,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
             item=all_entries.get(mid)
             if not item:
                 value=row['payload'];item={'object_id':row['object_id'],'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder') and any(c['role']=='original' for c in value.get('components',[])),'generation_scope':'exact','preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
+                item.update(material_plans.card_counts(store,[mid])[mid])
             placement=row['payload'].get('scope') or item.get('scope')
             owner=p.ref_record(store,placement) if placement else scoped
             context['materials'].append({**item,'id':row['id'],'title':row['payload']['title'],'association':relation,

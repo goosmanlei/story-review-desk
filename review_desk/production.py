@@ -712,6 +712,9 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         if not result['material_versions']:
             result['material_versions'] = result['legacy_material_versions']
+        if selected['kind'] in ('REQUIREMENT', 'ASSET'):
+            from .material_plans import card_counts
+            result['material_card_counts'] = card_counts(store, {selected['object_id'], *result['material_versions']})
         if result['material_versions']:
             from .material_review import context
             contexts = result.setdefault('review_contexts', {})
@@ -731,7 +734,9 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         AND EXISTS(SELECT 1 FROM json_each(r.payload,'$.components') c
                    WHERE json_extract(c.value,'$.role')='original') ORDER BY m.material_id,r.object_id"""):
         material_assets.setdefault(row[0], []).append(row[1])
-    return {"records": rows, "material_assets": material_assets}
+    from .material_plans import card_counts
+    return {"records": rows, "material_assets": material_assets,
+            "material_card_counts": card_counts(store, [r['object_id'] for r in rows if r['kind'] in ('REQUIREMENT','ASSET')])}
 
 
 def dependency_closure(store, revision_id, include_history=True):

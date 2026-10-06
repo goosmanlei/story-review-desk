@@ -126,7 +126,7 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
 function mockManagementModal(c){c.openUnifiedMaterial=async ref=>{const result=await c.readUnifiedCard(ref.object_id,ref.revision_id,ref.params);c.activateUnifiedCard(result);c.renderProductionReader()}}
 async function materialListFixture(linked){
   const f=fixture(),{c}=f,{need,asset}=material(),candidate={...asset,object_id:'historical-candidate',id:'historical-candidate-r1'};
-  const item={canonical_material_id:need.object_id,object_id:need.object_id,id:need.id,title:'A material',media_type:'image',generated:true};
+  const item={canonical_material_id:need.object_id,object_id:need.object_id,id:need.id,title:'A material',media_type:'image',generated:true,version_count:2,candidate_count:1};
   if(linked)c.location.href+='&production_object='+linked+'&production_revision='+linked+'-r1';
   const opened=[];
   c.api=async url=>{
@@ -154,7 +154,7 @@ test('history result summaries explain D3 once while preserving an exact histori
   const statusGroups=host.all().filter(n=>n.attributes.role==='group'&&n.attributes['aria-label']?.includes('含历史版本'));
   assert.equal(statusGroups.length,1);
   const card=host.querySelectorAll('[data-material-id]')[0];
-  assert.match(card.textContent,/有生成结果/);
+  assert.match(card.textContent,/版本 2 个 · 候选 1 个/);
   assert.doesNotMatch(card.textContent,/含历史版本|已生成/,'the filter group already states the list-wide range');
   assert.deepEqual(opened,['historical-candidate']);
   assert.equal(card.dataset.materialId,'need');
@@ -164,8 +164,8 @@ for(const workspace of ['settings.workspace','production.workspace'])test(`scene
   const {c,reader}=fixture(),media=workspace==='production.workspace'?'video':'audio';
   const scene=row('scene','PREPARATION'),shot=row('shot','SHOT_DESIGN',{number:1,duration_frames:120,fps:24});
   const items=[
-    {object_id:'historical-need',id:'historical-need-r3',title:'Changed current plan',media_type:media,generated:true,generation_scope:'history'},
-    {object_id:'exact-empty',id:'exact-empty-r1',title:'An exact record',media_type:media,generated:false,generation_scope:'exact'},
+    {object_id:'historical-need',id:'historical-need-r3',title:'Changed current plan',media_type:media,generated:true,generation_scope:'history',version_count:2,candidate_count:1},
+    {object_id:'exact-empty',id:'exact-empty-r1',title:'An exact record',media_type:media,generated:false,generation_scope:'exact',version_count:1,candidate_count:0},
     {object_id:'old-projection',id:'old-projection-r1',title:'An older projection',media_type:media,generated:true}
   ];
   c.state.workspace=workspace;c.state.breakdownData={episode:'episode'};
@@ -177,9 +177,9 @@ for(const workspace of ['settings.workspace','production.workspace'])test(`scene
   await c.showBreakdownScene(scene,reader,new Element('nav'),9);
   const cards=reader.querySelectorAll('[data-material-id]');
   assert.deepEqual(cards.map(n=>n.dataset.materialId),items.map(i=>i.object_id));
-  assert.match(cards[0].textContent,/有生成结果（含历史版本）/);
-  assert.match(cards[1].textContent,/未生成/);assert.doesNotMatch(cards[1].textContent,/历史/);
-  assert.match(cards[2].textContent,/已生成/);assert.doesNotMatch(cards[2].textContent,/历史/);
+  assert.match(cards[0].textContent,/版本 2 个 · 候选 1 个/);
+  assert.match(cards[1].textContent,/版本 1 个 · 候选 0 个/);assert.doesNotMatch(cards[1].textContent,/历史/);
+  assert.match(cards[2].textContent,/版本未登记 · 候选未登记/);assert.doesNotMatch(cards[2].textContent,/历史/);
   for(const card of cards)assert.equal(card.dataset.reviewDialogTrigger,'');
   await cards[0].onclick();await cards[1].onclick();
   assert.equal(opened[0].revision_id,'historical-need-r3');
@@ -191,13 +191,13 @@ test('unowned demand sees a real older plan result without replacing its exact c
   const {c,reader}=fixture(),{need,asset,round}=material();
   need.payload.scope={object_id:'scene',revision_id:'scene-r1'};
   const current={...need,id:'need-r2',version:2};
-  const data={record:current,history:[current,need],candidate_records:[],material_versions:{need:[
+  const data={record:current,history:[current,need],candidate_records:[],material_card_counts:{need:{version_count:2,candidate_count:1}},material_versions:{need:[
     {number:2,model:'plan-v1',plan:current,members:[current],results:[]},round]}};
   c.state.entityReview=null;c.state.unifiedScope=null;c.state.materialReview=data;
   const opened=[];c.renderMaterialWorkspace=(_right,detail)=>opened.push(detail.record);
   c.renderUnifiedCard(reader);
   const card=reader.querySelectorAll('[data-material-id]')[0];
-  assert.match(card.textContent,/有生成结果（含历史版本）/);
+  assert.match(card.textContent,/版本 2 个 · 候选 1 个/);
   assert.equal(card.dataset.materialId,need.object_id);assert.equal(card.getAttribute('aria-pressed'),'true');
   assert.deepEqual(opened,[current]);assert.equal(data.material_versions.need[0].results.length,0);
   assert.equal(data.material_versions.need[1].results[0].id,asset.id);
@@ -209,11 +209,11 @@ for(const candidateKind of ['placeholder','preview-only','call'])test(`unowned d
   const candidate=candidateKind==='call'?row('attempt','CALL',{status:'failed'}):structuredClone(asset);
   if(candidateKind==='placeholder')candidate.payload.placeholder=true;
   if(candidateKind==='preview-only')candidate.payload.components=candidate.payload.components.filter(v=>v.role!=='original');
-  const data={record:need,history:[need],candidate_records:[candidate],material_versions:{}};
+  const data={record:need,history:[need],candidate_records:[candidate],material_card_counts:{need:{version_count:1,candidate_count:0}},material_versions:{}};
   c.state.entityReview=null;c.state.materialReview=data;c.renderMaterialWorkspace=()=>{};
   c.renderUnifiedCard(reader);
   const card=reader.querySelectorAll('[data-material-id]')[0];
-  assert.match(card.textContent,/无生成结果（含历史版本）/);assert.doesNotMatch(card.textContent,/有生成结果|已生成/);
+  assert.match(card.textContent,/版本 1 个 · 候选 0 个/);assert.doesNotMatch(card.textContent,/有生成结果|已生成/);
   assert.equal(data.candidate_records[0],candidate,'history remains available despite its not being a real original');
 });
 
@@ -227,22 +227,22 @@ for(const variant of ['original','placeholder','preview-only'])test(`unowned exa
   c.renderMaterialWorkspace=(_right,detail)=>rendered.push(detail.record.id);
   c.renderUnifiedCard(reader);
   const card=reader.querySelectorAll('[data-material-id]')[0];
-  assert.match(card.textContent,variant==='original'?/已生成/:/未生成/);
+  assert.match(card.textContent,/版本未登记 · 候选未登记/);
   assert.doesNotMatch(card.textContent,/历史|有生成结果|无生成结果/);
   assert.deepEqual(rendered,[exact.id]);assert.equal(data.history[1].id,asset.id);
 });
 
-test('entity state material cards continue to follow the selected model instead of all its historical rounds',()=>{
+test('entity material totals remain unchanged when selecting an empty or produced version',()=>{
   const {c,reader}=fixture(),{need,asset,round}=material();
   const current={...need,id:'need-r2'},empty={number:2,model:'plan-v1',plan:current,members:[current],results:[]};
   const data={unifiedCollecting:true,unifiedMaterialId:need.object_id,material_versions:{need:[empty,round]}};
   c.state.entityReview=data;
-  c.renderUnifiedModels(reader,[{need:current,material_id:need.object_id,round:empty,rounds:[empty,round],candidates:[]}],data);
-  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/未生成/);
+  c.renderUnifiedModels(reader,[{cardCounts:{version_count:2,candidate_count:1},need:current,material_id:need.object_id,round:empty,rounds:[empty,round],candidates:[]}],data);
+  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/版本 2 个 · 候选 1 个/);
   assert.doesNotMatch(reader.textContent,/历史|有生成结果|无生成结果/);
   reader.replaceChildren();data.unifiedGroups=[];
-  c.renderUnifiedModels(reader,[{need,material_id:need.object_id,round,rounds:[empty,round],candidates:[{record:asset}]}],data);
-  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/已生成/);
+  c.renderUnifiedModels(reader,[{cardCounts:{version_count:2,candidate_count:1},need,material_id:need.object_id,round,rounds:[empty,round],candidates:[{record:asset}]}],data);
+  assert.match(reader.querySelectorAll('[data-material-id]')[0].textContent,/版本 2 个 · 候选 1 个/);
   assert.equal(data.material_versions.need[0].results.length,0,'viewing the old model cannot populate the current plan');
 });
 
