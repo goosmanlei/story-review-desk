@@ -133,7 +133,7 @@ function entitySources(parent,row){
   const data=state.entityReview,sources=el('div','entity-review-sources'),unique=new Map();
   for(const source of row.payload.sources||[]){const key=source.revision_id+source.scene_id;if(!unique.has(key))unique.set(key,{...source,block_ids:[]});unique.get(key).block_ids.push(...source.block_ids)}
   const uses=(data.usages[row.id]||[]).filter(u=>u.kind==='SHOT_DESIGN');
-  data.evidenceViews||={};const saved=data.evidenceViews[row.id]||={open:false,tab:'sources'};
+  data.evidenceViews||={};const saved=data.evidenceViews[row.id]||={open:false,tab:null};
   const appendSources=host=>{if(!unique.size)nodeText('p','production-meta','此版本未登记剧情依据',host);for(const source of unique.values()){source.block_ids=[...new Set(source.block_ids)].sort();productionRefLink(host,source,source.scene_id?reviewPositionLabel('scene',source.scene_id):'正文')}};
   if(row.kind!=='STATE'){
     const detail=el('details','entity-evidence-frame');detail.open=saved.open;nodeText('summary',null,`剧情依据 · ${unique.size} 场`,detail);appendSources(detail);detail.ontoggle=()=>{saved.open=detail.open};sources.append(detail);
@@ -141,11 +141,10 @@ function entitySources(parent,row){
     const frame=el('section','entity-evidence-frame'),tabs=el('div','entity-evidence-tabs');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','选定状态的依据');frame.append(tabs);
     const content=el('div','entity-evidence-content');content.id='evidence-'+row.id;content.setAttribute('role','tabpanel');frame.append(content);
     const buttons=[];for(const [key,label] of [['sources',`剧情依据 · ${unique.size} 场`],['shots',`关联镜头 · ${uses.length} 镜`]]){
-      const button=productionButton(tabs,label,()=>{saved.tab=key;saved.open=true;draw()});button.setAttribute('role','tab');button.setAttribute('aria-controls',content.id);buttons.push([key,button]);
-      button.onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();saved.tab=key==='sources'?'shots':'sources';saved.open=true;draw();buttons.find(([key])=>key===saved.tab)[1].focus({preventScroll:true})}};
+      const button=productionButton(tabs,label,()=>{saved.open=!(saved.open&&saved.tab===key);saved.tab=saved.open?key:null;draw()});button.setAttribute('role','tab');button.setAttribute('aria-controls',content.id);buttons.push([key,button]);
+      button.onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();const target=event.key==='Home'?'sources':event.key==='End'?'shots':key==='sources'?'shots':'sources';buttons.find(([key])=>key===target)[1].focus({preventScroll:true})}};
     }
-    const toggle=productionButton(tabs,'展开',()=>{saved.open=!saved.open;draw()});toggle.setAttribute('aria-controls',content.id);
-    const draw=()=>{for(const [key,button] of buttons){button.setAttribute('aria-selected',String(key===saved.tab));button.tabIndex=key===saved.tab?0:-1}toggle.textContent=saved.open?'收起':'展开';toggle.setAttribute('aria-expanded',String(saved.open));content.hidden=!saved.open;content.replaceChildren();if(!saved.open)return;if(saved.tab==='sources')appendSources(content);else if(uses.length)for(const use of uses)productionRefLink(content,use,use.title);else nodeText('p','production-meta','此版本未关联镜头',content)};
+    const draw=()=>{for(const [key,button] of buttons){button.setAttribute('aria-selected',String(saved.open&&key===saved.tab));button.setAttribute('aria-expanded',String(saved.open&&key===saved.tab));button.tabIndex=0}content.hidden=!saved.open;content.replaceChildren();if(!saved.open)return;if(saved.tab==='sources')appendSources(content);else if(uses.length)for(const use of uses)productionRefLink(content,use,use.title);else nodeText('p','production-meta','此版本未关联镜头',content)};
     draw();sources.append(frame);
   }
   parent.append(sources);
@@ -217,9 +216,9 @@ function renderEntityReview(root){
     try{await refresh;await state.refreshEntityIndex?.()}
     catch(error){data.decisionSave.message=savedMessage+`；当前显示尚未更新：${error.message}。请重新打开此实体核对。`;if(isEntityReview()&&state.entityReview===data&&productionReadEpoch===refreshEpoch&&accept.isConnected){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}}
   });accept.classList.add('entity-review-accept');accept.title=withdrawals.length?withdrawals[0].label+'；保留历史内容与评论，不对此版本采纳或取消。':viewingHistory?'正在查看历史内容，不能执行采纳或取消；请查看当前状态。':data.acceptance_mode==='content'?'采纳当前基础信息、关系、完整状态及已有素材方案；生成前仍需完善并认可方案。':'采纳基础信息、关系、全部完整状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=!!data.decisionSave||(!data.can_accept&&!data.can_revoke)||viewingHistory||!!withdrawals.length;
-  header.append(actions);root.append(header);renderEntityWithdrawals(root,withdrawals);
+  identity.classList.add('entity-review-identity');entityVersionControl(identity,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});header.append(actions);root.append(header);renderEntityWithdrawals(root,withdrawals);
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
-  const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);entityVersionControl(basicHeading,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});basics.append(basicHeading);
+  const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);basics.append(basicHeading);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
   renderEntityRelations(root,data);
   if(data.historicalCall)renderActualGeneration(root,{call:data.historicalCall,inputs:[]});

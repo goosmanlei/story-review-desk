@@ -30,57 +30,65 @@ function renderEntityRelations(root,data){
   const markerId='entity-relation-arrow-'+(++relationGraphSerial);
   const make=(tag,attrs={},text=null,parent=svg)=>{const e=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))e.setAttribute(k,v);if(text!==null)e.textContent=text;parent.append(e);return e};
   const defs=make('defs'),marker=make('marker',{id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},null,defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},null,marker);
-  function node(record,x,y,central=false,reference=null){
+  // Fixed readable columns. Measure full HTML before placing any node or edge;
+  // a longer explanation expands the graph, never the square viewport.
+  const groups=relationGroups(data,rows),ordered=groups.flatMap(g=>g.rows.map(row=>({row,main:g.main})));
+  const center=340,nodeWidth=220,captionWidth=260,items=[];
+  function node(record,central=false,reference=null){
     const g=make('g',{class:'relation-node'+(central?' central':'')});
-    make('rect',{x:x-85,y:y-38,width:170,height:76,rx:4,class:'relation-node-box'+(central?' central':'')},null,g);
-    const icon=productionEntityIcon(record.payload.entity_type);icon.setAttribute('x',x-70);icon.setAttribute('y',y-12);icon.setAttribute('width',24);icon.setAttribute('height',24);g.append(icon);
-    const chars=Array.from(record.payload.title),lines=[chars.slice(0,6).join('')];if(chars.length>6)lines.push(chars.slice(6,chars.length>12?11:12).join('')+(chars.length>12?'…':''));
-    make('text',{x:x+12,y:y-22,'text-anchor':'middle',class:'relation-node-code'},businessCode(record),g);
-    for(const [index,line] of lines.entries())make('text',{x:x+12,y:y+(lines.length===1?12:1)+index*20,'text-anchor':'middle',class:'relation-node-name'},line,g);make('title',{},businessTitle(record),g);
+    const box=make('rect',{width:nodeWidth,rx:4,class:'relation-node-box'+(central?' central':'')},null,g);
+    const foreign=make('foreignObject',{width:nodeWidth},null,g),host=el('div','relation-node-content');foreign.append(host);
+    host.append(productionEntityIcon(record.payload.entity_type));const copy=el('div');nodeText('small','relation-node-code',businessCode(record),copy);nodeText('span','relation-node-name',record.payload.title,copy);host.append(copy);
     if(!central){g.dataset.reviewDialogTrigger='';g.setAttribute('role','button');g.setAttribute('tabindex','0');g.setAttribute('aria-label','打开实体：'+record.payload.title);g.dataset.relatedEntity=record.object_id;
       const open=()=>openUnifiedMaterial(reference||{object_id:record.object_id,revision_id:record.id},g);
       g.ondblclick=e=>{e.preventDefault();e.stopPropagation();open()};g.onkeydown=e=>{if(['Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();open()}};
-    }return g;
+    }
+    return {g,box,foreign,host};
   }
-  const groups=relationGroups(data,rows),positions=[];
-  for(const group of groups){
-    const perRing=8;
-    group.rows.forEach((row,index)=>{const ring=Math.floor(index/perRing),count=Math.min(perRing,group.rows.length-ring*perRing),angle=-Math.PI/2+(index%perRing)*Math.PI*2/count;
-      const radius=(group.main?190:545)+ring*310;positions.push({row,main:group.main,radius,angle});
-    });
-  }
-  const extent=Math.max(360,...positions.map(v=>v.radius+225)),center=extent,size=extent*2;
-  svg.setAttribute('viewBox',`0 0 ${size} ${size}`);
-  for(const item of positions){
-    const {row,angle,radius}=item,other=row.payload.entities.find(r=>r.object_id!==entity.object_id),record=by.get(other.object_id);if(!record)continue;
-    const x=center+Math.cos(angle)*radius,y=center+Math.sin(angle)*radius,forward=row.payload.entities[0].object_id===entity.object_id;
-    const near={x:center+Math.cos(angle)*85,y:center+Math.sin(angle)*45},far={x:x-Math.cos(angle)*82,y:y-Math.sin(angle)*39};
-    const path=make('path',{class:'relation-edge'+(item.main?' primary':''),d:forward?`M${near.x} ${near.y} L${far.x} ${far.y}`:`M${far.x} ${far.y} L${near.x} ${near.y}`,'marker-end':`url(#${markerId})`});
-    if(row.payload.direction==='mutual')path.setAttribute('marker-start',`url(#${markerId})`);
-    const foreign=make('foreignObject',{x:x-110,y:y+45,width:220,height:85}),host=materialTextSurface(foreign,row);host.classList.add('relation-text');host.dataset.relationId=row.object_id;
-    nodeText('small','business-code',businessCode(row),host);const caption=relationCaption(row),label=nodeText('span','relation-caption',caption.text,host);if(caption.block){label.dataset.blockId=caption.block.id;label.dataset.anchorOffset=caption.offset}
+  const central=node(entity,true);
+  for(const [index,item] of ordered.entries()){
+    const {row}=item,other=row.payload.entities.find(r=>r.object_id!==entity.object_id),record=by.get(other.object_id);if(!record)continue;
+    const edge=make('path',{class:'relation-edge'+(item.main?' primary':''),'marker-end':`url(#${markerId})`,'stroke-dasharray':index%3===1?'8 4':index%3===2?'3 4':'none'});
+    if(row.payload.direction==='mutual')edge.setAttribute('marker-start',`url(#${markerId})`);
+    const foreign=make('foreignObject',{width:captionWidth}),host=materialTextSurface(foreign,row);host.classList.add('relation-text');host.dataset.relationId=row.object_id;
+    nodeText('small','business-code',businessCode(row),host);
+    for(const block of productionTextBlocks(row)){const label=nodeText('p','relation-caption',block.text,host);label.dataset.blockId=block.id}
     if(row.payload.basis==='production')nodeText('small','production-meta','制作选择',host);
     const references=row.payload.applies_to?.length?row.payload.applies_to:row.payload.sources;
-    const sources=el('details','relation-sources');nodeText('summary',null,'剧情依据 · '+references.length,sources);
+    const sources=el('div','relation-sources');nodeText('span','production-meta','剧情依据 · '+references.length,sources);
     for(const source of references)materialReferenceLink(sources,source,relationSceneLabel(source),true);host.append(sources);
-    node(record,x,y,false,other);
-    if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!host.isConnected){observer.disconnect();return}foreign.setAttribute('height',Math.max(85,host.scrollHeight+8))});observer.observe(host)}
+    items.push({...item,index,edge,foreign,host,node:node(record,false,other)});
   }
-  node(entity,center,center,true);
-  viewport.tabIndex=0;viewport.setAttribute('aria-label','关系图视窗，可滚动或拖动查看');
-  let measuredScale=0;
-  const measure=()=>{const scale=Math.max(.55,viewport.clientWidth/720),position=relationGraphPosition(data.graphPosition,viewport.clientWidth,viewport.clientHeight,scale,center);svg.style.width=size*scale+'px';svg.style.height=size*scale+'px';measuredScale=scale;
-    viewport.scrollLeft=position.x;viewport.scrollTop=position.y;
-    data.graphPosition={x:viewport.scrollLeft,y:viewport.scrollTop,scale,width:viewport.clientWidth,height:viewport.clientHeight};
+  let size=720,measuredScale=1,laidOut=false;
+  const place=(n,x,y,h)=>{n.g.setAttribute('transform',`translate(${x-nodeWidth/2} ${y})`);n.box.setAttribute('height',h);n.foreign.setAttribute('height',h)};
+  const layout=()=>{
+    if(!viewport.isConnected)return;
+    const centralHeight=Math.max(80,central.host.scrollHeight),top=40;place(central,center,top,centralHeight);
+    const narrow=viewport.clientWidth<480, next=[top+centralHeight+90,top+centralHeight+90];
+    for(const item of items){const side=item.index%2,x=narrow?center:(side?510:170),y=next[narrow?0:side],nh=Math.max(80,item.node.host.scrollHeight),ch=Math.max(120,item.host.scrollHeight+12);
+      place(item.node,x,y,nh);item.foreign.setAttribute('x',x-captionWidth/2);item.foreign.setAttribute('y',y+nh+12);item.foreign.setAttribute('height',ch);
+      next[narrow?0:side]=y+nh+12+ch+50;
+      const cy=top+centralHeight/2,forward=item.row.payload.entities[0].object_id===entity.object_id;
+      let d;
+      if(item.index<(narrow?1:2)){const start=[center+(side?40:-40),top+centralHeight],end=[x,y];d=forward?`M${start} C${start[0]} ${y-40} ${x} ${y-40} ${end}`:`M${end} C${x} ${y-40} ${start[0]} ${y-40} ${start}`}
+      else{const lane=side?680+Math.floor(item.index/2)*12:0-Math.floor(item.index/2)*12,port=side?center+nodeWidth/2:center-nodeWidth/2,endpoint=side?x+nodeWidth/2:x-nodeWidth/2,ty=y+nh/2;
+        const points=[[port,cy],[lane,cy],[lane,ty],[endpoint,ty]];if(!forward)points.reverse();d='M'+points.map(v=>v.join(' ')).join(' L');
+      }
+      item.edge.setAttribute('d',d);
+    }
+    const gutter=Math.ceil(items.length/2)*12+30,left=-gutter,width=680+gutter*2,height=Math.max(720,...next);
+    svg.setAttribute('viewBox',`${left} 0 ${width} ${height}`);svg.style.width=width+'px';svg.style.height=height+'px';size=height;
+    if(!laidOut){viewport.scrollLeft=Math.max(0,center+gutter-viewport.clientWidth/2);viewport.scrollTop=0;laidOut=true;if(data.graphPosition){const saved=data.graphPosition;viewport.scrollLeft=saved.x+(saved.width-viewport.clientWidth)/2;viewport.scrollTop=saved.y}}
   };
-  requestAnimationFrame(measure);
+  viewport.tabIndex=0;viewport.setAttribute('aria-label','关系图视窗，可滚动或拖动查看');
+  const measure=layout;requestAnimationFrame(layout);
   viewport.onscroll=()=>{data.graphPosition={x:viewport.scrollLeft,y:viewport.scrollTop,scale:measuredScale,width:viewport.clientWidth,height:viewport.clientHeight}};
   let pan=null;
-  viewport.onpointerdown=e=>{if(e.target.closest('foreignObject,[role=button]'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId)};
+  viewport.onpointerdown=e=>{if(e.target.closest('.relation-text,[role=button]'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId)};
   viewport.onpointermove=e=>{if(!pan)return;viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY};
   viewport.onpointerup=viewport.onpointercancel=()=>{pan=null};
   viewport.onkeydown=e=>{if(e.target!==viewport||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();viewport.scrollBy({left:e.key==='ArrowLeft'?-80:e.key==='ArrowRight'?80:0,top:e.key==='ArrowUp'?-80:e.key==='ArrowDown'?80:0})};
-  if(typeof ResizeObserver!=='undefined'){let width=0;const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return}if(viewport.clientWidth!==width){width=viewport.clientWidth;measure()}});observer.observe(viewport)}
+  if(typeof ResizeObserver!=='undefined'){let width=viewport.clientWidth;const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return}const nextWidth=viewport.clientWidth;if(width!==nextWidth){viewport.scrollLeft+=(width-nextWidth)/2;width=nextWidth}measure()});observer.observe(viewport);observer.observe(central.host);for(const item of items){observer.observe(item.host);observer.observe(item.node.host)}}
 }
 
 function relationSceneLabel(source){

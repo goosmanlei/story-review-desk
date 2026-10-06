@@ -111,6 +111,8 @@ class Store:
             initialize(self)
             from .relation_explanations import initialize as initialize_relationship_policy
             initialize_relationship_policy(self)
+            from .state_cleanup import initialize as initialize_state_cleanup
+            initialize_state_cleanup(self)
         except BaseException:
             self.db.rollback()
             try:
@@ -178,6 +180,8 @@ class Store:
             return [self._put_object(**record) for record in records]
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .state_cleanup import guard_write
+        guard_write(self, object_id, payload)
         kinds = {item for domain in DOMAINS.values() for item in domain["kinds"]}
         if kind == "SOURCE" or kind not in kinds or not isinstance(object_id, str) or not object_id or not isinstance(payload, dict):
             raise ValueError("invalid object kind, id or payload; SOURCE uses put_source")
@@ -476,6 +480,7 @@ class Store:
         if not obj or not revision or revision["object_id"] != object_id:
             raise ValueError("unknown object or mismatched revision")
         payload = json.loads(revision["payload"])
+        if obj["kind"] == "DELETED_STATE":raise Conflict("此准确状态目标已清理；保留既有评论，不新增正文锚点")
         if obj["kind"] == "SOURCE":
             if _source_cache is not None and object_id in _source_cache:
                 source, source_revision = _source_cache[object_id]

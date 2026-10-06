@@ -154,7 +154,7 @@ async function openUnifiedMaterial(ref,trigger){
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
   const fields=['shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
   const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
-  const {dialog,body}=openReviewDialog('实体与素材',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
+  const {dialog,body}=openReviewDialog('实体大卡',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;
