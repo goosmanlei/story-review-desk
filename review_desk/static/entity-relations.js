@@ -95,5 +95,5 @@ function renderEntityRelations(root,data){
 
 function relationSceneLabel(source){
   const ep=state.screenplays.flatMap(s=>s.episodes).find(e=>e.id===source.revision_id);
-  return `${ep?.payload.number?reviewPositionLabel('episode',ep.payload.number)+' · ':''}${source.scene_id?reviewPositionLabel('scene',source.scene_id):'全文'}`;
+  return `${ep?.payload.number?reviewPositionLabel('episode',ep)+' · ':''}${source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'全文'}`;
 }

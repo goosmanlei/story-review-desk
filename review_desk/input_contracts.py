@@ -7,6 +7,28 @@ import re
 LABELS = {'image':'图片', 'audio':'音频', 'video':'视频'}
 
 
+def check_declared(model, prompt, media_types):
+    """Plan shape can be checked before media are selected; no readiness claim."""
+    issues = []
+    if model in ('seedance2.0_fast_vision','Seedance_2.5'):
+        fast = model == 'seedance2.0_fast_vision'
+        if len(prompt) > (5000 if fast else 15000):issues.append('Prompt 长度超过模型限制')
+        limits = {'image':9 if fast else 30,'audio':3 if fast else 10,'video':3 if fast else 10}
+        if any(kind not in limits for kind in media_types):issues.append('模型参考类型不支持')
+        for kind, limit in limits.items():
+            if media_types.count(kind) > limit:issues.append(kind+' reference count exceeds model limit')
+        if not fast and len(media_types)>50:issues.append('total reference count exceeds model limit')
+        counts = {}; labels = set()
+        for kind in media_types:
+            if kind not in LABELS:continue
+            counts[kind] = counts.get(kind,0)+1
+            labels.add(LABELS[kind]+str(counts[kind]))
+        mentions = set(re.findall(r'@(图片\d+|音频\d+|视频\d+)',prompt))
+        if mentions-labels:issues.append('提示词指代了未提交的参考输入')
+        if labels-mentions:issues.append('提示词缺少真实输入指代：'+','.join(sorted(labels-mentions)))
+    return issues
+
+
 def label_inputs(inputs):
     counts={};result=[]
     for index,value in enumerate(inputs):
@@ -19,8 +41,8 @@ def label_inputs(inputs):
 
 
 def check(model, prompt, inputs):
-    labels=[v['label'] for v in inputs];issues=[]
-    if not inputs:return {'model':model,'convention':'text only','verified':True,'issues':[]}
+    labels=[v['label'] for v in inputs];issues=check_declared(model,prompt,[v['component']['mime'].split('/')[0] for v in inputs])
+    if not inputs:return {'model':model,'convention':'text only','verified':not issues,'issues':issues}
     if model in ('gpt-image-2-5-sunburst','gpt-image-2'):
         convention='OpenArt visualReferences ordered array; describe 图片1、图片2 in natural language'
         if any(not v['component']['mime'].startswith('image/') for v in inputs) or len(inputs)>16:
@@ -39,7 +61,8 @@ def check(model, prompt, inputs):
                 if len(parts)>limit:issues.append(kind+' reference count exceeds model limit')
                 if kind!='image':
                     durations=[v.get('range',{}).get('end_seconds',v['component'].get('duration_seconds',0))-v.get('range',{}).get('start_seconds',0) for v in parts]
-                    if any(not 2<=d<=(15.5 if kind=='video' and fast else 15 if fast else 30) for d in durations):issues.append(kind+' reference duration outside model limit')
+                    maximum=(15.5 if fast else 30.2) if kind=='video' else (15 if fast else 30)
+                    if any(not 2<=d<=maximum for d in durations):issues.append(kind+' reference duration outside model limit')
                     if sum(durations)>(15.5 if kind=='video' and fast else 15.2 if fast else 30.2):issues.append(kind+' total reference duration exceeds model limit')
         for label in labels:
             if not re.search(r'@'+re.escape(label)+r'(?!\d)',prompt):issues.append('提示词缺少真实输入指代 @'+label)

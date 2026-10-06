@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from review_desk.bundle import export, restore
+from review_desk.bundle import export, restore, _bytes, _write_content
 from review_desk.store import Store, digest
 
 
@@ -84,6 +84,30 @@ class BundleIntegrityTest(unittest.TestCase):
         self.assertEqual(self.contents(), previous)
         restore(self.destination, self.bundle)
         self.assertEqual(self.destination.comments()[0]['body'], 'Original opinion')
+
+    def test_streamed_content_keeps_exact_previous_bytes_and_manifest(self):
+        for body in ('{}', json.dumps({'text':'中文\\\"\n😀'*18000},ensure_ascii=False)):
+            self.source.db.execute('INSERT OR IGNORE INTO material_content VALUES (?,?)',(digest(body.encode()),body))
+        self.source.db.commit()
+        expected=_bytes({'format':'material-content-v1','material_content':[
+            dict(row) for row in self.source.db.execute('SELECT id,body FROM material_content ORDER BY id')]})
+        manifest=export(self.source,self.bundle)
+        self.assertEqual((self.bundle/'material-content.json').read_bytes(),expected)
+        self.assertEqual(manifest['files']['material-content.json'],digest(expected))
+        self.assertEqual(list(self.bundle.glob('.content-export-*')),[])
+        # Empty graphs have the same canonical envelope too.
+        path=self.root/'empty-content.json'
+        _write_content(self.destination,path)
+        self.assertEqual(path.read_bytes(),_bytes({'format':'material-content-v1','material_content':[]}))
+        read_text=Path.read_text
+        def bounded_read(path,*args,**kwargs):
+            if path.name=='material-content.json':raise AssertionError('content graph loaded as a whole')
+            return read_text(path,*args,**kwargs)
+        with patch.object(Path,'read_text',bounded_read):
+            restore(self.destination,self.bundle)
+        self.assertEqual(self.destination.comments(),self.source.comments())
+        self.assertEqual(list(self.destination.db.execute('SELECT id,body FROM material_content ORDER BY id')),
+                         list(self.source.db.execute('SELECT id,body FROM material_content ORDER BY id')))
 
     def test_all_supported_schemas_require_their_core_files_and_still_restore(self):
         for schema in (1, 2, 3, 4, 5, 6):

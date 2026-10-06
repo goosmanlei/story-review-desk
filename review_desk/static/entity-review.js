@@ -112,7 +112,7 @@ function selectEntityReviewState(row){
 function entityReviewScope(row){
   const scenes=[...new Map((state.entityReview.usages[row.id]||[]).filter(u=>u.kind==='PREPARATION').map(u=>[u.source.object_id+u.source.scene_id,u.source])).values()];
   if(!scenes.length)return row.payload.reference_media==='none'?'仅被提及':'尚未关联实际出场';
-  const sceneName=ref=>{const ep=state.screenplays.flatMap(s=>s.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);return `${(ep?.payload.number||ep?.payload.episode_number)?reviewPositionLabel('episode',ep.payload.number||ep.payload.episode_number)+' · ':''}${reviewPositionLabel('scene',ref.scene_id)}`};
+  const sceneName=ref=>{const ep=state.screenplays.flatMap(s=>s.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);return `${(ep?.payload.number||ep?.payload.episode_number)?reviewPositionLabel('episode',ep)+' · ':''}${reviewPositionLabel('scene',ref.scene_id,ref.object_id)}`};
   return scenes.length===1?sceneName(scenes[0]):`${sceneName(scenes[0])} 至 ${sceneName(scenes.at(-1))} · ${scenes.length} 场`;
 }
 function entityVersionControl(parent,row,onchange){
@@ -134,7 +134,7 @@ function entitySources(parent,row){
   for(const source of row.payload.sources||[]){const key=source.revision_id+source.scene_id;if(!unique.has(key))unique.set(key,{...source,block_ids:[]});unique.get(key).block_ids.push(...source.block_ids)}
   const uses=(data.usages[row.id]||[]).filter(u=>u.kind==='SHOT_DESIGN');
   data.evidenceViews||={};const saved=data.evidenceViews[row.id]||={open:false,tab:null};
-  const appendSources=host=>{if(!unique.size)nodeText('p','production-meta','此版本未登记剧情依据',host);for(const source of unique.values()){source.block_ids=[...new Set(source.block_ids)].sort();productionRefLink(host,source,source.scene_id?reviewPositionLabel('scene',source.scene_id):'正文')}};
+  const appendSources=host=>{if(!unique.size)nodeText('p','production-meta','此版本未登记剧情依据',host);for(const source of unique.values()){source.block_ids=[...new Set(source.block_ids)].sort();productionRefLink(host,source,source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'正文')}};
   if(row.kind!=='STATE'){
     const detail=el('details','entity-evidence-frame');detail.open=saved.open;nodeText('summary',null,`剧情依据 · ${unique.size} 场`,detail);appendSources(detail);detail.ontoggle=()=>{saved.open=detail.open};sources.append(detail);
   }else{

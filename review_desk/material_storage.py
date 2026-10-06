@@ -223,9 +223,9 @@ def physical_revisions(store):
             store.db.execute('SELECT id,object_id,version,payload AS stored_payload,created_at FROM revisions ORDER BY object_id,version')]
 
 
-def dump(store):
+def dump(store, *, include_content=True):
     return {name:[dict(row) for row in store.db.execute('SELECT * FROM '+name+' ORDER BY 1')]
-            for name in TABLES}
+            for name in TABLES if include_content or name!='material_content'}
 
 
 def restore_content(store, data):

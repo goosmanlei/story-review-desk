@@ -67,7 +67,7 @@ def scheme(payload, kind):
     for item in value.get('inputs', []):
         ref = item.get('reference', item)
         # Keep exact nonmedia inputs too: they may actually condition a call.
-        inputs.append({**ref, **{k: item[k] for k in ('component_id', 'range', 'crop') if k in item}})
+        inputs.append({**ref, **{k: item[k] for k in ('component_id', 'range', 'crop', 'selection_state') if k in item}})
     return {'method': 'generate' if value.get('method') == 'generation' else value.get('method'), 'model': value.get('model'),
             'parameters': params, 'prompt': value.get('prompt'), 'inputs': inputs,
             'randomization': strategy}
@@ -208,10 +208,11 @@ def comment_scope(store, comment, context):
 
 
 def card_counts(store, material_ids=None):
-    """Registered versions and distinct real candidates per exact version.
+    """Registered versions and distinct real candidates across those versions.
 
     Missing registration stays unknown; neither files nor failed calls create
-    candidates. Canonical aliases do not duplicate a version/candidate pair.
+    candidates. Aliases, repeated associations and retained revisions cannot
+    count the same real call/original set a second time.
     """
     aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
     canonical_id = lambda mid: aliases.get(mid, mid)
@@ -221,7 +222,7 @@ def card_counts(store, material_ids=None):
         versions.setdefault(mid, set()).add(row['number'])
     for row in store.db.execute("SELECT m.material_id,m.number,c.candidate_id FROM material_plan_members m JOIN material_candidate_members c ON c.revision_id=m.revision_id WHERE m.role='result'"):
         mid = canonical_id(row['material_id'])
-        candidates.setdefault(mid, set()).add((row['number'], row['candidate_id']))
+        candidates.setdefault(mid, set()).add(row['candidate_id'])
     ids = versions if material_ids is None else material_ids
     return {mid: {'version_count': len(versions[canonical_id(mid)]) if canonical_id(mid) in versions else None,
                   'candidate_count': len(candidates.get(canonical_id(mid), set())) if canonical_id(mid) in versions else None}

@@ -47,11 +47,11 @@ class BreakdownPageTest(fixtures.BreakdownTest):
 
     def test_classification_keeps_multiple_owners_and_never_guesses_from_title(self):
         self.put(self.entity());self.put(self.requirement());row=p.record(self.store,'dialogue');owner=p.record(self.store,'songbook')
-        self.assertEqual(u.material_classification(self.store,row,{},owner)['label'],'音频—道具')
+        self.assertEqual(u.material_classification(self.store,row,{},owner)['label'],'道具-声音')
         self.put(self.spec('other','ENTITY',entity_type='character',subtype='test',aliases=[],facts=[],choices=[],unknowns=[],sources=[]))
         result=u.material_classification(self.store,row,{'entity_ids':['songbook','other']},owner)
-        self.assertEqual(result['label'],'音频—共有');self.assertEqual(len(result['entity_refs']),2)
+        self.assertEqual(result['label'],'共有-声音');self.assertEqual(len(result['entity_refs']),2)
         unknown={**row,'payload':{**row['payload'],'scope':None,'title':'角色音频剧情 misleading'}}
-        self.scene_shot();self.assertEqual(u.material_classification(self.store,unknown,{},p.record(self.store,'shot'))['label'],'音频—镜头')
+        self.scene_shot();self.assertEqual(u.material_classification(self.store,unknown,{},p.record(self.store,'shot'))['label'],'镜头-声音')
 
 if __name__=='__main__':unittest.main()

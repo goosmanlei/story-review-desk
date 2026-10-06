@@ -51,18 +51,22 @@ def validate_plan(store, object_id, payload):
     elif scope['kind'] not in ('INPUT_LOCK', 'STORY', 'EPISODE', 'PREPARATION', 'SHOT_DESIGN'):
         raise ValueError('generation scope must be a complete state or production position')
     from .material_plans import randomization
-    from .input_contracts import check_parameters
+    from .input_contracts import check_parameters, check_declared
     check_parameters(plan['model'],plan['parameters'])
     strategy=randomization(plan)
     if strategy['mode']=='random' and 'seed' in plan['parameters']:raise ValueError('random plan cannot set a fixed parameter seed')
     if plan['method'] == 'reuse' and len(inputs) != 1:
         raise ValueError('reuse requires one exact upstream input')
     seen = set()
+    media_types = []
     for value in inputs:
         if not isinstance(value, dict):
             raise ValueError('generation input must be an object')
         p._text(value.get('use'), 'input purpose')
         target = p.ref_record(store, value.get('reference'), {'ASSET', 'REQUIREMENT'})
+        media_types.append(target['payload']['media_type'])
+        if 'selection_state' in value and (value['selection_state'] != 'unselected' or target['kind'] != 'REQUIREMENT' or value.get('material_selection') is not None):
+            raise ValueError('invalid unselected reference slot')
         key = canonical(value)
         if key in seen:
             raise ValueError('duplicate generation input')
@@ -93,6 +97,11 @@ def validate_plan(store, object_id, payload):
                         todo.append(linked)
         if plan['method'] == 'reuse' and target['payload']['media_type'] != payload['media_type']:
             raise ValueError('reuse media type differs from output')
+    contract_issues = check_declared(plan['model'],plan['prompt'],media_types)
+    if contract_issues:raise ValueError('；'.join(contract_issues))
+    if plan.get('reference_links') or plan.get('prompt_links'):
+        from .reference_paths import validate
+        validate(store, {'object_id': object_id, 'id': '@'+object_id, 'kind': 'REQUIREMENT', 'payload': payload})
 
 
 def requirements_for(rows, states):
@@ -459,6 +468,9 @@ def readiness(store, requirement_id):
         from .shot_references import applies, slots
         exact_slots=slots(store,plan['inputs']) if applies(store,need) else None
         for index,item in enumerate(plan['inputs']):
+            if item.get('selection_state')=='unselected':
+                issues.append('参考 '+str(index+1)+'：尚未选定素材版本和候选')
+                continue
             if exact_slots is not None and exact_slots[index]['issues']:
                 issues.extend('参考 '+str(index+1)+'：'+issue for issue in exact_slots[index]['issues'])
                 continue

@@ -23,13 +23,19 @@ def slot(store, value, index):
             return result
         choices=mp.memberships(store,target['id'])
         selection=value.get('material_selection')
-        if selection is not None:
+        if value.get('selection_state') == 'unselected':
+            if target['kind'] != 'REQUIREMENT' or selection is not None:
+                raise ValueError('待选槽位不能携带已选候选或版本')
+            result['material_id'] = target['object_id']
+        elif selection is not None:
             if not isinstance(selection,dict):raise ValueError('参考版本选定格式无效')
             mid,number=selection.get('material_id'),selection.get('number')
             if isinstance(mid,str) and any(v['material_id']==mid for v in choices):result['material_id']=mid
-            if not isinstance(mid,str) or type(number) is not int or number<1:raise ValueError('缺少准确素材版本')
-            if not mp.belongs(store,target['id'],mid,number):raise ValueError('素材版本与引用不匹配')
-            result.update(material_id=mid,number=number)
+            if not isinstance(mid,str) or type(number) is not int or number<1:
+                result['issues'].append('缺少准确素材版本')
+            elif not mp.belongs(store,target['id'],mid,number):
+                result['issues'].append('素材版本与引用不匹配')
+            else:result.update(material_id=mid,number=number)
         else:
             # Only exact historical membership can supply V/C. Never a default
             # round, title match, adoption or current object head.
@@ -39,21 +45,23 @@ def slot(store, value, index):
             if len(pairs)==1:result['material_id'],result['number']=next(iter(pairs))
             elif target['kind']=='REQUIREMENT':result['material_id']=target['object_id']
             elif len({pair[0] for pair in pairs})==1:result['material_id']=next(iter(pairs))[0]
-        from .material_storage import canonical_id
-        result['canonical_material_id']=canonical_id(store,result['material_id']) if result['material_id'] else None
-        if result['material_id']:result.update(mp.card_counts(store,[result['material_id']])[result['material_id']])
         if not result['number']:result['issues'].append('尚未选定素材版本')
         if target['kind']!='ASSET':
             result['issues'].append('尚未选定候选')
-            return result
+            return with_identity(store,result)
         result['candidate']={'object_id':target['object_id'],'revision_id':target['id']}
         if selection is not None and selection.get('candidate_revision_id')!=target['id']:raise ValueError('版本与候选不匹配')
         if not mp.identity(target['payload']):raise ValueError('此引用没有真实候选原件')
         if result['number']:
             if not any(v['material_id']==result['material_id'] and v['number']==result['number'] and v['role']=='result' for v in choices):raise ValueError('候选不属于此素材版本')
-            code=store.db.execute('SELECT number FROM business_candidates WHERE material_id=? AND version=? AND candidate_id=?',(result['material_id'],result['number'],mp.identity(target['payload']))).fetchone()
+        # Candidate identity is independent of whether its version was chosen.
+        # A version mismatch remains a production error even when C is known.
+        versions={v['number'] for v in choices if v['material_id']==result['material_id'] and v['role']=='result'}
+        candidate_version=result['number'] if result['number'] in versions else next(iter(versions)) if len(versions)==1 else None
+        if candidate_version is not None:
+            code=store.db.execute('SELECT number FROM business_candidates WHERE material_id=? AND version=? AND candidate_id=?',(result['material_id'],candidate_version,mp.identity(target['payload']))).fetchone()
             if code:result['candidate_number']=code[0]
-            else:raise ValueError('候选编号缺失，需修复准确记录')
+        if result['candidate_number'] is None:raise ValueError('候选编号缺失，需修复准确记录')
         _,component=p.component_for(store,result['candidate'],value.get('component_id'))
         if component['role']!='original':raise ValueError('请选择准确原件组成')
         validate_component(p.root_of(store),component,inspect=False)
@@ -61,9 +69,14 @@ def slot(store, value, index):
         result['component']=component
     except (KeyError,ValueError,OSError) as exc:
         result['issues'].append({'missing media or byte size mismatch':'原件缺失或文件大小不匹配，请恢复准确原件','media checksum mismatch':'原件校验不一致，请核对准确原件'}.get(str(exc),str(exc)))
+    return with_identity(store,result)
+
+
+def with_identity(store,result):
     if result['material_id']:
         from .material_storage import canonical_id
         result['canonical_material_id']=canonical_id(store,result['material_id'])
+        result.update(mp.card_counts(store,[result['material_id']])[result['material_id']])
         code=store.db.execute('SELECT prefix,number FROM business_codes WHERE object_id=?',(result['canonical_material_id'],)).fetchone()
         if code:result['material_code']=code[0]+str(code[1]).zfill(3)
     return result
@@ -88,6 +101,8 @@ def inputs_for(store,row):
 def select(store, request):
     """Optimistic, atomic selection; the revision itself is the durable receipt."""
     if not isinstance(request,dict):raise ValueError('reference selection must be an object')
+    if request.get('path') is not None and request['path'] != [request.get('index')]:
+        raise ValueError('间接参考归上游方案选定，不能作为本镜独立输入写回')
     op=request.get('id')
     if not isinstance(op,str) or not p.ID.fullmatch(op):raise ValueError('selection id is required')
     fingerprint=input_key({k:v for k,v in request.items() if k!='id'})
@@ -119,14 +134,27 @@ def select(store, request):
             if not origin['material_id']:raise ValueError('引用身份缺失，需先修复此槽位')
             from .material_storage import canonical_id
             if canonical_id(store,origin['material_id'])!=canonical_id(store,mid):raise ValueError('不能把槽位换成另一素材')
-            candidate=p.ref_record(store,request['candidate'],{'ASSET'})
-            value={**old,'reference':request['candidate'],'component_id':request['component_id'],
-                   'material_selection':{'material_id':mid,'number':request['number'],'candidate_revision_id':candidate['id']}}
+            if request.get('candidate') is None:
+                number=request.get('number')
+                if type(number) is not int or number<1:raise ValueError('请选择准确素材版本')
+                target_round=next((r for r in mp.snapshot(store,mid) if r['number']==number),None)
+                definition=target_round and (target_round.get('definition_records',{}).get('requirement') or target_round.get('plan'))
+                if not definition or not mp.belongs(store,definition['id'],mid,number):
+                    raise ValueError('此历史版本没有可单独选定的准确方案；请选择真实候选')
+                value={**old,'reference':{'object_id':definition['object_id'],'revision_id':definition['id']},
+                       'material_selection':{'material_id':mid,'number':number}}
+                for key in ('component_id','range','crop','sha256'):value.pop(key,None)
+            else:
+                candidate=p.ref_record(store,request['candidate'],{'ASSET'})
+                value={**old,'reference':request['candidate'],'component_id':request['component_id'],
+                       'material_selection':{'material_id':mid,'number':request['number'],'candidate_revision_id':candidate['id']}}
+            value.pop('selection_state',None)
             # CALL inputs are flat exact references; the new draft uses the
             # generation-plan form without losing crop/range or ordered use.
             for key in ('object_id','revision_id','kind'):value.pop(key,None)
             checked=slot(store,value,index)
-            if checked['issues']:raise Conflict('；'.join(checked['issues']))
+            issues=[issue for issue in checked['issues'] if not (request.get('candidate') is None and issue=='尚未选定候选')]
+            if issues:raise Conflict('；'.join(issues))
             payload=copy.deepcopy(base['payload'])
             if call:
                 from .generation import PLAN

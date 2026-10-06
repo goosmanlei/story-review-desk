@@ -2,10 +2,11 @@
 const scriptVersion=()=>state.screenplays.find(v=>v.object_id===state.screenplayVersion);
 const scriptEpisode=()=>scriptVersion()?.episodes.find(e=>e.object_id===state.screenplayEpisode);
 const scriptScene=()=>scriptEpisode()?.payload.scenes.find(s=>s.id===state.screenplayScene);
-const scriptVersionLabel=(version,index)=>businessCode(version)+' · 版本'+(version.payload.title.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u)?.[1]||String(index+1));
+const scriptVersionLabel=(version,index)=>'版本'+(version.payload.title.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u)?.[1]||String(index+1));
 const durationLabel=seconds=>Math.floor(seconds/60)+'分'+(seconds%60?String(seconds%60).padStart(2,'0')+'秒':'');
-const episodeCode=episode=>reviewPositionLabel('episode',episode.payload.number);
+const episodeCode=episode=>reviewPositionLabel('episode',episode);
 function sceneCode(scene){
+  if(scene.business_code)return scene.business_code;
   const numbered=scene.id.match(/^s0*(\d+)$/iu);
   if(numbered)return reviewPositionLabel('scene',numbered[1]);
   return reviewPositionLabel('scene',scene.id)||'场次';
