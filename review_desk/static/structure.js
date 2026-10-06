@@ -206,7 +206,7 @@ function renderStructureReader(){
   status.append(versions);versions.scrollLeft=versionScroll;revealStructureVersion(versions);
   if(!active){nodeText('p','structure-empty','请选择一个结构稿版本继续阅读。',status);return}
   const doc=active.payload;
-  const directoryHead=el('header');nodeText('small',null,'STORY STRUCTURE',directoryHead);nodeText('h2',null,'故事结构',directoryHead);nodeText('p',null,'章节目录 · 版本评论数包含已关闭评论。',directoryHead);index.append(directoryHead);
+  const directoryHead=el('header');nodeText('h2',null,'章节目录',directoryHead);nodeText('p',null,'版本评论数包含已关闭评论。',directoryHead);index.append(directoryHead);
   const chapters=el('div','structure-chapters');index.append(chapters);
   if(doc.illustrative){nodeText('p','structure-alert','隔离验收示例：内容仅用于验证页面与改稿流程，不是本故事已确认的结构。',status)}
   const basisSelection=state.structure.selection_history?.find(item=>item.id===doc.direction_selection_revision);

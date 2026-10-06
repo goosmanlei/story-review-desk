@@ -329,8 +329,6 @@ function renderConfigurations({preserve=false}={}){
   if(state.configSection==='CODES'){root.replaceChildren();root.configurationMounted=false;renderBusinessCodeCatalog(root);return}
   if(preserve&&root.configurationMounted){showConfigurationSection();return}
   root.replaceChildren();root.configurationMounted=true;
-  const header=el('header','management-heading');nodeText('h1',null,'系统管理',header);
-  nodeText('p',null,'当前故事实例 · 系统与故事项目配置',header);root.append(header);
   const layout=el('div','configuration-layout configuration-layout-unified'),article=el('article','config-page');
   layout.append(article);root.append(layout);
   const data=state.configurations;
@@ -345,45 +343,76 @@ function renderConfigurations({preserve=false}={}){
   };
   for(const scope of ['SYSTEM','PROJECT']){const draft=configurationDraft(scope);let record=draft?.base?.scope===scope&&Number.isInteger(draft.base.version)&&draft.base.body?draft.base:data.values[scope];const initialBody={...record.body,...(draft?.updates||{})};const section=el('section','config-section');
     section.dataset.configSection=scope;
-    nodeText('h2','section-title',scope==='SYSTEM'?'系统与 AI 配置':'故事项目配置',section);
-    nodeText('p','config-explanation',scope==='SYSTEM'?'系统功能和 AI 能力的通用选项，随版本演进。':'当前故事实例的创作阶段与背景，仅影响本实例。',section);
     const versionNote=nodeText('p','config-version',`配置版本 ${record.version} · Schema ${record.schema_version}`,section);
     const fields=data.catalog.scopes[scope],form=el('form');form.dataset.scope=scope;
-    const effortOptions=data.catalog.model_efforts;let effortGroup,uploading=0;
+    form.noValidate=true;
+    const feature=(title,description)=>{const group=el('section','config-feature');nodeText('h2',null,title,group);nodeText('p','config-explanation',description,group);const content=el('div','config-feature-fields');group.append(content);form.append(group);return content};
+    const iconFields=scope==='SYSTEM'?feature('站点图标','选择已有图标或上传新文件，预览确认后保存。'):null;
+    const polishFields=scope==='SYSTEM'?feature('评论润色','选择模型及其支持的推理强度；润色建议仍需手动采用和保存。'):null;
+    const effortOptions=data.catalog.model_efforts;let effortGroup,uploading=0,refreshIcon=()=>{};
+    const validationFields=[];
+    const validateField=(input,spec,error)=>{let message='';const value=String(input.value);
+      if(spec.type==='env_name'&&!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(value))message='以字母或下划线开头，只含字母、数字和下划线，最多128个字符。';
+      if(spec.type==='integer'&&(!value.trim()||!Number.isInteger(Number(value))||Number(value)<spec.min||Number(value)>spec.max))message=`请填写 ${spec.min}—${spec.max} 之间的整数。`;
+      error.textContent=message;error.hidden=!message;input.setAttribute('aria-invalid',String(!!message));return message;
+    };
     const radioChoices=(group,key,choices,selected)=>{group.replaceChildren();nodeText('legend',null,fields[key].label,group);
       const row=el('div','config-choice-row');for(const choice of choices){const label=el('label','config-choice');const input=el('input');input.type='radio';input.name=key;input.value=choice;input.checked=choice===selected;label.append(input,el('span',null,choice==='off'?'不适用':choice));row.append(label)}group.append(row)};
     for(const [key,spec] of Object.entries(fields)){
       if(spec.type==='model'||spec.type==='reasoning_effort'){const group=el('fieldset','config-choice-field');
         radioChoices(group,key,spec.type==='model'?Object.keys(effortOptions):effortOptions[initialBody.ai_polish_model]||[],initialBody[key]);
         if(spec.type==='model')group.addEventListener('change',()=>{const model=form.elements.ai_polish_model.value,allowed=effortOptions[model];const current=form.elements.ai_polish_effort.value;radioChoices(effortGroup,'ai_polish_effort',allowed,allowed.includes(current)?current:allowed.includes('medium')?'medium':allowed[0])});
-        else effortGroup=group;form.append(group);continue}
-      const label=el('label','config-field');nodeText('span',null,spec.label,label);
+        else effortGroup=group;(polishFields||form).append(group);continue}
+      const label=el(spec.type==='favicon'?'div':'label','config-field');
+      if(spec.type!=='favicon')nodeText('span',null,spec.label,label);
       let input;if(spec.type==='favicon'){
         input=el('select');const empty=el('option',null,'默认审阅台图标');empty.value='';input.append(empty);
         for(const name of data.favicon_assets||[]){const option=el('option',null,name);option.value=name;input.append(option)}
         if(initialBody[key]&&!Array.from(input.options).some(option=>option.value===initialBody[key])){const option=el('option',null,`${initialBody[key]}（不可用）`);option.value=initialBody[key];input.append(option)}
         input.value=initialBody[key];
-        const preview=el('img');preview.width=32;preview.height=32;preview.alt='站点图标预览';
-        let unavailableFile=data.favicon_error?initialBody[key]:'',errorStatus;
-        const show=()=>{preview.src=input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg'};show();input.onchange=show;
-        const file=el('input');file.type='file';file.accept='.svg,.png,.ico';file.setAttribute('aria-label','上传站点图标');
-        file.onchange=async()=>{const selected=file.files[0];if(!selected)return;if(selected.size>256*1024){toast('图标须在 256 KiB 以内');file.value='';return}uploading++;updateSave();
+        const previews=el('div','favicon-previews');
+        const currentBox=el('div','favicon-preview'),pendingBox=el('div','favicon-preview');
+        const currentPreview=el('img'),preview=el('img');for(const img of [currentPreview,preview]){img.width=40;img.height=40}
+        currentPreview.alt='当前已保存图标';preview.alt='待保存图标预览';
+        currentBox.append(currentPreview);nodeText('span',null,'当前图标',currentBox);pendingBox.append(preview);nodeText('span',null,'待保存预览',pendingBox);previews.append(currentBox,pendingBox);label.append(previews);
+        const status=nodeText('p','favicon-status','',label);status.setAttribute('role','status');
+        let unavailableFile=data.favicon_error?record.body[key]:'',errorStatus,uploadNote='';
+        const show=()=>{
+          preview.src=input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg';
+          const changed=input.value!==record.body[key];status.textContent=uploadNote|| (changed?'选择已变化，尚未保存。':'预览与已保存选择一致。');
+        };
+        refreshIcon=()=>{currentPreview.src=state.configurations.favicon?.url||'/default-favicon.svg';if(input.value===record.body[key])uploadNote='';show()};refreshIcon();
+        const selectLabel=el('label','favicon-select-label');nodeText('span',null,'选择已有图标',selectLabel);selectLabel.append(input);label.append(selectLabel);
+        input.onchange=()=>{uploadNote='';show()};
+        const actions=el('div','favicon-actions'),uploadLabel=el('label','favicon-upload');nodeText('span',null,'上传新图标',uploadLabel);
+        const file=el('input');file.type='file';file.accept='.svg,.png,.ico';file.setAttribute('aria-label','上传站点图标');uploadLabel.append(file);actions.append(uploadLabel);
+        file.onchange=async()=>{const selected=file.files[0];if(!selected)return;
+          if(selected.size>256*1024){uploadNote='上传失败：图标须在 256 KiB 以内；当前选择已保留。';show();toast(uploadNote);file.value='';return}
+          uploading++;uploadNote='正在上传，当前已保存图标仍有效。';show();updateSave();
           try{const encoded=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=reject;reader.readAsDataURL(selected)});
             const result=await api('/api/favicon',{method:'POST',body:JSON.stringify({name:selected.name,data:encoded})});
             let option=Array.from(input.options).find(option=>option.value===result.file);if(!option){option=el('option');option.value=result.file;input.append(option)}option.textContent=result.file;
-            if(result.file===unavailableFile){unavailableFile='';if(errorStatus)errorStatus.remove()}input.value=result.file;show();toast('图标已上传，请保存配置以应用')
-          }catch(error){toast(error.message)}finally{uploading--;updateSave();file.value=''}};
-        label.append(preview,file);const clear=nodeText('button',null,'清空，恢复默认',label);clear.type='button';clear.onclick=()=>{input.value='';show();updateSave()};
-        if(data.favicon_error){errorStatus=nodeText('small',null,'当前图标不可用，暂用默认图标。请选择其他图标或清空后保存。',label);errorStatus.setAttribute('role','status')}
-        nodeText('small',null,'上传 SVG、PNG 或 PNG 编码的 ICO，至多 256 KiB。选择或清空后点保存配置。',label);
+            if(result.file===unavailableFile){unavailableFile='';if(errorStatus)errorStatus.remove()}input.value=result.file;
+            uploadNote='图标已上传并选入预览，尚未应用；请保存配置。';show();toast(uploadNote)
+          }catch(error){uploadNote=`上传失败：${error.message}；当前选择和其他输入已保留。`;show();toast(uploadNote)}finally{uploading--;updateSave();file.value=''}};
+        const clear=nodeText('button','secondary','恢复默认图标',actions);clear.type='button';clear.onclick=()=>{input.value='';uploadNote='已选择默认图标，尚未保存。';show();updateSave()};label.append(actions);
+        if(data.favicon_error){errorStatus=nodeText('small','config-field-error','当前图标不可用，暂用默认图标；请选择其他图标或恢复默认后保存。',label);errorStatus.setAttribute('role','status')}
+        nodeText('small',null,'支持 SVG、PNG 或 PNG 编码的 ICO，至多 256 KiB。上传只登记文件，保存配置后才生效。',label);
       }
       else if(spec.type==='long_text'){input=el('textarea');input.rows=4;input.value=initialBody[key]}
       else if(spec.type==='stage'){input=el('select');for(const stage of state.framework.stages){const option=el('option',null,stage.label);option.value=stage.id;input.append(option)}input.value=initialBody[key]}
       else{input=el('input');input.type=spec.type==='integer'?'number':'text';input.value=initialBody[key]}
+      input.name=key;input.setAttribute('aria-label',spec.label);
+      if(spec.type!=='favicon')label.append(input);
       if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
-      input.name=key;input.setAttribute('aria-label',spec.label);label.append(input);form.append(label)}
+      if(spec.type==='integer'){input.min=spec.min;input.max=spec.max;input.step=1;nodeText('small',null,`填写 ${spec.min}—${spec.max} 之间的整数，限制润色参考的上下文字数。`,label)}
+      if(['env_name','integer'].includes(spec.type)){
+        const error=nodeText('small','config-field-error','',label);error.id=`config-${scope}-${key}-error`;error.hidden=true;input.setAttribute('aria-describedby',error.id);
+        const check=()=>validateField(input,spec,error);input.onblur=check;input.oninput=()=>{if(!error.hidden)check()};validationFields.push({input,check});
+      }
+      (spec.type==='favicon'?iconFields:polishFields||form).append(label)}
     const save=nodeText('button','primary','保存配置',form);save.type='submit';
-    const notice=nodeText('p','config-explanation','',form);notice.hidden=true;notice.setAttribute('role','status');
+    const notice=nodeText('p','config-save-status','',form);notice.hidden=true;notice.setAttribute('role','status');
     let saving=false,pendingRequest=draft?.pendingRequest||null,confirmedBody=null;
     const ownsForm=()=>form.isConnected&&state.workspace==='project.configuration';
     const rawValues=()=>Object.fromEntries(Object.keys(fields).map(key=>[key,String(form.elements[key].value)]));
@@ -391,7 +420,7 @@ function renderConfigurations({preserve=false}={}){
     const inputValues=()=>Object.fromEntries(Object.entries(fields).map(([key,spec])=>[key,spec.type==='integer'?Number(form.elements[key].value):form.elements[key].value]));
     const savedValues=()=>confirmedBody&&Object.fromEntries(Object.keys(fields).map(key=>[key,confirmedBody[key]]));
     const persistDraft=()=>{const updates=rawValues();configurationDraft(scope,!pendingRequest&&same(updates,rawBody(record.body))?null:{base:record,updates,pendingRequest})};
-    const updateSave=()=>{save.disabled=saving||uploading>0||!!confirmedBody&&same(rawValues(),rawBody(confirmedBody));persistDraft()};
+    const updateSave=()=>{save.disabled=saving||uploading>0||!!confirmedBody&&same(rawValues(),rawBody(confirmedBody));if(!saving&&confirmedBody&&!same(rawValues(),rawBody(confirmedBody))&&notice.textContent.includes('已保存'))notice.textContent='已保存配置仍有效；当前新输入尚未保存。';persistDraft()};
     form.addEventListener('input',updateSave);form.addEventListener('change',updateSave);
     const message=text=>{if(ownsForm()){notice.hidden=false;notice.textContent=text;toast(text)}};
     const readAttempt=async request=>{
@@ -403,7 +432,7 @@ function renderConfigurations({preserve=false}={}){
     };
     form.onsubmit=async event=>{
       event.preventDefault();if(saving||save.disabled||!ownsForm())return;
-      if(Object.entries(fields).some(([key,spec])=>spec.type==='integer'&&!String(form.elements[key].value).trim()))return message('请填写数值，当前输入已保留');
+      const invalid=validationFields.filter(field=>field.check());if(invalid.length){invalid[0].input.focus?.();return message('请修正标出的配置项；当前图标选择和其他输入已保留。')}
       const updates=inputValues();saving=true;notice.hidden=true;updateSave();let committed=null,snapshot=null;
       try{
         if(pendingRequest){
@@ -430,7 +459,7 @@ function renderConfigurations({preserve=false}={}){
         const name=scope==='PROJECT'?'故事项目配置':'系统与 AI 配置';
         if(form.isConnected){record=committed;confirmedBody=committed.body;versionNote.textContent=`配置版本 ${record.version} · Schema ${record.schema_version}`}
         toast(`${name}已保存${ownsForm()&&!same(inputValues(),savedValues())?'；当前新输入尚未保存':''}`);
-        try{snapshot||=await api('/api/configurations');rememberSnapshot(snapshot);applyFavicon()}
+        try{snapshot||=await api('/api/configurations');rememberSnapshot(snapshot);applyFavicon();refreshIcon();if(ownsForm()){notice.hidden=false;notice.textContent=`${name}已保存并生效${!same(inputValues(),savedValues())?'；当前新输入尚未保存':''}。`}}
         catch(error){message(`${name}已保存；最新配置与图标暂未刷新：${error.message}。当前输入已保留。`)}
       }catch(error){message(error.message)}
       finally{saving=false;if(form.isConnected)updateSave()}

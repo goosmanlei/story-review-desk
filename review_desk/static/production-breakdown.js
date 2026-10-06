@@ -3,7 +3,7 @@ let breakdownEpoch=0,breakdownSelectionEpoch=0;
 function productionTab(){const p=new URL(location.href).searchParams;if(state.workspace==='materials.workspace')return 'materials';if(state.workspace==='production.workspace')return p.get('production_tab')==='history'?'history':'shots';return (['entities','materials','breakdown'].includes(p.get('production_tab'))?p.get('production_tab'):null)||((p.has('production_entity')||p.has('entity_state'))?'entities':'breakdown')}
 function productionTabs(){if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs()}
 function breakdownRoute(values){const url=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)url.searchParams.delete(k);else url.searchParams.set(k,v)}history.replaceState(history.state,'',url)}
-function breakdownHeading(host){const h=nodeText('h1','production-heading',state.workspace==='production.workspace'?'全剧制作':'制作设定',host);productionTabs(host)}
+function breakdownHeading(host){productionTabs(host)}
 function breakdownSceneTitle(row){return reviewPositionLabel('scene',row.payload.source?.scene_id||row.payload.scene_id)+' · '+row.payload.title.replace(/^\d+-\d+\s*/,'')}
 function breakdownShotTitle(row){return reviewPositionLabel('shot',row.payload.number)+' · '+row.payload.title.replace(/^E\d+-\d+\s*/i,'')}
 function breakdownEpisodeTitle(episode){
