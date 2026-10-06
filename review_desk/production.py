@@ -79,6 +79,9 @@ def record(store, object_id=None, revision_id=None):
         raise KeyError("unknown production object or revision")
     if reads is not None:reads['records'][key] = row
     value = record_view(row)
+    if value["kind"]=="DELETED_STATE":
+        from .state_cleanup import view
+        value=view(value)
     memberships = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
     value['material_round_numbers'] = {v['material_id']: v['number'] for v in reversed(memberships)}
     return value
@@ -262,6 +265,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         raise ValueError("reviewable text blocks are required")
     if len({b["id"] for b in blocks}) != len(blocks):
         raise ValueError("duplicate reviewable block id")
+    from .state_cleanup import preserved, guard_write
+    if preserved(store,object_id,payload):return
+    if check_current:guard_write(store,object_id,payload)
     for _, ref in references(payload):
         source_check(store, ref)
     p = payload

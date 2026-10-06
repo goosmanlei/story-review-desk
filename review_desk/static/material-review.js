@@ -119,7 +119,7 @@ function materialRoundControl(parent,mid,rounds,selected,change){
 function reviewChoiceButtons(parent,label,choices,selected,change,{repeat=false}={}){
   const bar=el('div','review-choice-buttons');bar.setAttribute('role','group');bar.setAttribute('aria-label',label);
   for(const choice of choices){const button=productionButton(bar,choice.label,()=>{if(repeat||String(choice.id)!==String(selected))return change(choice.id)});button.setAttribute('aria-pressed',String(String(choice.id)===String(selected)));button.dataset.choiceId=choice.id}
-  parent.append(bar);return bar;
+  parent.append(bar);if(typeof requestAnimationFrame==='function')requestAnimationFrame(()=>{const button=bar.querySelector('[aria-pressed=true]');if(button)bar.scrollLeft=Math.max(0,button.offsetLeft-bar.offsetLeft+button.offsetWidth-bar.clientWidth)});return bar;
 }
 function materialDefaultRound(rounds){
   const ordered=[...(rounds||[])].sort((a,b)=>b.number-a.number);
@@ -205,6 +205,7 @@ function renderMaterialCard(parent,model,options={}){
     const number=item.record.candidate_codes?.find(c=>c.material_id===model.material_id&&c.version===model.round?.number);
     return number?{...item,candidate_number:number.number,candidate_code:number.code}:item;
   });
+  items=[...items].sort((a,b)=>(a.candidate_number||a.record.candidate_number||0)-(b.candidate_number||b.record.candidate_number||0));
   box.dataset.materialKey=need?.object_id||model.material_id||items[0].record.object_id;
   if(model.round){const focus=e=>{if(e?.target.closest('.material-reference,[data-review-dialog-trigger]'))return;focusMaterialCommentCard(model.material_id,model.round.number)};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,businessTitle({...need||model.identity||items[0].record,material_code:materialModelCode(model)},need?.payload.generation?.output.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title),heading);

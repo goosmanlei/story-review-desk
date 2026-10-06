@@ -89,7 +89,7 @@ def restore(store, rows, candidates=(), comments=()):
         if not isinstance(row.get('object_id'),str) or not row['object_id']:raise ValueError('invalid numbered identity')
         existing=store.db.execute('SELECT kind,current_revision FROM objects WHERE id=?',(row['object_id'],)).fetchone()
         if existing:
-            payload=json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?',(existing['current_revision'],)).fetchone()[0]);expected='RL' if existing['kind']=='RELATION' and payload.get('relation_type')=='entity' else PREFIXES.get(existing['kind'])
+            payload=json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?',(existing['current_revision'],)).fetchone()[0]);expected='RL' if existing['kind']=='RELATION' and payload.get('relation_type')=='entity' else 'ST' if existing['kind']=='DELETED_STATE' else PREFIXES.get(existing['kind'])
             if row.get('prefix')!=expected:raise ValueError('number prefix differs from object kind')
         if set(row) != {'object_id', 'prefix', 'number'} or row['prefix'] not in {v[1] for v in TYPES} or type(row['number']) is not int or row['number'] < 1:
             raise ValueError('invalid business code allocation')

@@ -300,6 +300,10 @@ def _verify(store):
     for revision in store.revisions():
         payload=json.loads(revision['payload'])
         if digest(canonical({'object_id':revision['object_id'],'version':revision['version'],'payload':payload}).encode())!=revision['id']:
+            from .state_cleanup import verify_row as verify_cleaned_state
+            receipt=store.db.execute('SELECT * FROM state_cleanup_receipts WHERE revision_id=?',(revision['id'],)).fetchone()
+            if receipt:
+                verify_cleaned_state(revision,dict(receipt));continue
             from .relation_explanations import verify_row
             removed=store.db.execute('SELECT * FROM relation_explanation_redactions WHERE revision_id=?',(revision['id'],)).fetchone()
             if not removed or store.db.execute('SELECT 1 FROM objects WHERE current_revision=?',(revision['id'],)).fetchone():

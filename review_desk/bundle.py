@@ -87,6 +87,8 @@ def export(store, export_dir):
         framework = {"objects": store.objects(), "revisions": store.revisions(), "dependencies": store.dependencies()}
         from . import business_codes
         from .relation_explanations import dump as dump_redactions
+        from .state_cleanup import dump as dump_state_cleanup
+        framework.update(dump_state_cleanup(store))
         framework["relation_redacted_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM relation_redacted_comments ORDER BY comment_id")]
         framework["relation_explanation_redactions"] = dump_redactions(store)
         framework["relation_explanation_latest_only"] = bool(store.db.execute("SELECT latest_only FROM relation_explanation_policy WHERE id=1 AND latest_only=1").fetchone())
@@ -193,6 +195,8 @@ def restore(store, export_dir):
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
     framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
+    from .state_cleanup import guard_restore
+    guard_restore(store, framework)
     if schema >= 4:
         from .material_versions import TABLES
         if any(name not in framework for name in TABLES):
@@ -257,11 +261,17 @@ def restore(store, export_dir):
                     raise ValueError("invalid current revision")
             redactions={r["revision_id"]:r for r in framework.get("relation_explanation_redactions",[])}
             if len(redactions)!=len(framework.get("relation_explanation_redactions",[])) or not set(redactions)<=revisions.keys():raise ValueError("invalid redaction locators")
+            cleaned_states={r["revision_id"]:r for r in framework.get("state_cleanup_receipts",[])}
+            if len(cleaned_states)!=len(framework.get("state_cleanup_receipts",[])) or not set(cleaned_states)<=revisions.keys():raise ValueError("invalid state cleanup identities")
             for revision in revisions.values():
                 if revision["object_id"] not in objects:
                     raise ValueError("orphan revision")
                 payload = json.loads(revision["payload"])
                 if digest(canonical({"object_id": revision["object_id"], "version": revision["version"], "payload": payload}).encode()) != revision["id"]:
+                    if revision["id"] in cleaned_states:
+                        from .state_cleanup import verify_row
+                        if objects[revision["object_id"]]["kind"]!="DELETED_STATE":raise ValueError("invalid cleaned state kind")
+                        verify_row(revision,cleaned_states[revision["id"]]);continue
                     if revision["id"] not in redactions:raise ValueError("revision checksum mismatch")
                     from .relation_explanations import verify_row
                     if objects[revision["object_id"]]["current_revision"]==revision["id"]:raise ValueError("current explanation cannot be redacted")
@@ -344,6 +354,10 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], stamp, stamp))
                 for revision in test.revisions():
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
+            from .state_cleanup import receipt_payload
+            for table,keys in (("state_cleanup_receipts",("revision_id","object_id","entity_ref","original_sha256","receipt_sha256","reason")),("state_cleanup_preserved",("revision_id","payload_sha256")),("state_cleanup_comments",("comment_id","object_id","revision_id","anchor_sha256"))):
+                for row in framework.get(table,[]) if framework else []:
+                    store.db.execute("INSERT INTO "+table+" VALUES ("+",".join("?" for k in keys)+")",tuple(row[k] for k in keys))
             if schema >= 2:
                 from .production import FORMATS, validate_payload, references, current_records
                 dependencies_by_revision={}
@@ -371,7 +385,8 @@ def restore(store, export_dir):
             restore_codes(store,framework.get("business_codes",[]) if framework else [],framework.get("business_candidates",[]) if framework else [],framework.get("business_comments",[]) if framework else [])
             for c in restored_comments:
                 from .relation_explanations import retained_comment
-                if not retained_comment(store,c):store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
+                from .state_cleanup import retained_comment as state_retained_comment
+                if not retained_comment(store,c) and not state_retained_comment(store,c):store.validate_target(c["target_object_id"], c["target_revision_id"], c["anchor"])
                 store.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (c["id"], c.get("source_id"), c["target_object_id"], c["target_revision_id"], canonical(c["anchor"]), c["body"], c["status"], c["version"], c["created_at"], c["updated_at"]))
             for e in comments["events"]:
                 store.db.execute("INSERT INTO comment_events VALUES (?,?,?,?,?)", (e["id"], e["comment_id"], e["action"], e["body"], e["at"]))
