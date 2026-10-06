@@ -144,6 +144,8 @@ def card(store, object_id, revision_id=None, entity_id=None):
     entity=entity_review.snapshot(store,entity_id or owner['object_id']) if entity_id or owner else None
     if entity_id:
         allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
+        if row.get('cleaned_target') and row['payload']['entity']['object_id']==entity_id:
+            allowed.add(row['object_id'])
         if row['object_id'] not in allowed:
             raise ValueError('准确对象不属于所请求的实体')
         if form and form['payload']['entity']['object_id']!=entity_id:

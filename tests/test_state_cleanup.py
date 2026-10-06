@@ -79,3 +79,15 @@ class StateCleanupTest(unittest.TestCase):
             self.assertFalse(s.objects())
             with self.assertRaises(Conflict):s.put_object('old','STATE',self.full('old')['payload'])
         finally:s.close()
+
+    def test_cleaned_exact_link_keeps_entity_context_on_reload(self):
+        from review_desk import ui_projection
+        self.setup_history();c.apply(self.store,self.approved)
+        owner=self.entity()['object_id']
+        card=ui_projection.card(self.store,'old',self.old['revision_id'],entity_id=owner)
+        self.assertTrue(card['form']['cleaned_target'])
+        self.assertEqual(card['form']['id'],self.old['revision_id'])
+        self.assertEqual(card['entity_review']['entity']['object_id'],owner)
+        self.put(self.entity('other'))
+        with self.assertRaisesRegex(ValueError,'不属于'):
+            ui_projection.card(self.store,'old',self.old['revision_id'],entity_id='other')
