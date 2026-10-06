@@ -401,8 +401,10 @@ test('late save refreshes only the active page and never paints a closed dialog'
     assert.equal(f.callbacks.length,active?1:0);assert.equal(f.button().textContent,'正在保存…');
   }
 });
-test('absent reference candidates cannot save and frozen versions explain the new plan',()=>{
-  const f=shotChoiceFixture();f.context.frozen=true;f.c.renderShotReferenceChoice(f.box,f.model,null);assert.equal(f.button().disabled,true);assert.ok(f.box.textContent.includes('建立新制作版本'));
+test('an empty reference version can be saved without a candidate and frozen versions explain the new plan',async()=>{
+  const f=shotChoiceFixture(),requests=[];f.context.frozen=true;f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));return {number:2}};
+  f.c.renderShotReferenceChoice(f.box,f.model,null);assert.equal(f.button().disabled,false);assert.ok(f.box.textContent.includes('建立新制作版本'));
+  assert.ok(f.box.textContent.includes('候选仍待选'));await f.button().onclick();assert.equal(requests[0].candidate,null);assert.equal(requests[0].component_id,undefined);
 });
 test('an exact shot video candidate mismatch never falls back to another result',()=>{
   const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_plan=1&shot_candidate=missing';c.breakdownPrompt(reader,need,context);

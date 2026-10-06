@@ -51,3 +51,16 @@ test('scene material cards replace local heading codes only from an exact owning
  const wrong={...item,locations:[{scope:{...scope,revision_id:'scene-current'},kind:'PREPARATION',scene:'s099'}]};assert.equal(c.materialPositionText(wrong),item.title);c.state.productionRecords=[{...scope,id:'scene-current',kind:'PREPARATION',payload:{source:{scene_id:'s099'}}}];assert.equal(c.materialPositionText(wrong),item.title);
  c.state.breakdownSceneData={scene:{object_id:'scene',id:'scene-old',kind:'PREPARATION',payload:{source:{scene_id:'s012'}}}};assert.equal(c.materialPositionText({...item,locations:[]}), 'S012 · 米铺门口 · 场级调度图');
 });
+test('allocated object codes override local numbers while prose and excluded object titles stay literal',()=>{
+ const c=fixture();c.state.businessCodes=new Map([['ep','E71'],['scene:ep:s001','S143'],['shot-a','SH222'],['shot-b','SH223']]);c.state.legacyShotCodes=new Map([['E1-7','E71 / SH222']]);
+ assert.equal(c.reviewPositionLabel('episode',{object_id:'ep',payload:{number:1}}),'E71');
+ assert.equal(c.reviewPositionLabel('scene','s001','ep'),'S143');
+ for(const [id,expected] of [['shot-a','SH222'],['shot-b','SH223']])assert.equal(c.reviewPositionLabel('shot',{object_id:id,payload:{number:7}}),expected);
+ assert.equal(c.reviewPositionText('E1-007 河街'),'E71 / SH222 河街');
+ assert.equal(c.reviewPositionText('E2-007 旧镜'),'第2集第7镜 旧镜');
+ assert.equal(c.reviewPositionText('第1集的第7镜'),'第1集的第7镜');
+ assert.equal(c.businessTitle({object_id:'shot-a',kind:'SHOT_DESIGN',payload:{title:'E1-007 河街'}}),'SH222 · 河街');
+ assert.equal(c.businessTitle({object_id:'shot-a',kind:'SHOT_DESIGN',payload:{title:'SH222 河街'}}),'SH222 · 河街');
+ assert.equal(c.businessTitle({kind:'SOURCE',business_code:'D003',payload:{title:'第1集资料'}}),'第1集资料');
+ assert.equal(c.businessTitle({kind:'STORY',business_code:'B003',payload:{title:'版本四'}}),'版本四');
+});

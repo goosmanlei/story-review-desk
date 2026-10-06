@@ -336,9 +336,9 @@ function materialReferenceRequest(ref,source=null){
   // Story revisions share exact references with production records, but have a
   // separate reader that validates the cited scene and limits the text blocks.
   const known=(state.productionRecords||[]).find(r=>r.object_id===ref.object_id);
-  const isSource=!!(source===true||source==='full_scene'||['EPISODE','SOURCE','STORY'].includes(known?.kind)||ref.scene_id||ref.block_ids?.length||source===null&&!(state.productionRecords||[]).some(r=>r.object_id===ref.object_id));
+  const isSource=!!(source===true||source==='full_scene'||source==='scene_script'||['EPISODE','SOURCE','STORY'].includes(known?.kind)||ref.scene_id||ref.block_ids?.length||source===null&&!(state.productionRecords||[]).some(r=>r.object_id===ref.object_id));
   const query=new URLSearchParams({object_id:ref.object_id,revision_id:ref.revision_id});
-  if(isSource){if(source==='full_scene')query.set('full_scene','1');if(ref.scene_id)query.set('scene_id',ref.scene_id);if(ref.block_ids?.length)query.set('block_ids',ref.block_ids.join(','))}
+  if(isSource){if(source==='full_scene'||source==='scene_script')query.set('full_scene','1');if(ref.scene_id)query.set('scene_id',ref.scene_id);if(source!=='scene_script'&&ref.block_ids?.length)query.set('block_ids',ref.block_ids.join(','))}
   return {isSource,url:'/api/production'+(isSource?'/source':'')+'?'+query};
 }
 function materialReferenceLink(parent,ref,title,source=false){
@@ -387,12 +387,12 @@ async function openMaterialReference(ref,trigger,source=false){
     if(request.isSource){
       body.replaceChildren();body.dataset.referenceRevision=detail.reference.revision_id;
       const version=detail.screenplay?.title?.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u);
-      title.textContent='剧情依据 · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
+      title.textContent=(source==='full_scene'||source==='scene_script'?'查看剧本':'剧情依据')+' · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
       body.dataset.referenceScene=detail.scene?.id||'';
-      if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene.id)+' · '+detail.scene.heading.replace(/^\d+-\d+\s*/,''),body);
-      const highlighted=new Set(detail.highlight_block_ids||[]);
+      if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene,detail.reference.object_id)+' · '+detail.scene.heading.replace(/^\d+-\d+\s*/,''),body);
+      const highlighted=new Set(source==='scene_script'?[]:detail.highlight_block_ids||[]);
       for(const block of detail.blocks){const line=nodeText('p','reference-text',block.text,body);line.dataset.referenceBlock=block.id;if(highlighted.has(block.id)){line.classList.add('reference-highlight');line.setAttribute('aria-label','本镜剧情依据')}}
-      if(detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
+      if(source!=='scene_script'&&detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
       body.querySelector('.reference-highlight')?.scrollIntoView({block:'center'});
       return;
     }

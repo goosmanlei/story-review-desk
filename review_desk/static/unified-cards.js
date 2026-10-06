@@ -12,7 +12,9 @@ function reviewSmallCard(parent,item,activate,selected=false){
   const type=productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
   const name=nodeText('strong',null,item.title,heading);name.title=item.title;
   if(item.business_code)nodeText('span','small-card-code',item.business_code,heading);content.append(heading);
-  if(item.subtitle)nodeText('small','small-card-metrics',item.subtitle,content);button.append(content);return button;
+  if(item.subtitle)nodeText('small','small-card-metrics',item.subtitle,content);
+  if(item.selectionSubtitle)nodeText('small','small-card-selection',item.selectionSubtitle,content);
+  button.append(content);return button;
 }
 function materialPositionText(item,value=item.title){
   const scope=item.placement||item.record?.payload.scope||item.scope;
@@ -20,7 +22,7 @@ function materialPositionText(item,value=item.title){
   const location=(item.locations||[]).find(row=>row.kind==='PREPARATION'&&scope&&row.scope?.object_id===scope.object_id&&row.scope?.revision_id===scope.revision_id);
   const owner=[state.unifiedScope,state.breakdownSceneData?.scene,...(state.productionRecords||[])].find(same);
   const scene=location?.scene||(owner?.kind==='PREPARATION'&&(owner.payload.source?.scene_id||owner.payload.scene_id));
-  const title=String(value??'');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,reviewPositionLabel('scene',scene)+' · ')):reviewPositionText(title);
+  const title=String(value??'');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,(businessCode(owner)||reviewPositionLabel('scene',scene,location?.episode||owner?.payload.source?.object_id))+' · ')):reviewPositionText(title);
 }
 function materialCountText(item){
   const count=(key,label)=>Number.isInteger(item[key])&&item[key]>=0?`${label} ${item[key]} 个`:`${label}未登记`;
@@ -28,7 +30,7 @@ function materialCountText(item){
 }
 function materialSmallCard(parent,item,activate,selected=false,{includesHistory=false,showHistoryScope=false,subtitle=null}={}){
   const counts=materialCountText(item);
-  const button=reviewSmallCard(parent,{...item,title:materialPositionText(item),business_code:businessCode(item),icon:item.media_type,subtitle:[counts,subtitle].filter(Boolean).join(' · ')},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
+  const button=reviewSmallCard(parent,{...item,title:materialPositionText(item),business_code:businessCode(item),icon:item.media_type,subtitle:counts,selectionSubtitle:subtitle},activate,selected);button.dataset.materialId=item.canonical_material_id||item.object_id;
   if(item.placement_title){const text=materialPositionText(item,item.placement_title);button.title+=' · '+text}
   return button;
 }

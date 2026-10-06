@@ -1,21 +1,36 @@
-function businessCode(row){return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
-function businessTitle(row,title=row?.payload?.title||row?.title||''){const code=businessCode(row),positioned=row?.business_scene_id?String(title).replace(/^\d+-\d+\s*/,reviewPositionLabel('scene',row.business_scene_id)+' · '):title,text=reviewPositionText(positioned);return code&&!text.startsWith(code+' · ')?code+' · '+text:text}
+function businessCode(row){if(['SOURCE','STORY'].includes(row?.kind))return '';return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
+function businessTitle(row,title=row?.payload?.title||row?.title||''){
+  if(['SOURCE','STORY'].includes(row?.kind))return String(title);
+  const code=businessCode(row),raw=String(title);
+  // A shot's stored local prefix is a legacy position, not a second identity.
+  const positioned=row?.kind==='SHOT_DESIGN'&&code?raw.replace(/^E\d+-\d+\s*/u,''):row?.business_scene_id?raw.replace(/^\d+-\d+\s*/,(row.business_scene_code||reviewPositionLabel('scene',row.business_scene_id))+' · '):raw;
+  const text=reviewPositionText(positioned);
+  if(!code||text===code||text.startsWith(code+' · '))return text;
+  return code+' · '+(text.startsWith(code+' ')?text.slice(code.length).trim():text);
+}
 function renderBusinessCodeCatalog(root){
   const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
   const table=el('table','business-code-table'),head=el('tr');for(const title of ['类型','前缀','示例','唯一性范围'])nodeText('th',null,title,head);table.append(head);
   for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);
 }
 /* View labels and tabs share the existing workspace/URL routing contract. */
-function reviewPositionLabel(kind,value){
+function reviewPositionLabel(kind,value,episode=null){
   const prefix=({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',PREPARATION:'S',shot:'SH',SH:'SH',SHOT_DESIGN:'SH'})[kind];
   if(!prefix)return String(value??'');
-  const raw=value&&typeof value==='object'?(value.payload?.number??value.payload?.episode_number??value.payload?.shot_number??value.scene_id??value.id):value;
+  if(value&&typeof value==='object'){const code=businessCode(value);if(code.startsWith(prefix)&&/^\d+$/.test(code.slice(prefix.length)))return code}
+  if(prefix==='S'&&episode){const id=typeof episode==='string'?episode:episode.object_id||episode.id,scene=typeof value==='object'?value.id:value;const code=(typeof state==='undefined'?null:state.businessCodes)?.get('scene:'+id+':'+scene);if(code)return code}
+  const raw=value&&typeof value==='object'?(value.payload?.number??value.number??value.payload?.episode_number??value.payload?.shot_number??value.scene_id??value.id):value;
   const text=String(raw??'').trim(),match=text.match(/^(?:E|S|SH)?0*(\d+)$/iu)||text.match(/^第\s*0*(\d+)\s*[集场鏡镜]$/u);
+  if(match&&typeof state!=='undefined'&&state.businessCodes)return '第'+Number(match[1])+({E:'集',S:'场',SH:'镜'})[prefix];
   return match?prefix+match[1].padStart(prefix==='E'?2:3,'0'):text;
 }
 function reviewPositionText(value){
-  return String(value??'').replace(/\bE(\d+)-(\d+)\b/giu,(_all,episode,shot)=>reviewPositionLabel('episode',episode)+' / '+reviewPositionLabel('shot',shot))
-    .replace(/第\s*(\d+)\s*([集场镜])/gu,(_all,number,unit)=>reviewPositionLabel(({集:'E',场:'S',镜:'SH'})[unit],number))
+  const globalCodes=typeof state!=='undefined'&&state.businessCodes;
+  const text=String(value??'').replace(/\bE(\d+)-(\d+)\b/giu,(_all,episode,shot)=>(typeof state==='undefined'?null:state.legacyShotCodes)?.get('E'+Number(episode)+'-'+Number(shot))||(globalCodes?`第${Number(episode)}集第${Number(shot)}镜`:reviewPositionLabel('episode',episode)+' / '+reviewPositionLabel('shot',shot)));
+  // Prose numbers are positions, not allocated identities. Only an exact
+  // legacy shot mapping may convert an old generated title to a global code.
+  if(globalCodes)return text;
+  return text.replace(/第\s*(\d+)\s*([集场镜])/gu,(_all,number,unit)=>reviewPositionLabel(({集:'E',场:'S',镜:'SH'})[unit],number))
     .replace(/\b(SH|E|S)0*(\d+)\b/giu,(_all,prefix,number)=>reviewPositionLabel(prefix.toUpperCase(),number));
 }
 const workspaceRoutes=new Map(),workspaceSubRoutes=new Map();

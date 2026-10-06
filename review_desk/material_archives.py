@@ -22,11 +22,14 @@ _ACTIVE_READER=ContextVar('material_archive_reader',default=None)
 
 
 @contextmanager
-def read_scope(store):
+def read_scope(store, root=None):
     """Use the caller's transaction for this instance's immutable content."""
-    token=_ACTIVE_READER.set((store,{}))
+    root=Path(root).resolve() if root is not None else store.db_path.parent.parent.resolve()
+    cache={};token=_ACTIVE_READER.set((store,cache,root))
     try:yield
-    finally:_ACTIVE_READER.reset(token)
+    finally:
+        cache.clear()
+        _ACTIVE_READER.reset(token)
 
 
 def encode(store,data):
@@ -100,27 +103,37 @@ def resolver(path):
     root=instance_root(path)
     database=root/'.runtime/review.sqlite3'
     active=_ACTIVE_READER.get()
-    if active is not None and active[0].db_path.resolve()==database.resolve():
-        store,cache=active
+    if active is not None and active[2]==root:
+        store,cache,_=active
         def scoped_get(key):return storage.expand(store,key,cache=cache)
-        scoped_get.close=lambda:None
+        # Cache only this file's token graph, not every archive in a restore.
+        scoped_get.close=cache.clear
+        scoped_get.clear=cache.clear
         return scoped_get
-    connection=None;rows=None;cache={}
+    connection=None;export_connection=None;export_directory=None;cache={}
     if database.is_file():
         connection=sqlite3.connect(database.as_uri()+'?mode=ro',uri=True)
         if not connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_content'").fetchone():
             connection.close();connection=None
     content_file=root/'export/material-content.json'
     def get(key,visiting=None):
-        nonlocal rows
+        nonlocal export_connection,export_directory
         if key in cache:return cache[key]
         found=connection.execute('SELECT body FROM material_content WHERE id=?',(key,)).fetchone() if connection else None
         body=found[0] if found else None
         if body is None:
-            if rows is None:
+            if export_connection is None:
                 if not content_file.is_file():raise ValueError('archive content graph is missing')
-                rows={r['id']:r['body'] for r in json.loads(content_file.read_text())['material_content']}
-            body=rows.get(key)
+                import tempfile
+                from .material_content_stream import rows
+                export_directory=tempfile.TemporaryDirectory(prefix='review-material-read-')
+                export_connection=sqlite3.connect(Path(export_directory.name)/'content.sqlite3')
+                export_connection.execute('PRAGMA cache_size=-2048')
+                export_connection.execute('CREATE TABLE content(id TEXT PRIMARY KEY,body TEXT NOT NULL)')
+                with export_connection:
+                    export_connection.executemany('INSERT INTO content VALUES (?,?)',((r['id'],r['body']) for r in rows(content_file)))
+            found=export_connection.execute('SELECT body FROM content WHERE id=?',(key,)).fetchone()
+            body=found[0] if found else None
         if body is None or digest(body.encode())!=key:raise ValueError('missing archive content')
         visiting=set() if visiting is None else visiting
         if key in visiting:raise ValueError('cyclic archive content')
@@ -135,7 +148,14 @@ def resolver(path):
         else:raise ValueError('invalid archive content node')
         visiting.remove(key);cache[key]=value
         return value
-    get.close=lambda:connection.close() if connection else None
+    def close():
+        nonlocal connection,export_connection,export_directory
+        if connection is not None:connection.close();connection=None
+        if export_connection is not None:export_connection.close();export_connection=None
+        if export_directory is not None:export_directory.cleanup();export_directory=None
+        cache.clear()
+    get.close=close
+    get.clear=cache.clear
     return get
 
 

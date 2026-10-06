@@ -1,5 +1,5 @@
 import unittest
-from review_desk.input_contracts import label_inputs, check
+from review_desk.input_contracts import label_inputs, check, check_declared
 
 
 class InputContractsTest(unittest.TestCase):
@@ -24,6 +24,15 @@ class InputContractsTest(unittest.TestCase):
         self.assertFalse(check('seed-audio-1.0','@音频10与@音频2',inputs)['verified'])
         self.assertFalse(check('UNKNOWN','@音频1与@音频2',inputs)['verified'])
         self.assertTrue(check('unknown','仅文字',[])['verified'])
+
+    def test_pending_plan_checks_size_type_and_phantom_slots_without_media(self):
+        self.assertFalse(check_declared('seedance2.0_fast_vision','@图片1 @音频1',['image','audio']))
+        self.assertTrue(check_declared('seedance2.0_fast_vision','字'*5001,[]))
+        self.assertTrue(check_declared('Seedance_2.5','字'*15001,[]))
+        self.assertTrue(check_declared('Seedance_2.5','@图片1',[]))
+        self.assertTrue(check_declared('seedance2.0_fast_vision',' '.join('@图片'+str(i) for i in range(1,11)),['image']*10))
+        self.assertTrue(check_declared('seedance2.0_fast_vision','只有文字',['audio']))
+        self.assertTrue(check_declared('Seedance_2.5','文档',['document']))
 
 
 if __name__=='__main__':unittest.main()

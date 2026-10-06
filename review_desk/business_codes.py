@@ -15,16 +15,14 @@ CREATE TABLE IF NOT EXISTS business_candidates (
 CREATE TABLE IF NOT EXISTS business_comments (comment_id TEXT PRIMARY KEY,number INTEGER NOT NULL UNIQUE);'''
 
 TYPES = (
-    ('集', 'E', 'E02', '每份剧本版本内；沿用正文集号'),
-    ('场', 'S', 'S003', '每份剧本版本内；沿用正文场号'),
-    ('镜', 'SH', 'E02 / SH004', '每集的准确镜头设计内；沿用镜号'),
+    ('集', 'E', 'E02', '本实例内；同一集对象的修订共用编号'),
+    ('场', 'S', 'S003', '本实例内；准确集对象与场身份共同确定，修订不重编号'),
+    ('镜', 'SH', 'SH034', '本实例内；不随切集、切场或显示顺序重置'),
     ('实体', 'EN', 'EN001', '本实例内'),
     ('实体状态', 'ST', 'ST001', '本实例内；历史保留状态也有独立编号'),
     ('素材', 'M', 'M001', '本实例内；准确共享身份共用编号，旧身份可追溯'),
     ('素材版本', 'MV', 'M001 / MV002', '同一准确素材身份内；沿用方案版本号'),
     ('素材候选', 'MC', 'M001 / MV002 / MC001', '同一素材版本内；按实际结果登记顺序分配'),
-    ('资料', 'D', 'D001', '本实例内，每份可独立访问的资料'),
-    ('剧本与故事结构', 'B', 'B001', '本实例内，每个故事或剧本对象'),
     ('实体关系', 'RL', 'RL001', '本实例内；不计素材采用及后台依赖边'),
     ('制作设定审阅对象', 'RV', 'RV001', '本实例内；保留旧审阅对象身份'),
     ('评论', 'C', 'C001', '本实例内；原文圈选、修订和评论身份不变'),
@@ -33,16 +31,34 @@ TYPES = (
     ('交付物', 'O', 'O001', '本实例内，每个交付物对象'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
-                SOURCE='D', STORY='B', REPRESENTATION='RV', JUDGMENT='DC',
+                EPISODE='E', SHOT_DESIGN='SH', REPRESENTATION='RV', JUDGMENT='DC',
                 ASSEMBLY='A', DELIVERABLE='O')
+LEGACY_PREFIXES = {'SOURCE': 'D', 'STORY': 'B'}
 
 
-def allocate(store, object_id, kind, payload):
-    prefix = 'RL' if kind == 'RELATION' and payload.get('relation_type') == 'entity' else PREFIXES.get(kind)
+def code(row):
+    return row['prefix'] + str(row['number']).zfill(2 if row['prefix'] == 'E' else 3)
+
+
+def scene_identity(episode_id, scene_id):
+    # Scenes are embedded in an immutable episode, not standalone objects. The
+    # reserved key shares the persisted allocation/tombstone recovery mechanism.
+    return 'scene:' + episode_id + ':' + scene_id
+
+
+def allocate_number(store, object_id, prefix):
     if not prefix or store.db.execute('SELECT 1 FROM business_codes WHERE object_id=?', (object_id,)).fetchone():
         return
     number = store.db.execute('SELECT coalesce(max(number),0)+1 FROM business_codes WHERE prefix=?', (prefix,)).fetchone()[0]
     store.db.execute('INSERT INTO business_codes VALUES (?,?,?)', (object_id, prefix, number))
+
+
+def allocate(store, object_id, kind, payload):
+    prefix = 'RL' if kind == 'RELATION' and payload.get('relation_type') == 'entity' else PREFIXES.get(kind)
+    allocate_number(store, object_id, prefix)
+    if kind == 'EPISODE':
+        for scene in payload.get('scenes', []):
+            allocate_number(store, scene_identity(object_id, scene['id']), 'S')
 
 
 def initialize(store):
@@ -50,6 +66,9 @@ def initialize(store):
     with store.db:
         for row in store.db.execute('SELECT o.id,o.kind,r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision ORDER BY o.created_at,o.id').fetchall():
             allocate(store, row['id'], row['kind'], json.loads(row['payload']))
+        # Historical scenes removed from the current revision remain addressable.
+        for row in store.db.execute("SELECT o.id,r.payload FROM objects o JOIN revisions r ON r.object_id=o.id WHERE o.kind='EPISODE' ORDER BY r.created_at,o.id,r.version").fetchall():
+            allocate(store, row['id'], 'EPISODE', json.loads(row['payload']))
         allocate_candidates(store)
         allocate_comments(store)
 
@@ -90,8 +109,8 @@ def restore(store, rows, candidates=(), comments=()):
         existing=store.db.execute('SELECT kind,current_revision FROM objects WHERE id=?',(row['object_id'],)).fetchone()
         if existing:
             payload=json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?',(existing['current_revision'],)).fetchone()[0]);expected='RL' if existing['kind']=='RELATION' and payload.get('relation_type')=='entity' else 'ST' if existing['kind']=='DELETED_STATE' else PREFIXES.get(existing['kind'])
-            if row.get('prefix')!=expected:raise ValueError('number prefix differs from object kind')
-        if set(row) != {'object_id', 'prefix', 'number'} or row['prefix'] not in {v[1] for v in TYPES} or type(row['number']) is not int or row['number'] < 1:
+            if row.get('prefix') not in {expected, LEGACY_PREFIXES.get(existing['kind'])}:raise ValueError('number prefix differs from object kind')
+        if set(row) != {'object_id', 'prefix', 'number'} or row['prefix'] not in {v[1] for v in TYPES} | {'D','B'} or type(row['number']) is not int or row['number'] < 1:
             raise ValueError('invalid business code allocation')
         store.db.execute('INSERT INTO business_codes VALUES (?,?,?)', (row['object_id'], row['prefix'], row['number']))
     for row in comments:
@@ -112,11 +131,11 @@ def restore(store, rows, candidates=(), comments=()):
 def catalog():
     return {'types': [dict(type=t, prefix=p, example=e, scope=s) for t,p,e,s in TYPES],
             'allocation': '新增对象按首次登记次序递增，已分配编号永久保留。编号不替换稳定身份或准确修订。',
-            'excluded': '后台调用、依赖边、事件、配置表和输入锁不增加界面编号。'}
+            'excluded': '资料、剧本与故事结构不使用简写编号。后台调用、依赖边、事件、配置表和输入锁也不增加编号。V/C 是当前素材内的局部版本／候选序号，须连同素材身份理解。'}
 
 
 def annotate(store, value):
-    codes = {r['object_id']:r['prefix']+str(r['number']).zfill(3) for r in dump(store)}
+    codes = {r['object_id']:code(r) for r in dump(store) if r['prefix'] not in ('D','B')}
     aliases = {r['alias_id']:r['material_id'] for r in store.db.execute('SELECT alias_id,material_id FROM material_aliases')}
     candidates = {(r['material_id'],r['version'],r['candidate_id']):r['number'] for r in store.db.execute('SELECT * FROM business_candidates')}
     comment_codes={r['comment_id']:'C'+str(r['number']).zfill(3) for r in store.db.execute('SELECT * FROM business_comments')}
@@ -125,8 +144,8 @@ def annotate(store, value):
         rid = scope.get('revision_id') if isinstance(scope,dict) else None
         if rid not in scenes:
             row = store.db.execute('SELECT o.kind,r.object_id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE r.id=?',(rid,)).fetchone() if rid else None
-            scene = json.loads(row['payload']).get('source',{}).get('scene_id') if row and row['kind']=='PREPARATION' and row['object_id']==scope.get('object_id') else None
-            scenes[rid] = scene
+            source = json.loads(row['payload']).get('source',{}) if row and row['kind']=='PREPARATION' and row['object_id']==scope.get('object_id') else {}
+            scenes[rid] = source
         return scenes[rid]
     def walk(v):
         if isinstance(v, list):
@@ -142,7 +161,9 @@ def annotate(store, value):
                 result['material_code'] = codes.get(aliases[oid],codes[oid])
             if v.get('kind') == 'REQUIREMENT' and 'payload' in v:
                 scene = scene_for(v['payload'].get('scope'))
-                if scene:result['business_scene_id'] = scene
+                if scene:
+                    result['business_scene_id'] = scene['scene_id']
+                    result['business_scene_code'] = codes.get(scene_identity(scene['object_id'], scene['scene_id']), '')
             if v.get('kind') == 'ASSET' and 'payload' in v:
                 from .material_plans import identity
                 cid = identity(v['payload'])
@@ -150,6 +171,16 @@ def annotate(store, value):
                     {'material_id':mid,'version':version,'number':number,
                      'code':codes.get(aliases.get(mid,mid),mid)+' / MV'+str(version).zfill(3)+' / MC'+str(number).zfill(3)}
                     for (mid,version,candidate),number in candidates.items() if candidate == cid]
+        source = v.get('payload', {}).get('source', {})
+        if v.get('kind') == 'PREPARATION' and source.get('scene_id'):
+            result['business_code'] = codes.get(scene_identity(source['object_id'], source['scene_id']), '')
+        if isinstance(oid, str) and codes.get(oid, '').startswith('E') and codes[oid][1:].isdigit():
+            target = result.get('payload', result)
+            for scene in target.get('scenes', []):
+                scene['business_code'] = codes.get(scene_identity(oid, scene['id']), '')
+        if v.get('reference', {}).get('object_id') and isinstance(result.get('scene'), dict):
+            sid = result['scene'].get('id')
+            if isinstance(sid, str):result['scene']['business_code'] = codes.get(scene_identity(v['reference']['object_id'], sid), '')
         if 'material_id' in v and type(v.get('number')) is int and 'results' in v:
             result['business_code'] = codes.get(aliases.get(v['material_id'],v['material_id']),v['material_id'])+' / MV'+str(v['number']).zfill(3)
             from .material_plans import identity
@@ -164,6 +195,20 @@ def annotate(store, value):
 
 
 def display_dump(store):
-    rows=dump(store);mapping={r['object_id']:r['prefix']+str(r['number']).zfill(3) for r in rows}
+    rows=[r for r in dump(store) if r['prefix'] not in ('D','B')];mapping={r['object_id']:code(r) for r in rows}
     aliases={r['alias_id']:r['material_id'] for r in store.db.execute('SELECT * FROM material_aliases')}
-    return [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
+    result = [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
+    by_id = {r['object_id']:r for r in result}
+    for row in store.db.execute("SELECT o.id,o.kind,r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind IN ('PREPARATION','SHOT_DESIGN')"):
+        value = json.loads(row['payload'])
+        if row['kind'] == 'PREPARATION':
+            source = value['source']; scene_code = mapping.get(scene_identity(source['object_id'], source['scene_id']))
+            if scene_code:result.append({'object_id':row['id'], 'display_code':scene_code})
+        elif row['id'] in by_id:
+            episode = store.db.execute('SELECT payload FROM revisions WHERE id=?', (value['episode']['revision_id'],)).fetchone()
+            if episode:
+                episode_number = json.loads(episode[0]).get('number')
+                if episode_number is not None:
+                    by_id[row['id']]['legacy_position'] = 'E'+str(episode_number)+'-'+str(value['number'])
+                by_id[row['id']]['episode_code'] = mapping.get(value['episode']['object_id'], '')
+    return result

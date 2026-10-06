@@ -224,6 +224,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
                 'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
         context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
         from .shot_references import slots,inputs_for
+        from .reference_paths import project as project_reference_paths, annotations as reference_annotations
         for detail in context['video_details'].values():
             targets=[detail['record'],*detail.get('history',[])]
             for rounds in detail.get('material_versions',{}).values():
@@ -232,6 +233,8 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
             for row in targets:
                 if row and row['kind'] in ('REQUIREMENT','CALL'):
                     row['review_shot_slots']=slots(store,inputs_for(store,row))
+                    row['review_reference_links']=project_reference_paths(store,row)
+                    row['review_prompt_links']=reference_annotations(store,row).get('prompt_links',[])
         return context
     source=selected['payload'].get('source',{})
     episode=p.ref_record(store,source) if source else None
@@ -268,5 +271,5 @@ def material_classification(store, row, item, placement):
         label={'SHOT_DESIGN':'镜头','PREPARATION':'场景','EPISODE':'分集','INPUT_LOCK':'全剧','STORY':'全剧','shared':'共有'}.get(kind,'其他')
     kind={'PREPARATION':'space','SHOT_DESIGN':'shot','EPISODE':'episode','INPUT_LOCK':'story','STORY':'story'}.get(kind,kind)
     media=row['payload']['media_type']
-    return {'key':media+':'+kind,'label':{'image':'图像','audio':'音频','video':'视频','project':'工程','document':'文档'}.get(media,media)+'—'+label,
+    return {'key':media+':'+kind,'label':label+'-'+{'image':'图像','audio':'声音','video':'视频','project':'工程','document':'文档'}.get(media,'其他'),
             'entity_refs':[b.ref(r) for r in entities.values()],'placement_refs':[b.ref(r) for r in scopes]}

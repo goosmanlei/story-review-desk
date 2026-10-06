@@ -58,6 +58,8 @@ def definition(store,row):
     content={'format':'material-definition-v1','requirements':requirement_fields(need['payload']) if need else None,
              'checks':copy.deepcopy(output.get('review_criteria',[])) if isinstance(output,dict) else None,
              'output':output,'generation':generation}
+    if need and any(k in need['payload'].get('generation', {}) for k in ('reference_links','prompt_links')):
+        content['review_references']={k:copy.deepcopy(need['payload']['generation'].get(k, [])) for k in ('reference_links','prompt_links')}
     provenance={'requirements':{'record':ref(need),'fields':sorted(requirement_fields(need['payload']))} if need else None,
                 'checks':{'record':ref(need),'field':'generation.output.review_criteria'} if need and output else None,
                 'output':{'record':ref(need),'field':'generation.output'} if need and output else None,
@@ -342,7 +344,8 @@ def _verify(store):
     for row in store.db.execute('SELECT * FROM material_archive_files'):
         part=Path(row['path'])
         if part.is_absolute() or '..' in part.parts or len(part.parts)<2 or part.parts[0] not in ('production','export'):raise ValueError('unsafe archive catalog path')
-        archives.decode(json.loads(row['container']),lambda key:storage.expand(store,key))
+        archive_cache={}
+        archives.decode(json.loads(row['container']),lambda key:storage.expand(store,key,cache=archive_cache))
     if store.db.execute('PRAGMA foreign_key_check').fetchone():raise ValueError('material model foreign key failure')
     return {'revision_count':store.db.execute('SELECT COUNT(*) FROM revisions').fetchone()[0],
             'content_nodes':store.db.execute('SELECT COUNT(*) FROM material_content').fetchone()[0],

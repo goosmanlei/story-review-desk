@@ -43,7 +43,10 @@ def _staged_files(target, files):
                 raise ValueError('bundle metadata destination is not a regular file: ' + name)
             (stage / 'new' / name).parent.mkdir(parents=True,exist_ok=True)
             (stage / 'previous' / name).parent.mkdir(parents=True,exist_ok=True)
-            (stage / 'new' / name).write_bytes(data)
+            if isinstance(data, Path):
+                shutil.copyfile(data, stage / 'new' / name)
+            else:
+                (stage / 'new' / name).write_bytes(data)
             if destination.exists():
                 shutil.copyfile(destination, stage / 'previous' / name)
 
@@ -74,7 +77,29 @@ def _staged_files(target, files):
             shutil.rmtree(stage, ignore_errors=True)
 
 
+def _write_content(store, path):
+    """Keep the existing canonical export bytes, with one content row in memory."""
+    encoder=json.JSONEncoder(ensure_ascii=False,sort_keys=True,indent=2)
+    with path.open('w',encoding='utf-8',newline='\n') as output:
+        output.write('{\n  "format": "material-content-v1",\n  "material_content": [')
+        count=0
+        for row in store.db.execute('SELECT id,body FROM material_content ORDER BY id'):
+            output.write(',\n    ' if count else '\n    ')
+            for chunk in encoder.iterencode(dict(row)):
+                output.write(chunk.replace('\n','\n    '))
+            count+=1
+        output.write('\n  ]\n}\n' if count else ']\n}\n')
+
+
 def export(store, export_dir):
+    target=Path(export_dir);target.mkdir(parents=True,exist_ok=True)
+    # The largest table must not coexist as rows, JSON text and encoded bytes.
+    # Stage from disk while retaining the same manifest and rollback semantics.
+    with tempfile.TemporaryDirectory(prefix='.content-export-',dir=target) as temp:
+        return _export(store,target,Path(temp)/'material-content.json')
+
+
+def _export(store, export_dir, content_file):
     target = Path(export_dir)
     target.mkdir(parents=True, exist_ok=True)
     archive_files={}
@@ -113,9 +138,10 @@ def export(store, export_dir):
                     container=material_archives.encode(store,raw)
                     archive_files[name]=_bytes(container)
                     store.db.execute('INSERT INTO material_archive_files VALUES (?,?) ON CONFLICT(path) DO UPDATE SET container=excluded.container',('export/assets/'+name,canonical(container)))
-        material_data=material_storage.dump(store)
+        material_data=material_storage.dump(store,include_content=False)
         physical_revisions=material_storage.physical_revisions(store)
         if complete_model:framework.update({k:v for k,v in material_data.items() if k!="material_content"})
+        if complete_model:_write_content(store,content_file)
         configurations = {"records": [dict(row) for row in store.db.execute("SELECT * FROM configurations ORDER BY scope")],
                           "events": store.configuration_events()}
         icon = store.configuration("SYSTEM")["body"]["site_favicon"]
@@ -150,14 +176,14 @@ def export(store, export_dir):
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
     files = {"materials.json": material_bytes, "comments.json": comment_bytes,
              "objects.json": framework_bytes, "configurations.json": configuration_bytes}
-    if complete_model:files["material-content.json"]=_bytes({"format":"material-content-v1","material_content":material_data["material_content"]})
+    if complete_model:files["material-content.json"]=content_file
     layout = target.parent / 'config/entity-relationship-layout.json'
     if layout.exists():
         value = json.loads(layout.read_text())
         if not isinstance(value, dict) or value.get('format') != 'entity-relationship-layout-v1':
             raise ValueError('unsupported relationship layout')
         files['entity-relationship-layout.json'] = _bytes(value)
-    hashes = {name: digest(data) for name, data in files.items()}
+    hashes = {name: physical_file_hash(data) if isinstance(data,Path) else digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
     manifest = {"schema_version": 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
@@ -218,16 +244,22 @@ def restore(store, export_dir):
         if not isinstance(layout_value, dict) or layout_value.get('format') != 'entity-relationship-layout-v1':
             raise ValueError('unsupported relationship layout')
         layout_files['entity-relationship-layout.json'] = _bytes(layout_value)
-    # Validate in a separate in-memory store before any destination write.
-    test = Store(":memory:")
+    # Validate before any destination write, with a bounded disk-backed index.
+    # An in-memory SQLite copy of the complete content graph doubles the peak.
+    validation_dir=tempfile.TemporaryDirectory(prefix='review-restore-check-')
+    try:
+        test=Store(Path(validation_dir.name)/'.runtime/review.sqlite3')
+        test.db.execute('PRAGMA cache_size=-4096')
+        test.db.execute('PRAGMA temp_store=FILE')
+    except BaseException:
+        validation_dir.cleanup()
+        raise
     try:
         from . import material_storage
         if schema >= 6:
-            content=json.loads((target/"material-content.json").read_text())
-            if content.get("format")!="material-content-v1":raise ValueError("invalid material content format")
-            framework["material_content"]=content["material_content"]
-            if any(name not in framework for name in material_storage.TABLES):raise ValueError("material model tables missing")
-            material_storage.restore_content(test,framework)
+            from .material_content_stream import rows as content_rows
+            if any(name not in framework for name in material_storage.TABLES if name!='material_content'):raise ValueError("material model tables missing")
+            material_storage.restore_content(test,{**framework,'material_content':content_rows(target/'material-content.json')})
             physical_revisions=framework["revisions"]
             physical_by_id={row["id"]:row["payload"] for row in physical_revisions}
             framework["revisions"]=[{**row,"payload":material_storage.hydrate(test,row["payload"])} for row in physical_revisions]
@@ -294,7 +326,12 @@ def restore(store, export_dir):
                     for component in payload.get("components", []):
                         if "assets/" + component["file"] not in manifest["files"]:
                             raise ValueError("unmanifested production component")
-                        validate_component(target.parent, component)
+                        # The empty destination cannot resolve compact metadata
+                        # yet. Reuse the already validated temporary content DB
+                        # instead of loading the whole exported graph per file.
+                        from .material_archives import read_scope as archive_read_scope
+                        with archive_read_scope(test, root=target.parent):
+                            validate_component(target.parent, component)
             for dependency in framework["dependencies"]:
                 if dependency["from_revision"] not in revisions or dependency["to_revision"] not in revisions:
                     raise ValueError("invalid dependency")
@@ -337,7 +374,7 @@ def restore(store, export_dir):
         # this connection, not open a second reader of the destination database.
         from .material_archives import read_scope as archive_read_scope
         with archive_read_scope(store), _staged_files(config, layout_files) as publish, _staged_files(store.db_path.parent.parent,archive_files) as publish_archives, store.db:
-            if schema >= 6:material_storage.restore_content(store,framework)
+            if schema >= 6:material_storage.restore_content(store,{**framework,'material_content':content_rows(target/'material-content.json')})
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))
             if schema >= 2:
@@ -358,6 +395,15 @@ def restore(store, export_dir):
             for table,keys in (("state_cleanup_receipts",("revision_id","object_id","entity_ref","original_sha256","receipt_sha256","reason")),("state_cleanup_preserved",("revision_id","payload_sha256")),("state_cleanup_comments",("comment_id","object_id","revision_id","anchor_sha256"))):
                 for row in framework.get(table,[]) if framework else []:
                     store.db.execute("INSERT INTO "+table+" VALUES ("+",".join("?" for k in keys)+")",tuple(row[k] for k in keys))
+            if schema >= 5:
+                # Exact paths need historical memberships, canonical aliases
+                # and candidate numbers while validating restored payloads.
+                # Comment bindings wait until their comments exist below.
+                from .material_plans import TABLES as PLAN_TABLES, restore as restore_plans
+                restore_plans(store,{name:framework[name] if name!='material_plan_comments' else [] for name in PLAN_TABLES},validate_after=False)
+                if schema >= 6:material_storage.restore_indices(store,framework)
+                from .business_codes import restore as restore_codes
+                restore_codes(store,framework.get("business_codes",[]),framework.get("business_candidates",[]),framework.get("business_comments",[]))
             if schema >= 2:
                 from .production import FORMATS, validate_payload, references, current_records
                 dependencies_by_revision={}
@@ -382,7 +428,7 @@ def restore(store, export_dir):
             if framework and framework.get("relation_explanation_latest_only"):
                 store.db.execute("INSERT OR REPLACE INTO relation_explanation_policy VALUES (1,1)")
             from .business_codes import restore as restore_codes
-            restore_codes(store,framework.get("business_codes",[]) if framework else [],framework.get("business_candidates",[]) if framework else [],framework.get("business_comments",[]) if framework else [])
+            if schema < 5:restore_codes(store,framework.get("business_codes",[]) if framework else [],framework.get("business_candidates",[]) if framework else [],framework.get("business_comments",[]) if framework else [])
             for c in restored_comments:
                 from .relation_explanations import retained_comment
                 from .state_cleanup import retained_comment as state_retained_comment
@@ -396,10 +442,8 @@ def restore(store, export_dir):
                 from .material_versions import restore as restore_rounds
                 restore_rounds(store, framework)
             if schema >= 5:
-                from .material_plans import restore as restore_plans
-                restore_plans(store, framework,validate_after=schema<6)
+                restore_plans(store,{name:framework[name] if name=='material_plan_comments' else [] for name in PLAN_TABLES},validate_after=schema<6)
             if schema >= 6:
-                material_storage.restore_indices(store,framework)
                 from .material_plans import validate as validate_plans
                 validate_plans(store)
                 from .material_model import verify
@@ -418,4 +462,5 @@ def restore(store, export_dir):
         raise
     finally:
         test.close()
+        validation_dir.cleanup()
     return manifest

@@ -10,3 +10,26 @@ test('late scene response cannot repaint after a later selection or workspace sw
     vm.runInContext(change,c);finish({scene:{},shots:[]});await pending;assert.equal(writes,0);
   }
 });
+test('same-scene navigation only reuses the reader for the same accurate material route',()=>{
+  const c=fixture(),base=new URLSearchParams('breakdown_object=shot-a&shot_material_id=video&shot_plan=2&shot_candidate=c2');
+  const anotherShot=new URLSearchParams(base);anotherShot.set('breakdown_object','shot-b');
+  assert.equal(c.breakdownSelectionKey(base),c.breakdownSelectionKey(anotherShot));
+  for(const [key,value] of [['shot_plan','1'],['shot_candidate','c1'],['production_revision','old'],['material_target','exact']]){
+    const other=new URLSearchParams(base);other.set(key,value);assert.notEqual(c.breakdownSelectionKey(base),c.breakdownSelectionKey(other));
+  }
+});
+test('returning to a shot restores only a draft on a displayed exact Prompt revision',()=>{
+  const c=fixture();c.productionTab=()=> 'shots';let focused=0;
+  const surface={dataset:{productionBlocks:'plan-v2'},reviewFocus(){focused++}};
+  const row={querySelectorAll:()=>[surface]};
+  c.localStorage={getItem:key=>key==='kept-body'?'unsent text':null};
+  c.state.productionDraftContexts={
+    '["plan-v2",null,null,null]':{anchor:{quote:'exact'},draftKey:'kept-body'},
+    '["other-shot",null,null,null]':{anchor:{quote:'other'},draftKey:'kept-body'},
+    '["plan-v1",null,null,null]':{anchor:{quote:'old'},draftKey:'kept-body'}
+  };
+  c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
+  surface.dataset.productionBlocks='plan-v3';c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
+  surface.dataset.productionBlocks='plan-v2';c.localStorage.getItem=()=>null;c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
+  c.productionTab=()=> 'breakdown';c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
+});

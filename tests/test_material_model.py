@@ -311,7 +311,8 @@ class MaterialModelTest(unittest.TestCase):
         other.db.execute('PRAGMA cache_spill=2')
         resolver=archives.resolver;locked=[]
         def observe(path):
-            if archives._ACTIVE_READER.get() is not None and not locked:
+            active=archives._ACTIVE_READER.get()
+            if active is not None and active[0] is other and not locked:
                 second=sqlite3.connect(other.db_path,timeout=0)
                 try:
                     with self.assertRaisesRegex(sqlite3.OperationalError,'locked'):
@@ -326,3 +327,26 @@ class MaterialModelTest(unittest.TestCase):
             self.assertEqual(other.revisions(),self.store.revisions())
             self.assertIsNone(archives._ACTIVE_READER.get())
         finally:other.close()
+
+    def test_export_archive_readers_release_graph_without_waiting_for_gc(self):
+        import gc,tracemalloc
+        root=self.root/'empty-archive-instance';(root/'export/assets').mkdir(parents=True)
+        raw=b'{"prompt":"small"}';container=archives.encode(self.store,raw)
+        rows=[dict(row) for row in self.store.db.execute('SELECT * FROM material_content')]
+        # An unrelated graph makes retention visible without a large fixture.
+        for i in range(3000):
+            body=canonical({'value':str(i)+':'+'x'*200})
+            rows.append({'id':digest(body.encode()),'body':body})
+        (root/'export/material-content.json').write_text(canonical({'format':'material-content-v1','material_content':rows}))
+        path=root/'export/assets/small.json';path.write_text(canonical(container))
+        del rows
+        gc.collect();enabled=gc.isenabled();gc.disable();tracemalloc.start()
+        try:
+            before=tracemalloc.get_traced_memory()[0]
+            for _ in range(12):self.assertEqual(archives.read_bytes(path),raw)
+            retained=tracemalloc.get_traced_memory()[0]-before
+            self.assertLess(retained,2*1024*1024,'closed recursive readers retained export graphs')
+        finally:
+            tracemalloc.stop()
+            if enabled:gc.enable()
+            gc.collect()
