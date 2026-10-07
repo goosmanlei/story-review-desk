@@ -10,10 +10,28 @@ from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
 from review_desk.server import ReviewServer
+from review_desk.store import Store
 from test_comment_source_reuse import document, source_row
 
 
 class ConcurrentHttpTest(unittest.TestCase):
+    def test_existing_wal_requires_explicit_reviewed_conversion(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root)/'.runtime/review.sqlite3'
+            store = Store(path)
+            self.assertEqual(store.db.execute('PRAGMA journal_mode=WAL').fetchone()[0], 'wal')
+            store.close()
+            with self.assertRaisesRegex(ValueError, 'DELETE mode'):
+                ReviewServer(('127.0.0.1', 0), root, {})
+            store = Store.open_existing(path)
+            try:
+                self.assertEqual(store.db.execute('PRAGMA journal_mode').fetchone()[0], 'wal')
+                self.assertEqual(store.db.execute('PRAGMA journal_mode=DELETE').fetchone()[0], 'delete')
+            finally:
+                store.close()
+            with ReviewServer(('127.0.0.1', 0), root, {}) as server:
+                self.assertEqual(server.store.read_cache.db.execute('PRAGMA journal_mode').fetchone()[0], 'delete')
+
     def test_workers_serialize_expected_versions_and_cache_observes_writes(self):
         with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1', 0), root, {'id': 'isolated', 'title': 'isolated'}) as server:
             server.store.put_source(document('source'))

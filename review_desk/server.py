@@ -32,8 +32,13 @@ class ReviewServer(HTTPServer):
         self.config = config
         self._local = threading.local()
         self._local.store = Store(self.root / ".runtime" / "review.sqlite3")
-        if self.store.db.execute('PRAGMA journal_mode=WAL').fetchone()[0] != 'wal':
-            raise ValueError('bounded HTTP workers require SQLite WAL')
+        # Keep the reviewed deployment's rollback journal. Its bundled SQLite
+        # has no verified WAL-reset fix; do not enable WAL merely for threads.
+        # Existing WAL instances need an explicit stopped/backup migration.
+        if self.store.db.execute('PRAGMA journal_mode').fetchone()[0] != 'delete':
+            self._local.store.close()
+            super().server_close()
+            raise ValueError('bounded HTTP deployment requires reviewed SQLite DELETE mode; stop connections and back up before changing journal mode')
         from .read_cache import attach, source_version
         self.cache_version = source_version()
         attach(self.store, version=self.cache_version)
