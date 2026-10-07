@@ -106,8 +106,8 @@ def related_media(store, rows, entity_id, states):
         payload = asset['payload']
         owned = any(r['object_id'] == entity_id for r in payload.get('subjects', []))
         if not owned:
-            owned = any(p.ref_record(store, r, {'STATE'})['payload']['entity']['object_id'] == entity_id
-                        for r in payload.get('states', []))
+            linked = [p.ref_record(store, r, {'STATE'}) for r in payload.get('states', [])]
+            owned = any((s.get('owner_object_id') if s.get('unavailable') else s['payload']['entity']['object_id']) == entity_id for s in linked)
         if not owned:
             continue
         covered = set()

@@ -69,7 +69,7 @@ function navigateWorkspace(id){
   }else{
     if(['settings.workspace','production.workspace'].includes(id)){
       const url=new URL(location.href);url.searchParams.set('workspace',id);url.searchParams.set('production_tab',id==='settings.workspace'?'breakdown':'shots');
-      for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target'])url.searchParams.delete(key);
+      for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
       url.hash='';history.pushState(null,'',url);switchWorkspace(id,false);
     }else switchWorkspace(id);
   }
@@ -88,7 +88,7 @@ function selectProductionTab(tab){
   if(saved){history.pushState(null,'',saved);switchWorkspace(workspace,false);return}
   const url=new URL(location.href);
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
-  for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target'])url.searchParams.delete(key);
+  for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
   url.hash='';if(url.href!==location.href)history.pushState(null,'',url);switchWorkspace(workspace,false);
 }
 function workspaceTabItems(){

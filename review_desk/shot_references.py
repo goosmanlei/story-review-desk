@@ -18,6 +18,8 @@ def slot(store, value, index):
     try:
         target=p.ref_record(store,value.get('reference',value))
         result['record']=target
+        if target.get('unavailable'):
+            raise ValueError(target['payload']['title'])
         if target['kind'] not in ('ASSET','REQUIREMENT'):
             result['nonmedia']=True
             return result

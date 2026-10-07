@@ -118,7 +118,7 @@ function activateUnifiedCard(result){
   }else{
     // This card owns its version route; a caller or parent card may still have
     // another material's exact version in the shared page URL.
-    const url=new URL(location.href);for(const key of ['material_id','material_version','material_round','material_target']){const value=params.get(key);if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}history.replaceState(history.state,'',url);
+    const url=new URL(location.href);for(const key of ['material_id','material_version','material_round','material_target','material_baseline']){const value=params.get(key);if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}history.replaceState(history.state,'',url);
     detail.explicitRevision=result.explicit&&!result.defaultSelection;detail.adoptionContext=result.adoption_context;
     if(params.has('material_round')&&Object.keys(detail.legacy_material_versions||{}).length)detail.material_versions=detail.legacy_material_versions;
     const target=params.get('material_target');if(target&&!materialRows(detail).some(r=>r.id===target))throw Error('准确候选引用不存在；未替换为最新结果');
@@ -182,7 +182,8 @@ async function openUnifiedMaterial(ref,trigger){
 function validateUnifiedReference(result){
   const params=result.params,detail=result.detail,data=result.entity_review||detail;
   const versions=params.has('material_round')?data.legacy_material_versions:data.material_versions;
-  const parameter=params.has('material_round')?'material_round':'material_version',number=Number(params.get(parameter)),mid=params.get('material_id');
+  normalizeConsolidatedMaterialRoute(params,versions);
+  const parameter=params.has('material_round')?'material_round':'material_version',mid=params.get('material_id');let number=Number(params.get(parameter));
   if(params.has(parameter)&&(!Number.isSafeInteger(number)||number<1))throw Error('准确素材版本无效；未替换为当前版本');
   if(mid&&!Object.hasOwn(versions||{},mid))throw Error('准确素材标识不存在；未替换为其他素材');
   const sets=Object.entries(versions||{}).filter(([id])=>!mid||id===mid),rounds=sets.flatMap(([,rs])=>rs);

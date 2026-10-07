@@ -114,6 +114,8 @@ def _export(store, export_dir, content_file):
         from .relation_explanations import dump as dump_redactions
         from .state_cleanup import dump as dump_state_cleanup
         framework.update(dump_state_cleanup(store))
+        from .version_consolidation import dump as dump_consolidation
+        framework.update(dump_consolidation(store))
         framework["relation_redacted_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM relation_redacted_comments ORDER BY comment_id")]
         framework["relation_explanation_redactions"] = dump_redactions(store)
         framework["relation_explanation_latest_only"] = bool(store.db.execute("SELECT latest_only FROM relation_explanation_policy WHERE id=1 AND latest_only=1").fetchone())
@@ -149,6 +151,10 @@ def _export(store, export_dir, content_file):
         store.db.execute('RELEASE SAVEPOINT export_snapshot')
     asset_names = {_safe_asset(name) for source in materials for name in
                    [*(asset["file"] for asset in source["assets"]), *([source["media"]["file"]] if (source.get("media") or {}).get("file") else [])]}
+    if framework.get('consolidation_runs'):
+        from .version_consolidation import file_references
+        for row in framework['revisions']:
+            asset_names.update(_safe_asset(name) for name in file_references(json.loads(row['payload'])))
     for revision in framework["revisions"]:
         payload = json.loads(revision["payload"])
         if revision["object_id"] == "story-structure":
@@ -186,7 +192,7 @@ def _export(store, export_dir, content_file):
     hashes = {name: physical_file_hash(data) if isinstance(data,Path) else digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
-    manifest = {"schema_version": 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -202,7 +208,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6, 7):
+    if schema not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -223,6 +229,10 @@ def restore(store, export_dir):
     framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
     from .state_cleanup import guard_restore
     guard_restore(store, framework)
+    from . import version_consolidation as consolidation
+    consolidation.guard_restore(store, framework)
+    if schema >= 8 and not all(t in framework for t in consolidation.TABLES):
+        raise ValueError('consolidation receipts missing from schema 8 export')
     if schema >= 4:
         from .material_versions import TABLES
         if any(name not in framework for name in TABLES):
@@ -256,6 +266,7 @@ def restore(store, export_dir):
         raise
     try:
         from . import material_storage
+        consolidation.restore(test, framework)
         if schema >= 6:
             from .material_content_stream import rows as content_rows
             if any(name not in framework for name in material_storage.TABLES if name!='material_content'):raise ValueError("material model tables missing")
@@ -299,7 +310,7 @@ def restore(store, export_dir):
                 if revision["object_id"] not in objects:
                     raise ValueError("orphan revision")
                 payload = json.loads(revision["payload"])
-                if digest(canonical({"object_id": revision["object_id"], "version": revision["version"], "payload": payload}).encode()) != revision["id"]:
+                if not consolidation.valid_identity(test, revision['object_id'], revision['version'], payload, revision['id']):
                     if revision["id"] in cleaned_states:
                         from .state_cleanup import verify_row
                         if objects[revision["object_id"]]["kind"]!="DELETED_STATE":raise ValueError("invalid cleaned state kind")
@@ -322,6 +333,9 @@ def restore(store, export_dir):
                         raise ValueError("unsupported restored production format/kind")
                     for _, ref in references(payload):
                         if ref["revision_id"] not in revisions or revisions[ref["revision_id"]]["object_id"] != ref["object_id"]:
+                            removed = consolidation.deleted(test, ref['revision_id'])
+                            if removed and removed['object_id'] == ref['object_id'] and consolidation.preserved(test, revision['object_id'], payload):
+                                continue
                             raise ValueError("invalid restored production reference")
                     for component in payload.get("components", []):
                         if "assets/" + component["file"] not in manifest["files"]:
@@ -374,6 +388,7 @@ def restore(store, export_dir):
         # this connection, not open a second reader of the destination database.
         from .material_archives import read_scope as archive_read_scope
         with archive_read_scope(store), _staged_files(config, layout_files) as publish, _staged_files(store.db_path.parent.parent,archive_files) as publish_archives, store.db:
+            consolidation.restore(store, framework)
             if schema >= 6:material_storage.restore_content(store,{**framework,'material_content':content_rows(target/'material-content.json')})
             for source in materials:
                 store.db.execute("INSERT INTO sources VALUES (?,?,?)", (source["id"], canonical(source), digest(canonical(source).encode())))
@@ -413,14 +428,15 @@ def restore(store, export_dir):
                     payload = json.loads(revision["payload"])
                     if payload.get("format") in FORMATS:
                         validate_payload(store, revision["object_id"], objects[revision["object_id"]]["kind"], payload, inspect=False, check_current=False)
-                        expected_deps = {(ref["revision_id"], role) for role, ref in references(payload)}
+                        expected_deps = {(ref["revision_id"], role) for role, ref in references(payload) if not consolidation.deleted(store, ref['revision_id'])}
                         actual_deps = dependencies_by_revision.get(revision['id'],set())
                         if expected_deps != actual_deps:
                             raise ValueError("restored production dependencies differ from payload")
                 from .production import read_scope
                 with read_scope(store):
                     for current in current_records(store, {"ENTITY", "RELATION", "REQUIREMENT"}):
-                        validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
+                        if not consolidation.preserved(store, current['object_id'], current['payload']):
+                            validate_payload(store, current["object_id"], current["kind"], current["payload"], inspect=False)
             for redaction in framework.get("relation_explanation_redactions",[]) if framework else []:
                 store.db.execute("INSERT INTO relation_explanation_redactions VALUES (?,?,?,?)",tuple(redaction[k] for k in ("revision_id","object_id","payload_sha256","facts_sha256")))
             for comment_locator in framework.get("relation_redacted_comments",[]) if framework else []:
