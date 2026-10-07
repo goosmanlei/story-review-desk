@@ -72,10 +72,9 @@ class ReadCache:
         try:
             self.db = sqlite3.connect(self.path, timeout=.05, isolation_level=None)
             self.db.execute('PRAGMA auto_vacuum=INCREMENTAL')
-            self.db.execute('PRAGMA journal_mode=WAL')
+            self.db.execute('PRAGMA journal_mode=DELETE')
             self.db.execute('PRAGMA synchronous=NORMAL')
             self.db.execute('PRAGMA journal_size_limit=1048576')
-            self.db.execute('PRAGMA wal_autocheckpoint=256')
             self.db.execute(f'PRAGMA max_page_count={max(256, 2*maximum//4096)}')
             self.db.execute('CREATE TABLE IF NOT EXISTS entries (key TEXT PRIMARY KEY, body BLOB NOT NULL, digest TEXT NOT NULL, size INTEGER NOT NULL, touched REAL NOT NULL)')
             self.db.execute('CREATE INDEX IF NOT EXISTS entries_lru ON entries(touched,key)')
