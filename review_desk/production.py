@@ -20,8 +20,7 @@ from . import production_states as full_states
 KINDS = {"INPUT_LOCK": "input-lock", "ENTITY": "entity", "STATE": "state",
          "REPRESENTATION": "representation", "PREPARATION": "preparation",
          "SHOT_DESIGN": "shot-design", "REQUIREMENT": "requirement", "ASSET": "asset",
-         "CALL": "call", "JUDGMENT": "judgment", "RELATION": "relation",
-         "ASSEMBLY": "assembly", "DELIVERABLE": "deliverable"}
+         "CALL": "call", "JUDGMENT": "judgment", "RELATION": "relation"}
 FORMATS = {"production-" + v + "-v1": k for k, v in KINDS.items()}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$")
 USAGES = ("generation_input", "post_audio", "editorial")
@@ -404,35 +403,29 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
                 (object_id, p['scope']['object_id'], p['slot'])).fetchone():
             raise Conflict('scope/slot already has a requirement; revise that object explicitly')
-    elif kind in ("ASSET", "DELIVERABLE"):
+    elif kind == "ASSET":
         _components(store, p, inspect)
-        if kind == "ASSET":
-            if p.get("media_type") not in ("image", "audio", "video", "project", "document"):
-                raise ValueError("invalid asset media type")
-            expected = {"image": "image/", "audio": "audio/", "video": "video/",
-                        "project": "application/", "document": ("application/", "text/")}[p["media_type"]]
-            if any(not c["mime"].startswith(expected) for c in p["components"] if c["role"] == "original"):
-                raise ValueError("original component does not match the asset media type")
-            _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "SHOT_DESIGN", "INPUT_LOCK"})
-            _refs(store, p, "states", {"STATE"})
-            full_states.validate_asset_coverage(store, p)
-            for candidate in p.get('candidate_requirements', []):
-                need = ref_record(store, candidate, {'REQUIREMENT'})
-                if need['payload']['media_type'] != p['media_type'] or (ref_record(store, need['payload']['scope'])['kind'] == 'STATE' and not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', []))):
-                    raise ValueError('candidate requirement needs exact state and media coverage')
-            call = ref_record(store, p.get("production"), {"CALL"})
-            if call["payload"].get("status") not in ("submitted", "completed"):
-                raise ValueError("an asset needs a real production record")
-            _lineage(store, p)
-            if p.get("media_type") == "image" and "i2i_depth" not in p.get("lineage", {}):
-                raise ValueError("an image asset requires a traceable image lineage")
-            if p.get("media_type") == "image" and call["payload"].get("lineage") != p.get("lineage"):
-                raise ValueError("asset lineage differs from actual production input")
-        else:
-            ref_record(store, p.get("assembly"), {"ASSEMBLY"})
-            _list(p, "dependencies")
-            if not isinstance(p.get("verification"), dict):
-                raise ValueError("deliverable verification record required")
+        if p.get("media_type") not in ("image", "audio", "video", "project", "document"):
+            raise ValueError("invalid asset media type")
+        expected = {"image": "image/", "audio": "audio/", "video": "video/",
+                    "project": "application/", "document": ("application/", "text/")}[p["media_type"]]
+        if any(not c["mime"].startswith(expected) for c in p["components"] if c["role"] == "original"):
+            raise ValueError("original component does not match the asset media type")
+        _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "SHOT_DESIGN", "INPUT_LOCK"})
+        _refs(store, p, "states", {"STATE"})
+        full_states.validate_asset_coverage(store, p)
+        for candidate in p.get('candidate_requirements', []):
+            need = ref_record(store, candidate, {'REQUIREMENT'})
+            if need['payload']['media_type'] != p['media_type'] or (ref_record(store, need['payload']['scope'])['kind'] == 'STATE' and not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', []))):
+                raise ValueError('candidate requirement needs exact state and media coverage')
+        call = ref_record(store, p.get("production"), {"CALL"})
+        if call["payload"].get("status") not in ("submitted", "completed"):
+            raise ValueError("an asset needs a real production record")
+        _lineage(store, p)
+        if p.get("media_type") == "image" and "i2i_depth" not in p.get("lineage", {}):
+            raise ValueError("an image asset requires a traceable image lineage")
+        if p.get("media_type") == "image" and call["payload"].get("lineage") != p.get("lineage"):
+            raise ValueError("asset lineage differs from actual production input")
     elif kind == "CALL":
         if p.get("status") not in ("planned", "submitted", "completed", "failed", "unknown"):
             raise ValueError("invalid production call status")
@@ -519,35 +512,6 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             op = other["payload"]
             if op.get("relation_type") == "adoption" and other["object_id"] != object_id and op["scope"]["object_id"] == p["scope"]["object_id"] and op["slot"] == p["slot"]:
                 raise Conflict("scope/slot already has an adoption; revise that object explicitly")
-    elif kind == "ASSEMBLY":
-        for key in ("fps", "width", "height", "duration_frames"):
-            if type(p.get(key)) is not int or p[key] <= 0:
-                raise ValueError("positive integer required: " + key)
-        visual_intervals = []
-        for item in _list(p, "items"):
-            _text(item.get("track"), "track")
-            for key in ("start_frame", "duration_frames"):
-                if type(item.get(key)) is not int or item[key] < (1 if key == "duration_frames" else 0):
-                    raise ValueError("invalid timeline frames")
-            if item["start_frame"] + item["duration_frames"] > p["duration_frames"]:
-                raise ValueError("timeline item exceeds assembly")
-            _, component = component_for(store, item.get("asset"), item.get("component_id"))
-            shot = ref_record(store, item.get("shot"), {"SHOT_DESIGN"})
-            if shot["payload"]["fps"] != p["fps"]:
-                raise ValueError("shot and assembly frame rates differ")
-            if component["mime"].startswith(("image/", "video/")):
-                visual_intervals.append((item["start_frame"], item["start_frame"] + item["duration_frames"]))
-            if "duration_seconds" in component:
-                validate_selection(component, {"range": {"start_seconds": item.get("in_seconds"), "end_seconds": item.get("out_seconds")}})
-                if abs(item["out_seconds"] - item["in_seconds"] - item["duration_frames"] / p["fps"]) > 1 / p["fps"]:
-                    raise ValueError("timeline clip duration differs from selected media")
-        covered = 0
-        for start, end in sorted(visual_intervals):
-            if start > covered:
-                raise ValueError("assembly visual coverage has a gap")
-            covered = max(covered, end)
-        if covered != p["duration_frames"]:
-            raise ValueError("assembly needs visual coverage through its final frame")
 
 
 def current_records(store, kinds=None):

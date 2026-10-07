@@ -1,6 +1,6 @@
 /* Episode / scene navigation and all-shot rows share one exact context reader. */
 let breakdownEpoch=0,breakdownSelectionEpoch=0;
-function productionTab(){const p=new URL(location.href).searchParams;if(state.workspace==='materials.workspace')return 'materials';if(state.workspace==='production.workspace')return p.get('production_tab')==='history'?'history':'shots';return (['entities','materials','breakdown'].includes(p.get('production_tab'))?p.get('production_tab'):null)||((p.has('production_entity')||p.has('entity_state'))?'entities':'breakdown')}
+function productionTab(){const p=new URL(location.href).searchParams;if(state.workspace==='materials.workspace')return 'materials';if(p.get('production_tab')==='history')return 'retired';return (['entities','materials','breakdown'].includes(p.get('production_tab'))?p.get('production_tab'):null)||((p.has('production_entity')||p.has('entity_state'))?'entities':'breakdown')}
 function productionTabs(){if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs()}
 function breakdownRoute(values){const url=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)url.searchParams.delete(k);else url.searchParams.set(k,v)}history.replaceState(history.state,'',url)}
 function breakdownHeading(host){productionTabs(host)}
@@ -45,7 +45,7 @@ async function refreshShotReference(context,slot,result){
   breakdownRoute({shot_material_id:context.need.object_id,shot_plan:result.number,shot_candidate:null});
   await loadProductionBreakdown({refresh:true}).catch(e=>toast(e.message));
   const target=document.querySelector(`[data-shot-id="${CSS.escape(context.need.payload.scope.object_id)}"] [data-input-index="${slot.index}"] button`);target?.focus({preventScroll:true});
-  if(draft&&target&&state.workspace==='production.workspace'){Object.assign(state,draft);renderComments()}
+  if(draft&&target&&state.workspace==='settings.workspace'){Object.assign(state,draft);renderComments()}
 }
 function openShotReference(item,context,trigger){
   const slot=item.slot;if(!slot?.material_id||!slot.record){toast('准确素材身份缺失，需先修复此参考槽位');return}
@@ -208,7 +208,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   const staged=el('div'),loading=nodeText('p','breakdown-loading','正在读取本集镜头…',host);loading.setAttribute('role','status');
   const sidebarTop=existingNav?.scrollTop||0,episodeLeft=host.querySelector('.breakdown-episode-tabs')?.scrollLeft||0;
   try{breakdownHeading(host);
-  const query=new URLSearchParams({episode:params.get('breakdown_episode')||'',...(productionTab()==='shots'?{view:'shots'}:{})});
+  const query=new URLSearchParams({episode:params.get('breakdown_episode')||'',view:'breakdown'});
   if(targetId){query.set('object_id',targetId);if(targetRevision)query.set('revision_id',targetRevision)}
   // Within this immutable episode, selecting an already known exact scene or
   // shot only needs its body. A refresh, changed edition, or another tab reads
@@ -220,11 +220,11 @@ async function loadProductionBreakdown({refresh=false}={}){
   state.breakdownCatalog={workspace,tab:productionTab(),data};
   state.breakdownData=data;state.productionRecords=[data.lock,...data.scenes,...data.shots].filter(Boolean);
   const episodes=el('nav','screenplay-episodes breakdown-episode-tabs');episodes.setAttribute('aria-label','分集导航');staged.append(episodes);
-  if(productionTab()==='shots'){const scope='镜头制作评论：本集准确场镜及关联视频的全部制作版本与候选；含已关闭评论，按评论去重，不含剧本和上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
+  {const scope='制作拆解评论：本集准确场镜及关联视频的全部制作版本与候选；含已关闭评论，按评论去重，不含剧本和上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
   for(const ep of data.episodes)renderEpisodeCard(episodes,{...ep,payload:{number:ep.number,title:ep.title,scenes:ep.scenes}},ep.object_id===data.episode,breakdownEpisodeCount(ep),()=>{if(ep.object_id!==(new URL(location.href).searchParams.get('breakdown_episode')||data.episode))breakdownNavigate({breakdown_episode:ep.object_id,breakdown_scene:null,breakdown_object:null,breakdown_revision:null})});
   const active=episodes.querySelector('.active');if(active){const r=active.getBoundingClientRect(),edge=episodes.getBoundingClientRect();if(r.right>edge.right)episodes.scrollLeft+=r.right-edge.right;if(r.left<edge.left)episodes.scrollLeft+=r.left-edge.left}
   const layout=el('div','breakdown-scene-layout'),nav=el('aside','text-reader-index breakdown-scenes'),head=el('header'),sceneList=el('nav','breakdown-scene-list'),body=el('article','breakdown-body');
-  nodeText('h2',null,'本集场镜',head);nav.append(head,sceneList);sceneList.setAttribute('aria-label','场镜导航');body.setAttribute('aria-label',productionTab()==='shots'?'镜头制作':'逐镜设计');layout.append(nav,body);staged.append(layout);
+  nodeText('h2',null,'本集场镜',head);nav.append(head,sceneList);sceneList.setAttribute('aria-label','场镜导航');body.setAttribute('aria-label','逐镜设计与视频制作');layout.append(nav,body);staged.append(layout);
   const target=data.shots.find(r=>r.object_id===targetId&&(!targetRevision||r.id===targetRevision))||data.scenes.find(r=>r.object_id===targetId&&(!targetRevision||r.id===targetRevision));
   if(targetId&&!target)throw Error('准确场镜不在此目录；未替换为同名或最新对象');
   const selected=(target?.kind==='SHOT_DESIGN'?data.scenes.find(r=>r.id===target.payload.parent?.revision_id):target)||data.scenes.find(r=>r.object_id===params.get('breakdown_scene'))||data.scenes[0];
@@ -246,6 +246,9 @@ async function loadProductionBreakdown({refresh=false}={}){
     breakdownRoute({material_id:null,material_version:null,material_round:null,material_target:null,production_entity:null,entity_state:null});
     await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params},null);
   }
+  }catch(error){
+    if(epoch===breakdownEpoch&&workspace===state.workspace){host.replaceChildren();nodeText('p','production-issue','准确制作位置不可用：'+error.message,host)}
+    throw error;
   }finally{loading.remove()}
 }
 function groupedShotMaterials(items){
@@ -255,18 +258,17 @@ function groupedShotMaterials(items){
 }
 async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
   const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
-  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:productionTab()==='shots'?'shots':'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
+  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
   body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
-  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,...(workspace==='production.workspace'?{production_tab:'shots'}:{})});
+  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
   const page=el('section','breakdown-scene');body.append(page);
   const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);materialReferenceLink(heading,data.scene.payload.source,'查看剧本','scene_script');header.append(heading);page.append(header);
-  if(productionTab()==='shots'&&data.source_scene){const values=[data.source_scene.location,data.source_scene.time].filter(Boolean);if(values.length)nodeText('p','production-meta',values.join(' · '),header)}
   for(const item of data.shots){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);materialReferenceLink(title,shot.payload.source,'查看剧本','full_scene');heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
-    if(productionTab()==='shots'){const needs=item.context.requirements.filter(r=>r.payload.media_type==='video');for(const need of needs)breakdownPrompt(text,need,item.context);if(!needs.length)nodeText('p','production-meta','本镜视频生成方案待补齐',text)}else breakdownShotText(text,shot);
-    row.append(text,materials);page.append(row);nodeText('h4',null,productionTab()==='shots'?'本镜视频':'本镜素材',materials);
+    breakdownShotText(text,shot);{const needs=item.context.requirements.filter(r=>r.payload.media_type==='video');for(const need of needs)breakdownPrompt(text,need,item.context);if(!needs.length)nodeText('p','production-meta','本镜视频生成方案待补齐',text)}
+    row.append(text,materials);page.append(row);nodeText('h4',null,'本镜素材',materials);
     if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
-    const items=(item.context.materials||[]).filter(i=>productionTab()!=='shots'||i.media_type==='video');
+    const items=item.context.materials||[];
     for(const group of groupedShotMaterials(items)){const section=el('section','breakdown-material-group');nodeText('h5',null,group.label,section);materials.append(section);
       for(const item of group.items)materialSmallCard(section,item,trigger=>{const choice=state.breakdownVideoSelections?.[item.id],params=choice?.number?new URLSearchParams({material_id:item.object_id,material_version:choice.number,...(choice.baseline?{material_baseline:choice.baseline}:{}),...(choice.candidate?{material_target:choice.candidate}:{})}):item.canonical_material_id?new URLSearchParams({material_id:item.canonical_material_id}):null;
         openUnifiedMaterial({...item.reference,...choice?.reference,object_id:choice?.reference?.object_id||item.reference?.object_id||item.object_id,revision_id:choice?.reference?.revision_id||item.reference?.revision_id||item.id,params,defaultSelection:!choice&&item.association!=='adoption'&&item.record?.kind!=='ASSET'},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
@@ -340,7 +342,7 @@ function restoreProductionDraft(){
   else if(changed){state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null}
 }
 function restoreBreakdownPromptDraft(row){
-  if(!row||productionTab()!=='shots')return;
+  if(!row||!['breakdown','shots'].includes(productionTab()))return;
   const surfaces=[...row.querySelectorAll('[data-production-blocks]')];
   for(const [key,saved] of Object.entries(state.productionDraftContexts||{}).reverse()){
     let revision;try{revision=JSON.parse(key)[0];if(!saved.anchor||!saved.draftKey||localStorage.getItem(saved.draftKey)===null)continue}catch{continue}

@@ -278,8 +278,7 @@ function renderWorkspaceNav(){
   const sections=[
     ['production.approach','制作思路','思路','故事创作与生产制作方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与分集剧本'],
-    ['settings.workspace','制作设定','设定','主体、空间与实体关系'],
-    ['production.workspace','全剧制作','制作','镜头、场景与分集成片'],
+    ['settings.workspace','生产制作','制作','制作拆解、实体与素材'],
     ['project.configuration','系统管理','管理','故事项目与系统配置']
   ];
   for(const [id,title,index,description] of sections){
@@ -310,6 +309,7 @@ function switchWorkspace(id,updateUrl=true){
   if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   hideSelectionAction();
   if(id==='current')id='production.approach';
+  if(typeof normalizeProductionWorkspace==='function')id=normalizeProductionWorkspace(id);
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='production.approach';
   if(state.workspace!==id)cancelSourceChapterRestore();
   const previous=state.workspace,storyChild=['story.sources','story.outline','story.script'].includes(id);
@@ -324,7 +324,7 @@ function switchWorkspace(id,updateUrl=true){
   $('#placeholder-view').hidden=storyChild||isProduction()||id==='project.configuration'||id==='production.approach';
   $('#production-view').hidden=!isProduction();
   $('#comments-toggle').hidden=!storyChild&&!isProduction();closePanel();
-  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['制作设定','设'],'materials.workspace':['制作设定','设'],'production.workspace':['全剧制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
+  const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['生产制作','制'],'materials.workspace':['生产制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations({preserve:true});if(id==='production.approach')Promise.resolve(renderApproach()).then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});if(id==='story.outline'){restoreStoryDraft();renderStructureReader();renderComments()}
   if(source){restoreStoryDraft();renderDocument();renderComments();scheduleSourceChapter()}

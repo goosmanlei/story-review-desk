@@ -178,18 +178,6 @@ class ProductionTest(unittest.TestCase):
                           production=self.ref('recording'),lineage={})
         with self.assertRaisesRegex(ValueError, 'media type'): self.put(wrong)
 
-    def test_assembly_rejects_uncovered_frames(self):
-        self.image()
-        self.put(self.spec('shot','SHOT_DESIGN',episode=self.ref('episode'),source=self.source,scene_id='scene',
-                           number=1,purpose='验收',framing='全景',spatial='门外',action_start='静止',action_end='静止',
-                           continuity='独立',duration_frames=24,fps=24,sound=[],entities=[],states=[]))
-        assembly = self.spec('timeline','ASSEMBLY',fps=24,width=1920,height=1080,duration_frames=24,items=[{
-            'track':'picture','start_frame':1,'duration_frames':23,'asset':self.ref('still'),
-            'component_id':'original','shot':self.ref('shot')}])
-        with self.assertRaisesRegex(ValueError, 'gap'): self.put(assembly)
-        assembly['payload']['items'][0].update(start_frame=0,duration_frames=24)
-        self.put(assembly)
-
     def test_native_resolution_needs_actual_pixels_and_provenance(self):
         self.put(self.entity()); self.image()
         need=self.requirement(); need['payload'].update(media_type='image',usage='generation_input',

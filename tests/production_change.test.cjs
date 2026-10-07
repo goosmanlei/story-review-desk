@@ -21,7 +21,7 @@ const ready=(scope,count=1)=>({scope:record(scope,'EPISODE'),required_count:coun
 function fixture(){
   const host=new Node('main'),episodes=[record('episode-A','EPISODE'),record('episode-B','EPISODE')],records=episodes.flatMap(e=>['a','b'].map(letter=>record(e.object_id+'-prep-'+letter,'PREPARATION',{source:{object_id:e.object_id,revision_id:e.id,scene_id:'scene-'+letter}})));
   const messages=[],requests=[],reads=[],posts=[];
-  const context={state:{workspace:'production.workspace',screenplays:[{episodes}]},URL,URLSearchParams,location:{href:'http://fixture/?workspace=production.workspace'},document:{querySelectorAll:()=>[],createElementNS:(namespace,tag)=>Object.assign(new Node(tag),{namespaceURI:namespace})},isProduction:()=>true,renderComments(){},toast:text=>messages.push(text),el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,cls);n.textContent=text;parent.append(n);return n},crypto:require('node:crypto').webcrypto};
+  const context={state:{workspace:'materials.workspace',screenplays:[{episodes}]},URL,URLSearchParams,location:{href:'http://fixture/?workspace=materials.workspace'},document:{querySelectorAll:()=>[],createElementNS:(namespace,tag)=>Object.assign(new Node(tag),{namespaceURI:namespace})},isProduction:()=>true,renderComments(){},toast:text=>messages.push(text),el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,cls);n.textContent=text;parent.append(n);return n},crypto:require('node:crypto').webcrypto};
   context.api=async(url,options)=>{
     if(options?.method==='POST')posts.push(JSON.parse(options.body));
     if(url==='/api/production')return {records};
@@ -42,14 +42,10 @@ function fixture(){
 }
 const response=(status,data)=>({status,ok:status>=200&&status<300,json:async()=>data});
 const saved=request=>({object_id:request.object_id,kind:'JUDGMENT',version:1,payload:plain(request.payload)});
-async function scope(f,episode,count=1){const ep=f.byLabel('制作分集');if(ep.value!==episode){ep.value=episode;ep.onchange();await flush()}const action=f.button('检查本集素材缺项').onclick();await flush();f.requests.at(-1).resolve(ready(episode,count));await action;return f.byLabel('所选集场素材缺项')}
+
 function fill(f,box){const form=f.form(box);form.field('变更处理').value='keep';form.field('复核者').value='Technical reviewer';form.field('复核依据').value='Keep exact reference';return form}
 
-test('a late saved judgment leaves the newer episode, all-scenes filter and readiness intact',async()=>{
-  const f=fixture();await f.context.loadProductionWorkspace();const a=await scope(f,'episode-A');await f.button('记录变更处理',a).onclick();const old=fill(f,a.querySelectorAll('.production-editor')[0]);const saving=old.button('保存变更处理').onclick();await flush();const post=f.requests.at(-1);
-  const b=await scope(f,'episode-B');const before=f.text(b);post.resolve({saved:true});await saving;
-  assert.equal(f.byLabel('制作分集').value,'episode-B');assert.equal(f.byLabel('制作场次').value,'');assert.equal(b.hidden,false);assert.equal(f.text(b),before);assert.equal(f.requests.filter(r=>r.url.includes('readiness')).length,2);assert.match(f.messages.at(-1),/「upstream」.*已保存/);assert.equal(f.posts.length,1);
-});
+
 test('late failures after navigation and success or failure after cancel never redraw another editor',async()=>{
   for(const mode of ['navigation-failure','cancel-failure','cancel-success']){
     const f=fixture(),old=f.open();const saving=old.button('保存变更处理').onclick();await flush();
@@ -59,14 +55,8 @@ test('late failures after navigation and success or failure after cancel never r
     assert.equal(next.box.isConnected,true);assert.equal(next.field('复核依据').value,'a different new opinion');assert.equal(f.reads.length,0);assert.equal(f.messages.length,mode.endsWith('success')?1:0);
   }
 });
-test('same scope refresh preserves page, title, close control and record body',async()=>{
-  const f=fixture();await f.context.loadProductionWorkspace();const panel=await scope(f,'episode-A',45);await f.button('下一页',panel).onclick();await f.button('记录变更处理',panel).onclick();const old=fill(f,panel.querySelectorAll('.production-editor')[0]);const reader=f.context.$('#production-reader'),readerText=f.text(reader);const saving=old.button('保存变更处理').onclick();await flush();f.requests.at(-1).resolve({});await flush();assert.match(f.requests.at(-1).url,/readiness.*episode-A/);f.requests.at(-1).resolve(ready('episode-A',45));await saving;
-  assert.equal(f.text(reader),readerText);assert.equal(panel.querySelectorAll('.production-editor').length,0);assert.equal(panel.all().find(n=>n.tag==='strong').textContent,'episode-A-need-21');assert.match(f.text(panel),/第 21–40 项/);assert.match(f.text(panel),/episode-A/);assert.equal(f.byLabel('制作场次').value,'');await f.button('收起缺项检查',panel).onclick();assert.equal(panel.hidden,true);
-});
-test('a successful POST and failed local GET remain saved and cannot post twice',async()=>{
-  const f=fixture();await f.context.loadProductionWorkspace();const panel=await scope(f,'episode-A');await f.button('记录变更处理',panel).onclick();const old=fill(f,panel.querySelectorAll('.production-editor')[0]);const saving=old.button('保存变更处理').onclick();await flush();f.requests.at(-1).resolve({});await flush();f.requests.at(-1).reject(Error('readiness unavailable'));await saving;
-  assert.match(old.notice().textContent,/已保存，但当前检查尚未更新/);assert.equal(old.button('保存变更处理').disabled,true);await old.button('保存变更处理').onclick();assert.equal(f.posts.length,1);assert.equal(old.field('复核依据').value,'Keep exact reference');
-});
+
+
 test('in-flight fields and same-editor repeated save are locked to one exact request',async()=>{
   const f=fixture(),form=f.open();const first=form.button('保存变更处理').onclick();await flush();for(const label of ['变更处理','复核者','复核依据'])assert.equal(form.field(label).disabled,true);assert.equal(form.button('取消').disabled,false);
   form.field('变更处理').value='rework';await form.button('保存变更处理').onclick();assert.equal(f.posts.length,1);assert.equal(f.posts[0].payload.change.action,'keep');f.requests[0].resolve({});await first;
@@ -96,20 +86,7 @@ test('changed input after unknown result cannot describe the old saved request a
 test('cancel while reading an unknown save prevents a repeated POST and any new-editor mutation',async()=>{
   const f=fixture(),old=f.open();const saving=old.button('保存变更处理').onclick();await flush();f.requests[0].reject(Error('lost'));await flush();await old.button('取消').onclick();const next=f.open();f.reads[0].resolve(response(404,{}));await saving;assert.equal(f.posts.length,1);assert.equal(f.messages.length,0);assert.equal(next.box.isConnected,true);
 });
-test('other editors, cancel, paging or changed scope during local refresh prevent replacement',async()=>{
-  for(const mode of ['other-before','other-during','cancel-during','page-during','scope-during']){
-    const f=fixture();await f.context.loadProductionWorkspace();const panel=await scope(f,'episode-A',45);await f.button('记录变更处理',panel).onclick();const old=fill(f,panel.querySelectorAll('.production-editor')[0]);const saving=old.button('保存变更处理').onclick();await flush();const post=f.requests.at(-1);
-    let next;if(mode==='other-before')next=f.open({},old.box.parent);
-    post.resolve({});await flush();
-    if(mode==='other-before'){await saving;assert.equal(next.box.isConnected,true);assert.equal(f.requests.filter(r=>r.url.includes('readiness')).length,1);continue}
-    const refreshing=f.requests.at(-1);
-    if(mode==='other-during')next=f.open({},old.box.parent);
-    if(mode==='cancel-during')await old.button('取消').onclick();
-    if(mode==='page-during')await f.button('下一页',panel).onclick();
-    if(mode==='scope-during')await scope(f,'episode-B',1);
-    const before=f.text(panel);refreshing.resolve(ready('episode-A',45));await saving;assert.equal(f.text(panel),before);if(next)assert.equal(next.box.isConnected,true);
-  }
-});
+
 
 test('download labels use the exact readiness scope, including kind-less screenplay snapshots',async()=>{
   for(const [kind,label] of [['EPISODE','本集'],['PREPARATION','本场'],['SHOT_DESIGN','逐镜'],['STATE','状态参考']]){
@@ -183,14 +160,14 @@ test('saved judgment and failed actual list refresh show both saved feedback and
 });
 
 const decisionRecord=(version=3,action='keep',id='existing-decision')=>({object_id:id,id:id+'-r'+version,kind:'JUDGMENT',version,payload:{format:'production-judgment-v1',title:'upstream · 变更复核',blocks:[{id:'decision',text:'Existing explicit reason'}],target:plain(change.target),verdict:'impact_resolved',actor:'Original recorded actor',reason:'Existing explicit reason',change:{old:{object_id:change.object_id,revision_id:change.used_revision},new:{object_id:change.object_id,revision_id:change.current_revision},action}}});
-function historyRouteFixture(href='http://fixture/?workspace=production.workspace&production_tab=history'){
+function judgmentRouteFixture(href='http://fixture/?workspace=materials.workspace'){
  const f=fixture(),c=f.context,old=decisionRecord(1,'keep'),latest=decisionRecord(2,'rework'),originalApi=c.api;
  const stack=[href],positions=[],reads=[],switches=[];let cursor=0;
  c.location.href=href;c.state.workspace=new URL(href).searchParams.get('workspace');
  c.history={replaceState(_s,_t,url){c.location.href=stack[cursor]=String(url)},pushState(_s,_t,url){stack.splice(++cursor);stack.push(String(url));c.location.href=String(url)}};
  c.rememberWorkspacePosition=()=>positions.push({url:c.location.href,scroll:c.$('#production-reader')?.scrollTop});
  c.rememberWorkspaceRoute=()=>{};
- c.productionTab=()=>new URL(c.location.href).searchParams.get('production_tab')||'history';c.productionTabs=()=>{};
+ c.productionTab=()=> 'records';c.productionTabs=()=>{};
  c.api=async(url,options)=>{
   reads.push(url);const params=new URL(url,'http://fixture').searchParams;
   if(url.startsWith('/api/production/index?'))return {records:[...f.records,...(params.get('object_id')===latest.object_id?[latest]:[])]};
@@ -202,39 +179,15 @@ function historyRouteFixture(href='http://fixture/?workspace=production.workspac
  return {...f,old,latest,stack,positions,routeReads:reads,switches,pop};
 }
 
-test('the actual change-history button stays in production history and preserves the exact source entry',async()=>{
- const f=historyRouteFixture();await f.context.loadProductionWorkspace();
- const sourceUrl=f.context.location.href,sourceId=f.context.state.productionSelected.id;
- f.context.$('#production-reader').scrollTop=375;
- const readiness=ready('episode-A');readiness.requirements[0].change_reviews=[{...plain(change),decision:f.latest}];
- const rendering=f.context.renderProductionReadiness(f.host,f.episodes[0],{isCurrent:()=>true});await flush();f.requests.at(-1).resolve(readiness);await rendering;
- await f.button('查看处理历史').onclick();
- assert.equal(f.context.state.workspace,'production.workspace');assert.equal(f.context.state.productionSelected.id,f.latest.id);
- assert.deepEqual(f.switches,[]);assert.equal(f.stack.length,2);assert.equal(f.stack[0],sourceUrl);
- assert.deepEqual(f.positions,[{url:sourceUrl,scroll:375}]);
- const route=new URL(f.context.location.href);assert.equal(route.searchParams.get('production_tab'),'history');assert.equal(route.searchParams.get('production_revision'),f.latest.id);
- await f.context.openProductionRecord(f.old.object_id,f.old.id);assert.equal(f.stack.length,2);assert.equal(f.context.state.productionSelected.id,f.old.id);
- const exactOldUrl=f.context.location.href;await f.pop(-1);assert.equal(f.context.state.productionSelected.id,sourceId);assert.equal(f.context.location.href,sourceUrl);
- await f.pop(1);assert.equal(f.context.state.productionSelected.id,f.old.id);assert.equal(f.context.location.href,exactOldUrl);assert.equal(f.stack.length,2);
- const refreshed=historyRouteFixture(exactOldUrl);await refreshed.context.loadProductionWorkspace();assert.equal(refreshed.context.state.productionSelected.id,f.old.id);
- assert.ok(refreshed.routeReads.some(url=>url.includes('index?')&&url.includes('object_id='+f.old.object_id)));
- assert.ok(refreshed.routeReads.some(url=>url.includes('revision_id='+f.old.id)));assert.equal(refreshed.stack.length,1);
- assert.ok(!refreshed.byLabel('记录类型').children.some(option=>option.value==='JUDGMENT'),'explicit history does not expand the default list kinds');
-});
 
-test('ordinary change history can leave shot mode without overwriting the source route',async()=>{
- const f=historyRouteFixture();await f.context.loadProductionWorkspace();
- f.context.history.replaceState(null,'','http://fixture/?workspace=production.workspace&production_tab=shots&breakdown_scene=scene-A');
- const source=f.context.location.href;await f.context.openProductionRecord(f.latest.object_id,f.latest.id,true);await flush();
- assert.deepEqual(f.switches,[{workspace:'production.workspace',updateUrl:false}]);assert.equal(f.stack[0],source);
- assert.equal(f.context.state.productionSelected.id,f.latest.id);assert.equal(new URL(f.context.location.href).searchParams.get('production_tab'),'history');
-});
+
+
 
 test('material judgments and title-only decisions retain their established workspace ownership',async()=>{
- const f=historyRouteFixture();await f.context.loadProductionWorkspace();
+ const f=judgmentRouteFixture();await f.context.loadProductionWorkspace();
  for(const row of [{...f.latest,payload:{...f.latest.payload,change:null}},{...f.latest,payload:{...f.latest.payload,change:{...f.latest.payload.change,scope:'state_title_only'}}}]){
   f.context.api=async()=>({record:row,history:[row],uses:[]});const calls=[];f.context.switchWorkspace=(workspace,updateUrl)=>calls.push({workspace,updateUrl});
-  f.context.state.workspace='production.workspace';await f.context.openProductionRecord(row.object_id,row.id,true);
+  f.context.state.workspace='settings.workspace';await f.context.openProductionRecord(row.object_id,row.id,true);
   assert.deepEqual(calls,[{workspace:'materials.workspace',updateUrl:false}]);
  }
  f.context.state.workspace='materials.workspace';f.context.location.href='http://fixture/?workspace=materials.workspace';f.context.api=async()=>({record:f.latest,history:[f.latest],uses:[]});
@@ -243,7 +196,7 @@ test('material judgments and title-only decisions retain their established works
 });
 
 test('a late change-history read cannot add a route after leaving its originating workspace',async()=>{
- const f=historyRouteFixture();await f.context.loadProductionWorkspace();const source=f.context.location.href;
+ const f=judgmentRouteFixture();await f.context.loadProductionWorkspace();const source=f.context.location.href;
  let release;f.context.api=()=>new Promise(resolve=>{release=resolve});
  const pending=f.context.openProductionRecord(f.latest.object_id,f.latest.id,true);f.context.state.workspace='story.sources';release({record:f.latest});await pending;
  assert.equal(f.context.location.href,source);assert.equal(f.stack.length,1);assert.deepEqual(f.positions,[]);assert.deepEqual(f.switches,[]);

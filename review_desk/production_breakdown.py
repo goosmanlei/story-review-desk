@@ -44,12 +44,12 @@ def rows(store, kind, condition='', params=()):
 
 
 def index(store, view, object_id=None):
-    kinds={'settings':('ENTITY','STATE','REPRESENTATION'), 'history':('INPUT_LOCK','PREPARATION','ASSEMBLY','DELIVERABLE')}.get(view)
+    kinds={'settings':('ENTITY','STATE','REPRESENTATION')}.get(view)
     if not kinds:raise ValueError('unknown production index')
     values=[r for kind in kinds for r in rows(store,kind)]
     if object_id and not any(r['object_id']==object_id for r in values):
         selected=p.record(store,object_id)
-        allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'} if view=='settings' else {'SHOT_DESIGN','REQUIREMENT','ASSET','CALL','JUDGMENT'}
+        allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'}
         if selected['kind'] in allowed or (view=='settings' and selected['kind']=='RELATION' and selected['payload'].get('relation_type')=='entity'):
             values.append(selected)
     result={'records':values,'material_assets':{}}
@@ -145,9 +145,8 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
         shots=[shot for sc in scenes for shot in scene_shots(store,sc,
                exact_shot if exact_shot and exact_shot['payload']['parent']==ref(sc) else None)]
         targets=[*scenes,*shots]
-        if view=='shots':
-            for shot in shots:
-                targets.extend(material_comment_targets(store,shot['id']))
+        for shot in shots:
+            targets.extend(material_comment_targets(store,shot['id']))
         entries.append({'object_id':ep['object_id'],'id':ep['id'],'number':ep['payload']['number'],
             'title':ep['payload']['title'],'scenes':[{'id':s['id'],'title':s.get('heading',s['id'])} for s in ep['payload']['scenes']],
             'comment_targets':list({r['id']:ref(r) for r in targets}.values())})

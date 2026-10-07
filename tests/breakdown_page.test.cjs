@@ -31,7 +31,7 @@ test('returning to a shot restores only a draft on a displayed exact Prompt revi
   c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
   surface.dataset.productionBlocks='plan-v3';c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
   surface.dataset.productionBlocks='plan-v2';c.localStorage.getItem=()=>null;c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
-  c.productionTab=()=> 'breakdown';c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
+  c.productionTab=()=> 'breakdown';c.localStorage.getItem=()=> 'text';c.restoreBreakdownPromptDraft(row);assert.equal(focused,2);
 });
 test('clicking the mounted episode again supersedes an in-flight episode switch',async()=>{
   const c=fixture(),requests=[],pending=[];
