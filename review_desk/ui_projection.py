@@ -185,7 +185,9 @@ def card(store, object_id, revision_id=None, entity_id=None):
 def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
     if view not in (None, 'breakdown', 'shots'):
         raise ValueError('unknown scene view')
-    metadata = view == 'breakdown'
+    # Full video definitions are read below for this scene's shots only. Other
+    # materials and ancestor contexts retain the lightweight list projection.
+    metadata = view is not None
     read_ref = light.ref_record if metadata else p.ref_record
     selected=p.record(store,object_id,revision_id)
     if selected['kind']!='PREPARATION':raise ValueError('scene reader requires a scene')
@@ -250,7 +252,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
                 'placement':b.ref(owner),'placement_level':levels.get(owner['kind'],'shot'),
                 'placement_title':owner['payload']['title'],'record':row,
                 'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
-        context['video_details']={} if metadata else {r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
+        context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video' and scoped['kind']=='SHOT_DESIGN'}
         from .shot_references import slots,inputs_for
         from .reference_paths import project as project_reference_paths, annotations as reference_annotations
         for detail in context['video_details'].values():

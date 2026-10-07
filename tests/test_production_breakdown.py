@@ -104,7 +104,7 @@ class BreakdownTest(unittest.TestCase):
         self.store.put_object('story','STORY',{'title':'screenplay','blocks':[]})
         self.put(self.spec('lock','INPUT_LOCK',screenplay=self.ref('story'),episodes=[self.ref('episode')],
             approval={'actor':'fixture','statement':'fixture only','scope':'one episode'},specification={}))
-        self.assertIn('lock',[r['object_id'] for r in bd.index(self.store,'history')['records']])
+        with self.assertRaisesRegex(ValueError, 'unknown production index'): bd.index(self.store,'history')
         self.scene_shot();self.put(self.requirement(scope='shot'))
         for table in reversed(mp.TABLES):self.store.db.execute('DELETE FROM '+table)
         self.store.db.commit()

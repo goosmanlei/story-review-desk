@@ -416,7 +416,7 @@ test('saved reference routing waits for the modal history entry to return',()=>{
   vm.runInContext('reviewDialogBackPending=true',c);let changed=false;c.afterReviewDialogReturn(()=>changed=true);assert.equal(changed,false);pop({stopImmediatePropagation(){}});assert.equal(changed,true);
 });
 test('reference save refresh keeps the draft attached to the original immutable text',async()=>{
-  const {c}=fixture(),old=row('video','REQUIREMENT'),anchor={type:'text',quote:'original'};c.state.workspace='production.workspace';c.state.anchor=anchor;c.state.productionSelected=old;c.state.breakdownVideoSelections={};
+  const {c}=fixture(),old=row('video','REQUIREMENT'),anchor={type:'text',quote:'original'};c.state.workspace='settings.workspace';c.state.anchor=anchor;c.state.productionSelected=old;c.state.breakdownVideoSelections={};
   c.loadProductionBreakdown=async()=>{c.state.anchor=null;c.state.productionSelected=row('scene','PREPARATION')};c.document.querySelector=()=>({focus(){c.state.anchor=null}});
   await c.refreshShotReference({need:{...old,payload:{scope:{object_id:'shot'}}}},{index:0},{number:2});assert.equal(c.state.anchor,anchor);assert.equal(c.state.productionSelected,old);assert.ok(c.location.href.includes('shot_plan=2'));
 });

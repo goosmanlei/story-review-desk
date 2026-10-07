@@ -129,7 +129,7 @@ class UiProjectionTest(unittest.TestCase):
     def test_breakdown_reads_only_list_metadata_but_keeps_exact_card_and_counts(self):
         self.setup_plans(); self.generate(); self.mount_on_test_shot('need-full-overall')
         full = ui.scene(self.store, 'scene', view='shots')
-        with patch.object(p, 'snapshot', side_effect=AssertionError('breakdown must not expand video history')):
+        with patch.object(p, 'snapshot', wraps=p.snapshot) as snapshots:
             slim = ui.scene(self.store, 'scene', view='breakdown')
         self.assertEqual(slim['scene'], full['scene'])
         self.assertEqual(slim['shots'][0]['record'], full['shots'][0]['record'])
@@ -143,7 +143,8 @@ class UiProjectionTest(unittest.TestCase):
         detail = ui.card(self.store, target['object_id'], target['revision_id'])
         self.assertEqual(detail['detail']['record']['id'], target['revision_id'])
         self.assertIn('generation', detail['detail']['record']['payload'])
-        self.assertEqual(slim['shots'][0]['context']['video_details'], {})
+        self.assertEqual(slim['shots'][0]['context']['video_details'], full['shots'][0]['context']['video_details'])
+        self.assertTrue(all(call.kwargs['object_id'] in {r['object_id'] for shot in slim['shots'] for r in shot['context']['requirements'] if r['payload']['media_type']=='video'} for call in snapshots.call_args_list))
 
     def test_scene_fallback_keeps_exact_scope_and_rejects_placeholder_or_preview_as_results(self):
         self.setup_plans(); self.media(); self.mount_on_test_shot('voice')

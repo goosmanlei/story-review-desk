@@ -15,24 +15,6 @@ function setup(records,api){
 }
 const plain=value=>JSON.parse(JSON.stringify(value));
 
-test('history type filters expose only loaded kinds and retain accurately supplemented records',()=>{
-  const baseline=['INPUT_LOCK','PREPARATION','ASSEMBLY','DELIVERABLE'].map(kind=>row(kind.toLowerCase(),kind));
-  const declaration=source.split('\n').find(line=>line.trim().startsWith('const kindOptions='));
-  assert.ok(declaration,'test must exercise the actual history filter options');
-  for(const [records,expected] of [
-    [baseline,['','PREPARATION','ASSEMBLY','DELIVERABLE']],
-    [[...baseline,row('linked-shot','SHOT_DESIGN',{},'exact-shot-revision')],['','PREPARATION','SHOT_DESIGN','ASSEMBLY','DELIVERABLE']],
-    [[...baseline,row('linked-requirement','REQUIREMENT',{},'exact-requirement-revision')],['','PREPARATION','REQUIREMENT','ASSEMBLY','DELIVERABLE']],
-    [[],['']],
-  ]){
-    const before=JSON.stringify(records),ctx=setup(records);ctx.workspace='production.workspace';ctx.result={records};
-    const options=plain(vm.runInContext('(()=>{'+declaration+'return kindOptions})()',ctx));
-    assert.deepEqual(options.map(option=>option[0]),expected);
-    assert.ok(options.every(([kind])=>!kind||records.some(record=>record.kind===kind)));
-    assert.equal(JSON.stringify(records),before);
-  }
-});
-
 test('withdrawn entities and states leave current lists without deleting historical rows',()=>{
   const a=row('a','ENTITY'),old=row('old','ENTITY',{status:'withdrawn'});
   const current=row('current','STATE',{state_model:'complete-v1',entity:{object_id:'a'}});
@@ -124,7 +106,7 @@ function recordButtons(ctx,ids){
 }
 test('record navigation keeps visual and accessible selection on the exact displayed object',async()=>{
   const a=row('a','PREPARATION'),b=row('b','PREPARATION'),old={...b,id:'b-old'};
-  const ctx=setup([a,b],recordApi([a,b,old]));ctx.state.workspace='production.workspace';
+  const ctx=setup([a,b],recordApi([a,b,old]));ctx.state.workspace='settings.workspace';
   const buttons=recordButtons(ctx,['a','b',null]);
   for(const [objectId,revisionId,selected] of [['a',null,0],['b',null,1],['b','b-old',1],['a',null,0]]){
     await ctx.openProductionRecord(objectId,revisionId);
@@ -136,7 +118,7 @@ test('record navigation keeps visual and accessible selection on the exact displ
 test('a late record response cannot move either selection marker from the newer record',async()=>{
   const a=row('a','PREPARATION'),b=row('b','PREPARATION');let release;
   const ctx=setup([a,b],url=>new URL(url,'http://localhost').searchParams.get('object_id')==='a'?new Promise(resolve=>{release=()=>resolve({record:a,history:[a]})}):Promise.resolve({record:b,history:[b]}));
-  ctx.state.workspace='production.workspace';const buttons=recordButtons(ctx,['a','b']);
+  ctx.state.workspace='settings.workspace';const buttons=recordButtons(ctx,['a','b']);
   const older=ctx.openProductionRecord('a');await ctx.openProductionRecord('b');release();await older;
   assert.equal(ctx.state.productionSelected,b);
   assert.deepEqual(buttons.map(b=>[b.active,b.attrs['aria-pressed']]),[[false,'false'],[true,'true']]);

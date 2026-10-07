@@ -27,12 +27,9 @@ TYPES = (
     ('制作设定审阅对象', 'RV', 'RV001', '本实例内；保留旧审阅对象身份'),
     ('评论', 'C', 'C001', '本实例内；原文圈选、修订和评论身份不变'),
     ('审阅决定', 'DC', 'DC001', '本实例内，每个可访问的决定对象'),
-    ('组合', 'A', 'A001', '本实例内，每个组合对象'),
-    ('交付物', 'O', 'O001', '本实例内，每个交付物对象'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
-                EPISODE='E', SHOT_DESIGN='SH', REPRESENTATION='RV', JUDGMENT='DC',
-                ASSEMBLY='A', DELIVERABLE='O')
+                EPISODE='E', SHOT_DESIGN='SH', REPRESENTATION='RV', JUDGMENT='DC')
 LEGACY_PREFIXES = {'SOURCE': 'D', 'STORY': 'B'}
 
 

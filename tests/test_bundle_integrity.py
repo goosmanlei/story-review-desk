@@ -61,6 +61,33 @@ class BundleIntegrityTest(unittest.TestCase):
             restore(self.destination, self.bundle)
         self.assert_empty()
 
+    def test_retired_production_types_cannot_reenter_through_restore(self):
+        for kind, name in [('ASSEMBLY', 'assembly'), ('DELIVERABLE', 'deliverable')]:
+            with self.subTest(kind=kind):
+                manifest = export(self.source, self.bundle)
+                oid = 'retired-' + name
+                self.source.put_object(oid, 'JUDGMENT', {
+                    'format': 'production-' + name + '-v1', 'title': oid,
+                    'blocks': [{'id': 'notes', 'text': 'Old isolated fixture'}],
+                })
+                # Reconstruct an old valid-checksum export, independently of
+                # the new exporter which rejects these production formats.
+                framework = json.loads((self.bundle / 'objects.json').read_text())
+                framework['objects'].append({**dict(self.source.db.execute('SELECT * FROM objects WHERE id=?', (oid,)).fetchone()), 'kind': kind})
+                framework['revisions'].append(dict(self.source.db.execute('SELECT * FROM revisions WHERE object_id=?', (oid,)).fetchone()))
+                raw = _bytes(framework)
+                (self.bundle / 'objects.json').write_bytes(raw)
+                manifest['files']['objects.json'] = digest(raw)
+                manifest['objects'] += 1
+                manifest['revisions'] += 1
+                (self.bundle / 'manifest.json').write_bytes(_bytes(manifest))
+                with self.assertRaisesRegex(ValueError, 'unsupported restored production'):
+                    restore(self.destination, self.bundle)
+                self.assert_empty()
+                self.source.db.execute('DELETE FROM revisions WHERE object_id=?', (oid,))
+                self.source.db.execute('DELETE FROM objects WHERE id=?', (oid,))
+                self.source.db.commit()
+
     def test_restore_layout_failure_keeps_database_empty_and_retryable(self):
         self.layout()
         export(self.source, self.bundle)

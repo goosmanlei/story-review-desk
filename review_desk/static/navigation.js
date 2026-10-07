@@ -36,7 +36,16 @@ function reviewPositionText(value){
 const workspaceRoutes=new Map(),workspaceSubRoutes=new Map();
 const workspacePositionSelectors=['#source-view','#source-list','#structure-reader','#structure-index','#screenplay-reader','#screenplay-scene-index','#production-reader','#production-index','.breakdown-body','.breakdown-scene-list','#approach-index'];
 const workspacePositions=new Map();
-function workspaceGroup(id){return ['story.sources','story.outline','story.script'].includes(id)?'story.sources':['settings.workspace','materials.workspace'].includes(id)?'settings.workspace':id}
+function workspaceGroup(id){return ['story.sources','story.outline','story.script'].includes(id)?'story.sources':['settings.workspace','materials.workspace','production.workspace'].includes(id)?'settings.workspace':id}
+function normalizeProductionWorkspace(id){
+  const url=new URL(location.href),p=url.searchParams;
+  if(id==='production.workspace'||id==='settings.workspace'&&p.get('production_tab')==='shots'){
+    id='settings.workspace';p.set('workspace',id);
+    if(p.get('production_tab')!=='history')p.set('production_tab','breakdown');
+    history.replaceState(history.state,'',url);
+  }
+  return id;
+}
 function rememberWorkspaceRoute(){
   const url=new URL(location.href),id=url.searchParams.get('workspace')||'production.approach';
   if(typeof state==='undefined'||id!==state.workspace)return;
@@ -68,7 +77,7 @@ function navigateWorkspace(id){
     switchWorkspace(url.searchParams.get('workspace')||id,false);
   }else{
     if(['settings.workspace','production.workspace'].includes(id)){
-      const url=new URL(location.href);url.searchParams.set('workspace',id);url.searchParams.set('production_tab',id==='settings.workspace'?'breakdown':'shots');
+      id='settings.workspace';const url=new URL(location.href);url.searchParams.set('workspace',id);url.searchParams.set('production_tab','breakdown');
       for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
       url.hash='';history.pushState(null,'',url);switchWorkspace(id,false);
     }else switchWorkspace(id);
@@ -83,7 +92,7 @@ function selectConfigurationSection(section){
 function selectProductionTab(tab){
   if(tab===productionTab())return;
   rememberWorkspacePosition();rememberWorkspaceRoute();
-  const workspace=tab==='materials'?'materials.workspace':['shots','history'].includes(tab)?'production.workspace':'settings.workspace';
+  const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
   const saved=workspaceSubRoutes.get(workspaceGroup(workspace)+':'+tab);
   if(saved){history.pushState(null,'',saved);switchWorkspace(workspace,false);return}
   const url=new URL(location.href);
@@ -102,7 +111,7 @@ function workspaceTabItems(){
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
   if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['CODES','编号前缀']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
-    const options=workspace==='production.workspace'?[['shots','镜头制作'],['history','组合与历史']]:[['breakdown','制作拆解'],['entities','实体管理'],['materials','素材管理']];
+    const options=[['breakdown','制作拆解'],['entities','实体管理'],['materials','素材管理']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));
   }
   return [];
@@ -111,7 +120,7 @@ function renderWorkspaceTabs(){
   renderPageHeading();
   const root=document.querySelector('#workspace-subnav');if(!root)return;
   const focused=root.contains(document.activeElement)?document.activeElement.id:null,scroll=root.scrollLeft;
-  root.replaceChildren();root.setAttribute('aria-label',({'production.approach':'制作思路','story.sources':'故事创作','settings.workspace':'制作设定','production.workspace':'全剧制作','project.configuration':'系统管理'})[workspaceGroup(state.workspace)]+'子页面');
+  root.replaceChildren();root.setAttribute('aria-label',({'production.approach':'制作思路','story.sources':'故事创作','settings.workspace':'生产制作','project.configuration':'系统管理'})[workspaceGroup(state.workspace)]+'子页面');
   const items=workspaceTabItems();
   for(const item of items){
     const button=nodeText('button','workspace-subtab'+(item.active?' active':''),item.label,root);button.type='button';button.id=item.id;button.setAttribute('role','tab');button.setAttribute('aria-selected',String(item.active));button.setAttribute('aria-controls',item.controls);button.tabIndex=item.active?0:-1;
@@ -139,13 +148,12 @@ function workspacePageDescriptor(workspace,params){
     SYSTEM:['SYSTEM & AI','系统与 AI','管理站点图标与评论润色选项；修改后统一保存配置。'],
     CODES:['BUSINESS CODES','编号前缀','查阅对象编号的前缀、示例和唯一性范围，识别准确的版本与候选。']
   })[params.get('config_section')]||['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'];
-  const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'?(params.get('production_tab')==='history'?'history':'shots'):(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
+  if(params.get('production_tab')==='history')return ['页面不可用','页面已退役','此旧页面已移除，请从生产制作选择当前工作入口。'];
+  const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'||params.get('production_tab')==='shots'?'breakdown':(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
   return ({
-    breakdown:['STORY → PRODUCTION','制作拆解','按集场阅读逐镜设计，核对剧情依据及本镜关联的实体与素材。'],
+    breakdown:['STORY → PRODUCTION','制作拆解','按集场阅读逐镜设计与视频方案，选择准确参考并审阅本镜素材。'],
     entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、完整状态和关系，评论或采纳当前内容。'],
-    materials:['MATERIAL LIBRARY','素材管理','按集场查看素材方案、版本与真实候选，预览原件并审阅准确内容。'],
-    shots:['SHOT PRODUCTION','镜头制作','按集场检查镜头方案，明确选择上游参考并审阅本镜视频候选。'],
-    history:['COMPOSITION & HISTORY','组合与历史','查阅组合记录、准确采用及制作历史，核对成片所需的输入与缺项。']
+    materials:['MATERIAL LIBRARY','素材管理','按集场查看素材方案、版本与真实候选，预览原件并审阅准确内容。']
   })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
 }
 function renderPageHeading(){

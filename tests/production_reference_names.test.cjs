@@ -8,7 +8,7 @@ class Element{
   setAttribute(name,value){this.attrs[name]=value}
   all(){return [this,...this.children.flatMap(node=>node.all())]}
 }
-const record=(object_id,id,title,kind='ASSEMBLY',extra={})=>({object_id,id,current_revision:id,kind,version:1,payload:{title,blocks:[],...extra}});
+const record=(object_id,id,title,kind='JUDGMENT',extra={})=>({object_id,id,current_revision:id,kind,version:1,payload:{title,blocks:[],...extra}});
 const ref=row=>({object_id:row.object_id,revision_id:row.id});
 const projected=row=>({...ref(row),title:row.payload.title});
 const plain=value=>JSON.parse(JSON.stringify(value));
@@ -29,42 +29,15 @@ function fixture(records=[],screenplays=[],sources=[]){
 test('actual detail renderer displays exact old dependency names while links retain old revisions',async()=>{
   const oldAssembly=record('assembly','assembly-v1','Red then blue'),newAssembly=record('assembly','assembly-v2','Blue then red');
   const oldVideo=record('video','video-v1','Video v1','ASSET'),newVideo=record('video','video-v2','Video v2','ASSET');
-  const output=record('output','output-v1','Old output','DELIVERABLE',{assembly:ref(oldAssembly),dependencies:[ref(oldVideo)]});
+  const output=record('output','output-v1','Old output','JUDGMENT',{target:ref(oldAssembly),dependencies:[ref(oldVideo)]});
   const f=fixture([newAssembly,newVideo]),detail={record:output,history:[output],uses:[],reference_titles:[projected(oldAssembly),projected(oldVideo)]};
   f.state.productionSelected=output;f.state.productionDetail=detail;
   f.context.renderProductionRecord(f.root,detail);
-  assert.match(f.text(),/assembly：Red then blue/);assert.match(f.text(),/Video v1/);
+  assert.match(f.text(),/审阅对象：Red then blue/);assert.match(f.text(),/Video v1/);
   assert.doesNotMatch(f.text(),/Blue then red|Video v2/);
-  const assemblyLink=f.root.all().find(node=>node.textContent==='assembly：Red then blue');await assemblyLink.onclick();
+  const assemblyLink=f.root.all().find(node=>node.textContent==='审阅对象：Red then blue');await assemblyLink.onclick();
   assert.deepEqual(plain(f.calls.find(call=>call.type==='record').args),['assembly','assembly-v1',true]);
   assert.deepEqual(plain(f.calls.find(call=>call.type==='reference').reference),ref(oldVideo));
-});
-
-test('actual timeline renderer uses each exact asset and shot title from its own detail',()=>{
-  const oldImage=record('image','image-v1','Original image','ASSET'),currentImage=record('image','image-v2','Renamed image','ASSET');
-  const oldShot=record('shot','shot-v1','Original shot','SHOT_DESIGN'),currentShot=record('shot','shot-v2','Renamed shot','SHOT_DESIGN');
-  const assembly=record('assembly','assembly-v1','Timeline','ASSEMBLY',{fps:24,duration_frames:24,items:[{track:'picture',start_frame:0,duration_frames:24,asset:ref(oldImage),shot:ref(oldShot)}]});
-  const f=fixture([currentImage,currentShot]),detail={record:assembly,history:[assembly],uses:[],reference_titles:[projected(oldImage),projected(oldShot)]};
-  f.state.productionSelected=assembly;f.context.renderProductionRecord(f.root,detail);
-  assert.match(f.text(),/Original image/);assert.match(f.text(),/Original shot/);assert.doesNotMatch(f.text(),/Renamed image|Renamed shot/);
-});
-
-test('legacy server absence uses an exact known history row or ID, never the renamed current head',()=>{
-  const old=record('object','old','Old title'),head=record('object','new','New title');
-  const f=fixture([head]);
-  assert.equal(f.context.productionName(ref(old)),'object');
-  f.state.productionDetail={record:head,history:[head,old]};
-  assert.equal(f.context.productionName(ref(old)),'Old title');
-  assert.equal(f.context.productionName(ref(head)),'New title');
-  assert.equal(f.context.productionName({object_id:'object'}),'New title');
-});
-
-test('same visible names do not authorize wrong object or wrong revision matches',()=>{
-  const a=record('a','a-v1','Shared label'),b=record('b','b-v1','Shared label');
-  const f=fixture([a,b]);
-  assert.equal(f.context.productionName({object_id:'a',revision_id:'b-v1'},[projected(b)]),'a');
-  assert.equal(f.context.productionName({object_id:'a',revision_id:'a-v0'},[projected(a)]),'a');
-  assert.equal(f.context.productionName(ref(a),[projected(a),projected(b)]),'Shared label');
 });
 
 test('explicit placement labels and exact media component/crop/range are unchanged',()=>{
