@@ -344,7 +344,7 @@ async function focusedMaterialListFixture({explicitMaterial=false,outside=false,
 test('exact historical links beyond the first page open the old candidate without resetting pagination',async()=>{
   for(const explicitMaterial of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial});
     assert.equal(f.listed[0].grouped,'1');assert.equal(f.listed[0].focus,undefined);
-    assert.equal(f.host.querySelectorAll('[data-material-id]').length,30);
+    assert.equal(f.host.querySelectorAll('[data-material-id]').length,40);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);
     assert.deepEqual(f.opened,[{object_id:f.candidate.object_id,revision_id:f.candidate.id}]);
     if(explicitMaterial)assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
@@ -352,7 +352,7 @@ test('exact historical links beyond the first page open the old candidate withou
 });
 test('pagination changes only the group/card collection and does not automatically read another material',async()=>{
   const f=await focusedMaterialListFixture();const next=f.host.all().find(n=>n.tag==='button'&&n.textContent==='下一页');assert.ok(next);await next.onclick();
-  assert.equal(f.listed.length,1);assert.equal(f.host.querySelectorAll('[data-material-id]').length,11);
+  assert.equal(f.listed.length,1);assert.equal(f.host.querySelectorAll('[data-material-id]').length,1);
   assert.equal(f.opened.length,1);assert.equal(f.c.state.productionSelected.id,f.candidate.id);
 });
 test('a linked old candidate outside filters remains exact without changing unique or display counts',async()=>{
@@ -419,4 +419,19 @@ test('reference save refresh keeps the draft attached to the original immutable 
   const {c}=fixture(),old=row('video','REQUIREMENT'),anchor={type:'text',quote:'original'};c.state.workspace='production.workspace';c.state.anchor=anchor;c.state.productionSelected=old;c.state.breakdownVideoSelections={};
   c.loadProductionBreakdown=async()=>{c.state.anchor=null;c.state.productionSelected=row('scene','PREPARATION')};c.document.querySelector=()=>({focus(){c.state.anchor=null}});
   await c.refreshShotReference({need:{...old,payload:{scope:{object_id:'shot'}}}},{index:0},{number:2});assert.equal(c.state.anchor,anchor);assert.equal(c.state.productionSelected,old);assert.ok(c.location.href.includes('shot_plan=2'));
+});
+
+test('flat management scope choices preserve authoritative labels and single selection linkage',async()=>{
+ const {c}=fixture(),host=new Element('div'),filters={episode:'',scene:''},changes=[];
+ const catalog={episodes:[{object_id:'e1',number:1},{object_id:'e2',number:2}]},locations=[{episode:'e1',scene:'s1'},{episode:'e2',scene:'s2'}];
+ c.reviewPositionLabel=(kind,row)=>kind==='episode'?'E0'+row.number:row==='s1'?'S001':'S002';
+ c.state.businessCodes=new Map([['scene:e1:s1','S001'],['scene:e2:s2','S002']]);assert.equal(c.managementSceneLabel('s1',null,catalog),'S001');
+ const draw=()=>{host.replaceChildren();c.managementScopeFilters(host,filters,catalog,locations,()=>{changes.push({...filters});draw()})};
+ const button=value=>host.all().find(n=>n.dataset.filterValue===value);
+ draw();assert.equal(host.all().some(n=>n.tag==='select'),false);assert.equal(button('e1').textContent,'E01');assert.equal(button('s1').textContent,'S001');
+ await button('s1').onclick();assert.equal(filters.scene,'s1');assert.equal(button('s1').attributes['aria-pressed'],'true');
+ await button('e2').onclick();assert.equal(filters.episode,'e2');assert.equal(filters.scene,'');assert.equal(button('s1'),undefined);assert.equal(button('s2').textContent,'S002');
+ await button('s2').onclick();await button('s2').onclick();assert.equal(filters.scene,'');
+ await button('e2').onclick();assert.equal(filters.episode,'');assert.ok(button('s1'));assert.ok(changes.length>=5);
+ filters.scene='missing';draw();assert.equal(filters.scene,'');
 });
