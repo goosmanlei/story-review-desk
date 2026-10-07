@@ -11,7 +11,7 @@
 正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`；有方法文档时一并保留 Git 中的 `content/`。首次从公开导出恢复：
 
 ```bash
-cd /path/to/story-review-desk-python
+cd /path/to/story-review-desk
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo restore
 cd /path/to/story-repo
 docker compose up -d --build
