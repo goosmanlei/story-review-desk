@@ -52,6 +52,16 @@ class ShotReferenceTest(unittest.TestCase):
         with self.assertRaises(Conflict):sr.select(self.store,{**changed,'id':'conflicting'})
         self.assertEqual(p.record(self.store,'video')['id'],new['id'])
 
+    def test_catalog_comment_identities_match_complete_versions_after_reference_write(self):
+        from review_desk.production_breakdown import material_comment_targets,ref
+        self.prepare()
+        def check():
+            with p.read_scope(self.store):
+                expected=[ref(row) for version in mp.snapshot(self.store,'video')
+                          for row in [*version['members'],*filter(None,version.get('definition_records',{}).values())]]
+                self.assertEqual([ref(row) for row in material_comment_targets(self.store,self.ref('shot')['revision_id'])],expected)
+        check();sr.select(self.store,self.request());check()
+
     def test_exact_candidate_version_component_and_ranges_are_required(self):
         self.prepare(True);valid=p.record(self.store,'video')['payload']['generation']['inputs'][0]
         self.assertFalse(sr.slot(self.store,valid,0)['issues'])

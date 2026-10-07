@@ -41,7 +41,7 @@ async function fixture(href=base,{internal=true,settle=true}={}){
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
   vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);
   const framework={workspaces:['story.sources','story.outline','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
-  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}}[url])}};
+  context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplays?metadata=1':{versions:[]},'/api/sources?with_revision=1&metadata=1':sources.map(({id,title,target_revision_id})=>({id,title,target_revision_id})),'/api/screenplay-summaries':{episodes:[]}}[url])}};
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;globalThis.saves=commentSaves;
     applyFavicon=()=>{};renderWorkspaceNav=()=>{};closePanel=()=>{};openPanel=()=>{};hideSelectionAction=()=>{};watchTextSelection=()=>{};
     chooseScript=()=>{};resolveStructureRevision=()=>null;chooseStructureRevision=()=>{};
@@ -54,7 +54,8 @@ async function fixture(href=base,{internal=true,settle=true}={}){
   await context.init();assert.doesNotMatch(reader.textContent||'',/^加载失败/);if(settle)flush();
   const chapter=(source,id)=>root.querySelector(`.source-chapter-button[data-source-id="${source}"][data-block-id="${id}"]`);
   const pop=(url,apply=true)=>{context.location.href=url;listeners.popstate();if(apply)flush()};
-  return {context,root,nodes,reader,storage,frames,writes,scrolls,requests,flush,chapter,pop};
+  const popAsync=async(url,apply=true)=>{context.location.href=url;await listeners.popstate();if(apply)flush()};
+  return {context,root,nodes,reader,storage,frames,writes,scrolls,requests,flush,chapter,pop,popAsync};
 }
 
 test('real chapter menu writes exact source and refresh restores after the workspace becomes visible',async()=>{
@@ -115,7 +116,7 @@ test('pending route scroll yields to actual comment location, editor changes and
 
 test('hidden source does not scroll; cross-workspace history applies only after it is visible; manual return keeps the live position',async()=>{
   const hidden='http://isolated/?workspace=project.configuration&source=refinement-a&source_chapter=chapter-10',f=await fixture(hidden);assert.equal(f.scrolls.length,0);
-  f.pop(base+'&source_chapter=chapter-10');assert.equal(f.reader.scrollTop,5488);assert.ok(f.scrolls.every(x=>x.visible));
+  await f.popAsync(base+'&source_chapter=chapter-10');assert.equal(f.reader.scrollTop,5488);assert.ok(f.scrolls.every(x=>x.visible));
   f.reader.scrollTop=6000;f.context.switchWorkspace('project.configuration');f.context.switchWorkspace('story.sources');f.flush();assert.equal(f.reader.scrollTop,6000);
   f.pop(base+'&source_chapter=chapter-1',false);f.context.switchWorkspace('project.configuration');const before=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,before);
 });
@@ -123,4 +124,32 @@ test('hidden source does not scroll; cross-workspace history applies only after 
 test('passive scroll highlighting and unrelated same-source history do not write routes or move the reader',async()=>{
   const f=await fixture(base+'&source_chapter=chapter-1');f.reader.scrollTop=5600;f.context.syncSourceChapter();assert.equal(f.context.state.sourceChapter,'chapter-10');assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-1');
   f.pop(base+'&source_chapter=chapter-1&structure_revision=unrelated');assert.equal(f.reader.scrollTop,5600);assert.equal(f.writes.length,0);
+});
+
+test('nonstory entry loads no story text; entering the reader restores exact chapter and loads only once',async()=>{
+  const f=await fixture('http://isolated/?workspace=project.configuration&source=refinement-b&source_chapter=chapter-10');
+  assert.equal(f.requests.some(r=>r.url==='/api/sources?with_revision=1'),false);
+  await f.context.switchWorkspace('story.sources');f.flush();
+  assert.equal(f.context.state.current.id,'refinement-b');assert.equal(f.reader.scrollTop,5488);
+  f.context.switchWorkspace('project.configuration');await f.context.switchWorkspace('story.sources');
+  assert.equal(f.requests.filter(r=>r.url==='/api/sources?with_revision=1').length,1);
+});
+
+test('late first story load cannot replace a newer workspace and parallel entries share the read',async()=>{
+  const f=await fixture('http://isolated/?workspace=project.configuration');
+  const fetch=f.context.fetch;let release;const pending=new Promise(resolve=>release=resolve);
+  f.context.fetch=async(...args)=>{if(args[0].startsWith('/api/sources'))await pending;return fetch(...args)};
+  const first=f.context.switchWorkspace('story.sources'),second=f.context.switchWorkspace('story.outline');
+  f.context.switchWorkspace('project.configuration');release();await Promise.all([first,second]);f.flush();
+  assert.equal(f.context.state.workspace,'project.configuration');assert.equal(f.scrolls.length,0);
+  assert.equal(f.requests.filter(r=>r.url==='/api/sources?with_revision=1').length,1);
+  await f.context.switchWorkspace('story.sources');assert.equal(f.context.state.workspace,'story.sources');
+});
+
+test('failed first story read remains retryable without marking partial data ready',async()=>{
+  const f=await fixture('http://isolated/?workspace=project.configuration'),fetch=f.context.fetch;
+  f.context.fetch=async(...args)=>{if(args[0]==='/api/story-structure')throw Error('temporary read failure');return fetch(...args)};
+  await f.context.switchWorkspace('story.sources');assert.equal(f.context.state.workspace,'project.configuration');
+  f.context.fetch=fetch;await f.context.switchWorkspace('story.sources');f.flush();
+  assert.equal(f.context.state.workspace,'story.sources');assert.equal(f.context.state.current.id,'plain');
 });

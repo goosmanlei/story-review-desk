@@ -21,7 +21,7 @@ class GroupedManagementTest(UiProjectionTest):
             {'episode':'e1','scene':'s1','kind':'SHOT_DESIGN'},
             {'episode':'e1','scene':'s2','kind':'STATE'},
             {'episode':None,'scene':None,'kind':'STATE'}]}]
-        with patch('review_desk.list_associations.b.rows',return_value=[{'object_id':'e1','payload':{'number':1}}]):
+        with patch('review_desk.list_associations.light.rows',return_value=[{'object_id':'e1','payload':{'number':1}}]):
             groups=material_groups(None,entries)
             self.assertEqual([(g['scene'],g['material_ids']) for g in groups],[('s1',['m']),('s2',['m'])])
             self.assertEqual(len(material_groups(None,entries,scene='s1')),1)
@@ -57,3 +57,22 @@ class GroupedManagementTest(UiProjectionTest):
         self.setup_plans()
         self.assertEqual(ui.material_list(self.store,grouped=True)['management_episodes'],[{'object_id':'episode','number':1}])
         self.assertEqual(self.summary()['management_episodes'],[{'object_id':'episode','number':1}])
+
+    def test_compact_list_preserves_membership_filters_groups_and_card_information(self):
+        self.setup_plans();self.generate();self.mount_on_test_shot('need-full-overall')
+        for filters in ({},{'media':'audio'},{'status':'generated'},{'episode':'episode','scene':'scene'},
+                        {'media':'audio','status':'ungenerated','search':'overall'},{'search':'absent'}):
+            with self.subTest(filters=filters),p.read_scope(self.store):
+                full=ui.material_list(self.store,grouped=True,**filters)
+                compact=ui.material_list(self.store,grouped=True,compact=True,**filters)
+                self.assertEqual({k:v for k,v in full.items() if k!='items'},
+                                 {k:v for k,v in compact.items() if k!='items'})
+                self.assertEqual(len(full['items']),len(compact['items']))
+                for before,after in zip(full['items'],compact['items']):
+                    self.assertEqual({k:v for k,v in before.items() if k not in ('locations','entity_ids','material_identity')},
+                                     {k:v for k,v in after.items() if k!='locations'})
+        before=ui.material_list(self.store,grouped=True,compact=True)
+        self.generate('new-call','new-result')
+        after=ui.material_list(self.store,grouped=True,compact=True)
+        self.assertGreater(next(i for i in after['items'] if i['object_id']=='need-full-overall')['candidate_count'],
+                           next(i for i in before['items'] if i['object_id']=='need-full-overall')['candidate_count'])

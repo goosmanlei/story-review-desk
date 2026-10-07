@@ -5,6 +5,7 @@ its independent EPISODE objects retain all old comments and exact dependencies.
 No structure acceptance or project-stage transition is implied by publication.
 """
 import re
+import json
 from copy import deepcopy
 
 from .store import Conflict, canonical, digest
@@ -121,16 +122,20 @@ def import_screenplay(store, document):
     return {**result[-1], "episodes": refs, "unchanged": False}
 
 
-def snapshot(store):
+def snapshot(store, metadata=False):
+    def read(revision_id):
+        if not metadata:return revision_record(store,revision_id)
+        row=store.db.execute("SELECT id,object_id,version,json_remove(payload,'$.blocks') AS payload,created_at FROM revisions WHERE id=?",(revision_id,)).fetchone()
+        return {**dict(row),'payload':json.loads(row['payload'])} if row else None
     versions = []
     for obj in store.objects():
         if obj["kind"] != "STORY" or obj["id"] == "story-structure":
             continue
-        revision = revision_record(store, obj["current_revision"])
+        revision = read(obj["current_revision"])
         payload = revision["payload"]
         if payload.get("format") != FORMAT:
             continue
-        episodes = [revision_record(store, ref["revision_id"]) for ref in payload["episodes"]]
+        episodes = [read(ref["revision_id"]) for ref in payload["episodes"]]
         versions.append({**revision, "episodes": episodes})
     versions.sort(key=lambda v: (v["created_at"], v["object_id"]))
     return {"versions": versions}

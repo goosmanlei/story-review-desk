@@ -146,7 +146,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/materials":
                     from .ui_projection import material_list as materials
                     with production.read_scope(store):
-                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1"))
+                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1"))
                 if path == "/api/production":
                     return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
                 if path == "/api/production/impact":
@@ -185,9 +185,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
             except (ValueError, OSError):
                 return self._json({"error": "实例制作方法文档格式错误或无法读取"}, 503)
         if path == "/api/sources":
-            sources = store.sources()
+            sources = store.sources(metadata=query.get('metadata')==['1'])
             if query.get("with_revision") == ["1"]:
-                revisions = {obj["id"]: obj["current_revision"] for obj in store.objects() if obj["kind"] == "SOURCE"}
+                revisions = dict(store.db.execute("SELECT id,current_revision FROM objects WHERE kind='SOURCE'"))
                 sources = [{**source, "target_revision_id": revisions[source["id"]]} for source in sources]
             return self._json(sources)
         if path == "/api/framework":
@@ -213,7 +213,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/comments/context":
             return self._json(store.context())
         if path == "/api/screenplays":
-            return self._json(screenplay_snapshot(store))
+            return self._json(screenplay_snapshot(store,metadata=query.get('metadata')==['1']))
         if path == "/api/screenplay-summaries":
             try:
                 return self._json(read_summaries(self.server.root))

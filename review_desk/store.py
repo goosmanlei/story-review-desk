@@ -267,7 +267,9 @@ class Store:
         row = self.db.execute("SELECT * FROM sources WHERE id=?", (source_id,)).fetchone()
         return json.loads(row["document"]) if row else None
 
-    def sources(self):
+    def sources(self, metadata=False):
+        if metadata:
+            return [dict(row) for row in self.db.execute("SELECT id,json_extract(document,'$.title') AS title FROM sources ORDER BY id")]
         return [json.loads(row[0]) for row in self.db.execute("SELECT document FROM sources ORDER BY id")]
 
     def put_source(self, document):

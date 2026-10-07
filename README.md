@@ -6,6 +6,8 @@
 
 素材卡按固定方案版本与候选显示一份相应生成内容，保留独立可读的历史方案、真实调用、原件与准确评论；接口、迁移与验证见 [素材版本与候选](docs/material-versions.md)。
 
+制作页面按需读取正文，列表和目录保留准确身份；请求内复用、轻量接口及恢复边界见[制作读取说明](docs/production-performance.md)。
+
 ## 启动一个故事实例
 
 正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`；有方法文档时一并保留 Git 中的 `content/`。首次从公开导出恢复：

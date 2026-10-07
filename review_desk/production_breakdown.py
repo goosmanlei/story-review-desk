@@ -146,12 +146,8 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
                exact_shot if exact_shot and exact_shot['payload']['parent']==ref(sc) else None)]
         targets=[*scenes,*shots]
         if view=='shots':
-            from .material_plans import snapshot
             for shot in shots:
-                for need in context(store,shot['object_id'],shot['id'])['requirements']:
-                    if need['payload']['media_type']=='video':
-                        for version in snapshot(store,need['object_id']):
-                            targets.extend([*version['members'],*filter(None,version.get('definition_records',{}).values())])
+                targets.extend(material_comment_targets(store,shot['id']))
         entries.append({'object_id':ep['object_id'],'id':ep['id'],'number':ep['payload']['number'],
             'title':ep['payload']['title'],'scenes':[{'id':s['id'],'title':s.get('heading',s['id'])} for s in ep['payload']['scenes']],
             'comment_targets':list({r['id']:ref(r) for r in targets}.values())})
@@ -194,10 +190,40 @@ def context(store, object_id, revision_id=None):
             'adoptions': [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type']=='adoption']}
 
 
-def exact_scoped(store, kind, revision):
+def material_comment_targets(store, revision):
+    """Exact comment identities, without reading definitions merely to count them."""
+    from . import list_reading as light
+    needs={r['object_id']:r for r in exact_scoped(store,'REQUIREMENT',revision,metadata=True)
+           if r['payload'].get('status')!='withdrawn'}
+    for link in exact_scoped(store,'RELATION',revision,metadata=True):
+        if link['payload']['relation_type'] in ('applicability','occurrence'):
+            subject=light.ref_record(store,link['payload']['subject'])
+            if subject['kind']=='REQUIREMENT':needs.setdefault(subject['object_id'],subject)
+    targets=[]
+    for need in needs.values():
+        if need['payload']['media_type']!='video':continue
+        for version in store.db.execute('''SELECT v.number,d.provenance FROM material_plan_versions v
+            LEFT JOIN material_definition_versions d ON d.material_id=v.material_id AND d.number=v.number
+            WHERE v.material_id=? ORDER BY v.number DESC''',(need['object_id'],)):
+            targets.extend(dict(r) for r in store.db.execute('''SELECT r.id,r.object_id FROM material_plan_members m
+                JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.number=? ORDER BY r.id''',
+                (need['object_id'],version['number'])))
+            provenance=json.loads(version['provenance']) if version['provenance'] else {}
+            for field in ('requirements','generation'):
+                source=provenance.get(field)
+                if source:
+                    row=light.ref_record(store,source['record'])
+                    if field=='requirements' or row['kind']=='CALL':targets.append(row)
+    return targets
+
+
+def exact_scoped(store, kind, revision, metadata=False):
     # Historical reading uses the latest revision *bound to that exact scope*,
     # even when a current object moved elsewhere. Current heads never rebind it.
-    return [p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
+    from . import list_reading as light
+    columns='r.id,r.object_id,r.version,r.payload AS stored_payload,r.created_at' if metadata else 'r.*'
+    reader=light.project if metadata else lambda _store,row:p.record_view(row)
+    return [reader(store,r) for r in store.db.execute(f"""SELECT {columns},o.kind,o.current_revision
         FROM revisions r JOIN objects o ON o.id=r.object_id
         WHERE o.kind=? AND json_extract(r.payload,'$.scope.revision_id')=?
         AND NOT EXISTS(SELECT 1 FROM revisions newer WHERE newer.object_id=r.object_id
@@ -208,7 +234,8 @@ def exact_scoped(store, kind, revision):
 def location(store, scope, cache):
     rid=scope['revision_id']
     if rid in cache:return cache[rid]
-    value=p.ref_record(store,scope);payload=value['payload']
+    from .list_reading import ref_record
+    value=ref_record(store,scope);payload=value['payload']
     episode=payload.get('episode') or payload.get('source')
     result={'scope':scope,'episode':episode.get('object_id') if episode else (value['object_id'] if value['kind']=='EPISODE' else None),
         'scene':payload.get('scene_id') or (payload.get('source') or {}).get('scene_id'),'kind':value['kind']}

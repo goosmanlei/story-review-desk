@@ -53,7 +53,7 @@ def read_scope(store):
     owns_transaction = not store.db.in_transaction
     if owns_transaction:
         store.db.execute('BEGIN')
-    store._production_reads = {'records': {}, 'current': None}
+    store._production_reads = {'records': {}, 'current': {}}
     try:
         yield
     finally:
@@ -82,7 +82,10 @@ def record(store, object_id=None, revision_id=None):
     if value["kind"]=="DELETED_STATE":
         from .state_cleanup import view
         value=view(value)
-    memberships = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
+    memberships_cache = reads.setdefault('round_memberships', {}) if reads is not None else {}
+    if value['id'] not in memberships_cache:
+        memberships_cache[value['id']] = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
+    memberships = memberships_cache[value['id']]
     value['material_round_numbers'] = {v['material_id']: v['number'] for v in reversed(memberships)}
     return value
 
@@ -536,14 +539,16 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
 def current_records(store, kinds=None):
     result = []
     reads = getattr(store, '_production_reads', None)
-    if reads is not None and reads['current'] is not None:
-        rows = reads['current']
+    key = tuple(sorted(kinds)) if kinds else ()
+    cache = reads['current'] if reads is not None else {}
+    if key in cache or () in cache:
+        rows = cache[key] if key in cache else cache[()]
     else:
         query="SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision"
-        values=sorted(kinds) if kinds and reads is None else []
+        values=sorted(kinds) if kinds else []
         if values:query+=" WHERE o.kind IN ("+','.join('?' for _ in values)+")"
         rows = store.db.execute(query+" ORDER BY o.id",values).fetchall()
-        if reads is not None:reads['current'] = rows
+        if reads is not None:cache[key] = rows
     for row in rows:
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
             value=record_view(row)

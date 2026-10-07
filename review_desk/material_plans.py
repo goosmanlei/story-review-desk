@@ -214,6 +214,12 @@ def card_counts(store, material_ids=None):
     candidates. Aliases, repeated associations and retained revisions cannot
     count the same real call/original set a second time.
     """
+    scope = getattr(store, '_production_reads', None)
+    cached = scope.get('material_card_counts') if scope is not None else None
+    if cached is not None:
+        aliases, counts = cached
+        ids = counts if material_ids is None else material_ids
+        return {mid: dict(counts.get(aliases.get(mid, mid), {'version_count': None, 'candidate_count': None})) for mid in ids}
     aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
     canonical_id = lambda mid: aliases.get(mid, mid)
     versions = {}; candidates = {}
@@ -223,10 +229,11 @@ def card_counts(store, material_ids=None):
     for row in store.db.execute("SELECT m.material_id,m.number,c.candidate_id FROM material_plan_members m JOIN material_candidate_members c ON c.revision_id=m.revision_id WHERE m.role='result'"):
         mid = canonical_id(row['material_id'])
         candidates.setdefault(mid, set()).add(row['candidate_id'])
+    counts = {mid: {'version_count': len(numbers), 'candidate_count': len(candidates.get(mid, set()))}
+              for mid, numbers in versions.items()}
+    if scope is not None:scope['material_card_counts'] = (aliases, counts)
     ids = versions if material_ids is None else material_ids
-    return {mid: {'version_count': len(versions[canonical_id(mid)]) if canonical_id(mid) in versions else None,
-                  'candidate_count': len(candidates.get(canonical_id(mid), set())) if canonical_id(mid) in versions else None}
-            for mid in ids}
+    return {mid: dict(counts.get(canonical_id(mid), {'version_count': None, 'candidate_count': None})) for mid in ids}
 
 
 def snapshot(store, mid):

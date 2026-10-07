@@ -1,6 +1,7 @@
 """Exact list associations; never expand a parent into its child locations."""
 import re
 from . import production as p, production_breakdown as b
+from . import list_reading as light
 
 
 def entity_locations(store, entities, rows):
@@ -57,7 +58,7 @@ def material_uses(store, entries):
     cache = {}
 
     def add(reference, scope, evidence):
-        target = p.ref_record(store, reference)
+        target = light.ref_record(store, reference)
         if target['kind'] not in ('ASSET', 'REQUIREMENT'):
             return
         mid = canonical_id(store, target['object_id'])
@@ -67,16 +68,16 @@ def material_uses(store, entries):
             if item:
                 item['locations'].append({**b.location(store, scope, cache), 'relation': evidence['kind'], 'evidence': evidence})
 
-    for need in b.rows(store, 'REQUIREMENT'):
+    for need in light.rows(store, 'REQUIREMENT'):
         scope = need['payload'].get('scope')
         if not scope:
             continue
         for value in ([] if need['payload'].get('status')=='withdrawn' else need['payload'].get('generation', {}).get('inputs', [])):
             add(value['reference'], scope, {'kind': 'planned_input', 'record': b.ref(need), 'input': value})
-        for row in store.db.execute("SELECT DISTINCT r.* ,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.material_id=? AND m.role='call'", (need['object_id'],)):
-            call = p.record_view(row)
+        for row in store.db.execute("SELECT DISTINCT r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='call'", (need['object_id'],)):
+            call = light.record(store, revision_id=row[0])
             exact_need = call['payload'].get('generation_requirement')
-            exact_scope = p.ref_record(store, exact_need)['payload'].get('scope') if exact_need else scope
+            exact_scope = light.ref_record(store, exact_need)['payload'].get('scope') if exact_need else scope
             if exact_scope:
                 for value in call['payload'].get('inputs', []):
                     add(value.get('reference', value), exact_scope, {'kind': 'actual_input', 'record': b.ref(call), 'input': value})
@@ -90,7 +91,7 @@ def material_uses(store, entries):
 
 
 def material_groups(store, entries, episode=None, scene=None):
-    episode_numbers = {r['object_id']: r['payload'].get('number') for r in b.rows(store, 'EPISODE')}
+    episode_numbers = {r['object_id']: r['payload'].get('number') for r in light.rows(store, 'EPISODE')}
     groups = {}
     for item in entries:
         locations = item['locations']
