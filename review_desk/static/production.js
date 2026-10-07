@@ -74,7 +74,7 @@ function productionName(ref,referenceTitles=[]){
   const matches=row=>row.object_id===ref.object_id&&(!ref.revision_id||row.id===ref.revision_id);
   const title=ref.revision_id&&referenceTitles.find(row=>row.object_id===ref.object_id&&row.revision_id===ref.revision_id)?.title;
   if(typeof title==='string'&&title)return reviewPositionText(title);
-  const detailRows=[state.productionSelected,...[state.productionDetail,state.productionEntityDetail,state.productionChildDetail].flatMap(detail=>detail?[detail.record,...(detail.history||[])]:[])].filter(Boolean);
+  const detailRows=[state.unifiedScope,state.productionSelected,...[state.productionDetail,state.productionEntityDetail,state.productionChildDetail].flatMap(detail=>detail?[detail.record,...(detail.history||[])]:[])].filter(Boolean);
   const row=[...(state.productionRecords||[]),...(ref.revision_id?detailRows:[]),...(state.screenplays||[]).flatMap(s=>s.episodes||[]),...(state.screenplays||[])].find(matches);
   if(row?.payload.title)return businessTitle(row);
   const source=(state.sources||[]).find(source=>source.id===ref.object_id&&(!ref.revision_id||source.target_revision_id===ref.revision_id));
