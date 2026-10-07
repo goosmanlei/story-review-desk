@@ -100,3 +100,20 @@ test('acknowledged retry with unchanged comments never removes a newer page edit
   resolve({ok:true,json:async()=>({})});await saving;
   assert.equal(root.querySelector('.comment-editor'),editor);assert.equal(root.querySelector('#comment-editor-text').value,'new page draft');assert.equal(f.context.state.anchor.type,'global');assert.equal(f.storage.get(next),'new page draft');
 });
+
+test('a delayed comment refresh cannot restore an older comment after a newer refresh',async()=>{
+  const pending=[];
+  const f=fixture({fetch:()=>new Promise(resolve=>pending.push(resolve))});f.target();
+  const start=source.indexOf('async function refreshComments(){'),end=source.indexOf('\nasync function saveComment(){',start);
+  vm.runInContext(source.slice(start,end),f.context);
+  f.context.renderSources=()=>{};f.context.renderActiveReader=()=>{};
+  const before=[{id:'one',body:'old',status:'OPEN',version:1}],after=[{id:'one',body:'edited',status:'CLOSED',version:3}];
+  f.context.state.comments=before;
+  const old=f.context.refreshComments(),newer=f.context.refreshComments();
+  pending[1]({ok:true,json:async()=>after});await newer;
+  assert.equal(f.context.state.comments[0].version,3);const renders=f.context.renders;
+  pending[0]({ok:true,json:async()=>before});await old;
+  assert.equal(f.context.state.comments[0].version,3);
+  assert.equal(f.context.state.comments[0].status,'CLOSED');
+  assert.equal(f.context.renders,renders,'discarding an old response must not disturb the active reader or draft');
+});

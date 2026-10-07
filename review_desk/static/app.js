@@ -741,7 +741,7 @@ function toggleCommentsFromReader(){
     updateCommentEditorControls();
   }
 }
-let commentAction=0;
+let commentAction=0,commentRefreshEpoch=0;
 function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){
   const key=draftKey();
@@ -854,7 +854,9 @@ function renderComments({replaceDraft=false}={}){
 }
 
 async function refreshComments(){
+  const epoch=++commentRefreshEpoch;
   const comments=await api('/api/comments');
+  if(epoch!==commentRefreshEpoch)return;
   // Refocusing the window fetches comments asynchronously. A no-op refresh must not
   // replace the text nodes underneath a selection gesture (or the current editor).
   if(JSON.stringify(comments)===JSON.stringify(state.comments))return;
