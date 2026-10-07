@@ -131,3 +131,13 @@ test('file cancellation and upload rejection never change saved or pending selec
  file.files=[{size:262145,name:'large.png'}];await file.onchange();assert.equal(f.requests.length,0);assert.equal(form.elements.site_favicon.value,'old.svg');assert.equal(form.elements.ai_context_max_chars.value,'14000');
  file.files=[{size:4,name:'invalid.svg'}];const uploading=file.onchange();await flush();f.requests[0].respond(400,{error:'invalid icon'});await uploading;assert.equal(form.elements.site_favicon.value,'old.svg');assert.equal(f.context.state.configurations.values.SYSTEM.body.site_favicon,'old.svg');assert.match(f.messages.at(-1),/上传失败/);assert.equal(f.save(form).disabled,false);
 });
+
+
+test('deferred configuration loads choices once and cannot remount a page after leaving it',async()=>{
+ const f=fixture();delete f.context.state.configurations.favicon_assets;
+ f.context.renderConfigurations();f.context.renderConfigurations();assert.equal(f.requests.length,1);
+ assert.equal(f.requests[0].url,'/api/configurations');assert.equal(f.form('PROJECT'),undefined);
+ f.context.state.workspace='production.entities';f.requests[0].resolve(f.data);await flush();
+ assert.equal(f.form('PROJECT'),undefined);f.context.state.workspace='project.configuration';f.context.renderConfigurations();
+ assert.equal(f.form('PROJECT').elements.story_background.value,'Original story background');assert.equal(f.requests.length,1);
+});

@@ -205,7 +205,14 @@ async function loadProductionBreakdown({refresh=false}={}){
   try{breakdownHeading(host);
   const query=new URLSearchParams({episode:params.get('breakdown_episode')||'',...(productionTab()==='shots'?{view:'shots'}:{})});
   if(targetId){query.set('object_id',targetId);if(targetRevision)query.set('revision_id',targetRevision)}
-  const data=await api('/api/production/breakdown?'+query);if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+  // Within this immutable episode, selecting an already known exact scene or
+  // shot only needs its body. A refresh, changed edition, or another tab reads
+  // the authoritative directory again; historical targets never use a head.
+  const cached=state.breakdownCatalog,known=cached?.data;
+  const reuse=!refresh&&cached?.workspace===workspace&&cached?.tab===productionTab()&&known.episode===(params.get('breakdown_episode')||known.episode)&&targetId&&
+    [...known.scenes,...known.shots].some(r=>r.object_id===targetId&&r.id===targetRevision);
+  const data=reuse?known:await api('/api/production/breakdown?'+query);if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+  state.breakdownCatalog={workspace,tab:productionTab(),data};
   state.breakdownData=data;state.productionRecords=[data.lock,...data.scenes,...data.shots].filter(Boolean);
   const episodes=el('nav','screenplay-episodes breakdown-episode-tabs');episodes.setAttribute('aria-label','分集导航');staged.append(episodes);
   if(productionTab()==='shots'){const scope='镜头制作评论：本集准确场镜及关联视频的全部制作版本与候选；含已关闭评论，按评论去重，不含剧本和上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
@@ -243,7 +250,7 @@ function groupedShotMaterials(items){
 }
 async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
   const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
-  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
+  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:productionTab()==='shots'?'shots':'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
   body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
   breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,...(workspace==='production.workspace'?{production_tab:'shots'}:{})});
   const page=el('section','breakdown-scene');body.append(page);

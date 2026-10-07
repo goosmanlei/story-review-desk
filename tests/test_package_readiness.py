@@ -157,6 +157,8 @@ class PackageReadinessTest(unittest.TestCase):
 
     def test_http_and_cli_share_availability_failure_and_exact_success_manifest(self):
         self.required();optional = self.optional();path = self.root/'export/assets'/optional['file'];original = path.read_bytes()
+        from review_desk.read_cache import initialize
+        initialize(self.store)
         original_history = '\n'.join(self.store.db.iterdump())
         self.store.close()
         ready_queue = queue.Queue()

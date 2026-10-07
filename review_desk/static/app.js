@@ -1,7 +1,20 @@
 const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplaySummaries:new Map(),screenplayVersion:null,screenplayEpisode:null,screenplayScene:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
-const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json',...(options.headers||{})}});let data;try{data=await response.json()}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
+function unpackReviewGraph(graph){
+  if(graph?.format!=='review-graph-v1'||!Array.isArray(graph.nodes)||graph.nodes.length>200000)throw Error('Unsupported review response');
+  function read(value,upper=graph.nodes.length){
+    if(value===null||typeof value!=='object')return value;
+    const index=value.$;if(!Number.isInteger(index)||index<0||index>=upper)throw Error('Invalid review reference');
+    const [kind,data]=graph.nodes[index];
+    if(kind==='s')return data;
+    if(kind==='a')return data.map(item=>read(item,index));
+    if(kind==='o')return Object.fromEntries(data.map(([key,item])=>[key,read(item,index)]));
+    throw Error('Invalid review node');
+  }
+  return read(graph.root);
+}
+const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
 const isStructure=()=>state.workspace==='story.outline';
@@ -350,6 +363,11 @@ function renderConfigurations({preserve=false}={}){
   const root=$('#configuration-view');
   if(typeof configurationSectionFromRoute==='function')state.configSection=configurationSectionFromRoute();
   if(state.configSection==='CODES'){root.replaceChildren();root.configurationMounted=false;renderBusinessCodeCatalog(root);return}
+  if(state.configurations.favicon_assets===undefined){
+    root.replaceChildren();root.configurationMounted=false;nodeText('p',null,'正在读取配置…',root);
+    state.configurationRead ||= api('/api/configurations').then(data=>{state.configurations=data}).finally(()=>{state.configurationRead=null});
+    state.configurationRead.then(()=>{if(state.workspace==='project.configuration')renderConfigurations()}).catch(error=>{if(state.workspace==='project.configuration'){root.replaceChildren();nodeText('p','production-issue',error.message,root)}});return;
+  }
   if(preserve&&root.configurationMounted){showConfigurationSection();return}
   root.replaceChildren();root.configurationMounted=true;
   const layout=el('div','configuration-layout configuration-layout-unified'),article=el('article','config-page');
@@ -951,7 +969,7 @@ function locateComment(comment){
 
 async function init(){try{
   const initialUrl=new URL(location.href),initialWorkspace=initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach');
-  const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/business-codes'),['story.sources','story.outline','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
+  const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance'),api('/api/comments'),api('/api/framework'),api(initialWorkspace==='project.configuration'?'/api/configurations':'/api/configurations?summary=1'),api('/api/business-codes'),['story.sources','story.outline','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
   state.businessCodeCatalog=codes;state.businessCodes=new Map(codes.objects.map(row=>[row.object_id,row.display_code||row.prefix+String(row.number).padStart(3,'0')]));
   state.legacyShotCodes=new Map();for(const row of codes.objects.filter(r=>r.legacy_position)){const key=row.legacy_position,label=[row.episode_code,row.display_code].filter(Boolean).join(' / ');state.legacyShotCodes.set(key,state.legacyShotCodes.has(key)?null:label)}
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();

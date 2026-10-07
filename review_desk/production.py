@@ -54,6 +54,9 @@ def read_scope(store):
     if owns_transaction:
         store.db.execute('BEGIN')
     store._production_reads = {'records': {}, 'current': {}}
+    if owns_transaction and getattr(store, 'read_cache', None):
+        from .read_cache import token
+        store._production_reads['generation'] = token(store)
     try:
         yield
     finally:

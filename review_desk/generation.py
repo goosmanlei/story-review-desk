@@ -316,10 +316,11 @@ def decide(store, value):
 
 
 def snapshot(store, entity_id, revision_id=None):
-    # Cache only repeated reads inside one SQLite snapshot. Never retain a
-    # response or object head across requests, including imports and comments.
+    # Cross-request reuse is tied to the transaction's authoritative generation.
+    # Write validation and caller-owned transactions always read their own data.
     with p.read_scope(store):
-        return _snapshot(store, entity_id, revision_id)
+        from .read_cache import read_json
+        return read_json(store, ['entity-review', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
 
 
 def _snapshot(store, entity_id, revision_id=None):
@@ -332,7 +333,8 @@ def _snapshot(store, entity_id, revision_id=None):
         WHERE o.kind IN ('STATE','ASSET','REPRESENTATION','PREPARATION','SHOT_DESIGN')
         OR (o.kind='RELATION' AND json_extract(r.payload,'$.relation_type')='entity')
         OR (o.kind='REQUIREMENT' AND json_extract(r.payload,'$.scope.object_id') IN
-            (SELECT id FROM objects WHERE kind='STATE')) ORDER BY o.id""")]
+            (SELECT s.id FROM objects s JOIN revisions sr ON sr.id=s.current_revision
+             WHERE s.kind='STATE' AND json_extract(sr.payload,'$.entity.object_id')=?)) ORDER BY o.id""", (entity_id,))]
     rows=[r for r in rows if r['payload'].get('format') in p.FORMATS]
     # Match the complete record projection used by current_records for assets.
     for row in rows:

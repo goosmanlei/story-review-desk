@@ -213,7 +213,9 @@ class CommentSourceReuseTest(unittest.TestCase):
                 except Exception as exc:
                     errors.append(exc)
 
-            with patch.object(server.store, "comment_anchor_states", wraps=server.store.comment_anchor_states) as batch:
+            # Each bounded HTTP worker owns its connection; observe the reader
+            # across those instances, not only the fixture's owner connection.
+            with patch.object(Store, "comment_anchor_states", autospec=True, side_effect=Store.comment_anchor_states) as batch:
                 client = threading.Thread(target=request_rows, daemon=True)
                 client.start()
                 server.timeout = 3

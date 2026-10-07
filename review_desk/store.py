@@ -26,10 +26,33 @@ class Conflict(ValueError):
 
 
 class Store:
+    @classmethod
+    def open_existing(cls, db_path):
+        """A worker connection after the owner has initialized the schema."""
+        self = cls.__new__(cls)
+        self.db_path = Path(db_path)
+        self.db = sqlite3.connect(self.db_path.resolve().as_uri()+'?mode=rw', uri=True)
+        stat = self.db_path.stat()
+        self.file_identity = (stat.st_dev, stat.st_ino)
+        self.db.execute('PRAGMA foreign_keys=ON')
+        self.db.execute('PRAGMA secure_delete=ON')
+        self._material_functions()
+        from .material_storage import row_factory
+        self.db.row_factory = row_factory(self)
+        return self
+
+    def _material_functions(self):
+        from .material_storage import hydrate
+        self.db.create_function('material_sha256', 1, lambda text: digest(text.encode()), deterministic=True)
+        self.db.create_function('material_revision_sha256', 3, lambda oid, version, payload: digest(canonical({'object_id': oid, 'version': version, 'payload': json.loads(hydrate(self, payload))}).encode()))
+        self.db.create_function('material_model_migrating', 0, lambda: int(getattr(self, '_material_migrating', False)))
+
     def __init__(self, db_path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(str(self.db_path))
+        stat = self.db_path.stat() if str(self.db_path) != ':memory:' else None
+        self.file_identity = (stat.st_dev, stat.st_ino) if stat else None
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA secure_delete=ON")
@@ -94,10 +117,7 @@ class Store:
         from .material_plans import SCHEMA
         self.db.executescript(SCHEMA)
         from .material_storage import SCHEMA as CONTENT_SCHEMA, row_factory
-        from .material_storage import hydrate
-        self.db.create_function("material_sha256",1,lambda text:digest(text.encode()),deterministic=True)
-        self.db.create_function("material_revision_sha256",3,lambda oid,version,payload:digest(canonical({"object_id":oid,"version":version,"payload":json.loads(hydrate(self,payload))}).encode()))
-        self.db.create_function("material_model_migrating",0,lambda:int(getattr(self,"_material_migrating",False)))
+        self._material_functions()
         try:
             self.db.executescript(CONTENT_SCHEMA)
             self.db.row_factory = row_factory(self)
@@ -242,25 +262,28 @@ class Store:
         return {scope: self.configuration(scope) for scope in ("SYSTEM", "PROJECT")}
 
     def set_configuration(self, scope, updates, expected_version):
-        current = self.configuration(scope)
-        if type(expected_version) is not int or expected_version != current["version"]:
-            raise Conflict("configuration version changed; refresh before saving")
-        if not isinstance(updates, dict):
-            raise ValueError("configuration updates must be an object")
-        body = validate(scope, {**current["body"], **updates})
-        if scope == "SYSTEM" and body["site_favicon"]:
-            from .favicon import asset
-            asset(self.db_path.parent.parent, body["site_favicon"])
-        version, stamp = expected_version + 1, now()
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            current = self.configuration(scope)
+            if type(expected_version) is not int or expected_version != current["version"]:
+                raise Conflict("configuration version changed; refresh before saving")
+            if not isinstance(updates, dict):
+                raise ValueError("configuration updates must be an object")
+            body = validate(scope, {**current["body"], **updates})
+            if scope == "SYSTEM" and body["site_favicon"]:
+                from .favicon import asset
+                asset(self.db_path.parent.parent, body["site_favicon"])
+            version, stamp = expected_version + 1, now()
             self.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET schema_version=excluded.schema_version,version=excluded.version,body=excluded.body,updated_at=excluded.updated_at", (scope, SCHEMA_VERSION, version, canonical(body), stamp))
             self.db.execute("INSERT INTO configuration_events(scope,version,body,at) VALUES (?,?,?,?)", (scope, version, canonical(body), stamp))
-        return self.configuration(scope)
+            return self.configuration(scope)
 
     def configuration_events(self):
         return [dict(row) for row in self.db.execute("SELECT * FROM configuration_events ORDER BY id")]
 
     def close(self):
+        if getattr(self, 'read_cache', None):
+            self.read_cache.close()
         self.db.close()
 
     def source(self, source_id):
@@ -617,33 +640,34 @@ class Store:
                 comment_scope(self, self.comment(comment_id), context, value.get('material_revision'))
             # Revision intent remains readable in old clients; comments never
             # create a plan version or modify generation inputs.
-        return self.comment(comment_id)
+            return self.comment(comment_id)
 
     def change_comment(self, comment_id, action, expected_version, body=None):
-        current = self.comment(comment_id)
-        if not current:
-            raise ValueError("unknown comment")
-        if type(expected_version) is not int or current["version"] != expected_version:
-            raise Conflict("comment version changed; refresh before editing")
-        if action == "EDIT":
-            if current["status"] != "OPEN":
-                raise Conflict("closed comment cannot be edited")
-            body = str(body or "").strip()
-            if not body:
-                raise ValueError("empty comment")
-            # Historical comments remain editable even if an external asset was lost.
-            status = "OPEN"
-        elif action == "CLOSE" and current["status"] == "OPEN":
-            body, status = current["body"], "CLOSED"
-        elif action == "REOPEN" and current["status"] == "CLOSED":
-            body, status = current["body"], "OPEN"
-        else:
-            raise Conflict("action does not match current status")
-        stamp = now()
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            current = self.comment(comment_id)
+            if not current:
+                raise ValueError("unknown comment")
+            if type(expected_version) is not int or current["version"] != expected_version:
+                raise Conflict("comment version changed; refresh before editing")
+            if action == "EDIT":
+                if current["status"] != "OPEN":
+                    raise Conflict("closed comment cannot be edited")
+                body = str(body or "").strip()
+                if not body:
+                    raise ValueError("empty comment")
+                # Historical comments remain editable even if an external asset was lost.
+                status = "OPEN"
+            elif action == "CLOSE" and current["status"] == "OPEN":
+                body, status = current["body"], "CLOSED"
+            elif action == "REOPEN" and current["status"] == "CLOSED":
+                body, status = current["body"], "OPEN"
+            else:
+                raise Conflict("action does not match current status")
+            stamp = now()
             self.db.execute("UPDATE comments SET body=?,status=?,version=version+1,updated_at=? WHERE id=?", (body, status, stamp, comment_id))
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, action, body, stamp))
-        return self.comment(comment_id)
+            return self.comment(comment_id)
 
     def events(self):
         return [dict(row) for row in self.db.execute("SELECT * FROM comment_events ORDER BY id")]
