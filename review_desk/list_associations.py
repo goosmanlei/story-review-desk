@@ -9,7 +9,7 @@ def entity_locations(store, entities, rows):
     cache = {}
 
     def owners(reference):
-        row = p.ref_record(store, reference)
+        row = light.ref_record(store, reference)
         if row['kind'] == 'ENTITY':
             return [row['object_id']]
         if row['kind'] == 'STATE':
@@ -28,7 +28,7 @@ def entity_locations(store, entities, rows):
         if row['kind'] in ('ENTITY', 'STATE'):
             eids = [row['object_id']] if row['kind'] == 'ENTITY' else [value['entity']['object_id']]
             for source in value.get('sources', []):
-                target = p.ref_record(store, source)
+                target = light.ref_record(store, source)
                 if target['kind'] == 'EPISODE':
                     add(eids, {'episode': target['object_id'], 'scene': source.get('scene_id')},
                         {'record': b.ref(row), 'source': source, 'kind': 'source'})
@@ -40,7 +40,7 @@ def entity_locations(store, entities, rows):
                 eids += [eid for ref in occurrence.get('states', []) for eid in owners(ref)]
             add(eids, b.location(store, b.ref(row), cache), {'record': b.ref(row), 'kind': 'scene_shot'})
         elif row['kind'] == 'RELATION' and value.get('relation_type') in ('occurrence', 'applicability'):
-            subject = p.ref_record(store, value['subject'])
+            subject = light.ref_record(store, value['subject'])
             if subject['kind'] in ('ENTITY', 'STATE'):
                 add(owners(value['subject']), b.location(store, value['scope'], cache),
                     {'record': b.ref(row), 'subject': value['subject'], 'scope': value['scope'], 'kind': value['relation_type']})

@@ -1,6 +1,10 @@
 import json
 import mimetypes
 import re
+import hashlib
+import time
+import queue
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -20,34 +24,109 @@ from .production_media import asset_path, ingest
 
 
 class ReviewServer(HTTPServer):
+    request_queue_size = 32
+
     def __init__(self, address, instance_root, config):
         super().__init__(address, ReviewHandler)
         self.root = Path(instance_root).resolve()
         self.config = config
-        self.store = Store(self.root / ".runtime" / "review.sqlite3")
+        self._local = threading.local()
+        self._local.store = Store(self.root / ".runtime" / "review.sqlite3")
+        if self.store.db.execute('PRAGMA journal_mode=WAL').fetchone()[0] != 'wal':
+            raise ValueError('bounded HTTP workers require SQLite WAL')
+        from .read_cache import attach, source_version
+        self.cache_version = source_version()
+        attach(self.store, version=self.cache_version)
+        from .web_assets import WebAssets
+        self.web_assets = WebAssets()
+        self._requests = queue.Queue(maxsize=8)
+        self._workers = [threading.Thread(target=self._work, name=f'review-worker-{i}') for i in range(4)]
+        for worker in self._workers:
+            worker.start()
+
+    @property
+    def store(self):
+        if not hasattr(self._local, 'store'):
+            from .read_cache import attach
+            self._local.store = Store.open_existing(self.root / '.runtime/review.sqlite3')
+            attach(self._local.store, initialize_schema=False, version=self.cache_version)
+        stat = self._local.store.db_path.stat()
+        if (stat.st_dev, stat.st_ino) != self._local.store.file_identity:
+            raise OSError('database replaced while serving; restart after restoration')
+        return self._local.store
+
+    def process_request(self, request, address):
+        # Four active connections and eight queued sockets; no per-request
+        # thread growth or unbounded executor submission queue.
+        self._requests.put((request, address))
+
+    def _work(self):
+        try:
+            while True:
+                item = self._requests.get()
+                if item is None:
+                    return
+                request, address = item
+                try:
+                    self.finish_request(request, address)
+                except Exception:
+                    self.handle_error(request, address)
+                finally:
+                    self.shutdown_request(request)
+        finally:
+            if hasattr(self._local, 'store'):
+                self._local.store.close()
 
     def get_request(self):
         request, address = super().get_request()
-        # Browsers can preconnect without sending an HTTP request. Keep such
-        # idle sockets from blocking the single thread that owns the SQLite store.
+        # Idle browser preconnections cannot retain a worker indefinitely.
         request.settimeout(2)
         return request, address
 
     def server_close(self):
-        self.store.close()
+        for _ in getattr(self, '_workers', []):
+            self._requests.put(None)
+        for worker in getattr(self, '_workers', []):
+            worker.join()
+        if hasattr(getattr(self, '_local', None), 'store'):
+            self._local.store.close()
         super().server_close()
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
+    cache_paths = frozenset(('/api/production/index', '/api/production/breakdown',
+        '/api/production/card', '/api/production/scene', '/api/production/materials',
+        '/api/sources', '/api/screenplays', '/api/business-codes'))
+
+    def _representation(self):
+        from .json_transport import MEDIA_TYPE
+        graph = MEDIA_TYPE in self.headers.get('Accept', '') and urlsplit(self.path).path in self.cache_paths
+        compressed = bool(re.search(r'(?:^|,)\s*gzip\s*(?:,|$)', self.headers.get('Accept-Encoding', '')))
+        return graph, compressed
+
     def _json(self, value, status=200):
         from .business_codes import annotate
-        if self.command == 'GET' and urlsplit(self.path).path != '/api/production/package':
-            value = annotate(self.server.store, value)
-        data = json.dumps(value, ensure_ascii=False).encode()
+        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach'):
+            value = annotate(self.server.store, value, share_records=True)
+        from .json_transport import encode
+        graph, compressed = self._representation()
+        data = encode(value, graph=graph, compressed=compressed)
+        saved = getattr(self, '_response_cache', None)
+        if status == 200 and saved and saved[1] == self.server.store.db.total_changes:
+            self.server.store.read_cache.put(saved[0], data)
+        return self._json_bytes(data, status)
+
+    def _json_bytes(self, data, status=200):
+        from .json_transport import MEDIA_TYPE
+        graph, compressed = self._representation()
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", (MEDIA_TYPE if graph else "application/json")+"; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header('Vary', 'Accept, Accept-Encoding')
+        self.send_header('X-Review-Cache', getattr(self, '_cache_state', 'bypass'))
+        if compressed:
+            self.send_header('Content-Encoding', 'gzip')
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
         self.wfile.write(data)
@@ -58,9 +137,36 @@ class ReviewHandler(BaseHTTPRequestHandler):
         from .material_archives import reference, read_bytes
         import io
         reconstructed = read_bytes(path) if reference(path) else None
-        size = len(reconstructed) if reconstructed is not None else path.stat().st_size
+        if path == Path(__file__).parent / 'static' / 'index.html':
+            reconstructed = self.server.web_assets.index
+        with (io.BytesIO(reconstructed) if reconstructed is not None else path.open("rb")) as stream:
+            return self._file_stream(stream, path, mime, reconstructed)
+
+    def _file_stream(self, stream, path, mime, reconstructed):
+        import os
+        size = len(reconstructed) if reconstructed is not None else os.fstat(stream.fileno()).st_size
+        media = urlsplit(self.path).path.startswith('/api/production/files/') and mime.startswith(('image/', 'audio/', 'video/'))
+        etag = None
+        if media:
+            # Revalidate original bytes, never key historic media by a mutable
+            # filename alone. Hash and serve the same open file, bounded in RAM.
+            digest = hashlib.sha256()
+            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                digest.update(chunk)
+            stream.seek(0)
+            if path.stem != digest.hexdigest():
+                raise ValueError('original media checksum differs from its identity')
+            etag = '"'+digest.hexdigest()+'"'
+            if self.headers.get('If-None-Match') == etag:
+                self.send_response(304)
+                self.send_header('ETag', etag)
+                self.send_header('Cache-Control', 'private, no-cache')
+                self.end_headers()
+                return
         start, end = 0, size - 1
         partial = self.headers.get("Range")
+        if partial and self.headers.get('If-Range') and self.headers['If-Range'] != etag:
+            partial = None
         if partial:
             match = re.fullmatch(r"bytes=(\d*)-(\d*)", partial)
             if not match or not any(match.groups()):
@@ -82,18 +188,19 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Cache-Control", "no-store")
+        self.send_header("Cache-Control", "private, no-cache" if media else "no-store")
+        if etag:
+            self.send_header('ETag', etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        with (io.BytesIO(reconstructed) if reconstructed is not None else path.open("rb")) as stream:
-            stream.seek(start)
-            remaining = end - start + 1
-            while remaining > 0:
-                chunk = stream.read(min(1024 * 1024, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+        stream.seek(start)
+        remaining = end - start + 1
+        while remaining > 0:
+            chunk = stream.read(min(1024 * 1024, remaining))
+            if not chunk:
+                break
+            self.wfile.write(chunk)
+            remaining -= len(chunk)
 
     def _input(self, maximum=20_000_000):
         length = int(self.headers.get("Content-Length", "0"))
@@ -102,8 +209,51 @@ class ReviewHandler(BaseHTTPRequestHandler):
         return json.loads(self.rfile.read(length))
 
     def do_GET(self):
+        request_path = urlsplit(self.path).path
+        if not request_path.startswith('/api/') or request_path.startswith('/api/production/files/'):
+            return self._get()
+        cache = getattr(self.server.store, 'read_cache', None)
+        if not cache or urlsplit(self.path).path not in self.cache_paths:
+            with production.read_scope(self.server.store):
+                return self._get()
+        from .read_cache import token
+        store = self.server.store
+        layout = self.server.root / 'config/entity-relationship-layout.json'
+        layout_key = hashlib.sha256(layout.read_bytes()).hexdigest() if layout.is_file() else None
+        parsed = urlsplit(self.path)
+        request_key = [parsed.path, sorted(parse_qs(parsed.query).items())]
+        deadline = time.monotonic()+15
+        while True:
+            generation = token(store)
+            key = cache.key(generation, ['http', request_key, self._representation(), layout_key])
+            data = cache.get(key)
+            if data is not None:
+                self._cache_state = 'hit'
+                return self._json_bytes(data)
+            with cache.lease(key) as owned:
+                if owned or time.monotonic() >= deadline:
+                    data = cache.get(key)
+                    if data is not None:
+                        self._cache_state = 'hit'
+                        return self._json_bytes(data)
+                    with production.read_scope(store):
+                        # A writer may commit between the first token read and
+                        # opening this snapshot. Never publish under its old key.
+                        if store._production_reads['generation'] != generation:
+                            continue
+                        self._response_cache = (key, store.db.total_changes)
+                        self._cache_state = 'miss'
+                        try:
+                            return self._get()
+                        finally:
+                            self._response_cache = None
+            time.sleep(.005)
+
+    def _get(self):
         parsed = urlsplit(self.path)
         path, query = parsed.path, parse_qs(parsed.query)
+        if self.server.web_assets.serve(self, path):
+            return
         store = self.server.store
         if path == '/api/business-codes':
             from .business_codes import catalog, display_dump
@@ -137,7 +287,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     from . import ui_projection
                     with production.read_scope(store):
                         reader=ui_projection.card if path.endswith('/card') else ui_projection.scene
-                        options={'shot_revision':param('shot_revision')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
+                        options={'shot_revision':param('shot_revision'),'view':param('view')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
                         return self._json(reader(store,param('object_id'),param('revision_id'),**options))
                 if path == "/api/production/context":
                     from .production_breakdown import context
@@ -204,7 +354,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     icon_error = str(exc)
                     _, _, icon = current_favicon(self.server.root, {})
                 return self._json({"catalog": configuration_catalog(), "values": values, "favicon": icon,
-                                   "favicon_error": icon_error, "favicon_assets": favicon_choices(self.server.root)})
+                                   "favicon_error": icon_error, **({"favicon_assets": favicon_choices(self.server.root)} if query.get('summary')!=['1'] else {})})
             except (ValueError, OSError) as exc:
                 return self._json({"error": str(exc)}, 503)
         if path == "/api/comments":

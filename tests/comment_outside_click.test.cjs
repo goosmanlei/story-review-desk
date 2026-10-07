@@ -43,7 +43,7 @@ async function fixture(){
   body.document=c.document;
   const source={id:'source',target_revision_id:'source-r1',blocks:[{id:'paragraph',text:'Exact original'}]};
   const responses={'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Fixture'},'/api/sources?with_revision=1':[source],'/api/comments':[],
-    '/api/framework':{},'/api/configurations':{},'/api/story-structure':{current_revision:null},
+    '/api/framework':{},'/api/configurations':{},'/api/configurations?summary=1':{},'/api/story-structure':{current_revision:null},
     '/api/screenplays':{versions:[]},'/api/screenplay-summaries':{episodes:[]}};
   c.fetch=async url=>{assert.ok(Object.hasOwn(responses,url),url);return {ok:true,json:async()=>responses[url]}};
   vm.createContext(c);require('./load_review_helpers.cjs')(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8'),c,{filename:'app.js'});

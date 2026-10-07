@@ -165,15 +165,19 @@ def edition_codes(store):
 
 
 def visible_codes(store):
-    return [r for r in dump(store) if r['prefix'] not in ('D','B','E','S')]+edition_codes(store)
+    from .read_cache import read_json
+    return read_json(store, 'visible-business-codes-v1',
+                     lambda: [r for r in dump(store) if r['prefix'] not in ('D','B','E','S')]+edition_codes(store))
 
 
-def annotate(store, value):
+def annotate(store, value, *, share_records=False):
+    from .material_storage import _clone_json_tree
     codes = {r['object_id']:code(r) for r in visible_codes(store)}
     aliases = {r['alias_id']:r['material_id'] for r in store.db.execute('SELECT alias_id,material_id FROM material_aliases')}
     candidates = {(r['material_id'],r['version'],r['candidate_id']):r['number'] for r in store.db.execute('SELECT * FROM business_candidates')}
     comment_codes={r['comment_id']:'C'+str(r['number']).zfill(3) for r in store.db.execute('SELECT * FROM business_comments')}
     scenes = {}
+    records = {}
     def scene_for(scope):
         rid = scope.get('revision_id') if isinstance(scope,dict) else None
         if rid not in scenes:
@@ -186,6 +190,11 @@ def annotate(store, value):
             return [walk(i) for i in v]
         if not isinstance(v, dict):
             return v
+        record_key = (v.get('id'), v.get('object_id')) if 'payload' in v and isinstance(v.get('id'), str) else None
+        if record_key:
+            for original, annotated in records.get(record_key, []):
+                if original == v:
+                    return dict(annotated) if share_records else _clone_json_tree(annotated)
         result = {k:walk(i) for k,i in v.items()}
         if v.get('id') in comment_codes and 'anchor' in v and 'body' in v:result['business_code']=comment_codes[v['id']]
         oid = v.get('object_id') or v.get('id')
@@ -224,6 +233,10 @@ def annotate(store, value):
                     row['candidate_number'] = number
                     row['candidate_code'] = result['business_code']+' / MC'+str(number).zfill(3)
             result['results'].sort(key=lambda row: row.get('candidate_number',0))
+        if record_key:
+            # Version/candidate decoration below can mutate a returned record.
+            # Keep a private template and give every occurrence its own tree.
+            records.setdefault(record_key, []).append((v, dict(result) if share_records else _clone_json_tree(result)))
         return result
     return walk(value)
 

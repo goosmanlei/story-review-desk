@@ -90,6 +90,8 @@ def main():
         if command in ("production-package", "production-generation-package"):
             sub.add_argument("--output", required=True, type=Path)
     subs.add_parser("check")
+    cache = subs.add_parser('read-cache', help='inspect or invalidate disposable local read results')
+    cache.add_argument('action', choices=('status', 'clear'))
     args = parser.parse_args()
     root = args.instance.resolve()
     config = json.loads((root / "config" / "instance.json").read_text())
@@ -105,7 +107,10 @@ def main():
         return
     store = Store(root / ".runtime" / "review.sqlite3")
     try:
-        if args.command == "import-sources":
+        if args.command == 'read-cache':
+            from .read_cache import manage
+            result = manage(store, args.action)
+        elif args.command == "import-sources":
             data = json.loads(args.file.read_text())
             for document in data:
                 store.put_source(document)

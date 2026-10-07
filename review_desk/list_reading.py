@@ -47,6 +47,13 @@ def project(store, raw):
             inputs = field(store, key, ('inputs',))
             if inputs is not None:value['inputs'] = inputs
     row['payload'] = value
+    scope = getattr(store, '_production_reads', None)
+    if scope is not None:
+        cache = scope.setdefault('list_records', {})
+        cache[(row['object_id'], row['id'])] = row
+        cache[(None, row['id'])] = row
+        if row['id'] == row['current_revision']:
+            cache[(row['object_id'], None)] = row
     return row
 
 

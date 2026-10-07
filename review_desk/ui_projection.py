@@ -5,6 +5,11 @@ from . import list_reading as light
 
 
 def material_entries(store):
+    from .read_cache import read_json
+    return read_json(store, 'material-entries-v1', lambda: _material_entries(store))
+
+
+def _material_entries(store):
     needs=light.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
     assets=light.rows(store,'ASSET');results={};used=set()
     for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
@@ -170,7 +175,11 @@ def card(store, object_id, revision_id=None, entity_id=None):
             'adoption_context':b.context(store,scoped['object_id'],scoped['id']) if scoped else None}
 
 
-def scene(store, object_id, revision_id=None, shot_revision=None):
+def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
+    if view not in (None, 'breakdown', 'shots'):
+        raise ValueError('unknown scene view')
+    metadata = view == 'breakdown'
+    read_ref = light.ref_record if metadata else p.ref_record
     selected=p.record(store,object_id,revision_id)
     if selected['kind']!='PREPARATION':raise ValueError('scene reader requires a scene')
     shots=b.scene_shots(store,selected,p.record(store,revision_id=shot_revision) if shot_revision else None)
@@ -178,7 +187,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
     for reference in chain:
         row=p.ref_record(store,reference)
         if row['kind'] in ('PREPARATION','EPISODE','INPUT_LOCK','STORY'):
-            contexts.append(b.context(store,row['object_id'],row['id']))
+            contexts.append(b.context(store,row['object_id'],row['id'],metadata=metadata))
     all_entries={i['object_id']:i for i in material_entries(store)}
     def enrich(context):
         from .material_storage import canonical_id
@@ -196,20 +205,21 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
         for need in context['requirements']:
             add(need,'mounted' if need['payload']['scope']==b.ref(scoped) else 'applicable',
                 {'kind':'direct_requirement','record':b.ref(need),'scope':b.ref(scoped)})
-            need['review_input_records']=[p.ref_record(store,v['reference']) for v in need['payload'].get('generation',{}).get('inputs',[])]
+            if not metadata:
+                need['review_input_records']=[p.ref_record(store,v['reference']) for v in need['payload'].get('generation',{}).get('inputs',[])]
             for value in need['payload'].get('generation',{}).get('inputs',[]):
-                add(p.ref_record(store,value['reference']),'planned_input',
+                add(read_ref(store,value['reference']),'planned_input',
                     {'kind':'planned_input','record':b.ref(need),'reference':value})
             for membership in material_plans.memberships(store,need['id']):
                 for call_ref in store.db.execute("SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=? AND role='call'",(membership['material_id'],membership['number'])):
-                    call=p.record(store,revision_id=call_ref[0])
+                    call=(light.record if metadata else p.record)(store,revision_id=call_ref[0])
                     for value in call['payload'].get('inputs',[]):
                         exact=value.get('reference',value)
-                        add(p.ref_record(store,exact),'actual_input',
+                        add(read_ref(store,exact),'actual_input',
                             {'kind':'actual_input','record':b.ref(call),'reference':value})
         for link in context['relations']:
             if link['payload']['relation_type']=='applicability':
-                subject=p.ref_record(store,link['payload']['subject'])
+                subject=read_ref(store,link['payload']['subject'])
                 # A state/entity applicability link expresses suitability, not
                 # the use of every material attached to that state/entity.
                 add(subject,'applicable',{'kind':'direct_requirement','record':b.ref(link),'scope':b.ref(scoped)})
@@ -230,7 +240,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
                 'placement':b.ref(owner),'placement_level':levels.get(owner['kind'],'shot'),
                 'placement_title':owner['payload']['title'],'record':row,
                 'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
-        context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
+        context['video_details']={} if metadata else {r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video'}
         from .shot_references import slots,inputs_for
         from .reference_paths import project as project_reference_paths, annotations as reference_annotations
         for detail in context['video_details'].values():
@@ -248,7 +258,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None):
     episode=p.ref_record(store,source) if source else None
     source_scene=next((s for s in (episode or {}).get('payload',{}).get('scenes',[]) if s['id']==source.get('scene_id')),None)
     return {'scene':selected,'source_scene':source_scene,'shared':[enrich(c) for c in reversed(contexts)],
-            'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id']))} for r in shots]}
+            'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id'],metadata=metadata))} for r in shots]}
 
 
 

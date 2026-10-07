@@ -126,6 +126,25 @@ class UiProjectionTest(unittest.TestCase):
         versions = ui.card(self.store, **{'object_id': exact['object_id'], 'revision_id': exact['revision_id']})['detail']['material_versions'][exact['object_id']]
         self.assertEqual(versions[0]['results'], [])
 
+    def test_breakdown_reads_only_list_metadata_but_keeps_exact_card_and_counts(self):
+        self.setup_plans(); self.generate(); self.mount_on_test_shot('need-full-overall')
+        full = ui.scene(self.store, 'scene', view='shots')
+        with patch.object(p, 'snapshot', side_effect=AssertionError('breakdown must not expand video history')):
+            slim = ui.scene(self.store, 'scene', view='breakdown')
+        self.assertEqual(slim['scene'], full['scene'])
+        self.assertEqual(slim['shots'][0]['record'], full['shots'][0]['record'])
+        old = full['shots'][0]['context']['materials']
+        new = slim['shots'][0]['context']['materials']
+        for item, expected in zip(new, old):
+            self.assertEqual({k:v for k,v in item.items() if k!='record'},
+                             {k:v for k,v in expected.items() if k!='record'})
+            self.assertEqual(item['record']['id'], expected['record']['id'])
+        target = new[0]['reference']
+        detail = ui.card(self.store, target['object_id'], target['revision_id'])
+        self.assertEqual(detail['detail']['record']['id'], target['revision_id'])
+        self.assertIn('generation', detail['detail']['record']['payload'])
+        self.assertEqual(slim['shots'][0]['context']['video_details'], {})
+
     def test_scene_fallback_keeps_exact_scope_and_rejects_placeholder_or_preview_as_results(self):
         self.setup_plans(); self.media(); self.mount_on_test_shot('voice')
         exact = self.ref('voice'); saved = p.record(self.store, 'voice')

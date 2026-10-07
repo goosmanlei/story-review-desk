@@ -156,10 +156,12 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
             'scenes':chosen_scenes,'shots':chosen_shots,'target':ref(target) if target else None}
 
 
-def context(store, object_id, revision_id=None):
+def context(store, object_id, revision_id=None, *, metadata=False):
+    from . import list_reading as light
+    read_ref = light.ref_record if metadata else p.ref_record
     selected = p.record(store, object_id, revision_id)
     scope_revision = selected['id']
-    direct = exact_scoped(store, 'REQUIREMENT', scope_revision)
+    direct = exact_scoped(store, 'REQUIREMENT', scope_revision, metadata=metadata)
     links = [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type'] in ('applicability','occurrence')]
     entities = list(selected['payload'].get('entities', []))
     states = list(selected['payload'].get('states', []))
@@ -169,7 +171,7 @@ def context(store, object_id, revision_id=None):
         states = [s for o in occurrences for s in o['states']]
     needs = {r['object_id']: r for r in direct if r['payload'].get('status') != 'withdrawn'}
     for link in links:
-        subject = p.ref_record(store, link['payload']['subject'])
+        subject = read_ref(store, link['payload']['subject'])
         if subject['kind'] == 'REQUIREMENT':
             needs.setdefault(subject['object_id'], subject)
         if link['payload']['relation_type']=='occurrence':
