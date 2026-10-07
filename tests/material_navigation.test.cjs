@@ -65,6 +65,16 @@ test('a previous detail card cannot override the newly opened asset membership',
  const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'need');assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
 });
 
+for(const exact of [false,true])test(`unified material ${exact?'exact reference':'fresh entry'} ignores another card's version in the caller URL`,()=>{
+ const f=setup();f.ctx.location.href='http://local/?workspace=materials.workspace&material_page=2&material_media=audio&material_id=foreign&material_round=9&material_target=foreign-result';
+ const params=new URLSearchParams(exact?'material_id=need&material_round=1&material_target=b-exact':'');
+ f.detail.legacy_material_versions=f.detail.material_versions;
+ const result={entity_review:null,detail:f.detail,params,explicit:true};
+ f.ctx.validateUnifiedReference(result);f.ctx.activateUnifiedCard(result);f.ctx.renderMaterialWorkspace(f.root,f.detail);
+ assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
+ const url=new URL(f.ctx.location.href);assert.equal(url.searchParams.get('material_page'),'2');assert.equal(url.searchParams.get('material_media'),'audio');assert.notEqual(url.searchParams.get('material_id'),'foreign');assert.equal(url.searchParams.get('material_round'),'1');
+});
+
 for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested member and submits its accurate judgment`,async()=>{
  const f=setup();f.a.payload.production={...f.b.payload.production};f.a.payload.components=f.b.payload.components.map(c=>({...c}));
  f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
