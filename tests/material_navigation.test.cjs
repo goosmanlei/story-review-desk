@@ -75,6 +75,13 @@ for(const exact of [false,true])test(`unified material ${exact?'exact reference'
  const url=new URL(f.ctx.location.href);assert.equal(url.searchParams.get('material_page'),'2');assert.equal(url.searchParams.get('material_media'),'audio');assert.notEqual(url.searchParams.get('material_id'),'foreign');assert.equal(url.searchParams.get('material_round'),'1');
 });
 
+test('a lazy material list keeps the exact scope title supplied with its standalone card',()=>{
+ const f=setup(),scope={object_id:'shot-scope',id:'scope-v1',kind:'SHOT_DESIGN',payload:{title:'Exact shot title'}};
+ f.ctx.state.productionRecords=[];f.ctx.state.unifiedScope=scope;
+ assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:scope.id}),'Exact shot title');
+ assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:'scope-v0'}),scope.object_id);
+});
+
 for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested member and submits its accurate judgment`,async()=>{
  const f=setup();f.a.payload.production={...f.b.payload.production};f.a.payload.components=f.b.payload.components.map(c=>({...c}));
  f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
