@@ -79,6 +79,12 @@ def record(store, object_id=None, revision_id=None):
         row = store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM objects o
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
+        from .version_consolidation import deleted, missing_view
+        receipt = deleted(store, revision_id) if revision_id else None
+        if receipt:
+            if object_id and receipt['object_id'] != object_id:
+                raise ValueError('deleted revision belongs to another object')
+            return missing_view(receipt, store)
         raise KeyError("unknown production object or revision")
     if reads is not None:reads['records'][key] = row
     value = record_view(row)
@@ -102,15 +108,17 @@ def ref_record(store, ref, kinds=None):
     return value
 
 
-def references(value, path="payload"):
+def references(value, path="payload", include_unavailable=False):
     if isinstance(value, dict):
+        if value.get('unavailable') and not include_unavailable:
+            return
         if "object_id" in value and "revision_id" in value:
             yield path, value
         for key, child in value.items():
-            yield from references(child, path + "." + key)
+            yield from references(child, path + "." + key, include_unavailable)
     elif isinstance(value, list):
         for index, child in enumerate(value):
-            yield from references(child, path + "." + str(index))
+            yield from references(child, path + "." + str(index), include_unavailable)
 
 
 def source_check(store, ref):
@@ -263,6 +271,9 @@ def _lineage(store, payload):
 
 
 def validate_payload(store, object_id, kind, payload, inspect=True, check_current=True):
+    from .version_consolidation import preserved as consolidated
+    if not check_current and consolidated(store, object_id, payload):
+        return
     if kind not in KINDS or not isinstance(payload, dict) or payload.get("format") != "production-" + KINDS[kind] + "-v1":
         raise ValueError("unsupported production format/kind")
     _text(payload.get("title"), "title")
@@ -678,6 +689,9 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         raise ValueError("unknown production kind")
     if object_id or revision_id:
         selected = record(store, object_id, revision_id)
+        if selected.get('unavailable'):
+            from .version_consolidation import NOTICE
+            raise ValueError(NOTICE)
         if selected["payload"].get("format") not in FORMATS:
             raise ValueError("not a production object")
         history = [record(store, revision_id=r[0]) for r in store.db.execute("SELECT id FROM revisions WHERE object_id=? ORDER BY version DESC", (selected["object_id"],))]

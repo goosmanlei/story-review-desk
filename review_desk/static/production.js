@@ -309,13 +309,17 @@ async function loadProductionWorkspace({onReadStart}={}){
 async function openProductionRecord(objectId,revisionId=null,navigate=false,entityId=null){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();const workspaceAtStart=state.workspace,epoch=++productionReadEpoch;
   let detail=await api('/api/production?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{})}));
+  const exactRoute=new URL(location.href);
+  if(exactRoute.searchParams.get('production_object')===objectId&&Object.values(detail.material_versions||{}).some(rs=>rs.some(r=>r.baseline_id))){
+    normalizeConsolidatedMaterialRoute(exactRoute.searchParams,exactRoute.searchParams.has('material_round')?detail.legacy_material_versions:detail.material_versions);history.replaceState(history.state,'',exactRoute);
+  }
   if(epoch!==productionReadEpoch||state.workspace!==workspaceAtStart)return;
   const changeHistory=state.workspace==='production.workspace'&&productionChangeHistory(detail.record),needsWorkspaceRoute=!productionWorkspaceCanRead(state.workspace,detail.record);
   if(navigate&&(needsWorkspaceRoute||changeHistory)){
     const workspace=changeHistory?state.workspace:Object.keys(productionGroups).find(k=>productionGroups[k].includes(detail.record.kind))||(['CALL','JUDGMENT'].includes(detail.record.kind)?'materials.workspace':state.workspace);
     const url=new URL(location.href),previousTab=url.searchParams.get('production_tab');
     url.searchParams.set('workspace',workspace);url.searchParams.set('production_object',objectId);url.searchParams.set('production_revision',detail.record.id);url.hash='';
-    if(changeHistory){url.searchParams.set('production_tab','history');for(const key of ['production_entity','entity_state','material_id','material_version','material_round','material_target'])url.searchParams.delete(key)}
+    if(changeHistory){url.searchParams.set('production_tab','history');for(const key of ['production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key)}
     if(url.href!==location.href){
       if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
       if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute();
@@ -372,8 +376,8 @@ function focusProductionReview(detail,paint=true){
   if(typeof isEntityReview==='function'&&isEntityReview()){
     if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&r.id===r.current_revision&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
     const context=['ASSET','REQUIREMENT','CALL'].includes(r.kind)?materialCommentContext():null;
-    if(context){url.searchParams.set('material_id',context.material_id);url.searchParams.set(context.model==='plan-v1'?'material_version':'material_round',context.number)}
-    else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version')}
+    if(context){const round=state.entityReview.material_versions?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialVersionRoute(url.searchParams,context.material_id,round||context)}
+    else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version');url.searchParams.delete('material_baseline')}
   }
   if(state.workspace==='settings.workspace'&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
   if(typeof isMaterialReview==='function'&&isMaterialReview()){url.searchParams.set('production_object',state.materialReview.record.object_id);url.searchParams.set('production_revision',state.materialReview.record.id);url.searchParams.set('material_target',r.id)}

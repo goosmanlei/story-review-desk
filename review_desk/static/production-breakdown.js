@@ -124,18 +124,23 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
 function breakdownPrompt(parent,need,context){
   const detail=context.video_details?.[need.object_id],rounds=detail?.material_versions?.[need.object_id]||[];
   state.breakdownVideoSelections||={};const params=new URL(location.href).searchParams,exact=params.get('shot_material_id')===need.object_id;
+  if(exact&&params.has('shot_plan')){
+    const checked=new URLSearchParams({material_id:need.object_id,material_version:params.get('shot_plan'),...(params.has('shot_baseline')?{material_baseline:params.get('shot_baseline')}:{})});
+    try{validateUnifiedReference({params:checked,detail});params.set('shot_plan',checked.get('material_version'))}
+    catch(error){nodeText('p','production-issue',error.message,parent);return}
+  }
   const saved=exact?{number:Number(params.get('shot_plan')),candidate:params.get('shot_candidate')}:state.breakdownVideoSelections[need.id]||{},round=rounds.find(r=>r.number===saved.number)||[...rounds].sort((a,b)=>b.number-a.number)[0];
   if(exact&&saved.number&&!rounds.some(r=>r.number===saved.number)){nodeText('p','production-issue','准确视频制作版本不存在',parent);return}
   const candidates=(round?.results||[]).map(record=>({record,components:record.payload.components,component:record.payload.components.find(c=>c.role==='original')||record.payload.components[0]}));
   const model={need:round?(round.definition_records?round.definition_records.requirement:round.plan):need,identity:need,candidates,round,rounds,material_id:need.object_id};
   if(saved.candidate&&!candidates.some(i=>i.record.id===saved.candidate)){nodeText('p','production-issue','准确视频候选不属于此制作版本；未替换为其他结果',parent);return}
   const selected=materialCandidateChoice(candidates,saved.candidate||materialDefaultCandidate(model,{adoptions:context.adoptions}));
-  const selection={number:round?.number,candidate:selected?.record.id,reference:productionRef(selected?.record||model.need||round?.definition_records?.call||need)};state.breakdownVideoSelections[need.id]=selection;
+  const selection={number:round?.number,baseline:round?.baseline_id,candidate:selected?.record.id,reference:productionRef(selected?.record||model.need||round?.definition_records?.call||need)};state.breakdownVideoSelections[need.id]=selection;
   const referenceContext={need,number:round?.number,frozen:!!round?.frozen};
   const section=el('section','shot-generation-content');parent.append(section);
   const repaint=()=>{rememberProductionDraft();section.remove();breakdownPrompt(parent,need,context);paintReviewCommentCounts()};
   const bar=el('div','production-toolbar');section.append(bar);
-  const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
+  const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'视频候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
   if(selected){
@@ -260,9 +265,10 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);materialReferenceLink(title,shot.payload.source,'查看剧本','full_scene');heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
     if(productionTab()==='shots'){const needs=item.context.requirements.filter(r=>r.payload.media_type==='video');for(const need of needs)breakdownPrompt(text,need,item.context);if(!needs.length)nodeText('p','production-meta','本镜视频生成方案待补齐',text)}else breakdownShotText(text,shot);
     row.append(text,materials);page.append(row);nodeText('h4',null,productionTab()==='shots'?'本镜视频':'本镜素材',materials);
+    if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
     const items=(item.context.materials||[]).filter(i=>productionTab()!=='shots'||i.media_type==='video');
     for(const group of groupedShotMaterials(items)){const section=el('section','breakdown-material-group');nodeText('h5',null,group.label,section);materials.append(section);
-      for(const item of group.items)materialSmallCard(section,item,trigger=>{const choice=state.breakdownVideoSelections?.[item.id],params=choice?.number?new URLSearchParams({material_id:item.object_id,material_version:choice.number,...(choice.candidate?{material_target:choice.candidate}:{})}):item.canonical_material_id?new URLSearchParams({material_id:item.canonical_material_id}):null;
+      for(const item of group.items)materialSmallCard(section,item,trigger=>{const choice=state.breakdownVideoSelections?.[item.id],params=choice?.number?new URLSearchParams({material_id:item.object_id,material_version:choice.number,...(choice.baseline?{material_baseline:choice.baseline}:{}),...(choice.candidate?{material_target:choice.candidate}:{})}):item.canonical_material_id?new URLSearchParams({material_id:item.canonical_material_id}):null;
         openUnifiedMaterial({...item.reference,...choice?.reference,object_id:choice?.reference?.object_id||item.reference?.object_id||item.object_id,revision_id:choice?.reference?.revision_id||item.reference?.revision_id||item.id,params,defaultSelection:!choice&&item.association!=='adoption'&&item.record?.kind!=='ASSET'},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
     }
     if(!items.length)nodeText('p','production-meta','本镜暂无关联素材',materials);

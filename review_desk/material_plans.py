@@ -92,6 +92,11 @@ def legacy_signature(row):
 
 
 def signature(row, store=None):
+    if store is not None:
+        from .version_consolidation import saved_signature
+        value = saved_signature(store, row)
+        if value is not None:
+            return value
     from .material_model import signature as complete_signature
     return complete_signature(row, store)
 
@@ -237,6 +242,7 @@ def card_counts(store, material_ids=None):
 
 
 def snapshot(store, mid):
+    from .version_consolidation import version_route
     result = []
     for v in store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? ORDER BY number DESC', (mid,)):
         rows = [p.record(store, revision_id=r[0]) for r in store.db.execute('SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=? ORDER BY revision_id', (mid, v['number']))]
@@ -249,7 +255,7 @@ def snapshot(store, mid):
                 row['candidate_id'] = identity(row['payload'])
                 candidates[row['candidate_id']] = row
         from .material_model import projection
-        result.append({**dict(v), **projection(store,mid,v['number']), 'model': 'plan-v1', 'state': 'produced' if candidates else 'preparing',
+        result.append({**dict(v), **projection(store,mid,v['number']), **version_route(store,mid), 'model': 'plan-v1', 'state': 'produced' if candidates else 'preparing',
                        'plan': plans[-1] if plans else None, 'scheme': next((scheme(r['payload'],r['kind']) for r in rows if r['kind'] in ('CALL','REQUIREMENT') and (signature(r,store)==v['fingerprint'] or legacy_signature(r)==v['fingerprint'])), None), 'results': list(candidates.values()), 'members': rows, 'feedback': []})
     return result
 

@@ -26,6 +26,9 @@ def _material_entries(store):
         def add_scope(reference,relation):
             scoped=light.ref_record(store,reference)
             locations.append({**b.location(store,reference,cache),'relation':relation,'title':scoped['payload']['title']})
+            if scoped.get('unavailable'):
+                if scoped.get('owner_object_id'):owners[scoped['owner_object_id']]=None
+                return
             if scoped['kind']=='STATE':
                 owners[scoped['payload']['entity']['object_id']]=scoped['payload']['entity']
                 for source in scoped['payload'].get('sources',[]):
@@ -150,8 +153,8 @@ def card(store, object_id, revision_id=None, entity_id=None):
         needs=(detail.get('review_context') or {}).get('requirements',[])
         actual=(detail.get('review_context') or {}).get('call')
         call_need=(actual or {}).get('payload',{}).get('generation_requirement')
-        if needs:scope=needs[0]['payload']['scope']
-        elif call_need:scope=p.ref_record(store,call_need)['payload']['scope']
+        if needs:scope=needs[0]['payload'].get('scope')
+        elif call_need:scope=p.ref_record(store,call_need)['payload'].get('scope')
         elif row['payload'].get('state_coverage'):scope=row['payload']['state_coverage'][0]['state']
         elif row['payload'].get('subjects'):
             known=[p.ref_record(store,ref) for ref in row['payload']['subjects']]
@@ -159,7 +162,11 @@ def card(store, object_id, revision_id=None, entity_id=None):
     scoped=p.ref_record(store,scope) if scope else None
     if scoped and scoped['kind']=='STATE':form=scoped
     elif scoped and scoped['kind']=='ENTITY':owner=scoped
-    if form:owner=p.ref_record(store,form['payload']['entity'])
+    if form:
+        if form.get('unavailable'):
+            owner=p.record(store,form['owner_object_id']) if form.get('owner_object_id') else None
+            form=None
+        else:owner=p.ref_record(store,form['payload']['entity'])
     entity=entity_review.snapshot(store,entity_id or owner['object_id']) if entity_id or owner else None
     if entity_id:
         allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
@@ -192,8 +199,11 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
     def enrich(context):
         from .material_storage import canonical_id
         from . import material_plans
-        scoped=context['record'];needs={}
+        scoped=context['record'];needs={};context['missing_materials']=[]
         def add(row,relation,evidence):
+            if row.get('unavailable'):
+                context['missing_materials'].append({'reference':b.ref(row),'message':row['payload']['title'],'evidence':evidence})
+                return
             if row['kind'] not in ('REQUIREMENT','ASSET'):return
             mid=canonical_id(store,row['object_id'])
             if row['kind']=='ASSET':
@@ -268,6 +278,7 @@ def material_classification(store, row, item, placement):
     def add(value):
         if not value:return
         record=p.ref_record(store,value)
+        if record.get('unavailable'):return
         if record['kind']=='STATE':add(record['payload']['entity'])
         elif record['kind']=='ENTITY':entities[record['object_id']]=record
         elif record['kind'] in b.POSITIONS:scopes.append(record)

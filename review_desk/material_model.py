@@ -301,7 +301,8 @@ def _verify(store):
     from . import production as p
     for revision in store.revisions():
         payload=json.loads(revision['payload'])
-        if digest(canonical({'object_id':revision['object_id'],'version':revision['version'],'payload':payload}).encode())!=revision['id']:
+        from .version_consolidation import valid_identity
+        if not valid_identity(store, revision['object_id'], revision['version'], payload, revision['id']):
             from .state_cleanup import verify_row as verify_cleaned_state
             receipt=store.db.execute('SELECT * FROM state_cleanup_receipts WHERE revision_id=?',(revision['id'],)).fetchone()
             if receipt:
@@ -328,6 +329,12 @@ def _verify(store):
     bindings={(r[0],r[1]) for r in store.db.execute('SELECT material_id,number FROM material_definition_versions')}
     if versions!=bindings:raise ValueError('material versions are missing complete definition bindings')
     for binding in store.db.execute('SELECT * FROM material_definition_versions'):
+        from .version_consolidation import binding_preserved
+        if binding_preserved(store, binding):
+            content = storage.expand(store, binding['definition_id'])
+            if storage.content_id(content) != binding['definition_id']:
+                raise ValueError('consolidated definition content differs')
+            continue
         provenance=json.loads(binding['provenance'])
         source=p.ref_record(store,provenance['generation']['record'])
         content,expected,gaps=definition(store,source)

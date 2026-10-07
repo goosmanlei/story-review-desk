@@ -131,6 +131,7 @@ def comment_scope(store, comment, context=None, intent=None):
 
 
 def snapshot(store, material_id):
+    from .version_consolidation import version_route
     rounds = []
     for value in store.db.execute('SELECT * FROM material_rounds WHERE material_id=? ORDER BY number DESC', (material_id,)):
         rows = [p.record(store, revision_id=v[0]) for v in store.db.execute('SELECT revision_id FROM material_members WHERE material_id=? AND number=? ORDER BY revision_id', (material_id, value['number']))]
@@ -144,7 +145,7 @@ def snapshot(store, material_id):
         for row in results:
             key = result_identity(row['payload'])
             candidates[key] = row
-        rounds.append({**dict(value), 'plan': plans[-1] if plans else None,
+        rounds.append({**dict(value), **version_route(store,material_id), 'plan': plans[-1] if plans else None,
                        'results': list(candidates.values()), 'members': rows,
                        'feedback': [r[0] for r in store.db.execute('SELECT comment_id FROM material_feedback WHERE material_id=? AND number=? ORDER BY comment_id', (material_id, value['number']))]})
     return rounds

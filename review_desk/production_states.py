@@ -44,6 +44,9 @@ def usage_issues(store, entities, states, transitions, source, allow_none=False)
     issues, grouped = [], {e["object_id"]: [] for e in entities}
     for ref in states:
         state = ref_record(store, ref, {"STATE"})
+        if state.get('unavailable'):
+            issues.append({'code':'deleted_exact_state','state':ref})
+            continue
         owner = state["payload"]["entity"]["object_id"]
         if owner not in grouped:
             issues.append({"code": "state_owner_mismatch", "entity": owner, "state": ref})

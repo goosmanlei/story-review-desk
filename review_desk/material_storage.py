@@ -51,10 +51,10 @@ WHEN (NEW.definition_id!=OLD.definition_id OR NEW.provenance!=OLD.provenance OR 
  AND material_model_migrating()=0
 BEGIN SELECT RAISE(ABORT,'frozen material definition is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS material_revision_insert BEFORE INSERT ON revisions
-WHEN json_extract(NEW.payload,'$.format') IN ('production-requirement-v1','production-call-v1') AND material_revision_sha256(NEW.object_id,NEW.version,NEW.payload)!=NEW.id
+WHEN json_extract(NEW.payload,'$.format') IN ('production-requirement-v1','production-call-v1') AND material_model_migrating()=0 AND material_revision_valid(NEW.object_id,NEW.version,NEW.payload,NEW.id)=0
 BEGIN SELECT RAISE(ABORT,'material revision logical checksum mismatch'); END;
 CREATE TRIGGER IF NOT EXISTS material_revision_update BEFORE UPDATE OF payload ON revisions
-WHEN json_extract(NEW.payload,'$.format') IN ('production-requirement-v1','production-call-v1') AND material_revision_sha256(NEW.object_id,NEW.version,NEW.payload)!=NEW.id
+WHEN json_extract(NEW.payload,'$.format') IN ('production-requirement-v1','production-call-v1') AND material_model_migrating()=0 AND material_revision_valid(NEW.object_id,NEW.version,NEW.payload,NEW.id)=0
 BEGIN SELECT RAISE(ABORT,'material revision logical checksum mismatch'); END;
 
 '''
@@ -64,7 +64,14 @@ TRIGGERS=('material_content_immutable','material_content_checksum','material_rev
           'material_revision_update','material_frozen_version_update','material_frozen_definition_update')
 
 
+def upgrade_identity_triggers(db):
+    for name in ('material_revision_insert','material_revision_update'):
+        row=db.execute("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?",(name,)).fetchone()
+        if row and 'material_revision_valid' not in row[0]:db.execute('DROP TRIGGER '+name)
+
+
 def enable_constraints(db):
+    upgrade_identity_triggers(db)
     statement=''
     for line in SCHEMA[SCHEMA.index('CREATE TRIGGER'):].splitlines(keepends=True):
         statement+=line

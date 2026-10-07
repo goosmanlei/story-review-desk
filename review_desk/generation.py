@@ -372,9 +372,11 @@ def _snapshot(store, entity_id, revision_id=None):
         asset=item['record']
         refs=[v['state'] for v in asset['payload'].get('state_coverage',[]) if v.get('component_id')==item['component_id']]
         if not refs:refs=asset['payload'].get('states',[])
-        owned=[r for r in refs if p.ref_record(store,r,{'STATE'})['payload']['entity']['object_id']==entity_id]
+        exact_states=[(r,p.ref_record(store,r,{'STATE'})) for r in refs]
+        owned=[r for r,s in exact_states if not s.get('unavailable') and s['payload']['entity']['object_id']==entity_id]
         if not item.get('state') and len({r['revision_id'] for r in owned})==1:item['review_state']=owned[0]
-        item['associated_states']=[{'state':p.ref_record(store,r,{'STATE'}),'entity':p.ref_record(store,p.ref_record(store,r,{'STATE'})['payload']['entity'],{'ENTITY'})} for r in refs]
+        item['associated_states']=[{'state':s,'entity':p.ref_record(store,s['payload']['entity'],{'ENTITY'})} for r,s in exact_states if not s.get('unavailable')]
+        item['missing_states']=[s for _,s in exact_states if s.get('unavailable')]
     contexts=media_review.enrich_media(store,data['media'])
     calls=[c['call'] for c in contexts.values() if c['call']]
     for oid in {m['record']['object_id'] for m in data['media']}:
@@ -452,6 +454,12 @@ def readiness(store, requirement_id):
     need=p.record(store,requirement_id)
     if need['kind']!='REQUIREMENT':raise ValueError('generation needs a requirement')
     plan=need['payload'].get('generation');issues=[];inputs=[];approvals=[]
+    from .version_consolidation import deleted, NOTICE
+    missing = [path for path, reference in p.references(need['payload'], include_unavailable=True)
+               if reference.get('unavailable') or deleted(store, reference['revision_id'])]
+    if missing or need['payload'].get('consolidation_identity_only'):
+        return {'requirement':need,'plan':plan,'acceptances':[], 'inputs':[], 'i2i_depth':0,
+                'issues':[NOTICE+' '+path for path in missing] or ['保留产物的原始需求方案未登记'], 'ready':False}
     if not plan:issues.append('尚无生成方案')
     if need['payload'].get('status')=='withdrawn':issues.append('素材需求已撤回')
     scope=p.ref_record(store,need['payload']['scope'])

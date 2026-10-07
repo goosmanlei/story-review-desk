@@ -10,6 +10,8 @@ def entity_locations(store, entities, rows):
 
     def owners(reference):
         row = light.ref_record(store, reference)
+        if row.get('unavailable'):
+            return [row['owner_object_id']] if row.get('owner_object_id') else []
         if row['kind'] == 'ENTITY':
             return [row['object_id']]
         if row['kind'] == 'STATE':

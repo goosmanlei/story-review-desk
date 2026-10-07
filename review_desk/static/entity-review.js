@@ -22,6 +22,8 @@ function entityMaterialRouteOwner(row,param){
   return owner||null;
 }
 function entityMaterialRoute(data,row,param,{defaultSelection=false}={}){
+  const routeVersions=param.has('material_round')?data.legacy_material_versions:data.material_versions;
+  if(Object.values(routeVersions||{}).some(rs=>rs.some(r=>r.baseline_id)))normalizeConsolidatedMaterialRoute(param,routeVersions);
   if(param.has('material_round')&&Object.keys(data.legacy_material_versions||{}).length)data.material_versions=data.legacy_material_versions;
   const same=r=>r.object_id===row.object_id&&r.id===row.id;
   const entries=Object.entries(data.material_versions||{}).flatMap(([material_id,rounds])=>rounds.filter(round=>materialVersionCommentRows(round).some(same)).map(round=>({material_id,round})));

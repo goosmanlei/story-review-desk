@@ -27,6 +27,19 @@ class Conflict(ValueError):
 
 class Store:
     @classmethod
+    def open_readonly(cls, db_path):
+        """Inspect an existing instance without initialization or migrations."""
+        self = cls.__new__(cls)
+        self.db_path = Path(db_path)
+        self.db = sqlite3.connect(self.db_path.resolve().as_uri()+'?mode=ro', uri=True)
+        stat = self.db_path.stat()
+        self.file_identity = (stat.st_dev, stat.st_ino)
+        self._material_functions()
+        from .material_storage import row_factory
+        self.db.row_factory = row_factory(self)
+        return self
+
+    @classmethod
     def open_existing(cls, db_path):
         """A worker connection after the owner has initialized the schema."""
         self = cls.__new__(cls)
@@ -43,9 +56,11 @@ class Store:
 
     def _material_functions(self):
         from .material_storage import hydrate
+        from .version_consolidation import valid_identity
         self.db.create_function('material_sha256', 1, lambda text: digest(text.encode()), deterministic=True)
         self.db.create_function('material_revision_sha256', 3, lambda oid, version, payload: digest(canonical({'object_id': oid, 'version': version, 'payload': json.loads(hydrate(self, payload))}).encode()))
         self.db.create_function('material_model_migrating', 0, lambda: int(getattr(self, '_material_migrating', False)))
+        self.db.create_function('material_revision_valid', 4, lambda oid, version, payload, rid: int(valid_identity(self, oid, version, json.loads(hydrate(self, payload)), rid)))
 
     def __init__(self, db_path):
         self.db_path = Path(db_path)
@@ -116,9 +131,10 @@ class Store:
         self.db.execute('CREATE INDEX IF NOT EXISTS material_members_revision ON material_members(revision_id)')
         from .material_plans import SCHEMA
         self.db.executescript(SCHEMA)
-        from .material_storage import SCHEMA as CONTENT_SCHEMA, row_factory
+        from .material_storage import SCHEMA as CONTENT_SCHEMA, row_factory, upgrade_identity_triggers
         self._material_functions()
         try:
+            upgrade_identity_triggers(self.db)
             self.db.executescript(CONTENT_SCHEMA)
             self.db.row_factory = row_factory(self)
             # Existing V1 instance databases are upgraded without rewriting source text.
@@ -133,6 +149,8 @@ class Store:
             initialize_relationship_policy(self)
             from .state_cleanup import initialize as initialize_state_cleanup
             initialize_state_cleanup(self)
+            from .version_consolidation import initialize as initialize_consolidation
+            initialize_consolidation(self)
         except BaseException:
             self.db.rollback()
             try:
@@ -200,6 +218,8 @@ class Store:
             return [self._put_object(**record) for record in records]
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .version_consolidation import guard_write as guard_consolidation
+        guard_consolidation(self, object_id, payload)
         from .state_cleanup import guard_write
         guard_write(self, object_id, payload)
         kinds = {item for domain in DOMAINS.values() for item in domain["kinds"]}
@@ -213,7 +233,8 @@ class Store:
             from .generation import validate_call
             validate_call(self, object_id, payload)
         new_version = version + 1
-        revision_id = digest(canonical({"object_id": object_id, "version": new_version, "payload": payload}).encode())
+        from .version_consolidation import new_identity
+        revision_id = new_identity(self, object_id, new_version, payload)
         refs = []
         for ref in dependencies:
             if not isinstance(ref, dict) or not isinstance(ref.get("role"), str) or not ref["role"]:

@@ -47,6 +47,9 @@ def project(store, raw):
             inputs = field(store, key, ('inputs',))
             if inputs is not None:value['inputs'] = inputs
     row['payload'] = value
+    if row['kind'] == 'DELETED_STATE':
+        from .state_cleanup import view
+        row = view(row)
     scope = getattr(store, '_production_reads', None)
     if scope is not None:
         cache = scope.setdefault('list_records', {})
@@ -66,7 +69,12 @@ def record(store, object_id=None, revision_id=None):
                  'o.kind,o.current_revision FROM revisions r JOIN objects o ON o.id=r.object_id ')
         raw = store.db.execute(query + ('WHERE r.id=?' if revision_id else 'WHERE o.id=? AND r.id=o.current_revision'),
                                (revision_id or object_id,)).fetchone()
-        if raw is None:raise KeyError('unknown production object or revision')
+        if raw is None:
+            from .version_consolidation import deleted, missing_view
+            receipt = deleted(store, revision_id) if revision_id else None
+            if receipt and (not object_id or receipt['object_id'] == object_id):
+                return missing_view(receipt, store)
+            raise KeyError('unknown production object or revision')
         if object_id and raw['object_id'] != object_id:raise ValueError('revision belongs to another object')
         cache[key] = project(store, raw)
     return cache[key]
