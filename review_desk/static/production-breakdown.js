@@ -298,7 +298,7 @@ async function openBreakdownMaterial(need,reader,selectionEpoch=null,restore=fal
 }
 function flatFilterGroup(parent,key,label,options,selected,counts,onchange){
   const group=el('div','production-filter-group');group.setAttribute('role','group');group.setAttribute('aria-label',label);nodeText('span','production-filter-label',label,group);const choices=el('div','production-filter-options');group.append(choices);
-  for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;nodeText('span',null,title,button);nodeText('b','production-filter-count',String(counts?.[value]||0),button)}parent.append(group);
+  for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;nodeText('span',null,title,button);if(counts)nodeText('b','production-filter-count',String(counts[value]||0),button)}parent.append(group);
 }
 async function loadProductionMaterials(){return loadMaterialManagement()}
 

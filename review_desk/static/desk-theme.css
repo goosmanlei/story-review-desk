@@ -30,7 +30,7 @@ button { border-radius: var(--desk-radius); }
 :where(.workspace-content,.review-dialog,.comment-panel) :is(input:not([type=radio]):not([type=checkbox]):not([type=range]):not([type=hidden]),textarea,select) {
   max-width: 100%; min-width: 0; padding: 9px 12px; border: 1px solid var(--desk-line); border-radius: var(--desk-radius); color: var(--desk-ink); background: var(--desk-surface); font-size: 13px; line-height: 1.5;
 }
-:where(.workspace-content,.review-dialog,.comment-panel) :is(button.secondary,.production-toolbar button,.review-reference-button,.review-choice-buttons button,.card-actions button,.editor-actions button,.management-pagination button) {
+:where(.workspace-content,.review-dialog,.comment-panel) :is(button.secondary,.production-toolbar button,.review-reference-button,.review-choice-buttons button,.card-actions button,.editor-actions button,.management-pagination button,.review-pagination button) {
   padding: 8px 12px; border: 1px solid var(--desk-line); border-radius: var(--desk-radius); background: var(--desk-surface); color: var(--desk-ink); font: inherit; font-size: 13px; line-height: 1.5;
 }
 .workspace-content :is(#source-list,#structure-status,#structure-index,#screenplay-index,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button,
@@ -109,8 +109,12 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 :where(.workspace-content,.review-dialog) .material-small-card { border-radius: var(--desk-radius) !important; }
 :where(.workspace-content,.review-dialog) .material-small-card:hover { background: var(--desk-hover) !important; border-color: var(--desk-selection-line) !important; }
 :where(.workspace-content,.review-dialog) .material-small-card[aria-pressed=true] { background: var(--desk-selected) !important; border-color: var(--desk-selection-line) !important; box-shadow: inset 3px 0 var(--desk-selection-line); }
-.review-pagination :is(button,select) { border-radius: var(--desk-radius); font-size: 13px; line-height: 1.5; padding: 8px 12px; }
+.review-pagination :is(button,select) { font-family: inherit; color: var(--desk-ink); background: var(--desk-surface); border: 1px solid var(--desk-line); border-radius: var(--desk-radius); font-size: 13px; line-height: 1.5; padding: 8px 12px; }
 .production-filter-chip { border-radius: var(--desk-radius); }
 .production-filter-chip:hover { background: var(--desk-hover); border-color: var(--desk-selection-line); }
 .production-filter-chip[aria-pressed=true] { background: var(--desk-selected); border-color: var(--desk-selection-line); color: var(--desk-ink); box-shadow: inset 0 -2px var(--desk-selection-line); font-weight: 650; }
 .production-filter-chip[aria-pressed=true] .production-filter-count { background: #496752; color: white; }
+
+.review-pagination button:not(:disabled):hover { background: var(--desk-hover); border-color: var(--desk-selection-line); }
+.review-pagination :is(button,select):focus-visible { outline: 2px solid var(--desk-selection-line); outline-offset: 2px; }
+.review-pagination button:disabled { color: var(--desk-muted); background: var(--desk-soft); opacity: .55; cursor: default; }
