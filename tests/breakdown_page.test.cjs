@@ -33,3 +33,33 @@ test('returning to a shot restores only a draft on a displayed exact Prompt revi
   surface.dataset.productionBlocks='plan-v2';c.localStorage.getItem=()=>null;c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
   c.productionTab=()=> 'breakdown';c.restoreBreakdownPromptDraft(row);assert.equal(focused,1);
 });
+test('clicking the mounted episode again supersedes an in-flight episode switch',async()=>{
+  const c=fixture(),requests=[],pending=[];
+  class E {
+    constructor(){this.children=[];this.dataset={};this.scrollTop=0;this.scrollLeft=0}
+    append(...children){this.children.push(...children)}
+    replaceChildren(...children){this.children=children}
+    querySelector(){return null}
+    setAttribute(){}
+    remove(){}
+  }
+  const host=new E();c.state.workspace='settings.workspace';
+  c.document={querySelector:()=>null};c.$=()=>host;c.el=()=>new E();
+  c.nodeText=(_tag,_class,text,parent)=>{const n=new E();n.textContent=text;parent.append(n);return n};
+  c.history={state:null,pushState(_state,_title,url){c.location.href=String(url)},replaceState(_state,_title,url){c.location.href=String(url)}};
+  c.rememberProductionDraft=()=>{};c.toast=error=>assert.fail(error);
+  c.renderEpisodeCard=(parent,ep,_active,_count,onclick)=>parent.append({id:ep.object_id,onclick});
+  const data=episode=>({episode,episodes:[{object_id:'e1'},{object_id:'e2'}],scenes:[],shots:[]});
+  c.api=url=>{const episode=new URL(url,'http://fixture').searchParams.get('episode')||'e1';requests.push(episode);return requests.length===1?Promise.resolve(data(episode)):new Promise(resolve=>pending.push({episode,resolve}))};
+  vm.runInContext('let productionLoadEpoch=0,productionReadEpoch=0',c);
+  c.location.href+='&breakdown_episode=e1';await c.loadProductionBreakdown();
+  const mounted=host.children[0].children;
+  mounted.find(ep=>ep.id==='e1').onclick();assert.equal(requests.length,1,'settled active episode remains a no-op');
+  mounted.find(ep=>ep.id==='e2').onclick();
+  mounted.find(ep=>ep.id==='e1').onclick();
+  assert.deepEqual(requests,['e1','e2','e1'],'last click is an explicit navigation even while the old episode stays mounted');
+  pending[1].resolve(data('e1'));await new Promise(resolve=>setImmediate(resolve));
+  pending[0].resolve(data('e2'));await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(c.state.breakdownData.episode,'e1','late response cannot replace the last selected episode');
+  assert.equal(new URL(c.location.href).searchParams.get('breakdown_episode'),'e1');
+});
