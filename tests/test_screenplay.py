@@ -81,6 +81,16 @@ class ScreenplayTest(unittest.TestCase):
         self.assertEqual(before, self.store.objects())
         self.assertEqual(len(snapshot(self.store)['versions']), 1)
 
+    def test_directory_preserves_exact_links_and_scene_metadata_without_body_text(self):
+        import_screenplay(self.store,self.edition());import_screenplay(self.store,self.edition('script-two'))
+        full=snapshot(self.store);expected=copy.deepcopy(full)
+        for version in expected['versions']:
+            version['payload'].pop('blocks',None)
+            for episode in version['episodes']:episode['payload'].pop('blocks',None)
+        self.assertEqual(snapshot(self.store,metadata=True),expected)
+        self.assertEqual(snapshot(self.store),full)
+        self.assertEqual(self.store.sources(metadata=True),[{'id':'novel','title':'小说待审阅'}])
+
     def test_invalid_contracts_do_not_write(self):
         changes = [lambda d: d['basis']['story'].update(object_id=[]),
                    lambda d: d['basis']['story'].update(revision_id={}),

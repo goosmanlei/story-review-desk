@@ -1,11 +1,12 @@
 """Read-only card and list projections. No media creation or stored UI state."""
 from . import production as p, generation as g
 from . import production_breakdown as b
+from . import list_reading as light
 
 
 def material_entries(store):
-    needs=b.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
-    assets=b.rows(store,'ASSET');results={};used=set()
+    needs=light.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
+    assets=light.rows(store,'ASSET');results={};used=set()
     for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
         row=p.record_view(raw);results.setdefault(raw['material_id'],[]).append(row)
         if raw['material_id']!=row['object_id']:used.add(row['object_id'])
@@ -18,7 +19,7 @@ def material_entries(store):
     for row in [*needs,*(a for a in assets if a['object_id'] not in used)]:
         value=row['payload'];scope=value.get('scope');owners={};locations=[]
         def add_scope(reference,relation):
-            scoped=p.ref_record(store,reference)
+            scoped=light.ref_record(store,reference)
             locations.append({**b.location(store,reference,cache),'relation':relation,'title':scoped['payload']['title']})
             if scoped['kind']=='STATE':
                 owners[scoped['payload']['entity']['object_id']]=scoped['payload']['entity']
@@ -62,7 +63,7 @@ def material_entries(store):
 
 
 def management_episodes(store):
-    return [{'object_id':r['object_id'],'number':r['payload']['number']} for r in b.rows(store,'EPISODE')
+    return [{'object_id':r['object_id'],'number':r['payload']['number']} for r in light.rows(store,'EPISODE')
             if isinstance(r['payload'].get('number'),int) and r['payload']['number']>0]
 
 
@@ -86,14 +87,14 @@ def entity_summaries(store, entities, entries):
         adoption_statuses[eid]='accepted' if accepted else 'stale' if decision and decision['payload']['verdict']=='accepted' else 'unaccepted'
     from .entity_review import full_states
     from .list_associations import entity_locations
-    rows = rows if rows is not None else p.current_records(store)
+    rows = rows if rows is not None else p.current_records(store, {'ENTITY','STATE','PREPARATION','SHOT_DESIGN','RELATION'})
     return {'management_episodes':management_episodes(store),'entity_material_counts':counts,'entity_statuses':statuses,'entity_adoption_statuses':adoption_statuses,
             'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
             'entity_locations':entity_locations(store,entities,rows),
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False):
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False):
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
     values=material_entries(store);chosen={'episode':episode,'scene':scene,'media':media,'status':status}
@@ -113,6 +114,13 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
         from .list_associations import material_groups
         result.sort(key=lambda i:(i['canonical_material_id'],i['id']))
         groups=material_groups(store,result,episode,scene)
+        if compact:
+            # All card identities and grouping rows stay available for instant
+            # local pagination. Full association evidence is read on card open.
+            result=[{**{k:v for k,v in item.items() if k not in ('material_identity','entity_ids','locations')},
+                     'locations':[{k:v for k,v in loc.items() if k in ('scope','episode','scene','kind','relation','title')}
+                                  for loc in item['locations'] if loc.get('kind')=='PREPARATION']}
+                    for item in result]
         return {'management_episodes':management_episodes(store),'items':result,'total':len(result),'groups':groups,
                 'display_total':sum(len(group['material_ids']) for group in groups),'facets':facets}
     focused=None

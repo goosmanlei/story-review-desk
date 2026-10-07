@@ -7,6 +7,25 @@ const toast=message=>{const node=$('#toast');node.textContent=message;node.class
 const isStructure=()=>state.workspace==='story.outline';
 const isScript=()=>state.workspace==='story.script';
 const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
+let storyDataReady=false,storyDataRead=null,workspaceReadEpoch=0;
+async function loadStoryDirectory(){
+  const [sources,screenplays]=await Promise.all([api('/api/sources?with_revision=1&metadata=1'),api('/api/screenplays?metadata=1')]);
+  if(!storyDataReady){state.sources=sources;state.screenplays=screenplays.versions}
+}
+function loadStoryData(){
+  if(storyDataReady)return Promise.resolve();
+  if(storyDataRead)return storyDataRead;
+  storyDataRead=Promise.all([api('/api/sources?with_revision=1'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]}))]).then(([sources,structure,screenplays,summaries])=>{
+    state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));
+    state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;
+    state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));storyDataReady=true;
+  }).finally(()=>{storyDataRead=null});return storyDataRead;
+}
+function initializeStoryReaders(url){
+  state.structureRevision=resolveStructureRevision(url.searchParams.get('structure_revision'));
+  chooseSource(url.searchParams.get('source')||state.sources[0]?.id,true,false,url.searchParams.has('source'));
+  chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
+}
 const commentTarget=()=>state.reviewReferenceContext?{target_object_id:state.reviewReferenceContext.record.object_id,target_revision_id:state.reviewReferenceContext.record.id}:isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number,...(context.model?[context.model]:[])])}`:key};
@@ -269,6 +288,10 @@ function rememberStoryDraft(){const key=storyDraftMetaKey();if(!key||!state.anch
 function restoreStoryDraft(){const key=storyDraftMetaKey();if(!key||state.anchor)return;try{const saved=fallbackCommentDraftMeta()||JSON.parse(localStorage.getItem(key)||'null');if(saved?.anchor&&JSON.stringify(saved.target)===JSON.stringify(commentTarget())&&(!saved.editing||state.comments.some(c=>c.id===saved.editing&&c.target_revision_id===saved.target.target_revision_id))){state.anchor=saved.anchor;state.editing=saved.editing||null;state.selected=saved.selected||null}}catch{}}
 function forgetStoryDraft(){const key=storyDraftMetaKey();if(key)localStorage.removeItem(key)}
 function switchWorkspace(id,updateUrl=true){
+  const read=++workspaceReadEpoch;
+  if(['story.sources','story.outline','story.script'].includes(id)&&!storyDataReady){
+    return loadStoryData().then(()=>{if(read!==workspaceReadEpoch)return;initializeStoryReaders(new URL(location.href));const result=switchWorkspace(id,updateUrl);restoreSourceChapter(new URL(location.href),{initial:true});return result}).catch(error=>{if(read===workspaceReadEpoch)toast(error.message)});
+  }
   rememberStoryDraft();if(isScript())rememberScriptDraft();
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   if(typeof pauseReviewMedia==='function')pauseReviewMedia();
@@ -927,21 +950,20 @@ function locateComment(comment){
   if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}revealLocatedComment();(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}
 
 async function init(){try{
-  const [instance,sources,comments,framework,configurations,structure,screenplays,summaries,codes]=await Promise.all([api('/api/instance'),api('/api/sources?with_revision=1'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/story-structure'),api('/api/screenplays'),api('/api/screenplay-summaries').catch(()=>({episodes:[]})),api('/api/business-codes')]);
+  const initialUrl=new URL(location.href),initialWorkspace=initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach');
+  const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance'),api('/api/comments'),api('/api/framework'),api('/api/configurations'),api('/api/business-codes'),['story.sources','story.outline','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
   state.businessCodeCatalog=codes;state.businessCodes=new Map(codes.objects.map(row=>[row.object_id,row.display_code||row.prefix+String(row.number).padStart(3,'0')]));
   state.legacyShotCodes=new Map();for(const row of codes.objects.filter(r=>r.legacy_position)){const key=row.legacy_position,label=[row.episode_code,row.display_code].filter(Boolean).join(' / ');state.legacyShotCodes.set(key,state.legacyShotCodes.has(key)?null:label)}
-  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.sources=sources.sort((a,b)=>Number(!!a.media)-Number(!!b.media)||(a.order||0)-(b.order||0)||a.id.localeCompare(b.id));state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();state.structure=structure;state.structureRevision=structure.current_revision;state.screenplays=screenplays.versions;state.screenplaySummaries=new Map(summaries.episodes.map(item=>[item.object_id+':'+item.revision_id,item.summary]));
-  const initialUrl=new URL(location.href);
-  state.structureRevision=resolveStructureRevision(initialUrl.searchParams.get('structure_revision'));
-  chooseSource(initialUrl.searchParams.get('source')||state.sources[0]?.id,true,false,initialUrl.searchParams.has('source'));
-  chooseScript(initialUrl.searchParams.get('script'),initialUrl.searchParams.get('episode'),initialUrl.searchParams.get('scene'),false);
-  switchWorkspace(initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach'),false);
+  $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();
+  if(storyDataReady)initializeStoryReaders(initialUrl);
+  switchWorkspace(initialWorkspace,false);
   restoreSourceChapter(initialUrl,{initial:true});
-  window.addEventListener('popstate',()=>{
+  window.addEventListener('popstate',async()=>{
     const url=new URL(location.href),source=url.searchParams.get('source'),workspace=url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),previous=state.workspace;
+    if(['story.sources','story.outline','story.script'].includes(workspace)&&!storyDataReady){const read=++workspaceReadEpoch;try{await loadStoryData()}catch(error){if(read===workspaceReadEpoch)toast(error.message);return}if(read!==workspaceReadEpoch||location.href!==url.href)return;initializeStoryReaders(url)}
     const nextSource=state.sources.find(item=>item.id===source)||state.sources[0],sourceChanged=workspace==='story.sources'&&nextSource?.id!==state.current?.id;
     if(sourceChanged)chooseSource(nextSource?.id,true,false);
-    else if(workspace!=='story.sources'&&source&&source!==state.current?.id)chooseSource(source,true,false);
+    else if(storyDataReady&&workspace!=='story.sources'&&source&&source!==state.current?.id)chooseSource(source,true,false);
     if(url.searchParams.get('workspace')==='story.outline')chooseStructureRevision(url.searchParams.get('structure_revision'),false);
     if(url.searchParams.get('workspace')==='story.script'){
       const version=url.searchParams.get('script'),episode=url.searchParams.get('episode'),scene=url.searchParams.get('scene');
