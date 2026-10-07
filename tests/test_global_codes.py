@@ -22,6 +22,8 @@ class GlobalCodesTest(unittest.TestCase):
         shot = copy.deepcopy(p.record(self.store, 'shot')['payload'])
         shot.update(episode=self.ref('episode-other'), parent=self.ref('scene-other'), source=scene['source'])
         self.put({'object_id':'shot-other', 'kind':'SHOT_DESIGN', 'expected_version':0, 'payload':shot})
+        self.store.put_object('edition','STORY',{'format':'screenplay-edition-v1',
+            'episodes':[self.ref('episode'),self.ref('episode-other')]})
         original = codes.dump(self.store)
         view = {r['object_id']:r['display_code'] for r in codes.display_dump(self.store)}
         for a, b in [('episode','episode-other'), ('scene','scene-other'), ('shot','shot-other')]:
@@ -42,6 +44,43 @@ class GlobalCodesTest(unittest.TestCase):
         restore(recovered,dest/'export')
         self.assertEqual(codes.dump(recovered),original)
         self.assertEqual(codes.annotate(recovered,first_episode),historical)
+
+    def test_episode_and_scene_numbers_are_unique_within_each_complete_edition(self):
+        episode=p.record(self.store,'episode')
+        self.store.put_object('second-episode','EPISODE',copy.deepcopy(episode['payload']))
+        self.store.put_object('edition-one','STORY',{'format':'screenplay-edition-v1',
+            'episodes':[self.ref('episode'),self.ref('second-episode')]})
+        self.store.put_object('next-version-episode','EPISODE',copy.deepcopy(episode['payload']))
+        self.store.put_object('edition-two','STORY',{'format':'screenplay-edition-v1',
+            'episodes':[self.ref('next-version-episode')]})
+        mapped={r['object_id']:r for r in codes.display_dump(self.store)}
+        self.assertEqual(mapped['episode']['display_code'],'E01')
+        self.assertEqual(mapped['second-episode']['display_code'],'E02')
+        self.assertEqual(mapped[codes.scene_identity('episode','scene')]['display_code'],'S001')
+        self.assertEqual(mapped[codes.scene_identity('second-episode','scene')]['display_code'],'S002')
+        self.assertEqual(mapped['next-version-episode']['display_code'],'E01')
+        self.assertEqual(mapped[codes.scene_identity('next-version-episode','scene')]['display_code'],'S001')
+        self.assertNotEqual(mapped['episode']['screenplay_id'],mapped['next-version-episode']['screenplay_id'])
+        # Historical cross-edition allocations remain recoverable, but cannot
+        # leak into either exact revision or the standalone code catalog.
+        with self.store.db:
+            self.store.db.execute("INSERT INTO business_codes VALUES ('episode','E',56)")
+            self.store.db.execute('INSERT INTO business_codes VALUES (?,?,?)',(codes.scene_identity('episode','scene'),'S',141))
+        self.assertEqual({r['object_id']:r for r in codes.display_dump(self.store)},mapped)
+        self.assertEqual(codes.annotate(self.store,episode)['business_code'],'E01')
+        original=codes.dump(self.store)
+        export(self.store,self.root/'export')
+        dest=self.root/'scoped-recovered';shutil.copytree(self.root/'export',dest/'export')
+        recovered=Store(dest/'.runtime/review.sqlite3');self.addCleanup(recovered.close)
+        restore(recovered,dest/'export')
+        self.assertEqual(codes.dump(recovered),original)
+        self.assertEqual({r['object_id']:r for r in codes.display_dump(recovered)},mapped)
+
+    def test_unbound_episodes_do_not_get_cross_version_global_numbers(self):
+        episode=p.record(self.store,'episode')
+        self.assertFalse(any(r['prefix'] in ('E','S') for r in codes.dump(self.store)))
+        self.assertNotIn('business_code',codes.annotate(self.store,episode))
+        self.assertFalse(any(r['prefix'] in ('E','S') for r in codes.display_dump(self.store)))
 
     def test_removed_prefixes_remain_hidden_tombstones_and_vc_stay_local(self):
         for oid, kind in [('source','SOURCE'), ('story','STORY')]:

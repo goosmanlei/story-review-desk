@@ -1,7 +1,7 @@
-"""Human-readable identifiers, allocated independently of display ordering.
+"""Readable identifiers over exact identities and immutable screenplay editions.
 
-The persisted mapping supplements exact object/revision identities. It never
-renumbers existing entries; export includes both allocations and tombstones.
+Episode/scene numbers are scoped to one complete screenplay edition. Other
+allocations stay instance-wide; historical allocations remain recoverable.
 """
 import json
 
@@ -15,8 +15,8 @@ CREATE TABLE IF NOT EXISTS business_candidates (
 CREATE TABLE IF NOT EXISTS business_comments (comment_id TEXT PRIMARY KEY,number INTEGER NOT NULL UNIQUE);'''
 
 TYPES = (
-    ('集', 'E', 'E02', '本实例内；同一集对象的修订共用编号'),
-    ('场', 'S', 'S003', '本实例内；准确集对象与场身份共同确定，修订不重编号'),
+    ('集', 'E', 'E02', '同一剧本版本内；按该版本完整集序编号'),
+    ('场', 'S', 'S003', '同一剧本版本内；按完整集场顺序连续编号，不在每集重新起号'),
     ('镜', 'SH', 'SH034', '本实例内；不随切集、切场或显示顺序重置'),
     ('实体', 'EN', 'EN001', '本实例内'),
     ('实体状态', 'ST', 'ST001', '本实例内；历史保留状态也有独立编号'),
@@ -41,8 +41,7 @@ def code(row):
 
 
 def scene_identity(episode_id, scene_id):
-    # Scenes are embedded in an immutable episode, not standalone objects. The
-    # reserved key shares the persisted allocation/tombstone recovery mechanism.
+    # Scenes are embedded in an exact episode rather than standalone objects.
     return 'scene:' + episode_id + ':' + scene_id
 
 
@@ -54,11 +53,10 @@ def allocate_number(store, object_id, prefix):
 
 
 def allocate(store, object_id, kind, payload):
+    if kind == 'EPISODE':
+        return  # E/S come from the complete immutable edition, not this ledger.
     prefix = 'RL' if kind == 'RELATION' and payload.get('relation_type') == 'entity' else PREFIXES.get(kind)
     allocate_number(store, object_id, prefix)
-    if kind == 'EPISODE':
-        for scene in payload.get('scenes', []):
-            allocate_number(store, scene_identity(object_id, scene['id']), 'S')
 
 
 def initialize(store):
@@ -66,9 +64,6 @@ def initialize(store):
     with store.db:
         for row in store.db.execute('SELECT o.id,o.kind,r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision ORDER BY o.created_at,o.id').fetchall():
             allocate(store, row['id'], row['kind'], json.loads(row['payload']))
-        # Historical scenes removed from the current revision remain addressable.
-        for row in store.db.execute("SELECT o.id,r.payload FROM objects o JOIN revisions r ON r.object_id=o.id WHERE o.kind='EPISODE' ORDER BY r.created_at,o.id,r.version").fetchall():
-            allocate(store, row['id'], 'EPISODE', json.loads(row['payload']))
         allocate_candidates(store)
         allocate_comments(store)
 
@@ -130,12 +125,51 @@ def restore(store, rows, candidates=(), comments=()):
 
 def catalog():
     return {'types': [dict(type=t, prefix=p, example=e, scope=s) for t,p,e,s in TYPES],
-            'allocation': '新增对象按首次登记次序递增，已分配编号永久保留。编号不替换稳定身份或准确修订。',
+            'allocation': '集、场按准确剧本版本的完整顺序编号，场号跨集连续；切换版本各自从一开始。其他对象按首次登记次序递增，已分配编号保留。编号不替换稳定身份或准确修订。',
             'excluded': '资料、剧本与故事结构不使用简写编号。后台调用、依赖边、事件、配置表和输入锁也不增加编号。V/C 是当前素材内的局部版本／候选序号，须连同素材身份理解。'}
 
 
+def edition_codes(store):
+    """Derive stable E/S from published editions, never from filtered UI rows.
+
+    The screenplay retains exact episode revisions; following current episode
+    heads would misnumber historical scenes after a later edit. Unbound episode
+    objects have no edition code until a complete screenplay references them.
+    """
+    result={}
+    editions=store.db.execute("""SELECT r.object_id,r.id,r.payload FROM revisions r
+        JOIN objects o ON o.id=r.object_id WHERE o.kind='STORY'
+        AND json_extract(r.payload,'$.format')='screenplay-edition-v1'
+        ORDER BY r.created_at,r.object_id,r.version""")
+    for edition in editions:
+        scene_number=0
+        for number,reference in enumerate(json.loads(edition['payload'])['episodes'],1):
+            row=store.db.execute("SELECT r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE r.id=? AND r.object_id=? AND o.kind='EPISODE'",
+                                 (reference['revision_id'],reference['object_id'])).fetchone()
+            if row is None:raise ValueError('screenplay numbering requires exact episode revision')
+            episode=json.loads(row['payload'])
+            if episode.get('screenplay_id',edition['object_id'])!=edition['object_id']:
+                raise ValueError('episode numbering scope differs from screenplay')
+            entries=[(reference['object_id'],'E',number)]
+            for scene in episode.get('scenes',[]):
+                scene_number+=1
+                entries.append((scene_identity(reference['object_id'],scene['id']),'S',scene_number))
+            for oid,prefix,value in entries:
+                entry={'object_id':oid,'prefix':prefix,'number':value,
+                       'screenplay_id':edition['object_id'],'screenplay_revision_id':edition['id'],
+                       'episode_revision_id':reference['revision_id']}
+                if oid in result and result[oid]!=entry:
+                    raise ValueError('ambiguous screenplay numbering scope')
+                result[oid]=entry
+    return list(result.values())
+
+
+def visible_codes(store):
+    return [r for r in dump(store) if r['prefix'] not in ('D','B','E','S')]+edition_codes(store)
+
+
 def annotate(store, value):
-    codes = {r['object_id']:code(r) for r in dump(store) if r['prefix'] not in ('D','B')}
+    codes = {r['object_id']:code(r) for r in visible_codes(store)}
     aliases = {r['alias_id']:r['material_id'] for r in store.db.execute('SELECT alias_id,material_id FROM material_aliases')}
     candidates = {(r['material_id'],r['version'],r['candidate_id']):r['number'] for r in store.db.execute('SELECT * FROM business_candidates')}
     comment_codes={r['comment_id']:'C'+str(r['number']).zfill(3) for r in store.db.execute('SELECT * FROM business_comments')}
@@ -195,7 +229,7 @@ def annotate(store, value):
 
 
 def display_dump(store):
-    rows=[r for r in dump(store) if r['prefix'] not in ('D','B')];mapping={r['object_id']:code(r) for r in rows}
+    rows=visible_codes(store);mapping={r['object_id']:code(r) for r in rows}
     aliases={r['alias_id']:r['material_id'] for r in store.db.execute('SELECT * FROM material_aliases')}
     result = [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
     by_id = {r['object_id']:r for r in result}
