@@ -83,14 +83,8 @@ class UiProjectionTest(unittest.TestCase):
         self.assertEqual(current['results'], [])
 
     def mount_on_test_shot(self, subject):
-        occurrence = {'entity': self.ref('songbook'), 'states': [self.ref('full')],
-                      'mode': 'visual', 'evidence': [self.source]}
-        self.put(self.spec('scene', 'PREPARATION', source={**self.source, 'block_ids': ['a', 'b']},
-                           checked=True, occurrences=[occurrence], notes='fixture only'))
-        self.put(self.spec('shot', 'SHOT_DESIGN', episode=self.ref('episode'), parent=self.ref('scene'),
-                           scene_id='scene', source=self.source, number=1, purpose='purpose',
-                           framing='framing', spatial='spatial', action_start='start', action_end='end',
-                           continuity='continuity', fps=24, duration_frames=120, sound=[], entities=[], states=[]))
+        from audiovisual_fixture import composition
+        composition(self, shot_values={'entities':[self.ref('songbook')], 'states':[self.ref('full')], 'state_model':'complete-v1'})
         self.put(self.spec('shot-use', 'RELATION', relation_type='applicability',
                            subject=self.ref(subject), scope=self.ref('shot'),
                            basis='production_choice', reason='explicit fixture assignment'))
@@ -144,7 +138,7 @@ class UiProjectionTest(unittest.TestCase):
         self.assertEqual(detail['detail']['record']['id'], target['revision_id'])
         self.assertIn('generation', detail['detail']['record']['payload'])
         self.assertEqual(slim['shots'][0]['context']['video_details'], full['shots'][0]['context']['video_details'])
-        self.assertTrue(all(call.kwargs['object_id'] in {r['object_id'] for shot in slim['shots'] for r in shot['context']['requirements'] if r['payload']['media_type']=='video'} for call in snapshots.call_args_list))
+        self.assertTrue(all(call.kwargs['object_id'] in {r['object_id'] for shot in slim['shots'] for r in shot['context']['requirements']} for call in snapshots.call_args_list))
 
     def test_scene_fallback_keeps_exact_scope_and_rejects_placeholder_or_preview_as_results(self):
         self.setup_plans(); self.media(); self.mount_on_test_shot('voice')

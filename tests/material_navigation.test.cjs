@@ -33,7 +33,7 @@ for(const explicit of [false,true])test(`${explicit?'exact link':'asset index'} 
  const f=setup();await f.ctx.openProductionRecord(f.b.object_id,explicit?f.b.id:null);
  assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.b.id]);assert.deepEqual(f.nodes('call').map(n=>n.dataset.revision),['call-b-v1']);assert.deepEqual(f.nodes('text').map(n=>n.dataset.revision),[f.b.id]);
  const choice=f.root.all().find(n=>n.attributes['aria-label']==='本轮候选');assert.equal(selected(choice),f.b.id);
- f.nodes('media')[0].onfocus();assert.equal(f.ctx.state.productionSelected.id,f.b.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.b.id);assert.equal(f.requests.length,1);
+ f.nodes('media')[0].onfocus();assert.equal(f.ctx.state.productionSelected.id,f.b.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.b.id);assert.equal(f.requests.filter(url=>!url.includes('/acceptance?')&&!url.includes('/material-relations?')).length,1);
 });
 test('the actual asset renderer defaults to its own exact candidate without relying on a URL target',()=>{
  const f=setup();f.ctx.location.href='http://local/?workspace=materials.workspace';f.ctx.state.materialReview=f.detail;f.ctx.renderMaterialWorkspace(f.root,f.detail);
@@ -76,7 +76,7 @@ for(const exact of [false,true])test(`unified material ${exact?'exact reference'
 });
 
 test('a lazy material list keeps the exact scope title supplied with its standalone card',()=>{
- const f=setup(),scope={object_id:'shot-scope',id:'scope-v1',kind:'SHOT_DESIGN',payload:{title:'Exact shot title'}};
+ const f=setup(),scope={object_id:'shot-scope',id:'scope-v1',kind:'AV_SHOT',payload:{title:'Exact shot title'}};
  f.ctx.state.productionRecords=[];f.ctx.state.unifiedScope=scope;
  assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:scope.id}),'Exact shot title');
  assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:'scope-v0'}),scope.object_id);

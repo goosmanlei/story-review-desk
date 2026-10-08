@@ -5,6 +5,7 @@ import shutil
 import sqlite3
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from review_desk import material_archives as archives
@@ -54,14 +55,15 @@ class IndependentMaterialContractTest(unittest.TestCase):
 
     def failed_call(self, need, name='call', binding='generation_requirement', status='failed'):
         generation = need['payload']['generation']
-        self.store.put_object(name, 'CALL', {
-            'format': 'production-call-v1', 'title': name,
-            'blocks': [{'id': 'call', 'text': '真实失败调用的隔离技术夹具'}],
-            'method': 'generation', 'tool': 'independent-fixture', 'status': status,
-            'model': generation['model'], 'parameters': copy.deepcopy(generation['parameters']),
-            'prompt': generation['prompt'], 'inputs': [], 'outputs': [],
-            binding: {'object_id': need['object_id'], 'revision_id': need['id']},
-        })
+        with patch('review_desk.generation.validate_call'):
+            self.store.put_object(name, 'CALL', {
+                'format': 'production-call-v1', 'title': name,
+                'blocks': [{'id': 'call', 'text': '真实失败调用的隔离技术夹具'}],
+                'method': 'generation', 'tool': 'independent-fixture', 'status': status,
+                'model': generation['model'], 'parameters': copy.deepcopy(generation['parameters']),
+                'prompt': generation['prompt'], 'inputs': [], 'outputs': [],
+                binding: {'object_id': need['object_id'], 'revision_id': need['id']},
+            })
         return production.record(self.store, name)
 
     def test_complete_definition_changes_create_new_version_after_failure(self):
@@ -318,13 +320,14 @@ class IndependentMaterialContractTest(unittest.TestCase):
         need = self.need()
         versions = []
         for name in ('missing-call-a', 'missing-call-b'):
-            self.store.put_object(name, 'CALL', {
-                'format': 'production-call-v1', 'title': name,
-                'blocks': [{'id': 'call', 'text': '保留缺失制作定义的历史调用'}],
-                'method': 'generation', 'tool': 'legacy', 'status': 'unknown', 'model': 'unknown',
-                'parameters': {}, 'inputs': [], 'outputs': [],
-                'generation_requirement': {'object_id': need['object_id'], 'revision_id': need['id']},
-            })
+            with patch('review_desk.generation.validate_call'):
+                self.store.put_object(name, 'CALL', {
+                    'format': 'production-call-v1', 'title': name,
+                    'blocks': [{'id': 'call', 'text': '保留缺失制作定义的历史调用'}],
+                    'method': 'generation', 'tool': 'legacy', 'status': 'unknown', 'model': 'unknown',
+                    'parameters': {}, 'inputs': [], 'outputs': [],
+                    'generation_requirement': {'object_id': need['object_id'], 'revision_id': need['id']},
+                })
             call = production.record(self.store, name)
             versions.append(plans.memberships(self.store, call['id'])[0]['number'])
         self.assertNotEqual(versions[0], versions[1])

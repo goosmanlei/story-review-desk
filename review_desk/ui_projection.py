@@ -17,6 +17,7 @@ def _material_entries(store):
         if raw['material_id']!=row['object_id']:used.add(row['object_id'])
     for asset in assets:
         for ref in asset['payload'].get('candidate_requirements',[]):
+            if light.ref_record(store,ref).get('unavailable'):continue
             results.setdefault(ref['object_id'],[]).append(asset);used.add(asset['object_id'])
     links={};cache={};entries=[]
     for link in b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='applicability'"):
@@ -25,7 +26,7 @@ def _material_entries(store):
         value=row['payload'];scope=value.get('scope');owners={};locations=[]
         def add_scope(reference,relation):
             scoped=light.ref_record(store,reference)
-            locations.append({**b.location(store,reference,cache),'relation':relation,'title':scoped['payload']['title']})
+            locations.extend({**loc,'relation':relation,'title':scoped['payload']['title']} for loc in b.locations(store,reference,cache))
             if scoped.get('unavailable'):
                 if scoped.get('owner_object_id'):owners[scoped['owner_object_id']]=None
                 return
@@ -95,7 +96,7 @@ def entity_summaries(store, entities, entries):
         adoption_statuses[eid]='accepted' if accepted else 'stale' if decision and decision['payload']['verdict']=='accepted' else 'unaccepted'
     from .entity_review import full_states
     from .list_associations import entity_locations
-    rows = rows if rows is not None else p.current_records(store, {'ENTITY','STATE','PREPARATION','SHOT_DESIGN','RELATION'})
+    rows = rows if rows is not None else p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
     return {'management_episodes':management_episodes(store),'entity_material_counts':counts,'entity_statuses':statuses,'entity_adoption_statuses':adoption_statuses,
             'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
             'entity_locations':entity_locations(store,entities,rows),
@@ -127,7 +128,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
             # local pagination. Full association evidence is read on card open.
             result=[{**{k:v for k,v in item.items() if k not in ('material_identity','entity_ids','locations')},
                      'locations':[{k:v for k,v in loc.items() if k in ('scope','episode','scene','kind','relation','title')}
-                                  for loc in item['locations'] if loc.get('kind')=='PREPARATION']}
+                                  for loc in item['locations'] if loc.get('kind') in ('AV_SCENE','AV_SHOT','AV_EPISODE')]}
                     for item in result]
         return {'management_episodes':management_episodes(store),'items':result,'total':len(result),'groups':groups,
                 'display_total':sum(len(group['material_ids']) for group in groups),'facets':facets}
@@ -190,12 +191,12 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
     metadata = view is not None
     read_ref = light.ref_record if metadata else p.ref_record
     selected=p.record(store,object_id,revision_id)
-    if selected['kind']!='PREPARATION':raise ValueError('scene reader requires a scene')
+    if selected['kind']!='AV_SCENE':raise ValueError('scene reader requires a scene')
     shots=b.scene_shots(store,selected,p.record(store,revision_id=shot_revision) if shot_revision else None)
     chain=b.ancestors(store,selected);contexts=[]
     for reference in chain:
         row=p.ref_record(store,reference)
-        if row['kind'] in ('PREPARATION','EPISODE','INPUT_LOCK','STORY'):
+        if row['kind'] in ('AV_SCENE','AV_EPISODE','EPISODE','INPUT_LOCK','STORY'):
             contexts.append(b.context(store,row['object_id'],row['id'],metadata=metadata))
     all_entries={i['object_id']:i for i in material_entries(store)}
     def enrich(context):
@@ -209,10 +210,15 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
             if row['kind'] not in ('REQUIREMENT','ASSET'):return
             mid=canonical_id(store,row['object_id'])
             if row['kind']=='ASSET':
-                mids={canonical_id(store,v['object_id']) for v in row['payload'].get('candidate_requirements',[])}
-                if len(mids)==1:mid=next(iter(mids))
+                selection=evidence.get('reference',{}).get('material_selection',{})
+                selected=selection.get('material_id')
+                memberships={canonical_id(store,v['material_id']) for v in material_plans.memberships(store,row['id']) if v['role']=='result'}
+                mids=memberships|{canonical_id(store,v['object_id']) for v in row['payload'].get('candidate_requirements',[]) if not read_ref(store,v).get('unavailable')}
+                if selected and canonical_id(store,selected) in mids:mid=canonical_id(store,selected)
+                elif len(mids)==1:mid=next(iter(mids))
             if mid in needs:
                 needs[mid][2].append(evidence)
+                if row['kind']=='REQUIREMENT':needs[mid][:2]=[row,relation]
             else:needs[mid]=[row,relation,[evidence]]
         for need in context['requirements']:
             add(need,'mounted' if need['payload']['scope']==b.ref(scoped) else 'applicable',
@@ -239,7 +245,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
             add(p.ref_record(store,adoption['payload']['asset']),'adoption',
                 {'kind':'adoption','record':b.ref(adoption),'selection':adoption['payload']})
         context['materials']=[]
-        levels={'STORY':'story','INPUT_LOCK':'story','EPISODE':'episode','PREPARATION':'scene','SHOT_DESIGN':'shot','ENTITY':'entity','STATE':'state'}
+        levels={'AV_EPISODE':'episode','AV_SCENE':'scene','AV_SHOT':'shot','STORY':'story','INPUT_LOCK':'story','EPISODE':'episode','ENTITY':'entity','STATE':'state'}
         for mid,(row,relation,evidence) in needs.items():
             item=all_entries.get(mid)
             if not item:
@@ -247,29 +253,15 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
                 item.update(material_plans.card_counts(store,[mid])[mid])
             placement=row['payload'].get('scope') or item.get('scope')
             owner=p.ref_record(store,placement) if placement else scoped
-            context['materials'].append({**item,'id':row['id'],'title':row['payload']['title'],'association':relation,
+            context['materials'].append({**item,'id':row['id'],'title':item.get('title',row['payload']['title']),'association':relation,
                 'canonical_material_id':mid,'usage_evidence':evidence,
                 'placement':b.ref(owner),'placement_level':levels.get(owner['kind'],'shot'),
                 'placement_title':owner['payload']['title'],'record':row,
                 'reference':b.ref(row),'classification':material_classification(store,row,item,owner)})
-        context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if r['payload']['media_type']=='video' and scoped['kind']=='SHOT_DESIGN'}
-        from .shot_references import slots,inputs_for
-        from .reference_paths import project as project_reference_paths, annotations as reference_annotations
-        for detail in context['video_details'].values():
-            targets=[detail['record'],*detail.get('history',[])]
-            for rounds in detail.get('material_versions',{}).values():
-                for version in rounds:targets.extend([version.get('plan'),*version.get('definition_records',{}).values()])
-            for actual in detail.get('review_contexts',{}).values():targets.append(actual.get('call'))
-            for row in targets:
-                if row and row['kind'] in ('REQUIREMENT','CALL'):
-                    row['review_shot_slots']=slots(store,inputs_for(store,row))
-                    row['review_reference_links']=project_reference_paths(store,row)
-                    row['review_prompt_links']=reference_annotations(store,row).get('prompt_links',[])
+        context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if scoped['kind']=='AV_SHOT'}
         return context
-    source=selected['payload'].get('source',{})
-    episode=p.ref_record(store,source) if source else None
-    source_scene=next((s for s in (episode or {}).get('payload',{}).get('scenes',[]) if s['id']==source.get('scene_id')),None)
-    return {'scene':selected,'source_scene':source_scene,'shared':[enrich(c) for c in reversed(contexts)],
+    source_scenes=[p.source_excerpt(store,source) for source in selected['payload']['sources']]
+    return {'scene':selected,'source_scenes':source_scenes,'shared':[enrich(c) for c in reversed(contexts)],
             'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id'],metadata=metadata))} for r in shots]}
 
 
@@ -299,8 +291,8 @@ def material_classification(store, row, item, placement):
     else:
         kinds={r['kind'] for r in scopes} or {placement['kind']}
         kind=next(iter(kinds)) if len(kinds)==1 else 'shared'
-        label={'SHOT_DESIGN':'镜头','PREPARATION':'场景','EPISODE':'分集','INPUT_LOCK':'全剧','STORY':'全剧','shared':'共有'}.get(kind,'其他')
-    kind={'PREPARATION':'space','SHOT_DESIGN':'shot','EPISODE':'episode','INPUT_LOCK':'story','STORY':'story'}.get(kind,kind)
+        label={'AV_SHOT':'视听镜头','AV_SCENE':'视听场','AV_EPISODE':'视听集','EPISODE':'分集','INPUT_LOCK':'全剧','STORY':'全剧','shared':'共有'}.get(kind,'其他')
+    kind={'AV_SCENE':'space','AV_SHOT':'shot','AV_EPISODE':'episode','EPISODE':'episode','INPUT_LOCK':'story','STORY':'story'}.get(kind,kind)
     media=row['payload']['media_type']
     return {'key':media+':'+kind,'label':label+'-'+{'image':'图像','audio':'声音','video':'视频','project':'工程','document':'文档'}.get(media,'其他'),
             'entity_refs':[b.ref(r) for r in entities.values()],'placement_refs':[b.ref(r) for r in scopes]}

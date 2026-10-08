@@ -43,6 +43,9 @@ def project(store, raw):
             inputs = field(store, key, ('generation', 'inputs'))
             method = field(store, key, ('generation', 'method'))
             value['generation'] = {k:v for k,v in (('inputs',inputs),('method',method)) if v is not None}
+            for name in ('selected_routes','conditions','relation_model'):
+                item = field(store, key, ('generation', name))
+                if item is not None:value['generation'][name] = item
         elif row['kind'] == 'CALL':
             inputs = field(store, key, ('inputs',))
             if inputs is not None:value['inputs'] = inputs

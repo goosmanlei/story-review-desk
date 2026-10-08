@@ -48,7 +48,7 @@ def validate_plan(store, object_id, payload):
             raise ValueError('generation plan requires a complete state')
         if payload['scope'] not in payload['states'] or scope['payload']['entity']['object_id'] not in {r['object_id'] for r in payload['entities']}:
             raise ValueError('generation plan must include its state and owning entity')
-    elif scope['kind'] not in ('INPUT_LOCK', 'STORY', 'EPISODE', 'PREPARATION', 'SHOT_DESIGN'):
+    elif scope['kind'] not in ('ENTITY', 'INPUT_LOCK', 'STORY', 'EPISODE', 'AV_EPISODE', 'AV_SCENE', 'AV_SHOT'):
         raise ValueError('generation scope must be a complete state or production position')
     from .material_plans import randomization
     from .input_contracts import check_parameters, check_declared
@@ -71,32 +71,16 @@ def validate_plan(store, object_id, payload):
         if key in seen:
             raise ValueError('duplicate generation input')
         seen.add(key)
-        if target['object_id'] == object_id:
-            raise ValueError('generation dependency cycle')
         if target['kind'] == 'ASSET':
             _, component = p.component_for(store, value['reference'], value.get('component_id'))
             p.validate_selection(component, value)
-        else:
-            if value.get('component_id') or value.get('crop') or value.get('range'):
-                raise ValueError('future requirement input resolves its exact adopted component and range')
-            if target['payload'].get('status') == 'withdrawn':
-                raise ValueError('generation input requirement is withdrawn')
-            # Immutable references alone are acyclic, but object-level cycles
-            # across successive revisions would make execution impossible.
-            todo = [target]; visited = set()
-            while todo:
-                node = todo.pop()
-                if node['object_id'] == object_id:
-                    raise ValueError('generation dependency cycle')
-                if node['id'] in visited:
-                    continue
-                visited.add(node['id'])
-                for upstream in node['payload'].get('generation', {}).get('inputs', []):
-                    linked = p.ref_record(store, upstream['reference'])
-                    if linked['kind'] == 'REQUIREMENT':
-                        todo.append(linked)
+        elif value.get('component_id') or value.get('crop') or value.get('range'):
+            raise ValueError('future input requires an exact candidate before choosing a media range')
         if plan['method'] == 'reuse' and target['payload']['media_type'] != payload['media_type']:
             raise ValueError('reuse media type differs from output')
+    from .material_relations import active_inputs
+    selected_inputs, _ = active_inputs(store, plan, object_id)
+    media_types = [p.ref_record(store, value['reference'])['payload']['media_type'] for _, value in selected_inputs]
     contract_issues = check_declared(plan['model'],plan['prompt'],media_types)
     if contract_issues:raise ValueError('；'.join(contract_issues))
     if plan.get('reference_links') or plan.get('prompt_links'):
@@ -122,7 +106,9 @@ def current_scope(store, entity_id, rows=None):
     owned = {r['id'] for r in requirements}
     while todo:
         row = todo.pop()
-        for item in row['payload'].get('generation', {}).get('inputs', []):
+        from .material_relations import active_inputs
+        selected_inputs, _ = active_inputs(store, row['payload'].get('generation', {}), row['object_id'])
+        for _, item in selected_inputs:
             target = p.ref_record(store, item['reference'], {'ASSET', 'REQUIREMENT'})
             if target['id'] in dependencies:
                 continue
@@ -330,7 +316,7 @@ def _snapshot(store, entity_id, revision_id=None):
     # breakdown page, not copied through every entity's acceptance calculation.
     rows=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
         FROM objects o JOIN revisions r ON r.id=o.current_revision
-        WHERE o.kind IN ('STATE','ASSET','REPRESENTATION','PREPARATION','SHOT_DESIGN')
+        WHERE o.kind IN ('STATE','ASSET','REPRESENTATION','AV_SCENE','AV_SHOT')
         OR (o.kind='RELATION' AND json_extract(r.payload,'$.relation_type')='entity')
         OR (o.kind='REQUIREMENT' AND json_extract(r.payload,'$.scope.object_id') IN
             (SELECT s.id FROM objects s JOIN revisions sr ON sr.id=s.current_revision
@@ -455,7 +441,11 @@ def readiness(store, requirement_id):
     if need['kind']!='REQUIREMENT':raise ValueError('generation needs a requirement')
     plan=need['payload'].get('generation');issues=[];inputs=[];approvals=[]
     from .version_consolidation import deleted, NOTICE
-    missing = [path for path, reference in p.references(need['payload'], include_unavailable=True)
+    # Unselected alternatives remain inspectable, but do not block the active route.
+    from .material_relations import active_inputs
+    selected_inputs, route_issues = active_inputs(store, plan or {}, need['object_id'])
+    inspected = {**need['payload'], 'generation': {**(plan or {}), 'inputs': [v for _, v in selected_inputs]}}
+    missing = [path for path, reference in p.references(inspected, include_unavailable=True)
                if reference.get('unavailable') or deleted(store, reference['revision_id'])]
     if missing or need['payload'].get('consolidation_identity_only'):
         return {'requirement':need,'plan':plan,'acceptances':[], 'inputs':[], 'i2i_depth':0,
@@ -463,21 +453,29 @@ def readiness(store, requirement_id):
     if not plan:issues.append('尚无生成方案')
     if need['payload'].get('status')=='withdrawn':issues.append('素材需求已撤回')
     scope=p.ref_record(store,need['payload']['scope'])
-    if scope['kind']!='STATE':
-        decisions=p.current_records(store,{'JUDGMENT'})
-        judgment=next((r for r in sorted(decisions,key=lambda r:(r['created_at'],r['id']),reverse=True) if r['payload'].get('target')==ref(need)),None)
-        if not judgment or judgment['payload']['verdict']!='accepted':issues.append('此准确制作方案尚未采纳')
-        else:approvals.append(ref(judgment))
-    for entity in need['payload']['entities'] if scope['kind']=='STATE' else []:
+    from .production_acceptance import snapshot as content_acceptance
+    chosen = content_acceptance(store, need['object_id'], need['id'])
+    if chosen['accepted']:
+        approvals.extend(chosen['acceptances'])
+    elif scope['kind'] != 'STATE':
+        issues.append('此准确制作方案尚未采纳')
+    for entity in need['payload']['entities'] if scope['kind']=='STATE' and not chosen['accepted'] else []:
         a=accepted(store,entity['object_id'])
         if not a:issues.append(p.ref_record(store,entity)['payload']['title']+'：当前生成方案未采纳')
         elif ref(need) not in a['payload']['acceptance_scope']['requirements']:issues.append('素材方案不在当前采纳范围内')
         else:approvals.append(ref(a))
+    if scope['kind'].startswith('AV_'):
+        design = content_acceptance(store, scope['object_id'], scope['id'])
+        if design['accepted']: approvals.extend(design['acceptances'])
+        else: issues.append('所用准确视听设计尚未采纳')
     if plan:
         issues.extend(plan.get('blockers',[]))
         from .shot_references import applies, slots
         exact_slots=slots(store,plan['inputs']) if applies(store,need) else None
-        for index,item in enumerate(plan['inputs']):
+        from .material_relations import active_inputs, cycle_issues
+        selected_inputs, route_issues = active_inputs(store, plan, need['object_id'])
+        issues.extend(cycle_issues(store, need))
+        for index,item in selected_inputs:
             if item.get('selection_state')=='unselected':
                 issues.append('参考 '+str(index+1)+'：尚未选定素材版本和候选')
                 continue

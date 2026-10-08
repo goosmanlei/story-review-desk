@@ -325,7 +325,7 @@ def validate(store):
         rows = [p.record(store, revision_id=r[0]) for r in store.db.execute('SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=?', (v['material_id'], v['number']))]
         matching = [r for r in rows if r['kind'] in ('CALL', 'REQUIREMENT') and (signature(r,store) == v['fingerprint'] or legacy_signature(r) == v['fingerprint'])]
         if not matching:
-            raise ValueError('plan fingerprint lacks exact source evidence')
+            raise ValueError('plan fingerprint lacks exact source evidence: '+v['material_id']+' / '+str(v['number']))
         for row in rows:
             if row['kind'] == 'CALL' and signature(row,store) != v['fingerprint'] and legacy_signature(row) != v['fingerprint']:
                 raise ValueError('different executed schemes share a version')

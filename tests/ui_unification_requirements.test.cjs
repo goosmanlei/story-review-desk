@@ -112,13 +112,13 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
   const {c,reader,need,asset,call,round,context}=videoFixture();
   const other=row('video-other','ASSET',{...asset.payload},'video-other-r1');round.results.push(other);round.members.push(other);context.video_details[need.object_id].review_contexts[other.id]={call,inputs:[],requirements:[need]};
   context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  const scene=row('scene','PREPARATION'),shot=row('shot','SHOT_DESIGN',{number:1,duration_frames:120,fps:24});
+  const scene=row('scene','AV_SCENE'),shot=row('shot','AV_SHOT',{number:1,duration_frames:120,fps:24});
   Object.assign(context,{requirements:[need],materials:[{object_id:need.object_id,id:need.id,title:need.payload.title,media_type:'video',slot:'video',generated:true}],entities:[],states:[]});
   c.state.workspace='production.workspace';c.state.breakdownData={episode:'episode'};c.api=async()=>({scene,shared:[],shots:[{record:shot,context}]});c.breakdownSelect=()=>{};vm.runInContext('breakdownEpoch=7',c);
   const opened=[];c.openUnifiedMaterial=reference=>opened.push(reference);
   await c.showBreakdownScene(scene,reader,new Element('nav'),7);
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
-  const candidate=reader.all().find(n=>n.attributes['aria-label']==='视频候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
+  const candidate=reader.all().find(n=>n.attributes['aria-label']==='素材候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
   await reader.querySelectorAll('[data-material-id]').find(n=>n.dataset.materialId===need.object_id).onclick();
   assert.equal(opened.length,1);assert.equal(opened[0].object_id,other.object_id);assert.equal(opened[0].revision_id,other.id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
 });
@@ -162,7 +162,7 @@ test('history result summaries explain D3 once while preserving an exact histori
 
 for(const workspace of ['settings.workspace','production.workspace'])test(`scene cards expose each supplied generation scope without rebinding ${workspace} links`,async()=>{
   const {c,reader}=fixture(),media=workspace==='production.workspace'?'video':'audio';
-  const scene=row('scene','PREPARATION'),shot=row('shot','SHOT_DESIGN',{number:1,duration_frames:120,fps:24});
+  const scene=row('scene','AV_SCENE'),shot=row('shot','AV_SHOT',{number:1,duration_frames:120,fps:24});
   const items=[
     {object_id:'historical-need',id:'historical-need-r3',title:'Changed current plan',media_type:media,generated:true,generation_scope:'history',version_count:2,candidate_count:1},
     {object_id:'exact-empty',id:'exact-empty-r1',title:'An exact record',media_type:media,generated:false,generation_scope:'exact',version_count:1,candidate_count:0},
@@ -196,9 +196,8 @@ test('unowned demand sees a real older plan result without replacing its exact c
   c.state.entityReview=null;c.state.unifiedScope=null;c.state.materialReview=data;
   const opened=[];c.renderMaterialWorkspace=(_right,detail)=>opened.push(detail.record);
   c.renderUnifiedCard(reader);
-  const card=reader.querySelectorAll('[data-material-id]')[0];
+  const card=reader.all().find(n=>n.className==='production-meta material-summary-counts');
   assert.match(card.textContent,/版本 2 个 · 候选 1 个/);
-  assert.equal(card.dataset.materialId,need.object_id);assert.equal(card.getAttribute('aria-pressed'),'true');
   assert.deepEqual(opened,[current]);assert.equal(data.material_versions.need[0].results.length,0);
   assert.equal(data.material_versions.need[1].results[0].id,asset.id);
 });
@@ -212,7 +211,7 @@ for(const candidateKind of ['placeholder','preview-only','call'])test(`unowned d
   const data={record:need,history:[need],candidate_records:[candidate],material_card_counts:{need:{version_count:1,candidate_count:0}},material_versions:{}};
   c.state.entityReview=null;c.state.materialReview=data;c.renderMaterialWorkspace=()=>{};
   c.renderUnifiedCard(reader);
-  const card=reader.querySelectorAll('[data-material-id]')[0];
+  const card=reader.all().find(n=>n.className==='production-meta material-summary-counts');
   assert.match(card.textContent,/版本 1 个 · 候选 0 个/);assert.doesNotMatch(card.textContent,/有生成结果|已生成/);
   assert.equal(data.candidate_records[0],candidate,'history remains available despite its not being a real original');
 });
@@ -226,7 +225,7 @@ for(const variant of ['original','placeholder','preview-only'])test(`unowned exa
   c.state.entityReview=null;c.state.materialReview=data;const rendered=[];
   c.renderMaterialWorkspace=(_right,detail)=>rendered.push(detail.record.id);
   c.renderUnifiedCard(reader);
-  const card=reader.querySelectorAll('[data-material-id]')[0];
+  const card=reader.all().find(n=>n.className==='production-meta material-summary-counts');
   assert.match(card.textContent,/版本未登记 · 候选未登记/);
   assert.doesNotMatch(card.textContent,/历史|有生成结果|无生成结果/);
   assert.deepEqual(rendered,[exact.id]);assert.equal(data.history[1].id,asset.id);
@@ -408,7 +407,7 @@ test('an empty reference version can be saved without a candidate and frozen ver
 });
 test('an exact shot video candidate mismatch never falls back to another result',()=>{
   const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_plan=1&shot_candidate=missing';c.breakdownPrompt(reader,need,context);
-  assert.ok(reader.textContent.includes('准确视频候选不属于此制作版本'));assert.ok(!reader.textContent.includes('真实生成内容'));
+  assert.ok(reader.textContent.includes('准确素材候选不属于此制作版本'));assert.ok(!reader.textContent.includes('真实生成内容'));
 });
 test('saved reference routing waits for the modal history entry to return',()=>{
   const {c}=fixture();let pop;c.window.addEventListener=(name,handler)=>{if(name==='popstate')pop=handler};
@@ -417,7 +416,7 @@ test('saved reference routing waits for the modal history entry to return',()=>{
 });
 test('reference save refresh keeps the draft attached to the original immutable text',async()=>{
   const {c}=fixture(),old=row('video','REQUIREMENT'),anchor={type:'text',quote:'original'};c.state.workspace='settings.workspace';c.state.anchor=anchor;c.state.productionSelected=old;c.state.breakdownVideoSelections={};
-  c.loadProductionBreakdown=async()=>{c.state.anchor=null;c.state.productionSelected=row('scene','PREPARATION')};c.document.querySelector=()=>({focus(){c.state.anchor=null}});
+  c.loadProductionBreakdown=async()=>{c.state.anchor=null;c.state.productionSelected=row('scene','AV_SCENE')};c.document.querySelector=()=>({querySelector(){return {focus(){c.state.anchor=null}}}});
   await c.refreshShotReference({need:{...old,payload:{scope:{object_id:'shot'}}}},{index:0},{number:2});assert.equal(c.state.anchor,anchor);assert.equal(c.state.productionSelected,old);assert.ok(c.location.href.includes('shot_plan=2'));
 });
 

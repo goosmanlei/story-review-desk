@@ -36,8 +36,10 @@ def production_text_blocks(payload):
             blocks.append({'id': f'{prefix}{field}/{index}', 'text': text,
                            'field': field, 'index': index})
     extra = [('production_description', payload.get('production_description'))]
-    if payload.get('format') == 'production-shot-design-v1':
-        extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','action_start','action_end','motion','continuity')]
+    if payload.get('format') == 'production-av-shot-v1':
+        extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','axis','movement','action_start','action_end','motion','performance','lighting','color','editing','continuity')]
+    if payload.get('format') in ('production-av-episode-v1', 'production-av-scene-v1', 'production-material-relation-v1'):
+        extra += [(field, payload.get(field)) for field in ('purpose', 'structure', 'rhythm', 'continuity', 'preserve', 'change', 'check')]
     if payload.get('relation_type') == 'entity':
         extra.append(('relationship.label', payload.get('label')))
     plan = payload.get('generation') or {}
@@ -56,7 +58,7 @@ def production_text_blocks(payload):
         if isinstance(text,str) and text.strip() and text not in body and text not in seen:
             seen.add(text)
             blocks.append({'id':prefix+field.replace('.', '/'), 'text':text, 'field':field})
-    if payload.get('format') == 'production-shot-design-v1':
+    if payload.get('format') == 'production-av-shot-v1':
         for index, item in enumerate(payload.get('sound') or []):
             if isinstance(item, dict) and item.get('type') == 'source_action':
                 continue

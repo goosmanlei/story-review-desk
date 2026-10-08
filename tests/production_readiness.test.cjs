@@ -10,7 +10,7 @@ class Element{
 const requirement=(id,required=true)=>({object_id:id,id:id+'-revision',payload:{title:id,scope:{object_id:'scope',revision_id:'scope-revision'},slot:id,required,purpose:'Fixture input',usage:'post_audio'}});
 const row=(id,required=true,issues=[],adopted=true)=>({requirement:requirement(id,required),issues,pending_changes:[],asset:adopted?{object_id:id+'-asset',id:id+'-asset-revision',payload:{title:id+' recording'}}:null,adoption:adopted?{payload:{asset:{object_id:id+'-asset',revision_id:id+'-asset-revision'},component_id:'original'}}:null});
 async function render(changes={}){
-  const r={object_id:'scope',id:'scope-revision',kind:'SHOT_DESIGN'},root=new Element('main');
+  const r={object_id:'scope',id:'scope-revision',kind:'AV_SHOT'},root=new Element('main');
   const data={required_count:1,missing_count:0,inputs_ready:true,package_available:true,package_issue:null,requirements:[row('required')],...changes};
   const requests=[],messages=[];
   const context={state:{productionSelected:r,productionRecords:[]},el:(tag,cls)=>new Element(tag,cls),

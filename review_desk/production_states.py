@@ -41,6 +41,7 @@ def validate_state(store, p):
 def usage_issues(store, entities, states, transitions, source, allow_none=False):
     """Check each identity's ordered full forms and in-scene transition evidence."""
     from .production import ref_record, source_check
+    source_ranges = source if isinstance(source, list) else [source]
     issues, grouped = [], {e["object_id"]: [] for e in entities}
     for ref in states:
         state = ref_record(store, ref, {"STATE"})
@@ -75,8 +76,9 @@ def usage_issues(store, entities, states, transitions, source, allow_none=False)
                 raise ValueError("transition crosses entities")
             evidence = transition["source"]
             source_check(store, evidence)
-            if (exact(evidence) != exact(source) or evidence.get("scene_id") != source.get("scene_id") or
-                    not evidence.get("block_ids") or not set(evidence["block_ids"]) <= set(source.get("block_ids", []))):
+            if not evidence.get("block_ids") or not any(
+                    exact(evidence) == exact(span) and evidence.get("scene_id") == span.get("scene_id") and
+                    set(evidence["block_ids"]) <= set(span.get("block_ids", [])) for span in source_ranges):
                 raise ValueError("transition is outside its exact scene/shot source")
             actual.append((exact(a), exact(b)))
         except (KeyError, ValueError, TypeError):
@@ -95,14 +97,11 @@ def validate_usage(store, kind, p):
         return
     if p["state_model"] != MODEL:
         raise ValueError("unsupported state model")
-    if kind == "PREPARATION":
-        groups = [([o["entity"]], o["states"], o.get("transitions", []), o["mode"] == "mention") for o in p["occurrences"]]
-    else:
-        groups = [(p["entities"], p["states"], p.get("state_transitions", []), False)]
+    groups = [(p["entities"], p["states"], p.get("state_transitions", []), False)]
     for entities, states, transitions, mention in groups:
         if not isinstance(transitions, list):
             raise ValueError("state transitions must be a list")
-        issues = usage_issues(store, entities, states, transitions, p["source"], mention)
+        issues = usage_issues(store, entities, states, transitions, p.get("sources", [p.get("source")]), mention)
         if issues:
             raise ValueError("complete state coverage: " + ", ".join(i["code"] for i in issues))
 
@@ -192,15 +191,13 @@ def scope_coverage(store, subjects, heads):
             groups = []
             if complete(subject) and p["reference_media"] != "none" and p.get("reference_mode") != "description":
                 used[(subject["object_id"], subject["id"])] = {"object_id": subject["object_id"], "revision_id": subject["id"]}
-        elif subject["kind"] == "PREPARATION":
-            groups = [([o["entity"]], o["states"], o.get("transitions", [])) for o in p["occurrences"] if o["mode"] != "mention"]
-        elif subject["kind"] == "SHOT_DESIGN":
+        elif subject["kind"] == "AV_SHOT":
             groups = [(p["entities"], p["states"], p.get("state_transitions", []))]
         else:
             groups = []
         for entities, states, transitions in groups:
             checked += len(entities)
-            for issue in usage_issues(store, entities, states, transitions, p["source"]):
+            for issue in usage_issues(store, entities, states, transitions, p.get("sources", [p.get("source")])):
                 issues.append({"scope": {"object_id": subject["object_id"], "revision_id": subject["id"]}, **issue})
             for ref in states:
                 state = ref_record(store, ref, {"STATE"})

@@ -18,7 +18,7 @@ class Element{
 function setup(options={}){
   const root=new Element('main');root.root=true;
   const requests=[],posts=[],postUrls=[],messages=[];
-  const context={state:{workspace:'production.workspace',productionRecords:[{object_id:'history-scene',id:'history-scene-r1',kind:'PREPARATION',payload:{title:'History scene'}}]},crypto:{randomUUID:()=>String(posts.length)},
+  const context={state:{workspace:'production.workspace',productionRecords:[{object_id:'history-scene',id:'history-scene-r1',kind:'AV_SCENE',payload:{title:'History scene'}}]},crypto:{randomUUID:()=>String(posts.length)},
     el:(tag,cls)=>new Element(tag,cls),Option:function(text,value){const option=new Element('option');option.textContent=text;option.value=value;return option},
     nodeText:(tag,cls,text,parent)=>{const node=new Element(tag);node.textContent=text;parent.append(node);return node},toast:message=>messages.push(message),
     api:(url,options)=>{if(options?.method==='POST'){posts.push(JSON.parse(options.body));postUrls.push(url);return Promise.resolve({})}return new Promise((resolve,reject)=>requests.push({url,resolve,reject}))}};
@@ -35,7 +35,7 @@ function setup(options={}){
 }
 
 test('history-only readiness opens the real lazy selector and posts the chosen historical file with the original contract', {timeout:2000}, async()=>{
-  const t=setup({lazy:true,adoption:null}),scope={object_id:'shot',id:'shot-exact',kind:'SHOT_DESIGN'};t.context.state.productionSelected=scope;
+  const t=setup({lazy:true,adoption:null}),scope={object_id:'shot',id:'shot-exact',kind:'AV_SHOT'};t.context.state.productionSelected=scope;
   const rendering=t.context.renderProductionReadiness(t.root,scope);
   assert.equal(t.requests[0].url,'/api/production/readiness?scope=shot');
   t.requests[0].resolve({requirements:[t.row],required_count:1,missing_count:1,inputs_ready:false,package_available:false});await rendering;

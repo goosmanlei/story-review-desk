@@ -2,6 +2,7 @@ import copy
 import json
 import shutil
 import unittest
+from unittest.mock import patch
 import test_material_versions as fixtures
 from review_desk import material_plans as mp, production as p, generation as g
 from review_desk.bundle import export, restore
@@ -75,7 +76,8 @@ class PlanVersionsTest(unittest.TestCase):
         self.setup_plans()
         for name,status in [('failed','failed'),('unknown','unknown')]:
             plan=p.record(self.store,'need-full-overall')['payload']['generation']
-            self.put(self.spec(name,'CALL',status=status,method='generation',tool='test',outputs=[],inputs=[],generation_requirement=self.ref('need-full-overall'),**{k:plan[k] for k in ('model','parameters','prompt')}))
+            with patch.object(g,'validate_call'): # seed existing failed provider history
+                self.put(self.spec(name,'CALL',status=status,method='generation',tool='test',outputs=[],inputs=[],generation_requirement=self.ref('need-full-overall'),**{k:plan[k] for k in ('model','parameters','prompt')}))
             with self.assertRaises(Conflict):self.change(name,prompt='rewrite history')
         self.assertEqual(len(mp.snapshot(self.store,'need-full-overall')),1)
         self.assertEqual(mp.snapshot(self.store,'need-full-overall')[0]['results'],[])

@@ -182,8 +182,8 @@ test('saving the restored outer draft cannot overwrite a closed modal draft',asy
 });
 test('an exact historical shot link preserves its requested revision in the all-shot scene reader',async()=>{
   const ctx=setup(),source={object_id:'episode',revision_id:'episode-1',scene_id:'scene'};
-  const scene=row('scene','PREPARATION',undefined,{source});
-  const current=row('shot','SHOT_DESIGN','shot-current',{parent:ref(scene),source,number:1,fps:24,duration_frames:120});
+  const scene=row('scene','AV_SCENE',undefined,{source});
+  const current=row('shot','AV_SHOT','shot-current',{parent:ref(scene),source,number:1,fps:24,duration_frames:120});
   const original={...current,id:'shot-original',version:1,payload:{...current.payload,title:'Original shot design'}};
   const sceneData={scene,shared:[],shots:[{record:original,context:{requirements:[],materials:[]}}]};
   ctx.state.breakdownData={episode:'episode',shots:[original]};ctx.state.productionRecords=[scene,current];
@@ -196,7 +196,7 @@ test('an exact historical shot link preserves its requested revision in the all-
 });
 
 function genericMaterialFixture(ctx){
-  const scope=row('scene','PREPARATION'),plan=number=>row('video-need','REQUIREMENT','plan-'+number,{
+  const scope=row('scene','AV_SCENE'),plan=number=>row('video-need','REQUIREMENT','plan-'+number,{
     scope:ref(scope),slot:'scene-video',media_type:'video',generation:{model:'fixture',parameters:{},prompt:'plan '+number,inputs:[],output:{name:'Fixture video',review_criteria:[]}}});
   const asset=(id,date)=>({...row(id,'ASSET',id+'-exact',{media_type:'video',components:[
     {id:'original',role:'original',mime:'video/mp4',sha256:id,file:id+'.mp4'},

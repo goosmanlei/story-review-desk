@@ -32,15 +32,8 @@ class UIProjectionRequirementsTest(unittest.TestCase):
         self.put(self.entity())
         self.put(self.full())
         self.put(self.need())
-        occurrence = {'entity': self.ref('songbook'), 'states': [self.ref('full')],
-                      'mode': 'visual', 'evidence': [self.source]}
-        self.put(self.spec('scene', 'PREPARATION', source={**self.source, 'block_ids': ['a', 'b']}, checked=True,
-                           occurrences=[occurrence], notes='fixture only'))
-        self.put(self.spec('shot', 'SHOT_DESIGN', episode=self.ref('episode'),
-                           parent=self.ref('scene'), scene_id='scene', source=self.source,
-                           number=1, purpose='purpose', framing='framing', spatial='spatial',
-                           action_start='start', action_end='end', continuity='continuity',
-                           fps=24, duration_frames=120, sound=[], entities=[], states=[]))
+        from audiovisual_fixture import composition
+        composition(self)
 
     def applicability(self, name, subject, scope):
         self.put(self.spec(name, 'RELATION', relation_type='applicability',
@@ -62,21 +55,20 @@ class UIProjectionRequirementsTest(unittest.TestCase):
         self.applicability('entity-on-scene', 'songbook', 'scene')
         self.applicability('state-on-shot', 'full', 'shot')
         data = ui.scene(self.store, 'scene')
-        scene = next(c for c in data['shared'] if c['record']['kind'] == 'PREPARATION')
+        scene = next(c for c in data['shared'] if c['record']['kind'] == 'AV_SCENE')
         for context in (scene, data['shots'][0]['context']):
             self.assertEqual(context['materials'], [])
             self.assertEqual(context['adoptions'], [])
 
     def test_historical_scene_keeps_its_old_shot_after_current_shot_moves(self):
         self.scene_and_state()
-        exact_shot = self.ref('shot')
-        current = p.record(self.store, 'scene')
-        self.put({'object_id': 'scene', 'kind': 'PREPARATION', 'expected_version': current['version'],
-                  'payload': {**current['payload'], 'title': 'new scene revision'}})
+        exact_shot = self.ref('shot'); old_parent = self.ref('scene')
         shot = p.record(self.store, 'shot')
-        self.put({'object_id': 'shot', 'kind': 'SHOT_DESIGN', 'expected_version': shot['version'],
-                  'payload': {**shot['payload'], 'parent': self.ref('scene')}})
-        old_parent = shot['payload']['parent']
+        self.put({'object_id': 'shot', 'kind': 'AV_SHOT', 'expected_version': shot['version'],
+                  'payload': {**shot['payload'], 'purpose': '新的表达目的'}})
+        current = p.record(self.store, 'scene')
+        self.put({'object_id': 'scene', 'kind': 'AV_SCENE', 'expected_version': current['version'],
+                  'payload': {**current['payload'], 'shots': [self.ref('shot')]}})
         data = ui.scene(self.store, old_parent['object_id'], old_parent['revision_id'])
         self.assertEqual([s['record']['id'] for s in data['shots']], [exact_shot['revision_id']])
 

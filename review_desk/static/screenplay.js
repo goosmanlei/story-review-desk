@@ -177,9 +177,23 @@ function renderScriptReader(){
     const source={id:episode.object_id,target_revision_id:episode.id,blocks:data.blocks};
     const indexes=new Map(data.blocks.map((block,index)=>[block.id,index]));
     for(const id of scene.block_ids){const index=indexes.get(id);if(index!==undefined)text.append(renderBlock(source,data.blocks[index],index))}
-    root.append(text);
+    root.append(text);renderStoryProductionLinks(root,episode,scene);
   }else nodeText('p','screenplay-scene-empty','本集暂无场次。',root);
   root.scrollTop=scriptReadingPositions.get(root.dataset.readingKey)||0;
+}
+function renderStoryProductionLinks(root,episode,scene){
+  const box=el('details','story-production-links');nodeText('summary',null,'相关制作',box);root.append(box);let loaded=false;
+  box.ontoggle=async()=>{if(!box.open||loaded)return;loaded=true;
+    try{const data=await api('/api/production/story-related?'+new URLSearchParams({object_id:episode.object_id,revision_id:episode.id,scene_id:scene.id}));if(!box.isConnected)return;
+      for(const [label,kinds] of [['实体与状态',['ENTITY','STATE','RELATION']],['视听设计',['AV_EPISODE','AV_SCENE','AV_SHOT']],['素材需求',['REQUIREMENT']]]){
+        const rows=data.items.filter(item=>kinds.includes(item.record.kind));if(!rows.length)continue;
+        const group=el('section');nodeText('h3',null,label,group);for(const {record} of rows){
+          if(record.kind.startsWith('AV_'))productionButton(group,businessTitle(record),()=>{rememberWorkspacePosition();rememberWorkspaceRoute();const url=new URL(location.href);url.search='';url.searchParams.set('workspace','settings.workspace');url.searchParams.set('production_tab','breakdown');url.searchParams.set('breakdown_object',record.object_id);url.searchParams.set('breakdown_revision',record.id);history.pushState(null,'',url);switchWorkspace('settings.workspace',false)});
+          else materialReferenceLink(group,productionRef(record),businessTitle(record));
+        }box.append(group);
+      }if(!data.items.length)nodeText('p','production-meta','此准确故事场尚无关联制作',box);
+    }catch(error){if(box.isConnected){nodeText('p','production-issue',error.message,box);loaded=false}}
+  };
 }
 function appendScriptCommentScope(card,comment){
   const episode=scriptEpisode(),first=sceneForBlock(episode,comment.anchor.block_id),last=sceneForBlock(episode,comment.anchor.end_block_id);

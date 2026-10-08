@@ -17,8 +17,8 @@ class GroupedManagementTest(UiProjectionTest):
 
     def test_cross_scene_duplicates_use_group_and_material_identity(self):
         entries=[{'canonical_material_id':'m','locations':[
-            {'episode':'e1','scene':'s1','kind':'SHOT_DESIGN'},
-            {'episode':'e1','scene':'s1','kind':'SHOT_DESIGN'},
+            {'episode':'e1','scene':'s1','kind':'AV_SHOT'},
+            {'episode':'e1','scene':'s1','kind':'AV_SHOT'},
             {'episode':'e1','scene':'s2','kind':'STATE'},
             {'episode':None,'scene':None,'kind':'STATE'}]}]
         with patch('review_desk.list_associations.light.rows',return_value=[{'object_id':'e1','payload':{'number':1}}]):
@@ -38,7 +38,7 @@ class GroupedManagementTest(UiProjectionTest):
         self.assertTrue(all(len(g['material_ids'])==len(set(g['material_ids'])) for g in groups))
         self.assertTrue(any(g['scene']=='scene' and 'need-full-overall' in g['material_ids'] for g in groups))
         rows=p.current_records(self.store);locs=entity_locations(self.store,[p.record(self.store,'songbook')],rows)['songbook']
-        self.assertTrue(any(l.get('scene')=='scene' and l['evidence']['kind']=='scene_shot' for l in locs))
+        self.assertTrue(any(l.get('scene')=='scene' and l['evidence']['kind']=='audiovisual_use' for l in locs))
         self.assertTrue(all('evidence' in l for l in locs))
 
     def test_explicit_owner_preserves_target_and_rejects_unrelated_object(self):

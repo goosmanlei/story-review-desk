@@ -1,15 +1,17 @@
-# One-time version consolidation
+# 净化切换与准确恢复
 
-`review_desk.version_consolidation` provides a generic inventory, exact migration plan and atomic database transition. Instance-specific file retirement, publication and recovery receipts belong to the story repository.
+旧生产结构的替换由 `review_desk.production_cutover` 提供通用原子操作。实例负责全剧编制、删除清单、每项候选的保留用途、共享资源核验、文件退役和发布顺序；通用系统不包含故事规则或公开的一次性编辑入口。
 
-`Store.open_readonly(path)` performs no initialization. `plan(store)` inventories ENTITY, STATE, SHOT_DESIGN and material plan identities. Core objects retain their latest revision. Materials retain the highest-numbered plan with verified originals, otherwise their latest plan, including every candidate of that plan. Missing originals or conflicting exact identities reject planning. The plan contains exact identities and hashes, not copies of discarded bodies.
+`plan(store, removals, records, retention)` 使用只读一致性范围，登记全部业务表的指纹、准确删除对象／修订／评论、保留原件的物理字节与哈希、以及新编制记录摘要。它不写业务数据。删除仅限允许替换的生产结构；仍有效的业务引用会阻断，真实 CALL 与 ASSET 的来源缺口单独处理。
 
-`apply_database(store, plan)` validates the complete database fingerprint and original-file checksums inside an immediate transaction. It removes discarded revisions and exclusively owned records, clears invalid selections, revokes decisions whose exact scope is removed or changed, rebuilds the retained V1 membership and marks/sweeps unreferenced immutable content. Real CALL payloads remain byte-for-byte unchanged. The returned receipt binds the post-transaction head, which an instance file publisher checks before destructive work. An optional `original_root` is for a separately frozen and hash-checked original set when controlled Git delivery has already changed formal paths.
+`apply(store, plan, records)` 在单个 IMMEDIATE 事务内重新核对整库基线与原件，物理移除淘汰结构及专属关系、意见和失效定义，导入新编制记录，重建保留候选的必要身份索引，并清除无引用的共享内容。真实调用和候选载荷不改写。已消失的历史输入只保留对象／修订身份、摘要和缺口解释，不保存旧业务正文或假造新方案。
 
-Deleted targets resolve to a minimal unavailable projection. No current revision substitutes for a missing exact target. Retained references keep their exact IDs; integrity verification checks the recorded transformed hash. New revision identities include the baseline, preventing an old deleted V2 from being recreated by the same new content. Database triggers reject deleted revision and object identities, including raw inserts. These rules are specific to the recorded migration: subsequent ordinary authoring still retains history and produces V2 under the existing freeze rules; comments and additional candidates do not create a new plan.
+事务内任何失败整体回滚。提交后中断时用同一计划重试，核对删除对象未复活、新建修订仍存在后返回原回执；不能再次生成、重新删除或覆盖后续数据。`after_delete`、`after_import`、`before_commit` 和 `after_commit` 故障点用于隔离验证。
 
-Material version projections expose `baseline_id` and `previous_numbers`. New numeric routes carry `material_baseline` (shot routes use `shot_baseline`). A legacy number resolves only if it names the retained content; a discarded old V1 cannot resolve to the new V1. A stale baseline, legacy round or missing exact candidate is rejected without fallback. Missing inputs remain visible in reference slots and prevent affected generation.
+实例切换前使用完整原始表指纹。隔离与正式新导入的创建时间自然不同，`result_fingerprint` 仅忽略本次准确新建对象、修订和素材轮次的创建／更新时间；保留历史、意见、载荷、索引和其他字段全部比较。它不修改真实时间，也不用于放宽提交前基线检查。
 
-Schema 8 complete bundles include the minimal deletion and transformation ledger. The instance policy binds its checksum and rejects pre-consolidation restore packages. CALL references to deleted sources may survive solely as immutable forensic input; their missing dependency is indexed separately. Export includes the retained call's actual input originals even when no remaining ASSET owns them. Verification never treats those forensic references as generation permission.
+Schema 9 导出包含有效数据和最小删除／转换凭据。准确旧链接不得跳到同名或当前对象；已删除身份在数据库触发器与恢复校验中不能复活。仍有效候选的真实输入可保留缺失历史依赖，但该缺口不能授予新生成许可。新的正常修订继续建立版本，不重复执行一次性收敛。
 
-Checks: `tests/test_version_consolidation.py` covers selection, all candidates, shared originals, drift, transaction faults, retry, empty restore, blocked inputs and future V2. `tests/version_consolidation.test.cjs` covers old numeric routes and new baseline links. Real browser evidence and complete instance coverage remain the instance owner's responsibility.
+物理文件与 SQLite 不共享断电事务。实例发布需停止旧写入，冻结准确包，受控交付后执行数据库事务和按哈希的文件清理，再部署新服务。提交后只向前恢复；不可把旧数据库或旧导出覆盖新意见。空实例恢复只消费当前净化导出及最小发布幂等凭据。
+
+验证入口：`test_production_cutover.py` 覆盖只读预演、漂移拒绝、全部故障点、提交中断重试及结果比较边界；`test_audiovisual.py` 与素材、bundle 测试覆盖准确关系、冻结、原件及空实例恢复。全量实例演练、真实浏览器和资源清理由实例任务提供实际证据。

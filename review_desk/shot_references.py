@@ -6,7 +6,7 @@ from .production_media import validate_component
 
 
 def applies(store, need):
-    return need['kind']=='REQUIREMENT' and need['payload']['media_type']=='video' and p.ref_record(store,need['payload']['scope'])['kind']=='SHOT_DESIGN'
+    return need['kind']=='REQUIREMENT' and bool(need['payload'].get('generation'))
 
 
 def input_key(value):
@@ -88,11 +88,36 @@ def slots(store, inputs):
     return [slot(store,v,i) for i,v in enumerate(inputs)]
 
 
+def enrich_detail(store, detail):
+    from .reference_paths import project, annotations
+    targets = [detail.get('record'), *detail.get('history', [])]
+    for rounds in detail.get('material_versions', {}).values():
+        for version in rounds:
+            targets.extend([version.get('plan'), *version.get('definition_records', {}).values()])
+    for actual in detail.get('review_contexts', {}).values():
+        targets.append(actual.get('call'))
+    for row in targets:
+        if row and row['kind'] in ('REQUIREMENT', 'CALL'):
+            row['review_shot_slots'] = slots(store, inputs_for(store, row))
+            if row['kind']=='REQUIREMENT' and row['payload'].get('generation'):
+                from .material_relations import active_inputs, rules
+                plan=row['payload']['generation']
+                active={index for index,_ in active_inputs(store,plan,row['object_id'])[0]}
+                for item in row['review_shot_slots']:
+                    item['active']=item['index'] in active
+                    item['rule']=rules(store,plan['inputs'][item['index']],row['object_id'])
+            row['review_reference_links'] = project(store, row)
+            row['review_prompt_links'] = annotations(store, row).get('prompt_links', [])
+    return detail
+
+
 def inputs_for(store,row):
     inputs=copy.deepcopy(row['payload'].get('generation',{}).get('inputs',[]) if row['kind']=='REQUIREMENT' else row['payload'].get('inputs',[]))
     if row['kind']=='CALL':
         source=row['payload'].get('generation_requirement') or row['payload'].get('prepared_plan')
-        plan=p.ref_record(store,source)['payload'].get('generation',{}).get('inputs',[]) if source else []
+        from .material_relations import active_inputs
+        need=p.ref_record(store,source) if source else None
+        plan=[value for _,value in active_inputs(store,need['payload'].get('generation',{}),need['object_id'])[0]] if need else []
         for actual,declared in zip(inputs,plan):
             if actual.get('material_selection') is not None or declared.get('material_selection') is None:continue
             if all(actual.get(k)==declared.get('reference',{}).get(k) for k in ('object_id','revision_id')) and all(actual.get(k)==declared.get(k) for k in ('component_id','crop','range')):
@@ -117,11 +142,11 @@ def select(store, request):
             result=response(store,row,True)
         else:
             need=p.record(store,request['requirement_id'])
-            if not applies(store,need):raise ValueError('只能选定本镜视频方案的参考')
-            if need['id']!=request['expected_revision']:raise Conflict('镜头方案已被修改，请重新打开后选择')
+            if not applies(store,need):raise ValueError('只能选定具有完整方案的素材参考')
+            if need['id']!=request['expected_revision']:raise Conflict('素材方案已被修改，请重新打开后选择')
             rounds=mp.snapshot(store,need['object_id'])
             chosen=next((r for r in rounds if r['number']==request['plan_number']),None)
-            if not chosen:raise ValueError('镜头制作版本不存在')
+            if not chosen:raise ValueError('素材方案版本不存在')
             source=chosen.get('definition_records',{}).get('requirement') or chosen.get('plan')
             call=chosen.get('definition_records',{}).get('call')
             # Locked calls may have resolved inputs absent from the original plan.
@@ -150,6 +175,11 @@ def select(store, request):
                 candidate=p.ref_record(store,request['candidate'],{'ASSET'})
                 value={**old,'reference':request['candidate'],'component_id':request['component_id'],
                        'material_selection':{'material_id':mid,'number':request['number'],'candidate_revision_id':candidate['id']}}
+            for key in ('crop', 'range'):
+                if key in request:
+                    value[key] = copy.deepcopy(request[key])
+                elif request.get('candidate') is not None:
+                    value.pop(key, None)
             value.pop('selection_state',None)
             # CALL inputs are flat exact references; the new draft uses the
             # generation-plan form without losing crop/range or ordered use.
@@ -168,6 +198,20 @@ def select(store, request):
                         exact={k:entry[k] for k in ('object_id','revision_id')}
                         inputs[i]={'reference':exact,**{k:entry[k] for k in ('component_id','crop','range') if k in entry},'use':original.get('inputs',[])[i].get('use','准确历史参考') if i<len(original.get('inputs',[])) else '准确历史参考'}
                 value.setdefault('use',inputs[index].get('use','准确历史参考'))
+                # A real call contains only the active route. A new draft must
+                # still retain the other declared alternatives and constraints.
+                if original.get('inputs'):
+                    from .material_relations import active_inputs
+                    selected=active_inputs(store,original,need['object_id'])[0]
+                    if len(selected)!=len(inputs):raise Conflict('实际调用与原方案槽位无法准确对应')
+                    merged=copy.deepcopy(original['inputs'])
+                    for (declared_index,declared),actual in zip(selected,inputs):
+                        merged[declared_index]={**declared,**actual}
+                    declared_index,declared=selected[index]
+                    inputs=merged;index=declared_index
+                    value={**declared,**value}
+                    for key in ('crop','range'):
+                        if key not in request:value.pop(key,None)
             if not payload.get('generation'):raise ValueError('历史制作版本没有完整方案，需先补齐')
             inputs[index]=value;payload['generation']['inputs']=inputs
             payload['shot_reference_operation']={'id':op,'fingerprint':fingerprint,'source_number':chosen['number']}

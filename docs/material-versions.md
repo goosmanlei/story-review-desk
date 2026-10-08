@@ -38,27 +38,9 @@
 
 受管 JSON 请求、回执和制作归档使用 `material-archive-reference-v1` 保存原字节重建配方。字符串与嵌套 JSON 字符串引用同一内容图；空白、键序、Unicode 转义、重复键与数字原写法均可恢复。容器物理哈希与原文件逻辑哈希分开；HTTP（含 Range）、媒体校验和后台脚本经 `material_archives.read_bytes/read_json` 得到原字节。图片、音频和视频原件不作转换。
 
-完整模型采用 Schema 7：在 Schema 6 的物理引用、旧身份、版本、评论、事件、采用及依赖之上，增加稳定业务编号、候选与评论序号、已授权关系说明清理证明及保留评论引用资格。唯一 `material-content.json` 保存共享内容，manifest 校验物理哈希。除有准确清理证明的非当前实体关系旧说明外，原 revision 哈希仍逐项校验；清理后的端点、方向、类型与来源必须符合事实哈希，当前关系或其他对象不能借此绕过校验。空实例恢复兼容 Schema 1—7，清理后的正式恢复只使用已清理的 Schema 7 导出。旧格式不自动推断缺失定义，Git 已提交历史不重写。编号范围见[前台业务编号](business-codes.md)。
+当前完整模型采用 Schema 9，保存视听编排、素材关系、稳定业务编号、方案与候选、评论及准确来源的最小清理凭据。共享内容仍存于唯一 material-content.json，manifest 校验物理哈希，保留原件按逻辑哈希验证。清理后的实例只使用当前净化导出恢复；退役生产类型不会从旧包复活。详见[切换与恢复](version-consolidation.md)。
 
-## 隔离迁移与回滚
-
-旧轮次到方案的迁移保留 `material-plan-map/material-plan-migrate`。本次完整定义与物理存储迁移使用独立接口：
-
-```bash
-python3 -m review_desk --instance PATH material-model-map --output migration.json
-python3 -m review_desk --instance PATH material-model-migrate migration.json --validate-only
-python3 -m review_desk --instance PATH material-model-migrate migration.json
-python3 -m review_desk --instance PATH material-model-verify
-python3 -m review_desk --instance PATH material-model-rollback migration.json --validate-only
-```
-
-`--archive-list` 可向 map 传入实例根目录相对的受管 JSON 路径列表。`material-model-migrate --defer-archives` 只执行数据库事务，供正式 Git 归档切换前的短写窗口使用。新服务兼容旧原始 JSON，并可从实例活库解析稍后到达的归档容器。
-
-HTTP 对应 `GET /api/production/material-model-map`、`GET /api/production/material-model-verify`、`POST /api/production/material-model-migrate` 和 `POST /api/production/material-model-rollback`；POST 使用 `{migration:完整迁移文档,validate_only:布尔}`，migrate 另接受 `defer_archives`。
-
-Python `migration_plan(store, system_head=None, archive_paths=())` 生成准确增量；`migrate(store, document, validate_only=False, system_head=None, apply_archives=True)`、`rollback(store, document, validate_only=False, require_legacy=False)` 和 `verify(store)` 操作已有实例。可审阅发布包 `material-model-package-v1` 只包含内容节点 ID，并以相对路径和 SHA-256 绑定唯一内容图；`load_migration(path, content_path=None)` 校验后恢复完整迁移文档。
-
-迁移在独立副本准备与预演，正式发布依实例授权顺序执行。数据库改写同一事务，重复执行校验模型后返回已应用；相关头、版本索引或归档改变则整批回滚。无关新增对象、评论与采用得到保留。专用回滚只撤销准确增量；相关内容已继续修改时拒绝覆盖，不能用旧副本替换活库。 正式旧镜像恢复使用 `require_legacy=True`，在逆向事务提交前拒绝仍含新编码素材的数据库，保留并发数据供向前恢复。回到原始 JSON 基线时同时移除本功能依赖新读取器的数据库触发器，保留其他触发器。若首次打开数据库后、迁移前即失败，可用 `prepare_legacy_runtime(db_path)` 清理这六个功能触发器；它只允许无已应用迁移且无引用载荷的数据库，否则拒绝启动旧读取器并要求向前恢复。文件采用暂存替换和异常恢复，数据库与文件不构成跨介质断电事务；正式切换使用延迟归档和发布编排处理这一边界。
+旧素材轮次、旧方案索引及旧物理模型迁移的 HTTP/CLI 入口均已退役；不以逆向迁移恢复旧业务。`material-model-verify` 和对应 GET 接口只读校验当前物理存储。正常创作继续使用不可变修订、版本冻结和准确候选规则。
 
 ## 验证入口
 

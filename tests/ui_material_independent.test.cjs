@@ -15,10 +15,10 @@ class Element {
   querySelectorAll(selector){return this.all().filter(n=>selector==='button'?n.tag==='button':false)}
   querySelector(selector){return this.querySelectorAll(selector)[0]||null}
 }
-const scene=id=>({object_id:id,id:id+'-r1',kind:'PREPARATION',payload:{title:id,source:{scene_id:id==='scene-a'?1:2},blocks:[]}});
+const scene=id=>({object_id:id,id:id+'-r1',kind:'AV_SCENE',payload:{title:id,source:{scene_id:id==='scene-a'?1:2},blocks:[]}});
 function fixture(){
   const host=new Element('main'),a=scene('scene-a'),b=scene('scene-b');
-  const shot={object_id:'old-shot',id:'old-shot-r1',kind:'SHOT_DESIGN',payload:{parent:{object_id:a.object_id,revision_id:a.id}}};
+  const shot={object_id:'old-shot',id:'old-shot-r1',kind:'AV_SHOT',payload:{parent:{object_id:a.object_id,revision_id:a.id}}};
   const c={URL,URLSearchParams,CSS:{escape:x=>x},console,location:{href:'http://fixture/?workspace=settings.workspace&production_tab=breakdown&breakdown_episode=episode&breakdown_scene=scene-a&breakdown_object=old-shot&breakdown_revision=old-shot-r1&production_object=old-shot&production_revision=old-shot-r1&material_id=old-need&material_version=2&material_target=old-result'},state:{workspace:'settings.workspace',productionRecords:[],breakdownData:{episode:'episode'}}};
   c.el=(tag,classes)=>{const n=new Element(tag);n.className=classes||'';return n};
   c.nodeText=(tag,classes,text,parent)=>{const n=c.el(tag,classes);n.textContent=text;parent.append(n);return n};

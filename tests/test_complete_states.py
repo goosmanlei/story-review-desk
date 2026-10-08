@@ -25,10 +25,9 @@ class CompleteStatesTest(unittest.TestCase):
         self.put(self.full(), self.full('wet'))
 
     def shot(self, states=None, transitions=None):
-        return self.spec('shot', 'SHOT_DESIGN', state_model='complete-v1', episode={'object_id':'episode','revision_id':self.episode['revision']},
-                         scene_id='scene', source={**self.source,'block_ids':['a','b']}, number=1, purpose='看清形态变化', framing='近景',
-                         spatial='桌面', action_start='完好', action_end='湿', continuity='同一本', duration_frames=24, fps=24,
-                         sound=[], entities=[self.ref('songbook')], states=states or [self.ref('full')], state_transitions=transitions or [])
+        from audiovisual_fixture import shot
+        return shot(self, state_model='complete-v1', entities=[self.ref('songbook')],
+                    states=states or [self.ref('full')], state_transitions=transitions or [])
 
     def need(self, state='full', slot='overall', required=True):
         return self.spec('need-'+state+'-'+slot, 'REQUIREMENT', scope=self.ref(state), slot=slot, required=required,
@@ -56,7 +55,7 @@ class CompleteStatesTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'missing_complete_state'):self.put(shot)
         self.put(self.entity('other'))
         wrong=self.full('other-full');wrong['payload']['entity']=self.ref('other');self.put(wrong)
-        with self.assertRaisesRegex(ValueError,'state_owner_mismatch'):self.put(self.shot([self.ref('other-full')]))
+        with self.assertRaisesRegex(ValueError,'缺少对应实体'):self.put(self.shot([self.ref('other-full')]))
         legacy=self.full('legacy');del legacy['payload']['state_model'];self.put(legacy)
         with self.assertRaisesRegex(ValueError,'legacy_partial_state'):self.put(self.shot([self.ref('legacy')]))
         transition={'from':self.ref('full'),'to':self.ref('wet'),'action':'被浸湿','source':{**self.source,'block_ids':['b']}}

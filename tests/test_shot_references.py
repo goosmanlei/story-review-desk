@@ -35,10 +35,16 @@ class ShotReferenceTest(unittest.TestCase):
         row=p.record(self.store,'video');round=mp.snapshot(self.store,'video')[0]
         value=row['payload']['generation']['inputs'][index]
         if round.get('definition_records',{}).get('call'):value=sr.inputs_for(self.store,round['definition_records']['call'])[index]
-        return {'id':operation,'requirement_id':'video','expected_revision':row['id'],'plan_number':round['number'],'index':index,'input_key':sr.input_key(value),'material_id':'need-full-overall','number':1,'candidate':self.ref(candidate),'component_id':p.record(self.store,candidate)['payload']['components'][0]['id']}
+        return {'id':operation,'requirement_id':'video','expected_revision':row['id'],'plan_number':round['number'],'index':index,'input_key':sr.input_key(value),'material_id':'need-full-overall','number':1,'candidate':self.ref(candidate),'component_id':p.record(self.store,candidate)['payload']['components'][0]['id'], **{k:value[k] for k in ('range','crop') if k in value}}
 
     def approve(self):
-        self.put(self.spec('approve-video','JUDGMENT',target=self.ref('video'),verdict='accepted',actor='technical fixture',reason='test only'))
+        from review_desk import production_acceptance as a
+        for oid in ('shot','video'):
+            current=a.snapshot(self.store,oid)
+            if not current['accepted']:
+                a.decide(self.store,{'object_id':oid,'expected_revision':current['target']['revision_id'],
+                    'expected_decision':a.ref(current['decision']) if current['decision'] else None,
+                    'action':'accept','actor':'隔离测试'})
 
     def test_draft_save_is_atomic_per_slot_idempotent_and_keeps_other_inputs(self):
         old=self.prepare();request=self.request();result=sr.select(self.store,request)
@@ -82,7 +88,7 @@ class ShotReferenceTest(unittest.TestCase):
             with self.assertRaises((Conflict,ValueError)):self.put(self.spec('rejected-'+status,'CALL',method='generation',tool='fixture',status=status,inputs=[],outputs=[],generation_requirement=self.ref('video'),generation_acceptances=[],**{k:plan[k] for k in ('model','parameters','prompt')}))
         sr.select(self.store,self.request());sr.select(self.store,self.request(index=1,operation='second-slot'))
         self.assertFalse(g.readiness(self.store,'video')['ready']) # changed plan needs approval
-        self.change('approve-video',target=self.ref('video'))
+        self.approve()
         self.assertTrue(g.readiness(self.store,'video')['ready']);self.assertEqual(len(g.package(self.store,'video')['inputs']),2)
 
     def test_submitted_failed_unknown_are_locked_and_change_creates_new_plan(self):
@@ -102,6 +108,26 @@ class ShotReferenceTest(unittest.TestCase):
                 self.assertEqual(p.record(self.store,revision_id=old['id'])['payload'],old['payload'])
                 self.assertEqual(p.record(self.store,'video')['payload']['generation']['inputs'][0]['range'],{'start_seconds':.1,'end_seconds':.8})
                 self.assertEqual(sr.slots(self.store,sr.inputs_for(self.store,before))[1]['number'],1)
+
+    def test_scene_selected_result_uses_owning_material_identity_and_counts(self):
+        from review_desk.ui_projection import scene
+        self.prepare();sr.select(self.store,self.request())
+        data=scene(self.store,'scene',view='breakdown')
+        items=data['shots'][0]['context']['materials']
+        self.assertEqual(len([v for v in items if v['canonical_material_id']=='need-full-overall']),1)
+        self.assertFalse(any(v['canonical_material_id']=='generated' for v in items))
+        item=next(v for v in items if v['canonical_material_id']=='need-full-overall')
+        self.assertGreater(item['candidate_count'],0)
+
+    def test_clearing_range_on_frozen_plan_does_not_restore_old_bounds(self):
+        self.prepare(True);sr.select(self.store,self.request(index=1))
+        plan=p.record(self.store,'video')['payload']['generation']
+        call=self.spec('video-call','CALL',method='generation',tool='historical fixture',status='unknown',inputs=[{**v['reference'],**{k:v[k] for k in ('component_id','range','crop') if k in v}} for v in plan['inputs']],outputs=[],prepared_plan=self.ref('video'),**{k:plan[k] for k in ('model','parameters','prompt')})
+        with patch.object(g,'validate_call'):self.put(call)
+        request=self.request(operation='clear-range');request.pop('range')
+        self.assertEqual(sr.select(self.store,request)['number'],2)
+        self.assertNotIn('range',p.record(self.store,'video')['payload']['generation']['inputs'][0])
+        self.assertIn('range',p.record(self.store,'video-call')['payload']['inputs'][0])
 
     def test_another_connection_conflicts_without_partial_changes(self):
         self.prepare();stale=self.request(operation='stale-writer');winner=self.request(operation='winner')

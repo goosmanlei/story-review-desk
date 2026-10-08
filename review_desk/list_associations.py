@@ -34,13 +34,14 @@ def entity_locations(store, entities, rows):
                 if target['kind'] == 'EPISODE':
                     add(eids, {'episode': target['object_id'], 'scene': source.get('scene_id')},
                         {'record': b.ref(row), 'source': source, 'kind': 'source'})
-        elif row['kind'] in ('PREPARATION', 'SHOT_DESIGN'):
+        elif row['kind'] in ('AV_SCENE', 'AV_SHOT'):
             eids = [eid for ref in value.get('entities', []) for eid in owners(ref)]
             eids += [eid for ref in value.get('states', []) for eid in owners(ref)]
             for occurrence in value.get('occurrences', []):
                 eids += owners(occurrence['entity'])
                 eids += [eid for ref in occurrence.get('states', []) for eid in owners(ref)]
-            add(eids, b.location(store, b.ref(row), cache), {'record': b.ref(row), 'kind': 'scene_shot'})
+            for loc in b.locations(store, b.ref(row), cache):
+                add(eids, loc, {'record': b.ref(row), 'kind': 'audiovisual_use'})
         elif row['kind'] == 'RELATION' and value.get('relation_type') in ('occurrence', 'applicability'):
             subject = light.ref_record(store, value['subject'])
             if subject['kind'] in ('ENTITY', 'STATE'):
@@ -68,14 +69,17 @@ def material_uses(store, entries):
         for identity in mids:
             item = by_id.get(identity)
             if item:
-                item['locations'].append({**b.location(store, scope, cache), 'relation': evidence['kind'], 'evidence': evidence})
+                item['locations'].extend({**loc, 'relation': evidence['kind'], 'evidence': evidence} for loc in b.locations(store, scope, cache))
 
     for need in light.rows(store, 'REQUIREMENT'):
         scope = need['payload'].get('scope')
         if not scope:
             continue
-        for value in ([] if need['payload'].get('status')=='withdrawn' else need['payload'].get('generation', {}).get('inputs', [])):
-            add(value['reference'], scope, {'kind': 'planned_input', 'record': b.ref(need), 'input': value})
+        from .material_relations import active_inputs
+        plan = need['payload'].get('generation', {})
+        active = {index for index,_ in active_inputs(store,plan,need['object_id'])[0]}
+        for index,value in enumerate([] if need['payload'].get('status')=='withdrawn' else plan.get('inputs', [])):
+            add(value['reference'], scope, {'kind': 'planned_input' if index in active else 'alternative', 'record': b.ref(need), 'input': value})
         for row in store.db.execute("SELECT DISTINCT r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='call'", (need['object_id'],)):
             call = light.record(store, revision_id=row[0])
             exact_need = call['payload'].get('generation_requirement')
@@ -89,6 +93,9 @@ def material_uses(store, entries):
             add(value['asset'], value['scope'], {'kind': 'adoption', 'record': b.ref(link)})
         elif value.get('relation_type') == 'applicability':
             add(value['subject'], value['scope'], {'kind': 'applicable', 'record': b.ref(link)})
+    for link in b.rows(store, 'MATERIAL_RELATION'):
+        value=link['payload']
+        add(value['upstream'],value['context'],{'kind':'material_relation','record':b.ref(link),'semantics':value['semantics']})
     return entries
 
 

@@ -34,7 +34,7 @@ function materialParameters(host,row,prefix,model){
   const name=nodeText('span',null,model||'模型未知',heading);if(block)name.dataset.blockId=block.id;
   materialField(host,row,prefix+'.parameters',null,'pre');
 }
-function materialInputs(inputs,records=[]){
+function materialInputs(inputs,records=[],slots=[]){
   const counts={};return inputs.flatMap((value,index)=>{
     const ref=value.reference||value,row=records.find(r=>r.id===ref.revision_id)||(state.productionRecords||[]).find(r=>r.id===ref.revision_id);
     // Keep the complete ordered inputs, including exact entity/script records.
@@ -43,6 +43,7 @@ function materialInputs(inputs,records=[]){
     const component=value.component_id?row.payload.components?.find(c=>c.id===value.component_id):row.payload.components?.find(c=>c.role==='original');
     if(row.kind==='ASSET'&&(!value.component_id||!component))return [{value,index,row,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
     const type=component?.mime.split('/')[0]||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];if(!label)return [];
+    if(slots.find(s=>s.index===index)?.active===false)return [{value,index,row,label:'备选 '+(slots.find(s=>s.index===index)?.rule?.route||index+1),ref:{...ref,...value}}];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
   });
 }
@@ -82,8 +83,9 @@ function renderGenerationRecipe(parent,need,requirementsShown=false){
   nodeText('h3',null,'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
-  materialParameters(host,need,'generation',plan.model);
-  renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
+  materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
+  if(need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
+  else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
   if(plan.blockers?.length){nodeText('h4',null,'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
   materialField(host,need,'generation.prompt','提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
 }
@@ -199,6 +201,34 @@ function materialMedia(parent,item){
   if(!component.mime.startsWith('audio/'))link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
 }
 function materialModelCode(model){return model.round?.business_code?.split(' / MV')[0]||businessCode(model.need||model.identity||model.candidates[0]?.record)}
+function materialCompareControl(host,model){
+  const choices=[];
+  for(const round of model.rounds||[])for(const [index,row] of (round.results||[]).entries()){
+    const component=row.payload.components.find(c=>c.role==='original');if(component)choices.push({round,record:row,component,label:'版本 '+round.number+' · 候选 '+(row.candidate_number||index+1)});
+  }
+  if(choices.length<2)return;
+  productionButton(host,'比较两个候选',event=>{
+    if(typeof pauseReviewMedia==='function')pauseReviewMedia();
+    const {dialog,body}=openReviewDialog('同需求候选比较',event?.currentTarget||document.activeElement,'material-reference-dialog material-compare-dialog');
+    const grid=el('div','material-compare-grid');body.append(grid);
+    for(const side of [0,1]){
+      const pane=el('section'),select=el('select'),content=el('div');select.setAttribute('aria-label',side?'右侧候选':'左侧候选');
+      for(const [index,item] of choices.entries())select.append(new Option(item.label,String(index)));select.value=String(side);
+      const draw=()=>{content.replaceChildren();const item=choices[Number(select.value)],component=item.component;
+        nodeText('h3',null,item.label,content);nodeText('p',null,item.record.payload.title,content);
+        const type=component.mime.split('/')[0];if(['image','audio','video'].includes(type)){
+          const media=el(type==='image'?'img':type);media.src='/api/production/files/'+encodeURIComponent(component.file);if(type==='image')media.alt=item.label+' · '+item.record.payload.title;else {media.controls=true;media.addEventListener('play',()=>{for(const other of grid.querySelectorAll('audio,video'))if(other!==media)other.pause()})}content.append(media);
+        }
+        materialReferenceLink(content,productionRef(item.record),'审阅此准确候选');
+        const plan=item.round.definition_records?.requirement?.payload.generation;
+        if(plan){nodeText('h4',null,'本版检查要点',content);for(const text of plan.output?.review_criteria||[])nodeText('p',null,text,content)}
+        nodeText('p','production-meta','此处切换只用于比较；参考选择和实际采用在对应操作中保存。',content);
+      };
+      select.onchange=()=>{for(const media of content.querySelectorAll('audio,video'))media.pause();draw()};pane.append(select,content);grid.append(pane);draw();
+    }
+    dialog.addEventListener('close',()=>{for(const media of grid.querySelectorAll('audio,video'))media.pause()},{once:true});
+  });
+}
 function renderMaterialCard(parent,model,options={}){
   const box=el('article','material-card'),need=model.need;
   let items=model.candidates.map(item=>{
@@ -210,6 +240,9 @@ function renderMaterialCard(parent,model,options={}){
   if(model.round){const focus=e=>{if(e?.target.closest('.material-reference,[data-review-dialog-trigger]'))return;focusMaterialCommentCard(model.material_id,model.round.number)};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,businessTitle({...need||model.identity||items[0].record,material_code:materialModelCode(model)},need?.payload.generation?.output.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title),heading);
   if(model.round)materialRoundControl(heading,model.material_id,model.rounds,model.round,options.roundChange);else if(need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
+  materialCompareControl(heading,model);
+  if(need)renderProductionAcceptance(heading,need);
+  renderMaterialRelations(box,model.material_id||need?.object_id);
   if(options.selectCandidate&&items.length){
     const chosen=materialCandidateChoice(items,options.selectedCandidateId);
     reviewChoiceButtons(box,'本轮候选',items.map((item,index)=>({id:item.record.id,label:'候选'+(item.candidate_number||item.record.candidate_number||index+1)})),chosen.record.id,options.selectCandidate);
@@ -389,7 +422,7 @@ async function openMaterialReference(ref,trigger,source=false){
       const version=detail.screenplay?.title?.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u);
       title.textContent=(source==='full_scene'||source==='scene_script'?'查看剧本':'剧情依据')+' · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
       body.dataset.referenceScene=detail.scene?.id||'';
-      if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene,detail.reference.object_id)+' · '+detail.scene.heading.replace(/^\d+-\d+\s*/,''),body);
+      if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene,detail.reference.object_id)+' · '+String(detail.scene.heading||detail.scene.title||detail.scene.id).replace(/^\d+-\d+\s*/,''),body);
       const highlighted=new Set(source==='scene_script'?[]:detail.highlight_block_ids||[]);
       for(const block of detail.blocks){const line=nodeText('p','reference-text',block.text,body);line.dataset.referenceBlock=block.id;if(highlighted.has(block.id)){line.classList.add('reference-highlight');line.setAttribute('aria-label','本镜剧情依据')}}
       if(source!=='scene_script'&&detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
