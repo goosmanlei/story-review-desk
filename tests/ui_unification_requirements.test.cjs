@@ -103,6 +103,13 @@ test('10.4 candidate without a real call reports the gap and never fills it from
   const {c,reader,need,context,asset}=videoFixture();delete context.video_details[need.object_id].review_contexts[asset.id];c.breakdownPrompt(reader,need,context);
   assert.match(reader.textContent,/未登记真实调用/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
 });
+test('video prompt links keep the deployment prefix and exact old revision',()=>{
+  const {c,reader,need,input,context}=videoFixture();c.REVIEW_DEPLOYMENT={base_path:'/lijizhanshe'};
+  c.breakdownPrompt(reader,need,context);
+  const inline=reader.all().find(n=>n.className==='shot-generation-prompt').all().find(n=>n.tag==='a');
+  assert.equal(inline.href,'/lijizhanshe/?revision='+input.id);
+  assert.equal(inline.textContent,'@图片1');
+});
 test('video defaults to latest empty version and exact manual old version retains its actual prompt',async()=>{
   const {c,reader,need,call,round,context}=videoFixture();context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
   c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
