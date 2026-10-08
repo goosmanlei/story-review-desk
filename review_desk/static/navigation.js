@@ -15,13 +15,13 @@ function renderBusinessCodeCatalog(root){
 }
 /* View labels and tabs share the existing workspace/URL routing contract. */
 function reviewPositionLabel(kind,value,episode=null){
-  const prefix=({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',AV_SCENE:'S',shot:'SH',SH:'SH',AV_SHOT:'SH'})[kind];
+  const prefix=({AV_EPISODE:'AE',AV_SCENE:'AS',AV_SHOT:'ASH'})[value?.kind]||({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',AV_SCENE:'AS',shot:'SH',SH:'SH',AV_SHOT:'ASH'})[kind];
   if(!prefix)return String(value??'');
   if(value&&typeof value==='object'){const code=businessCode(value);if(code.startsWith(prefix)&&/^\d+$/.test(code.slice(prefix.length)))return code}
   if(prefix==='S'&&episode){const id=typeof episode==='string'?episode:episode.object_id||episode.id,scene=typeof value==='object'?value.id:value;const code=(typeof state==='undefined'?null:state.businessCodes)?.get('scene:'+id+':'+scene);if(code)return code}
   const raw=value&&typeof value==='object'?(value.payload?.number??value.number??value.payload?.episode_number??value.payload?.shot_number??value.scene_id??value.id):value;
   const text=String(raw??'').trim(),match=text.match(/^(?:E|S|SH)?0*(\d+)$/iu)||text.match(/^第\s*0*(\d+)\s*[集场鏡镜]$/u);
-  if(match&&typeof state!=='undefined'&&state.businessCodes)return '第'+Number(match[1])+({E:'集',S:'场',SH:'镜'})[prefix];
+  if(match&&typeof state!=='undefined'&&state.businessCodes)return '第'+Number(match[1])+({E:'集',AE:'集',S:'场',AS:'场',SH:'镜',ASH:'镜'})[prefix];
   return match?prefix+match[1].padStart(prefix==='E'?2:3,'0'):text;
 }
 function reviewPositionText(value){

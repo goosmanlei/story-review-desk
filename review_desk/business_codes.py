@@ -20,7 +20,7 @@ TYPES = (
     ('需求关系', 'MR', 'MR001', '本实例内；语境和准确方案分别保存'),
     ('集', 'E', 'E02', '同一剧本版本内；按该版本完整集序编号'),
     ('场', 'S', 'S003', '同一剧本版本内；按完整集场顺序连续编号，不在每集重新起号'),
-    ('镜', 'SH', 'SH034', '本实例内；不随切集、切场或显示顺序重置'),
+    ('视听镜', 'ASH', 'ASH001', '本实例内独立编号；不沿用旧镜头 SH，不随切集、切场或显示顺序重置'),
     ('实体', 'EN', 'EN001', '本实例内'),
     ('实体状态', 'ST', 'ST001', '本实例内；历史保留状态也有独立编号'),
     ('素材', 'M', 'M001', '本实例内；准确共享身份共用编号，旧身份可追溯'),
@@ -32,7 +32,7 @@ TYPES = (
     ('审阅决定', 'DC', 'DC001', '本实例内，每个可访问的决定对象'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
-                AV_EPISODE='AE', AV_SCENE='AS', AV_SHOT='SH', MATERIAL_RELATION='MR', EPISODE='E', REPRESENTATION='RV', JUDGMENT='DC')
+                AV_EPISODE='AE', AV_SCENE='AS', AV_SHOT='ASH', MATERIAL_RELATION='MR', EPISODE='E', REPRESENTATION='RV', JUDGMENT='DC')
 LEGACY_PREFIXES = {'SOURCE': 'D', 'STORY': 'B'}
 
 
