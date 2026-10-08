@@ -25,7 +25,7 @@ function approachInline(parent, text) {
       let url;
       try { url = new URL(match[4], location.href); } catch (_) { /* Display malformed links as text. */ }
       if (url && (url.protocol === 'https:' || (url.origin === location.origin && match[4].startsWith('/?')))) {
-        const link = nodeText('a', null, match[3], parent); link.href = url.href;
+        const link = nodeText('a', null, match[3], parent); link.href = url.origin === location.origin ? reviewURL(url.pathname + url.search + url.hash) : url.href;
         if (url.origin !== location.origin) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
       } else parent.append(document.createTextNode(match[0]));
     }
@@ -215,7 +215,7 @@ async function renderApproach() {
           const row = el('li'), url = new URL(ref.href, location.href);
           // Editorial text cannot inject markup or executable URL schemes.
           if (url.protocol !== 'https:' && !(url.origin === location.origin && ref.href.startsWith('/?'))) continue;
-          const a = nodeText('a', null, ref.label, row); a.href = url.href;
+          const a = nodeText('a', null, ref.label, row); a.href = url.origin === location.origin ? reviewURL(url.pathname + url.search + url.hash) : url.href;
           if (url.origin !== location.origin) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
           links.append(row);
         }

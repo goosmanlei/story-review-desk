@@ -6,7 +6,7 @@ class Node{
  addEventListener(name,fn){this.events[name]=fn}
 }
 function fixture(){
- const context={URL,location:{href:'http://fixture/?workspace=production.approach'},document:{addEventListener(){},createTextNode:text=>new Node('#text',text)},window:{addEventListener(){}},el:(tag,cls)=>new Node(tag),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,text);parent.append(n);return n}};
+ const context={URL,location:{href:'http://fixture/?workspace=production.approach',origin:'http://fixture'},document:{addEventListener(){},createTextNode:text=>new Node('#text',text)},window:{addEventListener(){}},el:(tag,cls)=>new Node(tag),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,text);parent.append(n);return n}};
  vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8').split('const state=')[0],context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/approach.js'),'utf8'),context);return context;
 }
 function text(node){return node.textContent+node.children.map(text).join('')}
@@ -15,6 +15,13 @@ test('rich text never interprets HTML, loads media or creates executable links',
  c.approachInline(p,'<img src="https://private.invalid/a"> **强调** `原样` [危险](javascript:alert) [安全](https://example.org/method)');
  assert.equal(text(p),'<img src="https://private.invalid/a"> 强调 原样 [危险](javascript:alert) 安全');
  const links=p.children.filter(n=>n.tag==='a');assert.equal(links.length,1);assert.equal(links[0].href,'https://example.org/method');assert.equal(links[0].rel,'noopener noreferrer');assert.equal(p.children.some(n=>n.tag==='img'),false);
+});
+test('method prose keeps internal deep links within the deployed prefix',()=>{
+ const c=fixture(),p=new Node('p');c.REVIEW_DEPLOYMENT={base_path:'/lijizhanshe'};
+ c.approachInline(p,'[内部](/?workspace=production.approach&tab=filmcraft#approach-filmcraft-sound) [外部](https://example.org/knowledge)');
+ const links=p.children.filter(n=>n.tag==='a');
+ assert.equal(links[0].href,'/lijizhanshe/?workspace=production.approach&tab=filmcraft#approach-filmcraft-sound');
+ assert.equal(links[1].href,'https://example.org/knowledge');
 });
 test('subchapter targets keep stable names and diagrams use the shared reader dialog',()=>{
  const c=fixture(),root=new Node('section');let opened;
