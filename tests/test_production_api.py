@@ -12,6 +12,22 @@ from review_desk.server import ReviewServer
 
 
 class ProductionApiTest(unittest.TestCase):
+    def test_new_production_routes_do_not_shadow_story_structure_reader(self):
+        with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1',0),root,{'id':'test','title':'test'}) as server:
+            server.store.put_object('story-structure','STORY',{'title':'Current story', 'sections':[]})
+            result = {}
+            def client():
+                try:
+                    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    with opener.open(f'http://127.0.0.1:{server.server_port}/api/story-structure',timeout=5) as response:
+                        result['status']=response.status;result['body']=json.load(response)
+                except Exception as exc:result['error']=repr(exc)
+            thread=threading.Thread(target=client,daemon=True);thread.start();server.timeout=3
+            server.handle_request();thread.join(timeout=6)
+            self.assertFalse(thread.is_alive());self.assertNotIn('error',result)
+            self.assertEqual(result['status'],200)
+            self.assertIn('Current story',json.dumps(result['body']))
+
     def test_file_range_batch_conflict_exact_source_and_time_comment(self):
         with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1',0),root,{'id':'test','title':'test'}) as server:
             ep=server.store.put_object('episode','EPISODE',{'title':'依据','blocks':[{'id':'a','text':'说一句话。'}],

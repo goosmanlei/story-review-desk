@@ -66,7 +66,7 @@ class GenerationTest(unittest.TestCase):
         self.change('need-full-overall',generation={**p.record(self.store,'need-full-overall')['payload']['generation'],'prompt':'另一种处理'})
         self.assertIsNone(g.accepted(self.store,'songbook'))
 
-    def test_pending_master_can_be_accepted_but_execution_requires_exact_adoption(self):
+    def test_adoption_does_not_select_a_plan_input_and_changes_require_acceptance(self):
         self.setup_plans()
         plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
         plan['inputs']=[{'reference':self.ref('need-full-overall'),'use':'同一声源的干燥纸页母版'}]
@@ -74,15 +74,24 @@ class GenerationTest(unittest.TestCase):
         self.assertTrue(g.accepted(self.store,'songbook'))
         self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
         self.media();self.associate(range={'start_seconds':.1,'end_seconds':.8});self.adopt(range={'start_seconds':.1,'end_seconds':.8})
+        self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
+        from review_desk import material_plans as mp, shot_references as sr
+        self.change('voice',candidate_requirements=[self.ref('need-full-overall')])
+        need=p.record(self.store,'need-wet-overall')
+        membership=next(v for v in mp.memberships(self.store,self.ref('voice')['revision_id']) if v['material_id']=='need-full-overall' and v['role']=='result')
+        sr.select(self.store,{'id':'explicit-reference','requirement_id':need['object_id'],'expected_revision':need['id'],
+            'plan_number':1,'index':0,'input_key':sr.input_key(plan['inputs'][0]),'material_id':'need-full-overall',
+            'number':membership['number'],'candidate':self.ref('voice'),'component_id':'original','range':{'start_seconds':.1,'end_seconds':.8}})
+        self.decide()
         result=g.package(self.store,'need-wet-overall');self.assertEqual(result['inputs'][0]['range'],{'start_seconds':.1,'end_seconds':.8})
         path=self.root/'package';g.write_package(self.store,'need-wet-overall',path)
         self.assertTrue((path/json.loads((path/'manifest.json').read_text())['inputs'][0]['path']).is_file())
         old=copy.deepcopy(plan);plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan['prompt']='前置方案更新'
         self.change('need-full-overall',generation=plan)
-        self.assertFalse(er.snapshot(self.store,'songbook')['preparation']['complete'])
+        self.assertIsNone(g.accepted(self.store,'songbook'))
         self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
-        with self.assertRaises(ValueError):
-            self.change('need-full-overall',generation={**plan,'inputs':[{'reference':self.ref('need-wet-overall'),'use':'构成循环'}]})
+        self.change('need-full-overall',generation={**plan,'inputs':[{'reference':self.ref('need-full-overall'),'use':'循环草稿'}]})
+        self.assertTrue(any('循环' in issue for issue in g.readiness(self.store,'need-full-overall')['issues']))
 
     def test_execution_call_checks_current_decision_and_exact_inputs(self):
         self.setup_plans();self.decide();package=g.package(self.store,'need-full-overall')

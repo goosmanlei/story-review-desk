@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS business_candidates (
 CREATE TABLE IF NOT EXISTS business_comments (comment_id TEXT PRIMARY KEY,number INTEGER NOT NULL UNIQUE);'''
 
 TYPES = (
+    ('视听集', 'AE', 'AE001', '本实例内；准确引用故事集，设计版本独立'),
+    ('视听场', 'AS', 'AS001', '本实例内；可组合多个故事场或局部正文'),
+    ('需求关系', 'MR', 'MR001', '本实例内；语境和准确方案分别保存'),
     ('集', 'E', 'E02', '同一剧本版本内；按该版本完整集序编号'),
     ('场', 'S', 'S003', '同一剧本版本内；按完整集场顺序连续编号，不在每集重新起号'),
     ('镜', 'SH', 'SH034', '本实例内；不随切集、切场或显示顺序重置'),
@@ -29,7 +32,7 @@ TYPES = (
     ('审阅决定', 'DC', 'DC001', '本实例内，每个可访问的决定对象'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
-                EPISODE='E', SHOT_DESIGN='SH', REPRESENTATION='RV', JUDGMENT='DC')
+                AV_EPISODE='AE', AV_SCENE='AS', AV_SHOT='SH', MATERIAL_RELATION='MR', EPISODE='E', REPRESENTATION='RV', JUDGMENT='DC')
 LEGACY_PREFIXES = {'SOURCE': 'D', 'STORY': 'B'}
 
 
@@ -179,7 +182,7 @@ def annotate(store, value, *, share_records=False):
         rid = scope.get('revision_id') if isinstance(scope,dict) else None
         if rid not in scenes:
             row = store.db.execute('SELECT o.kind,r.object_id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE r.id=?',(rid,)).fetchone() if rid else None
-            source = json.loads(row['payload']).get('source',{}) if row and row['kind']=='PREPARATION' and row['object_id']==scope.get('object_id') else {}
+            source = next(iter(json.loads(row['payload']).get('sources',[])),{}) if row and row['kind'].startswith('AV_') and row['object_id']==scope.get('object_id') else {}
             scenes[rid] = source
         return scenes[rid]
     def walk(v):
@@ -211,9 +214,6 @@ def annotate(store, value, *, share_records=False):
                     {'material_id':mid,'version':version,'number':number,
                      'code':codes.get(aliases.get(mid,mid),mid)+' / MV'+str(version).zfill(3)+' / MC'+str(number).zfill(3)}
                     for (mid,version,candidate),number in candidates.items() if candidate == cid]
-        source = v.get('payload', {}).get('source', {})
-        if v.get('kind') == 'PREPARATION' and source.get('scene_id'):
-            result['business_code'] = codes.get(scene_identity(source['object_id'], source['scene_id']), '')
         if isinstance(oid, str) and codes.get(oid, '').startswith('E') and codes[oid][1:].isdigit():
             target = result.get('payload', result)
             for scene in target.get('scenes', []):
@@ -242,17 +242,4 @@ def display_dump(store):
     rows=visible_codes(store);mapping={r['object_id']:code(r) for r in rows}
     aliases={r['alias_id']:r['material_id'] for r in store.db.execute('SELECT * FROM material_aliases')}
     result = [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
-    by_id = {r['object_id']:r for r in result}
-    for row in store.db.execute("SELECT o.id,o.kind,r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind IN ('PREPARATION','SHOT_DESIGN')"):
-        value = json.loads(row['payload'])
-        if row['kind'] == 'PREPARATION':
-            source = value['source']; scene_code = mapping.get(scene_identity(source['object_id'], source['scene_id']))
-            if scene_code:result.append({'object_id':row['id'], 'display_code':scene_code})
-        elif row['id'] in by_id:
-            episode = store.db.execute('SELECT payload FROM revisions WHERE id=?', (value['episode']['revision_id'],)).fetchone()
-            if episode:
-                episode_number = json.loads(episode[0]).get('number')
-                if episode_number is not None:
-                    by_id[row['id']]['legacy_position'] = 'E'+str(episode_number)+'-'+str(value['number'])
-                by_id[row['id']]['episode_code'] = mapping.get(value['episode']['object_id'], '')
     return result

@@ -192,7 +192,9 @@ def _export(store, export_dir, content_file):
     hashes = {name: physical_file_hash(data) if isinstance(data,Path) else digest(data) for name, data in files.items()}
     for name in asset_names:
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
-    manifest = {"schema_version": 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    audiovisual_baseline = any(json.loads(row['receipt']).get('format') == 'production-cutover-result-v1'
+                              for row in framework.get('consolidation_runs', []))
+    manifest = {"schema_version": 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -208,7 +210,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6, 7, 8):
+    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -227,6 +229,13 @@ def restore(store, export_dir):
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
     framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
+    from .production_cutover import RETIRED_KINDS
+    if any(row['kind'] in RETIRED_KINDS for row in (framework or {}).get('objects', [])):
+        raise ValueError('retired production structures cannot be restored; use a clean audiovisual export')
+    policy_path = store.db_path.parent.parent/'config/instance.json'
+    policy = json.loads(policy_path.read_text()).get('audiovisual_policy') if policy_path.exists() else None
+    if policy and (schema < 9 or not any(row['id'] == policy['cutover_id'] for row in (framework or {}).get('consolidation_runs', []))):
+        raise ValueError('this instance requires its exact audiovisual cutover receipt')
     from .state_cleanup import guard_restore
     guard_restore(store, framework)
     from . import version_consolidation as consolidation

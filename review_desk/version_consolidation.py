@@ -14,7 +14,7 @@ from . import material_archives, production as p
 from .production_media import physical_file_hash
 
 
-CORE_KINDS = ('ENTITY', 'STATE', 'SHOT_DESIGN')
+CORE_KINDS = ('ENTITY', 'STATE', 'AV_SHOT')
 NOTICE = '此准确版本已删除；原引用不可用，请重新选择。'
 TABLES = ('consolidation_revisions', 'consolidation_versions', 'consolidation_missing',
           'consolidation_definitions', 'consolidation_signatures', 'consolidation_objects', 'consolidation_runs')
@@ -191,7 +191,7 @@ def version_route(store, material_id):
     return {'baseline_id':rows[0]['plan_id'], 'previous_numbers':{str(r['old_number']):r['new_number'] for r in rows}} if rows else {}
 
 
-def fingerprint(store):
+def fingerprint(store, *, normalize=None):
     """Hash physical rows one at a time, including comments and decisions."""
     cursor = store.db.cursor()
     cursor.row_factory = sqlite3.Row
@@ -206,7 +206,8 @@ def fingerprint(store):
         columns = len(cursor.execute('PRAGMA table_info("'+table+'")').fetchall())
         order = ','.join(str(n+1) for n in range(columns))
         for row in cursor.execute('SELECT * FROM "'+table+'" ORDER BY '+order):
-            body = canonical(list(row)).encode()
+            value = normalize(table, dict(row)) if normalize else row
+            body = canonical(list(value.values()) if isinstance(value, dict) else list(value)).encode()
             h.update(len(body).to_bytes(8, 'big')); h.update(body)
             size += len(body); count += 1
         if count or table not in TABLES:
@@ -353,7 +354,7 @@ def plan(store):
                 return any(invalid_selection(v) for v in value.values())
             return isinstance(value,list) and any(invalid_selection(v) for v in value)
         changed_scopes = {r['id'] for r in store.db.execute(
-            "SELECT r.id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('ENTITY','STATE','SHOT_DESIGN','REQUIREMENT')")
+            "SELECT r.id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('ENTITY','STATE','AV_SHOT','REQUIREMENT')")
             if r['id'] not in lost and invalid_selection(json.loads(r['payload']))}
         # A decision or relation with a deleted exact subject/scope cannot
         # remain active. Do not resurrect an earlier acceptance as its head.

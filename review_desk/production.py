@@ -17,15 +17,15 @@ from .production_media import asset_path, validate_component
 from . import production_states as full_states
 
 
-KINDS = {"INPUT_LOCK": "input-lock", "ENTITY": "entity", "STATE": "state",
-         "REPRESENTATION": "representation", "PREPARATION": "preparation",
-         "SHOT_DESIGN": "shot-design", "REQUIREMENT": "requirement", "ASSET": "asset",
+KINDS = {"AV_EPISODE": "av-episode", "AV_SCENE": "av-scene", "AV_SHOT": "av-shot",
+         "MATERIAL_RELATION": "material-relation", "INPUT_LOCK": "input-lock", "ENTITY": "entity", "STATE": "state",
+         "REPRESENTATION": "representation", "REQUIREMENT": "requirement", "ASSET": "asset",
          "CALL": "call", "JUDGMENT": "judgment", "RELATION": "relation"}
 FORMATS = {"production-" + v + "-v1": k for k, v in KINDS.items()}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$")
 USAGES = ("generation_input", "post_audio", "editorial")
-CHANGE_KINDS = {"ENTITY", "STATE", "REPRESENTATION", "INPUT_LOCK", "EPISODE", "STORY",
-                "PREPARATION", "SHOT_DESIGN", "REQUIREMENT", "RELATION"}
+CHANGE_KINDS = {"AV_EPISODE", "AV_SCENE", "AV_SHOT", "MATERIAL_RELATION", "ENTITY", "STATE", "REPRESENTATION", "INPUT_LOCK", "EPISODE", "STORY",
+                "REQUIREMENT", "RELATION"}
 
 
 def root_of(store):
@@ -277,7 +277,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         raise ValueError("unsupported production format/kind")
     _text(payload.get("title"), "title")
     blocks = _list(payload, "blocks")
-    if (not blocks and kind!='PREPARATION') or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
+    if not blocks or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
         raise ValueError("reviewable text blocks are required")
     if len({b["id"] for b in blocks}) != len(blocks):
         raise ValueError("duplicate reviewable block id")
@@ -287,7 +287,13 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     for _, ref in references(payload):
         source_check(store, ref)
     p = payload
-    if kind == "INPUT_LOCK":
+    if kind in {"AV_EPISODE", "AV_SCENE", "AV_SHOT"}:
+        from .audiovisual import validate
+        validate(store, kind, p)
+    elif kind == "MATERIAL_RELATION":
+        from .material_relations import validate
+        validate(store, p)
+    elif kind == "INPUT_LOCK":
         ref_record(store, p.get("screenplay"), {"STORY"})
         episodes = _refs(store, p, "episodes", {"EPISODE"})
         if not episodes or len({e["object_id"] for e in episodes}) != len(episodes):
@@ -337,43 +343,6 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             if p['review_model'] != entity_review.MODEL:
                 raise ValueError('unsupported entity review model')
             entity_review.validate(store, object_id, p, check_current)
-    elif kind == "PREPARATION":
-        episode = ref_record(store, p.get("source"), {"EPISODE"})
-        if p.get('input_lock'):
-            locked = ref_record(store, p['input_lock'], {'INPUT_LOCK'})
-            if not any(r['object_id']==episode['object_id'] and r['revision_id']==episode['id'] for r in locked['payload']['episodes']):
-                raise ValueError('scene input lock does not contain its exact episode')
-        scene = next((s for s in episode["payload"].get("scenes", []) if s["id"] == p["source"].get("scene_id")), None)
-        if not scene or set(p["source"].get("block_ids", [])) != set(scene["block_ids"]) or p.get("checked") is not True:
-            raise ValueError("scene preparation must cover the complete scene")
-        seen = set()
-        for occurrence in _list(p, "occurrences"):
-            entity = ref_record(store, occurrence.get("entity"), {"ENTITY"})
-            if entity["object_id"] in seen or occurrence.get("mode") not in ("visual", "voice", "visual_voice", "mention"):
-                raise ValueError("invalid or repeated scene occurrence")
-            seen.add(entity["object_id"])
-            for state in _refs(store, occurrence, "states", {"STATE"}):
-                if state["payload"]["entity"]["object_id"] != entity["object_id"]:
-                    raise ValueError("occurrence state belongs to another entity")
-            evidence = _list(occurrence, "evidence")
-            if not evidence or any(r.get("revision_id") != episode["id"] or r.get("scene_id") != scene["id"] or not r.get("block_ids") for r in evidence):
-                raise ValueError("occurrence evidence must locate this scene")
-        full_states.validate_usage(store, kind, p)
-    elif kind == "SHOT_DESIGN":
-        from .production_breakdown import validate_parent
-        validate_parent(store, p)
-        ref_record(store, p.get("episode"), {"EPISODE"})
-        if p.get("source", {}).get("revision_id") != p["episode"]["revision_id"] or p.get("scene_id") != p["source"].get("scene_id"):
-            raise ValueError("shot episode/scene/source differ")
-        for key in ("purpose", "framing", "spatial", "action_start", "action_end", "continuity"):
-            _text(p.get(key), key)
-        for key in ("number", "duration_frames", "fps"):
-            if type(p.get(key)) is not int or p[key] <= 0:
-                raise ValueError("positive integer required: " + key)
-        _list(p, "sound")
-        _refs(store, p, "entities", {"ENTITY"})
-        _refs(store, p, "states", {"STATE"})
-        full_states.validate_usage(store, kind, p)
     elif kind == "REQUIREMENT":
         ref_record(store, p.get("scope"))
         for key in ("slot", "purpose", "media_type"):
@@ -411,7 +380,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                     "project": "application/", "document": ("application/", "text/")}[p["media_type"]]
         if any(not c["mime"].startswith(expected) for c in p["components"] if c["role"] == "original"):
             raise ValueError("original component does not match the asset media type")
-        _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "SHOT_DESIGN", "INPUT_LOCK"})
+        _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "AV_SHOT", "AV_SCENE", "AV_EPISODE", "INPUT_LOCK"})
         _refs(store, p, "states", {"STATE"})
         full_states.validate_asset_coverage(store, p)
         for candidate in p.get('candidate_requirements', []):
@@ -459,7 +428,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     elif kind == "JUDGMENT":
         target = ref_record(store, p.get("target"))
         from . import entity_review
-        if p.get('acceptance_model') == 'entity-content-v1':
+        if p.get('acceptance_model') == 'production-content-v1':
+            from .production_acceptance import validate
+            validate(store, object_id, p, check_current)
+        elif p.get('acceptance_model') == 'entity-content-v1':
             from .generation import validate_content_decision
             validate_content_decision(store, object_id, p, check_current)
         elif p.get('acceptance_model') == 'entity-generation-v1':
@@ -471,7 +443,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             entity_review.validate_acceptance(store, target, check_current)
         if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved", "revoked"):
             raise ValueError("invalid review verdict")
-        if p.get("verdict") == "revoked" and p.get("acceptance_model") not in ("entity-generation-v1", "entity-content-v1"):
+        if p.get("verdict") == "revoked" and p.get("acceptance_model") not in ("entity-generation-v1", "entity-content-v1", "production-content-v1"):
             raise ValueError("revocation requires a generation acceptance")
         for key in ("actor", "reason"):
             _text(p.get(key), key)
@@ -557,11 +529,14 @@ def restore_records(store, batches):
         _import_records(store, batch, check_current=False)
 
 
-def _import_records(store, document, validate_only=False, *, check_current=True):
+def _import_records(store, document, validate_only=False, *, check_current=True, transaction=True):
     if not isinstance(document, dict) or document.get("format") != "production-import-v1" or not isinstance(document.get("records"), list) or not (document["records"] or document.get("remove_unreferenced_requirements")):
         raise ValueError("nonempty production-import-v1 records are required")
     results, resolved = [], {}
-    store.db.execute("BEGIN IMMEDIATE")
+    if transaction:
+        store.db.execute("BEGIN IMMEDIATE")
+    elif not store.db.in_transaction or validate_only:
+        raise ValueError("nested import requires an owning transaction")
     try:
         guards = document.get('expected_heads', {})
         if not isinstance(guards, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in guards.items()):
@@ -592,12 +567,22 @@ def _import_records(store, document, validate_only=False, *, check_current=True)
             if check_current:
                 from .material_plans import register
                 register(store, record(store, revision_id=result['revision']))
-        if validate_only:
-            store.db.rollback()
-        else:
-            store.db.commit()
+        for result in results:
+            row = record(store, revision_id=result["revision"])
+            if row["kind"] == "MATERIAL_RELATION":
+                try:
+                    downstream = record(store, row["payload"]["downstream_id"])
+                except KeyError as exc:
+                    raise ValueError("material relation downstream is missing") from exc
+                if downstream["kind"] != "REQUIREMENT":
+                    raise ValueError("material relation downstream must be a requirement")
+        if transaction:
+            if validate_only:
+                store.db.rollback()
+            else:
+                store.db.commit()
     except BaseException:
-        store.db.rollback()
+        if transaction: store.db.rollback()
         raise
     return {"validated_only": validate_only, "records": results, "removed": removed}
 
@@ -709,7 +694,8 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
                     for candidate in round['members']:
                         if candidate['kind'] == 'ASSET' and candidate['id'] not in contexts:
                             contexts[candidate['id']] = context(store, candidate)
-        return result
+        from .shot_references import enrich_detail
+        return enrich_detail(store, result)
     rows = current_records(store, {kind} if kind else None)
     # Only actual original results count. Round history belongs to the demand,
     # not to a second list entry; missing/failed calls do not manufacture media.
@@ -795,11 +781,13 @@ def asset_coverage(store, asset):
         subject = ref_record(store, ref)
         if subject['kind'] == 'ENTITY':
             entities.add(subject['object_id'])
-        elif subject['kind'] in ('REPRESENTATION', 'SHOT_DESIGN'):
+        elif subject['kind'] in ('REPRESENTATION', 'AV_SHOT'):
             entities.update(r['object_id'] for r in subject['payload']['entities'])
             states.extend(subject['payload']['states'])
     for ref in states:
-        entities.add(ref_record(store, ref, {'STATE'})['payload']['entity']['object_id'])
+        state = ref_record(store, ref, {'STATE'})
+        if not state.get('unavailable'):
+            entities.add(state['payload']['entity']['object_id'])
     return entities, {r['object_id'] for r in states}
 
 
@@ -851,14 +839,14 @@ def _input_readiness(store, scope, validate_file):
     if subject['kind'] == 'EPISODE':
         episode_refs = [{'object_id': scope, 'revision_id': subject['id']}]
     episode_keys = {(r['object_id'], r['revision_id']) for r in episode_refs}
-    scene = subject["payload"].get("source", {}).get("scene_id") if subject["kind"] == "PREPARATION" else None
+    from .audiovisual import KINDS as AV_KINDS, children
+    if subject['kind'] in AV_KINDS:
+        todo = children(store, subject)
+        while todo:
+            child = todo.pop()
+            scope_ids.add(child['object_id']); todo.extend(children(store, child))
     for item in heads:
-        if item['kind'] not in ('PREPARATION', 'SHOT_DESIGN'):
-            continue
-        ep = item['payload'].get('episode') or item['payload']['source']
-        in_episode = (ep['object_id'], ep['revision_id']) in episode_keys
-        in_scene = item['kind'] == 'SHOT_DESIGN' and scene and item['payload']['scene_id'] == scene and ep['revision_id'] == subject['payload']['source']['revision_id']
-        if in_episode or in_scene:
+        if item['kind'] in AV_KINDS and any((s['object_id'], s['revision_id']) in episode_keys for s in item['payload']['sources']):
             scope_ids.add(item['object_id'])
     coverage = full_states.scope_coverage(store, [r for r in heads if r['object_id'] in scope_ids], heads)
     state_keys = {full_states.exact(r) for r in coverage['states']}

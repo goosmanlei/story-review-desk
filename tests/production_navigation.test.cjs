@@ -105,7 +105,7 @@ function recordButtons(ctx,ids){
   return buttons;
 }
 test('record navigation keeps visual and accessible selection on the exact displayed object',async()=>{
-  const a=row('a','PREPARATION'),b=row('b','PREPARATION'),old={...b,id:'b-old'};
+  const a=row('a','AV_SCENE'),b=row('b','AV_SCENE'),old={...b,id:'b-old'};
   const ctx=setup([a,b],recordApi([a,b,old]));ctx.state.workspace='settings.workspace';
   const buttons=recordButtons(ctx,['a','b',null]);
   for(const [objectId,revisionId,selected] of [['a',null,0],['b',null,1],['b','b-old',1],['a',null,0]]){
@@ -116,7 +116,7 @@ test('record navigation keeps visual and accessible selection on the exact displ
   }
 });
 test('a late record response cannot move either selection marker from the newer record',async()=>{
-  const a=row('a','PREPARATION'),b=row('b','PREPARATION');let release;
+  const a=row('a','AV_SCENE'),b=row('b','AV_SCENE');let release;
   const ctx=setup([a,b],url=>new URL(url,'http://localhost').searchParams.get('object_id')==='a'?new Promise(resolve=>{release=()=>resolve({record:a,history:[a]})}):Promise.resolve({record:b,history:[b]}));
   ctx.state.workspace='settings.workspace';const buttons=recordButtons(ctx,['a','b']);
   const older=ctx.openProductionRecord('a');await ctx.openProductionRecord('b');release();await older;

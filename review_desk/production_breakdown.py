@@ -3,7 +3,7 @@ import json
 from . import production as p
 from .store import Conflict
 
-POSITIONS = {'INPUT_LOCK', 'STORY', 'EPISODE', 'PREPARATION', 'SHOT_DESIGN'}
+POSITIONS = {'AV_EPISODE', 'AV_SCENE', 'AV_SHOT', 'INPUT_LOCK', 'STORY', 'EPISODE'}
 
 
 def ref(row):
@@ -30,14 +30,6 @@ def validate_relation(store, value):
         raise ValueError('a media selection needs an exact component')
 
 
-def validate_parent(store, value):
-    if 'parent' not in value:
-        return
-    parent = p.ref_record(store, value['parent'], {'PREPARATION'})
-    if any(parent['payload']['source'][k] != value['episode'][k] for k in ('object_id','revision_id')) or parent['payload']['source']['scene_id'] != value['scene_id']:
-        raise ValueError('shot direct parent differs from episode/scene')
-
-
 def rows(store, kind, condition='', params=()):
     sql = 'SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind=?'
     return [p.record_view(r) for r in store.db.execute(sql+(' AND '+condition if condition else '')+' ORDER BY o.id', (kind, *params))]
@@ -62,24 +54,13 @@ def index(store, view, object_id=None):
 def ancestors(store, row):
     """Exact revision chain, never a current-head substitution."""
     result = [ref(row)]
-    if row['kind'] == 'SHOT_DESIGN':
-        payload = row['payload']
-        if payload.get('parent'):
-            parent = p.ref_record(store, payload['parent'], {'PREPARATION'})
-            result.extend(ancestors(store, parent))
-        else:
-            # Legacy shots have an exact episode + scene locator, but no scene
-            # preparation revision. Do not invent one from the current tree.
-            result.extend(ancestors(store,p.ref_record(store,payload['episode'],{'EPISODE'})))
-    elif row['kind'] == 'PREPARATION':
-        source = row['payload']['source']
-        episode=p.ref_record(store,{'object_id': source['object_id'], 'revision_id': source['revision_id']},{'EPISODE'})
-        if row['payload'].get('input_lock'):
-            result.append(ref(episode))
-            result.extend(ancestors(store,p.ref_record(store,row['payload']['input_lock'],{'INPUT_LOCK'})))
-        else:
-            result.extend(ancestors(store,episode))
-    elif row['kind'] == 'EPISODE':
+    if row['kind'] in {'AV_EPISODE', 'AV_SCENE', 'AV_SHOT'}:
+        from .audiovisual import path
+        chain = path(store, row)
+        result = [ref(r) for r in reversed(chain)]
+        result.extend(ancestors(store, p.ref_record(store, row['payload']['input_lock'])))
+        return list({r['revision_id']: r for r in result}.values())
+    if row['kind'] == 'EPISODE':
         # Legacy episodes have no exact input-lock parent. Recover an unambiguous
         # screenplay from immutable historical evidence, not today's lock head.
         parents={}
@@ -95,64 +76,18 @@ def ancestors(store, row):
 
 def scene_shots(store, scene, exact=None):
     """Latest shot revision bound to this immutable parent, with exact override."""
-    shots=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
-        FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='SHOT_DESIGN'
-        AND json_extract(r.payload,'$.parent.revision_id')=? AND NOT EXISTS(
-            SELECT 1 FROM revisions n WHERE n.object_id=r.object_id AND n.version>r.version
-            AND json_extract(n.payload,'$.parent.revision_id')=?)""",(scene['id'],scene['id']))]
-    if exact:
-        if exact['kind']!='SHOT_DESIGN' or exact['payload'].get('parent')!=ref(scene):
-            raise ValueError('exact shot does not belong to the selected scene')
-        shots=[r for r in shots if r['object_id']!=exact['object_id']]+[exact]
-    return sorted(shots,key=lambda r:(r['payload']['number'],r['object_id']))
+    if scene['kind'] == 'AV_SCENE':
+        from .audiovisual import children
+        values = children(store, scene)
+        if exact and exact['id'] not in {r['id'] for r in values}:
+            raise ValueError('镜头不属于本版视听场')
+        return values
+    raise ValueError('视听场必须是 AV_SCENE')
 
 
 def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
-    locks = rows(store, 'INPUT_LOCK')
-    target=p.record(store,object_id,revision_id) if object_id else None
-    exact_scene=None;exact_shot=None
-    if target:
-        if target['kind']=='SHOT_DESIGN':
-            exact_shot=target
-            if not target['payload'].get('parent'):
-                raise ValueError('historical shot has no exact scene parent; refusing current substitution')
-            exact_scene=p.ref_record(store,target['payload']['parent'],{'PREPARATION'})
-        elif target['kind']=='PREPARATION':exact_scene=target
-        else:raise ValueError('breakdown target must be a scene or shot')
-    lock=locks[-1] if locks else None
-    if exact_scene and exact_scene['payload'].get('input_lock'):
-        lock=p.ref_record(store,exact_scene['payload']['input_lock'],{'INPUT_LOCK'})
-    if not lock:return {'episodes': [], 'scenes': [], 'shots': [], 'lock': None}
-    episodes = [p.ref_record(store, r, {'EPISODE'}) for r in lock['payload']['episodes']]
-    if exact_scene:
-        source=exact_scene['payload']['source'];episode=source['object_id']
-        exact_episode=p.ref_record(store,source,{'EPISODE'})
-        episodes=[exact_episode if e['object_id']==episode else e for e in episodes]
-        if not any(e['object_id']==episode for e in episodes):episodes.append(exact_episode)
-    chosen = next((e for e in episodes if e['object_id'] == episode), None) if episode else episodes[0]
-    if chosen is None:raise KeyError('episode outside exact production input')
-    entries=[];chosen_scenes=[];chosen_shots=[]
-    for ep in episodes:
-        scenes=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
-            FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='PREPARATION'
-            AND json_extract(r.payload,'$.source.object_id')=? AND json_extract(r.payload,'$.source.revision_id')=?
-            AND NOT EXISTS(SELECT 1 FROM revisions n WHERE n.object_id=r.object_id AND n.version>r.version
-                AND json_extract(n.payload,'$.source.revision_id')=?)""",(ep['object_id'],ep['id'],ep['id']))]
-        if exact_scene and ep['object_id']==episode:
-            scenes=[r for r in scenes if r['object_id']!=exact_scene['object_id']]+[exact_scene]
-        order={s['id']:i for i,s in enumerate(ep['payload']['scenes'])}
-        scenes.sort(key=lambda r:(order.get(r['payload']['source']['scene_id'],len(order)),r['object_id']))
-        shots=[shot for sc in scenes for shot in scene_shots(store,sc,
-               exact_shot if exact_shot and exact_shot['payload']['parent']==ref(sc) else None)]
-        targets=[*scenes,*shots]
-        for shot in shots:
-            targets.extend(material_comment_targets(store,shot['id']))
-        entries.append({'object_id':ep['object_id'],'id':ep['id'],'number':ep['payload']['number'],
-            'title':ep['payload']['title'],'scenes':[{'id':s['id'],'title':s.get('heading',s['id'])} for s in ep['payload']['scenes']],
-            'comment_targets':list({r['id']:ref(r) for r in targets}.values())})
-        if ep['id']==chosen['id']:chosen_scenes=scenes;chosen_shots=shots
-    return {'lock':lock,'episodes':entries,'episode':chosen['object_id'],
-            'scenes':chosen_scenes,'shots':chosen_shots,'target':ref(target) if target else None}
+    from .audiovisual import catalog as audiovisual_catalog
+    return audiovisual_catalog(store, episode, object_id, revision_id, view)
 
 
 def context(store, object_id, revision_id=None, *, metadata=False):
@@ -165,9 +100,6 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     entities = list(selected['payload'].get('entities', []))
     states = list(selected['payload'].get('states', []))
     occurrences = list(selected['payload'].get('occurrences', []))
-    if selected['kind'] == 'PREPARATION':
-        entities = [o['entity'] for o in occurrences]
-        states = [s for o in occurrences for s in o['states']]
     needs = {r['object_id']: r for r in direct if r['payload'].get('status') != 'withdrawn'}
     for link in links:
         subject = read_ref(store, link['payload']['subject'])
@@ -187,6 +119,7 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     states=list({r['revision_id']:r for r in states}.values())
     return {'record': selected, 'ancestors': ancestors(store, selected),
             'entities': [p.ref_record(store, r) for r in entities], 'states': [p.ref_record(store, r) for r in states],
+            'continuity_states': [p.ref_record(store, r) for r in selected['payload'].get('continuity_context', [])],
             'occurrences': occurrences, 'relations': links, 'requirements': list(needs.values()),
             'adoptions': [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type']=='adoption']}
 
@@ -202,7 +135,6 @@ def material_comment_targets(store, revision):
             if subject['kind']=='REQUIREMENT':needs.setdefault(subject['object_id'],subject)
     targets=[]
     for need in needs.values():
-        if need['payload']['media_type']!='video':continue
         for version in store.db.execute('''SELECT v.number,d.provenance FROM material_plan_versions v
             LEFT JOIN material_definition_versions d ON d.material_id=v.material_id AND d.number=v.number
             WHERE v.material_id=? ORDER BY v.number DESC''',(need['object_id'],)):
@@ -237,11 +169,22 @@ def location(store, scope, cache):
     if rid in cache:return cache[rid]
     from .list_reading import ref_record
     value=ref_record(store,scope);payload=value['payload']
-    episode=payload.get('episode') or payload.get('source')
+    episode=payload.get('episode') or payload.get('source') or next(iter(payload.get('sources', [])), None)
     result={'scope':scope,'episode':episode.get('object_id') if episode else (value['object_id'] if value['kind']=='EPISODE' else None),
-        'scene':payload.get('scene_id') or (payload.get('source') or {}).get('scene_id'),'kind':value['kind']}
+        'scene':payload.get('scene_id') or (episode or {}).get('scene_id'),'kind':value['kind'],
+        'audiovisual': value['object_id'] if value['kind'].startswith('AV_') else None}
     cache[rid]=result
     return result
+
+
+def locations(store, scope, cache):
+    base = location(store, scope, cache)
+    if not base['kind'].startswith('AV_'):
+        return [base]
+    from .list_reading import ref_record
+    row = ref_record(store, scope)
+    return [{**base, 'episode': s['object_id'], 'scene': s['scene_id'], 'source': s}
+            for s in row['payload']['sources']]
 
 
 def materials(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40):
@@ -270,7 +213,7 @@ def materials(store, episode=None, scene=None, media=None, search='', status=Non
 
 def summary(store, object_id, revision_id=None):
     selected=p.record(store,object_id,revision_id);target=ref(selected)
-    descendants=[r for kind in ('SHOT_DESIGN','PREPARATION','EPISODE') for r in rows(store,kind)
+    descendants=[r for kind in ('AV_SHOT','AV_SCENE','AV_EPISODE') for r in rows(store,kind)
         if target in ancestors(store,r)[1:]]
     direct=context(store,object_id,revision_id)
     return {'record':selected,'direct_entities':direct['entities'],'direct_requirements':direct['requirements'],

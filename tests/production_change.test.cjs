@@ -19,7 +19,7 @@ const record=(object_id,kind,payload={})=>({object_id,id:object_id+'-r1',current
 const change={object_id:'upstream',used_revision:'upstream-r1',current_revision:'upstream-r2',target:{object_id:'exact-use',revision_id:'exact-use-r1'}};
 const ready=(scope,count=1)=>({scope:record(scope,'EPISODE'),required_count:count,missing_count:count,inputs_ready:false,package_available:false,requirements:Array.from({length:count},(_,i)=>({requirement:record(scope+'-need-'+String(i+1).padStart(2,'0'),'REQUIREMENT',{purpose:'technical test',usage:'post_audio',required:true}),issues:['upstream_needs_review'],pending_changes:[plain(change)]}))});
 function fixture(){
-  const host=new Node('main'),episodes=[record('episode-A','EPISODE'),record('episode-B','EPISODE')],records=episodes.flatMap(e=>['a','b'].map(letter=>record(e.object_id+'-prep-'+letter,'PREPARATION',{source:{object_id:e.object_id,revision_id:e.id,scene_id:'scene-'+letter}})));
+  const host=new Node('main'),episodes=[record('episode-A','EPISODE'),record('episode-B','EPISODE')],records=episodes.flatMap(e=>['a','b'].map(letter=>record(e.object_id+'-prep-'+letter,'AV_SCENE',{source:{object_id:e.object_id,revision_id:e.id,scene_id:'scene-'+letter}})));
   const messages=[],requests=[],reads=[],posts=[];
   const context={state:{workspace:'materials.workspace',screenplays:[{episodes}]},URL,URLSearchParams,location:{href:'http://fixture/?workspace=materials.workspace'},document:{querySelectorAll:()=>[],createElementNS:(namespace,tag)=>Object.assign(new Node(tag),{namespaceURI:namespace})},isProduction:()=>true,renderComments(){},toast:text=>messages.push(text),el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,cls);n.textContent=text;parent.append(n);return n},crypto:require('node:crypto').webcrypto};
   context.api=async(url,options)=>{
@@ -89,7 +89,7 @@ test('cancel while reading an unknown save prevents a repeated POST and any new-
 
 
 test('download labels use the exact readiness scope, including kind-less screenplay snapshots',async()=>{
-  for(const [kind,label] of [['EPISODE','本集'],['PREPARATION','本场'],['SHOT_DESIGN','逐镜'],['STATE','状态参考']]){
+  for(const [kind,label] of [['EPISODE','本集'],['AV_SCENE','本场'],['AV_SHOT','逐镜'],['STATE','状态参考']]){
     const f=fixture(),subject=record('accurate-scope',kind);
     // screenplay.snapshot() emits episode payload/revision without a kind field.
     if(kind==='EPISODE'){delete subject.kind;subject.payload.format='screenplay-episode-v1'}

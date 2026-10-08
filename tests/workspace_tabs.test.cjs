@@ -17,7 +17,7 @@ function fixture(workspace='story.sources',query=''){
  context.renderWorkspaceTabs();return {context,root,requests,location,positions,storage,document,windowEvents};
 }
 test('four main pages use one subtab container with one selected and keyboard-focusable tab',()=>{
- for(const [workspace,titles] of [['production.approach',['故事创作','生产制作']],['story.sources',['故事采编','故事结构','剧本创作']],['settings.workspace',['制作拆解','实体管理','素材管理']],['production.workspace',['制作拆解','实体管理','素材管理']],['project.configuration',['故事项目','系统与 AI','编号前缀']]]){
+ for(const [workspace,titles] of [['production.approach',['故事创作','生产制作']],['story.sources',['故事采编','故事结构','故事剧本']],['settings.workspace',['视听制作','实体管理','素材管理']],['production.workspace',['视听制作','实体管理','素材管理']],['project.configuration',['故事项目','系统与 AI','编号前缀']]]){
   const f=fixture(workspace);assert.deepEqual(f.root.children.map(n=>n.textContent),titles);assert.equal(f.root.children.filter(n=>n.attrs['aria-selected']==='true').length,1);assert.equal(f.root.children.filter(n=>n.tabIndex===0).length,1);assert.ok(f.root.children.every(n=>n.attrs.role==='tab'&&n.attrs['aria-controls']));
  }
  const html=fs.readFileSync(path.join(staticRoot,'index.html'),'utf8');assert.match(html,/<header class="workspace-topbar">.*id="workspace-subnav"/);assert.doesNotMatch(html,/class="(?:story-mode-tabs|approach-tabs)"/);

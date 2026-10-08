@@ -19,10 +19,10 @@ function reviewSmallCard(parent,item,activate,selected=false){
 function materialPositionText(item,value=item.title){
   const scope=item.placement||item.record?.payload.scope||item.scope;
   const same=row=>scope&&row?.object_id===scope.object_id&&row?.id===scope.revision_id;
-  const location=(item.locations||[]).find(row=>row.kind==='PREPARATION'&&scope&&row.scope?.object_id===scope.object_id&&row.scope?.revision_id===scope.revision_id);
+  const location=(item.locations||[]).find(row=>row.kind==='AV_SCENE'&&scope&&row.scope?.object_id===scope.object_id&&row.scope?.revision_id===scope.revision_id);
   const owner=[state.unifiedScope,state.breakdownSceneData?.scene,...(state.productionRecords||[])].find(same);
-  const scene=location?.scene||(owner?.kind==='PREPARATION'&&(owner.payload.source?.scene_id||owner.payload.scene_id));
-  const title=String(value??'');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,(businessCode(owner)||reviewPositionLabel('scene',scene,location?.episode||owner?.payload.source?.object_id))+' · ')):reviewPositionText(title);
+  const scene=location?.scene||(owner?.kind==='AV_SCENE'&&(owner.payload.source?.scene_id||owner.payload.scene_id));
+  const title=String(value??'').replace(/完整形态/gu,'实体状态');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,(businessCode(owner)||reviewPositionLabel('scene',scene,location?.episode||owner?.payload.source?.object_id))+' · ')):reviewPositionText(title);
 }
 function materialCountText(item){
   const count=(key,label)=>Number.isInteger(item[key])&&item[key]>=0?`${label} ${item[key]} 个`:`${label}未登记`;
@@ -80,12 +80,14 @@ function renderUnifiedCard(root){
   const card=el('section','unified-card'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
   if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
   else if(state.materialReview){
-    const scope=state.unifiedScope,title=scope?.kind==='PREPARATION'?breakdownSceneTitle(scope):scope?.kind==='SHOT_DESIGN'?breakdownShotTitle(scope):scope?.kind==='EPISODE'?breakdownEpisodeTitle(scope):reviewPositionText(scope?.payload.title||'素材');nodeText('h2',null,title,left);
-    if(scope){nodeText('p','production-meta',({INPUT_LOCK:'全剧',STORY:'全剧',EPISODE:'集',PREPARATION:'场',SHOT_DESIGN:'镜',STATE:'完整状态'})[scope.kind]||productionKinds[scope.kind],left);reviewTextBlocks(left,scope);if(scope.payload.source)materialReferenceLink(left,scope.payload.source,'剧情依据',true)}
+    const scope=state.unifiedScope,title=scope?.kind==='AV_SCENE'?breakdownSceneTitle(scope):scope?.kind==='AV_SHOT'?breakdownShotTitle(scope):scope?.kind==='EPISODE'?breakdownEpisodeTitle(scope):reviewPositionText(scope?.payload.title||'素材');nodeText('h2',null,title,left);
+    if(scope){nodeText('p','production-meta',({INPUT_LOCK:'全剧',STORY:'全剧',EPISODE:'集',AV_SCENE:'场',AV_SHOT:'镜',STATE:'实体状态'})[scope.kind]||productionKinds[scope.kind],left);reviewTextBlocks(left,scope);if(scope.payload.source)materialReferenceLink(left,scope.payload.source,'剧情依据',true)}
     else nodeText('p','production-meta','历史原件未登记实体或制作位置归属',left);
-    const row=state.materialReview.record,includesHistory=row.kind==='REQUIREMENT';
-    const results=includesHistory?materialRows(state.materialReview):[row],generated=results.some(r=>r.kind==='ASSET'&&!r.payload.placeholder&&r.payload.components?.some(c=>c.role==='original'));
-    materialSmallCard(left,{...state.materialReview.material_card_counts?.[row.object_id],object_id:row.object_id,id:row.id,title:row.payload.title,media_type:row.payload.media_type,slot:row.payload.slot,generated},trigger=>openUnifiedMaterial({object_id:row.object_id,revision_id:row.id},trigger),true,{includesHistory,showHistoryScope:true});
+    const detail=state.materialReview,row=detail.record,entries=Object.entries(detail.material_versions||{});
+    const current=state.materialCommentCard?.data===detail?entries.find(([mid])=>mid===state.materialCommentCard.material_id):entries[0];
+    const mid=current?.[0]||row.object_id,rounds=current?.[1]||[],identity=rounds.map(r=>r.definition_records?.requirement||r.plan).find(Boolean)||row;
+    const counts=detail.material_card_counts?.[mid]||(rounds.length?{version_count:rounds.length,candidate_count:new Set(rounds.flatMap(r=>r.results||[]).filter(r=>r.kind==='ASSET'&&!r.payload.placeholder&&r.payload.components?.some(c=>c.role==='original')).map(r=>r.candidate_id||r.id)).size}:{});
+    nodeText('h3',null,businessTitle(identity),left);nodeText('p','production-meta material-summary-counts',materialCountText(counts),left);
     renderMaterialWorkspace(right,state.materialReview);
   }
   paintProductionReview();
@@ -167,7 +169,7 @@ async function openUnifiedMaterial(ref,trigger){
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
   const fields=['shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
   const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
-  const {dialog,body}=openReviewDialog('实体大卡',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
+  const {dialog,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;

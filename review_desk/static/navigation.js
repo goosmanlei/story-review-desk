@@ -1,9 +1,9 @@
 function businessCode(row){if(['SOURCE','STORY'].includes(row?.kind))return '';return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
 function businessTitle(row,title=row?.payload?.title||row?.title||''){
   if(['SOURCE','STORY'].includes(row?.kind))return String(title);
-  const code=businessCode(row),raw=String(title);
+  const code=businessCode(row),raw=String(title).replace(/完整形态/gu,'实体状态');
   // A shot's stored local prefix is a legacy position, not a second identity.
-  const positioned=row?.kind==='SHOT_DESIGN'&&code?raw.replace(/^E\d+-\d+\s*/u,''):row?.business_scene_id?raw.replace(/^\d+-\d+\s*/,(row.business_scene_code||reviewPositionLabel('scene',row.business_scene_id))+' · '):raw;
+  const positioned=row?.kind==='AV_SHOT'&&code?raw.replace(/^E\d+-\d+\s*/u,''):row?.business_scene_id?raw.replace(/^\d+-\d+\s*/,(row.business_scene_code||reviewPositionLabel('scene',row.business_scene_id))+' · '):raw;
   const text=reviewPositionText(positioned);
   if(!code||text===code||text.startsWith(code+' · '))return text;
   return code+' · '+(text.startsWith(code+' ')?text.slice(code.length).trim():text);
@@ -15,7 +15,7 @@ function renderBusinessCodeCatalog(root){
 }
 /* View labels and tabs share the existing workspace/URL routing contract. */
 function reviewPositionLabel(kind,value,episode=null){
-  const prefix=({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',PREPARATION:'S',shot:'SH',SH:'SH',SHOT_DESIGN:'SH'})[kind];
+  const prefix=({episode:'E',E:'E',EPISODE:'E',scene:'S',S:'S',AV_SCENE:'S',shot:'SH',SH:'SH',AV_SHOT:'SH'})[kind];
   if(!prefix)return String(value??'');
   if(value&&typeof value==='object'){const code=businessCode(value);if(code.startsWith(prefix)&&/^\d+$/.test(code.slice(prefix.length)))return code}
   if(prefix==='S'&&episode){const id=typeof episode==='string'?episode:episode.object_id||episode.id,scene=typeof value==='object'?value.id:value;const code=(typeof state==='undefined'?null:state.businessCodes)?.get('scene:'+id+':'+scene);if(code)return code}
@@ -108,11 +108,11 @@ function workspaceTabItems(){
     return tabs.map(({id,label})=>({id:'approach-tab-'+id,label,active:id===active,controls:'approach-body',open:()=>selectApproachTab(id)}));
   }
   if(['story.sources','story.outline','story.script'].includes(workspace))return [
-    ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','剧本创作','screenplay-workspace']
+    ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','故事剧本','screenplay-workspace']
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
   if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['CODES','编号前缀']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
-    const options=[['breakdown','制作拆解'],['entities','实体管理'],['materials','素材管理']];
+    const options=[['breakdown','视听制作'],['entities','实体管理'],['materials','素材管理']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));
   }
   return [];
@@ -156,8 +156,8 @@ function workspacePageDescriptor(workspace,params){
   if(params.get('production_tab')==='history')return ['页面不可用','页面已退役','此旧页面已移除，请从生产制作选择当前工作入口。'];
   const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'||params.get('production_tab')==='shots'?'breakdown':(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
   return ({
-    breakdown:['STORY → PRODUCTION','制作拆解','按集场阅读逐镜设计与视频方案，选择准确参考并审阅本镜素材。'],
-    entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、完整状态和关系，评论或采纳当前内容。'],
+    breakdown:['STORY → PRODUCTION','视听制作','按视听集、场、镜阅读设计，审阅各项素材方案与准确候选。'],
+    entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、实体状态和关系，评论或采纳当前内容。'],
     materials:['MATERIAL LIBRARY','素材管理','按集场查看素材方案、版本与真实候选，预览原件并审阅准确内容。']
   })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
 }

@@ -14,8 +14,8 @@ test('unified material ownership uses exact scene, shot and episode numbers with
  const c=fixture(),root=new Element('main'),seen=[];c.materialSmallCard=()=>{};c.renderMaterialWorkspace=()=>{};c.paintProductionReview=()=>{};c.materialReferenceLink=()=>{};c.reviewTextBlocks=(_host,row)=>seen.push(row.payload.blocks[0].text);
  c.state.materialReview={record:{object_id:'asset',id:'asset-r1',kind:'ASSET',payload:{title:'素材'}}};
  for(const [kind,payload,expected] of [
-  ['PREPARATION',{title:'01-01 米铺门口',source:{scene_id:'s012'}},'S012 · 米铺门口'],
-  ['SHOT_DESIGN',{title:'E01-004 河街开场',number:4},'SH004 · 河街开场'],
+  ['AV_SCENE',{title:'01-01 米铺门口',source:{scene_id:'s012'}},'S012 · 米铺门口'],
+  ['AV_SHOT',{title:'E01-004 河街开场',number:4},'SH004 · 河街开场'],
   ['EPISODE',{title:'第2集 灯火',number:2},'E02 · 灯火']
  ]){
   const scope={kind,payload:{...payload,blocks:[{id:'same-id',text:'正文中的第1集 E01-004 原样保留'}]}},before=JSON.stringify(scope);c.state.unifiedScope=scope;c.renderUnifiedCard(root);assert.equal(root.all().find(n=>n.tag==='h2').textContent,expected);assert.equal(JSON.stringify(scope),before);
@@ -46,10 +46,10 @@ test('generated comment groups, version accessibility labels and placeholders fo
  const comment={target_revision_id:'asset-v1',body:'评论 E2-004 不改动'},before=JSON.stringify({row,comment});assert.equal(c.entityReviewCommentGroup(comment),'素材 · E02 / SH004 河街素材 · 版本 1');c.entityVersionControl(root,row,()=>{});assert.equal(root.children[0].attrs['aria-label'],'E02 / SH004 河街素材的版本');c.renderMaterialPlaceholder(root,row);assert.equal(root.children[1].attrs['aria-label'],'E02 / SH004 河街素材 · 未生成');assert.equal(JSON.stringify({row,comment}),before);
 });
 test('scene material cards replace local heading codes only from an exact owning scene scope',()=>{
- const c=fixture(),root=new Element('section'),scope={object_id:'scene',revision_id:'scene-old'},item={object_id:'material',id:'need-old',title:'01-01 米铺门口 · 场级调度图',media_type:'image',placement:scope,placement_title:'01-01 米铺门口',locations:[{scope,kind:'PREPARATION',scene:'s012'}]};c.productionEntityIcon=()=>new Element('svg');const before=JSON.stringify(item);
+ const c=fixture(),root=new Element('section'),scope={object_id:'scene',revision_id:'scene-old'},item={object_id:'material',id:'need-old',title:'01-01 米铺门口 · 场级调度图',media_type:'image',placement:scope,placement_title:'01-01 米铺门口',locations:[{scope,kind:'AV_SCENE',scene:'s012'}]};c.productionEntityIcon=()=>new Element('svg');const before=JSON.stringify(item);
  const button=c.materialSmallCard(root,item,()=>{});assert.equal(button.all().find(n=>n.tag==='strong').textContent,'S012 · 米铺门口 · 场级调度图');assert.equal(button.title,'S012 · 米铺门口 · 场级调度图 · S012 · 米铺门口');assert.equal(JSON.stringify(item),before);
- const wrong={...item,locations:[{scope:{...scope,revision_id:'scene-current'},kind:'PREPARATION',scene:'s099'}]};assert.equal(c.materialPositionText(wrong),item.title);c.state.productionRecords=[{...scope,id:'scene-current',kind:'PREPARATION',payload:{source:{scene_id:'s099'}}}];assert.equal(c.materialPositionText(wrong),item.title);
- c.state.breakdownSceneData={scene:{object_id:'scene',id:'scene-old',kind:'PREPARATION',payload:{source:{scene_id:'s012'}}}};assert.equal(c.materialPositionText({...item,locations:[]}), 'S012 · 米铺门口 · 场级调度图');
+ const wrong={...item,locations:[{scope:{...scope,revision_id:'scene-current'},kind:'AV_SCENE',scene:'s099'}]};assert.equal(c.materialPositionText(wrong),item.title);c.state.productionRecords=[{...scope,id:'scene-current',kind:'AV_SCENE',payload:{source:{scene_id:'s099'}}}];assert.equal(c.materialPositionText(wrong),item.title);
+ c.state.breakdownSceneData={scene:{object_id:'scene',id:'scene-old',kind:'AV_SCENE',payload:{source:{scene_id:'s012'}}}};assert.equal(c.materialPositionText({...item,locations:[]}), 'S012 · 米铺门口 · 场级调度图');
 });
 test('allocated object codes override local numbers while prose and excluded object titles stay literal',()=>{
  const c=fixture();c.state.businessCodes=new Map([['ep','E71'],['scene:ep:s001','S143'],['shot-a','SH222'],['shot-b','SH223']]);c.state.legacyShotCodes=new Map([['E1-7','E71 / SH222']]);
@@ -59,8 +59,15 @@ test('allocated object codes override local numbers while prose and excluded obj
  assert.equal(c.reviewPositionText('E1-007 河街'),'E71 / SH222 河街');
  assert.equal(c.reviewPositionText('E2-007 旧镜'),'第2集第7镜 旧镜');
  assert.equal(c.reviewPositionText('第1集的第7镜'),'第1集的第7镜');
- assert.equal(c.businessTitle({object_id:'shot-a',kind:'SHOT_DESIGN',payload:{title:'E1-007 河街'}}),'SH222 · 河街');
- assert.equal(c.businessTitle({object_id:'shot-a',kind:'SHOT_DESIGN',payload:{title:'SH222 河街'}}),'SH222 · 河街');
+ assert.equal(c.businessTitle({object_id:'shot-a',kind:'AV_SHOT',payload:{title:'E1-007 河街'}}),'SH222 · 河街');
+ assert.equal(c.businessTitle({object_id:'shot-a',kind:'AV_SHOT',payload:{title:'SH222 河街'}}),'SH222 · 河街');
  assert.equal(c.businessTitle({kind:'SOURCE',business_code:'D003',payload:{title:'第1集资料'}}),'第1集资料');
  assert.equal(c.businessTitle({kind:'STORY',business_code:'B003',payload:{title:'版本四'}}),'版本四');
+});
+
+test('exact story excerpt without an optional scene heading remains readable',async()=>{
+ const c=fixture(),dialog=new Element('dialog'),body=new Element('section'),title=new Element('h2');body.querySelector=()=>null;
+ c.openReviewDialog=()=>({dialog,body,title});c.api=async()=>({reference:{object_id:'ep',revision_id:'exact'},title:'正式分集',scene:{id:'s002'},blocks:[{id:'b',text:'准确原文'}],highlight_block_ids:['b']});
+ await c.openMaterialReference({object_id:'ep',revision_id:'exact',scene_id:'s002',block_ids:['b']},null,'full_scene');
+ assert.ok(body.all().some(n=>n.textContent==='准确原文'));assert.equal(body.dataset.referenceRevision,'exact');assert.equal(body.dataset.referenceScene,'s002');
 });

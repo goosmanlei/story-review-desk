@@ -266,20 +266,28 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]
-                if path == "/api/production/material-model-map":
-                    from .material_model import migration_plan
-                    return self._json(migration_plan(store))
                 if path == "/api/production/material-model-verify":
                     from .material_model import verify
                     return self._json(verify(store))
-                if path == "/api/production/material-plan-map":
-                    from .material_plans import migration_plan
-                    with production.read_scope(store):
-                        return self._json(migration_plan(store))
                 if path == "/api/production/summary":
                     from .production_breakdown import summary
                     with production.read_scope(store):
                         return self._json(summary(store,param('object_id'),param('revision_id')))
+                if path == '/api/production/acceptance':
+                    from .production_acceptance import snapshot as acceptance_snapshot
+                    with production.read_scope(store):
+                        return self._json(acceptance_snapshot(store, param('object_id'), param('revision_id')))
+                if path == '/api/production/story-related':
+                    from .audiovisual import related
+                    reference = {'object_id': param('object_id'), 'revision_id': param('revision_id')}
+                    if param('scene_id'):
+                        reference['scene_id'] = param('scene_id')
+                    with production.read_scope(store):
+                        return self._json(related(store, reference))
+                if path == '/api/production/material-relations':
+                    from .material_relations import for_material
+                    with production.read_scope(store):
+                        return self._json({'relations': for_material(store, param('material_id'))})
                 if path == "/api/production/breakdown":
                     from .production_breakdown import catalog
                     with production.read_scope(store):
@@ -425,18 +433,18 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
-        if self.path in ("/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision", "/api/production/material-plan-migrate", "/api/production/material-model-migrate", "/api/production/material-model-rollback"):
+        if self.path in ("/api/production/material-route", "/api/production/acceptance", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
             try:
-                value = self._input(128_000_000 if '/material-model-' in self.path else 20_000_000)
-                if self.path.endswith('shot-reference'):
+                value = self._input(20_000_000)
+                if self.path.endswith('material-route'):
+                    from .material_relations import choose_route
+                    result=choose_route(self.server.store, value)
+                elif self.path.endswith('acceptance'):
+                    from .production_acceptance import decide
+                    result=decide(self.server.store,value)
+                elif self.path.endswith('shot-reference'):
                     from .shot_references import select
                     result=select(self.server.store,value)
-                elif '/material-model-' in self.path:
-                    from .material_model import migrate,rollback
-                    result=(rollback(self.server.store,value['migration'],value.get('validate_only') is True) if self.path.endswith('rollback') else migrate(self.server.store,value['migration'],value.get('validate_only') is True,apply_archives=value.get('defer_archives') is not True))
-                elif self.path.endswith('material-plan-migrate'):
-                    from .material_plans import migrate
-                    result=migrate(self.server.store,value['migration'],value.get('validate_only') is True)
                 elif self.path.endswith("import"):
                     result = production.import_records(self.server.store, value, value.get("validate_only") is True)
                 elif self.path.endswith("entity-decision"):

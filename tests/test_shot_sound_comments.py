@@ -11,7 +11,7 @@ from review_desk.store import Conflict
 
 
 def sound_payload():
-    return {'format': 'production-shot-design-v1', 'blocks': [{'id': '@review/original', 'text': '原文'}],
+    return {'format': 'production-av-shot-v1', 'blocks': [{'id': '@review/original', 'text': '原文'}],
             'purpose': '叙事目的', 'sound': [{'type': 'source_action', 'text': '保持隐藏'},
             {'text': '唱🧵两句', 'description': '被正文取代的说明'}, {'description': '远处铃声'}, '风声', {'text': '唱🧵两句'}]}
 
@@ -34,9 +34,8 @@ class ShotSoundCommentsTest(unittest.TestCase):
         f = fixtures.ProductionTest()
         f.setUp()
         self.addCleanup(f.tearDown)
-        record = f.spec('shot', 'SHOT_DESIGN', episode=f.ref('episode'), source=f.source, scene_id='scene',
-                        number=1, purpose='叙事目的', framing='全景', spatial='门外', action_start='静止', action_end='静止',
-                        continuity='独立', duration_frames=24, fps=24, sound=sound_payload()['sound'], entities=[], states=[])
+        from audiovisual_fixture import shot
+        record = shot(f, sound=sound_payload()['sound'])
         record['payload']['blocks'] = sound_payload()['blocks']
         f.put(record)
         old = p.record(f.store, 'shot')
@@ -50,7 +49,7 @@ class ShotSoundCommentsTest(unittest.TestCase):
             f.store.validate_target('shot', old['id'], {**anchor, 'quote': '错引'})
         changed = copy.deepcopy(old['payload'])
         changed['sound'][1]['text'] = '新的声音安排'
-        f.put({'object_id': 'shot', 'kind': 'SHOT_DESIGN', 'expected_version': old['version'], 'payload': changed})
+        f.put({'object_id': 'shot', 'kind': 'AV_SHOT', 'expected_version': old['version'], 'payload': changed})
         self.assertTrue(f.store.anchor_state('shot', old['id'], anchor)['valid'])
         self.assertFalse(f.store.anchor_state('shot', f.ref('shot')['revision_id'], anchor)['valid'])
         self.assertEqual(p.record(f.store, revision_id=old['id'])['payload'], old['payload'])

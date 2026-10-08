@@ -39,8 +39,11 @@ def definition(store,row):
         if exact:
             need=p.ref_record(store,exact,{'REQUIREMENT'})
             evidence['requirement_binding']={'field':'generation_requirement' if call['payload'].get('generation_requirement') else 'prepared_plan','record':ref(call)}
+            if need.get('unavailable'):
+                gaps.append('original_requirement_retired')
+                need=None
             seen=set()
-            while need['payload'].get('generation',{}).get('method')=='reuse':
+            while need and need['payload'].get('generation',{}).get('method')=='reuse':
                 if need['id'] in seen:raise ValueError('cyclic reuse requirement')
                 seen.add(need['id']);source=reuse_source(store,need)
                 if not source:
@@ -60,6 +63,10 @@ def definition(store,row):
              'output':output,'generation':generation}
     if need and any(k in need['payload'].get('generation', {}) for k in ('reference_links','prompt_links')):
         content['review_references']={k:copy.deepcopy(need['payload']['generation'].get(k, [])) for k in ('reference_links','prompt_links')}
+    if need and any(k in need['payload'].get('generation', {}) for k in ('selected_routes', 'conditions', 'relation_model')):
+        plan = need['payload']['generation']
+        content['route_contract'] = {k: copy.deepcopy(plan.get(k)) for k in ('selected_routes', 'conditions', 'relation_model')}
+        content['route_contract']['inputs'] = copy.deepcopy(plan.get('inputs', []))
     provenance={'requirements':{'record':ref(need),'fields':sorted(requirement_fields(need['payload']))} if need else None,
                 'checks':{'record':ref(need),'field':'generation.output.review_criteria'} if need and output else None,
                 'output':{'record':ref(need),'field':'generation.output'} if need and output else None,

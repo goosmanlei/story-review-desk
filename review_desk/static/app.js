@@ -278,7 +278,7 @@ function renderWorkspaceNav(){
   const sections=[
     ['production.approach','制作思路','思路','故事创作与生产制作方法'],
     ['story.sources','故事创作','故事','故事采编、故事结构与分集剧本'],
-    ['settings.workspace','生产制作','制作','制作拆解、实体与素材'],
+    ['settings.workspace','生产制作','制作','视听制作、实体与素材'],
     ['project.configuration','系统管理','管理','故事项目与系统配置']
   ];
   for(const [id,title,index,description] of sections){

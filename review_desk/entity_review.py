@@ -203,9 +203,9 @@ transition is required before viewing, commenting or accepting output.
         usages[form['id']] = []
         for row in rows:
             payload = row['payload']
-            if ((row['kind'] == 'PREPARATION' and any(ref(form) in occurrence['states'] for occurrence in payload['occurrences'])) or
-                    (row['kind'] == 'SHOT_DESIGN' and ref(form) in payload['states'])):
-                usages[form['id']].append({'kind': row['kind'], 'title': payload['title'], 'source': payload['source'], **ref(row)})
+            if row['kind'] == 'AV_SHOT' and ref(form) in payload['states']:
+                usages[form['id']].append({'kind': row['kind'], 'title': payload['title'], 'sources': payload['sources'], **ref(row)})
+
     targets = [contents['entity'], *contents['states'], *(m['record'] for m in contents['media'])]
     related_ids = {entity_id, *(r['object_id'] for r in rows if r['kind'] == 'STATE' and r['payload']['entity']['object_id'] == entity_id),
                    *(r['object_id'] for r in rows if submission(r) and r['payload']['entities'][0]['object_id'] == entity_id),
