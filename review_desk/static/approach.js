@@ -59,7 +59,7 @@ function renderApproachBlocks(article, blocks, title, tabId) {
       const figure = el('figure', 'approach-media');
       const media = el(block.kind === 'image' ? 'img' : block.kind);
       if (block.kind !== 'audio') { media.width = block.width; media.height = block.height; }
-      media.src = '/approach-media/' + encodeURIComponent(block.file);
+      media.src = reviewURL('/approach-media/' + encodeURIComponent(block.file));
       if (block.kind === 'image') {
         media.alt = block.caption; media.loading = 'lazy'; media.decoding = 'async';
         media.tabIndex = 0; media.setAttribute('role', 'button'); media.setAttribute('aria-haspopup', 'dialog');

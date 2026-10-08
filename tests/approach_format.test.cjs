@@ -7,7 +7,7 @@ class Node{
 }
 function fixture(){
  const context={URL,location:{href:'http://fixture/?workspace=production.approach'},document:{addEventListener(){},createTextNode:text=>new Node('#text',text)},window:{addEventListener(){}},el:(tag,cls)=>new Node(tag),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,text);parent.append(n);return n}};
- vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/approach.js'),'utf8'),context);return context;
+ vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8').split('const state=')[0],context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/approach.js'),'utf8'),context);return context;
 }
 function text(node){return node.textContent+node.children.map(text).join('')}
 test('rich text never interprets HTML, loads media or creates executable links',()=>{

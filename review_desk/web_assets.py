@@ -3,10 +3,12 @@ import gzip
 import hashlib
 from pathlib import Path
 import re
+import json
 
 
 class WebAssets:
-    def __init__(self):
+    def __init__(self, deployment=None):
+        deployment = deployment or {'base_path': '', 'publication_id': '', 'experience': False}
         root = Path(__file__).parent / 'static'
         page = (root/'index.html').read_text()
         self.files = {}
@@ -22,6 +24,12 @@ class WebAssets:
             self.files[url] = (body, gzip.compress(body, compresslevel=6, mtime=0), mime)
             tag = f'<script src="{url}" defer></script>' if extension == 'js' else f'<link rel="stylesheet" href="{url}">'
             page = re.sub(pattern, '', page[:matches[0].start()])+tag+re.sub(pattern, '', page[matches[0].end():])
+        prefix = deployment['base_path']
+        page = re.sub(r'(href|src)="/([^"/]*)', lambda m: m[1] + '="' + prefix + '/' + m[2], page)
+        bootstrap = json.dumps(deployment, ensure_ascii=True).replace('<', '\\u003c')
+        page = page.replace('</head>', '<script>globalThis.REVIEW_DEPLOYMENT=' + bootstrap + ';</script></head>')
+        if deployment['experience']:
+            page = page.replace('本机独立实例 · 业务数据可公开同步', '体验环境，操作将在下次发布时重置')
         self.index = page.encode()
 
     def serve(self, handler, path):

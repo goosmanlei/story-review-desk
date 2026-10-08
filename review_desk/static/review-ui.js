@@ -58,7 +58,7 @@ const reviewWaveCache=new Map();let reviewAudioContext;
 async function reviewWaveform(url){
   if(reviewWaveCache.has(url))return reviewWaveCache.get(url);
   const promise=(async()=>{
-    const response=await fetch(url);if(!response.ok)throw Error('音频无法读取');
+    const response=await reviewFetch(url);if(!response.ok)throw Error('音频无法读取');
     const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('此浏览器不支持波形解码');
     reviewAudioContext ||= new Audio();const buffer=await reviewAudioContext.decodeAudioData(await response.arrayBuffer());
     const channels=Array.from({length:buffer.numberOfChannels},(_,i)=>buffer.getChannelData(i)),count=Math.min(1600,buffer.length),peaks=[];
@@ -70,7 +70,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   const from=selection.range?.start_seconds??0;
   let to=selection.range?.end_seconds??component.duration_seconds??0,span=to-from;
   const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;box.dataset.reviewFile=component.file;box.dataset.reviewFrom=from;box.dataset.reviewTo=to;
-  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=options.src||'/api/production/files/'+encodeURIComponent(component.file);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
+  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=reviewURL(options.src||'/api/production/files/'+encodeURIComponent(component.file));media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
   const focus=()=>{if(review){if(options.focus)options.focus();else focusProductionReview({record,history:[record],uses:[]})}};box.reviewFocus=focus;box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
   const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){stopAt=to;if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
   const mute=productionButton(top,'静音',()=>{media.muted=!media.muted;mute.textContent=media.muted?'恢复声音':'静音'});box.append(top);

@@ -127,6 +127,8 @@ def suggest(preview):
                "input": canonical(preview["context"])}
     if effort != "off":
         payload["reasoning"] = {"effort": effort}
+    from .external_budget import reserve
+    reserve()
     request = Request("https://api.openai.com/v1/responses", data=json.dumps(payload, ensure_ascii=False).encode(),
                       headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
     with urlopen(request, timeout=30) as response:

@@ -6,7 +6,7 @@ function materialDefaultCandidate(model,data){
 function reviewSmallCard(parent,item,activate,selected=false){
   const button=productionButton(parent,'',()=>activate(button));button.className='material-small-card';button.setAttribute('aria-pressed',String(selected));button.title=item.title;
   const preview=el('span','material-small-preview');
-  if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src='/api/production/files/'+encodeURIComponent(item.preview.file);img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
+  if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src=reviewURL('/api/production/files/'+encodeURIComponent(item.preview.file));img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
   if(item.preview?.mime?.startsWith('image/'))button.append(preview);
   const content=el('span','material-small-copy'),heading=el('span','small-card-title'),icon=productionEntityIcon(item.icon);
   const type=productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
