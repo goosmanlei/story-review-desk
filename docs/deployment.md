@@ -8,6 +8,6 @@
 
 媒体保持原件哈希、Range、ETag 和压缩契约。可设置 `REVIEW_UPLOAD_RESERVE_BYTES`，服务器在流式上传前为所有并发上传累计预留空间，拒绝占用系统保留空间；默认根路径未设置此值时保留既有行为。
 
-体验 API 必须有独立服务端凭据及实际授权。`REVIEW_POLISH_BUDGET_FILE` 指向业务重置之外的持久计数文件，`REVIEW_POLISH_MAX_ATTEMPTS` 是累计请求尝试上限。实际请求前先持锁增加计数，失败、超时和业务重置均不清零；文件只保存次数，不保存草稿或密钥。未设置体验调用预算时拒绝真实请求；这不是完整 API 验收。
+体验 API 必须有服务端凭据及实际授权。`REVIEW_POLISH_BUDGET_FILE` 指向业务重置之外的持久计数文件，`REVIEW_POLISH_MAX_ATTEMPTS` 是累计请求尝试上限。可选 `REVIEW_POLISH_DAILY_LIMIT` 设置每日上限，`REVIEW_POLISH_BUDGET_TIMEZONE` 明确日期时区（默认 Asia/Shanghai）；两种上限同时设置时同时约束。实际请求前先持锁增加计数，失败、超时和业务重置均不清零；每日模式仅跨日期恢复当天预算，累计总次数保留。文件只保存日期和次数，不保存草稿或密钥。未设置体验调用预算时拒绝真实请求；这不是完整 API 验收。
 
 认证、独立维护页、全量替换、资源预算、准确快照和发布回执由实例的发布工具负责。仅设置路径和身份不能证明部署成功；需要真实浏览器及前缀内写入、重启、两次发布与维护／恢复验证。HTTP 与存储边界测试见 `tests/test_deployment.py`、`tests/deployment.test.cjs`，完整系统回归仍需保留。
