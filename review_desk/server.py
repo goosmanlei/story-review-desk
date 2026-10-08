@@ -5,6 +5,9 @@ import hashlib
 import time
 import queue
 import threading
+import os
+import shutil
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
@@ -30,6 +33,8 @@ class ReviewServer(HTTPServer):
         super().__init__(address, ReviewHandler)
         self.root = Path(instance_root).resolve()
         self.config = config
+        from .deployment import settings
+        self.deployment = settings()
         self._local = threading.local()
         self._local.store = Store(self.root / ".runtime" / "review.sqlite3")
         # Keep the reviewed deployment's rollback journal. Its bundled SQLite
@@ -43,8 +48,10 @@ class ReviewServer(HTTPServer):
         self.cache_version = source_version()
         attach(self.store, version=self.cache_version)
         from .web_assets import WebAssets
-        self.web_assets = WebAssets()
+        self.web_assets = WebAssets(self.deployment)
         self._requests = queue.Queue(maxsize=8)
+        self._upload_lock = threading.Lock()
+        self._upload_reserved = 0
         self._workers = [threading.Thread(target=self._work, name=f'review-worker-{i}') for i in range(4)]
         for worker in self._workers:
             worker.start()
@@ -59,6 +66,22 @@ class ReviewServer(HTTPServer):
         if (stat.st_dev, stat.st_ino) != self._local.store.file_identity:
             raise OSError('database replaced while serving; restart after restoration')
         return self._local.store
+
+    @contextmanager
+    def upload_budget(self, size):
+        reserve = int(os.environ.get('REVIEW_UPLOAD_RESERVE_BYTES', '0'))
+        if not reserve:
+            yield
+            return
+        with self._upload_lock:
+            if shutil.disk_usage(self.root).free < reserve + size + self._upload_reserved:
+                raise ValueError('上传空间不足，请保留服务器运行空间')
+            self._upload_reserved += size
+        try:
+            yield
+        finally:
+            with self._upload_lock:
+                self._upload_reserved -= size
 
     def process_request(self, request, address):
         # Four active connections and eight queued sockets; no per-request
@@ -99,6 +122,33 @@ class ReviewServer(HTTPServer):
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
+    def parse_request(self):
+        if not super().parse_request():
+            return False
+        prefix = self.server.deployment['base_path']
+        parsed = urlsplit(self.path)
+        if prefix:
+            if parsed.path == prefix and self.command == 'GET':
+                self.send_response(308)
+                self.send_header('Location', prefix + '/' + ('?' + parsed.query if parsed.query else ''))
+                self.send_header('Cache-Control', 'no-store')
+                self.send_header('Content-Length', '0')
+                self.end_headers()
+                return False
+            if not parsed.path.startswith(prefix + '/'):
+                self.send_error(404)
+                return False
+            self.path = self.path[len(prefix):]
+        publication = self.server.deployment['publication_id']
+        supplied = self.headers.get('X-Review-Publication')
+        if publication and urlsplit(self.path).path.startswith('/api/') and (
+                supplied is not None and supplied != publication or
+                self.command not in ('GET', 'HEAD', 'OPTIONS') and supplied != publication):
+            self._json({'error': '体验版本已更新，请刷新页面后重新操作',
+                        'publication_changed': True}, 409)
+            return False
+        return True
+
     cache_paths = frozenset(('/api/production/index', '/api/production/breakdown',
         '/api/production/card', '/api/production/scene', '/api/production/materials',
         '/api/sources', '/api/screenplays', '/api/business-codes'))
@@ -341,7 +391,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
             except (ValueError, TypeError, OSError) as exc:
                 return self._json({"error": str(exc)}, 400)
         if path == "/api/instance":
-            return self._json({"id": self.server.config["id"], "title": self.server.config["title"]})
+            return self._json({"id": self.server.config["id"], "title": self.server.config["title"],
+                               **({"deployment": self.server.deployment} if self.server.deployment["base_path"] or self.server.deployment["publication_id"] else {})})
         if path == "/api/production-approach":
             try:
                 return self._json(read_document(self.server.root))
@@ -511,7 +562,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 size = int(self.headers.get("Content-Length", "0"))
                 if not 0 < size <= 8 * 1024 ** 3:
                     raise ValueError("media upload requires Content-Length between 1 byte and 8 GiB")
-                result = ingest(self.server.root, self.rfile, self.path.rsplit("/", 1)[1], size)
+                with self.server.upload_budget(size):
+                    result = ingest(self.server.root, self.rfile, self.path.rsplit("/", 1)[1], size)
                 return self._json(result, 201)
             except (ValueError, TypeError, OSError) as exc:
                 return self._json({"error": str(exc)}, 400)

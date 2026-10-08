@@ -1,3 +1,48 @@
+// URL and browser persistence share one explicit environment/publication boundary.
+const reviewDeployment=globalThis.REVIEW_DEPLOYMENT||{base_path:'',publication_id:'',experience:false};
+function reviewURL(value){
+  if(typeof value!=='string'||!value.startsWith('/')||value.startsWith('//'))return value;
+  const prefix=(globalThis.REVIEW_DEPLOYMENT||{}).base_path;
+  if(!prefix||value===prefix||value.startsWith(prefix+'/'))return value;
+  return prefix+value;
+}
+function reviewPublicationChanged(){
+  if(typeof location!=='undefined')location.reload();
+  throw Error('体验版本已更新，请刷新页面后重新操作');
+}
+function reviewStorage(name){
+  const scope='review-env:'+encodeURIComponent(reviewDeployment.base_path||'/')+':';
+  const identity=reviewDeployment.publication_id;
+  const prefix=identity?scope+identity+':':'';
+  const current=scope+'current';
+  let tracked=false;
+  function storage(){
+    const native=globalThis[name];
+    if(identity&&tracked&&native.getItem(current)!==identity)reviewPublicationChanged();
+    return native;
+  }
+  if(identity){
+    try{
+      const native=globalThis[name],keys=[];
+      for(let i=0;i<native.length;i++)keys.push(native.key(i));
+      for(const key of keys)if(key?.startsWith(scope)&&key!==current&&!key.startsWith(prefix))native.removeItem(key);
+      native.setItem(current,identity);
+      tracked=true;
+    }catch{ /* Existing draft failure handling remains responsible for unavailable storage. */ }
+  }
+  return {getItem:key=>storage().getItem(prefix+key),setItem:(key,value)=>storage().setItem(prefix+key,value),removeItem:key=>storage().removeItem(prefix+key)};
+}
+const localStorage=reviewDeployment.publication_id?reviewStorage('localStorage'):globalThis.localStorage,sessionStorage=reviewDeployment.publication_id?reviewStorage('sessionStorage'):globalThis.sessionStorage;
+async function reviewFetch(path,options={}){
+  const publication=(globalThis.REVIEW_DEPLOYMENT||{}).publication_id;
+  const headers={...(options.headers||{}),...(publication?{'X-Review-Publication':publication}:{})};
+  const response=await fetch(reviewURL(path),{...options,headers});
+  if(response.status===409&&publication){
+    const data=await response.clone().json().catch(()=>null);
+    if(data?.publication_changed)reviewPublicationChanged();
+  }
+  return response;
+}
 const state={sources:[],comments:[],current:null,anchor:null,editing:null,selected:null,historyOpen:false,historyLimit:20,suggestion:null,preview:null,previewExpanded:false,framework:null,configurations:null,workspace:'story.sources',configSection:'PROJECT',expandedGroups:new Set(),expandedSources:new Set(),sourceChapter:null,structure:null,structureRevision:null,drawMode:null,screenplays:[],screenplaySummaries:new Map(),screenplayVersion:null,screenplayEpisode:null,screenplayScene:null};
 const $=s=>document.querySelector(s);
 const el=(tag,cls,text)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(text!==undefined)node.textContent=text;return node};
@@ -14,7 +59,7 @@ function unpackReviewGraph(graph){
   }
   return read(graph.root);
 }
-const api=async(path,options={})=>{const response=await fetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
+const api=async(path,options={})=>{const response=await reviewFetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
 const isStructure=()=>state.workspace==='story.outline';
@@ -135,7 +180,7 @@ const renderActiveReader=()=>state.reviewReferenceContext?paintProductionReview(
 const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
-function link(label,url,parent){const a=el('a',null,label);a.href=url;a.target='_blank';a.rel='noopener noreferrer';parent.append(a);return a}
+function link(label,url,parent){const a=el('a',null,label);a.href=reviewURL(url);a.target='_blank';a.rel='noopener noreferrer';parent.append(a);return a}
 
 // Count records, including closed comments, on the exact displayed revision.
 function revisionCommentCount(objectId,revisionId){
@@ -345,7 +390,7 @@ function renderPlaceholder(id){
   const button=nodeText('button','primary','返回故事采编',card);button.type='button';button.onclick=()=>switchWorkspace('story.sources');root.append(card);
 }
 
-function applyFavicon(){const previous=$("#site-favicon"),icon=state.configurations.favicon;if(previous&&icon){const link=document.createElement("link");link.id="site-favicon";link.rel="icon";link.type=icon.mime;link.href=icon.url;previous.replaceWith(link)}}
+function applyFavicon(){const previous=$("#site-favicon"),icon=state.configurations.favicon;if(previous&&icon){const link=document.createElement("link");link.id="site-favicon";link.rel="icon";link.type=icon.mime;link.href=reviewURL(icon.url);previous.replaceWith(link)}}
 
 function configurationDraft(scope,value){
   if(typeof sessionStorage==='undefined')return null;
@@ -419,10 +464,10 @@ function renderConfigurations({preserve=false}={}){
         const status=nodeText('p','favicon-status','',label);status.setAttribute('role','status');
         let unavailableFile=data.favicon_error?record.body[key]:'',errorStatus,uploadNote='';
         const show=()=>{
-          preview.src=input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg';
+          preview.src=reviewURL(input.value&&input.value!==unavailableFile?'/assets/'+encodeURIComponent(input.value):'/default-favicon.svg');
           const changed=input.value!==record.body[key];status.textContent=uploadNote|| (changed?'选择已变化，尚未保存。':'预览与已保存选择一致。');
         };
-        refreshIcon=()=>{currentPreview.src=state.configurations.favicon?.url||'/default-favicon.svg';if(input.value===record.body[key])uploadNote='';show()};refreshIcon();
+        refreshIcon=()=>{currentPreview.src=reviewURL(state.configurations.favicon?.url||'/default-favicon.svg');if(input.value===record.body[key])uploadNote='';show()};refreshIcon();
         const selectLabel=el('label','favicon-select-label');nodeText('span',null,'选择已有图标',selectLabel);selectLabel.append(input);label.append(selectLabel);
         input.onchange=()=>{uploadNote='';show()};
         const actions=el('div','favicon-actions'),uploadLabel=el('label','favicon-upload');nodeText('span',null,'上传新图标',uploadLabel);
@@ -563,7 +608,7 @@ function renderDocument(){
   if(source.media){const media=el('section','source-media');nodeText('strong',null,source.media.file?'演出资料 · 本实例媒体':'演出资料 · 第三方平台',media);
     if(source.media.file){const url=`/assets/${encodeURIComponent(source.media.file)}`;
       if(source.media.kind==='audio')reviewMediaPlayer(media,{id:source.media.file,file:source.media.file,mime:'audio/mpeg'}, {id:source.target_revision_id,object_id:source.id}, {},false,{src:url});
-      else{const player=el('video');player.controls=true;player.preload='metadata';player.src=url;player.playsInline=true;media.append(player);const download=el('a',null,'下载视频 ↓');download.href=url;download.download=source.media.file;media.append(download)}
+      else{const player=el('video');player.controls=true;player.preload='metadata';player.src=reviewURL(url);player.playsInline=true;media.append(player);const download=el('a',null,'下载视频 ↓');download.href=reviewURL(url);download.download=source.media.file;media.append(download)}
     }
     if(source.media.url)link(source.media.label||'原始发布页面 ↗',source.media.url,media);
     nodeText('p',null,source.media.note||'请核对演出元数据和整理文本。',media);doc.append(media)}
@@ -992,7 +1037,7 @@ async function init(){try{
     if(workspace!=='story.sources'||previous!==workspace)switchWorkspace(workspace,false);
     restoreSourceChapter(url,{force:sourceChanged||previous!==state.workspace});
   });
-  $('#brand-home').onclick=()=>location.assign('/');
+  $('#brand-home').onclick=()=>location.assign(reviewURL('/'));
   $('#screenplay-comments').onclick=togglePanel;
   $('#comments-toggle').onclick=toggleCommentsFromReader;$('#comments-close').onclick=closePanel;
   document.addEventListener('keydown',event=>{

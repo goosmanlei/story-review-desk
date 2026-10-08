@@ -142,7 +142,7 @@ function openStructureImage(visual,trigger,mediaBase='/assets/'){
   hideSelectionAction();
   const {dialog,body}=openReviewDialog(visual.title,trigger,'structure-image-dialog','关闭放大图');
   body.classList.add('structure-image-canvas');
-  const image=el('img');image.src=`${mediaBase}${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;body.append(image);
+  const image=el('img');image.src=reviewURL(`${mediaBase}${encodeURIComponent(visual.file)}`);image.alt=visual.alt||visual.title;image.draggable=false;body.append(image);
   const size=nodeText('button','structure-image-size','原始尺寸',dialog.querySelector('.review-dialog-header'));
   size.type='button';size.setAttribute('aria-pressed','false');
   size.onclick=()=>{const original=body.classList.toggle('original-size');size.textContent=original?'适应窗口':'原始尺寸';size.setAttribute('aria-pressed',String(original))};
@@ -157,7 +157,7 @@ function renderStructureVisual(visual,preview=false){
   if(Number(size.width)>0&&Number(size.height)>0){img.width=Number(size.width);img.height=Number(size.height)}
   img.addEventListener('load',()=>{if(img.naturalWidth&&img.naturalHeight){structureVisualSizes.set(visual.file,{width:img.naturalWidth,height:img.naturalHeight});img.width=img.naturalWidth;img.height=img.naturalHeight}scheduleStructureIndex()});
   img.addEventListener('error',scheduleStructureIndex);
-  img.src=`/assets/${encodeURIComponent(visual.file)}`;img.alt=visual.alt;stage.append(img);
+  img.src=reviewURL(`/assets/${encodeURIComponent(visual.file)}`);img.alt=visual.alt;stage.append(img);
   if(preview){
     img.classList.add('structure-image-trigger');img.dataset.reviewDialogTrigger='';img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
     img.onclick=()=>openStructureImage(visual,img);

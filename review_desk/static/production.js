@@ -352,7 +352,7 @@ function productionFields(parent,fields){const dl=el('dl','production-fields');f
 function productionList(parent,title,items){if(!items?.length)return;nodeText('h3',null,title,parent);const list=el('ul');for(const item of items){const row=el('li');if(typeof item==='string')row.textContent=item;else if(item.speaker){nodeText('p',null,`${item.speaker}${item.type==='singing'?'（演唱）':'（对白）'}：${item.text}`,row);if(item.fps&&Number.isFinite(item.planned_start_frame))nodeText('small',null,`镜内预计 ${(item.planned_start_frame/item.fps).toFixed(2)}–${(item.planned_end_frame/item.fps).toFixed(2)} 秒；${item.timing_status}`,row);productionRefLink(row,item.source,'查看原文')}else row.textContent=item.description||JSON.stringify(item);list.append(row)}parent.append(list)}
 function productionMedia(parent,component,review=true){
   const url='/api/production/files/'+encodeURIComponent(component.file);
-  if(component.mime.startsWith('image/')){if(review)parent.append(renderStructureVisual({...component,title:reviewPositionText(state.productionSelected.payload.title),alt:reviewPositionText(state.productionSelected.payload.title),description:`${component.role} · ${component.width}×${component.height}`},true));else{const img=el('img');img.width=component.width;img.height=component.height;img.src=url;img.alt=component.id;parent.append(img)}}
+  if(component.mime.startsWith('image/')){if(review)parent.append(renderStructureVisual({...component,title:reviewPositionText(state.productionSelected.payload.title),alt:reviewPositionText(state.productionSelected.payload.title),description:`${component.role} · ${component.width}×${component.height}`},true));else{const img=el('img');img.width=component.width;img.height=component.height;img.src=reviewURL(url);img.alt=component.id;parent.append(img)}}
   else if(component.mime.startsWith('audio/')||component.mime.startsWith('video/'))reviewMediaPlayer(parent,component,state.productionSelected,{},review);
   if(!component.mime.startsWith('audio/'))link(`下载 ${component.role} · ${component.file.slice(0,12)}…`,url,parent);nodeText('p','production-meta',`${component.mime} · ${component.bytes.toLocaleString()} bytes · SHA-256 ${component.sha256}`,parent);
 }
@@ -455,7 +455,7 @@ function showProductionJudgment(root){
   const same=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
   const controls=()=>{for(const node of [verdict,actor,reason,save])node.disabled=saving||saved};
   const readAttempt=async request=>{
-    const response=await fetch('/api/production?object_id='+encodeURIComponent(request.object_id));
+    const response=await reviewFetch('/api/production?object_id='+encodeURIComponent(request.object_id));
     if(response.status===404)return 'absent';
     const value=await response.json();if(!response.ok||!value.record)throw Error('审阅保存结果暂无法核实');
     const row=value.record;
@@ -639,7 +639,7 @@ function showProductionChange(parent,change,options={}){
   const samePayload=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
   const readAttempt=async request=>{
     // Read back this exact request without advancing the editor's version.
-    const response=await fetch('/api/production?object_id='+encodeURIComponent(request.object_id));
+    const response=await reviewFetch('/api/production?object_id='+encodeURIComponent(request.object_id));
     if(response.status===404)return request.expected_version===0?'unchanged':'changed';
     const data=await response.json();if(!response.ok||!data.record)throw Error('复核保存结果暂无法核实');
     const current=data.record;

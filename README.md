@@ -31,6 +31,8 @@ Python 服务对套接字读写设置两秒空闲超时，浏览器只预连而�
 
 各子页共用“短标识、页面标题、用途说明”页头，菜单、版本与表单采用浅色纸面和绿色选中状态。系统与 AI 的图标、评论润色分区仍使用同一保存机制；上下文字数限制为 1000—30000，模型与推理强度从服务端目录联动。导航、控件与配置交互的维护入口见[界面约定](docs/interface.md)。
 
+子路径部署、体验提示、发布身份隔离、旧页面写入拒绝和独立 API 累计预算见 [部署契约](docs/deployment.md)。
+
 ## 数据访问与公开同步
 
 导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框、资料总数或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放；音频不显示下载入口，受管文件与后台导出保持可用；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
