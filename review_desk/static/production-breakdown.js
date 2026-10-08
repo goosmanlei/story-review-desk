@@ -182,7 +182,7 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
     if(span.start<offset)continue;
     pre.append(document.createTextNode(block.text.slice(offset,span.start)));const input=span.input;
     if(input?.ref&&(!input.missing||input.slot?.record)){
-      const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=materialReferenceRequest(input.ref,false).url;a.textContent=span.text;
+      const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=reviewURL(materialReferenceRequest(input.ref,false).url);a.textContent=span.text;
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
       if(span.entity)a.setAttribute('aria-label','@'+span.text+'；'+a.title);
       a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
