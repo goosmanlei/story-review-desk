@@ -1,6 +1,91 @@
 /* Instance-owned reading material. No production state or progress is stored here. */
 let approachDocument = null;
+let approachContent = null;
 let approachIndexFrame = 0, approachIndexObserver = null;
+
+function approachTabs() {
+  return approachContent?.tabs || [{id: 'story', label: '故事创作'}, {id: 'materials', label: '生产制作'}];
+}
+
+function approachSelectedTab(params = new URL(location.href).searchParams) {
+  return approachTabs().find(tab => tab.id === params.get('tab')) || approachTabs()[0];
+}
+
+function approachInline(parent, text) {
+  // A small text-only format: code, emphasis and explicit links. No HTML,
+  // media, or implicit network requests from instance prose. Local media uses
+  // explicit validated blocks rather than arbitrary prose URLs.
+  const pattern = /`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\(([^\s)]+)\)/g;
+  let start = 0;
+  for (const match of text.matchAll(pattern)) {
+    parent.append(document.createTextNode(text.slice(start, match.index)));
+    if (match[1]) nodeText('code', null, match[1], parent);
+    else if (match[2]) nodeText('strong', null, match[2], parent);
+    else {
+      let url;
+      try { url = new URL(match[4], location.href); } catch (_) { /* Display malformed links as text. */ }
+      if (url && (url.protocol === 'https:' || (url.origin === location.origin && match[4].startsWith('/?')))) {
+        const link = nodeText('a', null, match[3], parent); link.href = url.href;
+        if (url.origin !== location.origin) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
+      } else parent.append(document.createTextNode(match[0]));
+    }
+    start = match.index + match[0].length;
+  }
+  parent.append(document.createTextNode(text.slice(start)));
+}
+
+function approachTable(content, title, rich = false) {
+  const table = el('table', 'approach-table');
+  nodeText('caption', 'visually-hidden', title, table);
+  const head = el('thead'), tr = el('tr');
+  for (const column of content.columns) { const th = nodeText('th', null, column, tr); th.scope = 'col'; }
+  head.append(tr); table.append(head);
+  const body = el('tbody');
+  for (const row of content.rows) {
+    const line = el('tr');
+    row.forEach((value, i) => {
+      const cell = nodeText(i === 0 ? 'th' : 'td', null, rich ? '' : value, line);
+      if (rich) approachInline(cell, value);
+      cell.dataset.label = content.columns[i]; if (i === 0) cell.scope = 'row';
+    });
+    body.append(line);
+  }
+  table.append(body); return table;
+}
+
+function renderApproachBlocks(article, blocks, title) {
+  for (const block of blocks) {
+    if (block.type === 'media') {
+      const figure = el('figure', 'approach-media');
+      const media = el(block.kind === 'image' ? 'img' : block.kind);
+      if (block.kind !== 'audio') { media.width = block.width; media.height = block.height; }
+      media.src = '/approach-media/' + encodeURIComponent(block.file);
+      if (block.kind === 'image') { media.alt = block.caption; media.loading = 'lazy'; media.decoding = 'async'; }
+      else {
+        media.controls = true; media.preload = 'metadata';
+        media.setAttribute('aria-label', block.caption);
+        if (block.kind === 'video') media.playsInline = true;
+        media.addEventListener('play', () => {
+          for (const other of article.closest('#approach-body')?.querySelectorAll('audio,video') || []) if (other !== media) other.pause();
+        });
+      }
+      figure.append(media); nodeText('figcaption', null, block.caption, figure);
+      article.append(figure); continue;
+    }
+    if (block.type === 'table') { article.append(approachTable(block, title, true)); continue; }
+    if (block.type === 'code') {
+      const pre = el('pre', 'approach-prompt');
+      nodeText('code', null, block.text, pre); article.append(pre); continue;
+    }
+    if (block.type === 'list') {
+      const list = el(block.ordered ? 'ol' : 'ul', 'approach-list');
+      for (const text of block.items) { const item = el('li'); approachInline(item, text); list.append(item); }
+      article.append(list); continue;
+    }
+    const paragraph = el(block.type === 'heading' ? `h${block.level + 1}` : 'p');
+    approachInline(paragraph, block.text); article.append(paragraph);
+  }
+}
 
 function scheduleApproachIndex() {
   if (approachIndexFrame || $('#approach-view').hidden) return;
@@ -57,7 +142,8 @@ function restoreApproachAnchor() {
 
 async function renderApproach() {
   const host = $('#approach-body');
-  const selected = new URL(location.href).searchParams.get('tab') === 'materials' ? 'materials' : 'story';
+  const requested = new URL(location.href).searchParams.get('tab') || 'story';
+  const selected = approachContent ? approachSelectedTab().id : requested;
   if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   host.setAttribute('aria-labelledby', `approach-tab-${selected}`);
   // Hash navigation must keep the mounted text and its browser reading position.
@@ -70,23 +156,32 @@ async function renderApproach() {
   try {
     if (!approachDocument) approachDocument = api('/api/production-approach').catch(error => { approachDocument = null; throw error; });
     const guide = await approachDocument;
+    approachContent = guide;
     // A fast tab switch must not let the previous request replace the selected text.
-    const current = new URL(location.href).searchParams.get('tab') === 'materials' ? 'materials' : 'story';
-    if (current !== selected) return;
+    const current = new URL(location.href).searchParams.get('tab') || 'story';
+    if (current !== requested) return;
     host.replaceChildren();
     if (!guide) { nodeText('p', 'approach-note', '本实例尚未提供制作方法文档。已有故事与审阅功能可继续使用。', host); return; }
-    const tab = guide.tabs.find(item => item.id === selected);
+    const tab = approachSelectedTab();
+    if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
+    host.setAttribute('aria-labelledby', `approach-tab-${tab.id}`);
     nodeText('h2', null, tab.title, host);
     nodeText('p', 'approach-lead', tab.lead, host);
     $('#approach-index-title').textContent = tab.label;
     index.setAttribute('aria-label', `${tab.label}阅读目录`);
     for (const section of tab.sections) {
       const a = nodeText('a', 'source-chapter-button', section.title, index); a.href = `#approach-${tab.id}-${section.id}`;
+      a.addEventListener('click', event => {
+        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && a.hash === location.hash) {
+          event.preventDefault(); restoreApproachAnchor();
+        }
+      });
     }
     sidebar.hidden = !tab.sections.length;
     for (const section of tab.sections) {
       const article = el('section', 'approach-section'); article.id = `approach-${tab.id}-${section.id}`;
       nodeText('h3', null, section.title, article);
+      if (section.blocks) renderApproachBlocks(article, section.blocks, section.title);
       for (const text of section.paragraphs || []) nodeText('p', null, text, article);
       if (section.flow) {
         const flow = el('ol', 'approach-flow'); flow.setAttribute('aria-label', section.title + '：顺序流程');
@@ -94,18 +189,7 @@ async function renderApproach() {
         article.append(flow);
       }
       if (section.table) {
-        const table = el('table', 'approach-table');
-        nodeText('caption', 'visually-hidden', section.title, table);
-        const head = el('thead'), tr = el('tr');
-        for (const column of section.table.columns) { const th = nodeText('th', null, column, tr); th.scope = 'col'; }
-        head.append(tr); table.append(head);
-        const body = el('tbody');
-        for (const row of section.table.rows) {
-          const line = el('tr');
-          row.forEach((value, i) => { const cell = nodeText(i === 0 ? 'th' : 'td', null, value, line); cell.dataset.label = section.table.columns[i]; if (i === 0) cell.scope = 'row'; });
-          body.append(line);
-        }
-        table.append(body); article.append(table);
+        article.append(approachTable(section.table, section.title));
       }
       if (section.note) nodeText('p', 'approach-note', section.note, article);
       if (section.links) {
@@ -123,7 +207,7 @@ async function renderApproach() {
       }
       host.append(article);
     }
-    host.dataset.tab = selected;
+    host.dataset.tab = tab.id;
     approachIndexObserver = new ResizeObserver(scheduleApproachIndex);
     for (const node of [host, sidebar, $('.workspace-topbar')]) approachIndexObserver.observe(node);
     restoreApproachAnchor();

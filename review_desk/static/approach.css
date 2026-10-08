@@ -20,6 +20,13 @@
 .approach-section { margin-top: 36px; scroll-margin-top: var(--approach-scroll-offset,90px); }
 .approach-section h3 { font-size: 22px; margin: 0 0 16px; line-height: 1.5; }
 .approach-section p { margin: 12px 0; }
+.approach-section h4 { margin: 26px 0 10px; font-size: 19px; line-height: 1.6; }
+.approach-section h5 { margin: 22px 0 8px; font-size: 17px; line-height: 1.6; }
+.approach-list { padding-left: 1.6em; }
+.approach-list li { margin: 8px 0; }
+.approach-body code { font-size: .9em; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+.approach-prompt { margin: 18px 0; padding: 18px; border: 1px solid var(--desk-line); background: #f3eddf; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; }
+.approach-prompt code { white-space: inherit; }
 .approach-note { padding: 15px 18px; border-left: 3px solid #496752; background: #eee9dc; }
 .approach-flow { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 12px; list-style: none; counter-reset: step; padding: 0; }
 .approach-flow li { counter-increment: step; padding: 16px; border: 1px solid var(--desk-line); background: #f3ecdf; }
@@ -32,6 +39,10 @@
 .approach-table tbody th { min-width: 6em; font-weight: 600; background: #f3eddf; }
 .approach-links { padding-left: 22px; }
 .approach-links li { margin: 8px 0; }
+.approach-media { margin: 24px 0; }
+.approach-media img,.approach-media video,.approach-media audio { display: block; width: 100%; max-width: 100%; height: auto; }
+.approach-media video { background: #17211e; }
+.approach-media figcaption { margin-top: 8px; color: var(--desk-muted); font-size: 14px; line-height: 1.6; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 900px) { .approach-flow { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 1000px) {
