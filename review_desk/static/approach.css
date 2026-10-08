@@ -18,6 +18,7 @@
 .approach-lead { color: #4a5146; }
 .approach-body a { color: #754337; text-underline-offset: 4px; }
 .approach-section { margin-top: 36px; scroll-margin-top: var(--approach-scroll-offset,90px); }
+.approach-anchor { scroll-margin-top: var(--approach-scroll-offset,90px); }
 .approach-section h3 { font-size: 22px; margin: 0 0 16px; line-height: 1.5; }
 .approach-section p { margin: 12px 0; }
 .approach-section h4 { margin: 26px 0 10px; font-size: 19px; line-height: 1.6; }
@@ -42,6 +43,9 @@
 .approach-media { margin: 24px 0; }
 .approach-media img,.approach-media video,.approach-media audio { display: block; width: 100%; max-width: 100%; height: auto; }
 .approach-media video { background: #17211e; }
+.approach-media img { cursor: zoom-in; }
+.approach-media [hidden] { display: none; }
+.approach-media img:focus-visible { outline: 2px solid var(--desk-red); outline-offset: 3px; }
 .approach-media figcaption { margin-top: 8px; color: var(--desk-muted); font-size: 14px; line-height: 1.6; }
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 @media (max-width: 900px) { .approach-flow { grid-template-columns: 1fr 1fr; } }

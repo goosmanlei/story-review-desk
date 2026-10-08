@@ -2,11 +2,45 @@
 import json
 import re
 import hashlib
+import xml.etree.ElementTree as ET
 
 MEDIA_TYPES = {'.png': ('image', 'image/png'), '.jpg': ('image', 'image/jpeg'),
                '.jpeg': ('image', 'image/jpeg'), '.webp': ('image', 'image/webp'),
                '.mp4': ('video', 'video/mp4'), '.webm': ('video', 'video/webm'),
-               '.mp3': ('audio', 'audio/mpeg'), '.wav': ('audio', 'audio/wav')}
+               '.mp3': ('audio', 'audio/mpeg'), '.wav': ('audio', 'audio/wav'),
+               '.svg': ('image', 'image/svg+xml')}
+
+
+def validate_diagram(raw):
+    """Method diagrams are passive shapes/text, never executable SVG documents."""
+    try:
+        source = raw.decode('utf-8')
+        if '<!' in source or '<?' in source or '\x00' in source:
+            raise ValueError('method diagram declarations and processing instructions are forbidden')
+        root = ET.fromstring(source)
+    except (UnicodeDecodeError, ET.ParseError) as error:
+        raise ValueError('invalid method diagram') from error
+    allowed = {'svg', 'g', 'path', 'rect', 'circle', 'ellipse', 'line', 'polyline',
+               'polygon', 'text', 'tspan', 'title', 'desc', 'defs', 'marker'}
+    attributes = {'id', 'class', 'role', 'aria-labelledby', 'aria-label', 'viewBox',
+                  'width', 'height', 'x', 'y', 'x1', 'x2', 'y1', 'y2', 'cx', 'cy',
+                  'r', 'rx', 'ry', 'd', 'points', 'transform', 'fill', 'fill-opacity',
+                  'fill-rule', 'stroke', 'stroke-width', 'stroke-dasharray',
+                  'stroke-linecap', 'stroke-linejoin', 'stroke-opacity', 'opacity',
+                  'font-family', 'font-size', 'font-weight', 'text-anchor',
+                  'dominant-baseline', 'dx', 'dy', 'marker-start', 'marker-mid',
+                  'marker-end', 'markerHeight', 'markerWidth', 'markerUnits',
+                  'orient', 'refX', 'refY', 'preserveAspectRatio'}
+    namespace = '{http://www.w3.org/2000/svg}'
+    require_root = root.tag == namespace + 'svg'
+    for element in root.iter():
+        if not require_root or element.tag not in {namespace + tag for tag in allowed}:
+            raise ValueError('unsupported method diagram element')
+        for key, value in element.attrib.items():
+            if key not in attributes or '://' in value or '\\' in value:
+                raise ValueError('method diagram external or executable attribute')
+            if 'url' in value.lower() and not re.fullmatch(r'url\(#[A-Za-z0-9_-]+\)', value):
+                raise ValueError('method diagram external style reference')
 
 
 def media_type(filename):
@@ -34,6 +68,8 @@ def media_file(root, filename):
         for chunk in iter(lambda: stream.read(1024 * 1024), b''): digest.update(chunk)
     if any(block['sha256'] != digest.hexdigest() for block in declared):
         raise ValueError('method media differs from declared content')
+    if path.suffix == '.svg':
+        validate_diagram(path.read_bytes())
     return path, media_type(filename)[1]
 
 
@@ -57,7 +93,7 @@ def read_document(root):
         require(isinstance(content["rows"], list))
         require(all(strings(row) and len(row) == len(content["columns"]) for row in content["rows"]))
 
-    def blocks(items):
+    def blocks(items, ids):
         require(isinstance(items, list))
         for block in items:
             kind = block["type"]
@@ -76,6 +112,9 @@ def read_document(root):
                 require(isinstance(block["text"], str))
             if kind == "heading":
                 require(type(block["level"]) is int and block["level"] in (3, 4))
+                if 'id' in block:
+                    require(identifier(block['id']) and block['id'] not in ids)
+                    ids.add(block['id'])
             if kind == "code":
                 require(isinstance(block.get("language", ""), str))
             if kind == "list":
@@ -95,15 +134,18 @@ def read_document(root):
             require(all(isinstance(tab[key], str) for key in ("label", "title", "lead")))
             require(isinstance(tab["sections"], list))
             ids = set()
+            section_ids = [section['id'] for section in tab['sections']]
+            require(all(isinstance(id, str) for id in section_ids))
+            require(len(set(section_ids)) == len(section_ids))
+            ids.update(section_ids)
             for section in tab["sections"]:
                 require(isinstance(section["id"], str) and section["id"].isascii())
-                require(section["id"].replace("-", "").isalnum() and section["id"] not in ids)
-                ids.add(section["id"])
+                require(section["id"].replace("-", "").isalnum())
                 require(isinstance(section["title"], str))
                 if "blocks" in section:
                     require(value["schema_version"] == 2)
                     require(not any(key in section for key in ("paragraphs", "flow", "table", "note", "links")))
-                    blocks(section["blocks"])
+                    blocks(section["blocks"], ids)
                 require(strings(section.get("paragraphs", [])))
                 if "note" in section:
                     require(isinstance(section["note"], str))

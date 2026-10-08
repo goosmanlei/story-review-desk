@@ -40,6 +40,10 @@ body.structure-image-open{overflow:hidden}
 
 .structure-image-canvas{flex:1;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;padding:0 16px 16px}
 .structure-image-canvas img{display:block;width:100%;height:100%;object-fit:contain}
+.structure-image-size{flex:0 0 auto;align-self:center;white-space:nowrap}
+.structure-image-dialog .review-dialog-close{order:1}
+.structure-image-canvas.original-size{display:block;overflow:auto}
+.structure-image-canvas.original-size img{width:auto;height:auto;max-width:none;max-height:none}
 @media(max-width:700px){.structure-image-dialog{width:calc(100vw - 16px);height:calc(100vh - 16px);height:calc(100dvh - 16px)}.structure-image-canvas{padding:0 8px 8px}}
 
 .structure-versions button { display: grid; gap: 4px; text-align: left; }
