@@ -11,7 +11,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit
 
 from .favicon import current as current_favicon, choices as favicon_choices, upload as upload_favicon
-from .approach import read_document
+from .approach import read_document, media_file
 from .configuration import catalog as configuration_catalog
 from .framework import catalog as framework_catalog
 from .polish import build_context, suggest
@@ -339,6 +339,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(read_document(self.server.root))
             except (ValueError, OSError):
                 return self._json({"error": "实例制作方法文档格式错误或无法读取"}, 503)
+        if path.startswith('/approach-media/'):
+            try:
+                media, mime = media_file(self.server.root, path[len('/approach-media/'):])
+                return self._file(media, mime)
+            except FileNotFoundError:
+                return self._json({'error': 'method media not found'}, 404)
+            except (ValueError, OSError):
+                return self._json({'error': 'method media unavailable or changed'}, 503)
         if path == "/api/sources":
             sources = store.sources(metadata=query.get('metadata')==['1'])
             if query.get("with_revision") == ["1"]:

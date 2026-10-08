@@ -25,6 +25,18 @@ test('four main pages use one subtab container with one selected and keyboard-fo
 test('arrow and Home/End activate exact subtabs and preserve keyboard focus after rendering',()=>{
  const f=fixture('story.sources'),press=(index,key)=>f.root.children[index].onkeydown({key,preventDefault(){}});press(0,'ArrowRight');assert.equal(f.context.state.workspace,'story.outline');assert.equal(f.document.activeElement.id,'open-story-structure');press(1,'End');assert.equal(f.context.state.workspace,'story.script');press(2,'Home');assert.equal(f.context.state.workspace,'story.sources');const before=f.requests.length;f.root.children[0].onclick();assert.equal(f.requests.length,before);
 });
+test('instance method tabs share navigation and preserve legacy routes',()=>{
+ const f=fixture('production.approach','&tab=another-method');
+ f.context.approachTabs=()=>[{id:'story',label:'故事创作'},{id:'materials',label:'生产制作'},{id:'another-method',label:'实例方法'}];
+ f.context.renderWorkspaceTabs();
+ assert.deepEqual(f.root.children.map(n=>n.textContent),['故事创作','生产制作','实例方法']);
+ assert.equal(f.root.children[2].attrs['aria-selected'],'true');
+ f.root.children[2].onkeydown({key:'Home',preventDefault(){}});
+ assert.equal(new URL(f.location.href).searchParams.get('tab'),'story');
+ f.root.children[1].onclick();assert.equal(new URL(f.location.href).searchParams.get('tab'),'materials');
+ f.location.href='http://fixture/?workspace=production.approach&tab=missing';f.context.renderWorkspaceTabs();
+ assert.equal(f.root.children[0].attrs['aria-selected'],'true');
+});
 test('production navigation creates one accurate route and removes old record selection',()=>{
  const f=fixture('materials.workspace','&production_tab=materials&production_object=old&material_target=old-candidate&breakdown_episode=ep-A');f.root.children[1].onclick();const u=new URL(f.location.href);assert.equal(f.requests.length,1);assert.equal(u.searchParams.get('workspace'),'settings.workspace');assert.equal(u.searchParams.get('production_tab'),'entities');assert.equal(u.searchParams.get('production_object'),null);assert.equal(u.searchParams.get('material_target'),null);assert.equal(u.searchParams.get('breakdown_episode'),'ep-A');assert.equal(f.root.children[1].attrs['aria-selected'],'true');
 });

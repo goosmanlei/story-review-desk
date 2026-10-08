@@ -103,8 +103,9 @@ function selectProductionTab(tab){
 function workspaceTabItems(){
   const workspace=state.workspace;
   if(workspace==='production.approach'){
-    const active=new URL(location.href).searchParams.get('tab')==='materials'?'materials':'story';
-    return [['story','故事创作'],['materials','生产制作']].map(([id,label])=>({id:'approach-tab-'+id,label,active:id===active,controls:'approach-body',open:()=>selectApproachTab(id)}));
+    const tabs=typeof approachTabs==='function'?approachTabs():[{id:'story',label:'故事创作'},{id:'materials',label:'生产制作'}];
+    const requested=new URL(location.href).searchParams.get('tab'),active=(tabs.find(tab=>tab.id===requested)||tabs[0]).id;
+    return tabs.map(({id,label})=>({id:'approach-tab-'+id,label,active:id===active,controls:'approach-body',open:()=>selectApproachTab(id)}));
   }
   if(['story.sources','story.outline','story.script'].includes(workspace))return [
     ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','剧本创作','screenplay-workspace']
@@ -135,6 +136,10 @@ function renderWorkspaceTabs(){
   if(focused)document.getElementById(focused)?.focus({preventScroll:true});
 }
 function workspacePageDescriptor(workspace,params){
+  if(workspace==='production.approach'&&typeof approachSelectedTab==='function'){
+    const tab=approachSelectedTab(params);
+    if(!['story','materials'].includes(tab.id))return ['制作方法',tab.label,'按目录阅读完整方法、模板与案例，形成方案后回到生产制作。'];
+  }
   if(workspace==='production.approach')return params.get('tab')==='materials'
     ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']
     :['从资料到故事','故事创作方法','了解采编、结构、小说与剧本的创作步骤，以及审阅意见如何推动修订。'];
