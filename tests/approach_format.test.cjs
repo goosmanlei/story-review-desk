@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),vm=require('node:vm');
 class Node{
- constructor(tag,text=''){this.tag=tag;this.textContent=text;this.children=[];this.dataset={};this.events={};this.attributes={}}
+ constructor(tag,text=''){this.tag=tag;this.textContent=text;this.children=[];this.dataset={};this.events={};this.attributes={};this.classList={add(){}}}
  append(node){this.children.push(node)}
  setAttribute(name,value){this.attributes[name]=value}
  addEventListener(name,fn){this.events[name]=fn}
@@ -15,6 +15,15 @@ test('rich text never interprets HTML, loads media or creates executable links',
  c.approachInline(p,'<img src="https://private.invalid/a"> **强调** `原样` [危险](javascript:alert) [安全](https://example.org/method)');
  assert.equal(text(p),'<img src="https://private.invalid/a"> 强调 原样 [危险](javascript:alert) 安全');
  const links=p.children.filter(n=>n.tag==='a');assert.equal(links.length,1);assert.equal(links[0].href,'https://example.org/method');assert.equal(links[0].rel,'noopener noreferrer');assert.equal(p.children.some(n=>n.tag==='img'),false);
+});
+test('subchapter targets keep stable names and diagrams use the shared reader dialog',()=>{
+ const c=fixture(),root=new Node('section');let opened;
+ c.openStructureImage=(visual,trigger,base)=>opened={visual,trigger,base};
+ c.renderApproachBlocks(root,[{type:'heading',level:3,id:'source-sp01',text:'来源 SP01'},{type:'media',kind:'image',file:'diagram.svg',caption:'机位关系',width:800,height:600}],'来源','filmcraft');
+ assert.equal(root.children[0].id,'approach-filmcraft-source-sp01');
+ const img=root.children[1].children[0]; img.events.click();
+ assert.equal(opened.base,'/approach-media/');assert.equal(opened.visual.file,'diagram.svg');assert.equal(opened.trigger,img);
+ assert.equal(img.attributes['aria-haspopup'],'dialog');
 });
 test('prompts preserve newlines and literal syntax while tables retain labelled cells',()=>{
  const c=fixture(),root=new Node('section'),prompt='0—2 秒：原样\n  <speaker> "$value"\n**不是强调**';
@@ -31,4 +40,16 @@ test('declared media uses local controls and pauses other method playback',()=>{
  assert.equal(image.width,1672);assert.equal(image.height,941);assert.equal(video.width,1280);assert.equal(video.height,720);
  assert.equal(text(root.children[0]),'<reference>');assert.equal(video.controls,true);assert.equal(video.preload,'metadata');assert.equal(video.autoplay,undefined);
  video.events.play();assert.equal(pauses,1);
+});
+test('method image reader is independent of a pending story-region selection',()=>{
+ const c=fixture(),body=new Node('div'),dialog=new Node('dialog'),header=new Node('header');let opened=0;
+ c.state={drawMode:'story-diagram'};c.hideSelectionAction=()=>{};
+ c.document.querySelector=()=>null;c.document.body=new Node('body');
+ dialog.querySelector=()=>header;
+ c.openReviewDialog=()=>{opened++;return{dialog,body}};
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/structure.js'),'utf8'),c);
+ c.openStructureImage({title:'story',file:'original.png'},null);assert.equal(opened,0);
+ c.openStructureImage({title:'method',file:'diagram.svg'},null,'/approach-media/');
+ assert.equal(opened,1);assert.equal(body.children[0].src,'/approach-media/diagram.svg');
+ assert.equal(c.state.drawMode,'story-diagram');assert.equal(header.children[0].textContent,'原始尺寸');
 });

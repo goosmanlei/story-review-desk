@@ -53,14 +53,21 @@ function approachTable(content, title, rich = false) {
   table.append(body); return table;
 }
 
-function renderApproachBlocks(article, blocks, title) {
+function renderApproachBlocks(article, blocks, title, tabId) {
   for (const block of blocks) {
     if (block.type === 'media') {
       const figure = el('figure', 'approach-media');
       const media = el(block.kind === 'image' ? 'img' : block.kind);
       if (block.kind !== 'audio') { media.width = block.width; media.height = block.height; }
       media.src = '/approach-media/' + encodeURIComponent(block.file);
-      if (block.kind === 'image') { media.alt = block.caption; media.loading = 'lazy'; media.decoding = 'async'; }
+      if (block.kind === 'image') {
+        media.alt = block.caption; media.loading = 'lazy'; media.decoding = 'async';
+        media.tabIndex = 0; media.setAttribute('role', 'button'); media.setAttribute('aria-haspopup', 'dialog');
+        media.setAttribute('aria-label', '放大查看：' + block.caption);
+        const show = () => openStructureImage({file: block.file, title: block.caption}, media, '/approach-media/');
+        media.addEventListener('click', show);
+        media.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); show(); } });
+      }
       else {
         media.controls = true; media.preload = 'metadata';
         media.setAttribute('aria-label', block.caption);
@@ -69,6 +76,10 @@ function renderApproachBlocks(article, blocks, title) {
           for (const other of article.closest('#approach-body')?.querySelectorAll('audio,video') || []) if (other !== media) other.pause();
         });
       }
+      media.addEventListener('error', () => {
+        media.hidden = true;
+        if (!figure.querySelector('.approach-note')) nodeText('p', 'approach-note', '此图文媒体加载失败。请刷新重试；仍失败时需核对文件与正文版本。', figure);
+      });
       figure.append(media); nodeText('figcaption', null, block.caption, figure);
       article.append(figure); continue;
     }
@@ -83,6 +94,10 @@ function renderApproachBlocks(article, blocks, title) {
       article.append(list); continue;
     }
     const paragraph = el(block.type === 'heading' ? `h${block.level + 1}` : 'p');
+    if (block.type === 'heading' && block.id && tabId) {
+      paragraph.id = `approach-${tabId}-${block.id}`;
+      paragraph.classList.add('approach-anchor');
+    }
     approachInline(paragraph, block.text); article.append(paragraph);
   }
 }
@@ -125,13 +140,14 @@ function restoreApproachAnchor() {
   if ($('#approach-view').hidden) return;
   syncApproachIndex();
   const target = document.getElementById(location.hash.slice(1));
-  if (target?.classList.contains('approach-section') && $('#approach-body').contains(target)) target.scrollIntoView({block: 'start'});
+  const owned = target && (target.classList.contains('approach-section') || target.classList.contains('approach-anchor')) && $('#approach-body').contains(target);
+  if (owned) target.scrollIntoView({block: 'start'});
   scheduleApproachIndex();
   // Workspace/browser scroll restoration runs after rendering. Only rescue a
   // partially covered anchor heading; keep deeper saved reading positions.
   const href = location.href;
   requestAnimationFrame(() => requestAnimationFrame(() => {
-    if (location.href !== href || $('#approach-view').hidden || !target) return;
+    if (location.href !== href || $('#approach-view').hidden || !owned) return;
     syncApproachIndex();
     const top = target.getBoundingClientRect().top;
     const offset = parseFloat($('#approach-body').style.getPropertyValue('--approach-scroll-offset'));
@@ -181,7 +197,7 @@ async function renderApproach() {
     for (const section of tab.sections) {
       const article = el('section', 'approach-section'); article.id = `approach-${tab.id}-${section.id}`;
       nodeText('h3', null, section.title, article);
-      if (section.blocks) renderApproachBlocks(article, section.blocks, section.title);
+      if (section.blocks) renderApproachBlocks(article, section.blocks, section.title, tab.id);
       for (const text of section.paragraphs || []) nodeText('p', null, text, article);
       if (section.flow) {
         const flow = el('ol', 'approach-flow'); flow.setAttribute('aria-label', section.title + '：顺序流程');

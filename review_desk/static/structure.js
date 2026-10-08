@@ -137,12 +137,15 @@ function paintStructureRegions(){
     if(active&&structureDrawing?.visual===visual)svg.append(drawPolygon(structureDrawing.points,'review-region drawing'));
   });
 }
-function openStructureImage(visual,trigger){
-  if(state.drawMode||structureDrawing||document.querySelector('.structure-image-dialog'))return;
+function openStructureImage(visual,trigger,mediaBase='/assets/'){
+  if((mediaBase==='/assets/'&&(state.drawMode||structureDrawing))||document.querySelector('.structure-image-dialog'))return;
   hideSelectionAction();
   const {dialog,body}=openReviewDialog(visual.title,trigger,'structure-image-dialog','关闭放大图');
   body.classList.add('structure-image-canvas');
-  const image=el('img');image.src=`/assets/${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;body.append(image);
+  const image=el('img');image.src=`${mediaBase}${encodeURIComponent(visual.file)}`;image.alt=visual.alt||visual.title;image.draggable=false;body.append(image);
+  const size=nodeText('button','structure-image-size','原始尺寸',dialog.querySelector('.review-dialog-header'));
+  size.type='button';size.setAttribute('aria-pressed','false');
+  size.onclick=()=>{const original=body.classList.toggle('original-size');size.textContent=original?'适应窗口':'原始尺寸';size.setAttribute('aria-pressed',String(original))};
   dialog.addEventListener('close',()=>document.body.classList.remove('structure-image-open'),{once:true});
   document.body.classList.add('structure-image-open');
 }

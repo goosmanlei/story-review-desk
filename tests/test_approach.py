@@ -10,6 +10,7 @@ from urllib.error import HTTPError
 from urllib.request import urlopen, Request
 
 from review_desk.server import ReviewServer
+from review_desk.approach import validate_diagram
 
 
 class ApproachTest(unittest.TestCase):
@@ -131,6 +132,40 @@ class ApproachTest(unittest.TestCase):
             broken = copy.deepcopy(value); broken['tabs'][2]['sections'][0]['blocks'][0].update(mutation)
             self.path.write_text(json.dumps(broken))
             with self.assertRaises(HTTPError): self.get('/api/production-approach')
+
+    def test_heading_targets_cannot_collide_or_escape_the_method_page(self):
+        value = {'schema_version': 2, 'tabs': [{'id': name, 'label': name, 'title': name, 'lead': '', 'sections': []}
+                                             for name in ('story', 'materials', 'filmcraft')]}
+        heading = {'type': 'heading', 'level': 3, 'text': '来源', 'id': 'source-sp01'}
+        section = {'id': 'sources', 'title': '来源', 'blocks': [heading]}
+        value['tabs'][2]['sections'] = [section]
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        for id in ('sources', '../other', '', 'has space'):
+            heading['id'] = id; self.path.write_text(json.dumps(value))
+            with self.assertRaises(HTTPError): self.get('/api/production-approach')
+        heading['id'] = 'source-sp01'
+        section['blocks'].append(copy.deepcopy(heading)); self.path.write_text(json.dumps(value))
+        with self.assertRaises(HTTPError): self.get('/api/production-approach')
+
+    def test_diagrams_are_passive_local_shapes(self):
+        validate_diagram(b'<svg xmlns="http://www.w3.org/2000/svg"><defs><marker id="arrow"/></defs><path d="M0 0L10 10" marker-end="url(#arrow)"/><text>diagram</text></svg>')
+        for raw in (
+            b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"/>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><image href="https://example.org/track"/></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><rect fill="url(https://example.org/track)"/></svg>',
+            b'<!DOCTYPE svg><svg xmlns="http://www.w3.org/2000/svg"/>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><foreignObject/></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><style>text{fill:red}</style></svg>',
+            b'<?xml-stylesheet type="text/css" href="https://example.org/style.css"?><svg xmlns="http://www.w3.org/2000/svg"/>',
+            '<!DOCTYPE svg [<!ENTITY x "expanded">]><svg xmlns="http://www.w3.org/2000/svg"><text>&x;</text></svg>'.encode('utf-16'),
+            b'<svg xmlns="http://www.w3.org/2000/svg" xml:base="//example.org/paint.svg"><rect fill="url(#paint)"/></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><g xmlns=""><text>wrong namespace</text></g></svg>',
+            b'<svg xmlns="http://www.w3.org/2000/svg"><rect style="fill:red"/></svg>',
+            b'<svg',
+        ):
+            with self.subTest(raw=raw), self.assertRaises(ValueError): validate_diagram(raw)
 
 
 if __name__ == "__main__":
