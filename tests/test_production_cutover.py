@@ -40,6 +40,24 @@ class CutoverTest(unittest.TestCase):
         with self.assertRaises(Conflict):cut.apply(self.store,plan,records)
         self.assertEqual(before,vc.fingerprint(self.store))
 
+    def test_old_shot_identity_and_number_are_physically_removed(self):
+        self.setup_story()
+        self.store.put_object('legacy-shot','STORY',{'title':'retired fixture'})
+        with self.store.db:
+            # Simulate persisted pre-cutover rows without reviving an old API.
+            self.store.db.execute("UPDATE objects SET kind='SHOT_DESIGN' WHERE id='legacy-shot'")
+            self.store.db.execute("INSERT INTO business_codes VALUES ('legacy-shot','SH',297)")
+        records=[self.shot()]
+        plan=cut.plan(self.store,['legacy-shot'],records,[])
+        before=vc.fingerprint(self.store)
+        with self.assertRaises(RuntimeError):cut.apply(self.store,plan,records,fault='after_delete')
+        self.assertEqual(before,vc.fingerprint(self.store))
+        result=cut.apply(self.store,plan,records)
+        self.assertEqual(result['retired_shot_number_allocations'],1)
+        self.assertFalse(self.store.db.execute("SELECT 1 FROM objects WHERE id='legacy-shot'").fetchone())
+        self.assertFalse(self.store.db.execute("SELECT 1 FROM business_codes WHERE prefix='SH'").fetchone())
+        self.assertEqual(tuple(self.store.db.execute("SELECT prefix,number FROM business_codes WHERE object_id='av-shot'").fetchone()),('ASH',1))
+
     def test_result_comparison_ignores_only_new_creation_times(self):
         plan,records=self.package();cut.apply(self.store,plan,records)
         result=cut.result_fingerprint(self.store,plan)

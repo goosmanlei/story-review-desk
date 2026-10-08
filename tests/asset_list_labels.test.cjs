@@ -28,5 +28,5 @@ test('other production records retain their record revision label',()=>{
 });
 test('history scene and shot records use shared cards with exact global location codes',()=>{
  const records=[{object_id:'scene',kind:'AV_SCENE',version:5,payload:{title:'01-01 米铺门口',source:{object_id:'ep',revision_id:'ep-old',scene_id:'s012'}}},{object_id:'shot',kind:'AV_SHOT',version:3,payload:{title:'E02-004 河街开场',episode:{object_id:'ep',revision_id:'ep-old'},scene_id:'s012',number:4}}],episodes=[{object_id:'ep',id:'ep-current',payload:{number:99}},{object_id:'ep',id:'ep-old',payload:{number:2}}],before=JSON.stringify(records),f=render(records,episodes);
- assert.deepEqual(f.buttons.map(f.title),['S012 · 米铺门口','SH004 · 河街开场']);assert.deepEqual(f.buttons.map(f.subtitle),['E02 / S012 · 修订 5','E02 / S012 / SH004 · 修订 3']);assert.ok(f.buttons.every(b=>b.className==='material-small-card'));f.buttons[1].onclick();assert.deepEqual(f.opened,['shot']);assert.equal(JSON.stringify(records),before);
+ assert.deepEqual(f.buttons.map(f.title),['S012 · 米铺门口','ASH004 · 河街开场']);assert.deepEqual(f.buttons.map(f.subtitle),['E02 / S012 · 修订 5','E02 / S012 / ASH004 · 修订 3']);assert.ok(f.buttons.every(b=>b.className==='material-small-card'));f.buttons[1].onclick();assert.deepEqual(f.opened,['shot']);assert.equal(JSON.stringify(records),before);
 });

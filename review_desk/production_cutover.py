@@ -12,6 +12,7 @@ from .production_media import physical_file_hash
 RETIRED_KINDS = {'PREPARATION', 'SHOT_DESIGN'}
 REPLACEABLE = RETIRED_KINDS | {'REQUIREMENT', 'MATERIAL_RELATION', 'RELATION', 'JUDGMENT', 'REPRESENTATION'}
 FORMAT = 'production-cutover-v1'
+NUMBERING_POLICY = {'AV_SHOT': 'ASH', 'retired_shot_prefix': 'SH'}
 
 
 def checksum(value):
@@ -57,7 +58,7 @@ def plan(store, removals, records, retention):
                 if path.is_symlink() or not path.is_file():
                     raise ValueError('retained original unavailable: ' + name)
                 files[name] = {'file': name, 'physical_sha256': physical_file_hash(path), 'physical_bytes': path.stat().st_size}
-        body = {'format': FORMAT, 'baseline': vc.fingerprint(store), 'record_sha256': checksum(records),
+        body = {'format': FORMAT, 'numbering_policy': NUMBERING_POLICY, 'baseline': vc.fingerprint(store), 'record_sha256': checksum(records),
                 'delete_objects': sorted(lost), 'delete_revisions': retired, 'delete_comments': sorted(comments),
                 'retention': retention, 'files': sorted(files.values(), key=lambda r: r['file'])}
         body['id'] = checksum(body)
@@ -96,6 +97,8 @@ def apply(store, document, records, *, fault=None):
     """One transaction; retry after commit verifies identities and returns receipt."""
     if document.get('format') != FORMAT or document.get('id') != checksum({k: v for k,v in document.items() if k != 'id'}) or document.get('record_sha256') != checksum(records):
         raise ValueError('cutover package checksum mismatch')
+    if document.get('numbering_policy') != NUMBERING_POLICY:
+        raise ValueError('cutover numbering policy differs')
     prior = store.db.execute('SELECT receipt FROM consolidation_runs WHERE id=?', (document['id'],)).fetchone()
     if prior:
         receipt = json.loads(prior[0])
@@ -140,6 +143,12 @@ def apply(store, document, records, *, fault=None):
         _delete(store, 'revisions', 'id', lost)
         store.db.executemany('INSERT INTO consolidation_objects VALUES (?,?) ON CONFLICT(object_id) DO NOTHING', ((oid,document['id']) for oid in oids))
         _delete(store, 'objects', 'id', oids)
+        # Retired shot codes have no live meaning. The audiovisual shot is a
+        # different object type and allocates in its own ASH namespace.
+        old_shots = {r['object_id'] for r in document['delete_revisions'] if r['kind'] == 'SHOT_DESIGN'}
+        changes = store.db.total_changes
+        _delete(store, 'business_codes', 'object_id', old_shots)
+        retired_shot_codes = store.db.total_changes - changes
         # Never change a real CALL or ASSET body, signature identity, or bytes.
         # Missing historic dependencies have only an exact hash/tombstone entry.
         preserved = 0
@@ -195,6 +204,7 @@ def apply(store, document, records, *, fault=None):
         mp.validate(store)
         receipt = {'format':'production-cutover-result-v1','id':document['id'],
                    'deleted_objects':len(oids),'deleted_revisions':len(lost),'deleted_comments':len(document['delete_comments']),
+                   'retired_shot_number_allocations':retired_shot_codes,
                    'preserved_provenance_revisions':preserved,'standalone_materials':len(rebuilt),
                    'retired_archive_entries':len(archives), **gc,
                    'created_heads':{r['id']:r['revision'] for r in created['records']}, 'actual_generation_calls':0}

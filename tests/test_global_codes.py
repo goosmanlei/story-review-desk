@@ -12,6 +12,15 @@ class GlobalCodesTest(unittest.TestCase):
     for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'scene_shot'):
         locals()[name] = getattr(fixtures.BreakdownTest, name)
 
+    def test_audiovisual_shots_do_not_continue_legacy_shot_sequence(self):
+        with self.store.db:
+            self.store.db.execute("INSERT INTO business_codes VALUES ('legacy-shot','SH',297)")
+        self.scene_shot()
+        self.assertEqual(codes.annotate(self.store,p.record(self.store,'shot'))['business_code'],'ASH001')
+        types={row['prefix']:row for row in codes.catalog()['types']}
+        self.assertIn('ASH',types)
+        self.assertNotIn('SH',types)
+
     def test_repeated_local_numbers_and_reordering_keep_distinct_exact_identities(self):
         self.scene_shot()
         first_episode = p.record(self.store, 'episode')

@@ -15,7 +15,7 @@ test('unified material ownership uses exact scene, shot and episode numbers with
  c.state.materialReview={record:{object_id:'asset',id:'asset-r1',kind:'ASSET',payload:{title:'素材'}}};
  for(const [kind,payload,expected] of [
   ['AV_SCENE',{title:'01-01 米铺门口',source:{scene_id:'s012'}},'S012 · 米铺门口'],
-  ['AV_SHOT',{title:'E01-004 河街开场',number:4},'SH004 · 河街开场'],
+  ['AV_SHOT',{title:'E01-004 河街开场',number:4},'ASH004 · 河街开场'],
   ['EPISODE',{title:'第2集 灯火',number:2},'E02 · 灯火']
  ]){
   const scope={kind,payload:{...payload,blocks:[{id:'same-id',text:'正文中的第1集 E01-004 原样保留'}]}},before=JSON.stringify(scope);c.state.unifiedScope=scope;c.renderUnifiedCard(root);assert.equal(root.all().find(n=>n.tag==='h2').textContent,expected);assert.equal(JSON.stringify(scope),before);
@@ -63,6 +63,17 @@ test('allocated object codes override local numbers while prose and excluded obj
  assert.equal(c.businessTitle({object_id:'shot-a',kind:'AV_SHOT',payload:{title:'SH222 河街'}}),'SH222 · 河街');
  assert.equal(c.businessTitle({kind:'SOURCE',business_code:'D003',payload:{title:'第1集资料'}}),'第1集资料');
  assert.equal(c.businessTitle({kind:'STORY',business_code:'B003',payload:{title:'版本四'}}),'版本四');
+});
+
+test('audiovisual position labels use their independent exact allocation',()=>{
+ const c=fixture();c.state.businessCodes=new Map([['new-shot','ASH001'],['new-scene','AS001'],['new-episode','AE001']]);
+ for(const [kind,id,label] of [['AV_SHOT','new-shot','ASH001'],['AV_SCENE','new-scene','AS001'],['AV_EPISODE','new-episode','AE001']]){
+  const row={kind,object_id:id,payload:{number:298,title:'新设计'}};
+  assert.equal(c.reviewPositionLabel(kind,row),label);
+  assert.equal(c.businessTitle(row),label+' · 新设计');
+ }
+ assert.equal(c.reviewPositionLabel('shot',{kind:'AV_SHOT',object_id:'new-shot',payload:{number:298}}),'ASH001');
+ assert.equal(c.reviewPositionText('旧镜 SH297'),'旧镜 SH297');
 });
 
 test('exact story excerpt without an optional scene heading remains readable',async()=>{
