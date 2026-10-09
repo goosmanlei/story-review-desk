@@ -92,14 +92,73 @@ function breakdownFacetTitle(key,value,catalog){
   return scene?breakdownSceneTitle({...scene,payload:{source:{scene_id:scene.id},title:scene.title}}):reviewPositionLabel('scene',value);
 }
 function breakdownLevel(row){return ({INPUT_LOCK:'story',STORY:'story',EPISODE:'episode',AV_EPISODE:'episode',AV_SCENE:'scene',AV_SHOT:'shot'})[row.kind]}
-function breakdownShotText(parent,shot){
+const breakdownShotLabels={purpose:'叙事目的',framing:'构图',spatial:'空间',axis:'轴线与方向',movement:'机位运动',performance:'表演',lighting:'光线',color:'色彩',editing:'剪辑',action_start:'起始',action_end:'结束',motion:'动作过程',continuity:'承接'};
+function breakdownShotFields(shot){
   const blocks=productionTextBlocks(shot);
+  return Object.entries(breakdownShotLabels).map(([key,label])=>{
+    const value=shot.payload[key],block=blocks.find(b=>b.field===key||b.id===key)||blocks.find(b=>b.text===value);
+    // A legacy projection can omit an independent substring. Read its full
+    // value without assigning another field's text anchor to it.
+    return {key,label,value,block:block?.text===value?block:null};
+  }).filter(item=>typeof item.value==='string'&&item.value.trim());
+}
+function breakdownCommonConditions(items){
+  const shots=items.map(item=>item.record),fields={},sounds=[];
+  if(shots.length<2)return {fields,sounds};
+  for(const key of ['spatial','axis','lighting','color','continuity']){
+    const value=shots[0].payload[key];
+    if(typeof value==='string'&&value.trim()&&shots.every(shot=>shot.payload[key]===value))fields[key]=value;
+  }
+  // Equal dialogue can be an intentional repeated event. Only an explicitly
+  // typed background sound may move out of the individual shot's sequence.
+  const background=shot=>(shot.payload.sound||[]).filter(item=>item&&typeof item==='object'&&['ambience','environment','music'].includes(item.type)).map(item=>item.text||item.description).filter(Boolean);
+  for(const value of background(shots[0]))if(!sounds.includes(value)&&shots.every(shot=>background(shot).includes(value)))sounds.push(value);
+  return {fields,sounds};
+}
+function breakdownFieldLine(host,item,label=item.label){
+  const line=el('p');nodeText('b',null,label+'　',line);const span=nodeText('span',null,item.value,line);
+  if(item.block)span.dataset.blockId=item.block.id;host.append(line);return span;
+}
+function renderBreakdownConditions(host,data,common){
+  const scene=data.scene,raw=el('details','breakdown-conditions');nodeText('summary',null,'场级条件',raw);
+  // These are the exact parent's original conditions, not a newer scene head
+  // or a silent replacement for shot coverage values.
+  for(const key of ['spatial','axis','lighting','color'])if(scene.payload[key])breakdownFieldLine(raw,{value:scene.payload[key],label:breakdownShotLabels[key]});
+  const sceneSound=Array.isArray(scene.payload.sound)?scene.payload.sound:[scene.payload.sound];
+  for(const sound of sceneSound){const value=typeof sound==='string'?sound:sound?.text||sound?.description;if(value)breakdownFieldLine(raw,{value,label:'声音'})}
+  if(raw.childElementCount>1)host.append(raw);
+  const shared=el('details','breakdown-conditions');shared.open=true;nodeText('summary',null,'各镜共同条件',shared);
+  for(const [key,value] of Object.entries(common.fields)){
+    // The scene's already visible continuity needs to be read only once.
+    if(key==='continuity'&&scene.payload.continuity===value)continue;
+    breakdownFieldLine(shared,{value,label:breakdownShotLabels[key]});
+  }
+  for(const value of common.sounds)breakdownFieldLine(shared,{value,label:'声音'});
+  if(shared.childElementCount>1)host.append(shared);
+}
+function breakdownShotText(parent,shot,common={fields:{},sounds:[]}){
+  const blocks=productionTextBlocks(shot),fields=breakdownShotFields(shot),byKey=new Map(fields.map(item=>[item.key,item]));
   const text=reviewSurface(el('div'));text.dataset.productionBlocks=shot.id;text.reviewFocus=()=>{state.breakdownReviewFocus=(state.breakdownReviewFocus||0)+1;focusProductionReview(entityReviewDetail(shot),false)};text.onpointerdown=text.reviewFocus;text.onfocusin=text.reviewFocus;parent.append(text);
-  for(const [key,label] of [['purpose','叙事目的'],['framing','构图'],['spatial','空间'],['axis','轴线与方向'],['movement','机位运动'],['performance','表演'],['lighting','光线'],['color','色彩'],['editing','剪辑'],['action_start','起始'],['action_end','结束'],['motion','动作过程'],['continuity','承接']]){
-    const block=blocks.find(b=>b.field===key||b.text===shot.payload[key]);if(!block)continue;const line=el('p');nodeText('b',null,label+'　',line);const span=nodeText('span',null,block.text,line);span.dataset.blockId=block.id;text.append(line);
+  const original=[],shown=new Set();
+  for(const item of fields){
+    const {key,value,block}=item,pair={purpose:'performance',framing:'movement',performance:'purpose',movement:'framing'}[key],other=byKey.get(pair),same=other&&value===other.value;
+    if(same&&['performance','movement'].includes(key)){
+      if(block&&block.id!==other.block?.id)original.push(item);
+      continue;
+    }
+    if(common.fields[key]===value){original.push(item);continue}
+    breakdownFieldLine(text,item,same?{purpose:'叙事目的与表演',framing:'构图与机位运动'}[key]:item.label);
+    if(block)shown.add(block.id);
   }
   const sounds=blocks.filter(b=>/^sound\.\d+\.(text|description)$/.test(b.field||''));
-  if(sounds.length){const line=el('p');nodeText('b',null,'声音　',line);for(const [index,block] of sounds.entries()){if(index)line.append(document.createTextNode('；'));nodeText('span',null,block.text,line).dataset.blockId=block.id}text.append(line)}
+  for(const block of sounds){
+    const item={key:block.field,label:'声音',value:block.text,block};
+    const source=shot.payload.sound[Number(block.field.split('.')[1])],background=source&&typeof source==='object'&&['ambience','environment','music'].includes(source.type);
+    if((background&&common.sounds.includes(block.text))||(typeof source==='string'&&shot.payload.editing===block.text))original.push(item);
+    else breakdownFieldLine(text,item);
+  }
+  const unique=original.filter((item,index)=>!item.block||!shown.has(item.block.id)&&original.findIndex(other=>other.block?.id===item.block.id)===index);
+  if(unique.length){const details=el('details','breakdown-shot-original');nodeText('summary',null,'共同条件与原字段',details);for(const item of unique)breakdownFieldLine(details,item);text.append(details)}
 }
 function shotReferenceItems(row,inputs,records){
   const items=materialInputs(inputs,records,row.review_shot_slots||[]).map(item=>({...item,slot:row.review_shot_slots?.find(s=>s.index===item.index)}));
@@ -340,9 +399,9 @@ function groupedShotMaterials(items){
   for(const item of unique){const c=item.classification||{key:item.media_type+':other',label:'其他-'+({image:'图像',audio:'声音',video:'视频',project:'工程',document:'文档'}[item.media_type]||'其他')};if(!groups.has(c.key))groups.set(c.key,{...c,items:[]});groups.get(c.key).items.push(item)}
   const media=['image','audio','video','project','document'];return [...groups.values()].sort((a,b)=>media.indexOf(a.key.split(':')[0])-media.indexOf(b.key.split(':')[0])||a.label.localeCompare(b.label,'zh-CN'));
 }
-function renderBreakdownShot(parent,item){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
+function renderBreakdownShot(parent,item,common){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);renderAudiovisualSources(title,shot);renderProductionAcceptance(title,shot);heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
-    breakdownShotText(text,shot);renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
+    breakdownShotText(text,shot,common);renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
     row.append(text,materials);parent.append(row);nodeText('h4',null,'本镜素材',materials);
     if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
     const items=item.context.materials||[];
@@ -359,7 +418,8 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
   breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
   const page=el('section','breakdown-scene');body.append(page);
   const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
-  for(const item of data.shots)renderBreakdownShot(page,item);
+  const common=breakdownCommonConditions(data.shots);renderBreakdownConditions(page,data,common);
+  for(const item of data.shots)renderBreakdownShot(page,item,common);
   state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.context.requirements)];
   if(commit)commit();
   state.breakdownRenderedSelection=breakdownSelectionKey(restore||new URLSearchParams());
