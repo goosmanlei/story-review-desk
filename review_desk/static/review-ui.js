@@ -83,7 +83,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   const axis=el('div','review-time-axis');nodeText('span',null,from.toFixed(2)+' 秒',axis);nodeText('span',null,to.toFixed(2)+' 秒',axis);box.append(axis);
   const tools=el('div','review-range-tools'),start=el('input'),end=el('input');
   for(const [input,label] of [[start,'选段起点（秒）'],[end,'选段终点（秒）']]){input.type='number';input.step='.01';input.min=from;input.max=to;input.setAttribute('aria-label',label);const wrap=el('label');nodeText('span',null,label,wrap);wrap.append(input);tools.append(wrap)}
-  let range=null,stopAt=to,gesture=null;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>span>0?100*(v-from)/span:0;
+  let range=null,stopAt=to,gesture=null,mediaFailed=false;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>span>0?100*(v-from)/span:0;
   const paint=()=>{
     const time=clamp(media.currentTime||from);clock.textContent=`${time.toFixed(2)} / ${to.toFixed(2)} 秒`;head.style.left=percent(time)+'%';track.setAttribute('aria-valuenow',String(time));track.setAttribute('aria-valuetext',time.toFixed(2)+' 秒');
     tools.hidden=!range;region.hidden=!range;aHandle.hidden=!range;bHandle.hidden=!range;play.textContent=media.paused?'播放':'暂停';
@@ -106,8 +106,8 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   track.title='点击定位，拖动选段；方向键定位，I / O 设起止点';
   for(const [handle,index] of [[aHandle,0],[bHandle,1]])handle.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const next=e.key==='Home'?from:e.key==='End'?to:range[index]+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1);select(index===0?next:range[0],index===1?next:range[1])};
   const setDuration=duration=>{if(!to&&Number.isFinite(duration)){to=duration;span=to-from;stopAt=to;box.dataset.reviewTo=to;track.setAttribute('aria-valuemax',to);for(const input of [start,end])input.max=to;for(const handle of [aHandle,bHandle])handle.setAttribute('aria-valuemax',to);axis.lastElementChild.textContent=to.toFixed(2)+' 秒'}};
-  media.onloadedmetadata=()=>{setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);paint()};media.onpause=paint;media.onerror=()=>{fallback.textContent='音频读取失败，请检查原文件';play.disabled=true};
-  box.reviewLocate=anchor=>{select(anchor.start_seconds,anchor.end_seconds);seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'})};
+  media.onloadedmetadata=()=>{if(!box.isConnected)return;setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);paint()};media.onpause=paint;media.onerror=()=>{mediaFailed=true;fallback.hidden=false;fallback.textContent='原文件读取失败；未替换为其他文件，请返回继续审阅';play.disabled=true};
+  box.reviewLocate=anchor=>{if(!box.isConnected||anchor.component_id!==component.id||anchor.asset_file!==component.file||anchor.start_seconds<from||anchor.end_seconds>to||!select(anchor.start_seconds,anchor.end_seconds))return false;media.pause();seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'});return true};
   if(review){
     reviewSurface(box,'audio');let commentKey='';
     box.reviewPaintComments=()=>{
@@ -123,10 +123,10 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   if(active?.type==='time'&&active.component_id===component.id&&active.asset_file===component.file&&from<=active.start_seconds&&active.end_seconds<=to){range=[active.start_seconds,active.end_seconds];media.dataset.reviewSeek=String(active.start_seconds)}
   paint();
   if(audio)reviewWaveform(media.src).then(({peaks,duration})=>{
-    if(!box.isConnected)return;setDuration(duration);paint();fallback.hidden=true;const path=document.createElementNS(svg.namespaceURI,'path');let d='';
+    if(!box.isConnected)return;setDuration(duration);paint();if(!mediaFailed)fallback.hidden=true;const path=document.createElementNS(svg.namespaceURI,'path');let d='';
     const scale=Math.max(...peaks,.001);
     for(let i=0;i<400;i++){const t=from+i/399*span,j=Math.min(peaks.length-1,Math.floor(t/duration*peaks.length)),v=peaks[j]/scale*32;d+=`M${i*2},${36-v}V${36+v} `}path.setAttribute('d',d);svg.append(path);box.dataset.waveform='decoded';
-  }).catch(()=>{fallback.textContent='波形不可用 · 可继续播放和选段';box.dataset.waveform='unavailable'});
+  }).catch(()=>{if(!box.isConnected)return;if(!mediaFailed)fallback.textContent='波形不可用 · 可继续播放和选段';box.dataset.waveform='unavailable'});
   return box;
 }
 

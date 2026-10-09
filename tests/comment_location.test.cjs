@@ -7,11 +7,13 @@ class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={};thi
 const row=(object,kind,id=object+'-v1',payload={})=>({object_id:object,id,kind,current_revision:id,version:1,payload:{title:object,...payload}});
 function setup(){
  const plan=row('need','REQUIREMENT','shared-plan',{scope:{object_id:'form'}}),oldCall=row('call','CALL','call-old'),newCall=row('call','CALL','call-new');
- const asset=(id,call)=>row('asset','ASSET',id,{production:{object_id:'call',revision_id:call.id},components:[{id:'original',mime:'audio/wav'}]});
+ const asset=(id,call)=>row('asset','ASSET',id,{production:{object_id:'call',revision_id:call.id},components:[{id:'original',mime:'audio/wav',file:'original.wav',duration_seconds:10}]});
  const oldAsset=asset('asset-old',oldCall),newAsset=asset('asset-new',newCall),rounds=[{number:2,plan,members:[plan,newAsset,newCall],results:[newAsset]},{number:1,plan,members:[plan,oldAsset,oldCall],results:[oldAsset]}];
  const detail=record=>({record,history:[newAsset,oldAsset],review_context:{call:record.id===oldAsset.id?oldCall:newCall,requirements:[plan]},review_contexts:{[oldAsset.id]:{call:oldCall,requirements:[plan]},[newAsset.id]:{call:newCall,requirements:[plan]}},material_versions:{need:rounds},selectedMaterialRounds:{need:2}});
+ const reader={scrollIntoView(){},querySelector:()=>({scrollIntoView(){}}),querySelectorAll:()=>[{dataset:{reviewFrom:0,reviewTo:10},reviewLocate:()=>true}]};
  const requests=[],messages=[],nodes={'#toast':{classList:{add(){},remove(){}},set textContent(message){messages.push(message)}}};
- const ctx={URL,URLSearchParams,console,window:{innerWidth:1440},CSS:{escape:value=>value},setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:s=>nodes[s]||null,querySelectorAll:()=>[],createElement:t=>new Element(t)},fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,reject,resolve:data=>resolve({ok:true,json:async()=>data})}))};
+ const stored=new Map();
+ const ctx={URL,URLSearchParams,console,window:{innerWidth:1440},CSS:{escape:value=>value},setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,String(v)),removeItem:k=>stored.delete(k)},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?reader:nodes[s]||null,querySelectorAll:()=>[],createElement:t=>new Element(t)},fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,reject,resolve:data=>resolve({ok:true,json:async()=>data})}))};
  vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);for(const name of files)vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
  vm.runInContext('globalThis.state=state;globalThis.key=draftKey;openPanel=()=>{};hideSelectionAction=()=>{};',ctx);
  ctx.state.workspace='materials.workspace';ctx.state.productionRecords=[plan,newAsset];ctx.state.materialReview=detail(newAsset);ctx.state.productionSelected=newAsset;
@@ -49,7 +51,7 @@ test('an invalid preferred scope does not fall through to another valid material
  await f.click(c);assert.equal(f.ctx.state.editing,null);assert.match(f.messages.at(-1),/无法准确定位/);assert.equal(data.selectedMaterialRounds.need,2);
 });
 for(const kind of ['ASSET','CALL'])test(`${kind}: edit waits for the exact historical reader and does not cancel its own completion`,async()=>{
- const f=setup(),target=kind==='ASSET'?f.oldAsset:f.oldCall,c=f.comment(target);if(kind==='ASSET')c.anchor={type:'time',component_id:'original',start_seconds:1.25,end_seconds:3.5};
+ const f=setup(),target=kind==='ASSET'?f.oldAsset:f.oldCall,c=f.comment(target);if(kind==='ASSET')c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1.25,end_seconds:3.5};
  const editing=f.click(c);assert.equal(f.ctx.state.editing,null);assert.equal(f.ctx.state.anchor,null);assert.equal(f.requests.length,1);
  f.requests[0].resolve(f.detail(f.oldAsset));await editing;assert.equal(f.ctx.state.productionSelected.id,target.id);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.anchor,c.anchor);assert.equal(f.ctx.state.materialReview.selectedMaterialRounds.need,1);assert.match(f.ctx.key(),new RegExp(target.id));assert.equal(f.requests.length,1);if(kind==='ASSET')assert.equal(f.ctx.state.materialReview.componentId,'original');
 });
@@ -82,7 +84,7 @@ test('leaving the workspace ignores the old response and does not open an editor
  const f=setup(),editing=f.click(f.comment(f.oldAsset));f.ctx.state.workspace='story.sources';f.requests[0].resolve(f.detail(f.oldAsset));await editing;assert.equal(f.ctx.state.workspace,'story.sources');assert.equal(f.ctx.state.editing,null);assert.equal(f.requests.length,1);
 });
 for(const workspace of ['story.sources','story.outline'])test(`${workspace}: ordinary comment editing still starts immediately`,async()=>{
- const f=setup(),c=f.comment(f.plan);f.ctx.state.workspace=workspace;await f.click(c);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.anchor,c.anchor);assert.equal(f.requests.length,0);
+ const f=setup(),c=f.comment(f.plan);f.ctx.state.workspace=workspace;if(workspace==='story.sources')f.ctx.state.current={id:c.target_object_id,target_revision_id:c.target_revision_id};else{c.target_object_id='story-structure';f.ctx.state.structureRevision=c.target_revision_id}await f.click(c);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.anchor,c.anchor);assert.equal(f.requests.length,0);
 });
 
 for(const kind of ['ASSET','CALL'])test(`${kind}: a recorded material card identity survives the same historical load`,async()=>{
@@ -120,4 +122,51 @@ test('the actual material workspace and card renderer retain the explicitly loca
  const card=root.all().find(node=>node.className==='material-card');assert.ok(card);assert.equal(card.dataset.materialKey,'other');
  const selectedRound=card.all().find(node=>node.attributes['aria-label']==='素材版本');assert.equal(selectedRound.children.find(node=>node.attributes['aria-pressed']==='true').dataset.choiceId,1);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
  assert.equal(f.ctx.state.materialCommentCard.material_id,'other');assert.equal(f.ctx.state.editing,c.id);assert.equal(loaded.selectedMaterialRounds.need,2);
+});
+
+for(const workspace of ['materials','settings'])test(`${workspace}: WAV opinion restores original component while preserving exact candidate and retained state`,async()=>{
+ const f=setup(),data=workspace==='settings'?f.entity():f.ctx.state.materialReview,c=f.comment(f.newAsset);c.material_scopes[0].number=2;
+ c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1,end_seconds:2};
+ data.selectedComponents={[f.newAsset.id]:'listening'};const before=JSON.stringify(c);
+ if(workspace==='settings'){
+   const current=data.states[0],retained={...current,id:'retained-state'};data.states.push(retained);f.ctx.state.productionChildDetail={record:retained};
+   data.media=[{id:'preview',record:f.newAsset,component_id:'listening',state:null,review_state:{object_id:current.object_id,revision_id:retained.id}}];
+   data.unifiedMaterialId='another-card';
+ }
+ await f.click(c,'定位原圈选');
+ assert.equal(data.selectedComponents[f.newAsset.id],'original');assert.equal(f.ctx.state.productionSelected.id,f.newAsset.id);assert.equal(JSON.stringify(c),before);
+ if(workspace==='settings'){assert.equal(f.ctx.state.productionChildDetail.record.id,'retained-state');assert.equal(data.unifiedMaterialId,'need');assert.equal(data.historicalMedia,null)}
+});
+for(const workspace of ['materials','settings'])for(const failure of ['component','file','revision','object','duration','nonfinite','invalid-anchor'])test(`${workspace}: ${failure} failure leaves the current reader and draft intact`,async()=>{
+ const f=setup(),data=workspace==='settings'?f.entity():f.ctx.state.materialReview,c=f.comment(f.newAsset);c.material_scopes[0].number=2;
+ c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1,end_seconds:2};
+ data.selectedComponents={[f.newAsset.id]:'listening'};f.ctx.state.anchor={type:'global'};const anchor=f.ctx.state.anchor;f.ctx.state.editing='existing-editor';
+ if(failure==='component')c.anchor.component_id='deleted';if(failure==='file')c.anchor.asset_file='other.wav';if(failure==='revision')c.target_revision_id='missing';if(failure==='object')c.target_object_id='other';if(failure==='duration')c.anchor.end_seconds=11;if(failure==='nonfinite')c.anchor.start_seconds=NaN;if(failure==='invalid-anchor')c.anchor_state={valid:false,reason:'原圈选已失效'};
+ await f.click(c,'定位原圈选');assert.equal(f.ctx.state.productionSelected.id,f.newAsset.id);assert.equal(f.ctx.state.anchor,anchor);assert.equal(f.ctx.state.editing,'existing-editor');assert.equal(data.selectedComponents[f.newAsset.id],'listening');assert.equal(f.requests.length,0);assert.ok(f.messages.length);
+});
+test('one exact player cannot clamp a comment into a shorter placement',()=>{
+ const f=setup(),c=f.comment(f.newAsset);c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1,end_seconds:2};
+ let located=false;f.ctx.state.unifiedCardRoot={querySelectorAll:()=>[{dataset:{reviewFrom:1.5,reviewTo:3},reviewLocate:()=>{located=true}}]};
+ assert.equal(f.ctx.locateProductionComment(c,true),false);assert.equal(located,false);assert.match(f.messages.at(-1),/范围当前无法显示/);
+});
+test('legacy round traversal returns to the exact plan model used by a saved draft',()=>{
+ const f=setup(),data=f.ctx.state.materialReview,plans=data.material_versions;
+ data.legacy_material_versions={need:f.rounds.map(round=>({...round,model:'legacy'}))};
+ const both=f.comment(f.plan);both.material_plan_scopes=[{material_id:'need',number:1}];
+ assert.equal(f.ctx.selectCommentMaterialRound(data,f.plan,both),true);assert.equal(data.material_versions,plans);
+ const old=f.comment(f.plan);f.ctx.selectCommentMaterialRound(data,f.plan,old);assert.equal(data.material_versions,data.legacy_material_versions);
+ f.ctx.selectCommentMaterialRound(data,f.plan,both);assert.equal(data.material_versions,plans);
+});
+test('entity entry locates a retained state supplied with the exact media, without borrowing its current state',async()=>{
+ const f=setup(),data=f.entity(),current=data.states[0],old={...current,id:'old-state'},c=f.comment(f.newAsset);c.material_scopes[0].number=2;c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1,end_seconds:2};
+ data.media=[{id:'preview',record:f.newAsset,component_id:'listening',state:null,review_state:{object_id:old.object_id,revision_id:old.id},associated_states:[{state:old}]}];
+ await f.click(c,'定位原圈选');assert.equal(f.ctx.state.productionChildDetail.record,old);assert.equal(data.retained_states[0],old);assert.equal(data.states.includes(old),true);assert.equal(data.selectedComponents[f.newAsset.id],'original');
+});
+
+for(const available of [true,false])test(`image location searches the exact revision and file in the active card: ${available}`,()=>{
+ const f=setup(),c=f.comment(f.newAsset);f.newAsset.payload.components=[{id:'original',mime:'image/png',file:'image.png'}];
+ c.anchor={type:'region',visual_id:'original',asset_file:'image.png',points:[[.1,.1],[.5,.1],[.5,.5]]};let selector,scrolled=false;
+ f.ctx.state.unifiedCardRoot={querySelector:s=>{selector=s;return available?{scrollIntoView:()=>{scrolled=true}}:null}};
+ assert.equal(f.ctx.locateProductionComment(c,true),available);assert.equal(scrolled,available);assert.match(selector,/data-review-revision="asset-new"/);assert.match(selector,/data-review-file="image.png"/);assert.match(selector,/data-visual-id="original"/);
+ if(!available)assert.match(f.messages.at(-1),/原圈选当前无法显示/);
 });

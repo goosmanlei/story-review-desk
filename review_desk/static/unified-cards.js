@@ -146,7 +146,7 @@ async function switchUnifiedSourceMaterial(item,trigger){
 }
 async function readUnifiedCard(objectId,revisionId=null,params=null){
   let result;
-  try{result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}))}
+  try{result=await readEntityDecisionView('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}))}
   catch(error){if(error.message==='production record not found')throw Error('指定的对象或修订不可用；未打开其他版本。');throw error}
   result.params=params||new URLSearchParams();result.explicit=!!revisionId;validateUnifiedReference(result);return result;
 }
@@ -164,6 +164,7 @@ function materialSavedDraft(result){
 }
 function activateUnifiedCard(result){
   const detail=result.detail,row=detail.record,params=result.params;
+  detail.planMaterialVersions||=detail.material_versions;
   state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
   state.productionEntityId=state.entityReview?.entity.object_id||null;state.productionChildDetail=null;state.productionEntityDetail=null;
   if(state.entityReview){

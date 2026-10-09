@@ -150,7 +150,9 @@ test('a failed list load cannot replace newer loading, another detail read or an
   if(takeover==='new-read')newer=f.context.openProductionRecord('new-target');
   if(takeover==='workspace')f.context.state.workspace='story.sources';
   if(takeover==='detached')f.host.replaceChildren(new Node('p'));
-  const before=f.text(f.host);requests[0].reject(Error('old list unavailable'));await assert.rejects(old,/old list unavailable/);assert.equal(f.text(f.host),before);
+  const before=f.text(f.host);requests[0].reject(Error('old list unavailable'));
+  if(takeover==='detached')await assert.rejects(old,/old list unavailable/);else await old;
+  assert.equal(f.text(f.host),before);
   if(newer){requests[1].reject(Error('new request unavailable'));await assert.rejects(newer,/new request unavailable/);if(takeover==='new-load')assert.match(f.text(f.host),/new request unavailable/)}
  }
 });

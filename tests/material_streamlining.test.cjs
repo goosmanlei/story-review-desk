@@ -23,9 +23,10 @@ test('nested reference sessions return the panel and outer pending draft without
  class N{constructor(){this.children=[];this.listeners={};this.hidden=false}append(n){n.parentNode?.children.splice(n.parentNode.children.indexOf(n),1);this.children.push(n);n.parentNode=this}insertBefore(n,next){this.append(n);if(next){this.children.pop();this.children.splice(this.children.indexOf(next),0,n)}}addEventListener(k,f){this.listeners[k]=f}querySelector(){return null}}
  const root=new N(),outer=new N(),inner=new N(),panel=new N();root.append(panel);panel.hidden=true;
  const old={productionSelected:{id:'outer'},anchor:{type:'time'},pending:{body:'outer draft'},reviewCommentScope:{revision:'outer'}};
- const panelStates=[];
- const ctx={state:{...old},document:{querySelector:()=>panel},paintProductionReview(){},renderComments(){},setPanelOpen(open){panelStates.push(open);panel.hidden=!open}};vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),ctx);
+ const panelStates=[],saved=[];
+ const ctx={state:{...old},document:{querySelector:()=>panel},rememberProductionDraft(){saved.push(ctx.state.productionSelected.id)},paintProductionReview(){},renderComments(){},setPanelOpen(open){panelStates.push(open);panel.hidden=!open}};vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),ctx);
  const first=ctx.referenceReviewSession(outer,{record:{id:'first'}});first.focus();assert.equal(panel.parentNode,outer);ctx.state.pending={body:'inner draft'};
  const second=ctx.referenceReviewSession(inner,{record:{id:'second'}});second.focus();assert.equal(panel.parentNode,inner);inner.listeners.close();assert.equal(panel.parentNode,outer);assert.equal(ctx.state.productionSelected.id,'first');assert.equal(ctx.state.pending.body,'inner draft');
  outer.listeners.close();assert.equal(panel.parentNode,root);assert.equal(panel.hidden,true);assert.equal(ctx.state.pending,old.pending);assert.equal(ctx.state.anchor,old.anchor);assert.equal(ctx.state.reviewCommentScope,old.reviewCommentScope);assert.deepEqual(panelStates,[false,false]);
+ assert.deepEqual(saved,['second','first']);
 });

@@ -132,16 +132,55 @@ def cycle_issues(store, need):
     return list(dict.fromkeys(issues))
 
 
-def for_material(store, material_id):
-    result = [r for r in p.current_records(store, {'MATERIAL_RELATION'})
-              if material_id in (r['payload']['upstream']['object_id'], r['payload']['downstream_id'])]
+def for_material(store, material_id, revision_id=None):
+    """Read named uses of the displayed revision, never invent old lineage."""
+    selected = p.record(store, material_id, revision_id)
+    declared = {i['relation']['revision_id'] for i in selected['payload'].get('generation', {}).get('inputs', []) if i.get('relation')}
+    current = selected['id'] == selected['current_revision']
+    result = {r['id']: r for r in p.current_records(store, {'MATERIAL_RELATION'})
+              if (r['payload']['upstream']['object_id'] == material_id and
+                  (current or r['payload']['upstream']['revision_id'] == selected['id']))
+              or (current and r['payload']['downstream_id'] == material_id)}
+    for rid in declared:
+        row = p.record(store, revision_id=rid)
+        if row['kind'] == 'MATERIAL_RELATION':
+            # Replace the current revision of this edge with the plan's exact edge.
+            result = {k: v for k, v in result.items() if v['object_id'] != row['object_id']}
+            result[rid] = row
+    result = list(result.values())
     for row in result:
+        row['upstream_record'] = p.ref_record(store, row['payload']['upstream'])
+        row['context_record'] = p.ref_record(store, row['payload']['context'])
+        row['direction'] = 'incoming' if row['payload']['downstream_id'] == material_id else 'outgoing'
+        row['upstream_matches'] = row['payload']['upstream']['revision_id'] == selected['id']
         try:
-            target = p.record(store, row['payload']['downstream_id'])
+            target = selected if row['direction'] == 'incoming' else p.record(store, row['payload']['downstream_id'])
             row['downstream'] = {'object_id': target['object_id'], 'revision_id': target['id']}
+            row['downstream_record'] = target
+            row['declared_input'] = any(i.get('relation', {}).get('revision_id') == row['id'] for i in target['payload'].get('generation', {}).get('inputs', []))
+            from .material_plans import memberships
+            scopes = memberships(store, target['id'])
+            row['downstream_version'] = next((s['number'] for s in scopes if s['material_id'] == target['object_id']), None)
+            candidates = []
+            for scope in scopes:
+                for raw in store.db.execute("SELECT r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.material_id=? AND m.number=? AND m.role='result' ORDER BY r.created_at DESC", (scope['material_id'], scope['number'])):
+                    asset = p.record_view(raw)
+                    if not asset['payload'].get('placeholder') and any(c['role'] == 'original' for c in asset['payload'].get('components', [])):
+                        candidates.append(asset)
+            row['result'] = {'object_id': candidates[0]['object_id'], 'revision_id': candidates[0]['id']} if candidates else None
         except KeyError:
             row['downstream'] = None
+            row['downstream_record'] = None
+            row['result'] = None
     return result
+
+
+def review_context(store, material_id, revision_id=None):
+    relations = for_material(store, material_id, revision_id)
+    ids = {r['object_id'] for r in relations}
+    comments = {c['target_revision_id']: p.record(store, c['target_object_id'], c['target_revision_id'])
+                for c in store.comments() if c['target_object_id'] in ids}
+    return {'relations': relations, 'comment_records': list(comments.values())}
 
 
 def choose_route(store, request):
