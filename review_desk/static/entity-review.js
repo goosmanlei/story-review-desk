@@ -206,7 +206,7 @@ function renderEntityReview(root){
   if(data.decisionSave?.message)showSaveNotice(data.decisionSave.message);
   const accept=productionButton(actions,data.can_revoke?'取消采纳':'采纳',async()=>{
     if(data.decisionSave||!isEntityReview()||state.entityReview!==data||entityReviewHasHistoricalContent(data,state.productionEntityDetail.record,state.productionChildDetail?.record)||entityReviewWithdrawals(data,state.productionEntityDetail.record,state.productionChildDetail?.record).length)return;
-    accept.disabled=true;const action=data.can_revoke?'revoke':'accept',reason=action==='accept'?(data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及已有素材方案；生成前仍需完善并认可方案。':'采纳此实体的基础信息、关系、全部实体状态和素材生成方案，允许推进素材生成。'):'取消当前采纳，保留历史制作与意见。';
+    accept.disabled=true;const action=data.can_revoke?'revoke':'accept',reason=action==='accept'?(data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳此实体的基础信息、关系、全部实体状态和素材生成方案，允许推进素材生成。'):'取消当前采纳，保留历史制作与意见。';
     const epoch=productionReadEpoch,owns=()=>isEntityReview()&&state.entityReview===data&&productionReadEpoch===epoch&&accept.isConnected;
     const label=action==='accept'?'采纳':'取消采纳',savedMessage=`「${data.entity.payload.title}」的${label}已保存`;
     data.decisionSave={message:''};
@@ -217,11 +217,13 @@ function renderEntityReview(root){
     const refresh=reloadEntityReview(),refreshEpoch=productionReadEpoch;
     try{await refresh;await state.refreshEntityIndex?.()}
     catch(error){data.decisionSave.message=savedMessage+`；当前显示尚未更新：${error.message}。请重新打开此实体核对。`;if(isEntityReview()&&state.entityReview===data&&productionReadEpoch===refreshEpoch&&accept.isConnected){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}}
-  });accept.classList.add('entity-review-accept');accept.title=withdrawals.length?withdrawals[0].label+'；保留历史内容与评论，不对此版本采纳或取消。':viewingHistory?'正在查看历史内容，不能执行采纳或取消；请查看当前状态。':data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及已有素材方案；生成前仍需完善并认可方案。':'采纳基础信息、关系、全部实体状态及素材生成方案，允许推进素材生成；仍可评论。';accept.disabled=!!data.decisionSave||(!data.can_accept&&!data.can_revoke)||viewingHistory||!!withdrawals.length;
+  });accept.classList.add('entity-review-accept');accept.title=withdrawals.length?withdrawals[0].label+'；保留历史内容与评论，不对此版本采纳或取消。':viewingHistory?'正在查看历史内容，不能执行采纳或取消；请查看当前状态。':data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳基础信息、关系、全部实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需核对准确认可。';accept.disabled=!!data.decisionSave||(!data.can_accept&&!data.can_revoke)||viewingHistory||!!withdrawals.length;
   identity.classList.add('entity-review-identity');entityVersionControl(identity,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});header.append(actions);root.append(header);renderEntityWithdrawals(root,withdrawals);
   if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);basics.append(basicHeading);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
+  const ownNeeds=(data.requirements||[]).filter(r=>r.payload.scope?.object_id===entity.object_id&&r.payload.scope.revision_id===entity.id);
+  if(ownNeeds.length){const materials=el('section','entity-state-materials');materials.setAttribute('aria-label','实体素材需求');nodeText('h3',null,'实体素材需求',materials);root.append(materials);renderUnifiedModels(materials,entityReviewMaterialModels(ownNeeds,[],data),data)}
   renderEntityRelations(root,data);
   if(data.historicalCall)renderActualGeneration(root,{call:data.historicalCall,inputs:[]});
   if(data.historicalRelation){const old=el('section');nodeText('h3',null,'历史关系',old);reviewTextBlocks(old,data.historicalRelation);root.append(old)}

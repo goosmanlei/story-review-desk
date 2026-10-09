@@ -98,3 +98,32 @@ for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'a
  assert.equal(posts.length,1);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].payload.payload.target)),{object_id:f.a.object_id,revision_id:f.a.id});
  f.ctx.state.workspace='story.sources';release({ok:true,json:async()=>({saved:true})});await saving;
 });
+
+test('same-source switching retains each exact reader and never adopts a sibling',async()=>{
+ const f=setup(),scope={object_id:'shot',id:'shot-exact',kind:'AV_SHOT',payload:{title:'Exact source'}};
+ const other={...f.detail,record:{...f.plan,object_id:'other',id:'other-exact'},history:[],material_versions:{other:[{number:1,plan:f.plan,members:[f.plan],results:[]}]}};
+ const initial={detail:f.detail,params:new URLSearchParams(),explicit:true,scope},next={detail:other,params:new URLSearchParams(),explicit:true,scope};
+ const session={cards:{[f.detail.record.id]:initial,'other-exact':next},request:0};f.detail.sourceSession=session;f.ctx.location.href='http://local/?material_id=need&material_round=1&material_target=b-exact';
+ f.ctx.state.materialReview=f.detail;f.ctx.state.unifiedScope=scope;f.ctx.state.productionSelected=f.b;f.ctx.state.anchor={type:'text',quote:'exact B'};f.ctx.state.selected='comment-b';
+ f.ctx.renderProductionReader=()=>{};f.ctx.renderComments=()=>{};
+ await f.ctx.switchUnifiedSourceMaterial({object_id:'other',id:'other-exact'});
+ assert.equal(f.ctx.state.materialReview,other);assert.equal(f.ctx.state.productionSelected.id,'other-exact');assert.equal(f.ctx.state.unifiedScope,scope);
+ await f.ctx.switchUnifiedSourceMaterial({object_id:f.b.object_id,id:f.b.id});
+ assert.equal(f.ctx.state.materialReview,f.detail);assert.equal(f.ctx.state.productionSelected.id,f.b.id);assert.equal(f.ctx.state.anchor.quote,'exact B');assert.equal(f.ctx.state.selected,'comment-b');
+ assert.equal(f.requests.length,0);
+});
+
+test('same-source response is discarded after another card takes ownership',async()=>{
+ const f=setup(),scope={object_id:'shot',id:'shot-exact'},initial={detail:f.detail,params:new URLSearchParams(),explicit:true,scope};
+ f.detail.sourceSession={cards:{[f.b.id]:initial},request:0};f.ctx.state.materialReview=f.detail;f.ctx.state.unifiedScope=scope;f.ctx.state.productionSelected=f.b;
+ let resolve;f.ctx.readUnifiedCard=()=>new Promise(r=>{resolve=r});
+ const switching=f.ctx.switchUnifiedSourceMaterial({object_id:'other',id:'other-exact'});const replacement={record:f.plan};f.ctx.state.materialReview=replacement;
+ resolve({detail:replacement,params:new URLSearchParams(),scope});await switching;assert.equal(f.ctx.state.materialReview,replacement);assert.equal(f.ctx.state.productionSelected.id,f.b.id);
+});
+
+test('production text selection uses the active dialog rather than a background duplicate',()=>{
+ const f=setup(),foreground={id:'foreground'},calls=[];
+ f.ctx.state.productionSelected=f.plan;f.ctx.state.unifiedCardRoot={querySelector:()=>foreground};
+ f.ctx.textSelectionAnchor=(host,blocks,attribute)=>{calls.push({host,attribute});return {quote:'accurate foreground'}};
+ assert.equal(f.ctx.selectedAnchor().quote,'accurate foreground');assert.equal(calls[0].host,foreground);assert.equal(calls[0].attribute,'data-block-id');
+});
