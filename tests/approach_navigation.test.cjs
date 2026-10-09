@@ -17,3 +17,30 @@ test('focused desktop directory is not moved by active reading updates',()=>{con
 test('directory scrolling does not trigger reading progress calculation',()=>{const f=fixture();f.listeners.scroll({target:f.index});assert.equal(f.frames.length,0);f.listeners.scroll({target:{}});assert.equal(f.frames.length,1)});
 test('partially covered anchor is rescued after scroll restoration',()=>{const f=fixture();f.context.restoreApproachAnchor();assert.equal(f.moves(),1);f.setTop(55);f.flush();assert.equal(f.moves(),2)});
 test('deep saved reading position and a different route are preserved',()=>{const f=fixture();f.context.restoreApproachAnchor();f.setTop(-500);f.flush();assert.equal(f.moves(),1);f.context.restoreApproachAnchor();f.setTop(55);f.context.location.href='http://isolated/?workspace=story.sources';f.flush();assert.equal(f.moves(),2)});
+
+test('legacy chapter-only links select their owner consistently while explicit tabs and plain defaults win',()=>{
+  const c={URL,URLSearchParams,state:{workspace:'production.approach'},location:{href:'http://isolated/?workspace=production.approach',hash:''},document:{addEventListener(){}},window:{addEventListener(){}}};
+  vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/navigation.js'),'utf8'),c);vm.runInContext(script,c);
+  vm.runInContext(`approachContent={tabs:[
+    {id:'vision',label:'愿景与协作',sections:[{id:'practice'}]},
+    {id:'story',label:'故事创作',sections:[{id:'writing-review'}]},
+    {id:'materials',label:'生产制作',sections:[{id:'workflow'}]},
+    {id:'video-handbook',label:'视频生成手册',sections:[{id:'use',blocks:[{type:'heading',id:'nested-section'}]}]}
+  ]}`,c);
+  for(const [query,hash,id,title] of [
+    ['', '', 'vision','愿景与协作'],
+    ['', '#approach-story-writing-review','story','故事创作方法'],
+    ['', '#approach-materials-workflow','materials','生产制作方法'],
+    ['', '#approach-video-handbook-nested-section','video-handbook','视频生成手册'],
+    ['', '#approach-story-missing','vision','愿景与协作'],
+    ['&tab=vision','#approach-story-writing-review','vision','愿景与协作'],
+    ['&tab=materials','#approach-story-writing-review','materials','生产制作方法'],
+    ['&tab=story','#approach-materials-missing','story','故事创作方法'],
+    ['&tab=unknown','#approach-story-writing-review','vision','愿景与协作']
+  ]){
+    c.location.href='http://isolated/?workspace=production.approach'+query+hash;c.location.hash=hash;
+    assert.equal(c.approachSelectedTab().id,id);
+    assert.equal(c.workspaceTabItems().find(t=>t.active).id,'approach-tab-'+id);
+    assert.equal(c.workspacePageDescriptor('production.approach',new URL(c.location.href).searchParams)[1],title);
+  }
+});

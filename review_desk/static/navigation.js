@@ -152,7 +152,7 @@ function workspaceTabItems(){
   const workspace=state.workspace;
   if(workspace==='production.approach'){
     const tabs=typeof approachTabs==='function'?approachTabs():[{id:'story',label:'故事创作'},{id:'materials',label:'生产制作'}];
-    const requested=new URL(location.href).searchParams.get('tab'),active=(tabs.find(tab=>tab.id===requested)||tabs[0]).id;
+    const params=new URL(location.href).searchParams,active=(typeof approachSelectedTab==='function'?approachSelectedTab(params):(tabs.find(tab=>tab.id===params.get('tab'))||tabs[0])).id;
     return tabs.map(({id,label})=>({id:'approach-tab-'+id,label,active:id===active,controls:'approach-body',open:()=>selectApproachTab(id)}));
   }
   if(['story.sources','story.outline','story.script'].includes(workspace))return [
@@ -184,13 +184,13 @@ function renderWorkspaceTabs(){
   if(focused)document.getElementById(focused)?.focus({preventScroll:true});
 }
 function workspacePageDescriptor(workspace,params){
-  if(workspace==='production.approach'&&typeof approachSelectedTab==='function'){
-    const tab=approachSelectedTab(params);
-    if(!['story','materials'].includes(tab.id))return ['制作思路',tab.label,''];
+  if(workspace==='production.approach'){
+    const tab=typeof approachSelectedTab==='function'?approachSelectedTab(params):null;
+    if(tab&&!['story','materials'].includes(tab.id))return ['制作思路',tab.label,''];
+    return (tab?.id||params.get('tab'))==='materials'
+      ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']
+      :['从资料到故事','故事创作方法','了解采编、结构、小说与剧本的创作步骤，以及审阅意见如何推动修订。'];
   }
-  if(workspace==='production.approach')return params.get('tab')==='materials'
-    ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']
-    :['从资料到故事','故事创作方法','了解采编、结构、小说与剧本的创作步骤，以及审阅意见如何推动修订。'];
   const story={
     'story.sources':['SOURCE EVIDENCE','故事采编','阅读原始依据与整理稿，核对出处和版本；圈选原文提出审阅意见。'],
     'story.outline':['STORY STRUCTURE','故事结构','按稿次阅读人物、关系与故事线，结合图文审阅整体设计。'],
