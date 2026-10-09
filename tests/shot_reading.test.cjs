@@ -62,3 +62,23 @@ test('spoken content matching a background or editing line is never hidden by th
  const ctx=fixture(),rows=[shot('a',{editing:'同句',sound:[{type:'dialogue',text:'同句'},{type:'dialogue',text:'河声'},{type:'ambience',text:'河声'}]}),shot('b',{editing:'同句',sound:[{type:'dialogue',text:'同句'},{type:'dialogue',text:'河声'},{type:'ambience',text:'河声'}]})],common=ctx.breakdownCommonConditions(rows.map(record=>({record})));
  const text=mainText(render(ctx,rows[0],common));assert.ok(text.includes('声音　同句'));assert.ok(text.includes('声音　河声'));
 });
+
+test('Prompt comments prefer a containing exact excerpt and reveal full text for older technical ranges',()=>{
+ const ctx=fixture(),prompt='技术前言。看她一眼🐍，接回歌本。技术后文。',row={id:'exact-plan',object_id:'need',kind:'REQUIREMENT',payload:{generation:{prompt}}};
+ const block=ctx.productionTextBlocks(row).find(b=>b.field==='generation.prompt'),full=new Node('pre'),excerpt=new Node('span'),details=new Node('details');
+ full.dataset.blockId=excerpt.dataset.blockId=block.id;full.ownText=prompt;details.append(full);
+ excerpt.ownText='看她一眼🐍，接回歌本。';excerpt.dataset.anchorOffset=6;excerpt.hasAttribute=key=>key==='data-anchor-offset';
+ ctx.document.querySelectorAll=()=>[excerpt,full];ctx.state.productionSelected=row;ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=ctx.renderComments=()=>{};
+ const action={type:'text',block_id:block.id,start:6,end:11,quote:'看她一眼🐍'};
+ assert.equal(ctx.productionCommentTextNode(action),excerpt);
+ const old={id:'old-comment',target_revision_id:row.id,target_object_id:row.object_id,anchor:{type:'text',block_id:block.id,start:18,end:23,quote:'技术后文。'}};
+ const before=JSON.stringify(old);assert.equal(ctx.locateProductionComment(old,true),true);assert.equal(details.open,true);assert.equal(full.scrolled,true);assert.equal(JSON.stringify(old),before);
+});
+
+test('restoring a technical Prompt draft opens its full exact surface instead of an unrelated excerpt',()=>{
+ const ctx=fixture(),excerpt=new Node('div'),full=new Node('div'),details=new Node('details'),a=new Node('span'),b=new Node('pre');
+ excerpt.dataset.productionBlocks=full.dataset.productionBlocks='exact';a.dataset.blockId=b.dataset.blockId='prompt';a.dataset.anchorOffset=8;a.ownText='动作';a.hasAttribute=()=>true;b.ownText='技术前言以及动作';excerpt.append(a);full.append(b);details.append(full);
+ let focused=null;excerpt.reviewFocus=()=>focused='excerpt';full.reviewFocus=()=>focused='full';ctx.productionTab=()=> 'breakdown';ctx.localStorage={getItem:()=> '未保存'};
+ ctx.state.productionDraftContexts={'["exact",null,null,null]':{anchor:{block_id:'prompt',start:0,end:4},draftKey:'draft'}};
+ ctx.restoreBreakdownPromptDraft({querySelectorAll:()=>[excerpt,full]});assert.equal(focused,'full');assert.equal(details.open,true);
+});

@@ -426,7 +426,7 @@ function renderProductionRecord(root,detail,entityCard=false){
   if(['AV_SHOT','AV_SCENE'].includes(r.kind)){if(r.id===r.current_revision)renderProductionReadiness(root,r).catch(e=>nodeText('p','production-issue',e.message,root));else nodeText('p','production-meta','当前正在阅读历史修订。查看现有缺项或改变采用，请切换到当前版本；历史制作输入保留在下方精确引用中。',root)}
   const details=el('details');nodeText('summary',null,'完整记录与历史引用',details);nodeText('pre',null,JSON.stringify({record:r,uses:detail.uses},null,2),details);references.append(details);
 }
-function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.start<Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
+function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.end<=Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
 function paintProductionReview(){
   if(!isProduction())return;if(typeof paintMaterialUseText==='function')paintMaterialUseText();paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
   const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
@@ -459,9 +459,8 @@ function locateProductionComment(comment,local=false){
   // A merged display never migrates the original field. Reveal its exact text
   // in the same immutable shot before the shared locator and paint run.
   if(a.type==='text'){
-    const surface=document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"]');
-    const node=[...(surface?.querySelectorAll('[data-block-id]')||[])].find(n=>n.dataset.blockId===a.block_id);
-    for(let parent=node?.parentElement;parent&&parent!==surface;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+    const node=productionCommentTextNode(a);
+    for(let parent=node?.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
   }
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
   // Component ids can repeat across state references and unassigned candidates.
