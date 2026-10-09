@@ -187,3 +187,7 @@
 .relation-text .business-code{font-size:13px!important}.relation-sources{font-size:14px!important}
 .relation-sources button{display:inline-block;font-size:13px!important;padding:4px 6px!important;margin:3px!important}
 .relation-sources>.production-meta{display:block;font-size:13px!important}
+.unified-position-card { display:block; }
+.unified-position-card > .unified-card-context { overflow:visible; }
+.management-material-uses { margin:6px 0 16px; }
+.management-material-uses summary { cursor:pointer; }

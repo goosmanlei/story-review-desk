@@ -6,7 +6,7 @@ from . import list_reading as light
 
 def material_entries(store):
     from .read_cache import read_json
-    return read_json(store, 'material-entries-v1', lambda: _material_entries(store))
+    return read_json(store, 'material-entries-v5', lambda: _material_entries(store))
 
 
 def _material_entries(store):
@@ -33,7 +33,11 @@ def _material_entries(store):
             if scoped['kind']=='STATE':
                 owners[scoped['payload']['entity']['object_id']]=scoped['payload']['entity']
                 for source in scoped['payload'].get('sources',[]):
-                    locations.append({'episode':source['object_id'],'scene':source.get('scene_id'),'kind':'STATE','scope':reference,'relation':'source'})
+                    episode=light.ref_record(store,source)
+                    source_scene=next((s for s in episode['payload'].get('scenes',[]) if s['id']==source.get('scene_id')), {})
+                    locations.append({'episode':source['object_id'],'scene':source.get('scene_id'),'kind':'STATE','scope':reference,'source':source,'title':scoped['payload']['title'],
+                                      'source_scene_name':source_scene.get('heading') or source_scene.get('title') or source_scene.get('location'),
+                                      'source_version':episode.get('version'),'relation':'source'})
             elif scoped['kind']=='ENTITY':owners[scoped['object_id']]=b.ref(scoped)
         if scope:add_scope(scope,'mounted')
         for reference in links.get(row['id'],[]):add_scope(reference,'applicable')
@@ -67,12 +71,18 @@ def _material_entries(store):
     from .material_plans import card_counts
     metrics = card_counts(store, merged)
     for mid, item in merged.items():item.update(metrics[mid])
+    from .navigation_search import codes, material_fields
+    mapping = codes(store)
+    for item in merged.values():item['search_fields'] = material_fields(store, item, mapping)
     from .list_associations import material_uses
     return material_uses(store, list(merged.values()))
 
 
 def management_episodes(store):
-    return [{'object_id':r['object_id'],'number':r['payload']['number']} for r in light.rows(store,'EPISODE')
+    return [{'object_id':r['object_id'],'id':r['id'],'number':r['payload']['number'],
+             'title':r['payload']['title'],
+             'scenes':[{k:v for k,v in scene.items() if k in ('id','heading','title','location')} for scene in r['payload'].get('scenes',[])]}
+            for r in light.rows(store,'EPISODE')
             if isinstance(r['payload'].get('number'),int) and r['payload']['number']>0]
 
 
@@ -95,20 +105,23 @@ def entity_summaries(store, entities, entries):
         statuses[eid]='accepted' if accepted else 'unaccepted'
         adoption_statuses[eid]='accepted' if accepted else 'stale' if decision and decision['payload']['verdict']=='accepted' else 'unaccepted'
     from .entity_review import full_states
+    from .navigation_search import entity_fields, codes
     from .list_associations import entity_locations
     rows = rows if rows is not None else p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
     return {'management_episodes':management_episodes(store),'entity_material_counts':counts,'entity_statuses':statuses,'entity_adoption_statuses':adoption_statuses,
+            'entity_search_fields':entity_fields(entities,[r for r in rows if r['kind']=='STATE'],codes(store)),
             'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
             'entity_locations':entity_locations(store,entities,rows),
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
 def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False):
+    from .navigation_search import matches as search_matches
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
     values=material_entries(store);chosen={'episode':episode,'scene':scene,'media':media,'status':status}
     def matches(item,filters):
-        if search and search.lower() not in item['title'].lower():return False
+        if not search_matches(search,item['search_fields']):return False
         if filters.get('media') and item['media_type']!=filters['media']:return False
         if filters.get('status') and item['generated']!=(filters['status']=='generated'):return False
         return not (filters.get('episode') or filters.get('scene')) or any(
@@ -127,10 +140,13 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
             # All card identities and grouping rows stay available for instant
             # local pagination. Full association evidence is read on card open.
             result=[{**{k:v for k,v in item.items() if k not in ('material_identity','entity_ids','locations')},
-                     'locations':[{k:v for k,v in loc.items() if k in ('scope','episode','scene','kind','relation','title')}
-                                  for loc in item['locations'] if loc.get('kind') in ('AV_SCENE','AV_SHOT','AV_EPISODE')]}
+                     'locations':[{k:v for k,v in loc.items() if k in ('scope','source','source_scene_name','source_version','episode','scene','kind','relation','title')}
+                                  for loc in item['locations']]}
                     for item in result]
         return {'management_episodes':management_episodes(store),'items':result,'total':len(result),'groups':groups,
+                'management_locations':list({(loc.get('episode'),loc.get('scene')):
+                    {'episode':loc.get('episode'),'scene':loc.get('scene')} for item in values for loc in item['locations']
+                    if not episode or loc.get('episode')==episode}.values()),
                 'display_total':sum(len(group['material_ids']) for group in groups),'facets':facets}
     focused=None
     if focus:
@@ -198,6 +214,13 @@ def card(store, object_id, revision_id=None, entity_id=None):
             if form and not any(r['id']==form['id'] for r in [*entity['states'],*entity.get('retained_states',[])]):
                 entity['retained_states'].append(form)
     context=b.context(store,scoped['object_id'],scoped['id']) if scoped and not scoped.get('unavailable') else None
+    position_review=None
+    if row['kind'] in ('AV_SHOT','AV_SCENE'):
+        selected_scene=row if row['kind']=='AV_SCENE' else next((p.ref_record(store,ref) for ref in b.ancestors(store,row)[1:] if p.ref_record(store,ref)['kind']=='AV_SCENE'),None)
+        if selected_scene is None:raise ValueError('准确镜头未编入可用视听场；未替换为最新镜头')
+        position_review=scene(store,selected_scene['object_id'],selected_scene['id'],row['id'] if row['kind']=='AV_SHOT' else None,view='breakdown')
+        if row['kind']=='AV_SHOT':position_review['shots']=[item for item in position_review['shots'] if item['record']['id']==row['id']]
+        position_review.update(record=row,history=detail['history'])
     source_materials=[]
     if context and not entity:
         from .material_plans import card_counts
@@ -207,7 +230,7 @@ def card(store, object_id, revision_id=None, entity_id=None):
                            'media_type':r['payload']['media_type'],'scope':r['payload']['scope'],
                            **counts.get(r['object_id'],{})} for r in needs]
     return {'detail':detail,'entity_review':entity,'form':form,'scope':scoped,
-            'source_materials':source_materials,'adoption_context':context}
+            'source_materials':source_materials,'adoption_context':context,'position_review':position_review}
 
 
 def scene(store, object_id, revision_id=None, shot_revision=None, view=None):

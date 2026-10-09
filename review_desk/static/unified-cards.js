@@ -22,7 +22,7 @@ function materialPositionText(item,value=item.title){
   const location=(item.locations||[]).find(row=>row.kind==='AV_SCENE'&&scope&&row.scope?.object_id===scope.object_id&&row.scope?.revision_id===scope.revision_id);
   const owner=[state.unifiedScope,state.breakdownSceneData?.scene,...(state.productionRecords||[])].find(same);
   const scene=location?.scene||(owner?.kind==='AV_SCENE'&&(owner.payload.source?.scene_id||owner.payload.scene_id));
-  const title=String(value??'').replace(/完整形态/gu,'实体状态');return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,(businessCode(owner)||reviewPositionLabel('scene',scene,location?.episode||owner?.payload.source?.object_id))+' · ')):reviewPositionText(title);
+  const title=readableProductionTitle(item,value);return scene?reviewPositionText(title.replace(/^\d+-\d+\s*/,(businessCode(owner)||reviewPositionLabel('scene',scene,location?.episode||owner?.payload.source?.object_id))+' · ')):reviewPositionText(title);
 }
 function materialCountText(item){
   const count=(key,label)=>Number.isInteger(item[key])&&item[key]>=0?`${label} ${item[key]} 个`:`${label}未登记`;
@@ -83,16 +83,28 @@ function renderUnifiedSelected(data){
   renderMaterialCard(right,selected,{...options,roundChange:number=>{
     rememberProductionDraft();switchMaterialRound(data,key,number);delete data.selectedCandidates[key];renderProductionReader();renderComments();focusMaterialRoundControl(key);
   },planVersion:(h,row)=>entityVersionControl(h,row,next=>{data.localVersions||={};data.localVersions[next.object_id]=next}),assetVersion:(h,item)=>entityVersionControl(h,item.record,next=>{data.localVersions||={};data.localVersions[next.object_id]=next})});
-  if(chosen?.record.payload.blocks?.length){nodeText('h3',null,'生成结果自检',right);reviewTextBlocks(right,chosen.record)}
+  if(chosen)renderMaterialResultReview(right,chosen.record,chosen.review_context||data.materialContexts?.[chosen.record.id]||{});
+  if(chosen?.record.payload.blocks?.length){nodeText('h3',null,'生成时自检 · '+reviewDecisionTime(chosen.record.created_at),right);reviewTextBlocks(right,chosen.record)}
   if(chosen)renderMaterialUses(right,chosen.record,data.reference_titles||[]);
 }
 function renderUnifiedCard(root){
   root.classList.add('unified-card-host');root.replaceChildren();
   const card=el('section','unified-card'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
-  if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
+  if(state.positionReview){
+    card.classList.add('unified-position-card');right.remove();left.classList.add('breakdown-scene');
+    const data=state.positionReview,row=data.record,controls=el('div','production-toolbar');left.append(controls);
+    const select=el('select');select.setAttribute('aria-label',row.kind==='AV_SHOT'?'镜头设计版本':'场设计版本');
+    for(const version of data.history)select.append(new Option('版本 '+version.version,version.id));select.value=row.id;select.onchange=()=>switchUnifiedPosition(row.object_id,select.value);controls.append(select);
+    const episode=data.shared?.find(item=>item.record.kind==='AV_EPISODE')?.record;
+    nodeText('span','production-meta',[episode&&businessTitle(episode),breakdownSceneTitle(data.scene)].filter(Boolean).join(' / '),controls);
+    if(row.kind==='AV_SCENE'){nodeText('h2',null,breakdownSceneTitle(row),left);renderAudiovisualSources(left,row);renderAudiovisualDesign(left,row)}
+    for(const item of data.shots)renderBreakdownShot(left,item);
+  }
+  else if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
   else if(state.materialReview){
     const scope=state.unifiedScope,title=scope?.kind==='AV_SCENE'?breakdownSceneTitle(scope):scope?.kind==='AV_SHOT'?breakdownShotTitle(scope):scope?.kind==='EPISODE'?breakdownEpisodeTitle(scope):reviewPositionText(scope?.payload.title||'素材');nodeText('h2',null,title,left);
     if(scope){nodeText('p','production-meta',({INPUT_LOCK:'全剧',STORY:'全剧',EPISODE:'集',AV_SCENE:'场',AV_SHOT:'镜',STATE:'实体状态'})[scope.kind]||productionKinds[scope.kind],left);reviewTextBlocks(left,scope);if(scope.payload.source)materialReferenceLink(left,scope.payload.source,'剧情依据',true);for(const source of scope.payload.sources||[])materialReferenceLink(left,source,'剧情依据',true)}
+    if(scope&&['AV_SCENE','AV_SHOT'].includes(scope.kind))productionRefLink(left,{...productionRef(scope),kind:scope.kind},'打开完整'+(scope.kind==='AV_SHOT'?'镜头':'场设计'));
     else nodeText('p','production-meta','历史原件未登记实体或制作位置归属',left);
     const detail=state.materialReview,row=detail.record,entries=Object.entries(detail.material_versions||{});
     const current=state.materialCommentCard?.data===detail?entries.find(([mid])=>mid===state.materialCommentCard.material_id):entries[0];
@@ -105,6 +117,16 @@ function renderUnifiedCard(root){
     renderMaterialWorkspace(right,state.materialReview);
   }
   paintProductionReview();
+}
+async function switchUnifiedPosition(objectId,revisionId){
+  const previous=state.positionReview,root=state.unifiedCardRoot,session=previous.session||={request:0,results:{}},request=++session.request;
+  rememberProductionDraft();
+  try{
+    const result=session.results[revisionId]||await readUnifiedCard(objectId,revisionId);
+    if(request!==session.request||state.positionReview!==previous||state.unifiedCardRoot!==root||!root?.isConnected)return;
+    session.results[revisionId]=result;result.position_review.session=session;activateUnifiedCard(result);renderProductionReader();renderComments();
+    root.closest('dialog')?.querySelector('.review-dialog-header h2')?.replaceChildren(document.createTextNode(businessTitle(result.detail.record)));
+  }catch(error){if(request===session.request&&state.positionReview===previous&&state.unifiedCardRoot===root&&root?.isConnected){renderProductionReader();toast('准确设计版本不可用：'+error.message)}}
 }
 async function switchUnifiedSourceMaterial(item,trigger){
   const previous=state.materialReview,session=previous.sourceSession,root=state.unifiedCardRoot,scope=state.unifiedScope;
@@ -123,7 +145,9 @@ async function switchUnifiedSourceMaterial(item,trigger){
   state.unifiedCardRoot?.querySelector(`[data-material-id="${CSS.escape(item.object_id)}"]`)?.focus({preventScroll:true});
 }
 async function readUnifiedCard(objectId,revisionId=null,params=null){
-  const result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}));
+  let result;
+  try{result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}))}
+  catch(error){if(error.message==='production record not found')throw Error('指定的对象或修订不可用；未打开其他版本。');throw error}
   result.params=params||new URLSearchParams();result.explicit=!!revisionId;validateUnifiedReference(result);return result;
 }
 function materialSavedDraft(result){
@@ -140,7 +164,7 @@ function materialSavedDraft(result){
 }
 function activateUnifiedCard(result){
   const detail=result.detail,row=detail.record,params=result.params;
-  state.entityReview=result.entity_review;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
+  state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
   state.productionEntityId=state.entityReview?.entity.object_id||null;state.productionChildDetail=null;state.productionEntityDetail=null;
   if(state.entityReview){
     const data=state.entityReview;if(result.explicit&&!result.defaultSelection&&['ENTITY','STATE'].includes(row.kind)){data.localVersions||={};data.localVersions[row.object_id]=row;}if(params.get('production_entity')&&params.get('production_entity')!==data.entity.object_id)throw Error('准确实体不属于此素材');data.states.sort(productionStateOrder);state.productionEntityDetail=entityReviewDetail(result.explicit&&!result.defaultSelection&&row.kind==='ENTITY'?row:data.entity);
@@ -199,9 +223,9 @@ function preserveUnifiedCommentReader(dialog){
 async function openUnifiedMaterial(ref,trigger){
   rememberProductionDraft();if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
-  const fields=['shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
+  const fields=['shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','positionReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
   const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
-  const {dialog,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
+  const {dialog,title,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;
@@ -209,7 +233,7 @@ async function openUnifiedMaterial(ref,trigger){
     result.defaultSelection=!!ref.defaultSelection;
     state.shotReferenceContext=ref.shotReference?{...ref.shotReference,dialog,source:ref.shotReference,pageActive:owns}:null;
     if(ref.component_id){const data=result.entity_review||result.detail;data.selectedComponents||={};data.selectedComponents[ref.revision_id]=ref.component_id;if(!result.entity_review)result.detail.componentId=ref.component_id}
-    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);renderProductionReader();renderComments();
+    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);if(result.position_review)title.textContent=businessTitle(result.detail.record);renderProductionReader();renderComments();
   }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','production-issue',error.message,body)}}
 }
 
