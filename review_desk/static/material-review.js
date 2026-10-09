@@ -138,14 +138,15 @@ function renderMaterialRequirements(parent,requirement){
   if(!repeated||locatingDescription)materialField(host,requirement,'generation.output.description',repeated?null:'需求描述');
   materialField(host,requirement,'generation.output.review_criteria','检查要点');parent.append(info);
 }
-function renderGenerationRecipe(parent,need,requirementsShown=false){
+function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=false}={}){
   const plan=need.payload.generation,box=el('section','material-plan');box.dataset.requirementId=need.object_id;
-  nodeText('h3',null,plan?.method==='reuse'?'复用方案':'生成方案',box);
+  nodeText('h3',null,historical?'原方案':plan?.method==='reuse'?'复用方案':'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
   materialExecution(host,plan);
-  if(plan.method!=='reuse')materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
-  if(need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
+  if(plan.method!=='reuse')materialParameters(host,need,'generation',plan.model);
+  if(!historical)renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
+  if(!historical&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
   if(plan.blockers?.length){nodeText('h4',null,plan.method==='reuse'?'复用前仍需':'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
   materialField(host,need,'generation.prompt',plan.method==='reuse'?'复用说明':'提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
@@ -332,17 +333,17 @@ function renderMaterialCard(parent,model,options={}){
   // A version owns one demand definition. Result associations are uses, not
   // interchangeable historical definitions for every related state.
   const definitionRecords=model.round?.definition_records;
-  const requirement=definitionRecords?definitionRecords.requirement:need;
+  const requirement=model.exactPreparingRevision?need:definitionRecords?definitionRecords.requirement:need;
   if(requirement)renderMaterialRequirements(box,requirement);
   else if(definitionRecords)nodeText('p','production-meta','此版本未保留完整素材要求。',box);
-  if(!items.length&&need)renderGenerationRecipe(box,need,!!requirement);
+  if(!items.length&&need)renderGenerationRecipe(box,need,!!requirement,{historical:!!model.historicalRecipe});
   else if(!items.length&&model.round?.model==='plan-v1'){
     const call=model.round.members.find(r=>r.kind==='CALL');
     if(call){renderActualGeneration(box,{call,inputs:call.review_input_records||[]});nodeText('p','production-meta','此版本有调用记录，尚无已确认的原件结果。',box)}
     else nodeText('p','production-meta','此版本的历史方案未记录完整。',box);
   }
   parent.append(box);
-  if(typeof renderShotReferenceChoice==='function'){
+  if(!model.historicalRecipe&&typeof renderShotReferenceChoice==='function'){
     const actions=renderShotReferenceChoice(box,model,items[0],referencePlayer);
     if(actions&&referencePlayer)box.insertBefore(actions,referencePlayer.parentNode.nextSibling);
   }
@@ -467,7 +468,7 @@ async function openMaterialPlanHistory(row,comment=null){
   try{
     const detail=await api('/api/production?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));if(!dialog.isConnected)return;
     const session=referenceReviewSession(dialog,detail);dialog.reviewFocus=session.focus;
-    renderGenerationRecipe(body,detail.record);paintReviewCommentCounts();
+    renderGenerationRecipe(body,detail.record,false,{historical:true});paintReviewCommentCounts();
     if(comment){session.focus();state.selected=comment.id;const block=body.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`),surface=block?.closest('.review-surface')||body.querySelector('.review-surface');state.reviewCommentScope=reviewBlockScope(surface,'text');openPanel();renderComments();surface.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'})}
   }catch(error){if(dialog.isConnected)nodeText('p','error',error.message,body)}
 }
@@ -573,18 +574,25 @@ function renderMaterialDemand(root,detail){
   const round=rounds?.find(v=>v.number===selected)||(detail.explicitRevision?rounds?.find(v=>v.members.some(m=>m.id===r.id)):null)||materialDefaultRound(rounds);
   if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,round);history.replaceState(history.state,'',url)}
   const local=detail.localPlans?.[r.object_id];
-  const need=local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||(round?.model==='plan-v1'&&round.frozen?null:r);
+  const belongs=row=>row?.kind==='REQUIREMENT'&&materialVersionCommentRows(round).some(m=>m.id===row.id&&m.object_id===row.object_id);
+  const exact=belongs(local)?local:detail.explicitRevision&&belongs(r)?r:null;
+  // An unfrozen version can contain several immutable preparation revisions.
+  // A link to an earlier one reads that revision, not the version's latest plan.
+  // Frozen definitions and their real results retain the normal version contract.
+  const exactPreparingRevision=!!(round?.model==='plan-v1'&&!round.frozen&&!round.results?.length&&round.plan&&exact&&exact.id!==round.plan.id);
+  const need=exactPreparingRevision?exact:local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||(round?.model==='plan-v1'&&round.frozen?null:r);
   const results=round?.results||(detail.candidate_records||[]).filter(a=>a.payload.candidate_requirements?.some(ref=>ref.revision_id===r.id));
   const allCandidates=results.filter(a=>!a.payload.placeholder).map(record=>({record,component:record.payload.components.find(c=>c.id===detail.selectedComponents?.[record.id])||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],components:record.payload.components,review_context:detail.review_contexts?.[record.id]})).filter(i=>i.component);
   const candidates=materialExactCandidates(detail,allCandidates,detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'),round);
-  renderMaterialCard(root,{need,identity:r,candidates,round,rounds,material_id:mid},{
+  const historicalRecipe=exactPreparingRevision||!!(local&&need===local&&!candidates.length&&local.id!==round?.plan?.id);
+  renderMaterialCard(root,{need,identity:r,candidates,round,rounds,material_id:mid,exactPreparingRevision,historicalRecipe},{
     ...materialCandidateOptions(detail,candidates),
     roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,rounds.find(r=>r.number===number));history.replaceState(history.state,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},
     planVersion:(parent,row)=>{if(rounds?.length||detail.history.length<2)return;const select=el('select','entity-review-version');select.setAttribute('aria-label',reviewPositionText(row.payload.title)+'的版本');for(const v of detail.history)select.append(new Option(`记录修订 ${v.version}${v.id===v.current_revision?' · 当前':''}`,v.id));select.value=row.id;select.onchange=()=>openProductionRecord(row.object_id,select.value);parent.append(select)},
     selectComponent:(id,revision)=>{detail.selectedComponents||={};detail.selectedComponents[revision]=id;renderProductionReader();document.querySelector('#production-component')?.focus({preventScroll:true})}
   });
   if(need)productionRefLink(root,need.payload.scope,'适用范围：'+productionName(need.payload.scope));
-  if(typeof renderMaterialAdoptionControls==='function')renderMaterialAdoptionControls(root,detail);
+  if(!historicalRecipe&&typeof renderMaterialAdoptionControls==='function')renderMaterialAdoptionControls(root,detail);
 }
 
 function materialVersionParam(data){return Object.values(data?.material_versions||{}).some(rs=>rs.some(r=>r.model==='plan-v1'))?'material_version':'material_round'}
