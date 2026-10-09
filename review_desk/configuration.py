@@ -21,7 +21,7 @@ FIELDS = {
         "ai_polish_model": {"label": "评论润色模型", "type": "model", "default": "gpt-4.1-mini"},
         "ai_polish_effort": {"label": "推理强度", "type": "reasoning_effort", "default": "off"},
         "ai_polish_api_key_env": {"label": "API Key 环境变量名", "type": "env_name", "default": "OPENAI_API_KEY"},
-        "ai_context_max_chars": {"label": "AI 参考上下文字数上限", "type": "integer", "default": 12000, "min": 1000, "max": 30000},
+        "ai_context_max_chars": {"label": "AI 参考总字符上限", "type": "integer", "default": 12000, "min": 1000, "max": 30000},
     },
     "PROJECT": {
         "current_stage": {"label": "当前创作阶段", "type": "stage", "default": "STORY_COMPILATION"},
