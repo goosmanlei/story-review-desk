@@ -118,3 +118,20 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .review-pagination button:not(:disabled):hover { background: var(--desk-hover); border-color: var(--desk-selection-line); }
 .review-pagination :is(button,select):focus-visible { outline: 2px solid var(--desk-selection-line); outline-offset: 2px; }
 .review-pagination button:disabled { color: var(--desk-muted); background: var(--desk-soft); opacity: .55; cursor: default; }
+
+/* Keep each method resource and its condition together across form columns. */
+.methods-page .method-tabs { margin-bottom: 12px; }
+.methods-page .method-tabs button,.methods-page .method-files button,.methods-page .method-rules button { border: 1px solid var(--desk-line); border-radius: var(--desk-radius); background: #fffdfa; padding: 7px 11px; font: inherit; font-size: 13px; cursor: pointer; }
+.methods-page .method-tabs button.active { background: var(--desk-selected); border-color: var(--desk-selection-line); color: #355339; }
+.methods-page > select { margin-bottom: 24px; max-width: 100%; }
+.methods-page .method-files,.methods-page .method-resources,.methods-page .method-rules,.methods-page .config-explanation { grid-column: 1/-1; min-width: 0; }
+.methods-page .method-files .config-field { margin-bottom: 14px; }
+.methods-page .method-files input { max-width: 65%; margin-right: 8px; }
+.methods-page .method-resources h3 { margin: 0 0 14px; font-size: 16px; }
+.methods-page .method-resource-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); align-items: center; gap: 8px 16px; margin: 10px 0; }
+.methods-page .method-resource-row > input { width: 100%; min-width: 0; }
+.methods-page .method-resource-row > input:disabled { opacity: .5; }
+.methods-page .method-resource-row > label:not(.config-choice) { grid-column: 1/-1; font-size: 13px; }
+.methods-page .method-rules .config-field { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.methods-page .method-rules input,.methods-page .method-rules select { flex: 1 1 240px; }
+@media(max-width:700px) { .methods-page .method-resource-row { grid-template-columns: minmax(0,1fr); margin-bottom: 18px; } }
