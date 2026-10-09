@@ -79,3 +79,13 @@ for(const success of [true,false])test(`old polish ${success?'success':'failure'
  const current=f.ctx.polishComment();assert.equal(f.root.querySelector('[data-polish]').disabled,true);finishOld(success?{suggestion:'[MOCK] obsolete'}:{error:'[MOCK] obsolete'},success);await old;
  assert.equal(f.root.querySelector('[data-polish]').disabled,true);assert.equal(f.ctx.state.suggestion,null);f.pending.shift()(preview);await tick();f.pending.shift()({suggestion:'[MOCK] current'});await current;assert.equal(f.ctx.state.suggestion,'[MOCK] current');assert.equal(f.input().value,'new');assert.equal(f.root.querySelector('[data-polish]').disabled,false);
 });
+test('inspected snapshot is reused for submit and changed server context preserves the opinion',async()=>{
+ const f=fixture();edit(f,'user opinion');const inspect=f.ctx.previewPolish();f.pending.shift()(preview);await inspect;
+ const run=f.ctx.polishComment();assert.equal(f.requests.length,2);assert.equal(f.requests[1].url,'/api/comments/polish');assert.equal(f.requests[1].body.expected_context_sha256,preview.context_sha256);
+ f.pending.shift()({error:'[MOCK] 上下文已变化'},false);await run;assert.equal(f.input().value,'user opinion');assert.equal(f.ctx.state.suggestion,null);
+});
+test('adopting a local mocked suggestion invalidates the old reference snapshot',async()=>{
+ const f=fixture();edit(f,'user opinion');const inspect=f.ctx.previewPolish();f.pending.shift()(preview);await inspect;f.ctx.state.suggestion='[MOCK] new opinion';f.ctx.renderComments();
+ f.root.all().find(n=>n.tag==='button'&&n.textContent==='采用到草稿').onclick();assert.equal(f.ctx.state.preview,null);
+ const run=f.ctx.polishComment();assert.equal(f.requests.at(-1).url,'/api/comments/polish-context');f.pending.shift()(preview);await tick();f.pending.shift()({suggestion:'[MOCK] next'});await run;
+});
