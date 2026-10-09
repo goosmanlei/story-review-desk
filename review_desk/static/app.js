@@ -574,9 +574,9 @@ function blockMarks(source,block,index){
   return out;
 }
 
-function renderBlock(source,block,index){
+function renderBlock(source,block,index,explicitMarks=null){
   const p=el('p');p.dataset.blockId=block.id;p.id=`block-${block.id}`;
-  const marks=blockMarks(source,block,index),length=chars(block.text).length;
+  const marks=explicitMarks||blockMarks(source,block,index),length=chars(block.text).length;
   const cuts=new Set([0,length]);for(const m of marks){cuts.add(m.start);cuts.add(m.end)}
   const ordered=[...cuts].sort((a,b)=>a-b),letters=chars(block.text);
   for(let i=0;i<ordered.length-1;i++){

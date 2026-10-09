@@ -339,9 +339,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     with production.read_scope(store):
                         return self._json(related(store, reference))
                 if path == '/api/production/material-relations':
-                    from .material_relations import for_material
+                    from .material_relations import review_context
                     with production.read_scope(store):
-                        return self._json({'relations': for_material(store, param('material_id'))})
+                        return self._json(review_context(store, param('material_id'), param('revision_id')))
                 if path == "/api/production/breakdown":
                     from .production_breakdown import catalog
                     with production.read_scope(store):
