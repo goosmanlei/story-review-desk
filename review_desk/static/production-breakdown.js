@@ -308,21 +308,32 @@ function renderShotInputs(host,row,inputs,records,context){
     list.append(line);
   }
 }
-function renderShotReferenceChoice(box,model,item){
+function shotReferenceChoiceContext(box,model){
   const context=state.shotReferenceContext;if(!context||box.closest('dialog')!==context.dialog)return;
   if(model.material_id!==context.slot.material_id&&model.round?.canonical_id!==context.slot.canonical_material_id)return;
+  return context;
+}
+function renderShotReferenceChoice(box,model,item,player){
+  const context=shotReferenceChoiceContext(box,model);if(!context)return;
   const actions=el('div','production-toolbar shot-reference-actions');box.append(actions);
   if(context.indirect){
     nodeText('p','production-meta','间接参考的 '+shotReferenceLabel(context.slot)+' 属于“'+shotReferenceOwnerTitle(context.slot)+'”。当前镜头通过该方案传递此素材；这里浏览不保存，也不修改共享上游方案或其他镜头。',actions);
-    materialReferenceLink(actions,context.slot.selection_owner,'查看选定归属方案');return;
+    const bounds=context.slot.number===model.round?.number?referenceSelectionBounds(context.slot,item):{};
+    if(player&&bounds.range)productionButton(actions,`试听已保存片段 · ${bounds.range.start_seconds}–${bounds.range.end_seconds} 秒`,()=>player.reviewAudition(bounds.range,'已保存片段'));
+    materialReferenceLink(actions,context.slot.selection_owner,'查看选定归属方案');return actions;
   }
   const purpose=nodeText('p','production-meta','',actions);
   context.drafts||={};
   const identity=JSON.stringify([model.material_id,model.round?.number,item?.record.id||null,item?.component.id||null]);
-  const selectionFields=renderReferenceSelectionFields(actions,item,context.slot,()=>{context.drafts[identity]=selectionFields.snapshot();context.error=null;refresh()},context.drafts[identity]);
-  const actionLabel=item?'选为方案参考':'选定此版本，候选待选';
   const savedChoice=()=>context.slot.number===model.round?.number&&(context.slot.material_id===model.material_id||context.slot.canonical_material_id===model.material_id)&&(context.slot.candidate?.revision_id||null)===(item?.record.id||null)&&(!item||context.slot.value.component_id===item.component.id);
+  const savedBounds=()=>savedChoice()?referenceSelectionBounds(context.slot,item):{};
+  const selectionFields=renderReferenceSelectionFields(actions,item,{...context.slot,value:savedChoice()?context.slot.value:{}},()=>{player?.reviewPause();context.drafts[identity]=selectionFields.snapshot();context.error=null;refresh()},context.drafts[identity]);
+  const actionLabel=item?'选为方案参考':'选定此版本，候选待选';
   const unchanged=()=>savedChoice()&&JSON.stringify(selectionFields())===JSON.stringify(referenceSelectionBounds(context.slot,item));
+  const audition=player?productionButton(actions,'试听选段',()=>{
+    try{const bounds=selectionFields();if(!bounds.range||!player.reviewAudition(bounds.range,unchanged()?'已保存片段':'未保存范围'))throw Error('起点须早于终点，且在此原件范围内');context.error=null}
+    catch(error){context.error=error.message}refresh();
+  }):null;
   const button=productionButton(actions,actionLabel,async()=>{
     if(context.busy||button.disabled)return;
     let bounds;try{bounds=selectionFields()}catch(error){context.error=error.message;refresh();return}
@@ -337,7 +348,7 @@ function renderShotReferenceChoice(box,model,item){
     }catch(error){context.error='保存失败：'+error.message}
     finally{context.busy=false;context.source.pending=false;if(context.dialog.isConnected&&state.shotReferenceContext===context)context.choiceView?.refresh();else if(!context.dialog.isConnected&&context.pageActive?.()&&context.source.saved)context.source.onSaved(context.source.saved)}
   });
-  const discard=productionButton(actions,'放弃范围修改',()=>{delete context.drafts[identity];context.error=null;selectionFields.restore(referenceSelectionBounds(context.slot,item));refresh()});
+  const discard=productionButton(actions,'放弃范围修改',()=>{player?.reviewPause();delete context.drafts[identity];context.error=null;selectionFields.restore(savedBounds());refresh()});
   const message=nodeText('small','production-meta','',actions);message.setAttribute('role','status');
   const refresh=()=>{if(!actions.isConnected)return;let same=false;try{same=unchanged()}catch{}
     purpose.textContent=`为此素材方案版本 ${context.number} 的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 已提交版本改选将建立新制作版本。':'');
@@ -345,9 +356,15 @@ function renderShotReferenceChoice(box,model,item){
     button.textContent=context.busy?'正在保存…':same?'已保存 · 方案版本 '+context.number:context.slot.number?'保存修改 · 未保存':actionLabel;
     message.textContent=context.error||(item&&item.component?.role!=='original'?'试听／预览组成仅供比较；请选择原件后保存。':'');message.className=context.error?'production-issue':'production-meta';
     discard.hidden=!context.drafts[identity]||same;discard.disabled=context.busy;
+    if(audition){let bounds;try{bounds=selectionFields()}catch{}
+      audition.hidden=!selectionFields.snapshot().range?.enabled;
+      audition.disabled=!bounds?.range;
+      audition.textContent=(same?'试听已保存片段':'试听未保存范围')+(bounds?.range?` · ${bounds.range.start_seconds}–${bounds.range.end_seconds} 秒`:'');
+    }
   };
   context.choiceView={refresh};refresh();
   if(!item)nodeText('p','production-meta','可先选定此版本；候选仍待选，完成选定前不能执行制作。',actions);
+  return actions;
 }
 function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
   const block=productionTextBlocks(row).find(b=>b.field===field);if(!block)return;

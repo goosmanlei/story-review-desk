@@ -72,7 +72,8 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;box.dataset.reviewFile=component.file;box.dataset.reviewFrom=from;box.dataset.reviewTo=to;
   const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=reviewURL(options.src||'/api/production/files/'+encodeURIComponent(component.file));media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
   const focus=()=>{if(review){if(options.focus)options.focus();else focusProductionReview({record,history:[record],uses:[]})}};box.reviewFocus=focus;box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
-  const top=el('div','review-audio-controls'),play=productionButton(top,'播放',()=>{if(media.paused){stopAt=to;if(media.currentTime<from||media.currentTime>=to)media.currentTime=from;media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
+  const playLabel=options.fullPlayback?'播放完整'+options.fullPlayback:'播放';
+  const top=el('div','review-audio-controls'),play=productionButton(top,playLabel,()=>{if(media.paused){stopAt=to;playingRange=false;if(options.fullPlayback||media.currentTime<from||media.currentTime>=to)seek(from);media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
   const mute=productionButton(top,'静音',()=>{media.muted=!media.muted;mute.textContent=media.muted?'恢复声音':'静音'});box.append(top);
   const track=el('div','review-timeline');track.tabIndex=0;track.setAttribute('role','slider');track.setAttribute('aria-label',audio?'音频时间轴':'视频时间轴');track.setAttribute('aria-valuemin',String(from));track.setAttribute('aria-valuemax',String(to));
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 800 72');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('aria-hidden','true');track.append(svg);
@@ -83,17 +84,34 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   const axis=el('div','review-time-axis');nodeText('span',null,from.toFixed(2)+' 秒',axis);nodeText('span',null,to.toFixed(2)+' 秒',axis);box.append(axis);
   const tools=el('div','review-range-tools'),start=el('input'),end=el('input');
   for(const [input,label] of [[start,'选段起点（秒）'],[end,'选段终点（秒）']]){input.type='number';input.step='.01';input.min=from;input.max=to;input.setAttribute('aria-label',label);const wrap=el('label');nodeText('span',null,label,wrap);wrap.append(input);tools.append(wrap)}
-  let range=null,stopAt=to,gesture=null,mediaFailed=false;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>span>0?100*(v-from)/span:0;
+  let range=null,stopAt=to,playingRange=false,endTimer=null,gesture=null,mediaFailed=false;const clamp=v=>Math.max(from,Math.min(to,v)),percent=v=>span>0?100*(v-from)/span:0;
+  const clearEndTimer=()=>{if(endTimer!==null){clearTimeout(endTimer);endTimer=null}};
+  // timeupdate is too sparse to stop a short audition at its actual boundary.
+  // Recheck media time after stalls/seeks; never advance a stalled recording.
+  const armEndTimer=()=>{
+    clearEndTimer();if(media.paused||!playingRange||!box.isConnected||typeof setTimeout!=='function')return;
+    const boundary=Math.min(to,stopAt),remaining=boundary-media.currentTime;
+    if(remaining<=.01){media.pause();media.currentTime=boundary;stopAt=to;paint();return}
+    endTimer=setTimeout(armEndTimer,Math.max(1,(remaining-.008)/(media.playbackRate||1)*1000));
+  };
   const paint=()=>{
     const time=clamp(media.currentTime||from);clock.textContent=`${time.toFixed(2)} / ${to.toFixed(2)} 秒`;head.style.left=percent(time)+'%';track.setAttribute('aria-valuenow',String(time));track.setAttribute('aria-valuetext',time.toFixed(2)+' 秒');
-    tools.hidden=!range;region.hidden=!range;aHandle.hidden=!range;bHandle.hidden=!range;play.textContent=media.paused?'播放':'暂停';
+    tools.hidden=!range;region.hidden=!range;aHandle.hidden=!range;bHandle.hidden=!range;play.textContent=media.paused?playLabel:options.fullPlayback?(playingRange?'暂停'+playingRange:'暂停完整'+options.fullPlayback):'暂停';
     if(range){region.style.left=percent(range[0])+'%';region.style.width=percent(range[1])-percent(range[0])+'%';aHandle.style.left=percent(range[0])+'%';bHandle.style.left=percent(range[1])+'%';if(document.activeElement!==start)start.value=range[0].toFixed(2);if(document.activeElement!==end)end.value=range[1].toFixed(2);aHandle.setAttribute('aria-valuenow',range[0]);bHandle.setAttribute('aria-valuenow',range[1])}
   };
   const select=(a,b)=>{a=clamp(a);b=clamp(b);if(a>=b)return false;range=[a,b];paint();return true};
   const seek=t=>{media.currentTime=clamp(t);media.dataset.reviewSeek=String(clamp(t));paint()};
-  productionButton(tools,'试听选段',()=>{stopAt=range[1];seek(range[0]);media.play().catch(e=>toast(e.message))});
+  // Audition is playback only. It neither selects a comment range nor writes a
+  // consumer input; both callers retain their own exact range state.
+  box.reviewAudition=(bounds,origin='选段')=>{
+    const a=bounds?.start_seconds,b=bounds?.end_seconds;
+    if(!box.isConnected||mediaFailed||!Number.isFinite(a)||!Number.isFinite(b)||a<from||a>=b||b>to)return false;
+    media.pause();stopAt=b;playingRange=origin;seek(a);media.play().catch(e=>toast(e.message));return true;
+  };
+  box.reviewPause=()=>media.pause();
+  productionButton(tools,'试听选段',()=>box.reviewAudition({start_seconds:range[0],end_seconds:range[1]}));
   if(review)productionButton(tools,'添加评论',()=>{focus();startDraft({type:'time',component_id:component.id,asset_file:component.file,start_seconds:range[0],end_seconds:range[1]})});
-  productionButton(tools,'清除选段',()=>{range=null;stopAt=to;paint()});box.append(tools);
+  productionButton(tools,'清除选段',()=>{range=null;paint()});box.append(tools);
   for(const input of [start,end]){
     input.oninput=()=>{const a=Number(start.value),b=Number(end.value);if(start.value!==''&&end.value!==''&&from<=a&&a<b&&b<=to)select(a,b)};
     input.onchange=()=>{const a=Number(start.value),b=Number(end.value);if(!(from<=a&&a<b&&b<=to)){start.value=range[0].toFixed(2);end.value=range[1].toFixed(2);toast('起点须早于终点，且在此素材范围内')}};
@@ -106,7 +124,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   track.title='点击定位，拖动选段；方向键定位，I / O 设起止点';
   for(const [handle,index] of [[aHandle,0],[bHandle,1]])handle.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const next=e.key==='Home'?from:e.key==='End'?to:range[index]+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1);select(index===0?next:range[0],index===1?next:range[1])};
   const setDuration=duration=>{if(!to&&Number.isFinite(duration)){to=duration;span=to-from;stopAt=to;box.dataset.reviewTo=to;track.setAttribute('aria-valuemax',to);for(const input of [start,end])input.max=to;for(const handle of [aHandle,bHandle])handle.setAttribute('aria-valuemax',to);axis.lastElementChild.textContent=to.toFixed(2)+' 秒'}};
-  media.onloadedmetadata=()=>{if(!box.isConnected)return;setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);paint()};media.onpause=paint;media.onerror=()=>{mediaFailed=true;fallback.hidden=false;fallback.textContent='原文件读取失败；未替换为其他文件，请返回继续审阅';play.disabled=true};
+  media.onloadedmetadata=()=>{if(!box.isConnected)return;setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);armEndTimer();paint()};media.onpause=()=>{clearEndTimer();paint()};media.onratechange=armEndTimer;media.onseeked=()=>{armEndTimer();paint()};media.onerror=()=>{clearEndTimer();mediaFailed=true;fallback.hidden=false;fallback.textContent='原文件读取失败；未替换为其他文件，请返回继续审阅';play.disabled=true};
   box.reviewLocate=anchor=>{if(!box.isConnected||anchor.component_id!==component.id||anchor.asset_file!==component.file||anchor.start_seconds<from||anchor.end_seconds>to||!select(anchor.start_seconds,anchor.end_seconds))return false;media.pause();seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'});return true};
   if(review){
     reviewSurface(box,'audio');let commentKey='';
