@@ -73,6 +73,7 @@ test('story-hosted complete cards locate production comments and select only the
   const range={startContainer:{},endContainer:{}},surface={dataset:{productionBlocks:'edge-old'},contains:()=>true};
   ctx.state.unifiedCardRoot={querySelectorAll:()=>[surface]};ctx.getSelection=()=>({rangeCount:1,getRangeAt:()=>range});
   ctx.productionTextBlocks=()=>['exact blocks'];ctx.textSelectionAnchor=(host,blocks)=>({host,blocks});
+  ctx.textSelectionRange=(host,r)=>host.contains(r.startContainer)&&host.contains(r.endContainer)?r:null;
   assert.equal(ctx.selectedAnchor().host,surface);
   let located;ctx.locateProductionComment=comment=>{located=comment;return true};const comment={id:'old-opinion'};
   assert.equal(ctx.locateComment(comment),true);assert.equal(located,comment);
