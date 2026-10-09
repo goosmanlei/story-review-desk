@@ -787,7 +787,12 @@ function textSelectionAnchor(host,blocks,attribute){
   return {block_id:blocks[first].id,end_block_id:blocks[last].id,start,end,quote};
 }
 function selectedAnchor(){
-  if(isProduction())return state.productionSelected?textSelectionAnchor(state.unifiedCardRoot?.querySelector('#production-blocks')||$('#production-blocks'),productionTextBlocks(state.productionSelected),'data-block-id'):null;
+  if(isProduction()){
+    if(!state.productionSelected)return null;
+    const root=state.unifiedCardRoot||document,selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
+    const host=range&&[...root.querySelectorAll('[data-production-blocks]')].find(node=>node.dataset.productionBlocks===state.productionSelected.id&&node.contains(range.startContainer)&&node.contains(range.endContainer));
+    return host?textSelectionAnchor(host,productionTextBlocks(state.productionSelected),'data-block-id'):null;
+  }
   if(isStructure())return selectedStructureAnchor();
   if(isScript())return scriptScene()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
   if(state.workspace!=='story.sources'||!state.current)return null;
@@ -1026,10 +1031,10 @@ function renderComments({replaceDraft=false}={}){
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
       const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{try{localStorage.setItem(draftKey(),state.suggestion)}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，原输入与润色建议仍保留，请复制留存后重试。');return}state.suggestion=null;state.preview=null;state.previewExpanded=false;commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
   nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
-  if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,open);else for(const comment of open)body.append(commentCard(comment));
+  if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,open);else if(typeof isMaterialReview==='function'&&isMaterialReview())appendMaterialReviewComments(body,open);else for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
   const toggle=nodeText('button',null,state.historyOpen?'收起历史':'展开历史',head);toggle.onclick=()=>{state.historyOpen=!state.historyOpen;renderComments()};body.append(head);
-  if(state.historyOpen){if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,closed.slice(0,state.historyLimit));else for(const comment of closed.slice(0,state.historyLimit))body.append(commentCard(comment));if(closed.length>state.historyLimit){const more=nodeText('button','secondary','显示更多',body);more.onclick=()=>{state.historyLimit+=20;renderComments()}}}
+  if(state.historyOpen){if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,closed.slice(0,state.historyLimit));else if(typeof isMaterialReview==='function'&&isMaterialReview())appendMaterialReviewComments(body,closed.slice(0,state.historyLimit));else for(const comment of closed.slice(0,state.historyLimit))body.append(commentCard(comment));if(closed.length>state.historyLimit){const more=nodeText('button','secondary','显示更多',body);more.onclick=()=>{state.historyLimit+=20;renderComments()}}}
 }
 
 async function refreshComments(){

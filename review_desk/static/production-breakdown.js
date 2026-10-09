@@ -405,15 +405,18 @@ function breakdownPrompt(parent,need,context){
   }
   const saved=exact?{number:Number(params.get('shot_plan')),candidate:params.get('shot_candidate')}:state.breakdownVideoSelections[need.id]||{},round=rounds.find(r=>r.number===saved.number)||[...rounds].sort((a,b)=>b.number-a.number)[0];
   if(exact&&saved.number&&!rounds.some(r=>r.number===saved.number)){nodeText('p','production-issue','准确素材制作版本不存在',parent);return}
-  const candidates=(round?.results||[]).map(record=>({record,components:record.payload.components,component:record.payload.components.find(c=>c.role==='original')||record.payload.components[0]}));
-  const model={need:round?(round.definition_records?round.definition_records.requirement:round.plan):need,identity:need,candidates,round,rounds,material_id:need.object_id};
+  const exactNeed=detail?.record?.id===need.id?detail.record:need;
+  const historicalRecipe=typeof materialHistoricalDefinition==='function'&&materialHistoricalDefinition(exactNeed,round);
+  const candidates=(historicalRecipe?[]:round?.results||[]).map(record=>({record,components:record.payload.components,component:record.payload.components.find(c=>c.role==='original')||record.payload.components[0]}));
+  const model={need:historicalRecipe?exactNeed:round?(round.definition_records?round.definition_records.requirement:round.plan):need,identity:need,candidates,round,rounds,material_id:need.object_id};
   if(saved.candidate&&!candidates.some(i=>i.record.id===saved.candidate)){nodeText('p','production-issue','准确素材候选不属于此制作版本；未替换为其他结果',parent);return}
   const selected=materialCandidateChoice(candidates,saved.candidate||materialDefaultCandidate(model,{adoptions:context.adoptions}));
   const selection={number:round?.number,baseline:round?.baseline_id,candidate:selected?.record.id,reference:productionRef(selected?.record||model.need||round?.definition_records?.call||need)};state.breakdownVideoSelections[need.id]=selection;
-  const referenceContext={need,number:round?.number,frozen:!!round?.frozen};
+  const referenceContext={need:model.need||need,number:round?.number,frozen:!!round?.frozen,historical:historicalRecipe};
   const section=el('section','shot-generation-content');parent.append(section);
   const repaint=()=>{rememberProductionDraft();section.remove();breakdownPrompt(parent,need,context);paintReviewCommentCounts()};
   const bar=el('div','production-toolbar');section.append(bar);renderProductionAcceptance(bar,model.need||need);
+  if(historicalRecipe){renderHistoricalProductionDefinition(section,exactNeed,round,detail.history||[]);renderMaterialRequirements(section,exactNeed)}
   const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'素材候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
@@ -430,9 +433,9 @@ function breakdownPrompt(parent,need,context){
     if(!call){nodeText('p','production-issue','此候选未登记真实调用，无法还原输入与提示词',section);return}
     const host=materialTextSurface(section,call);renderShotInputs(host,call,call.payload.inputs||[],actual.inputs||[],referenceContext);materialExecution(host,call.payload);materialParameters(host,call,'call',call.payload.model);renderLinkedPrompt(host,call,call.payload.inputs||[],actual.inputs||[],'call.prompt',referenceContext);
   }else{
-    const call=round?.definition_records?.call;if(call){const host=materialTextSurface(section,call);nodeText('h4',null,'已提交 · 尚无原件结果',host);renderShotInputs(host,call,call.payload.inputs||[],call.review_input_records||[],referenceContext);materialExecution(host,call.payload);materialParameters(host,call,'call',call.payload.model);renderLinkedPrompt(host,call,call.payload.inputs||[],call.review_input_records||[],'call.prompt',referenceContext);return}
+    const call=!historicalRecipe&&round?.definition_records?.call;if(call){const host=materialTextSurface(section,call);nodeText('h4',null,'已提交 · 尚无原件结果',host);renderShotInputs(host,call,call.payload.inputs||[],call.review_input_records||[],referenceContext);materialExecution(host,call.payload);materialParameters(host,call,'call',call.payload.model);renderLinkedPrompt(host,call,call.payload.inputs||[],call.review_input_records||[],'call.prompt',referenceContext);return}
     const plan=model.need?.payload.generation;if(!plan){nodeText('p','production-meta',round?'此版本未保留完整生成方案':'生成方案待完善',section);return}
-    const host=materialTextSurface(section,model.need);nodeText('h4',null,'待生成 · 素材方案',host);renderMaterialRouteChoices(host,model.need,(result,routeKey)=>refreshShotReference(referenceContext,{routeKey},result));renderShotInputs(host,model.need,plan.inputs||[],model.need.review_input_records||[],referenceContext);materialExecution(host,plan);materialParameters(host,model.need,'generation',plan.model);renderLinkedPrompt(host,model.need,plan.inputs||[],model.need.review_input_records||[],'generation.prompt',referenceContext);
+    const host=materialTextSurface(section,model.need);nodeText('h4',null,historicalRecipe?'原方案 · 未生成':'待生成 · 素材方案',host);if(!historicalRecipe)renderMaterialRouteChoices(host,model.need,(result,routeKey)=>refreshShotReference(referenceContext,{routeKey},result));if(historicalRecipe)renderMaterialInputs(host,plan.inputs||[],model.need.review_input_records||[],model.need);else renderShotInputs(host,model.need,plan.inputs||[],model.need.review_input_records||[],referenceContext);materialExecution(host,plan);materialParameters(host,model.need,'generation',plan.model);renderLinkedPrompt(host,model.need,plan.inputs||[],model.need.review_input_records||[],'generation.prompt',historicalRecipe?null:referenceContext);
     if(plan.blockers?.length){nodeText('h4',null,'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue.replace(/；本任务不生成或采纳素材$/,''),host)}
   }
 }
