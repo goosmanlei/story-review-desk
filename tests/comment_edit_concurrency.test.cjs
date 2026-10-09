@@ -38,3 +38,7 @@ test('recovery catalog exposes exact old target only, independently of the curre
 test('another comment and visual/time anchors cannot reuse the edit key or basis',()=>{
  const f=page();const first=edit(f);for(const [id,anchor] of [['comment-two',{type:'global'}],['comment-one',{type:'region',visual_id:'exact-file',points:[[0,0],[1,0],[1,1]]}],['comment-one',{type:'time',component_id:'clip',asset_file:'exact.wav',start_seconds:1,end_seconds:2}]]){const key=edit(f,{...comment(),id,anchor});assert.notEqual(key,first);assert.deepEqual(plain(f.context.editDraftBasis().anchor),anchor);assert.equal(f.storage.get(first),'draft')}
 });
+test('conflict review controls unlock when a rejected save finishes',()=>{
+ const f=page();edit(f);const review=[{disabled:true},{disabled:true}],actions=[{},{},{}],editor={querySelector:s=>s==='textarea'?f.textarea:s==='[data-comment-submit]'?actions[0]:s==='[data-polish]'?actions[1]:null,querySelectorAll:s=>s==='.comment-edit-conflict button'?review:s==='.editor-actions button'?actions:[]};
+ const query=f.context.document.querySelector;f.context.document.querySelector=s=>s==='.comment-editor'?editor:query(s);f.context.updateCommentEditorControls();assert.deepEqual(review.map(b=>b.disabled),[false,false]);
+});

@@ -866,6 +866,7 @@ function updateCommentEditorControls(){
   const busy=commentSaves.has(draftKey());textarea.readOnly=busy;
   const intent=editor.querySelector('#material-revision-intent');if(intent)intent.disabled=busy;
   for(const button of editor.querySelectorAll('.editor-actions button'))button.disabled=busy;
+  for(const button of editor.querySelectorAll('.comment-edit-conflict button'))button.disabled=busy;
   editor.querySelector('[data-comment-submit]').disabled=busy||!textarea.value.trim();
   editor.querySelector('[data-polish]').disabled=busy||isProduction()||!textarea.value.trim();
 }
