@@ -82,3 +82,39 @@ test('restoring a technical Prompt draft opens its full exact surface instead of
  ctx.state.productionDraftContexts={'["exact",null,null,null]':{anchor:{block_id:'prompt',start:0,end:4},draftKey:'draft'}};
  ctx.restoreBreakdownPromptDraft({querySelectorAll:()=>[excerpt,full]});assert.equal(focused,'full');assert.equal(details.open,true);
 });
+
+test('inline file handoffs keep exact originals and requirements outside technical records',async t=>{
+ for(const media of ['project','document'])for(const result of [true,false])await t.test(media+(result?' with original':' awaiting original'),()=>{
+  const ctx=fixture(),parent=new Node('main'),need={id:'current-demand',object_id:'demand',payload:{media_type:media}},frozen={id:'frozen-demand',object_id:'demand',payload:{title:'original words'}},asset={id:'exact-asset',object_id:'asset'},call={id:'original-call',payload:{method:'external-edit'}};
+  const actual={call,inputs:[]},selected=result?{record:asset}:null;
+  ctx.el=tag=>{const n=new Node(tag);n.addEventListener=(event,fn)=>n[event]=fn;return n};
+  ctx.breakdownPromptSelection=()=>({detail:{review_contexts:{'exact-asset':actual}},rounds:[],exact:false,round:{number:1,definition_records:{requirement:frozen,call}},exactNeed:frozen,candidates:selected?[selected]:[],model:{need:frozen},selected,selection:{},referenceContext:{}});
+  ctx.renderProductionAcceptance=ctx.materialRoundControl=ctx.reviewChoiceButtons=ctx.preserveBreakdownDetailPosition=()=>{};
+  const rendered=[];ctx.materialMedia=(host,item)=>rendered.push({type:'file',host,item});ctx.renderMaterialRequirements=(host,row)=>rendered.push({type:'words',host,row});ctx.renderActualGeneration=(host,context)=>rendered.push({type:'call',host,context});
+  ctx.breakdownPrompt(parent,need,{});const section=parent.children[0],detail=section.children.find(n=>n.tagName==='DETAILS');
+  assert.equal(detail.open,false);assert.equal(rendered.find(n=>n.type==='words').host,section);assert.equal(rendered.find(n=>n.type==='words').row,frozen);
+  if(result){assert.equal(rendered.find(n=>n.type==='file').host,section);assert.equal(rendered.find(n=>n.type==='file').item,selected);assert.equal(rendered.find(n=>n.type==='call').context,actual)}
+  else {assert.ok(section.textContent.includes('尚未交付原文件'));assert.equal(rendered.find(n=>n.type==='call').context.call,call)}
+  assert.equal(rendered.find(n=>n.type==='call').host,detail);assert.equal(detail.children[0].textContent,'制作记录 · 工具与完整说明');
+  detail.open=true;detail.toggle();assert.equal(ctx.state.breakdownFileDetailOpen['original-call'],true);
+ });
+});
+
+// Exercise the actual candidate repaint: a saved file-handoff text draft must
+// return only when its exact frozen requirement is displayed again.
+test('inline candidate repaint restores only the displayed exact handoff draft',()=>{
+ const ctx=fixture(),parent=new Node('main'),need={id:'current',object_id:'file',payload:{media_type:'project'}};
+ const frozen={id:'frozen',object_id:'file',payload:{}};let choose,available=true,focused=0,remembered=0;
+ ctx.el=tag=>{const node=new Node(tag);node.addEventListener=()=>{};node.remove=()=>{node.parentElement.children=node.parentElement.children.filter(n=>n!==node)};node.querySelectorAll=()=>node.all().filter(n=>n.dataset.productionBlocks);return node};
+ parent.querySelectorAll=()=>parent.all().filter(n=>n.dataset.productionBlocks);
+ ctx.breakdownPromptSelection=()=>({detail:{review_contexts:{asset:{call:{id:'call',payload:{}}}}},rounds:[{number:1}],round:{number:1},candidates:[{record:{id:'asset'}}],model:{need:available?frozen:{id:'other'}},selected:{record:{id:'asset'}},selection:{}});
+ ctx.renderProductionAcceptance=ctx.materialRoundControl=ctx.preserveBreakdownDetailPosition=ctx.materialMedia=ctx.renderActualGeneration=ctx.paintReviewCommentCounts=()=>{};
+ ctx.reviewChoiceButtons=(_host,_title,_choices,_selected,onChoose)=>choose=onChoose;
+ ctx.history={state:null,pushState(){}};ctx.breakdownSelectionKey=()=>'';
+ ctx.renderMaterialRequirements=(host,row)=>{const surface=new Node('div'),text=new Node('p');surface.dataset.productionBlocks=row.id;text.dataset.blockId='handoff';text.ownText='斩蛇一个多月后';surface.append(text);surface.reviewFocus=()=>{focused++};host.append(surface)};
+ ctx.rememberProductionDraft=()=>remembered++;ctx.productionTab=()=> 'breakdown';ctx.localStorage={getItem:()=> '未提交意见'};
+ ctx.state.productionDraftContexts={'["frozen",null,null,null]':{anchor:{block_id:'handoff',start:0,end:7},draftKey:'exact-draft'}};
+ ctx.breakdownPrompt(parent,need,{});available=false;choose('asset');assert.equal(focused,0);
+ available=true;choose('asset');assert.equal(focused,1);assert.equal(remembered,2);
+ assert.equal(parent.children.length,1);assert.equal(parent.children[0].children.find(n=>n.tagName==='DETAILS').open,false,'restoring a handoff draft does not open unrelated technical records');
+});

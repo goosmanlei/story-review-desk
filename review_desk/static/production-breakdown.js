@@ -62,7 +62,7 @@ function renderShotDemands(host,context,onReading=null){
   for(const need of needs)select.append(new Option(readableProductionTitle(need),need.object_id));
   const routed=new URL(location.href).searchParams.get('shot_material_id');
   select.value=(needs.find(r=>r.object_id===routed)||needs.find(r=>r.payload.media_type==='video')||needs[0]).object_id;
-  const draw=()=>{body.replaceChildren();const need=needs.find(r=>r.object_id===select.value);breakdownPrompt(body,need,context,onReading);renderMaterialRelations(body,need.object_id,need)};
+  const draw=()=>{body.replaceChildren();const need=needs.find(r=>r.object_id===select.value);breakdownPrompt(body,need,context,onReading);renderMaterialRelations(body,need.object_id,need);restoreBreakdownPromptDraft(body)};
   select.onchange=()=>{rememberProductionDraft();breakdownRoute({shot_material_id:select.value,shot_plan:null,shot_candidate:null});draw()};
   section.append(select,body);host.append(section);draw();
 }
@@ -443,13 +443,20 @@ function breakdownPrompt(parent,need,context,onReading=null){
   let chosen;try{chosen=breakdownPromptSelection(need,context)}catch(error){onReading?.(null);nodeText('p','production-issue',error.message,parent);return}
   const {detail,rounds,exact,saved,round,exactNeed,historicalRecipe,candidates,model,selected,selection,referenceContext}=chosen;
   const section=el('section','shot-generation-content');parent.append(section);
-  const repaint=()=>{rememberProductionDraft();section.remove();breakdownPrompt(parent,need,context,onReading);paintReviewCommentCounts()};
+  const repaint=()=>{rememberProductionDraft();section.remove();breakdownPrompt(parent,need,context,onReading);restoreBreakdownPromptDraft(parent);paintReviewCommentCounts()};
   const bar=el('div','production-toolbar');section.append(bar);renderProductionAcceptance(bar,model.need||need);
 
   const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'素材候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
   const source=selected?detail.review_contexts?.[selected.record.id]?.call:!historicalRecipe&&round?.definition_records?.call||model.need;
+  const fileHandoff=['project','document'].includes(need.payload.media_type);
+  if(fileHandoff){
+    if(selected)materialMedia(section,selected);
+    else nodeText('p','production-meta','尚未交付原文件',section);
+    if(model.need)renderMaterialRequirements(section,model.need);
+    else nodeText('p','production-meta','此版本未保留完整素材要求。',section);
+  }
   const excerpt=source?.review_reading;onReading?.(excerpt);
   if(excerpt)renderBreakdownPromptReading(section,source,excerpt);
   else if(need.payload.media_type==='video')nodeText('p','production-meta',source?.review_reading_error?'准确动作正文读取失败；保留本版完整原文。':'此方案尚无经核对的动作正文；保留本版完整原文。',section);
@@ -457,15 +464,16 @@ function breakdownPrompt(parent,need,context,onReading=null){
     const pending=el('div','shot-reading-pending');nodeText('h4',null,'生成前仍需',pending);for(const issue of model.need.payload.generation.blockers)nodeText('p','production-issue',issue,pending);section.append(pending);
   }
   const full=el('details','shot-generation-details');full.dataset.readingRevision=source?.id||need.id;
-  full.open=(!excerpt&&need.payload.media_type==='video')||(exact&&new URL(location.href).searchParams.has('shot_plan'));
-  const summary=nodeText('summary',null,'生成细节 · 参考、参数与完整 Prompt',full);section.append(full);
+  state.breakdownFileDetailOpen||={};
+  full.open=fileHandoff?!!state.breakdownFileDetailOpen[full.dataset.readingRevision]:(!excerpt&&need.payload.media_type==='video')||(exact&&new URL(location.href).searchParams.has('shot_plan'));
+  if(fileHandoff)full.addEventListener('toggle',()=>{state.breakdownFileDetailOpen[full.dataset.readingRevision]=full.open});
+  const summary=nodeText('summary',null,fileHandoff?'制作记录 · 工具与完整说明':'生成细节 · 参考、参数与完整 Prompt',full);section.append(full);
   preserveBreakdownDetailPosition(full,section,summary);
-  if(historicalRecipe){renderHistoricalProductionDefinition(full,exactNeed,round,detail.history||[]);renderMaterialRequirements(full,exactNeed)}
-  if(['project','document'].includes(need.payload.media_type)){
-    if(selected){materialMedia(full,selected);renderActualGeneration(full,detail.review_contexts?.[selected.record.id])}
-    else nodeText('p','production-meta','尚未交付原文件',full);
-    if(model.need)renderMaterialRequirements(full,model.need);
-    else nodeText('p','production-meta','此版本未保留完整素材要求。',full);
+  if(historicalRecipe){renderHistoricalProductionDefinition(full,exactNeed,round,detail.history||[]);if(!fileHandoff)renderMaterialRequirements(full,exactNeed)}
+  if(fileHandoff){
+    if(selected)renderActualGeneration(full,detail.review_contexts?.[selected.record.id]);
+    else if(round?.definition_records?.call)renderActualGeneration(full,{call:round.definition_records.call,inputs:round.definition_records.call.review_input_records||[]});
+    else if(model.need)renderGenerationRecipe(full,model.need,true,{historical:historicalRecipe});
     return;
   }
   if(selected){

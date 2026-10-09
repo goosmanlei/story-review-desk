@@ -290,3 +290,32 @@ test('late relation success or error cannot populate a replaced material card',a
   if(reject)rejectRequest(new Error('previous object error'));else resolve({relations:[]});await pending;
  });
 });
+
+test('original generation details preserve exact calls, missing history and reading position',async t=>{
+ function fixture(){
+  const frames=[],rendered=[];
+  const node=tag=>({tag,dataset:{},children:[],isConnected:true,scrollTop:0,scrollLeft:0,append(n){n.parentElement=this;this.children.push(n)},addEventListener(name,fn){this[name]=fn},focus(o){this.focusOptions=o},scrollIntoView(){this.scrolled=true}});
+  const c={state:{},el:node,requestAnimationFrame:fn=>frames.push(fn),window:{scrollX:8,scrollY:40,scrollTo(x,y){this.scrollX=x;this.scrollY=y}},nodeText:(tag,cls,text,parent)=>{const n=node(tag);n.text=text;parent.append(n);return n},productionButton:(parent,text,fn)=>{const n=node('button');n.onclick=fn;parent.append(n)}};
+  vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+  c.renderActualGeneration=(host,context)=>rendered.push({host,context});return {c,node,frames,rendered};
+ }
+ const item={record:{id:'asset-exact'},review_context:{call:{id:'call-old',payload:{method:'external-edit'}},inputs:[{id:'input'}]}};
+ await t.test('complete historical call is collapsed once without changing its context',()=>{
+  const {c,node,rendered}=fixture(),host=node('main'),before=JSON.stringify(item);c.materialGenerationDetails(host,item);
+  const detail=host.children[0];assert.equal(detail.tag,'details');assert.equal(detail.open,false);assert.equal(rendered[0].host,detail);assert.equal(rendered[0].context,item.review_context);assert.equal(JSON.stringify(item),before);
+ });
+ await t.test('closing restores every enclosing scroller after layout and keeps focus visible',()=>{
+  const {c,node,frames}=fixture(),outer=node('dialog'),host=node('column');outer.append(host);host.scrollTop=87;outer.scrollTop=135;host.scrollLeft=6;
+  c.materialGenerationDetails(host,item);const detail=host.children[0],summary=detail.children[0];summary.onclick({});detail.open=true;
+  host.scrollTop=900;outer.scrollTop=800;c.window.scrollY=500;detail.children.at(-1).onclick();assert.equal(detail.open,false);assert.equal(summary.focusOptions.preventScroll,true);
+  frames.shift()();assert.equal(host.scrollTop,87);assert.equal(outer.scrollTop,135);assert.equal(host.scrollLeft,6);assert.equal(c.window.scrollY,40);
+ });
+ await t.test('open state follows exact asset and call rather than another candidate',()=>{
+  const {c,node}=fixture(),host=node('main');c.materialGenerationDetails(host,item);const detail=host.children[0];detail.open=true;detail.toggle();
+  const reopened=node('main');c.materialGenerationDetails(reopened,item);assert.equal(reopened.children[0].open,true);
+  const other=node('main');c.materialGenerationDetails(other,{...item,record:{id:'other-asset'}});assert.equal(other.children[0].open,false);
+ });
+ await t.test('absent CALL stays immediately readable and is not replaced by a recipe',()=>{
+  const {c,node,rendered}=fixture(),host=node('main');c.materialGenerationDetails(host,{record:{id:'asset'}});assert.equal(host.children.length,0);assert.equal(rendered[0].host,host);assert.equal(rendered[0].context,undefined);
+ });
+});
