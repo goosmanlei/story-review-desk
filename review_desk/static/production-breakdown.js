@@ -537,7 +537,7 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
   const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
   const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
   body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
-  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
+  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown',...(state.breakdownData.design?{production_scope_episode:state.breakdownData.design.object_id,production_scope_revision:state.breakdownData.design.id,production_scope_scene:scene.object_id}:{})});
   const page=el('section','breakdown-scene');body.append(page);
   const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
   const common=breakdownCommonConditions(data.shots);renderBreakdownConditions(page,data,common);
