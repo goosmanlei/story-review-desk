@@ -247,8 +247,9 @@ function focusMaterialCommentCard(mid,number){
     renderComments();
   }
 }
-function materialMedia(parent,item){
+function materialMedia(parent,item,options={}){
   const {record,component}=item,pane=el('div','entity-review-media-pane');pane.dataset.reviewRevision=record.id;
+  let player;
   const focus=()=>focusProductionReview({record,history:[record],uses:[]});pane.reviewFocus=()=>focusProductionReview({record,history:[record],uses:[]},false);pane.addEventListener('pointerdown',focus,true);pane.addEventListener('focusin',focus,true);
   if(component.mime.startsWith('image/')){
     pane.append(renderStructureVisual({...component,title:reviewPositionText(item.label||record.payload.title),alt:reviewPositionText(item.label||record.payload.title),description:`${component.width} × ${component.height}`},true));
@@ -257,9 +258,10 @@ function materialMedia(parent,item){
     const fit=()=>{const width=viewport.clientWidth,height=viewport.clientHeight,ratio=(component.width||stage.querySelector('img').naturalWidth)/(component.height||stage.querySelector('img').naturalHeight);if(!ratio)return;const w=Math.min(width,height*ratio);stage.style.width=w+'px';stage.style.height=w/ratio+'px'};
     const observer=new ResizeObserver(()=>{if(!pane.isConnected){observer.disconnect();return}fit()});observer.observe(viewport);stage.querySelector('img').addEventListener('load',fit);requestAnimationFrame(fit);
     if(item.crop)stage.dataset.reviewCrop=JSON.stringify(item.crop);
-  }else if(/^(audio|video)\//.test(component.mime))reviewMediaPlayer(pane,component,record,item);
+  }else if(/^(audio|video)\//.test(component.mime))player=reviewMediaPlayer(pane,component,record,item,true,options);
   else nodeText('p','production-meta',component.id+' · '+component.mime,pane);
   if(!component.mime.startsWith('audio/'))link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
+  return player;
 }
 function materialModelCode(model){return model.round?.business_code?.split(' / MV')[0]||businessCode(model.need||model.identity||model.candidates[0]?.record)}
 function materialCompareControl(host,model){
@@ -292,6 +294,8 @@ function materialCompareControl(host,model){
 }
 function renderMaterialCard(parent,model,options={}){
   const box=el('article','material-card'),need=model.need;
+  const referenceContext=typeof shotReferenceChoiceContext==='function'?shotReferenceChoiceContext(parent,model):null;
+  let referencePlayer;
   let items=model.candidates.map(item=>{
     const number=item.record.candidate_codes?.find(c=>c.material_id===model.material_id&&c.version===model.round?.number);
     return number?{...item,candidate_number:number.number,candidate_code:number.code}:item;
@@ -322,7 +326,8 @@ function renderMaterialCard(parent,model,options={}){
       for(const c of previewable){const label=({original:'原件',preview:'预览',thumbnail:'缩略图'})[c.role]||'媒体';const peers=previewable.filter(v=>v.role===c.role);select.append(new Option(label+(peers.length>1?' '+(peers.indexOf(c)+1):''),c.id))};select.value=item.component.id;
       if(options.selectComponent&&!options.multipleCards)select.id='production-component';select.onchange=()=>{options.selectComponent?.(select.value,item.record.id)};box.append(select);
     }
-    materialMedia(box,item);renderActualGeneration(box,item.review_context);
+    const player=materialMedia(box,item,{fullPlayback:referenceContext?(item.component.role==='original'?'原件':'预览'):null});if(!referencePlayer)referencePlayer=player;
+    renderActualGeneration(box,item.review_context);
   }
   // A version owns one demand definition. Result associations are uses, not
   // interchangeable historical definitions for every related state.
@@ -336,7 +341,12 @@ function renderMaterialCard(parent,model,options={}){
     if(call){renderActualGeneration(box,{call,inputs:call.review_input_records||[]});nodeText('p','production-meta','此版本有调用记录，尚无已确认的原件结果。',box)}
     else nodeText('p','production-meta','此版本的历史方案未记录完整。',box);
   }
-  parent.append(box);if(typeof renderShotReferenceChoice==='function')renderShotReferenceChoice(box,model,items[0]);return box;
+  parent.append(box);
+  if(typeof renderShotReferenceChoice==='function'){
+    const actions=renderShotReferenceChoice(box,model,items[0],referencePlayer);
+    if(actions&&referencePlayer)box.insertBefore(actions,referencePlayer.parentNode.nextSibling);
+  }
+  return box;
 }
 function renderMaterialWorkspace(root,detail){
   if(detail.record.kind==='REQUIREMENT')return renderMaterialDemand(root,detail);
