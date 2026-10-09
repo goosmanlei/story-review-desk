@@ -50,6 +50,35 @@ function fixture(ctx){
   return {entity,form,need,older,newer,items,round,data,model};
 }
 
+test('complete cards on every story page own exact comments and drafts until parent restoration',()=>{
+  for(const workspace of ['story.sources','story.outline','story.script']){
+    const ctx=setup();ctx.state.workspace=workspace;ctx.state.current={id:'source',target_revision_id:'source-r1'};
+    ctx.state.structureRevision='structure-r1';ctx.scriptEpisode=()=>({object_id:'episode',id:'episode-r4'});
+    const outer=vm.runInContext('JSON.stringify(commentTarget())',ctx),anchor={type:'text',block_id:'old-block',quote:'same quote'};
+    ctx.state.anchor=anchor;const originalKey=vm.runInContext('draftKey()',ctx);
+    ctx.state.unifiedCardRoot={isConnected:true};ctx.state.productionSelected={object_id:'old-asset',id:'old-asset-r1',payload:{blocks:[]}};
+    assert.equal(vm.runInContext('isProduction()',ctx),true);assert.equal(vm.runInContext('isProductionWorkspace()',ctx),false);
+    assert.equal(vm.runInContext('isScript() || isStructure()',ctx),false);
+    assert.equal(vm.runInContext('JSON.stringify(commentTarget())',ctx),JSON.stringify({target_object_id:'old-asset',target_revision_id:'old-asset-r1'}));
+    assert.notEqual(vm.runInContext('draftKey()',ctx),originalKey);
+    // Native close removes DOM before saving the card's draft.
+    ctx.state.unifiedCardRoot.isConnected=false;assert.equal(vm.runInContext('isProduction()',ctx),true);
+    ctx.state.unifiedCardRoot=null;assert.equal(vm.runInContext('JSON.stringify(commentTarget())',ctx),outer);
+    assert.equal(vm.runInContext('draftKey()',ctx),originalKey);
+  }
+});
+
+test('story-hosted complete cards locate production comments and select only their exact text surface',()=>{
+  const ctx=setup();ctx.state.workspace='story.script';ctx.state.productionSelected={object_id:'edge',id:'edge-old',payload:{blocks:[]}};
+  const range={startContainer:{},endContainer:{}},surface={dataset:{productionBlocks:'edge-old'},contains:()=>true};
+  ctx.state.unifiedCardRoot={querySelectorAll:()=>[surface]};ctx.getSelection=()=>({rangeCount:1,getRangeAt:()=>range});
+  ctx.productionTextBlocks=()=>['exact blocks'];ctx.textSelectionAnchor=(host,blocks)=>({host,blocks});
+  assert.equal(ctx.selectedAnchor().host,surface);
+  let located;ctx.locateProductionComment=comment=>{located=comment;return true};const comment={id:'old-opinion'};
+  assert.equal(ctx.locateComment(comment),true);assert.equal(located,comment);
+  surface.dataset.productionBlocks='another-r1';assert.equal(ctx.selectedAnchor(),null);
+});
+
 test('current version defaults to its latest candidate without changing adoption or selected components',()=>{
   const ctx=setup(),f=fixture(ctx);
   f.data.adoptions=[{payload:{scope:ref(f.form),slot:'overall',asset:ref(f.older),component_id:'original'}}];
