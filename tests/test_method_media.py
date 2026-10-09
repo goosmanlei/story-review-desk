@@ -19,6 +19,17 @@ class MediaMethodTest(unittest.TestCase):
     setup_plans = fixtures.GenerationTest.setup_plans
     decide = fixtures.GenerationTest.decide
 
+    def test_prepare_rejects_source_content_drift(self):
+        import json
+        from test_review import SOURCE
+        self.store.put_source(SOURCE)
+        source = self.store.db.execute("SELECT id,document FROM sources LIMIT 1").fetchone()
+        reference = self.ref(source['id'])
+        changed = json.loads(source['document']); changed['title'] += ' changed'
+        self.store.db.execute('UPDATE sources SET document=? WHERE id=?', (json.dumps(changed), source['id']))
+        with self.assertRaisesRegex(ValueError, '准确源资料已变化'):
+            mm.inputs(self.store, {'source': reference})
+
     def test_cutover_uses_exact_frozen_plans_and_enforces_new_artifacts(self):
         self.setup_plans(); self.decide()
         seed(self.store, 'media-plan', ['draft', 'review', 'result'])
@@ -100,6 +111,10 @@ class ActivatedReferenceTest(unittest.TestCase):
         row = p.record(self.store,'video')
         self.assertEqual(mm.verify(self.store,'video',row['payload'])['history'],'unknown')
         self.assertEqual(row['payload']['method_adjustment']['operation'],'administrative')
+        actual = {(d['to_revision'], d['role']) for d in self.store.db.execute(
+            'SELECT to_revision,role FROM dependencies WHERE from_revision=?', (row['id'],))}
+        expected = {(ref['revision_id'], path) for path, ref in p.references(row['payload'])}
+        self.assertEqual(actual, expected)
         changed = copy.deepcopy(row['payload']); changed['generation']['prompt'] += 'Changed.'
         with self.assertRaisesRegex(ValueError,'不能改写方案'):
             mm.verify(self.store,'video',changed)
