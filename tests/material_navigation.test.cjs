@@ -125,8 +125,12 @@ test('production text selection uses the active dialog rather than a background 
  const f=setup(),start={},end={},foreground={id:'foreground',dataset:{productionBlocks:f.plan.id},contains:node=>node===start||node===end},requirements={dataset:{productionBlocks:f.plan.id},contains:()=>false},calls=[];
  f.ctx.getSelection=()=>({rangeCount:1,getRangeAt:()=>({startContainer:start,endContainer:end})});
  f.ctx.state.productionSelected=f.plan;f.ctx.state.unifiedCardRoot={querySelectorAll:()=>[requirements,foreground]};
+ // This navigation fixture has no DOM Range; real boundary clipping is covered
+ // by selection.html against the browser's Range implementation.
+ f.ctx.textSelectionRange=(host,range)=>host.contains(range.startContainer)&&host.contains(range.endContainer)?range:null;
  f.ctx.textSelectionAnchor=(host,blocks,attribute)=>{calls.push({host,attribute});return {quote:'accurate foreground'}};
  assert.equal(f.ctx.selectedAnchor().quote,'accurate foreground');assert.equal(calls[0].host,foreground);assert.equal(calls[0].attribute,'data-block-id');
  foreground.dataset.productionBlocks='different-revision';assert.equal(f.ctx.selectedAnchor(),null,'another revision cannot borrow this selection');
  foreground.dataset.productionBlocks=f.plan.id;foreground.contains=node=>node===start;assert.equal(f.ctx.selectedAnchor(),null,'a selection crossing surfaces is not fabricated');
+ foreground.contains=()=>true;requirements.contains=()=>true;assert.equal(f.ctx.selectedAnchor(),null,'ambiguous duplicate surfaces cannot claim a selection');
 });

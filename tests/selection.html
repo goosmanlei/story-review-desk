@@ -44,6 +44,46 @@ async function main(){
   w=frame.contentWindow;d=w.document;
   for(let i=0;i<100&&!d.querySelector('#source-text p');i++)await pause(50);
   assert(d.querySelector('#source-text p'),'页面未加载');
+  // Deterministic DOM boundaries, separate from native mouse/keyboard checks.
+  for(const attribute of ['data-block-id','data-structure-block']){
+    for(const boundary of ['sibling-zero','sibling-text-zero','parent-gap','inside','reverse','external-title','external-prefix','label-only','other-revision','hidden-gap'])await test(attribute+' / '+boundary,async()=>{
+      const root=d.createElement('section');
+      root.innerHTML=`<h3>外部标题</h3><div data-production-blocks="boundary-exact"><p><b>动作　</b><span ${attribute}="prompt" data-anchor-offset="6">甲𪎊乙。</span></p><p><span ${attribute}="prompt" data-anchor-offset="16">后段。</span></p></div><summary>生成细节</summary><div data-production-blocks="other"><span ${attribute}="other">另一修订</span></div>`;
+      root.style.display="none";d.body.append(root);
+      const [heading,host,summary,other]=root.children,label=host.querySelector('b'),span=host.querySelector('span'),second=host.querySelectorAll('span')[1];
+      if(boundary!=='hidden-gap')second.parentElement.remove();
+      const blocks=[{id:'prompt',text:'技术前言。甲𪎊乙。\n隐藏原文\n后段。'}];
+      // Offsets follow the actual immutable Unicode text, including astral chars.
+      const letters=Array.from(blocks[0].text);span.dataset.anchorOffset=letters.indexOf('甲');second.dataset.anchorOffset=letters.indexOf('后');
+      const state=w.eval("state"),oldWorkspace=state.workspace,oldSelected=state.productionSelected,oldRoot=state.unifiedCardRoot;
+      try{
+        const r=d.createRange();r.setStart(label.firstChild,0);r.setEnd(summary,0);
+        if(boundary==='sibling-text-zero')r.setEnd(summary.firstChild,0);
+        if(boundary==='parent-gap')r.setEnd(root,2);
+        if(boundary==='inside')r.setEnd(span.firstChild,span.textContent.length);
+        if(boundary==='external-title')r.setEnd(summary.firstChild,1);
+        if(boundary==='external-prefix')r.setStart(heading.firstChild,heading.textContent.length-1);
+        if(boundary==='label-only')r.setEnd(label.firstChild,label.textContent.length);
+        if(boundary==='other-revision')r.setEnd(other.querySelector('span').firstChild,1);
+        if(boundary==='hidden-gap')r.setEnd(second.firstChild,second.textContent.length);
+        w.getSelection().removeAllRanges();w.getSelection().addRange(r);
+        if(boundary==='reverse')w.getSelection().setBaseAndExtent(r.endContainer,r.endOffset,r.startContainer,r.startOffset);
+        const anchor=w.textSelectionAnchor(host,blocks,attribute);
+        const valid=['sibling-zero','sibling-text-zero','parent-gap','inside','reverse'].includes(boundary);
+        assert(Boolean(anchor)===valid,'边界未按实际选入文字判断');
+        if(valid){assert(anchor.quote==='甲𪎊乙。','标签、空行或隐藏字进入引用');assert(anchor.start===5&&anchor.end===9,'Unicode 原文偏移错误')}
+        if(attribute==='data-block-id'){
+          state.workspace='settings.workspace';state.productionSelected={id:'boundary-exact',object_id:'boundary',payload:{blocks}};state.unifiedCardRoot=root;
+          const selected=w.selectedAnchor();assert(Boolean(selected)===valid,'制作选区入口与共用边界不一致');
+          if(valid)assert(selected.quote===anchor.quote,'准确正文归属不一致');
+        }
+      }finally{w.getSelection().removeAllRanges();state.workspace=oldWorkspace;state.productionSelected=oldSelected;state.unifiedCardRoot=oldRoot;root.remove()}
+    });
+  }
+  if(location.hash==='#boundaries-only'){
+    document.querySelector('#result').textContent=`${passed} passed, ${failed} failed`;
+    document.title=`${failed?'FAIL':'PASS'} — 准确正文边界检查`;return;
+  }
   await test('正文内松手与已有高亮内选词',async()=>{
     const p=d.querySelector('#source-text p');await select(p,1,p,5,{release:p});
     assert(!button().hidden,'按钮未显示');assert(quote()==='乙𪎊丁','Unicode 或高亮内引用错误');
@@ -136,7 +176,7 @@ async function main(){
     assert(d.querySelector('#comment-editor-text').value==='隔离测试草稿','未保存草稿被清除');
   });
   await test('制作思路 Tab 与浏览器历史同步',async()=>{
-    w.switchWorkspace('production.approach');d.querySelector('#approach-tab-story').click();await settle();
+    w.switchWorkspace('production.approach');await pause(100);d.querySelector('#approach-tab-story').click();await settle();
     d.querySelector('#approach-tab-materials').click();await settle();
     assert(new URL(w.location.href).searchParams.get('tab')==='materials','Tab 未写入直接链接');
     assert(d.querySelector('#approach-tab-materials').getAttribute('aria-selected')==='true','素材 Tab 未选中');
