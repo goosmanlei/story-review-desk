@@ -12,7 +12,8 @@ def graph(store, episode=None, revision=None, scene=None):
     if scene and not episode:raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
     if revision and not episode: raise ValueError('准确视听版本需要指定视听集')
     if episode:
-        selected = light.record(store, episode, revision)
+        try:selected = light.record(store, episode, revision)
+        except (KeyError,ValueError) as error:raise ValueError('链接指定的视听集或准确版本不存在，请重新选择制作范围') from error
         if selected.get('unavailable') or selected['kind'] != 'AV_EPISODE':
             raise ValueError('视听集或准确版本不可用，请重新选择制作范围')
         editions = [selected if row['object_id'] == episode else row for row in editions]
