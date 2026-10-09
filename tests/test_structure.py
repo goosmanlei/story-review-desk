@@ -1,3 +1,4 @@
+from test_methods import seed as seed_methods
 import json
 import tempfile
 import unittest
@@ -51,6 +52,7 @@ class StructureTest(unittest.TestCase):
         self.temp.cleanup()
 
     def test_review_revision_and_script_handoff(self):
+        seed_methods(self.store)
         selected = select_direction(self.store, "direction-a", 0)
         first = import_structure(self.store, document(selected["revision"]), 0)
         blocks = document(selected["revision"])["sections"][0]["blocks"]
@@ -134,6 +136,7 @@ class StructureTest(unittest.TestCase):
             confirm_structure(self.store, "wrong", "测试")
 
     def test_source_image_and_explicit_broken_reference(self):
+        seed_methods(self.store)
         source = direction("image-source", "图文资料")
         source.pop("group")
         source["assets"] = [{"file": "relation.svg", "title": "参考图", "alt": "人物关系", "note": "隔离样本", "source_url": "https://example.org/image"}]

@@ -179,6 +179,18 @@ def _export(store, export_dir, content_file):
             raise ValueError("missing asset: " + name)
     material_bytes, comment_bytes = _bytes(materials), _bytes(comments)
     if complete_model:framework["revisions"]=physical_revisions
+    # Private author candidates and reader/polish requests belong to the local
+    # runtime. Explicit method-export can archive them for local recovery;
+    # the public story export must never publish unfinished prose or drafts.
+    private_methods = {row['object_id'] for row in framework['revisions']
+                       if (lambda p: str(p.get('format', '')).startswith('managed-method-') and p.get('private') is True)(json.loads(row['payload']))}
+    if private_methods:
+        private_revisions = {row['id'] for row in framework['revisions'] if row['object_id'] in private_methods}
+        if any(d['to_revision'] in private_revisions and d['from_revision'] not in private_revisions for d in framework['dependencies']):
+            raise ValueError('public artifact depends on private method execution; publish an explicit sanitized final basis first')
+        framework['objects'] = [row for row in framework['objects'] if row['id'] not in private_methods]
+        framework['revisions'] = [row for row in framework['revisions'] if row['id'] not in private_revisions]
+        framework['dependencies'] = [row for row in framework['dependencies'] if row['from_revision'] not in private_revisions]
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
     files = {"materials.json": material_bytes, "comments.json": comment_bytes,
              "objects.json": framework_bytes, "configurations.json": configuration_bytes}

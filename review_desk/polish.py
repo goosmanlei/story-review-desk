@@ -6,7 +6,7 @@ import re
 from urllib.request import Request, urlopen
 
 from .framework import stage
-from .store import canonical, digest, Conflict
+from .store import Conflict, canonical, digest
 from .structure import revision_record, SELECTION_ID
 
 
@@ -160,7 +160,13 @@ def build_context(store, source_id, anchor, draft, target_object_id=None, target
         task_stage = "SCRIPT_DRAFT"
         task_label = "剧本审阅 · 表达当前意见"
     project, system = store.configuration("PROJECT"), store.configuration("SYSTEM")
-    limit = system["body"]["ai_context_max_chars"]
+    from .methods import resolve, instructions
+    method = resolve(store, "comment-polish", {"target_kind": obj["kind"]})
+    if method['steps'] != ['result']:
+        raise ValueError('评论润色方法必须声明单项 result；请在工作环节选择兼容方法')
+    total_limit = system["body"]["ai_context_max_chars"]
+    method_size = len(instructions(method))
+    limit = total_limit - method_size
     context = {"review_task": task_label, "creative_stage": stage(task_stage),
                "target_object_id": object_id, "target_revision_id": revision_id,
                "anchor": {k: v for k, v in anchor.items() if k != "quote"},
@@ -229,19 +235,34 @@ def build_context(store, source_id, anchor, draft, target_object_id=None, target
         # Notices are meaningful input too. Do not send an over-limit context.
         raise ValueError("必要参考及超限说明无法容纳在参考总上限内；请调高上限。未调用 AI。")
     serialized = canonical(context)
-    return {"context": context, "context_sha256": digest(serialized.encode()),
-            "budget": {"limit": limit, "used": len(serialized), "unit": "Unicode characters in serialized context"},
+    used = len(serialized) + len(instructions(method))
+    if used > total_limit:
+        raise ValueError('准确参考与所选方法超过字符预算；请调高上限或精简方法。未调用 AI。')
+    return {"context": context, "method": method,
+            "context_sha256": digest(canonical({'context': context, 'method': method}).encode()),
+            "budget": {"limit": total_limit, "used": used, "unit": "Unicode characters in serialized context plus method instructions"},
             "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
             "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
 
-def suggest(preview):
+def suggest(preview, store=None):
     env_name = preview["api_key_env_name"]
     key = os.environ.get(env_name)
     if not key:
         raise RuntimeError(f"AI 润色未配置：服务容器需设置 {env_name}")
+    from . import methods
+    import uuid
+    if store is None:
+        raise ValueError('评论润色需要受管执行记录；请通过服务入口调用')
+    context = preview['context']
+    request_basis = {'work_type': 'comment-polish', 'run_id': str(uuid.uuid4()), 'step_id': 'suggest', 'private': True,
+                     'target': context['target_object_id'] + '@' + context['target_revision_id'],
+                     'conditions': preview['method']['conditions'], 'inputs': {'context': context}}
+    execution = methods.prepare(store, request_basis)
+    if execution['payload']['package'] != preview['method']:
+        raise Conflict('方法选择已变化；请重新预览后执行')
     effort = preview["reasoning_effort"]
     payload = {"model": preview["model"], "store": False, "max_output_tokens": 300 if effort in ("off", "none") else 2048,
-               "instructions": "你是中文故事创作资料审阅意见的措辞助手。背景、阶段、原文上下文和不同版本资料只供理解原意见；输出必须严格限于改写用户评论草稿，不得新增事实、推断、注释建议、研究任务或创作要求。不要改变原意。UNKNOWN 不得补成结论。只输出一段建议正文，不加标题。",
+               "instructions": methods.instructions(execution["payload"]["package"]),
                "input": canonical(preview["context"])}
     if effort != "off":
         payload["reasoning"] = {"effort": effort}
@@ -255,4 +276,7 @@ def suggest(preview):
                          for part in item.get("content", []) if part.get("type") == "output_text").strip()
     if not suggestion:
         raise ValueError("AI 润色未返回文本")
-    return {"suggestion": suggestion, "saved": False, "context_sha256": preview["context_sha256"]}
+    output = methods.artifact(store, {**request_basis, 'execution': methods.reference(execution),
+                                      'stage': 'result', 'output': suggestion})
+    return {"suggestion": suggestion, "saved": False, "context_sha256": preview["context_sha256"],
+            "execution": methods.reference(execution), "artifact": methods.reference(output)}

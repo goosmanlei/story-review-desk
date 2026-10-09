@@ -46,6 +46,22 @@ def main():
     config_set.add_argument("scope", choices=("SYSTEM", "PROJECT"))
     config_set.add_argument("file", type=Path, help="JSON object containing configuration field updates")
     config_set.add_argument("--expected-version", type=int, required=True)
+    subs.add_parser('methods')
+    for command in ('method-save', 'method-prepare', 'method-artifact', 'method-restore'):
+        sub = subs.add_parser(command)
+        sub.add_argument('file', type=Path)
+    method_get = subs.add_parser('method-get')
+    method_get.add_argument('object_id')
+    method_get.add_argument('--revision')
+    method_export = subs.add_parser('method-export')
+    method_export.add_argument('object_id')
+    method_export.add_argument('revision_id')
+    method_export.add_argument('--output', type=Path, required=True)
+    subs.add_parser('method-registry')
+    subs.add_parser('method-activate-media')
+    source = subs.add_parser('method-source')
+    source.add_argument('file', type=Path)
+    source.add_argument('--source-root', type=Path, required=True)
     subs.add_parser("objects")
     production_get = subs.add_parser("production-get")
     production_get.add_argument("--kind", choices=production.KINDS)
@@ -94,7 +110,20 @@ def main():
         return
     store = Store(root / ".runtime" / "review.sqlite3")
     try:
-        if args.command == 'read-cache':
+        if args.command == 'methods' or args.command.startswith('method-'):
+            from . import methods
+            if args.command == 'methods': result = methods.catalog(store)
+            elif args.command == 'method-get': result = methods.read(store, args.object_id, args.revision)
+            elif args.command == 'method-export': result = methods.export_execution(store, {'object_id': args.object_id, 'revision_id': args.revision_id}, args.output)
+            elif args.command == 'method-registry': result = methods.export_registry(store)
+            elif args.command == 'method-activate-media':
+                from .method_media import activate
+                result = activate(store)
+            elif args.command == 'method-source': result = methods.sync_source(store, args.source_root, json.loads(args.file.read_text()))
+            else:
+                operation = {'method-save': methods.save, 'method-prepare': methods.prepare, 'method-artifact': methods.artifact, 'method-restore': methods.restore_registry}[args.command]
+                result = operation(store, json.loads(args.file.read_text()))
+        elif args.command == 'read-cache':
             from .read_cache import manage
             result = manage(store, args.action)
         elif args.command == "import-sources":

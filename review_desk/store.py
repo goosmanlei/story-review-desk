@@ -218,6 +218,8 @@ class Store:
             return [self._put_object(**record) for record in records]
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .methods import guard_write as guard_method
+        guard_method(self, object_id, kind, payload, expected_version)
         from .version_consolidation import guard_write as guard_consolidation
         guard_consolidation(self, object_id, payload)
         from .state_cleanup import guard_write
@@ -229,6 +231,9 @@ class Store:
         version = current["version"] if current else 0
         if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
             raise Conflict("object version or kind changed")
+        if kind == 'REQUIREMENT' and payload.get('generation'):
+            from .method_media import verify
+            verify(self, object_id, payload)
         if kind == "CALL":
             from .generation import validate_call
             validate_call(self, object_id, payload)
