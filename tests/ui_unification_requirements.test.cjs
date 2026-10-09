@@ -403,12 +403,12 @@ test('shot reference unknown save retries keep operation identity and changed ch
 });
 test('late save refreshes only the active page and never paints a closed dialog',async()=>{
   for(const active of [true,false]){const f=shotChoiceFixture();let finish;f.context.pageActive=()=>active;f.c.api=()=>new Promise(resolve=>finish=resolve);
-    f.c.renderShotReferenceChoice(f.box,f.model,f.item);const promise=f.button().onclick();await Promise.resolve();f.dialog.isConnected=false;finish({number:2});await promise;
+    f.c.renderShotReferenceChoice(f.box,f.model,f.item);const promise=f.button().onclick();await Promise.resolve();f.dialog.isConnected=false;finish({requirement_id:'video',revision_id:'saved-plan',number:2,slots:[{...f.context.slot,input_key:'saved-slot',value:{}}]});await promise;
     assert.equal(f.callbacks.length,active?1:0);assert.equal(f.button().textContent,'正在保存…');
   }
 });
 test('an empty reference version can be saved without a candidate and frozen versions explain the new plan',async()=>{
-  const f=shotChoiceFixture(),requests=[];f.context.frozen=true;f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));return {number:2}};
+  const f=shotChoiceFixture(),requests=[];f.context.frozen=true;f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));return {requirement_id:'video',revision_id:'saved-plan',number:2,slots:[{...f.context.slot,input_key:'saved-slot',value:{}}]}};
   f.c.renderShotReferenceChoice(f.box,f.model,null);assert.equal(f.button().disabled,false);assert.ok(f.box.textContent.includes('建立新制作版本'));
   assert.ok(f.box.textContent.includes('候选仍待选'));await f.button().onclick();assert.equal(requests[0].candidate,null);assert.equal(requests[0].component_id,undefined);
 });
