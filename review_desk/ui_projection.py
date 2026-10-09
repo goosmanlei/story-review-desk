@@ -233,7 +233,7 @@ def card(store, object_id, revision_id=None, entity_id=None):
             'source_materials':source_materials,'adoption_context':context,'position_review':position_review}
 
 
-def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
+def scene(store, object_id, revision_id=None, shot_revision=None, view=None, episode=None, episode_revision=None):
     if view not in (None, 'breakdown', 'shots'):
         raise ValueError('unknown scene view')
     # Full video definitions are read below for this scene's shots only. Other
@@ -243,11 +243,22 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
     selected=p.record(store,object_id,revision_id)
     if selected['kind']!='AV_SCENE':raise ValueError('scene reader requires a scene')
     shots=b.scene_shots(store,selected,p.record(store,revision_id=shot_revision) if shot_revision else None)
-    chain=b.ancestors(store,selected);contexts=[]
-    for reference in chain:
+    if episode_revision:
+        if not episode:
+            raise ValueError('准确集版本需要集对象')
+        edition=p.record(store,episode,episode_revision)
+        if edition['kind']!='AV_EPISODE' or b.ref(selected) not in edition['payload']['scenes']:
+            raise ValueError('视听场不属于所选准确集版本')
+        chain=[b.ref(selected),b.ref(edition),*b.ancestors(store,p.ref_record(store,edition['payload']['input_lock']))]
+    else:
+        chain=b.ancestors(store,selected)
+    contexts=[]
+    for index,reference in enumerate(chain):
         row=p.ref_record(store,reference)
         if row['kind'] in ('AV_SCENE','AV_EPISODE','EPISODE','INPUT_LOCK','STORY'):
-            contexts.append(b.context(store,row['object_id'],row['id'],metadata=metadata))
+            context=b.context(store,row['object_id'],row['id'],metadata=metadata)
+            if episode_revision:context['ancestors']=chain[index:]
+            contexts.append(context)
     all_entries={i['object_id']:i for i in material_entries(store)}
     def enrich(context):
         from .material_storage import canonical_id
@@ -311,8 +322,13 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
         context['video_details']={r['object_id']:p.snapshot(store,object_id=r['object_id'],revision_id=r['id']) for r in context['requirements'] if scoped['kind']=='AV_SHOT'}
         return context
     source_scenes=[p.source_excerpt(store,source) for source in selected['payload']['sources']]
+    shot_contexts=[]
+    for row in shots:
+        context=b.context(store,row['object_id'],row['id'],metadata=metadata)
+        if episode_revision:context['ancestors']=[b.ref(row),*chain]
+        shot_contexts.append({'record':row,'context':enrich(context)})
     return {'scene':selected,'source_scenes':source_scenes,'shared':[enrich(c) for c in reversed(contexts)],
-            'shots':[{'record':r,'context':enrich(b.context(store,r['object_id'],r['id'],metadata=metadata))} for r in shots]}
+            'shots':shot_contexts}
 
 
 
