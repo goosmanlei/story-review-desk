@@ -438,6 +438,13 @@ function locateProductionComment(comment,local=false){
   if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
   if(typeof productionTab==='function'&&['breakdown','shots'].includes(productionTab())&&state.productionSelected?.kind==='AV_SCENE'&&comment.anchor.type==='text'&&!document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"] [data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]'))return openBreakdownSceneNotes(state.productionSelected,comment);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
+  // A merged display never migrates the original field. Reveal its exact text
+  // in the same immutable shot before the shared locator and paint run.
+  if(a.type==='text'){
+    const surface=document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"]');
+    const node=[...(surface?.querySelectorAll('[data-block-id]')||[])].find(n=>n.dataset.blockId===a.block_id);
+    for(let parent=node?.parentElement;parent&&parent!==surface;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+  }
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
   // Component ids can repeat across state references and unassigned candidates.
   // Locate the exact asset revision before looking up its image or player.
