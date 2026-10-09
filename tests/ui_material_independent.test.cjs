@@ -278,7 +278,7 @@ for(const entry of ['demand','asset'])test(`C07 ${entry} entry keeps a preview c
 test('C08 locating a preview comment records only its exact candidate component',async()=>{
   const {c,detail,a,b,current}=componentFixture('asset');
   let located=null;c.materialPlanCommentNeedsHistory=()=>false;c.locateProductionComment=comment=>{located=comment.id};
-  const comment={id:'preview-comment',target_revision_id:a.id,anchor:{type:'visual',visual_id:'preview'},material_plan_scopes:[{material_id:'need',number:1}]};
+  const comment={id:'preview-comment',target_object_id:a.object_id,target_revision_id:a.id,anchor:{type:'visual',visual_id:'preview',asset_file:a.object_id+'.png'},material_plan_scopes:[{material_id:'need',number:1}]};
   assert.equal(await c.locateMaterialComment(comment),true);
   assert.equal(located,comment.id);
   assert.equal(detail.selectedComponents[a.id],'preview');

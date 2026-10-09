@@ -164,6 +164,7 @@ function materialSavedDraft(result){
 }
 function activateUnifiedCard(result){
   const detail=result.detail,row=detail.record,params=result.params;
+  detail.planMaterialVersions||=detail.material_versions;
   state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
   state.productionEntityId=state.entityReview?.entity.object_id||null;state.productionChildDetail=null;state.productionEntityDetail=null;
   if(state.entityReview){
