@@ -131,26 +131,31 @@ async function renderInputRelationPurpose(parent,value,need=null){
   }catch(error){if(parent.isConnected)nodeText('p','production-issue','用途意见读取失败：'+error.message,parent)}
 }
 async function renderMaterialRelations(host,materialId,selected=null){
-  const box=el('details','material-relations');host.append(box);
+  const box=el('section','material-relations');host.append(box);
   const owner=isEntityReview()?state.entityReview:state.materialReview;
   try{const data=await api('/api/production/material-relations?'+new URLSearchParams({material_id:materialId,...(selected?{revision_id:selected.id}:{})}));
     if(!box.isConnected)return;
     const declared=new Set((selected?.payload.generation?.inputs||[]).map(v=>v.relation?.revision_id).filter(Boolean));
     const rank=r=>r.context_record?.kind==='STATE'?0:r.downstream_record?.payload.media_type==='video'?1:2;
     const rows=data.relations.filter(row=>!declared.has(row.id)).sort((a,b)=>rank(a)-rank(b)||String(businessCode(a.downstream_record)||a.payload.downstream_id).localeCompare(String(businessCode(b.downstream_record)||b.payload.downstream_id),undefined,{numeric:true}));
-    if(!rows.length){box.remove();return}nodeText('summary',null,'备选与沿用用途 · '+data.relations.length,box);
+    if(!rows.length){box.remove();return}
     if(owner===(isEntityReview()?state.entityReview:state.materialReview))rememberMaterialRelations([...data.relations,...(data.comment_records||[])]);
-    const groups=[['旧备选',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics==='alternative')],['沿用方案',rows.filter(r=>r.direction==='outgoing')],['其他用途依据',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics!=='alternative')]];
-    for(const [label,group] of groups){if(!group.length)continue;const section=el('div','material-use-group');nodeText('h4',null,label+' · '+group.length,section);
-      if(label==='旧备选')nodeText('p','production-meta','供比较和复用选择；列入备选不表示已选为输入，也不转授旧认可。'+(selected?.payload.media_type==='audio'?'先核声音身份、内容、噪声和本次用途；所选片段须符合实际渠道限制。':'先核完整状态、风格、原生规格与图像谱系。'),section);
+    const alternatives=rows.filter(r=>r.direction==='incoming'&&r.payload.semantics==='alternative');
+    const image=row=>row.upstream_record?.payload.components?.find(c=>c.role==='original'&&c.mime.startsWith('image/'));
+    const groups=[['已有形象',alternatives.filter(image)],['旧备选',alternatives.filter(r=>!image(r))],['沿用方案',rows.filter(r=>r.direction==='outgoing')],['其他用途依据',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics!=='alternative')]];
+    for(const [label,group] of groups){if(!group.length)continue;const folded=['沿用方案','其他用途依据'].includes(label),section=el(folded?'details':'section','material-use-group');nodeText(folded?'summary':'h4',null,label+' · '+group.length,section);
+      if(['已有形象','旧备选'].includes(label))nodeText('p','production-meta','供本需求比较，尚未选用；旧原件的认可仅适用于原件。',section);
       for(const row of group){const p=row.payload,line=el('article','material-use-row'),out=row.direction==='outgoing',target=out?row.downstream_record:row.upstream_record,reference=out?row.downstream:p.upstream;
         line.dataset.relationId=row.object_id;
-        if(target&&reference){const title=businessTitle(target),button=productionButton(line,title,()=>out?openUnifiedMaterial(reference,button):openMaterialReference(reference,button));button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog')}
+        if(target&&reference){
+          const preview=!out&&image(row);
+          const button=preview?reviewSmallCard(line,{title:reviewPositionText(target.payload.title),business_code:businessCode(target),icon:'image',preview},trigger=>openMaterialReference(reference,trigger)):productionButton(line,businessTitle(target),()=>out?openUnifiedMaterial(reference,button):openMaterialReference(reference,button));button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog');
+        }
         else nodeText('p','production-issue','准确对象尚未建立',line);
         nodeText('p','production-meta',p.status==='withdrawn'?'历史用途 · 已退出当前准备':out?(!row.declared_input?'用途记录 · 当前方案未声明此输入':row.result?'此方案已有原件候选':'待生成 · 查看方案')+(row.downstream_version?' · 素材版本 '+row.downstream_version:' · 版本未核实'):p.semantics==='alternative'?'尚未选择 · 待比较':p.type_label,line);
         if(out&&row.upstream_matches===false)materialReferenceLink(line,p.upstream,'所引旧版：'+businessTitle(row.upstream_record)+' · 记录修订 '+row.upstream_record.version);
         if(out&&row.result){const button=productionButton(line,'查看此版原件候选',()=>openUnifiedMaterial(row.result,button));button.classList.add('material-reference')}
-        if(label!=='旧备选')nodeText('p',null,p.purpose,line);
+        if(!['已有形象','旧备选'].includes(label))nodeText('p',null,p.purpose,line);
         renderMaterialRelationPurpose(line,row);
         const old=(data.comment_records||[]).filter(r=>r.object_id===row.object_id&&r.id!==row.id);
         if(old.length){const history=el('details');nodeText('summary',null,'旧版本用途意见 · '+old.length,history);for(const r of old)renderMaterialRelationPurpose(history,r);line.append(history)}

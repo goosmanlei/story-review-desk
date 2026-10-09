@@ -192,7 +192,9 @@ function renderStoryProductionLinks(root,episode,scene){
         const rows=data.items.filter(item=>kinds.includes(item.record.kind));if(!rows.length)continue;
         const group=el('section');nodeText('h3',null,label,group);for(const {record} of rows){
           if(record.kind.startsWith('AV_'))productionButton(group,businessTitle(record),()=>{rememberWorkspacePosition();rememberWorkspaceRoute();const url=new URL(location.href);url.search='';url.searchParams.set('workspace','settings.workspace');url.searchParams.set('production_tab','breakdown');url.searchParams.set('breakdown_object',record.object_id);url.searchParams.set('breakdown_revision',record.id);history.pushState(null,'',url);switchWorkspace('settings.workspace',false)});
-          else materialReferenceLink(group,productionRef(record),businessTitle(record));
+          else if(['ENTITY','STATE','REQUIREMENT'].includes(record.kind)){
+            const button=productionButton(group,businessTitle(record),()=>openUnifiedMaterial(productionRef(record),button));button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog');
+          }else materialReferenceLink(group,productionRef(record),businessTitle(record));
         }box.append(group);
       }if(!data.items.length)nodeText('p','production-meta','此准确故事场尚无关联制作',box);
     }catch(error){if(box.isConnected){nodeText('p','production-issue',error.message,box);loaded=false}}
