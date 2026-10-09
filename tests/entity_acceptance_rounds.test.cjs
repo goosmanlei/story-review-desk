@@ -96,3 +96,53 @@ test('entity decision reload retains the chosen material version and candidate',
  assert.equal(f.context.state.entityReview.selectedCandidates.need,'candidate-one');
  assert.equal(f.context.state.entityReview.unifiedMaterialId,'need');
 });
+
+// Deferred responses model timing; UI reproduction lives in the story task.
+test('[defect-probing] early close still refreshes its live list for accept and revoke',async()=>{
+ for(const revoke of [false,true]){
+  const f=setup(),pending=[];let indexes=0,reloads=0;
+  f.data.can_revoke=revoke;f.data.can_accept=!revoke;
+  f.context.state.refreshEntityIndex=async()=>{indexes++};
+  f.context.reloadEntityReview=async()=>{reloads++};
+  f.context.fetch=()=>new Promise(resolve=>pending.push(resolve));
+  const button=f.render(),saving=button.onclick();await flush();button.isConnected=false;
+  pending[0]({ok:true,json:async()=>({})});await saving;
+  assert.equal(indexes,1);assert.equal(reloads,0);assert.equal(pending.length,1);
+ }
+});
+test('[defect-probing] a failed own detail read does not suppress the saved list update',async()=>{
+ const f=setup();let indexes=0;
+ f.context.state.refreshEntityIndex=async()=>{indexes++};
+ f.context.reloadEntityReview=async()=>{throw Error('detail unavailable')};
+ await f.render().onclick();assert.equal(indexes,1);
+ assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('尚未更新')));
+});
+test('late entity success cannot call the replacement page list refresher',async()=>{
+ const f=setup(),pending=[];let old=0,replacement=0;
+ f.context.state.refreshEntityIndex=async()=>{old++};f.context.fetch=()=>new Promise(resolve=>pending.push(resolve));
+ const saving=f.render().onclick();await flush();f.context.state.entityReview=null;
+ f.context.state.refreshEntityIndex=async()=>{replacement++};pending[0]({ok:true,json:async()=>({})});await saving;
+ assert.equal(old,1);assert.equal(replacement,0);
+});
+
+test('detail reads crossing a successful entity decision recheck once without resending the write',async()=>{
+ const f=setup(),pending=[];f.context.fetch=url=>new Promise(resolve=>pending.push({url,resolve:data=>resolve({ok:true,json:async()=>data})}));
+ const reading=f.context.readEntityDecisionView('/api/production/card?object_id=entity');
+ vm.runInContext("entityDecisionReads.set('entity',1)",f.context);
+ pending[0].resolve({entity_review:{entity:f.entity,decision_version:0}});await flush();assert.equal(pending.length,2);
+ pending[1].resolve({entity_review:{entity:f.entity,decision_version:1}});assert.equal((await reading).entity_review.decision_version,1);
+ assert.ok(pending.every(r=>r.url.includes('/card?')));
+});
+test('unrelated decisions do not invalidate another entity read and repeated changes are bounded',async()=>{
+ const f=setup(),pending=[];f.context.fetch=url=>new Promise(resolve=>pending.push({resolve:data=>resolve({ok:true,json:async()=>data})}));
+ const other=f.context.readEntityDecisionView('/api/production/card?object_id=other');vm.runInContext("entityDecisionReads.set('entity',1)",f.context);pending[0].resolve({entity_review:{entity:{object_id:'other'}}});await other;assert.equal(pending.length,1);
+ const changing=f.context.readEntityDecisionView('/api/production/entity-review?entity_id=entity');vm.runInContext("entityDecisionReads.set('entity',2)",f.context);pending[1].resolve({entity:f.entity});await flush();
+ vm.runInContext("entityDecisionReads.set('entity',3)",f.context);pending[2].resolve({entity:f.entity});await assert.rejects(changing,/重新打开/);assert.equal(pending.length,3);
+});
+test('failed or conflicting entity writes retain scope and never refresh or retry',async()=>{
+ for(const status of [400,409]){
+ const f=setup();let indexes=0;f.context.state.refreshEntityIndex=async()=>indexes++;
+ f.context.fetch=async(url,options)=>{f.requests.push({url,payload:JSON.parse(options.body)});return {ok:false,status,json:async()=>({error:status===409?'version conflict':'save rejected'})}};
+ await f.render().onclick();await f.render().onclick();assert.equal(indexes,0);assert.equal(f.requests.length,1);assert.equal(f.requests[0].payload.expected_version,0);assert.ok(!f.messages.some(s=>s.includes('已保存')));assert.match(f.messages.at(-1),status===409?/版本已变化，本次未保存/:/本次未保存/);
+ }
+});

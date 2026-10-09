@@ -30,7 +30,7 @@ function reviewStorage(name){
       tracked=true;
     }catch{ /* Existing draft failure handling remains responsible for unavailable storage. */ }
   }
-  return {getItem:key=>storage().getItem(prefix+key),setItem:(key,value)=>storage().setItem(prefix+key,value),removeItem:key=>storage().removeItem(prefix+key)};
+  return {getItem:key=>storage().getItem(prefix+key),setItem:(key,value)=>storage().setItem(prefix+key,value),removeItem:key=>storage().removeItem(prefix+key),keys:()=>Array.from({length:storage().length},(_,i)=>storage().key(i)).filter(key=>key?.startsWith(prefix)).map(key=>key.slice(prefix.length))};
 }
 const localStorage=reviewDeployment.publication_id?reviewStorage('localStorage'):globalThis.localStorage,sessionStorage=reviewDeployment.publication_id?reviewStorage('sessionStorage'):globalThis.sessionStorage;
 async function reviewFetch(path,options={}){
@@ -87,7 +87,52 @@ function initializeStoryReaders(url){
 }
 const commentTarget=()=>state.reviewReferenceContext?{target_object_id:state.reviewReferenceContext.record.object_id,target_revision_id:state.reviewReferenceContext.record.id}:isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
 const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
-const draftKey=()=>{const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number,...(context.model?[context.model]:[])])}`:key};
+// Reload keeps this page's drafts. A new/duplicated/reopened document starts a
+// separate editor; other saved local drafts are available through explicit recovery.
+const commentPageId=(()=>{if(!globalThis.crypto?.randomUUID||!sessionStorage)return null;const idKey='review-comment-page';let id;try{if(['reload','back_forward'].includes(globalThis.performance?.getEntriesByType?.('navigation')?.[0]?.type))id=sessionStorage.getItem(idKey);id ||= crypto.randomUUID();sessionStorage.setItem(idKey,id)}catch{id=crypto.randomUUID()}return id})();
+const editDraftBases=new Map();
+const editDraftKey=()=>state.editing&&state.anchor?`review-comment-edit:${commentPageId||'page'}:${JSON.stringify([commentTarget(),state.editing,state.anchor])}`:null;
+const draftKey=()=>{if(state.editing&&commentPageId)return editDraftKey();const key=legacyDraftKey(),context=!state.editing&&typeof materialCommentContext==='function'?materialCommentContext():null;return key&&context?`${key}:material:${JSON.stringify([context.material_id,context.number,...(context.model?[context.model]:[])])}`:key};
+function editDraftBasis(key=draftKey()){
+  if(!state.editing)return null;
+  if(editDraftBases.has(key))return editDraftBases.get(key);
+  try{const saved=JSON.parse(localStorage.getItem(key+':basis')||'null');if(saved?.editing===state.editing&&JSON.stringify(saved.target)===JSON.stringify(commentTarget())&&JSON.stringify(saved.anchor)===JSON.stringify(state.anchor)){editDraftBases.set(key,saved);return saved}}catch{}
+  return null;
+}
+function rememberEditBasis(basis,key=draftKey()){
+  editDraftBases.set(key,basis);localStorage.setItem(key+':basis',JSON.stringify(basis));
+}
+function beginCommentEdit(comment){
+  const key=draftKey();if(editDraftBasis(key))return;
+  // Legacy drafts have no provable start version. Keep the text, require review.
+  let legacy=null;try{legacy=localStorage.getItem(legacyDraftKey())}catch{}
+  const basis=JSON.parse(JSON.stringify({editing:comment.id,target:commentTarget(),anchor:state.anchor,version:legacy!==null?null:comment.version,body:legacy!==null?null:comment.body,workspace:state.workspace,owner:commentPageId,created_at:new Date().toISOString()}));
+  editDraftBases.set(key,basis);
+  try{rememberEditBasis(basis,key);if(legacy!==null&&localStorage.getItem(key)===null)localStorage.setItem(key,legacy)}catch{toast('本机草稿保存失败，开始编辑的依据与输入仍在当前页面；请复制留存。')}
+}
+function storedCommentEdits(){
+  try{const keys=localStorage.keys?localStorage.keys():Array.from({length:localStorage.length},(_,i)=>localStorage.key(i));return keys.filter(k=>k?.startsWith('review-comment-edit:')&&k.endsWith(':basis')).flatMap(meta=>{const key=meta.slice(0,-6),basis=JSON.parse(localStorage.getItem(meta)||'null'),text=localStorage.getItem(key);return basis&&text!==null&&JSON.stringify(basis.target)===JSON.stringify(commentTarget())&&state.comments.some(c=>c.id===basis.editing&&c.target_revision_id===basis.target.target_revision_id)?[{key,basis,text}]:[]})}catch{return []}
+}
+function appendStoredCommentEdits(parent){
+  const drafts=storedCommentEdits().filter(d=>d.key!==draftKey());if(!drafts.length)return;
+  const section=el('details','context-preview');nodeText('summary',null,`未保存的评论修改 · ${drafts.length} 份`,section);
+  nodeText('p','comment-help','这些文字只保存在本机，仍绑定原评论和原圈选。恢复另一页的草稿会在此页建立副本，不清除另一页输入。',section);
+  for(const draft of drafts){const c=state.comments.find(c=>c.id===draft.basis.editing),row=el('section');nodeText('p',null,`${c.business_code||'评论'} · ${new Date(draft.basis.created_at).toLocaleString('zh-CN')} · ${anchorLabel(draft.basis.anchor)}`,row);nodeText('pre',null,draft.text,row);
+    const restore=nodeText('button',null,`继续 ${c.business_code||'评论'} 的未保存修改`,row);restore.onclick=async()=>{if(commentSaves.has(draftKey()))return;await editComment(c);if(state.editing!==c.id||JSON.stringify(commentTarget())!==JSON.stringify(draft.basis.target))return;const key=draftKey();if(liveCommentDraft()?.value&&localStorage.getItem(key)!==null&&key!==draft.key){toast('此页已有未保存修改，请先处理后再恢复其他草稿。');return}try{localStorage.setItem(key,draft.text);rememberEditBasis({...draft.basis,owner:commentPageId},key);renderComments({replaceDraft:true})}catch{toast('恢复未完成，原草稿仍在本机。')}};
+    const discard=nodeText('button','destructive','放弃这份本机草稿',row);discard.onclick=()=>{try{if(localStorage.getItem(draft.key)!==draft.text||localStorage.getItem(draft.key+':basis')!==JSON.stringify(draft.basis)){toast('这份草稿已变化，请重新打开核对后再放弃。');return}localStorage.removeItem(draft.key+':submission');localStorage.removeItem(draft.key+':basis');localStorage.removeItem(draft.key);renderComments();toast('所选本机草稿已放弃，已保存评论和其他草稿保留。')}catch{toast('草稿未能完全清除，请复制留存后重试。')}};section.append(row);
+  }parent.append(section);
+}
+function appendEditConflict(editor){
+  if(!state.editing)return;
+  const basis=editDraftBasis(),latest=state.comments.find(c=>c.id===state.editing);if(!basis||!latest)return;
+  nodeText('p','comment-help',`未保存修改 · 开始编辑依据：${basis.version===null?'旧草稿，版本未知':'评论版本 '+basis.version}`,editor);
+  const notice=el('section','comment-edit-conflict');notice.setAttribute('role','status');
+  if(basis.version!==latest.version||basis.conflict)nodeText('p','comment-help','这条评论已有新的保存内容，你的修改尚未保存。请查看最新内容，人工整理后再保存，或放弃此页修改。',notice);
+  const view=nodeText('button',null,'查看最新已保存内容',notice);view.disabled=commentSaves.has(draftKey());view.onclick=async()=>{const key=draftKey(),action=commentAction;if(commentSaves.has(key))return;try{await refreshComments();if(key!==draftKey()||action!==commentAction)return;const current=state.comments.find(c=>c.id===state.editing);if(!current)throw Error('原评论已不可用；草稿仍保留');rememberEditBasis({...editDraftBasis(),reviewed:{version:current.version,body:current.body,status:current.status}},key);renderComments()}catch(error){if(key===draftKey()&&action===commentAction)toast(error.message)}};
+  if(basis.reviewed){nodeText('p',null,`已保存 · 评论版本 ${basis.reviewed.version}${basis.reviewed.status==='CLOSED'?' · 已关闭':''}`,notice);nodeText('pre',null,basis.reviewed.body,notice);
+    const use=nodeText('button',null,'已核对，按此版本继续修改',notice);use.disabled=commentSaves.has(draftKey());use.onclick=()=>{const key=draftKey(),current=state.comments.find(c=>c.id===state.editing),saved=editDraftBasis();if(commentSaves.has(key))return;if(!current||current.version!==saved.reviewed.version){toast('评论再次变化，请重新查看最新内容。');return}try{localStorage.setItem(key+':basis',JSON.stringify({...saved,version:saved.reviewed.version,body:saved.reviewed.body,reviewed:null,conflict:false}));localStorage.removeItem(key+':submission');editDraftBases.delete(key);commentRejections.delete(key);renderComments();toast('已更新保存依据，草稿原文未改；请人工整理后保存。')}catch{toast('本机保存依据未能更新，草稿仍保留。')}};
+  }editor.append(notice);
+}
 const commentSaves=new Set();
 const commentRejections=new Map();
 const commentReceipts=new Map();
@@ -340,9 +385,10 @@ function renderWorkspaceNav(){
 function storyDraftMetaKey(){
   if(!['story.sources','story.outline'].includes(state.workspace))return null;
   const ref=isStructure()?state.structureRevision:state.current?.target_revision_id;if(!ref)return null;
-  return 'review-story-editor:'+JSON.stringify([state.workspace,ref]);
+  return 'review-story-editor:'+JSON.stringify([state.workspace,ref])+(commentPageId?':page:'+commentPageId:'');
 }
-function rememberStoryDraft(){const key=storyDraftMetaKey();if(!key||!state.anchor)return;markActiveCommentDraft();try{localStorage.setItem(key,JSON.stringify({anchor:state.anchor,editing:state.editing,selected:state.selected,target:commentTarget()}))}catch{rememberCommentDraftFailure();toast('本机草稿定位信息保存失败，当前输入仍保留。')}}
+function rememberLiveCommentEdit(){if(!state.editing)return;const live=liveCommentDraft(),basis=editDraftBasis();if(live)localStorage.setItem(draftKey(),live.value);if(basis)rememberEditBasis(basis)}
+function rememberStoryDraft(){const key=storyDraftMetaKey();if(!key||!state.anchor)return;markActiveCommentDraft();try{rememberLiveCommentEdit();localStorage.setItem(key,JSON.stringify({anchor:state.anchor,editing:state.editing,selected:state.selected,target:commentTarget()}))}catch{rememberCommentDraftFailure();toast('本机草稿定位信息保存失败，当前输入仍保留。')}}
 function restoreStoryDraft(){const key=storyDraftMetaKey();if(!key||state.anchor)return;try{const saved=fallbackCommentDraftMeta()||JSON.parse(localStorage.getItem(key)||'null');if(saved?.anchor&&JSON.stringify(saved.target)===JSON.stringify(commentTarget())&&(!saved.editing||state.comments.some(c=>c.id===saved.editing&&c.target_revision_id===saved.target.target_revision_id))){state.anchor=saved.anchor;state.editing=saved.editing||null;state.selected=saved.selected||null}}catch{}}
 function forgetStoryDraft(){const key=storyDraftMetaKey();if(key)localStorage.removeItem(key)}
 function switchWorkspace(id,updateUrl=true){
@@ -788,11 +834,12 @@ function toggleCommentsFromReader(){
   }
 }
 let commentAction=0,commentRefreshEpoch=0;
-function startDraft(anchor,comment=null){++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function startDraft(anchor,comment=null){try{rememberLiveCommentEdit()}catch{rememberCommentDraftFailure()}++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;if(comment)beginCommentEdit(comment);state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){
+  ++commentAction;
   const key=draftKey();
-  try{if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key)}forgetStoryDraft()}
-  catch{toast('本机草稿未能完全清除，取消未完成。当前输入仍保留，请复制留存后重试。');return}
+  try{if(key){localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');localStorage.removeItem(key+':basis');commentRejections.delete(key);commentReceipts.delete(key)}forgetStoryDraft();editDraftBases.delete(key)}
+  catch{rememberCommentDraftFailure();toast('本机草稿未能完全清除，取消未完成。当前输入仍保留，请复制留存后重试。');return}
   commentDraftFallbacks.delete(commentDraftIdentity());forgetActiveCommentDraft(commentDraftIdentity());
   if(isScript())forgetScriptDraft();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;state.pending=null;renderActiveReader();renderComments();toast(message)
 }
@@ -819,6 +866,7 @@ function updateCommentEditorControls(){
   const busy=commentSaves.has(draftKey());textarea.readOnly=busy;
   const intent=editor.querySelector('#material-revision-intent');if(intent)intent.disabled=busy;
   for(const button of editor.querySelectorAll('.editor-actions button'))button.disabled=busy;
+  for(const button of editor.querySelectorAll('.comment-edit-conflict button'))button.disabled=busy;
   editor.querySelector('[data-comment-submit]').disabled=busy||!textarea.value.trim();
   editor.querySelector('[data-polish]').disabled=busy||isProduction()||!textarea.value.trim();
 }
@@ -831,7 +879,7 @@ async function editComment(comment){
     else if(typeof isEntityReview==='function'&&isEntityReview())located=await locateEntityReviewComment(comment);
     else if(typeof isMaterialReview==='function'&&isMaterialReview())located=await locateMaterialComment(comment);
     if(located===false||action!==commentAction||state.workspace!==workspace)return;
-    if(isProduction()&&state.productionSelected?.id!==comment.target_revision_id)return;
+    const target=commentTarget();if(target.target_revision_id!==comment.target_revision_id||(target.target_object_id||target.source_id)!==(comment.target_object_id||comment.source_id)){toast('请先打开这条评论的准确原稿；未将修改转移到当前版本。');return}
     startDraft(comment.anchor,comment);
   }catch(error){if(action===commentAction&&state.workspace===workspace)toast(error.message)}
 }
@@ -870,20 +918,22 @@ function renderComments({replaceDraft=false}={}){
   if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
   if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
+  appendStoredCommentEdits(body);
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);if(typeof isEntityReview==='function'&&isEntityReview())nodeText('small',null,'评论对象：'+(state.productionSelected.kind==='REPRESENTATION'?'整个实体':state.productionSelected.payload.title),editor);
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=retained?.value??readCommentDraftStorage(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     if(Number.isInteger(retained?.start))textarea.setSelectionRange?.(retained.start,retained.end,retained.direction);
-    textarea.addEventListener('input',()=>{try{localStorage.setItem(draftKey(),textarea.value);if(commentDraftFallbacks.has(commentDraftIdentity()))rememberCommentDraftFailure()}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，当前输入仍保留，请复制留存后重试。')}state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
+    textarea.addEventListener('input',()=>{try{localStorage.setItem(draftKey(),textarea.value);if(state.editing)rememberEditBasis(editDraftBasis());if(commentDraftFallbacks.has(commentDraftIdentity()))rememberCommentDraftFailure()}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，当前输入仍保留，请复制留存后重试。')}state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
     const help=nodeText('p','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);help.id='comment-editor-shortcuts';textarea.setAttribute('aria-describedby',help.id);
     appendLegacyMaterialDraft(editor,draftKey());
     appendCommentSubmissionNotice(editor,draftKey());
+    appendEditConflict(editor);
     const revisionIntent=commentRevisionIntent();
     if(revisionIntent){const label=el('label','comment-intent'),check=el('input');check.type='checkbox';check.checked=retained?.intent??(readCommentDraftStorage(draftKey()+':discussion')!=='true');check.id='material-revision-intent';check.onchange=()=>{try{localStorage.setItem(draftKey()+':discussion',String(!check.checked));if(commentDraftFallbacks.has(commentDraftIdentity()))rememberCommentDraftFailure()}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，当前选择仅在本页面保留。')}};label.append(check,document.createTextNode('作为素材修订意见'));editor.append(label)}
     const actions=el('div','editor-actions'),save=nodeText('button','primary',state.editing?'保存修改':'提交评论',actions);save.dataset.commentSubmit='true';save.onclick=saveComment;
     const inspect=nodeText('button',null,'查看润色参考',actions);inspect.onclick=previewPolish;inspect.hidden=isProduction();
     const polish=nodeText('button',null,'AI 润色修改意见',actions);polish.dataset.polish='true';polish.disabled=!textarea.value.trim();polish.onclick=polishComment;polish.hidden=isProduction();
     const collapse=nodeText('button',null,'收起草稿',actions);collapse.onclick=closePanel;
-    const cancel=nodeText('button','destructive',state.editing?'取消编辑':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'未保存的编辑已放弃':'本次未提交评论已取消');editor.append(actions);
+    const cancel=nodeText('button','destructive',state.editing?'放弃此页修改':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'此页未保存修改已放弃，已保存评论与其他页草稿仍保留':'本次未提交评论已取消');editor.append(actions);
     bindCommentEditorShortcuts(textarea,{submit:save,cancel});
     if(state.preview){const basis=el('details','context-preview');basis.open=state.previewExpanded;basis.addEventListener('toggle',()=>{state.previewExpanded=basis.open});const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
       const context=state.preview.context;nodeText('p',null,context.review_task||`${context.creative_stage.label}审阅`,basis);
@@ -916,6 +966,7 @@ async function saveComment(){
   const textarea=$('#comment-editor-text'),key=draftKey();
   if(!key||!textarea||textarea.disabled||textarea.readOnly||commentSaves.has(key))return;
   const text=textarea.value.trim();if(!text)return toast('请先填写修改意见');
+  if(state.editing&&!Number.isInteger(editDraftBasis(key)?.version)){renderComments();return toast('旧草稿的开始版本无法确定，请查看最新内容并明确核对后再保存。')}
   const editorMetaKey=isScript()?scriptDraftMetaKey(scriptEpisode()):storyDraftMetaKey();
   const editing=state.editing,draftText=textarea.value,payload={...commentTarget(),anchor:state.anchor,body:text};
   const fallbackIdentity=commentDraftIdentity(),fallback=commentDraftFallbacks.get(fallbackIdentity);
@@ -930,7 +981,9 @@ async function saveComment(){
         submission=pending;storedSubmission=localStorage.getItem(key+':submission');acknowledged=true;
       }else{
         localStorage.setItem(key,draftText);
-        submission=editing?{id:editing,editing,payload}:samePayload?{id:pending.id,payload:pending.payload}:{id:crypto.randomUUID(),payload};
+        const basis=editing?editDraftBasis(key):null;
+        if(editing&&!Number.isInteger(basis?.version))throw Error('旧草稿的开始版本无法确定，请查看最新内容并明确核对后再保存。');
+        submission=editing?{id:editing,editing,payload,expected_version:basis.version}:samePayload?{id:pending.id,payload:pending.payload}:{id:crypto.randomUUID(),payload};
         submission.attempt_id=crypto.randomUUID();
         storedSubmission=JSON.stringify(submission);localStorage.setItem(key+':submission',storedSubmission);commentRejections.delete(key);commentReceipts.delete(key);
       }
@@ -939,7 +992,7 @@ async function saveComment(){
       throw Error('本机草稿保存失败，评论尚未发送。当前输入仍保留，请复制留存后重试。')
     }
     if(!acknowledged){
-      if(editing){const c=state.comments.find(x=>x.id===editing);await api(`/api/comments/${c.id}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:c.version,body:text})})}
+      if(editing){sent=true;await api(`/api/comments/${editing}`,{method:'PATCH',body:JSON.stringify({action:'EDIT',expected_version:submission.expected_version,body:text})})}
       else{sent=true;await api('/api/comments',{method:'POST',body:JSON.stringify({id:submission.id,...submission.payload})})}
       acknowledged=true;storedSubmission=rememberCommentReceipt(key,storedSubmission,submission);
     }
@@ -948,7 +1001,7 @@ async function saveComment(){
     const stillHere=ownDraft&&commentDraftIdentity()===fallbackIdentity&&$('#comment-editor-text')?.value===draftText;
     if(ownDraft){
       if(editorMetaKey){const meta=JSON.parse(localStorage.getItem(editorMetaKey)||'null');if(meta&&JSON.stringify(meta.anchor)===JSON.stringify(payload.anchor)&&(meta.editing||null)===(editing||null))localStorage.removeItem(editorMetaKey)}
-      localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');commentRejections.delete(key);commentReceipts.delete(key);commentDraftFallbacks.delete(fallbackIdentity);forgetActiveCommentDraft(fallbackIdentity)}
+      localStorage.removeItem(key);localStorage.removeItem(key+':discussion');localStorage.removeItem(key+':submission');localStorage.removeItem(key+':basis');editDraftBases.delete(key);commentRejections.delete(key);commentReceipts.delete(key);commentDraftFallbacks.delete(fallbackIdentity);forgetActiveCommentDraft(fallbackIdentity)}
     cleaned=true;
     if(stillHere){if(isScript())forgetScriptDraft();forgetStoryDraft();state.anchor=null;state.editing=null;state.suggestion=null;state.preview=null;state.previewExpanded=false;renderActiveReader();renderComments()}
     if(stillHere&&payload.material_revision){const url=new URL(location.href);url.searchParams.delete('material_round');history.replaceState(history.state,'',url);if(isEntityReview())await reloadEntityReview();else if(isMaterialReview())await openProductionRecord(state.materialReview.record.object_id)}
@@ -958,13 +1011,15 @@ async function saveComment(){
       if(!cleaned&&draftKey()===key&&$('#comment-editor-text')===textarea&&textarea.value===draftText)appendCommentSubmissionNotice($('.comment-editor'),key,pendingCommentSubmission(key)||{...submission,acknowledged:true,local_receipt_only:true});
       toast(cleaned?'评论已保存，但页面未能更新，请刷新后查看。':'评论已保存，但本机草稿未能完全清除。当前输入仍保留；本机记录不可用时，请勿刷新后另建同一条评论。');
     }else{
-      let message=error.message;if(sent&&submission&&[400,409].includes(error.status)&&markCommentSubmissionRejected(key,storedSubmission,submission,error)===false)message+=' 拒绝状态未能写入本机；原草稿仍保留，请复制留存。';if(sent&&draftKey()===key)appendCommentSubmissionNotice($('.comment-editor'),key);toast(message)
+      let message=error.message;if(sent&&submission&&[400,409].includes(error.status)&&markCommentSubmissionRejected(key,storedSubmission,submission,error)===false)message+=' 拒绝状态未能写入本机；原草稿仍保留，请复制留存。';
+      if(editing&&error.status===409){const basis=editDraftBases.get(key);if(basis){editDraftBases.set(key,{...basis,conflict:true});try{localStorage.setItem(key+':basis',JSON.stringify(editDraftBases.get(key)))}catch{}}await refreshComments().catch(()=>{});if(draftKey()===key)renderComments();message='评论已被另一页修改，此页原稿仍保留。请查看最新已保存内容，核对后人工整理，或放弃此页修改。'}
+      if(sent&&draftKey()===key)appendCommentSubmissionNotice($('.comment-editor'),key);toast(message)
     }
   }finally{commentSaves.delete(key);updateCommentEditorControls()}
 }
-const sameDraft=(key,text,target)=>draftKey()===key&&$('#comment-editor-text')?.value.trim()===text&&(!target||JSON.stringify(commentTarget())===JSON.stringify(target));
-function renderPolishFeedback(key,text,target){
-  if(!sameDraft(key,text,target))return false;
+const sameDraft=(key,text,target,action=commentAction)=>action===commentAction&&draftKey()===key&&$('#comment-editor-text')?.value.trim()===text&&(!target||JSON.stringify(commentTarget())===JSON.stringify(target));
+function renderPolishFeedback(key,text,target,action=commentAction){
+  if(!sameDraft(key,text,target,action))return false;
   const input=$('#comment-editor-text'),value=input.value,start=input.selectionStart,end=input.selectionEnd,direction=input.selectionDirection;
   renderComments();
   if(draftKey()!==key||JSON.stringify(commentTarget())!==JSON.stringify(target))return false;
@@ -973,25 +1028,25 @@ function renderPolishFeedback(key,text,target){
 }
 async function polishComment(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  const key=draftKey(),target=commentTarget(),request={...target,anchor:state.anchor,body:text};
+  const key=draftKey(),target=commentTarget(),action=commentAction,request={...target,anchor:state.anchor,body:text};
   $('[data-polish]').disabled=true;
   try{
     const preview=state.preview&&state.previewRequest===JSON.stringify(request)?state.preview:await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
-    if(!sameDraft(key,text,target))return;
+    if(!sameDraft(key,text,target,action))return;
     state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=false;
     const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({...request,expected_context_sha256:preview.context_sha256})});
-    if(!sameDraft(key,text,target))return;
-    state.suggestion=result.suggestion;if(renderPolishFeedback(key,text,target))toast('润色建议已生成，原草稿未修改');
-  }catch(error){if(renderPolishFeedback(key,text,target))toast(error.message)}
+    if(!sameDraft(key,text,target,action))return;
+    state.suggestion=result.suggestion;if(renderPolishFeedback(key,text,target,action))toast('润色建议已生成，原草稿未修改');
+  }catch(error){if(renderPolishFeedback(key,text,target,action))toast(error.message)}
 }
 async function previewPolish(){
   const text=$('#comment-editor-text').value.trim();if(!text)return toast('请先填写修改意见');
-  const key=draftKey(),target=commentTarget(),request={...target,anchor:state.anchor,body:text};
+  const key=draftKey(),target=commentTarget(),action=commentAction,request={...target,anchor:state.anchor,body:text};
   try{
     const preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
-    if(!sameDraft(key,text,target))return;
-    state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=true;if(renderPolishFeedback(key,text,target))toast('已列出本次润色使用的准确参考');
-  }catch(error){if(sameDraft(key,text,target))toast(error.message)}
+    if(!sameDraft(key,text,target,action))return;
+    state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=true;if(renderPolishFeedback(key,text,target,action))toast('已列出本次润色使用的准确参考');
+  }catch(error){if(sameDraft(key,text,target,action))toast(error.message)}
 }
 const commentChanges=new Set();
 async function changeComment(comment,action){
