@@ -89,7 +89,7 @@ test('a completed workspace load cannot restore position after a newer scene loa
     const {c}=fixture(),pending=deferred();let restored=0;
     c.state.framework={workspaces:[{id:'settings.workspace'}]};c.window={scrollTo(){}};
     c.isProduction=()=>true;c.isScript=()=>false;
-    for(const name of ['rememberStoryDraft','hideSelectionAction','renderWorkspaceNav','closePanel'])c[name]=()=>{};
+    for(const name of ['rememberStoryDraft','hideSelectionAction','renderWorkspaceNav','closePanel','cancelSourceReadingRestore'])c[name]=()=>{};
     c.restoreWorkspacePosition=()=>restored++;
     c.loadProductionWorkspace=()=>{c.invalidateProductionReads();return pending.promise};
     const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8'),start=app.indexOf('function switchWorkspace(');
