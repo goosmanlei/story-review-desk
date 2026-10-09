@@ -761,10 +761,27 @@ function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
 }
 
 function offsetIn(block,node,offset){const range=document.createRange();range.selectNodeContents(block);range.setEnd(node,offset);return chars(range.toString()).length}
+function textSelectionRange(host,range){
+  if(!host||!range)return null;
+  const contents=document.createRange();contents.selectNodeContents(host);
+  const part=range.cloneRange();
+  // Native paragraph selection can end at the next sibling's offset zero.
+  // Clip only empty margins; selected text outside this exact surface is refused.
+  if(part.compareBoundaryPoints(Range.START_TO_START,contents)<0){
+    const before=part.cloneRange();before.setEnd(contents.startContainer,contents.startOffset);
+    if(before.toString().trim())return null;
+    part.setStart(contents.startContainer,contents.startOffset);
+  }
+  if(part.compareBoundaryPoints(Range.END_TO_END,contents)>0){
+    const after=part.cloneRange();after.setStart(contents.endContainer,contents.endOffset);
+    if(after.toString().trim())return null;
+    part.setEnd(contents.endContainer,contents.endOffset);
+  }
+  return part.toString().trim()?part:null;
+}
 function textSelectionAnchor(host,blocks,attribute){
   const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount)return null;
-  const range=selection.getRangeAt(0);
-  if(!host||!host.contains(range.startContainer)||!host.contains(range.endContainer))return null;
+  const range=textSelectionRange(host,selection.getRangeAt(0));if(!range)return null;
   // Browser drag endpoints may be element boundaries, including the gaps between blocks.
   // Intersect each block before measuring offsets, so markup and surrogate pairs stay exact.
   const touched=[];
@@ -793,7 +810,8 @@ function selectedAnchor(){
   if(isProduction()){
     if(!state.productionSelected)return null;
     const root=state.unifiedCardRoot||document,selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
-    const host=range&&[...root.querySelectorAll('[data-production-blocks]')].find(node=>node.dataset.productionBlocks===state.productionSelected.id&&node.contains(range.startContainer)&&node.contains(range.endContainer));
+    const hosts=range?[...root.querySelectorAll('[data-production-blocks]')].filter(node=>node.dataset.productionBlocks===state.productionSelected.id&&textSelectionRange(node,range)):[];
+    const host=hosts.length===1?hosts[0]:null;
     return host?textSelectionAnchor(host,productionTextBlocks(state.productionSelected),'data-block-id'):null;
   }
   if(isStructure())return selectedStructureAnchor();
