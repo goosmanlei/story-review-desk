@@ -125,3 +125,11 @@
 .review-cue svg{width:18px;height:18px;flex:none}
 .review-comment-count{font-size:12px;font-variant-numeric:tabular-nums;line-height:1}
 .material-reference-dialog .comment-panel{position:relative;inset:auto;width:auto;max-width:none;max-height:65vh;box-shadow:none;margin:12px 24px 24px;border:1px solid #d8e1d6}
+
+/* No file exists yet: keep the status beside the reviewable plan. */
+.entity-review-missing-image{display:flex;align-items:center;justify-content:flex-start;gap:10px;min-height:0;height:auto;max-height:none;padding:12px;aspect-ratio:auto}
+.entity-review-missing-image svg{width:22px;height:22px;flex:none}
+.material-use-row{padding:10px 0;border-top:1px solid var(--desk-line);overflow-wrap:anywhere}
+.material-use-row>.material-reference{white-space:normal;text-align:left;max-width:100%}
+.material-use-row>p{margin:6px 0}.material-use-details{margin:8px 0}.material-use-details>summary{cursor:pointer}
+.material-use-group>h4{margin-top:16px}.material-use-details .review-surface{margin-top:8px}

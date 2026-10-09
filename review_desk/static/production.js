@@ -66,6 +66,12 @@ function productionEntityIcon(type){
 }
 const productionDimensionLabels={appearance:'整体外观',clothing:'服装',injury:'伤势',health:'健康',fatigue:'疲劳',voice:'声音',attachments:'随身物',layout:'空间布局',dressing:'场景布置',time_light:'时间与光照',structure:'完整结构',condition:'状况',contents:'组成与内容',placement:'使用位置',lyrics_scope:'歌词范围',rendition:'演唱方式',performers:'演唱者'};
 let productionLoadEpoch=0,productionReadEpoch=0;
+// A new page choice ends every read owned by the previous production page,
+// including another child of the same workspace and a later return to it.
+function invalidateProductionReads(){
+  ++productionLoadEpoch;++productionReadEpoch;
+  if(typeof invalidateBreakdownReads==='function')invalidateBreakdownReads();
+}
 function productionButton(parent,text,action){const b=nodeText('button',null,text,parent);b.type='button';b.onclick=()=>Promise.resolve().then(action).catch(e=>toast(e.message));return b}
 function productionVisuals(){return (state.productionSelected?.payload.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:reviewPositionText(state.productionSelected.payload.title),alt:reviewPositionText(state.productionSelected.payload.title),description:`${c.role} · ${c.width}×${c.height} · ${c.sha256}`}))}
 function productionName(ref,referenceTitles=[]){
@@ -142,11 +148,12 @@ function renderProductionEntityNavigation(root,r){
   root.append(section);
 }
 async function loadProductionWorkspace({onReadStart}={}){
+  invalidateProductionReads();
   const route=new URL(location.href),legacyObject=route.searchParams.get('production_object');
   if(typeof productionTab==='function'&&legacyObject&&!route.searchParams.has('breakdown_object')&&!route.searchParams.has('material_id')&&(!route.searchParams.has('production_tab')||productionTab()==='breakdown')&&!route.searchParams.has('production_entity')){
     const workspace=state.workspace,read=++productionReadEpoch;
     let linked;try{linked=await api('/api/production?'+new URLSearchParams({object_id:legacyObject,...(route.searchParams.get('production_revision')?{revision_id:route.searchParams.get('production_revision')}:{})}))}
-    catch(error){if(state.workspace===workspace&&read===productionReadEpoch){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','准确旧目标不可用：'+error.message,host);state.productionSelected=null}throw error}
+    catch(error){if(state.workspace!==workspace||read!==productionReadEpoch)return;const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','准确旧目标不可用：'+error.message,host);state.productionSelected=null;throw error}
     if(state.workspace!==workspace||read!==productionReadEpoch)return;
     const row=linked.record;
     if(workspace==='settings.workspace'&&['ENTITY','STATE','REPRESENTATION'].includes(row.kind))route.searchParams.set('production_tab','entities');
@@ -160,7 +167,7 @@ async function loadProductionWorkspace({onReadStart}={}){
   if(typeof productionTab==='function'){const tab=productionTab();if(tab==='retired'){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','此旧页面已退役，目标不可用。请从生产制作选择当前子页。',host);state.productionSelected=null;return}if(tab==='breakdown')return loadProductionBreakdown();if(tab==='materials')return loadProductionMaterials()}
   const workspace=state.workspace,epoch=++productionLoadEpoch,readEpoch=productionReadEpoch,view=$('#production-view');view.replaceChildren();const loading=nodeText('p',null,'正在读取制作记录…',view);
   let result;try{result=await api(typeof productionTab==='function'?'/api/production/index?'+new URLSearchParams({view:'settings',object_id:new URL(location.href).searchParams.get('production_object')||''}):'/api/production')}
-  catch(error){if(state.workspace===workspace&&epoch===productionLoadEpoch&&readEpoch===productionReadEpoch&&loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
+  catch(error){if(state.workspace!==workspace||epoch!==productionLoadEpoch||readEpoch!==productionReadEpoch)return;if(loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
   if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
   if(workspace==='settings.workspace'&&result.entity_state_counts)return loadEntityManagement(result,{epoch,onReadStart});
@@ -370,7 +377,7 @@ function preserveCardPosition(){
   return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
 }
 function renderProductionReaderContent(){
-  const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;root.replaceChildren();
+  const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;if(typeof pauseReviewMedia==='function')pauseReviewMedia(root);root.replaceChildren();
   if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
   if(typeof isMaterialReview==='function'&&isMaterialReview()){renderUnifiedCard(root);return}
@@ -421,7 +428,7 @@ function renderProductionRecord(root,detail,entityCard=false){
 }
 function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.start<Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
 function paintProductionReview(){
-  if(!isProduction())return;paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
+  if(!isProduction())return;if(typeof paintMaterialUseText==='function')paintMaterialUseText();paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
   const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
   for(const para of document.querySelectorAll('#production-blocks [data-block-id]'))para.classList.toggle('comment-flash',para===target);
 }
@@ -431,19 +438,43 @@ function renderProductionTransitions(root,transitions){
   for(const t of transitions){const row=el('div','production-need');productionRefLink(row,t.from);nodeText('span',null,' → ',row);productionRefLink(row,t.to);nodeText('p',null,t.action,row);productionRefLink(row,t.source,'查看转换依据');section.append(row)}
   root.append(section);
 }
+function productionCommentLocationIssue(comment,row){
+  if(comment.anchor_state?.valid===false)return comment.anchor_state.reason||'原圈选已失效；评论仍保留。';
+  if(!row||row.id!==comment.target_revision_id||row.object_id!==comment.target_object_id)return '评论所属的准确修订不可用；未打开其他版本。';
+  const a=comment.anchor;
+  if(!['time','visual','region'].includes(a.type))return null;
+  const component=row.payload.components?.find(c=>c.id===(a.component_id||a.visual_id));
+  if(!component||!component.file||typeof component.mime!=='string'||component.file!==a.asset_file)return '评论所属的原文件组成不可用；未替换为预览或其他文件。';
+  if(a.type==='time'&&(!/^(audio|video)\//.test(component.mime)||!Number.isFinite(a.start_seconds)||!Number.isFinite(a.end_seconds)||a.start_seconds<0||a.start_seconds>=a.end_seconds||Number.isFinite(component.duration_seconds)&&a.end_seconds>component.duration_seconds))return '原评论的时间范围已不可用；未改写圈选。';
+  if(a.type!=='time'&&!component.mime.startsWith('image/'))return '原评论的图像组成不可用；评论仍保留。';
+  return null;
+}
 function locateProductionComment(comment,local=false){
+  if(typeof locateMaterialRelationComment==='function'&&locateMaterialRelationComment(comment))return;
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
   if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
-  if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
+  const issue=productionCommentLocationIssue(comment,state.productionSelected);if(issue){toast(issue);return false}
   if(typeof productionTab==='function'&&['breakdown','shots'].includes(productionTab())&&state.productionSelected?.kind==='AV_SCENE'&&comment.anchor.type==='text'&&!document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"] [data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]'))return openBreakdownSceneNotes(state.productionSelected,comment);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
+  // A merged display never migrates the original field. Reveal its exact text
+  // in the same immutable shot before the shared locator and paint run.
+  if(a.type==='text'){
+    const surface=document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"]');
+    const node=[...(surface?.querySelectorAll('[data-block-id]')||[])].find(n=>n.dataset.blockId===a.block_id);
+    for(let parent=node?.parentElement;parent&&parent!==surface;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
+  }
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
   // Component ids can repeat across state references and unassigned candidates.
   // Locate the exact asset revision before looking up its image or player.
-  const exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,mediaRoot=typeof isEntityReview==='function'&&isEntityReview()?(document.querySelector('[data-comment-media]'+exact)||document.querySelector(exact)):$('#production-reader');
-  if(a.type==='time'){const media=mediaRoot?.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;const player=media.closest?.('.review-media-player');if(player?.reviewLocate)player.reviewLocate(a);else{media.scrollIntoView({block:'center'});media.focus()}}}
-  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?mediaRoot?.querySelector(`[data-visual-id="${CSS.escape(a.visual_id)}"]`):mediaRoot||$('#production-reader');target?.scrollIntoView({block:'center'})}
+  const root=state.unifiedCardRoot||$('#production-reader'),exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,file=`[data-review-file="${CSS.escape(a.asset_file||'')}"]`;
+  if(a.type==='time'){
+    const player=[...root?.querySelectorAll('.review-media-player'+exact+file)||[]].find(p=>Number(p.dataset.reviewFrom)<=a.start_seconds&&a.end_seconds<=Number(p.dataset.reviewTo));
+    if(!player?.reviewLocate){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
+    if(player.reviewLocate(a)===false){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
+  }
+  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?root?.querySelector(exact+' '+file+` [data-visual-id="${CSS.escape(a.visual_id)}"]`):root;if(!target){toast('原圈选当前无法显示；评论仍保留。');return false}target.scrollIntoView({block:'center'})}
   paintProductionReview();renderComments();
+  return true;
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}
 function showProductionJudgment(root,record=state.productionSelected){

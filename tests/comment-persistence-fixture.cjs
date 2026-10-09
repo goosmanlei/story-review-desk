@@ -1,17 +1,18 @@
 // Execute the actual shared editor functions without simulating a browser render.
 const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),crypto=require('node:crypto');
-function fixture({storage=new Map(),fetch:transport}={}){
+function fixture({storage=new Map(),fetch:transport,pageStorage=null,navigationType='navigate'}={}){
   const textarea={value:'',disabled:false,readOnly:false},intent={checked:false,disabled:false},messages=[],requests=[],buttons=[{},{}];
   const editor={children:[],append(node){this.children.push(node)},querySelector:s=>s==='textarea'?textarea:s==='#material-revision-intent'?context.intent:s==='[data-comment-submit]'?buttons[0]:s==='[data-polish]'?buttons[1]:editor.children.find(node=>node.className?.split(' ').includes(s.slice(1)))||null,querySelectorAll:()=>buttons};
   const nodes={'#comment-editor-text':textarea,'.comment-editor':editor,'#toast':{classList:{add(){},remove(){}},set textContent(v){messages.push(v)}}};
   class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={}}append(...children){this.children.push(...children)}setAttribute(){} }
   const context={crypto,URL,console,setTimeout:()=>1,clearTimeout(){},intent,
     document:{addEventListener(){},querySelector:s=>s==='#material-revision-intent'?context.intent:nodes[s],createElement:tag=>new Element(tag)},
-    localStorage:{getItem:k=>storage.has(k)?storage.get(k):null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)},
+    localStorage:{getItem:k=>storage.has(k)?storage.get(k):null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k),get length(){return storage.size},key:i=>[...storage.keys()][i]},
     fetch:async(url,options)=>{requests.push({url,...options});return transport?transport(url,options):{ok:true,json:async()=>({})}},
     location:{href:'http://127.0.0.1/'},history:{replaceState(){}},
     isEntityReview:()=>context.state.workspace==='settings.workspace'&&!!context.state.entityReview,
     reloadEntityReview:async()=>{context.reloads++},openProductionRecord:async()=>{context.reloads++},reloads:0};
+  if(pageStorage){context.sessionStorage={getItem:k=>pageStorage.get(k)||null,setItem:(k,v)=>pageStorage.set(k,String(v)),removeItem:k=>pageStorage.delete(k)};context.performance={getEntriesByType:()=>[{type:navigationType}]}}
   vm.createContext(context);
   for(const name of ['app.js','material-review.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),context);
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;globalThis.legacyKey=legacyDraftKey;
