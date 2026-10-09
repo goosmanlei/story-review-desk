@@ -3,7 +3,7 @@ function fixture(){const c={state:{comments:[]},productionLabels:{},URL,URLSearc
 test('historical shot reads its hydrated exact demand and inputs instead of the identity current plan',()=>{
  const c=fixture(),seen=[];
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
- c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
+ c.el=()=>({append(){},dataset:{}});c.preserveBreakdownDetailPosition=()=>{};c.nodeText=(_t,_c,text)=>seen.push(text);
  c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialCandidateChoice=()=>null;c.materialDefaultCandidate=()=>null;
  c.renderProductionAcceptance=(_host,row)=>seen.push(row.id);c.materialRoundControl=()=>{};
  c.renderHistoricalProductionDefinition=(_host,row)=>seen.push(row.id);c.renderMaterialRequirements=(_host,row)=>seen.push(row.payload.generation.prompt);
@@ -17,7 +17,7 @@ test('historical shot reads its hydrated exact demand and inputs instead of the 
 });
 test('shared shot renderer retains exact background and material trace while changes and selected inputs stay visible',()=>{
   const c=fixture();
-  class E {constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){}}}append(...nodes){this.children.push(...nodes)}}
+  class E {constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){}}}append(...nodes){this.children.push(...nodes)}replaceChildren(...nodes){this.children=nodes}}
   c.el=tag=>new E(tag);c.nodeText=(tag,_class,text,parent)=>{const n=new E(tag);n.text=text;parent.append(n);return n};
   c.breakdownShotTitle=()=> 'shot';c.businessTitle=row=>row.object_id;
   c.renderAudiovisualSources=c.renderProductionAcceptance=()=>{};
@@ -30,7 +30,7 @@ test('shared shot renderer retains exact background and material trace while cha
   c.renderBreakdownShot(parent,{record:{object_id:'shot',id:'exact-shot',payload:{fps:24,duration_frames:120,states:[from,to],continuity_context:[background],state_transitions:[{from,to,action:'接过后才掰角'}]}},context:{materials:[{object_id:'material',media_type:'image'}]}});
   const copy=parent.children[0].children[0],trace=copy.children.find(n=>n.tag==='details');
   assert.ok(trace);assert.equal(trace.open,undefined,'trace is closed by default');
-  assert.ok(copy.children.some(n=>n.text==='米尚未交付，袋子仍在画外'));
+  assert.ok(copy.children.some(n=>n.children.some(v=>v.text==='米尚未交付，袋子仍在画外')));
   assert.ok(copy.children.some(n=>n.text==='本方案直接输入'));
   const changes=copy.children.find(n=>n.children.some(v=>v.text==='本镜状态变化'));
   assert.ok(changes.children.some(n=>n.children.some(v=>v.text==='接过后才掰角')));
@@ -41,7 +41,7 @@ test('shared shot renderer retains exact background and material trace while cha
 });
 test('project handoff exposes the selected original and its exact requirements without borrowing another version',()=>{
   for(const historical of [false,true]){
-    const c=fixture(),seen=[];c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
+    const c=fixture(),seen=[];c.el=()=>({append(){},dataset:{}});c.preserveBreakdownDetailPosition=()=>{};c.nodeText=(_t,_c,text)=>seen.push(text);
     for(const name of ['renderProductionAcceptance','materialRoundControl','reviewChoiceButtons'])c[name]=()=>{};
     c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialDefaultCandidate=()=>null;c.materialCandidateChoice=items=>items[0];
     c.materialMedia=(_host,item)=>seen.push(item.component.file);c.renderActualGeneration=(_host,context)=>seen.push(context.call.id);
