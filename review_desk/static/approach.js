@@ -7,8 +7,14 @@ function approachTabs() {
   return approachContent?.tabs || [{id: 'story', label: '故事创作'}, {id: 'materials', label: '生产制作'}];
 }
 
-function approachSelectedTab(params = new URL(location.href).searchParams) {
-  return approachTabs().find(tab => tab.id === params.get('tab')) || approachTabs()[0];
+function approachSelectedTab(params = new URL(location.href).searchParams, hash = location.hash) {
+  const tabs = approachTabs();
+  // Old default-page links contain only a chapter anchor. Resolve only an
+  // anchor actually owned by the document; an explicit tab always takes priority.
+  if (params.has('tab')) return tabs.find(tab => tab.id === params.get('tab')) || tabs[0];
+  return tabs.find(tab => (tab.sections || []).some(section =>
+    hash === `#approach-${tab.id}-${section.id}` || (section.blocks || []).some(block =>
+      block.type === 'heading' && block.id && hash === `#approach-${tab.id}-${block.id}`))) || tabs[0];
 }
 
 function bindApproachNavigation(link) {
@@ -245,7 +251,10 @@ document.addEventListener('scroll', event => {
   if (!$('#approach-index').contains(event.target)) scheduleApproachIndex();
 }, {capture: true, passive: true});
 window.addEventListener('resize', scheduleApproachIndex);
-window.addEventListener('hashchange', restoreApproachAnchor);
+window.addEventListener('hashchange', () => {
+  if (!$('#approach-view').hidden && approachContent && $('#approach-body').dataset.tab !== approachSelectedTab().id) renderApproach();
+  else restoreApproachAnchor();
+});
 
 function selectApproachTab(tab, focus = false) {
   if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
