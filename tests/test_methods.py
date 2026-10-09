@@ -24,6 +24,35 @@ def seed(store, work_type='comment-polish', steps=None):
 
 
 class MethodsTest(unittest.TestCase):
+    def test_source_companions_preserve_links_export_restore_and_old_snapshot(self):
+        root = Path(self.tmp.name)
+        (root / 'book/diagrams').mkdir(parents=True)
+        (root / 'book/chapter.md').write_text('![plan](diagrams/plan.svg)\n[source](sources.json)\n')
+        (root / 'book/diagrams/plan.svg').write_text('<svg xmlns="http://www.w3.org/2000/svg"/>')
+        (root / 'book/sources.json').write_text('{"source":"original"}')
+        spec = {'name':'illustrated','title':'Illustrated','expected_version':0,'preserve_paths':True,
+                'sections': {'main': {'path':'book/chapter.md'}},
+                'companions': {'main':['book/diagrams/plan.svg','book/sources.json']}}
+        resource = methods.sync_source(self.store, root, spec)
+        payload = copy.deepcopy(self.method['payload'])
+        payload['resources'] = [{**methods.reference(resource), 'section':'main'}]
+        method = methods.save(self.store, {'category':'skill','name':'review','expected_version':1,'payload':payload})
+        methods.save(self.store, {'category':'binding','name':'comment-polish','expected_version':1,
+                                 'payload':{'work_type':'comment-polish','rules':[{**methods.reference(method),'when':{}}]}})
+        execution = methods.prepare(self.store, self.request)
+        dest = root / 'delivered'
+        methods.export_execution(self.store, methods.reference(execution), dest)
+        self.assertEqual((dest/'shared/0/book/diagrams/plan.svg').read_text(), (root/'book/diagrams/plan.svg').read_text())
+        self.assertTrue((dest/'shared/0/book/chapter.md').exists())
+        (root/'book/diagrams/plan.svg').write_text('<svg>changed</svg>')
+        methods.sync_source(self.store, root, {**spec,'expected_version':1})
+        self.assertEqual(methods.prepare(self.store,self.request),execution)
+        restored=Store(root/'restored-companions/.runtime/review.sqlite3');self.addCleanup(restored.close)
+        methods.restore_registry(restored,json.loads((dest/'registry.json').read_text()))
+        self.assertEqual(methods.prepare(restored,self.request),execution)
+        with self.assertRaises(ValueError):
+            methods.sync_source(self.store,root,{**spec,'expected_version':2,'companions':{'main':['../outside.svg']}})
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.store = Store(Path(self.tmp.name) / '.runtime/review.sqlite3')
