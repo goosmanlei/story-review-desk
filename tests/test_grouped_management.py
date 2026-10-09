@@ -55,8 +55,12 @@ class GroupedManagementTest(UiProjectionTest):
         ep=p.record(self.store,'episode')
         self.store.put_object('episode','EPISODE',{**ep['payload'],'number':1},expected_version=ep['version'])
         self.setup_plans()
-        self.assertEqual(ui.material_list(self.store,grouped=True)['management_episodes'],[{'object_id':'episode','number':1}])
-        self.assertEqual(self.summary()['management_episodes'],[{'object_id':'episode','number':1}])
+        for catalog in (ui.material_list(self.store,grouped=True)['management_episodes'], self.summary()['management_episodes']):
+            self.assertEqual([(e['object_id'],e['number']) for e in catalog],[('episode',1)])
+            current=p.record(self.store,'episode')
+            self.assertEqual(catalog[0]['id'],current['id'])
+            self.assertEqual(catalog[0]['title'],current['payload']['title'])
+            self.assertEqual([s['id'] for s in catalog[0]['scenes']],[s['id'] for s in current['payload']['scenes']])
 
     def test_compact_list_preserves_membership_filters_groups_and_card_information(self):
         self.setup_plans();self.generate();self.mount_on_test_shot('need-full-overall')

@@ -12,7 +12,7 @@ class Node{
   insertBefore(n,ref){n.parent=this;this.children.splice(this.children.indexOf(ref),0,n)}
   setAttribute(k,v){this.attrs[k]=v}
   all(){return this.children.flatMap(n=>[n,...n.all()])}
-  querySelectorAll(selector){assert.equal(selector,'.production-editor');return this.all().filter(n=>n.className.split(' ').includes('production-editor'))}
+  querySelectorAll(selector){if(selector==='[data-decision-id]')return this.all().filter(n=>n.dataset.decisionId);assert.equal(selector,'.production-editor');return this.all().filter(n=>n.className.split(' ').includes('production-editor'))}
   get childElementCount(){return this.children.length}
 }
 const record=(object_id,kind,payload={})=>({object_id,id:object_id+'-r1',current_revision:object_id+'-r1',kind,version:1,payload:{title:object_id,...payload}});
@@ -108,26 +108,28 @@ function materialJudgmentFixture(){
   f.context.productionEntityIcon=()=>new Node('svg');vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),f.context);return f;
 }
 function openMaterialJudgment(f){
-  const root=f.context.$('#production-reader');f.context.showProductionJudgment(root);const form=f.form(root.children.at(-1));
+  const root=f.context.$('#production-reader');f.context.document.querySelectorAll=selector=>selector==='[data-judgment-target]'?root.all().filter(n=>n.dataset.judgmentTarget):[];
+  f.context.renderMaterialResultReview(root,f.context.state.productionSelected,{judgments:{current:[],history:[],conflicting:false}});
+  const section=root.children.at(-1);f.context.showProductionJudgment(section);const form=f.form(section.children.at(-1));
   form.field('审阅结果').value='passed';form.field('审阅者').value='Technical reviewer';form.field('结论依据').value='Exact asset candidate';return form;
 }
-test('judgment refresh reports a failed own detail read through the actual load and open functions',async()=>{
+test('judgment refresh reports a failed exact section read without reloading the detail',async()=>{
   const f=materialJudgmentFixture();await f.context.loadProductionWorkspace();const form=openMaterialJudgment(f),original=f.context.api;
-  f.context.api=(url,options)=>url.startsWith('/api/production?')?Promise.reject(Error('own detail unavailable')):original(url,options);
+  f.context.api=(url,options)=>url.startsWith('/api/production/judgments?')?Promise.reject(Error('own judgments unavailable')):original(url,options);
   const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await saving;
-  assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,false);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('页面尚未完整更新')&&s.includes('own detail unavailable')),JSON.stringify(f.messages));
+  assert.equal(f.posts.length,1);assert.equal(form.box.isConnected,false);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('判断显示尚未更新')&&s.includes('own judgments unavailable')),JSON.stringify(f.messages));assert.equal(f.context.state.productionSelected.object_id,'asset-A');
 });
 test('judgment refresh cannot report its old failure after a real new read or workspace takes over',async()=>{
   for(const takeover of ['new-read','new-workspace']){
     const f=materialJudgmentFixture();await f.context.loadProductionWorkspace();const form=openMaterialJudgment(f),original=f.context.api,details=[];
-    f.context.api=(url,options)=>url.startsWith('/api/production?')?new Promise((resolve,reject)=>details.push({url,resolve,reject})):original(url,options);
+    f.context.api=(url,options)=>url.startsWith('/api/production?')||url.startsWith('/api/production/judgments?')?new Promise((resolve,reject)=>details.push({url,resolve,reject})):original(url,options);
     const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await flush();assert.equal(details.length,1);
     let newer;
     if(takeover==='new-read'){
       newer=f.context.openProductionRecord('asset-B');await flush();assert.equal(details.length,2);
       details[1].resolve({record:f.records[1],history:[],uses:[]});await newer;
       assert.equal(f.context.state.productionSelected.object_id,'asset-B');
-    }else f.context.state.workspace='story.workspace';
+    }else {f.context.state.workspace='story.workspace';f.host.replaceChildren()}
     details[0].reject(Error('late old detail unavailable'));await saving;
     assert.equal(f.posts.length,1);assert.ok(f.messages.some(s=>s.includes('asset-A')&&s.includes('已记录')));
     assert.ok(!f.messages.some(s=>s.includes('late old detail unavailable')),JSON.stringify(f.messages));
@@ -152,11 +154,12 @@ test('a failed list load cannot replace newer loading, another detail read or an
   if(newer){requests[1].reject(Error('new request unavailable'));await assert.rejects(newer,/new request unavailable/);if(takeover==='new-load')assert.match(f.text(f.host),/new request unavailable/)}
  }
 });
-test('saved judgment and failed actual list refresh show both saved feedback and a recoverable error page',async()=>{
+test('saved judgment never invokes the old full-list refresh or destroys its reader',async()=>{
  const f=materialJudgmentFixture();await f.context.loadProductionWorkspace();const form=openMaterialJudgment(f),original=f.context.api;
  f.context.api=(url,options)=>url==='/api/production'?Promise.reject(Error('list unavailable')):original(url,options);
- const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await saving;
- assert.equal(f.posts.length,1);assert.ok(f.messages.some(s=>s.includes('已保存')&&s.includes('页面尚未完整更新')));assert.match(f.text(f.host),/制作记录读取失败/);assert.doesNotMatch(f.text(f.host),/正在读取/);
+ const saving=form.button('保存审阅').onclick();await flush();f.requests.at(-1).resolve({});await flush();
+ const get=f.requests.find(r=>r.url.startsWith('/api/production/judgments?'));assert.ok(get);get.resolve({current:[],history:[],conflicting:false});await saving;
+ assert.equal(f.posts.length,1);assert.ok(f.messages.some(s=>s.includes('已记录')));assert.doesNotMatch(f.text(f.host),/制作记录读取失败/);assert.equal(f.context.state.productionSelected.object_id,'asset-A');
 });
 
 const decisionRecord=(version=3,action='keep',id='existing-decision')=>({object_id:id,id:id+'-r'+version,kind:'JUDGMENT',version,payload:{format:'production-judgment-v1',title:'upstream · 变更复核',blocks:[{id:'decision',text:'Existing explicit reason'}],target:plain(change.target),verdict:'impact_resolved',actor:'Original recorded actor',reason:'Existing explicit reason',change:{old:{object_id:change.object_id,revision_id:change.used_revision},new:{object_id:change.object_id,revision_id:change.current_revision},action}}});

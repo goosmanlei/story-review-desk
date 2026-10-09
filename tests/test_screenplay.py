@@ -118,7 +118,8 @@ class ScreenplayTest(unittest.TestCase):
         self.assertEqual(context['target_revision_id'], ep['revision_id'])
         self.assertEqual(context['creative_stage']['id'], 'SCRIPT_DRAFT')
         self.assertEqual(len(context['source_documents']), 3)
-        self.assertTrue(all(d['text'] for d in context['source_documents']))
+        self.assertTrue(context['source_documents'][0]['text'])
+        self.assertTrue(all(d['identity_only'] and not d['text'] for d in context['source_documents'][1:]))
         self.assertFalse(preview['saved'])
 
 
