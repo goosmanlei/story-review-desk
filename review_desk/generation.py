@@ -133,8 +133,10 @@ def contents(store, scope):
 
 def preparation(store, scope):
     data = contents(store, scope); issues=[]
+    from .production_description import description
     for row in [data['entity'], *data['states']]:
-        if not str(row['payload'].get('production_description', '')).strip():
+        if not description(row['payload'], data['entity']['payload']['entity_type'],
+                           data['entity']['payload'].get('attribute_definitions', {})):
             issues.append({'object_id':row['object_id'], 'code':'description_missing', 'message':row['payload']['title']+'：制作描述待完善'})
         for message in row['payload'].get('production_blockers', []):
             issues.append({'object_id':row['object_id'], 'code':'content_unresolved', 'message':message})

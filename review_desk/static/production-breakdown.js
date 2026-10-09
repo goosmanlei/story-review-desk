@@ -335,8 +335,10 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
   const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
   for(const item of data.shots){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);renderAudiovisualSources(title,shot);renderProductionAcceptance(title,shot);heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
-    breakdownShotText(text,shot);renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
-    row.append(text,materials);page.append(row);nodeText('h4',null,'本镜素材',materials);
+    breakdownShotText(text,shot);const trace=renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
+    row.append(text);page.append(row);
+    if(trace){row.classList.add('shot-with-state-trace');trace.append(materials)}else row.append(materials);
+    nodeText('h4',null,'关联素材',materials);
     if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
     const items=item.context.materials||[];
     for(const group of groupedShotMaterials(items)){const section=el('section','breakdown-material-group');nodeText('h5',null,group.label,section);materials.append(section);
@@ -432,8 +434,17 @@ async function openBreakdownSceneNotes(row,comment){
 }
 
 function renderShotStateContext(host,shot,context={}){
-  const values=[['本镜使用的实体状态',shot.payload.states||[]],['连续性背景',shot.payload.continuity_context||[]]];
-  for(const [title,refs] of values){if(!refs.length)continue;const detail=el('details');nodeText('summary',null,title+' · '+refs.length,detail);for(const ref of refs){const record=[...(context.states||[]),...(context.continuity_states||[])].find(r=>r.id===ref.revision_id);materialReferenceLink(detail,ref,record?businessTitle(record):'查看实体状态')};host.append(detail)}
+  const records=[...(context.states||[]),...(context.continuity_states||[])];
+  const link=(parent,ref)=>{const row=records.find(r=>r.id===ref.revision_id);materialReferenceLink(parent,ref,row?businessTitle(row):'查看实体状态')};
+  const transitions=shot.payload.state_transitions||[];
+  if(transitions.length){const changes=el('div','shot-state-changes');nodeText('h4',null,'本镜状态变化',changes);for(const value of transitions){const line=el('div');link(line,value.from);nodeText('span',null,' → ',line);link(line,value.to);nodeText('p',null,value.action,line);changes.append(line)}host.append(changes)}
+  const used=shot.payload.states||[],background=shot.payload.continuity_context||[];
+  if(!used.length&&!background.length)return;
+  // Narrative continuity is already visible directly above. Keep one exact
+  // trace on demand, instead of repeating the materials as two default lists.
+  const detail=el('details');nodeText('summary',null,'状态依据',detail);
+  for(const [title,refs] of [['镜内状态',used],['画外连续性依据',background]]){if(!refs.length)continue;nodeText('h4',null,title,detail);for(const ref of refs)link(detail,ref)}
+  host.append(detail);return detail;
 }
 async function refreshMaterialPlan(result){
   const epoch=productionLoadEpoch,workspace=state.workspace,target=state.productionSelected?.id;

@@ -187,3 +187,13 @@
 .relation-text .business-code{font-size:13px!important}.relation-sources{font-size:14px!important}
 .relation-sources button{display:inline-block;font-size:13px!important;padding:4px 6px!important;margin:3px!important}
 .relation-sources>.production-meta{display:block;font-size:13px!important}
+
+/* The selected plan already presents its direct input cards. Exact state and
+   other material trace stays together on demand, including offscreen state. */
+.breakdown-row.shot-with-state-trace{display:block}
+.shot-with-state-trace>.breakdown-shot-copy{max-width:1050px;box-sizing:border-box;margin:auto}
+.shot-with-state-trace .breakdown-shot-materials{border:0;height:auto;margin-top:12px}
+.shot-with-state-trace .breakdown-material-group{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr));gap:8px}
+.shot-with-state-trace .breakdown-material-group h5{grid-column:1/-1}
+.shot-state-changes{margin:12px 0;padding:10px 12px;border-left:3px solid #789376;background:#f3f6ef}
+.shot-state-changes h4,.shot-state-changes p{margin:5px 0}
