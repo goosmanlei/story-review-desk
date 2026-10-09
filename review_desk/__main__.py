@@ -28,6 +28,9 @@ def main():
     subs.add_parser("export")
     subs.add_parser("restore")
     subs.add_parser("comments")
+    evidence = subs.add_parser('import-comment-evidence')
+    evidence.add_argument('file', type=Path)
+    evidence.add_argument('--validate-only', action='store_true')
     subs.add_parser("structure-get")
     subs.add_parser("structure-review")
     subs.add_parser("script-input")
@@ -109,6 +112,9 @@ def main():
             result = restore(store, root / "export")
         elif args.command == "comments":
             result = store.context()
+        elif args.command == 'import-comment-evidence':
+            from .comment_review import import_evidence
+            result = import_evidence(store, json.loads(args.file.read_text()), args.validate_only)
         elif args.command == "structure-get":
             result = snapshot(store)
         elif args.command == "structure-review":

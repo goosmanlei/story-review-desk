@@ -1,5 +1,7 @@
 # 评论能力与回归清单
 
+跨版本意见、作者回应、准确改动与人工关闭的关系见 [历史意见复核](comment-review.md)。
+
 本文供实现和验收评论能力的开发者使用，描述当前行为与检查入口；实际实例、视口、操作和浏览器结果由对应故事仓库保存。初始交互参考为本机历史 `story-review-desk/web/app/story-comments.tsx`、`closed-comment-history.tsx` 和 `tests/entity-comments.ui.mjs`，于 2026-09-21 只读核对；历史目录与本项目无代码或数据继承关系。
 
 | 可见行为 | 当前契约 | 验证方式 |
