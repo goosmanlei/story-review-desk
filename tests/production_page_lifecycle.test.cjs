@@ -83,3 +83,20 @@ test('late entity failure cannot replace a newer entity directory',async()=>{
   const body=host.children;old.reject(Error('old entity failure'));await pending;
   assert.deepEqual(host.children,body);assert.equal(c.state.productionSelected,entity);
 });
+
+test('a completed workspace load cannot restore position after a newer scene load',async()=>{
+  for(const superseded of [false,true]){
+    const {c}=fixture(),pending=deferred();let restored=0;
+    c.state.framework={workspaces:[{id:'settings.workspace'}]};c.window={scrollTo(){}};
+    c.isProduction=()=>true;c.isScript=()=>false;
+    for(const name of ['rememberStoryDraft','hideSelectionAction','renderWorkspaceNav','closePanel'])c[name]=()=>{};
+    c.restoreWorkspacePosition=()=>restored++;
+    c.loadProductionWorkspace=()=>{c.invalidateProductionReads();return pending.promise};
+    const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8'),start=app.indexOf('function switchWorkspace(');
+    vm.runInContext('let workspaceReadEpoch=0;let storyDataReady=true;\n'+app.slice(start,app.indexOf('\nfunction ',start+1)),c);
+    c.switchWorkspace('settings.workspace',false);
+    if(superseded)c.invalidateProductionReads();
+    pending.resolve();await pending.promise;await new Promise(resolve=>setImmediate(resolve));
+    assert.equal(restored,superseded?0:1);
+  }
+});

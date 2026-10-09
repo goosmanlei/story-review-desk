@@ -376,7 +376,10 @@ function switchWorkspace(id,updateUrl=true){
   if(id==='project.configuration')renderConfigurations({preserve:true});if(id==='production.approach')Promise.resolve(renderApproach()).then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});if(id==='story.outline'){restoreStoryDraft();renderStructureReader();renderComments()}
   if(source){restoreStoryDraft();renderDocument();renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
-  if(isProduction())loadProductionWorkspace().then(()=>{if(read===workspaceReadEpoch&&state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>{if(read===workspaceReadEpoch)toast(e.message)});else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
+  if(isProduction()){
+    const loading=loadProductionWorkspace(),loadEpoch=productionLoadEpoch;
+    loading.then(()=>{if(read===workspaceReadEpoch&&loadEpoch===productionLoadEpoch&&state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>{if(read===workspaceReadEpoch&&loadEpoch===productionLoadEpoch)toast(e.message)});
+  }else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
 
   if(!isProduction()&&id!=='production.approach'&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition();
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
