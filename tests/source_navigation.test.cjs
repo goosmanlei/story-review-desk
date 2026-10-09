@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8');
 // Real menu, route handlers and comment renderer; layout is synthetic, not browser acceptance.
 class Element{
-  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.listeners={};this.className='';this.value='';this.scrollTop=0;this.clientHeight=600;this.scrollHeight=12000;this.rect=()=>({top:0,bottom:600});
+  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.listeners={};this.className='';this.value='';this.scrollLeft=0;this.scrollTop=0;this.clientHeight=600;this.scrollHeight=12000;this.rect=()=>({top:0,bottom:600});
     this.classList={contains:x=>this.className.split(' ').includes(x),add:x=>{if(!this.classList.contains(x))this.className+=' '+x},remove:x=>{this.className=this.className.split(' ').filter(y=>y!==x).join(' ')},toggle:(x,on)=>{on??=!this.classList.contains(x);on?this.classList.add(x):this.classList.remove(x);return on}}}
   append(...nodes){for(const node of nodes){this.children.push(node);node.parent=this}}
   replaceChildren(...nodes){this.children=[];this.append(...nodes)}
