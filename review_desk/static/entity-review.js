@@ -263,7 +263,8 @@ function renderEntityReview(root){
 function renderMaterialPlaceholder(parent,need){
   const p=need.payload,type=p.media_type,box=el('div',type==='audio'?'entity-review-missing-audio':'entity-review-missing-image');
   box.dataset.requirementRevision=need.id;box.dataset.mediaType=type;box.append(productionEntityIcon(type));
-  box.setAttribute('aria-label',reviewPositionText(p.generation?.output.name||p.title)+' · 未生成');nodeText('small',null,(productionMediaLabels[type]||'素材')+' · 未生成',box);
+  const status=p.generation?.method==='reuse'?'复用方案':'未生成';
+  box.setAttribute('aria-label',reviewPositionText(p.generation?.output.name||p.title)+' · '+status);nodeText('small',null,(productionMediaLabels[type]||'素材')+' · '+status,box);
   if(type==='image'||type==='video'){const ratio=p.generation?.parameters?.aspect_ratio||'16:9';box.style.aspectRatio=ratio.replace(':',' / ')}parent.append(box);
 }
 function entityReviewMaterialItems(data,items){
