@@ -467,6 +467,13 @@ def readiness(store, requirement_id):
         return {'requirement':need,'plan':plan,'acceptances':[], 'inputs':[], 'i2i_depth':0,
                 'issues':[NOTICE+' '+path for path in missing] or ['保留产物的原始需求方案未登记'], 'ready':False}
     if not plan:issues.append('尚无生成方案')
+    method_basis = None
+    if plan:
+        from .method_media import verify
+        try:
+            method_basis = verify(store, need['object_id'], need['payload'], need['id'])
+        except (KeyError, ValueError) as exc:
+            issues.append(str(exc))
     if need['payload'].get('status')=='withdrawn':issues.append('素材需求已撤回')
     scope=p.ref_record(store,need['payload']['scope'])
     from .production_acceptance import snapshot as content_acceptance
@@ -538,7 +545,7 @@ def readiness(store, requirement_id):
     if plan and plan['method']=='generate' and images and depth>2:issues.append('图像参考超过两代，应回到干净母版')
     if plan and any(r['revision_id']!=p.record(store,r['object_id'])['id'] for r in need['payload']['states']):issues.append('素材状态已有更新')
     return {'requirement':need,'plan':plan,'acceptances':approvals,'inputs':inputs,'i2i_depth':max(depth,0),
-            'input_contract':contract,'issues':list(dict.fromkeys(issues)),'ready':not issues}
+            'input_contract':contract,'method_basis':method_basis,'issues':list(dict.fromkeys(issues)),'ready':not issues}
 
 
 def package(store, requirement_id):
@@ -550,7 +557,13 @@ def package(store, requirement_id):
     inputs=label_inputs(ready['inputs'])
     contract=check(plan['model'],plan['prompt'],inputs,parameters=plan['parameters'],execution=plan.get('execution'))
     if contract['issues']:raise Conflict('；'.join(contract['issues']))
+    method_snapshot = None
+    if (ready.get('method_basis') or {}).get('execution'):
+        from .methods import read
+        method_snapshot = read(store, **ready['method_basis']['execution'])['payload']
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']),'acceptances':ready['acceptances'],
+            **({'method_basis': ready['method_basis']} if ready.get('method_basis') else {}),
+            **({'method_snapshot': method_snapshot} if method_snapshot else {}),
             'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
             'randomization':randomization(plan),
             **({'execution':copy.deepcopy(plan['execution'])} if 'execution' in plan else {}),
@@ -577,11 +590,14 @@ def validate_call(store, object_id, payload):
     executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown') LIMIT 1", (object_id,)).fetchone()
     if executed:
         if old['payload'].get('actual_seed') is not None and payload.get('actual_seed')!=old['payload']['actual_seed']:raise Conflict('cannot rewrite actual random seed')
-        for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization','execution'):
+        for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization','execution','method_basis'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
     if payload.get('status') not in ('submitted','completed','failed','unknown'):return
     if not payload.get('generation_requirement'):
+        from .method_media import activation
+        if activation(store):
+            raise Conflict('新媒体调用必须关联准确生成方案与方法依据；不能绕过统一准备入口')
         if payload.get('prepared_plan'):
             from .shot_references import applies
             if applies(store,p.ref_record(store,payload['prepared_plan'])):
@@ -590,8 +606,11 @@ def validate_call(store, object_id, payload):
     need=p.ref_record(store,payload['generation_requirement'],{'REQUIREMENT'})
     if payload['status'] in ('failed','unknown'):
         from .shot_references import applies
-        if not applies(store,need):return
+        from .method_media import activation
+        if not applies(store,need) and not activation(store):return
     manifest=package(store,need['object_id'])
+    if manifest.get('method_basis') != payload.get('method_basis'):
+        raise Conflict('实际调用缺少同一准备包的方法依据')
     if (manifest['inputs'] or manifest.get('execution')) and not manifest['input_contract']['verified']:
         raise Conflict('参考输入的模型契约尚未核实，不能登记新执行调用')
     if manifest['requirement']!=payload['generation_requirement'] or manifest['acceptances']!=payload.get('generation_acceptances'):

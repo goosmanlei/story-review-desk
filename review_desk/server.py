@@ -313,6 +313,21 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == '/api/business-codes':
             from .business_codes import catalog, display_dump
             return self._json({**catalog(), 'objects':display_dump(store)})
+        if path == '/api/methods':
+            from .methods import catalog
+            return self._json(catalog(store))
+        if path == '/api/methods/resolve':
+            try:
+                from .methods import resolve
+                return self._json(resolve(store, query.get('work_type', [''])[0], json.loads(query.get('conditions', ['{}'])[0])))
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
+        if path == '/api/methods/record':
+            try:
+                from .methods import read
+                return self._json(read(store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0]))
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]
@@ -496,6 +511,16 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path in ('/api/methods/save', '/api/methods/prepare', '/api/methods/artifact', '/api/methods/media-prepare'):
+            try:
+                from . import methods
+                from .method_media import prepare as media_prepare
+                operation = {'save': methods.save, 'prepare': methods.prepare, 'artifact': methods.artifact, 'media-prepare': media_prepare}[self.path.rsplit('/', 1)[1]]
+                return self._json(operation(self.server.store, self._input(2_000_000)), 201)
+            except Conflict as exc:
+                return self._json({'error': str(exc)}, 409)
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if self.path in ("/api/production/material-route", "/api/production/acceptance", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
             try:
                 value = self._input(20_000_000)
@@ -557,7 +582,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     return self._json(preview)
                 if value.get("expected_context_sha256") != preview["context_sha256"]:
                     raise Conflict("AI 参考上下文已变化；请重新预览")
-                return self._json(suggest(preview))
+                return self._json(suggest(preview, self.server.store))
             except Conflict as exc:
                 return self._json({"error": str(exc)}, 409)
             except RuntimeError as exc:

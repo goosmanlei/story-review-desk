@@ -458,6 +458,7 @@ function showConfigurationSection(){
 function renderConfigurations({preserve=false}={}){
   const root=$('#configuration-view');
   if(typeof configurationSectionFromRoute==='function')state.configSection=configurationSectionFromRoute();
+  if(state.configSection==='METHODS'){root.configurationMounted=false;renderMethods(root);return}
   if(state.configSection==='CODES'){root.replaceChildren();root.configurationMounted=false;renderBusinessCodeCatalog(root);return}
   if(state.configurations.favicon_assets===undefined){
     root.replaceChildren();root.configurationMounted=false;nodeText('p',null,'正在读取配置…',root);

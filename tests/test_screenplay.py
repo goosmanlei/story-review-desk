@@ -1,3 +1,4 @@
+from test_methods import seed as seed_methods
 import copy
 import json
 import tempfile
@@ -107,6 +108,7 @@ class ScreenplayTest(unittest.TestCase):
             self.assertEqual(before, self.store.objects())
 
     def test_polish_uses_exact_episode_and_original_basis_after_new_structure(self):
+        seed_methods(self.store)
         first = import_screenplay(self.store, self.edition())
         old = self.structure['revision']
         selection = structure_snapshot(self.store)['selection']['id']

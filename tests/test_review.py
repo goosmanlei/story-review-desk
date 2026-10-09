@@ -1,3 +1,4 @@
+from test_methods import seed as seed_methods
 import json
 import io
 import sqlite3
@@ -153,6 +154,7 @@ class ReviewTest(unittest.TestCase):
             empty.close()
 
     def test_configuration_and_ai_context(self):
+        seed_methods(self.store)
         configured = self.store.set_configuration("PROJECT", {"story_background": "来自收录资料的故事背景", "creative_background": "首阶段只做故事采编", "target_medium": "漫剧"}, 0)
         self.assertEqual(configured["version"], 1)
         with self.assertRaises(Conflict):
@@ -176,7 +178,7 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(len(preview["context_sha256"]), 64)
         response = {"output": [{"content": [{"type": "output_text", "text": "建议核对字词"}]}]}
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-local-key"}), patch("review_desk.polish.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as remote:
-            result = suggest(preview)
+            result = suggest(preview, self.store)
         payload = json.loads(remote.call_args.args[0].data)
         self.assertEqual(result["suggestion"], "建议核对字词")
         self.assertFalse(payload["store"])
@@ -188,7 +190,7 @@ class ReviewTest(unittest.TestCase):
         preview = build_context(self.store, "fixture", anchor, "请核对字词")
         self.assertEqual((preview["model"], preview["reasoning_effort"]), ("gpt-5.6-luna", "high"))
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-local-key"}), patch("review_desk.polish.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as remote:
-            suggest(preview)
+            suggest(preview, self.store)
         payload = json.loads(remote.call_args.args[0].data)
         self.assertEqual(payload["reasoning"], {"effort": "high"})
         self.assertEqual(payload["max_output_tokens"], 2048)
@@ -196,6 +198,7 @@ class ReviewTest(unittest.TestCase):
             self.store.set_configuration("SYSTEM", {"ai_polish_model": "gpt-4.1-mini", "ai_polish_effort": "high"}, 1)
 
     def test_api_key_environment_name_not_secret(self):
+        seed_methods(self.store)
         with self.assertRaisesRegex(ValueError, "environment variable name"):
             self.store.set_configuration("SYSTEM", {"ai_polish_api_key_env": "BAD-NAME"}, 0)
         self.store.set_configuration("SYSTEM", {"ai_polish_api_key_env": "STORY_POLISH_API_KEY"}, 0)
@@ -204,7 +207,7 @@ class ReviewTest(unittest.TestCase):
         self.assertEqual(preview["api_key_env_name"], "STORY_POLISH_API_KEY")
         response = {"output": [{"content": [{"type": "output_text", "text": "建议"}]}]}
         with patch.dict("os.environ", {"STORY_POLISH_API_KEY": "custom-secret"}), patch("review_desk.polish.urlopen", return_value=io.BytesIO(json.dumps(response).encode())) as remote:
-            suggest(preview)
+            suggest(preview, self.store)
         self.assertEqual(remote.call_args.args[0].headers["Authorization"], "Bearer custom-secret")
         self.assertNotIn("custom-secret", json.dumps(self.store.configurations()))
         self.assertNotIn("custom-secret", json.dumps(self.store.configuration_events()))
