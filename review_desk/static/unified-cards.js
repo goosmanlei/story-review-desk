@@ -146,7 +146,7 @@ async function switchUnifiedSourceMaterial(item,trigger){
 }
 async function readUnifiedCard(objectId,revisionId=null,params=null){
   let result;
-  try{result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}))}
+  try{result=await readEntityDecisionView('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{})}))}
   catch(error){if(error.message==='production record not found')throw Error('指定的对象或修订不可用；未打开其他版本。');throw error}
   result.params=params||new URLSearchParams();result.explicit=!!revisionId;validateUnifiedReference(result);return result;
 }
