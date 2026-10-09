@@ -60,6 +60,7 @@ function rememberWorkspaceRoute(){
   if(['settings.workspace','materials.workspace','production.workspace'].includes(id)&&typeof productionTab==='function')workspaceSubRoutes.set(workspaceGroup(id)+':'+productionTab(),url.href);
 }
 function rememberWorkspacePosition(){
+  if(typeof rememberSourceReadingPosition==='function')rememberSourceReadingPosition();
   const offsets={};
   for(const selector of workspacePositionSelectors){const node=document.querySelector(selector);if(node)offsets[selector]=[node.scrollLeft||0,node.scrollTop||0]}
   workspacePositions.set(location.href,{window:[window.scrollX||0,window.scrollY||0],offsets});
@@ -67,11 +68,12 @@ function rememberWorkspacePosition(){
 }
 function restoreWorkspacePosition(){
   const href=location.href;
+  const sourceGuard=typeof state!=='undefined'&&state.workspace==='story.sources'&&typeof sourceReadingRestoreGuard==='function'?sourceReadingRestoreGuard():null;
   let position=workspacePositions.get(href);
   if(!position){try{const saved=JSON.parse(sessionStorage.getItem('review-view-position')||'null');if(saved?.url===href)position=saved.position}catch{}}
   if(!position)return;
   requestAnimationFrame(()=>{
-    if(location.href!==href)return;
+    if(location.href!==href||sourceGuard&&!sourceGuard())return;
     for(const [selector,offset] of Object.entries(position.offsets||{})){const node=document.querySelector(selector);if(node){node.scrollLeft=Number(offset[0])||0;node.scrollTop=Number(offset[1])||0}}
     window.scrollTo(Number(position.window?.[0])||0,Number(position.window?.[1])||0);
   });
@@ -98,13 +100,19 @@ function selectConfigurationSection(section){
 }
 function selectProductionTab(tab){
   if(tab===productionTab())return;
+  const source=new URL(location.href);
   rememberWorkspacePosition();rememberWorkspaceRoute();
   const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
-  const saved=workspaceSubRoutes.get(workspaceGroup(workspace)+':'+tab);
-  if(saved){history.pushState(null,'',saved);switchWorkspace(workspace,false);return}
-  const url=new URL(location.href);
+  const saved=workspaceSubRoutes.get(workspaceGroup(workspace)+':'+tab),url=new URL(saved||location.href),savedScopeRevision=url.searchParams.get('production_scope_revision'),sameScope=['production_scope_episode','production_scope_revision','production_scope_scene'].every(key=>url.searchParams.get(key)===source.searchParams.get(key));
+  for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene']){
+    const value=source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
+  }
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
-  for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+  if(!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+  if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
+    const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
+    if(!same){url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
+  }
   url.hash='';if(url.href!==location.href)history.pushState(null,'',url);switchWorkspace(workspace,false);
 }
 function workspaceTabItems(){

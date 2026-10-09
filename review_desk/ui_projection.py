@@ -115,11 +115,18 @@ def entity_summaries(store, entities, entries):
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False):
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None):
     from .navigation_search import matches as search_matches
+    if scope and scope != 'av':raise ValueError('unknown production scope')
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
-    values=material_entries(store);chosen={'episode':episode,'scene':scene,'media':media,'status':status}
+    values=material_entries(store)
+    catalog=management_episodes(store)
+    if scope == 'av':
+        from .production_scope import projection
+        projected=projection(store,values,episode,scope_revision,scene)
+        values=projected['entries'];catalog=projected['management_episodes']
+    chosen={'episode':episode,'scene':scene,'media':media,'status':status}
     def matches(item,filters):
         if not search_matches(search,item['search_fields']):return False
         if filters.get('media') and item['media_type']!=filters['media']:return False
@@ -132,10 +139,26 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
              'scene':sorted({l['scene'] for i in values for l in i['locations'] if l.get('scene') and (not episode or l['episode']==episode)})}
     facets={key:{value:sum(matches(i,{**chosen,key:value}) for i in values) for value in ['',*opts]} for key,opts in options.items()}
     result=[item for item in values if matches(item,chosen)]
+    if scope == 'av' and (episode or scene):
+        enriched=[]
+        for item in result:
+            refs={}
+            for loc in item['locations']:
+                if episode and loc['episode']!=episode or scene and loc['scene']!=scene:continue
+                reference=loc.get('evidence',{}).get('record')
+                if reference:
+                    record=light.ref_record(store,reference)
+                    refs[reference['revision_id']]={**reference,'version':record['version'],'title':record['payload']['title'],'use':loc.get('relation')}
+            enriched.append({**item,'scope_references':list(refs.values())})
+        result=enriched
     if grouped:
         from .list_associations import material_groups
         result.sort(key=lambda i:(i['canonical_material_id'],i['id']))
         groups=material_groups(store,result,episode,scene)
+        if scope == 'av':
+            numbers={e['object_id']:e['number'] for e in catalog}
+            for group in groups:group['episode_number']=numbers.get(group['episode'])
+            groups.sort(key=lambda g:(g['episode_number'] or 100000,g['scene'] or '',g['key']))
         if compact:
             # All card identities and grouping rows stay available for instant
             # local pagination. Full association evidence is read on card open.
@@ -143,10 +166,10 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
                      'locations':[{k:v for k,v in loc.items() if k in ('scope','source','source_scene_name','source_version','episode','scene','kind','relation','title')}
                                   for loc in item['locations']]}
                     for item in result]
-        return {'management_episodes':management_episodes(store),'items':result,'total':len(result),'groups':groups,
+        return {'management_episodes':catalog,'items':result,'total':len(result),'groups':groups,
                 'management_locations':list({(loc.get('episode'),loc.get('scene')):
                     {'episode':loc.get('episode'),'scene':loc.get('scene')} for item in values for loc in item['locations']
-                    if not episode or loc.get('episode')==episode}.values()),
+                    }.values()),
                 'display_total':sum(len(group['material_ids']) for group in groups),'facets':facets}
     focused=None
     if focus:
