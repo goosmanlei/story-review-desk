@@ -227,7 +227,7 @@ async function openUnifiedMaterial(ref,trigger){
   const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
   const {dialog,title,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
-  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
+  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params);if(!dialog.isConnected||!owns())return;
     while(typeof reviewDialogStack!=='undefined'&&reviewDialogStack.at(-1)!==dialog&&dialog.isConnected){const upper=reviewDialogStack.at(-1);await new Promise(resolve=>upper.addEventListener('close',resolve,{once:true}));if(!dialog.isConnected||!owns())return;}
     result.defaultSelection=!!ref.defaultSelection;

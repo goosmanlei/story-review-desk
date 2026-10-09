@@ -23,7 +23,7 @@ KINDS = {"AV_EPISODE": "av-episode", "AV_SCENE": "av-scene", "AV_SHOT": "av-shot
          "CALL": "call", "JUDGMENT": "judgment", "RELATION": "relation"}
 FORMATS = {"production-" + v + "-v1": k for k, v in KINDS.items()}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$")
-USAGES = ("generation_input", "post_audio", "editorial")
+USAGES = ("generation_input", "post_audio", "editorial", "review_reference")
 CHANGE_KINDS = {"AV_EPISODE", "AV_SCENE", "AV_SHOT", "MATERIAL_RELATION", "ENTITY", "STATE", "REPRESENTATION", "INPUT_LOCK", "EPISODE", "STORY",
                 "REQUIREMENT", "RELATION"}
 
