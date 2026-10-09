@@ -511,6 +511,7 @@ function productionDraftKey(){
 }
 function rememberProductionDraft(){
   if(!isProduction()||!state.productionSelected||!state.anchor)return;
+  if(typeof rememberLiveCommentEdit==='function')try{rememberLiveCommentEdit()}catch{rememberCommentDraftFailure()}
   if(state.productionDraftScope&&state.productionDraftScope!==productionDraftKey())return;
   state.productionDraftContexts||={};state.productionDraftContexts[state.productionDraftScope||productionDraftKey()]={anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope,draftKey:typeof draftKey==='function'?draftKey():null};
 }
