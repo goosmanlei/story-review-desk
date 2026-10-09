@@ -360,7 +360,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/breakdown":
                     from .production_breakdown import catalog
                     with production.read_scope(store):
-                        return self._json(catalog(store, param("episode"), param("object_id"), param("revision_id"),param('view')))
+                        return self._json(catalog(store, param("episode"), param("object_id"), param("revision_id"),param('view'),param('episode_revision')))
                 if path == '/api/production/index':
                     from .production_breakdown import index
                     with production.read_scope(store):
@@ -369,7 +369,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     from . import ui_projection
                     with production.read_scope(store):
                         reader=ui_projection.card if path.endswith('/card') else ui_projection.scene
-                        options={'shot_revision':param('shot_revision'),'view':param('view')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
+                        options={'shot_revision':param('shot_revision'),'view':param('view'),'episode':param('episode'),'episode_revision':param('episode_revision')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
                         return self._json(reader(store,param('object_id'),param('revision_id'),**options))
                 if path == "/api/production/context":
                     from .production_breakdown import context

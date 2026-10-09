@@ -140,15 +140,15 @@ function renderMaterialRequirements(parent,requirement){
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false){
   const plan=need.payload.generation,box=el('section','material-plan');box.dataset.requirementId=need.object_id;
-  nodeText('h3',null,'生成方案',box);
+  nodeText('h3',null,plan?.method==='reuse'?'复用方案':'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
   materialExecution(host,plan);
-  materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
+  if(plan.method!=='reuse')materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
-  if(plan.blockers?.length){nodeText('h4',null,'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
-  materialField(host,need,'generation.prompt','提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
+  if(plan.blockers?.length){nodeText('h4',null,plan.method==='reuse'?'复用前仍需':'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
+  materialField(host,need,'generation.prompt',plan.method==='reuse'?'复用说明':'提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
 }
 function materialVersions(){return (isEntityReview()?state.entityReview:state.materialReview)?.material_versions||{}}
 function materialRecordRound(row){for(const rounds of Object.values(materialVersions()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;if(Number.isInteger(row.material_version))return row.material_version;if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];return null}
@@ -479,6 +479,47 @@ function referenceReviewSession(dialog,detail){
   },{once:true});
   return {focus,locate};
 }
+function renderSourceReference(view,initial,ref,source){
+  const {dialog,title,body}=view;
+  let full=null,excerptTop=0;
+  const draw=(detail,expanded=false)=>{
+    if(!dialog.isConnected)return;
+    body.replaceChildren();body.dataset.referenceRevision=detail.reference.revision_id;
+    body.dataset.referenceScene=detail.scene?.id||'';
+    const version=detail.screenplay?.title?.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u);
+    title.textContent=(source==='full_scene'||source==='scene_script'?'查看剧本':'剧情依据')+' · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
+    if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene,detail.reference.object_id)+' · '+String(detail.scene.heading||detail.scene.title||detail.scene.id).replace(/^\d+-\d+\s*/,''),body);
+    const omitted=initial.scene_context?.omissions?.length>0;
+    let control=null,errorBox=null;
+    if(omitted){
+      nodeText('p','production-meta',expanded?`全场正文 · 高亮为原引用（${initial.blocks.length} 段）`:`剧情选段 · 引用 ${initial.blocks.length} / 全场 ${initial.scene_context.block_count} 段`,body);
+      control=productionButton(body,expanded?'返回选段':'读完整场',async()=>{
+        if(expanded){draw(initial);body.scrollTop=excerptTop;body.querySelector('button')?.focus({preventScroll:true});return}
+        excerptTop=body.scrollTop;control.disabled=true;
+        errorBox.hidden=false;errorBox.className='production-meta';errorBox.textContent='正在读取同一版本的完整场…';
+        try{
+          full||=await api(materialReferenceRequest(ref,'full_scene').url);
+          if(!dialog.isConnected)return;
+          draw(full,true);body.querySelector('button')?.focus({preventScroll:true});
+        }catch(error){if(dialog.isConnected){errorBox.className='error';errorBox.textContent='完整场暂不可读：'+error.message;control.disabled=false}}
+      });
+      errorBox=nodeText('p','production-meta','',body);errorBox.hidden=true;errorBox.setAttribute('role','status');
+    }else if(ref.block_ids?.length&&!detail.scene&&detail.context_unavailable_reason){
+      nodeText('p','production-issue','剧情选段 · '+detail.context_unavailable_reason,body);
+    }
+    const highlighted=new Set(source==='scene_script'?[]:detail.highlight_block_ids||[]);
+    const gaps=new Map((detail.scene_context?.omissions||[]).map(g=>[g.before_block_id,g.count]));
+    for(const block of detail.blocks){
+      if(gaps.has(block.id))nodeText('p','reference-omission',`⋯ 省略 ${gaps.get(block.id)} 段 ⋯`,body);
+      const line=nodeText('p','reference-text',block.text,body);line.dataset.referenceBlock=block.id;
+      if(highlighted.has(block.id)){line.classList.add('reference-highlight');line.setAttribute('aria-label','原引用')}
+    }
+    if(gaps.has(null))nodeText('p','reference-omission',`⋯ 省略 ${gaps.get(null)} 段 ⋯`,body);
+    if(source!=='scene_script'&&detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
+    body.querySelector('.reference-highlight')?.scrollIntoView({block:'center'});
+  };
+  draw(initial);
+}
 async function openMaterialReference(ref,trigger,source=false){
   const {dialog,title,body}=openReviewDialog(source?'剧情依据':'参考输入',trigger,'material-reference-dialog');
   nodeText('p',null,'读取中…',body);
@@ -487,15 +528,7 @@ async function openMaterialReference(ref,trigger,source=false){
     const detail=await api(request.url);
     if(!dialog.isConnected)return;
     if(request.isSource){
-      body.replaceChildren();body.dataset.referenceRevision=detail.reference.revision_id;
-      const version=detail.screenplay?.title?.match(/^(?:剧本|版本)\s*([一二三四五六七八九十百零〇\d]+)/u);
-      title.textContent=(source==='full_scene'||source==='scene_script'?'查看剧本':'剧情依据')+' · '+(version?'版本'+version[1]+' · ':'')+reviewPositionText(detail.title);
-      body.dataset.referenceScene=detail.scene?.id||'';
-      if(detail.scene)nodeText('h3',null,reviewPositionLabel('scene',detail.scene,detail.reference.object_id)+' · '+String(detail.scene.heading||detail.scene.title||detail.scene.id).replace(/^\d+-\d+\s*/,''),body);
-      const highlighted=new Set(source==='scene_script'?[]:detail.highlight_block_ids||[]);
-      for(const block of detail.blocks){const line=nodeText('p','reference-text',block.text,body);line.dataset.referenceBlock=block.id;if(highlighted.has(block.id)){line.classList.add('reference-highlight');line.setAttribute('aria-label','本镜剧情依据')}}
-      if(source!=='scene_script'&&detail.full_scene&&!(ref.block_ids?.length))nodeText('p','production-issue','本镜未登记准确正文块引用；未高亮其他文字',body);
-      body.querySelector('.reference-highlight')?.scrollIntoView({block:'center'});
+      renderSourceReference({dialog,title,body},detail,ref,source);
       return;
     }
     const row=detail.record,p=row.payload;body.replaceChildren();const versions=[...new Set(Object.values(detail.material_versions||{}).flatMap(rs=>rs.filter(r=>r.members.some(m=>m.id===row.id)).map(r=>r.number)))];title.textContent=businessTitle(row)+' · '+(versions.length===1?'素材版本 '+versions[0]:'记录修订 '+row.version);body.dataset.referenceRevision=row.id;

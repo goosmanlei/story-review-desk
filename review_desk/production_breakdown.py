@@ -85,9 +85,9 @@ def scene_shots(store, scene, exact=None):
     raise ValueError('视听场必须是 AV_SCENE')
 
 
-def catalog(store, episode=None, object_id=None, revision_id=None, view=None):
+def catalog(store, episode=None, object_id=None, revision_id=None, view=None, episode_revision=None):
     from .audiovisual import catalog as audiovisual_catalog
-    return audiovisual_catalog(store, episode, object_id, revision_id, view)
+    return audiovisual_catalog(store, episode, object_id, revision_id, view, episode_revision)
 
 
 def context(store, object_id, revision_id=None, *, metadata=False):

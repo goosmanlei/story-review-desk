@@ -34,7 +34,7 @@ async function fixture(){
   const nodes=new Map(),listeners={},storage=new Map(),renders=[],body=new Element('body');
   const node=selector=>{if(!nodes.has(selector)){const value=new Element();body.append(value);nodes.set(selector,value)}return nodes.get(selector)};
   const c={URL,URLSearchParams,console,setTimeout:()=>0,clearTimeout(){},CSS:{escape:x=>x},
-    location:{href:'http://fixture/?workspace=story.sources&source=source'},
+    location:{href:'http://fixture/?workspace=story.sources&source=source'},history:{state:null},
     window:{innerWidth:1024,innerHeight:800,addEventListener(){}},Node:{TEXT_NODE:3},getSelection:()=>({removeAllRanges(){}}),
     document:{body,activeElement:null,querySelector:node,querySelectorAll:()=>[],
       createElement:tag=>new Element(tag),
