@@ -130,7 +130,7 @@ function renderShotInputs(host,row,inputs,records,context){
     else if(item.slot?.record){const r=item.slot.record,component=item.slot.component;
       const issues=(item.slot.issues||[]).filter(issue=>!['尚未选定素材版本','尚未选定候选'].includes(issue));
       const owner=item.slot.direct===false?'选定归属：'+shotReferenceOwnerTitle(item.slot):'当前方案选定';
-      const label=item.slot.direct===false?item.label.replace(/ · 声音$/u,''):item.label;
+      const label=item.slot.direct===false?item.label.replace(/ · 声音$/u,''):item.label+(materialInputRole(item.value)?' · '+materialInputRole(item.value):'');
       const exactState=r.kind==='ASSET'&&item.referenceLabel&&!r.payload.title.includes(item.referenceLabel)?item.referenceLabel+' · ':'';
       const title=r.payload.title.startsWith(label)?r.payload.title:label+' · '+exactState+r.payload.title;
       const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:(item.slot.issues.length?'◌ ':'✓ ')+shotReferenceLabel(item.slot)+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(item.value.use?' · 用途：'+item.value.use:'')+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 已登记裁切区域':'');

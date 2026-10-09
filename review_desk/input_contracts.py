@@ -40,9 +40,19 @@ def label_inputs(inputs):
     return result
 
 
-def check(model, prompt, inputs):
+def check(model, prompt, inputs, *, parameters=None, execution=None):
     labels=[v['label'] for v in inputs];issues=check_declared(model,prompt,[v['component']['mime'].split('/')[0] for v in inputs])
-    if not inputs:return {'model':model,'convention':'text only','verified':not issues,'issues':issues}
+    from . import video_modes
+    mode = None
+    if video_modes.applies(model) or execution is not None:
+        mode = video_modes.check(model, parameters or {}, execution, [
+            {'media_type': v['component']['mime'].split('/')[0], 'role': v.get('role')} for v in inputs])
+        try:check_parameters(model, parameters or {})
+        except ValueError as exc:issues.append(str(exc))
+        issues.extend(mode['issues'])
+    if not inputs:
+        return {'model':model,'convention':'text only','verified':not issues and (mode is None or mode['verified']),
+                'issues':issues, **({'mode_check':mode} if mode else {})}
     if model in ('gpt-image-2-5-sunburst','gpt-image-2'):
         convention='OpenArt visualReferences ordered array; describe 图片1、图片2 in natural language'
         if any(not v['component']['mime'].startswith('image/') for v in inputs) or len(inputs)>16:
@@ -69,14 +79,33 @@ def check(model, prompt, inputs):
         mentions=set(re.findall(r'@(图片\d+|音频\d+|视频\d+)',prompt))
         if mentions-set(labels):issues.append('提示词指代了未提交的参考输入')
     else:
-        return {'model':model,'convention':'UNKNOWN; verify the execution platform contract','verified':False,'issues':[]}
-    return {'model':model,'convention':convention,'verified':not issues,'issues':issues}
+        return {'model':model,'convention':'UNKNOWN; verify the execution platform contract','verified':False,'issues':issues,
+                **({'mode_check':mode} if mode else {})}
+    return {'model':model,'convention':convention,'verified':not issues and (mode is None or mode['verified']),
+            'issues':list(dict.fromkeys(issues)), **({'mode_check':mode} if mode else {})}
 
 
 def check_parameters(model, parameters):
     if model not in ('seedance2.0_fast_vision','Seedance_2.5'):return
     duration=parameters.get('duration')
-    if type(duration) is not int or not 4<=duration<=(15 if model=='seedance2.0_fast_vision' else 30):
+    editing = model == 'Seedance_2.5' and parameters.get('task_type') == 'edit' and duration is None
+    if not editing and (type(duration) is not int or not 4<=duration<=(15 if model=='seedance2.0_fast_vision' else 30)):
         raise ValueError('Seedance duration outside verified single-call limits')
     allowed=('480p','720p') if model=='seedance2.0_fast_vision' else ('480p','720p','1080p')
     if parameters.get('resolution') not in allowed:raise ValueError('unsupported Seedance resolution')
+
+
+def planned_contract(plan, declarations):
+    """Check active, declared roles before selection, without claiming file readiness."""
+    from . import video_modes
+    issues = check_declared(plan['model'], plan['prompt'], [v['media_type'] for v in declarations])
+    try:check_parameters(plan['model'], plan['parameters'])
+    except ValueError as exc:issues.append(str(exc))
+    result = {'scope':'仅检查计划参数、附件编号和声明角色；原件、采纳和实际效果另验',
+              'issues':issues, 'verified':not issues}
+    if video_modes.applies(plan['model']) or plan.get('execution') is not None:
+        mode = video_modes.check(plan['model'], plan['parameters'], plan.get('execution'), declarations)
+        result['mode_check'] = mode
+        issues.extend(mode['issues'])
+        result['verified'] = not issues and mode['verified']
+    return result

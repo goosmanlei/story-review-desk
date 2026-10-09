@@ -1,0 +1,247 @@
+{
+  "format": "video-channel-capabilities-v1",
+  "channel": "pippit-tool-cli",
+  "version": "1.0.38",
+  "source": "pippit-tool-cli model describe <key> --refresh; pippit-tool-cli generate-video --help",
+  "scope": "只读渠道参数与输入契约；不证明账号权限、余额或媒体效果。调用前须重新核对。",
+  "cli_first_last_image_count": 2,
+  "models": {
+    "seedance2.0_fast_vision": {
+      "duration": {
+        "default": 10,
+        "description": "选择生成内容的时长（秒）",
+        "label": "时长",
+        "max": 15,
+        "min": 4,
+        "required_field": true,
+        "step": 1,
+        "unit": "seconds"
+      },
+      "is_support_extend_result": true,
+      "is_support_first_frame_image": true,
+      "is_support_last_frame_image": true,
+      "key": "seedance2.0_fast_vision",
+      "material_limits": {
+        "audio_total_limit": 3,
+        "image_total_limit": 9,
+        "max_image_size_bytes": 31457280,
+        "max_total_video_duration_ms": 15500,
+        "max_video_duration_ms": 15500,
+        "min_video_duration_ms": 2000,
+        "video_total_limit": 3
+      },
+      "max_audio_duration": 15000,
+      "max_prompt_length": 5000,
+      "max_total_audio_duration": 15200,
+      "min_audio_duration": 2000,
+      "ratio": {
+        "default": "adaptive",
+        "options": [
+          "adaptive",
+          "16:9",
+          "21:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "1:1"
+        ]
+      },
+      "resolution": {
+        "default": "720p",
+        "description": "选择生成视频的分辨率",
+        "label": "清晰度",
+        "options": [
+          "480p",
+          "720p"
+        ],
+        "required_field": true
+      },
+      "observed_at": "2026-10-09T04:38:28.456131Z"
+    },
+    "Seedance_2.5": {
+      "creation_modes": [
+        {
+          "duration_policy": "inherit",
+          "enabled": true,
+          "generate_type": 0,
+          "imitate_video_policy": {
+            "enabled": true
+          },
+          "key": "reference_generation",
+          "name": "参考生成",
+          "placeholder": "说说你的创作想法，也可以上传你想要参考的图片或视频进行生成",
+          "ratio": {
+            "default": "adaptive",
+            "options": [
+              "adaptive",
+              "16:9",
+              "21:9",
+              "9:16",
+              "4:3",
+              "3:4",
+              "1:1"
+            ]
+          },
+          "ratio_policy": {
+            "selection": "inherit",
+            "value_mode": "inherit"
+          },
+          "task_type": "reference",
+          "validation_policy": {
+            "required_video_count": 0,
+            "accepted_video_sources": [
+              "material",
+              "imitation"
+            ],
+            "include_imitation_duration_in_total": false
+          }
+        },
+        {
+          "duration_policy": "smart_disabled",
+          "enabled": true,
+          "imitate_video_policy": {
+            "enabled": true
+          },
+          "key": "video_edit",
+          "name": "视频编辑",
+          "placeholder": "描述你的编辑想法，帮你P视频，比如视频换脸、修改元素等",
+          "ratio": {
+            "default": "adaptive",
+            "options": [
+              "adaptive"
+            ]
+          },
+          "ratio_policy": {
+            "selection": "recommended_only",
+            "value_mode": "smart",
+            "blocked_click_toast": "视频编辑下暂不支持设置比例"
+          },
+          "task_type": "edit",
+          "validation_policy": {
+            "required_video_count": 1,
+            "accepted_video_sources": [
+              "material",
+              "imitation"
+            ],
+            "include_imitation_duration_in_total": true
+          }
+        },
+        {
+          "duration_policy": "inherit",
+          "enabled": true,
+          "imitate_video_policy": {
+            "enabled": false
+          },
+          "key": "video_extend",
+          "name": "视频延长",
+          "placeholder": "支持向前/向后延长视频，你可以说说希望视频接下来发生什么",
+          "ratio": {
+            "default": "adaptive",
+            "options": [
+              "adaptive"
+            ]
+          },
+          "ratio_policy": {
+            "selection": "recommended_only",
+            "value_mode": "smart",
+            "blocked_click_toast": "视频延长下暂不支持设置比例"
+          },
+          "task_type": "extend",
+          "validation_policy": {
+            "required_video_count": 1,
+            "accepted_video_sources": [
+              "material"
+            ],
+            "forbidden_input_types": [
+              "imitation"
+            ],
+            "include_imitation_duration_in_total": false
+          }
+        },
+        {
+          "duration_policy": "inherit",
+          "enabled": true,
+          "generate_type": 1,
+          "imitate_video_policy": {
+            "enabled": false
+          },
+          "key": "first_last_frame",
+          "name": "首尾帧模式",
+          "placeholder": "上传首帧和尾帧图片，并描述你想生成的视频内容",
+          "ratio": {
+            "default": "adaptive",
+            "options": [
+              "adaptive"
+            ]
+          },
+          "ratio_policy": {
+            "selection": "recommended_only",
+            "value_mode": "smart",
+            "blocked_click_toast": "首尾帧模式下暂不支持设置比例"
+          },
+          "validation_policy": {
+            "required_video_count": 0,
+            "forbidden_input_types": [
+              "imitation",
+              "audio",
+              "document"
+            ],
+            "include_imitation_duration_in_total": false
+          }
+        }
+      ],
+      "duration": {
+        "default": 10,
+        "description": "选择生成内容的时长（秒）",
+        "label": "时长",
+        "max": 30,
+        "min": 4,
+        "required_field": true,
+        "step": 1,
+        "unit": "seconds"
+      },
+      "is_support_extend_result": true,
+      "is_support_first_frame_image": true,
+      "is_support_last_frame_image": true,
+      "key": "Seedance_2.5",
+      "material_limits": {
+        "audio_total_limit": 10,
+        "image_total_limit": 30,
+        "max_image_size_bytes": 31457280,
+        "max_total_video_duration_ms": 30200,
+        "max_video_duration_ms": 30200,
+        "min_video_duration_ms": 2000,
+        "total_limit": 50,
+        "video_total_limit": 10
+      },
+      "max_audio_duration": 30000,
+      "max_prompt_length": 15000,
+      "max_total_audio_duration": 30200,
+      "min_audio_duration": 2000,
+      "ratio": {
+        "default": "adaptive",
+        "options": [
+          "adaptive",
+          "16:9",
+          "21:9",
+          "9:16",
+          "4:3",
+          "3:4",
+          "1:1"
+        ]
+      },
+      "resolution": {
+        "default": "720p",
+        "description": "选择生成视频的分辨率",
+        "label": "清晰度",
+        "options": [
+          "480p",
+          "720p",
+          "1080p"
+        ],
+        "required_field": true
+      },
+      "observed_at": "2026-10-09T04:38:28.650686Z"
+    }
+  }
+}
