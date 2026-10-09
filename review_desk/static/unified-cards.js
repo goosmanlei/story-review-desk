@@ -83,7 +83,8 @@ function renderUnifiedSelected(data){
   renderMaterialCard(right,selected,{...options,roundChange:number=>{
     rememberProductionDraft();switchMaterialRound(data,key,number);delete data.selectedCandidates[key];renderProductionReader();renderComments();focusMaterialRoundControl(key);
   },planVersion:(h,row)=>entityVersionControl(h,row,next=>{data.localVersions||={};data.localVersions[next.object_id]=next}),assetVersion:(h,item)=>entityVersionControl(h,item.record,next=>{data.localVersions||={};data.localVersions[next.object_id]=next})});
-  if(chosen?.record.payload.blocks?.length){nodeText('h3',null,'生成结果自检',right);reviewTextBlocks(right,chosen.record)}
+  if(chosen)renderMaterialResultReview(right,chosen.record,chosen.review_context||data.materialContexts?.[chosen.record.id]||{});
+  if(chosen?.record.payload.blocks?.length){nodeText('h3',null,'生成时自检 · '+reviewDecisionTime(chosen.record.created_at),right);reviewTextBlocks(right,chosen.record)}
   if(chosen)renderMaterialUses(right,chosen.record,data.reference_titles||[]);
 }
 function renderUnifiedCard(root){

@@ -11,7 +11,7 @@ function fixture(){
   const root=new Node('main'),requests=[],reads=[],posts=[],messages=[];
   const record={object_id:'asset',id:'exact-old-asset',payload:{title:'Original candidate'}},context={state:{workspace:'materials.workspace',productionSelected:record},crypto:require('node:crypto').webcrypto,el:(tag,cls)=>new Node(tag,cls),nodeText:(tag,cls,text,parent)=>{const node=new Node(tag,cls);node.textContent=text;parent.append(node);return node},toast:text=>messages.push(text),api:(url,options)=>{posts.push(JSON.parse(options.body));return new Promise((resolve,reject)=>requests.push({url,options,resolve,reject}))},fetch:url=>new Promise((resolve,reject)=>reads.push({url,resolve,reject}))};
   context.Option=function(text,value){const node=new Node('option');node.textContent=text;node.value=value;return node};
-  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);context.reloads=0;context.loadProductionWorkspace=async()=>{context.reloads++};
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(source,context);context.reloads=0;context.loadProductionWorkspace=async()=>{context.reloads++};context.refreshMaterialJudgments=target=>context.state.productionSelected?.id===target.revision_id?context.loadProductionWorkspace():Promise.resolve();
   const open=()=>{context.showProductionJudgment(root);const box=root.children.at(-1),field=label=>box.all().find(node=>node.attrs['aria-label']===label),button=label=>box.all().find(node=>node.tag==='button'&&node.textContent===label);field('审阅结果').value='passed';field('审阅者').value='Technical reviewer';field('结论依据').value='Exact original candidate assessment';return {box,field,button,notice:()=>box.all().find(node=>node.attrs.role==='status')}};
   return {context,root,record,requests,reads,posts,messages,open};
 }
@@ -26,7 +26,7 @@ test('the original target is frozen even when another comment focus changes the 
 });
 test('canceled or navigated saves do not reload a newer view or report old failures there',async()=>{
   for(const mode of ['cancel-success','navigate-success','cancel-failure','navigate-failure']){
-    const f=fixture(),old=f.open();const saving=old.button('保存审阅').onclick();await flush();if(mode.startsWith('cancel'))await old.button('取消').onclick();else vm.runInContext('++productionReadEpoch',f.context);const next=f.open();next.field('结论依据').value='unique new opinion';
+    const f=fixture(),old=f.open();const saving=old.button('保存审阅').onclick();await flush();if(mode.startsWith('cancel'))await old.button('取消').onclick();else vm.runInContext('++productionReadEpoch',f.context);f.context.state.productionSelected={object_id:'other-asset',id:'other-exact',payload:{title:'Other'}};const next=f.open();next.field('结论依据').value='unique new opinion';
     if(mode.endsWith('success'))f.requests[0].resolve({});else f.requests[0].reject(Error('old failure'));await saving;
     assert.equal(f.context.reloads,0);assert.equal(next.field('结论依据').value,'unique new opinion');assert.equal(next.box.isConnected,true);assert.equal(f.reads.length,0);assert.equal(f.messages.length,mode.endsWith('success')?1:0);
   }
@@ -57,10 +57,15 @@ test('edited reason after an uncertain save is not silently consumed by confirma
 test('cancel during an uncertain read prevents a stale retry and preserves the next editor',async()=>{
   const f=fixture(),old=f.open();const saving=old.button('保存审阅').onclick();await flush();f.requests[0].reject(Error('lost'));await flush();await old.button('取消').onclick();const next=f.open();f.reads[0].resolve(response(404,{}));await saving;assert.equal(f.posts.length,1);assert.equal(f.messages.length,0);assert.equal(next.box.isConnected,true);
 });
-test('known saved judgment and later refresh failure are separate outcomes with no second POST',async()=>{
+test('known saved judgment and later section refresh failure are separate outcomes with no second POST',async()=>{
   const f=fixture(),form=f.open();f.context.loadProductionWorkspace=()=>{vm.runInContext('++productionLoadEpoch',f.context);return Promise.reject(Error('list offline'))};const saving=form.button('保存审阅').onclick();await flush();f.requests[0].resolve({});await saving;
-  assert.equal(form.box.isConnected,false);assert.match(f.messages.at(-1),/已保存.*页面尚未完整更新.*list offline/);await form.button('保存审阅').onclick();assert.equal(f.posts.length,1);
+  assert.equal(form.box.isConnected,false);assert.match(f.messages.at(-1),/已保存.*判断显示尚未更新.*list offline/);await form.button('保存审阅').onclick();assert.equal(f.posts.length,1);
 });
 test('a refresh failure after another record takes over does not report an error on that record',async()=>{
-  const f=fixture(),form=f.open();let rejectRefresh;f.context.loadProductionWorkspace=()=>{vm.runInContext('++productionLoadEpoch',f.context);return new Promise((resolve,reject)=>rejectRefresh=reject)};const saving=form.button('保存审阅').onclick();await flush();f.requests[0].resolve({});await flush();vm.runInContext('++productionReadEpoch',f.context);rejectRefresh(Error('old list failure'));await saving;assert.equal(f.messages.length,1);assert.match(f.messages[0],/审阅已记录/);
+  const f=fixture(),form=f.open();let rejectRefresh;f.context.loadProductionWorkspace=()=>{vm.runInContext('++productionLoadEpoch',f.context);return new Promise((resolve,reject)=>rejectRefresh=reject)};const saving=form.button('保存审阅').onclick();await flush();f.requests[0].resolve({});await flush();vm.runInContext('++productionReadEpoch',f.context);f.root.isConnected=false;rejectRefresh(Error('old list failure'));await saving;assert.equal(f.messages.length,1);assert.match(f.messages[0],/审阅已记录/);
+});
+test('[defect-probing] returning during an uncertain save unlocks the current form when that attempt ends',async()=>{
+  const f=fixture(),old=f.open();const saving=old.button('保存审阅').onclick();await flush();old.box.remove();vm.runInContext('++productionReadEpoch',f.context);
+  const returned=f.open();assert.equal(returned.button('保存审阅').disabled,true);f.requests[0].reject(Error('response lost'));await saving;
+  assert.equal(returned.button('保存审阅').disabled,false);assert.equal(f.posts.length,1);
 });
