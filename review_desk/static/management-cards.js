@@ -15,7 +15,8 @@ function reviewPagination(parent,model,change){
 }
 function managementMemory(key,params,prefix){
   state.managementLists||={};if(!state.managementLists[key])state.managementLists[key]={page:Number(params.get(prefix+'page'))||1,rows:Number(params.get(prefix+'rows'))||10,filters:{}};
-  const memory=state.managementLists[key];if(![5,10,20,50].includes(memory.rows))memory.rows=10;return memory;
+  // A history/method return is an exact URL, not the last mounted list.
+  const memory=state.managementLists[key];memory.page=Number(params.get(prefix+'page'))||1;memory.rows=Number(params.get(prefix+'rows'))||10;if(![5,10,20,50].includes(memory.rows))memory.rows=10;return memory;
 }
 function managementRoute(prefix,memory){
   breakdownRoute({[prefix+'page']:memory.page,[prefix+'rows']:memory.rows,...Object.fromEntries(Object.entries(memory.filters).filter(([k])=>!['episode','scene','scope_revision'].includes(k)).map(([k,v])=>[prefix+k,v||null]))});managementScopeRoute(memory.filters);breakdownRoute({[prefix+'episode']:null,[prefix+'scene']:null});
@@ -57,7 +58,7 @@ function managementLegacyNotice(parent,memory){
 }
 async function loadEntityManagement(result,{epoch,onReadStart}={}){
   const workspace=state.workspace,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('entities',params,'entity_');
-  const keys=['episode','scene','category','acceptance','search'];for(const key of keys)memory.filters[key]??=params.get('entity_'+key)||'';managementScopeMemory(memory,params,'entity_');const filters=memory.filters;
+  const keys=['episode','scene','category','acceptance','search'];for(const key of keys)memory.filters[key]=params.get('entity_'+key)||'';managementScopeMemory(memory,params,'entity_');const filters=memory.filters;
   const catalog={episodes:result.management_episodes||[]};if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;
   rememberProductionDraft();state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
   const panel=el('section','production-filters');panel.setAttribute('aria-label','实体管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索实体、别名或状态';search.setAttribute('aria-label','搜索制作记录');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(scope,facets);managementLegacyNotice(panel,memory);host.append(panel);
@@ -140,7 +141,7 @@ async function openManagementMaterial(item,trigger){
 }
 async function loadMaterialManagement(){
   state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const workspace=state.workspace,epoch=++productionLoadEpoch,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('materials',params,'material_');++productionReadEpoch;state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
-  const keys=['episode','scene','media','status','search'];for(const key of keys)memory.filters[key]??=params.get('material_'+key)||'';managementScopeMemory(memory,params,'material_');const filters=memory.filters,catalog={episodes:[]};if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;state.productionRecords=[];
+  const keys=['episode','scene','media','status','search'];for(const key of keys)memory.filters[key]=params.get('material_'+key)||'';managementScopeMemory(memory,params,'material_');const filters=memory.filters,catalog={episodes:[]};if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;state.productionRecords=[];
   const panel=el('section','production-filters');panel.setAttribute('aria-label','素材管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(scope,facets);managementLegacyNotice(panel,memory);host.append(panel);const summary=nodeText('p','production-filter-summary','',host);summary.setAttribute('role','status');const content=el('div','management-card-list');content.setAttribute('aria-label','素材列表');host.append(content);const bottom=el('div');host.append(bottom);let request=0,result=null,timer;
   const clear=productionButton(controls,'清除筛选',()=>{for(const key of [...keys,'scope_revision'])filters[key]='';search.value='';refresh()});search.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{filters.search=search.value.trim();refresh()},150)};
   function draw(){

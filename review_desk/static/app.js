@@ -1165,6 +1165,8 @@ function locateComment(comment){
 async function init(){try{
   const initialUrl=new URL(location.href),initialWorkspace=initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach');
   const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance'),api('/api/comments'),api('/api/framework'),api(initialWorkspace==='project.configuration'?'/api/configurations':'/api/configurations?summary=1'),api('/api/business-codes'),['story.sources','story.outline','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
+  state.navigationInstanceId=instance.id;
+  if(typeof restoreWorkspaceNavigation==='function')restoreWorkspaceNavigation();
   state.businessCodeCatalog=codes;state.businessCodes=new Map(codes.objects.map(row=>[row.object_id,row.display_code||row.prefix+String(row.number).padStart(3,'0')]));
   state.legacyShotCodes=new Map();for(const row of codes.objects.filter(r=>r.legacy_position)){const key=row.legacy_position,label=[row.episode_code,row.display_code].filter(Boolean).join(' / ');state.legacyShotCodes.set(key,state.legacyShotCodes.has(key)?null:label)}
   $('#instance-title').textContent=instance.title;document.title=`${instance.title} · 故事审阅台`;state.comments=comments;state.framework=framework;state.configurations=configurations;applyFavicon();
@@ -1173,6 +1175,7 @@ async function init(){try{
   if(initialWorkspace!=='story.sources'||!restoreSourceReadingPosition(history.state?.sourceReading))restoreSourceChapter(initialUrl,{initial:true});
   window.addEventListener('popstate',async event=>{
     cancelSourceReadingRestore();cancelSourceChapterRestore();
+    if(typeof restoreWorkspaceNavigation==='function')restoreWorkspaceNavigation();
     const readingPosition=event?.state?.sourceReading;
     const url=new URL(location.href),source=url.searchParams.get('source'),workspace=url.searchParams.get('workspace')||(source?'story.sources':'production.approach'),previous=state.workspace;
     if(['story.sources','story.outline','story.script'].includes(workspace)&&!storyDataReady){const read=++workspaceReadEpoch;try{await loadStoryData()}catch(error){if(read===workspaceReadEpoch)toast(error.message);return}if(read!==workspaceReadEpoch||location.href!==url.href)return;initializeStoryReaders(url)}
