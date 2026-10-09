@@ -81,7 +81,7 @@ def validate(store, payload):
         require(isinstance(files, dict) and 0 < len(files) <= 100, '请提供必要的包内文件')
         for name, content in files.items():
             file_path(name)
-            require(PurePosixPath(name).parts[0] not in ('shared', 'execution.json', 'request.json', 'registry.json', 'delivery.json', 'record.json'), '包内文件名与执行交付文件冲突')
+            require(PurePosixPath(name).parts[0] not in ('shared', 'materials', 'RESOURCES.md', 'execution.json', 'request.json', 'registry.json', 'delivery.json', 'record.json') and not PurePosixPath(name).parts[0].startswith('stage-'), '包内文件名与执行交付文件冲突')
             text(content, name)
         require(sum(len(v) for v in files.values()) <= 1000000, '方法包正文过大；请拆分按需资源')
     if kind == 'resource':
@@ -90,6 +90,10 @@ def validate(store, payload):
         for name, filename in sections.items():
             identifier(name)
             require(filename in payload['files'], '章节文件不存在：' + name)
+        companions = payload.get('companions', {})
+        require(isinstance(companions, dict) and not (set(companions) - set(sections)), '附属文件的章节不存在')
+        for section, names in companions.items():
+            require(isinstance(names, list) and all(isinstance(n, str) and n in files for n in names), '附属文件不存在')
         source = payload.get('source')
         if source:
             require(source.get('kind') == 'project-markdown' and set(source.get('files', {})) == set(payload['files']), 'Markdown 投影的来源清单不完整')
@@ -205,6 +209,9 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
             resources.append({'reference': {**reference(resource), 'section': ref['section']},
                               'title': resource['payload']['title'], 'file': filename,
                               'content': resource['payload']['files'][filename]})
+            companions = resource['payload'].get('companions', {}).get(ref['section'])
+            if companions:
+                resources[-1]['files'] = {name: resource['payload']['files'][name] for name in companions}
     result = {'binding': reference(binding), 'method': reference(method), 'version': method['version'],
               'title': method['payload']['title'], 'work_type': work_type, 'conditions': conditions,
               'files': method['payload']['files'], 'resources': resources,
@@ -322,9 +329,15 @@ def export_execution(store, ref, destination):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     for index, resource in enumerate(value['package']['resources']):
-        path = folder / 'shared' / (str(index) + '.md')
-        path.parent.mkdir(exist_ok=True)
-        path.write_text(resource['content'])
+        if resource.get('files'):
+            for name, content in {**resource['files'], resource['file']: resource['content']}.items():
+                path = folder / 'shared' / str(index) / file_path(name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+        else:
+            path = folder / 'shared' / (str(index) + '.md')
+            path.parent.mkdir(exist_ok=True)
+            path.write_text(resource['content'])
     (folder / 'execution.json').write_text(json.dumps(execution, ensure_ascii=False, indent=2) + '\n')
     (folder / 'request.json').write_text(json.dumps(value['inputs'], ensure_ascii=False, indent=2) + '\n')
     (folder / 'registry.json').write_text(json.dumps(export_registry(store, executions=[execution['object_id']]), ensure_ascii=False, indent=2) + '\n')
@@ -347,10 +360,25 @@ def sync_source(store, root, value):
             matches = [parts[i+1] for i in range(1, len(parts), 2) if parts[i] == spec['section']]
             require(len(matches) == 1, 'Markdown 章节不存在或重复：' + spec['section'])
             content = matches[0].strip() + '\n'
-        filename = 'references/' + section + '.md'
+        filename = spec['path'] if value.get('preserve_paths') else 'references/' + section + '.md'
+        require(filename not in payload['files'] or payload['files'][filename] == content,
+                '同一路径不能保存不同章节切片；请分别使用章节文件')
         payload['files'][filename] = content
         payload['sections'][section] = filename
         payload['source']['files'][filename] = {**spec, 'sha256': digest(body.encode()), 'content_sha256': digest(content.encode())}
+    if value.get('companions'):
+        require(value.get('preserve_paths') is True, '保留附属资料须保持原相对路径')
+        payload['companions'] = copy.deepcopy(value['companions'])
+        for names in value['companions'].values():
+            require(isinstance(names, list), '附属资料应为准确文件清单')
+            for name in names:
+                relative = file_path(name)
+                path = (root / relative).resolve(strict=True)
+                require(root in path.parents and path.suffix in ('.md', '.svg', '.json'), '附属资料须为项目内 Markdown、SVG 或 JSON')
+                body = path.read_text(encoding='utf-8')
+                require(name not in payload['files'] or payload['files'][name] == body, '附属文件不能替换章节切片')
+                payload['files'][name] = body
+                payload['source']['files'][name] = {'path': name, 'sha256': digest(body.encode()), 'content_sha256': digest(body.encode())}
     oid = 'method.resource.' + identifier(value['name'])
     if store.db.execute('SELECT 1 FROM objects WHERE id=?', (oid,)).fetchone():
         old = read(store, oid)

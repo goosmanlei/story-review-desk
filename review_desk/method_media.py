@@ -1,5 +1,6 @@
 """Method provenance at existing media plan, preparation and call boundaries."""
 import copy
+import json
 
 from . import methods, production as p
 
@@ -11,7 +12,7 @@ def brief(payload):
             if k not in ('generation', 'method_basis', 'status', 'withdrawal_reason', 'required', 'blocks', 'method_adjustment', 'shot_reference_operation')}
 
 
-def inputs(store, payload, baseline=None):
+def inputs(store, payload, baseline=None, supporting=None):
     context = brief(payload)
     # Keep each distinct range. Two references to the same source revision
     # can carry different block selections; neither may replace the other.
@@ -32,6 +33,28 @@ def inputs(store, payload, baseline=None):
     if baseline:
         old = p.ref_record(store, baseline, {'REQUIREMENT'})
         result['baseline'] = {'reference': baseline, 'generation': old['payload'].get('generation')}
+    if supporting is not None:
+        methods.require(isinstance(supporting, list) and len(supporting) <= 100,
+                        '补充材料应为有界的准确引用清单')
+        result['supporting_references'] = copy.deepcopy(supporting)
+        result['supporting_records'] = []
+        for ref in supporting:
+            p.source_check(store, ref)
+            row = p.ref_record(store, ref)
+            content = copy.deepcopy(row['payload'])
+            if row['kind'] == 'SOURCE':
+                content = store.source(row['object_id'])
+                methods.require(content and methods.checksum(content) == row['payload']['source_revision'],
+                                '补充源资料已变化；不能用当前正文替换原材料')
+            if ref.get('block_ids'):
+                content = {**content, 'blocks': [b for b in content.get('blocks', []) if b['id'] in ref['block_ids']]}
+            # This is a read-only historical document, not a new graph of live
+            # production references. Originals can legitimately mention retired
+            # candidate requirements. Keep their bytes, but do not reactivate
+            # those ancestors through the execution NOTE. The outer exact
+            # reference is still checked above and on final consumption.
+            result['supporting_records'].append({'reference': copy.deepcopy(ref), 'kind': row['kind'],
+                                                'content_json': json.dumps(content, ensure_ascii=False, sort_keys=True)})
     return result
 
 
@@ -58,9 +81,13 @@ def prepare(store, value):
     current = store.db.execute('SELECT version,current_revision FROM objects WHERE id=?', (value['object_id'],)).fetchone()
     methods.require(value.get('expected_version') == (current['version'] if current else 0), '制作方案基线已变化；请回读准确版本后新建步骤')
     baseline = {'object_id': value['object_id'], 'revision_id': current['current_revision']} if current else None
+    conditions = value.get('method_conditions', {})
+    methods.require(isinstance(conditions, dict) and
+                    ('media_type' not in conditions or conditions['media_type'] == payload['media_type']),
+                    '方法选择条件不能改变素材媒体类型')
     request = {'work_type': 'media-plan', 'run_id': value['run_id'], 'step_id': value['step_id'],
-               'target': value['object_id'], 'conditions': {'media_type': payload['media_type']},
-               'inputs': inputs(store, payload, baseline)}
+               'target': value['object_id'], 'conditions': {**conditions, 'media_type': payload['media_type']},
+               'inputs': inputs(store, payload, baseline, value.get('supporting_references'))}
     execution = methods.prepare(store, request)
     methods.require(execution['payload']['package']['steps'] == ['draft', 'review', 'result'],
                     '媒体制作方法需按 draft、review、result 交付；请修正环节绑定')
@@ -214,7 +241,8 @@ def verify_authored(store, object_id, payload, revision_id=None):
     execution = methods.verify_execution(store, basis['execution'], identity)
     baseline = execution['payload']['inputs'].get('baseline', {}).get('reference')
     methods.require(not baseline or baseline['object_id'] == object_id, '方法起稿依据属于其他制作对象')
-    methods.verify_execution(store, basis['execution'], identity, inputs(store, payload, baseline))
+    methods.verify_execution(store, basis['execution'], identity,
+                             inputs(store, payload, baseline, execution['payload']['inputs'].get('supporting_references')))
     artifact = methods.read(store, **basis['artifact'])
     value = artifact['payload']
     methods.require(value['format'] == methods.FORMATS['artifact'] and value['execution'] == basis['execution']
