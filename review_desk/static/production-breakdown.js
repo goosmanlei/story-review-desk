@@ -1,5 +1,6 @@
 /* Episode / scene navigation and all-shot rows share one exact context reader. */
 let breakdownEpoch=0,breakdownSelectionEpoch=0;
+function invalidateBreakdownReads(){++breakdownEpoch;++breakdownSelectionEpoch}
 function renderAudiovisualSources(host,row){
   const sources=row.payload.sources||[];
   for(const [index,source] of sources.entries())materialReferenceLink(host,source,'故事依据'+(sources.length>1?' '+(index+1):''),'full_scene');
@@ -320,6 +321,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   }
   // Keep the mounted reader and its geometry while requests are pending. The
   // replacement is assembled off-screen and committed once, before positioning.
+  if(!oldBody)host.replaceChildren();
   const staged=el('div'),loading=nodeText('p','breakdown-loading','正在读取本集镜头…',host);loading.setAttribute('role','status');
   const sidebarTop=existingNav?.scrollTop||0,episodeLeft=host.querySelector('.breakdown-episode-tabs')?.scrollLeft||0;
   try{breakdownHeading(host);
@@ -363,7 +365,8 @@ async function loadProductionBreakdown({refresh=false}={}){
     await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params},null);
   }
   }catch(error){
-    if(epoch===breakdownEpoch&&workspace===state.workspace){host.replaceChildren();nodeText('p','production-issue','准确制作位置不可用：'+error.message,host)}
+    if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+    host.replaceChildren();nodeText('p','production-issue','准确制作位置不可用：'+error.message,host);
     throw error;
   }finally{loading.remove()}
 }
