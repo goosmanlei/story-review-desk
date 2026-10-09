@@ -1,5 +1,29 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 function fixture(){const c={state:{comments:[]},productionLabels:{},URL,URLSearchParams,location:{href:"http://fixture/?workspace=settings.workspace&production_tab=breakdown"}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
+test('shared shot renderer retains exact background and material trace while changes and selected inputs stay visible',()=>{
+  const c=fixture();
+  class E {constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){}}}append(...nodes){this.children.push(...nodes)}}
+  c.el=tag=>new E(tag);c.nodeText=(tag,_class,text,parent)=>{const n=new E(tag);n.text=text;parent.append(n);return n};
+  c.breakdownShotTitle=()=> 'shot';c.businessTitle=row=>row.object_id;
+  c.renderAudiovisualSources=c.renderProductionAcceptance=()=>{};
+  c.breakdownShotText=host=>c.nodeText('p',null,'米尚未交付，袋子仍在画外',host);
+  c.renderShotDemands=host=>c.nodeText('p',null,'本方案直接输入',host);
+  c.materialReferenceLink=(host,ref)=>{const n=new E('a');n.reference=ref;host.append(n)};
+  c.materialSmallCard=(host,item)=>{const n=new E('card');n.id=item.object_id;host.append(n);return n};
+  const ref=(id,version)=>({object_id:id,revision_id:version}),from=ref('prop','before'),to=ref('prop','after'),background=ref('bag','historical');
+  const parent=new E('main');
+  c.renderBreakdownShot(parent,{record:{object_id:'shot',id:'exact-shot',payload:{fps:24,duration_frames:120,states:[from,to],continuity_context:[background],state_transitions:[{from,to,action:'接过后才掰角'}]}},context:{materials:[{object_id:'material',media_type:'image'}]}});
+  const copy=parent.children[0].children[0],trace=copy.children.find(n=>n.tag==='details');
+  assert.ok(trace);assert.equal(trace.open,undefined,'trace is closed by default');
+  assert.ok(copy.children.some(n=>n.text==='米尚未交付，袋子仍在画外'));
+  assert.ok(copy.children.some(n=>n.text==='本方案直接输入'));
+  const changes=copy.children.find(n=>n.children.some(v=>v.text==='本镜状态变化'));
+  assert.ok(changes.children.some(n=>n.children.some(v=>v.text==='接过后才掰角')));
+  assert.deepEqual(trace.children.filter(n=>n.reference).map(n=>n.reference),[from,to,background]);
+  const materials=trace.children.find(n=>n.tag==='aside');assert.ok(materials);
+  assert.ok(materials.children.some(n=>n.children.some(v=>v.id==='material')));
+  assert.equal(parent.children[0].children.length,1,'same material cards are not repeated beside the shot');
+});
 test('project handoff exposes the selected original and its exact requirements without borrowing another version',()=>{
   for(const historical of [false,true]){
     const c=fixture(),seen=[];c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
