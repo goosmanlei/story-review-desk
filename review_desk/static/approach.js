@@ -11,6 +11,18 @@ function approachSelectedTab(params = new URL(location.href).searchParams) {
   return approachTabs().find(tab => tab.id === params.get('tab')) || approachTabs()[0];
 }
 
+function bindApproachNavigation(link) {
+  link.addEventListener('click', event => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || link.target || link.hasAttribute('download')) return;
+    const target = new URL(link.href, location.href);
+    if (target.origin !== location.origin || target.pathname !== reviewURL('/') || target.searchParams.get('workspace') !== 'production.approach') return;
+    // Only temporary method reading uses the existing in-document router.
+    // Explicit work/edition links and modified clicks keep native semantics.
+    if (typeof navigateApproachLink !== 'function') return;
+    event.preventDefault(); navigateApproachLink(target);
+  });
+}
+
 function approachInline(parent, text) {
   // A small text-only format: code, emphasis and explicit links. No HTML,
   // media, or implicit network requests from instance prose. Local media uses
@@ -26,6 +38,7 @@ function approachInline(parent, text) {
       try { url = new URL(match[4], location.href); } catch (_) { /* Display malformed links as text. */ }
       if (url && (url.protocol === 'https:' || (url.origin === location.origin && match[4].startsWith('/?')))) {
         const link = nodeText('a', null, match[3], parent); link.href = url.origin === location.origin ? reviewURL(url.pathname + url.search + url.hash) : url.href;
+        bindApproachNavigation(link);
         if (url.origin !== location.origin) { link.target = '_blank'; link.rel = 'noopener noreferrer'; }
       } else parent.append(document.createTextNode(match[0]));
     }
@@ -187,11 +200,7 @@ async function renderApproach() {
     index.setAttribute('aria-label', `${tab.label}阅读目录`);
     for (const section of tab.sections) {
       const a = nodeText('a', 'source-chapter-button', section.title, index); a.href = `#approach-${tab.id}-${section.id}`;
-      a.addEventListener('click', event => {
-        if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && a.hash === location.hash) {
-          event.preventDefault(); restoreApproachAnchor();
-        }
-      });
+      bindApproachNavigation(a);
     }
     sidebar.hidden = !tab.sections.length;
     for (const section of tab.sections) {
@@ -216,6 +225,7 @@ async function renderApproach() {
           // Editorial text cannot inject markup or executable URL schemes.
           if (url.protocol !== 'https:' && !(url.origin === location.origin && ref.href.startsWith('/?'))) continue;
           const a = nodeText('a', null, ref.label, row); a.href = url.origin === location.origin ? reviewURL(url.pathname + url.search + url.hash) : url.href;
+          bindApproachNavigation(a);
           if (url.origin !== location.origin) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
           links.append(row);
         }
@@ -240,7 +250,7 @@ window.addEventListener('hashchange', restoreApproachAnchor);
 function selectApproachTab(tab, focus = false) {
   if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
   const url = new URL(location.href); url.searchParams.set('workspace', 'production.approach'); url.searchParams.set('tab', tab); url.hash = '';
-  if (url.href !== location.href) history.pushState(null, '', url);
+  if (url.href !== location.href) typeof pushWorkspaceNavigation==='function'?pushWorkspaceNavigation(url):history.pushState(null, '', url);
   if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   renderApproach().then(()=>{if(typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});
   if (focus) $(`#approach-tab-${tab}`).focus();
