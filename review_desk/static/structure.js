@@ -68,11 +68,13 @@ function watchStructureIndex(){
 function structureRevision(){return state.structure?.revisions.find(r=>r.id===state.structureRevision)||null}
 function resolveStructureRevision(id){
   const revisions=state.structure?.revisions||[];
-  return revisions.some(revision=>revision.id===id)?id:revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
+  if(id)return revisions.some(revision=>revision.id===id)?id:null;
+  return revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
 }
 function chooseStructureRevision(id,updateUrl=true){
   if(typeof rememberStoryDraft==='function')rememberStoryDraft();
   const revision=resolveStructureRevision(id),changed=revision!==state.structureRevision;
+  state.structureRouteError=id&&!revision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择可用稿次。':null;
   if(changed){
     if(isStructure()){
       getSelection()?.removeAllRanges();hideSelectionAction();
@@ -207,6 +209,7 @@ function renderStructureReader(){
   const versions=el('nav','structure-versions');versions.setAttribute('aria-label','结构稿版本');
   for(const revision of state.structure.revisions){const button=nodeText('button','source-button'+(revision.id===state.structureRevision?' active':''),'',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
   status.append(versions);versions.scrollLeft=versionScroll;revealStructureVersion(versions);
+  if(state.structureRouteError){const issue=nodeText('p','production-issue',state.structureRouteError,status);issue.setAttribute('role','alert');return}
   if(!active){nodeText('p','structure-empty','请选择一个结构稿版本继续阅读。',status);return}
   const doc=active.payload;
   const directoryHead=el('header');nodeText('h2',null,'章节目录',directoryHead);nodeText('p',null,'版本评论数包含已关闭评论。',directoryHead);index.append(directoryHead);
