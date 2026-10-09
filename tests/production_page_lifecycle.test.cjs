@@ -93,7 +93,7 @@ test('a completed workspace load cannot restore position after a newer scene loa
     c.restoreWorkspacePosition=()=>restored++;
     c.loadProductionWorkspace=()=>{c.invalidateProductionReads();return pending.promise};
     const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8'),start=app.indexOf('function switchWorkspace(');
-    vm.runInContext('let workspaceReadEpoch=0;let storyDataReady=true;\n'+app.slice(start,app.indexOf('\nfunction ',start+1)),c);
+    vm.runInContext('let workspaceReadEpoch=0;let storyDataReady=true;\n'+app.match(/^const isProductionWorkspace=.*$/m)[0]+'\n'+app.slice(start,app.indexOf('\nfunction ',start+1)),c);
     c.switchWorkspace('settings.workspace',false);
     if(superseded)c.invalidateProductionReads();
     pending.resolve();await pending.promise;await new Promise(resolve=>setImmediate(resolve));

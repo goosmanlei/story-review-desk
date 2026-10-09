@@ -222,6 +222,7 @@ function preserveUnifiedCommentReader(dialog){
 }
 
 async function openUnifiedMaterial(ref,trigger){
+  if(!state.unifiedCardRoot&&!state.reviewReferenceContext){if(typeof rememberStoryDraft==='function')rememberStoryDraft();if(typeof isScript==='function'&&isScript())rememberScriptDraft();}
   rememberProductionDraft();if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
   const fields=['shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','positionReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
