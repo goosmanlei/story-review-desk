@@ -160,11 +160,35 @@ def source_excerpt(store, ref, full_scene=False):
     if payload.get('sections'):
         blocks = [b for section in payload['sections'] for b in section.get('blocks', [])]
     scene = next((s for s in payload.get('scenes', []) if s['id'] == ref.get('scene_id')), None)
+    # A block-only reference can use context only when the exact revision has
+    # one scene containing every cited block. Never borrow a current head.
+    if not scene and not ref.get('scene_id') and ref.get('block_ids'):
+        matches = [s for s in payload.get('scenes', []) if set(ref['block_ids']) <= set(s['block_ids'])]
+        if len(matches) == 1:
+            scene = matches[0]
     ids = ref.get('block_ids') or (scene or {}).get('block_ids')
     if full_scene and not scene:raise ValueError('full scene reading requires an exact scene reference')
     cited_ids=list(ref.get('block_ids') or [])
     if full_scene:ids=scene['block_ids']
-    if ids:
+    context = None
+    if scene:
+        block_map = {b['id']: b for b in blocks}
+        scene_ids = scene['block_ids']
+        if len(scene_ids) != len(set(scene_ids)) or any(b not in block_map for b in scene_ids):
+            raise ValueError('source scene text is incomplete in exact revision')
+        selected = set(ids or scene_ids)
+        # The scene's own ordering is authoritative, including historical data.
+        blocks = [block_map[b] for b in scene_ids if b in selected]
+        omissions, skipped = [], 0
+        for bid in scene_ids:
+            if bid not in selected:
+                skipped += 1
+            else:
+                if skipped:omissions.append({'before_block_id': bid, 'count': skipped})
+                skipped = 0
+        if skipped:omissions.append({'before_block_id': None, 'count': skipped})
+        context = {'block_count': len(scene_ids), 'omissions': omissions}
+    elif ids:
         blocks = [b for b in blocks if b['id'] in ids]
     screenplay = None
     if source['kind']=='EPISODE':
@@ -176,6 +200,8 @@ def source_excerpt(store, ref, full_scene=False):
     return {'reference': ref, 'kind': source['kind'], 'title': payload.get('title', source['object_id']),
             'screenplay':screenplay, 'episode_number':payload.get('number') if source['kind']=='EPISODE' else None,
             'scene': scene, 'blocks': blocks, 'is_current': source['id'] == source['current_revision'],
+            'scene_context': context,
+            'context_unavailable_reason': None if scene else '无法确定唯一准确场，不能补读全场。',
             **({'highlight_block_ids':cited_ids,'full_scene':True} if full_scene else {})}
 
 

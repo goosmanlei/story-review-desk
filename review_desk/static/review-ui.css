@@ -82,6 +82,7 @@
 .material-reference-dialog::backdrop{background:#15251a88}.material-reference-dialog .entity-review-local-heading{justify-content:space-between}
 .material-reference-dialog img,.material-reference-dialog video{display:block;max-width:100%;max-height:65vh;margin:16px auto;object-fit:contain}
 .material-reference-dialog audio{display:block;width:100%;margin:20px 0}.material-reference-dialog pre,.reference-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.reference-omission{color:var(--muted,#666);text-align:center;font-size:.9rem;margin:18px 0;border-block:1px dashed #ddd;padding:6px}
 .material-reference{margin:4px 6px 4px 0;text-align:left;text-decoration:underline;text-underline-offset:3px}
 
 .reference-crop-frame{position:relative;width:fit-content;max-width:100%;margin:auto}.reference-crop-frame img{margin:0}.reference-crop{position:absolute;box-sizing:border-box;border:2px solid #b27047;pointer-events:none}
