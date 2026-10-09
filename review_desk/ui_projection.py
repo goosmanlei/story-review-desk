@@ -154,12 +154,16 @@ def card(store, object_id, revision_id=None, entity_id=None):
         needs=(detail.get('review_context') or {}).get('requirements',[])
         actual=(detail.get('review_context') or {}).get('call')
         call_need=(actual or {}).get('payload',{}).get('generation_requirement')
-        if needs:scope=needs[0]['payload'].get('scope')
-        elif call_need:scope=p.ref_record(store,call_need)['payload'].get('scope')
-        elif row['payload'].get('state_coverage'):scope=row['payload']['state_coverage'][0]['state']
-        elif row['payload'].get('subjects'):
-            known=[p.ref_record(store,ref) for ref in row['payload']['subjects']]
-            owner=next((item for item in known if item['kind']=='ENTITY'),None)
+        references=[need['payload'].get('scope') for need in needs if not need.get('unavailable')]
+        if call_need:
+            call_record=p.ref_record(store,call_need)
+            if not call_record.get('unavailable'):references.append(call_record['payload'].get('scope'))
+        references.extend(item['state'] for item in row['payload'].get('state_coverage',[]))
+        references.extend(row['payload'].get('subjects',[]))
+        # A retired placeholder is evidence of absence, not a source. Try the
+        # remaining exact evidence without replacing any referenced revision.
+        scope=next((reference for reference in references if reference and
+                    not p.ref_record(store,reference).get('unavailable')),None)
     scoped=p.ref_record(store,scope) if scope else None
     if scoped and scoped['kind']=='STATE':form=scoped
     elif scoped and scoped['kind']=='ENTITY':owner=scoped
@@ -179,8 +183,31 @@ def card(store, object_id, revision_id=None, entity_id=None):
             form=None
     if entity:
         entity['adoptions']=b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='adoption'")
+        entity['reference_titles']=detail.get('reference_titles',[])
+        # An explicit old demand/result remains reachable even when its source
+        # has since advanced. This does not enter decision_scope or acceptance.
+        if row['kind'] in ('REQUIREMENT','ASSET'):
+            for field in ('material_versions','legacy_material_versions','material_card_counts'):
+                entity[field]={**entity.get(field,{}),**detail.get(field,{})}
+            exact_rows=[row,*[member for rounds in detail.get('material_versions',{}).values()
+                            for version in rounds for member in version['members']]]
+            entity['comment_records']=list({r['id']:r for r in [*entity['comment_records'],*exact_rows]}.values())
+            entity['comment_targets']=[b.ref(r) for r in entity['comment_records']]
+            if row['kind']=='REQUIREMENT' and not any(r['object_id']==row['object_id'] for r in entity['requirements']):
+                entity['requirements'].append(row)
+            if form and not any(r['id']==form['id'] for r in [*entity['states'],*entity.get('retained_states',[])]):
+                entity['retained_states'].append(form)
+    context=b.context(store,scoped['object_id'],scoped['id']) if scoped and not scoped.get('unavailable') else None
+    source_materials=[]
+    if context and not entity:
+        from .material_plans import card_counts
+        needs=[r for r in context['requirements'] if r['payload']['scope']==b.ref(scoped)]
+        counts=card_counts(store,[r['object_id'] for r in needs])
+        source_materials=[{'object_id':r['object_id'],'id':r['id'],'title':r['payload']['title'],
+                           'media_type':r['payload']['media_type'],'scope':r['payload']['scope'],
+                           **counts.get(r['object_id'],{})} for r in needs]
     return {'detail':detail,'entity_review':entity,'form':form,'scope':scoped,
-            'adoption_context':b.context(store,scoped['object_id'],scoped['id']) if scoped else None}
+            'source_materials':source_materials,'adoption_context':context}
 
 
 def scene(store, object_id, revision_id=None, shot_revision=None, view=None):
