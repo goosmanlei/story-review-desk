@@ -110,8 +110,8 @@ function selectProductionTab(tab){
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
   if(!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
   if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
-    const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
-    if(!same){url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
+    const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('breakdown_episode_revision')===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
+    if(!same){url.searchParams.set('breakdown_episode_revision',source.searchParams.get('production_scope_revision')||'');url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
   }
   url.hash='';if(url.href!==location.href)history.pushState(null,'',url);switchWorkspace(workspace,false);
 }
