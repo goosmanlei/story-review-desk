@@ -1,120 +1,237 @@
-"""Build an inspectable, bounded AI context before any remote request."""
+"""Exact, purpose-specific reference selection with one serialized-input budget."""
 
 import json
 import os
+import re
 from urllib.request import Request, urlopen
 
 from .framework import stage
-from .store import canonical, digest
+from .store import canonical, digest, Conflict
+from .structure import revision_record, SELECTION_ID
+
+
+COMPARISON = re.compile(r"对比|相比|比较|区别|差异|旧稿|旧版|原版")
+
+
+def _document(store, object_id, revision_id, role, purpose):
+    revision = revision_record(store, revision_id)
+    if not revision or revision["object_id"] != object_id:
+        raise ValueError("参考的准确修订不可用；请保留意见，重新核对版本。")
+    payload = revision["payload"]
+    if "source_revision" in payload:
+        source = store.source(object_id)
+        if not source or digest(canonical(source).encode()) != payload["source_revision"]:
+            raise Conflict("参考资料已变化，不能用当前资料替换原版本；请保留意见。")
+        payload = source
+    blocks = payload.get("blocks") or [b for section in payload.get("sections", []) for b in section["blocks"]]
+    return {"id": object_id, "revision": revision_id, "title": payload.get("title", object_id),
+            "version_type": payload.get("version_type", "故事结构" if object_id == "story-structure" else "分集剧本"),
+            "role": role, "purpose": purpose, "blocks": blocks,
+            "origin": payload.get("origin", ""), "source_url": payload.get("source_url", "")}
+
+
+def _excerpt(blocks, draft, anchor=None, radius=450):
+    """Offsets always refer to Unicode characters in the exact full document."""
+    starts, text = {}, ""
+    for block in blocks:
+        starts[block["id"]] = len(text)
+        text += block["text"] + "\n"
+    text = text.rstrip("\n")
+    if anchor and anchor.get("block_id") in starts:
+        left = starts[anchor["block_id"]] + anchor["start"]
+        right = starts[anchor.get("end_block_id", anchor["block_id"])] + anchor["end"]
+    else:
+        # Explicit quoted phrases are stronger than incidental word overlap.
+        terms = re.findall(r'[“「《"]([^”」》"]{2,80})[”」》"]', draft)
+        positions = [text.find(term) for term in terms if term in text]
+        if positions:
+            left = min(positions); right = left + max(len(t) for t in terms)
+        elif re.search(r"结尾|末段|最后", draft):
+            left = right = len(text)
+        elif re.search(r"开头|起句|首段|第一章", draft):
+            left = right = 0
+        else:
+            # A bounded lexical window, rather than an unrelated document opening.
+            terms = set(re.findall(r"[\u4e00-\u9fff]{2}", draft))
+            best = max(blocks, key=lambda b: sum(t in b["text"] for t in terms), default=None)
+            left = right = starts[best["id"]] if best else 0
+    if len(text) <= 1200:
+        return text, 0, len(text), len(text)
+    lo, hi = max(0, left - radius), min(len(text), right + radius)
+    # Finish at a sentence boundary where possible. A window is an excerpt,
+    # never a falsely complete chapter or a cut version of the selected quote.
+    if hi < len(text):
+        boundaries = list(re.finditer(r"[。！？\n]", text[right:hi]))
+        if boundaries:
+            hi = right + boundaries[-1].end()
+    if lo:
+        boundary = re.search(r"[。！？\n]", text[lo:left])
+        if boundary:
+            lo += boundary.end()
+    return text[lo:hi], lo, hi, len(text)
+
+
+def _append_document(context, document, draft, limit, anchor=None, allowance=1200):
+    blocks = document["blocks"]
+    doc = {k: v for k, v in document.items() if k != "blocks" and v != ""}
+    excerpt, start, end, total = _excerpt(blocks, draft, anchor)
+    doc.update(text="", start=start, end=start, total_chars=total, truncated=True)
+    context["source_documents"].append(doc)
+    if len(canonical(context)) > limit:
+        context["source_documents"].pop()
+        return False
+    # Full quote and anchor are already preserved in the required portion. Shrink
+    # optional neighboring text, including its JSON escaping, to the real budget.
+    quote_length = len(anchor.get("quote", "")) if anchor else 0
+    selected_start = sum(len(b["text"]) + 1 for b in blocks[:next((i for i, b in enumerate(blocks) if anchor and b["id"] == anchor.get("block_id")), 0)]) + (anchor["start"] if anchor else 0) - start
+    def portion(size):
+        if anchor and size < quote_length:
+            return "", start, start
+        offset = max(0, min(selected_start - (size - quote_length) // 2, len(excerpt) - size)) if anchor else 0
+        return excerpt[offset:offset + size], start + offset, start + offset + size
+    high = min(len(excerpt), max(allowance, quote_length))
+    low = 0
+    while low < high:
+        size = (low + high + 1) // 2
+        value, lo, hi = portion(size)
+        doc.update(text=value, start=lo, end=hi, truncated=lo > 0 or hi < total)
+        if len(canonical(context)) <= limit:
+            low = size
+        else:
+            high = size - 1
+    value, lo, hi = portion(low)
+    # Optional excerpt shrinkage may cut a neighboring sentence; make that visible.
+    doc.update(text=value, start=lo, end=hi, truncated=lo > 0 or hi < total)
+    return True
+
+
+def _comparisons(store, draft, target_id):
+    """Resolve explicitly named texts; shared story titles never pick a version."""
+    if not COMPARISON.search(draft):
+        return []
+    matches = []
+    for obj in store.objects():
+        if obj["id"] == target_id or obj["kind"] != "SOURCE":
+            continue
+        source = store.source(obj["id"])
+        title = source["title"]
+        version_name = re.split(r"[:：]", title)[0]
+        aliases = [obj["id"], title]
+        if len(version_name) >= 4:
+            aliases.append(version_name)
+            if version_name.startswith("故事精修"):
+                aliases.append(version_name.removeprefix("故事"))
+        if any(alias in draft for alias in aliases):
+            matches.append(_document(store, obj["id"], obj["current_revision"], "comparison", "意见明确提及的比较文本；仅说明差异，不定义当前对象事实。"))
+    # Structure history is selected by its explicit revision/version, never head.
+    for row in store.db.execute("SELECT id,version FROM revisions WHERE object_id='story-structure' ORDER BY version"):
+        if row["id"] in draft or re.search(rf"故事结构(?:第{row['version']}稿|修订{row['version']}(?!\d))", draft):
+            matches.append(_document(store, "story-structure", row["id"], "comparison", "意见明确提及的结构版本；仅供比较，不替换当前依据。"))
+    return matches
 
 
 def build_context(store, source_id, anchor, draft, target_object_id=None, target_revision_id=None):
     draft = str(draft or "").strip()
     if not 1 <= len(draft) <= 2000:
         raise ValueError("comment draft must be 1-2000 characters")
-    if target_object_id and target_object_id != "story-structure":
-        from .screenplay import EPISODE_FORMAT
-        from .structure import revision_record
-        target = store.validate_target(target_object_id, target_revision_id, anchor)
-        episode = revision_record(store, target_revision_id)
-        if target["object"]["kind"] != "EPISODE" or episode["payload"].get("format") != EPISODE_FORMAT:
-            raise ValueError("unsupported polish target")
-        payload = episode["payload"]
-        project, system = store.configuration("PROJECT"), store.configuration("SYSTEM")
-        blocks = target["blocks"]
-        index = next(i for i, b in enumerate(blocks) if b["id"] == anchor["block_id"])
-        story_ref, structure_ref = payload["basis"]["story"], payload["basis"]["structure"]
-        source = store.source(story_ref["object_id"])
-        structure = revision_record(store, structure_ref["revision_id"])
-        edition_obj = next(o for o in store.objects() if o["id"] == payload["screenplay_id"])
-        edition = revision_record(store, edition_obj["current_revision"])
-        documents, budget = [], system["body"]["ai_context_max_chars"]
-        inputs = [(target_object_id, payload["title"], "分集影视剧本 · 待审阅", target_revision_id, "\n".join(b["text"] for b in blocks)),
-                  (source["id"], source["title"], source["version_type"], story_ref["revision_id"], "\n".join(b["text"] for b in source["blocks"])),
-                  (structure_ref["object_id"], structure["payload"]["title"], "故事结构 · 改编依据", structure_ref["revision_id"], "\n".join(b["text"] for section in structure["payload"]["sections"] for b in section["blocks"]))]
-        # Give all three exact inputs space instead of silently exhausting the budget
-        # on a long novel. The complete selected quote remains available separately.
-        for i, (oid, title, kind, rid, entire) in enumerate(inputs):
-            allowance = min(len(entire), budget // (len(inputs) - i))
-            documents.append({"id": oid, "title": title, "version_type": kind, "revision": rid,
-                              "text": entire[:allowance], "truncated": allowance < len(entire)})
-            budget -= allowance
-        context = {"creative_stage": stage("SCRIPT_DRAFT"), "project_stage": stage(project["body"]["current_stage"]),
-                   "project_configuration_version": project["version"],
-                   **{k: project["body"][k] for k in ("story_background", "creative_background", "target_medium", "audience", "style")},
-                   "target_object_id": target_object_id, "target_revision_id": target_revision_id,
-                   "screenplay_id": payload["screenplay_id"], "screenplay_revision": edition["id"],
-                   "episode_number": payload["number"], "basis": payload["basis"],
-                   "selected_quote": anchor["quote"], "neighbor_blocks": blocks[max(0, index - 1):index + 3],
-                   "source_documents": documents, "comment_draft": draft}
-        return {"context": context, "context_sha256": digest(canonical(context).encode()),
-                "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
-                "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
-    if target_object_id == "story-structure":
-        target = store.validate_target(target_object_id, target_revision_id, anchor)
-        from .structure import revision_record
-        revision = revision_record(store, target_revision_id)
-        selection = revision_record(store, revision["payload"]["direction_selection_revision"])
-        source = store.source(selection["payload"]["source_id"])
-        project = store.configuration("PROJECT")
-        system = store.configuration("SYSTEM")
-        current_stage = stage(project["body"]["current_stage"])
-        blocks = target["blocks"]
-        index = next((i for i, block in enumerate(blocks) if block["id"] == anchor.get("block_id")), 0)
-        visual = next((v for v in target["visuals"] if v["id"] == anchor.get("visual_id")), None)
-        source_text = "\n".join(b["text"] for b in source["blocks"])
-        context = {"creative_stage": current_stage, "project_configuration_version": project["version"],
-                   "story_background": project["body"]["story_background"], "creative_background": project["body"]["creative_background"],
-                   "target_medium": project["body"]["target_medium"], "audience": project["body"]["audience"], "style": project["body"]["style"],
-                   "selected_source_id": source["id"], "selected_quote": anchor.get("quote", ""),
-                   "neighbor_blocks": blocks[max(0, index - 1):index + 3],
-                   "source_documents": [{"id": source["id"], "title": source["title"], "version_type": source["version_type"], "origin": source["origin"], "source_url": source["source_url"], "revision": selection["payload"]["source_revision"], "text": source_text[:system["body"]["ai_context_max_chars"]], "truncated": len(source_text) > system["body"]["ai_context_max_chars"]}],
-                   "structure_revision": target_revision_id, "structure_title": revision["payload"]["title"],
-                   "visual": visual, "region_points": anchor.get("points"), "comment_draft": draft}
-        return {"context": context, "context_sha256": digest(canonical(context).encode()),
-                "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
-                "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
-    source_object = next((item for item in store.objects() if item["id"] == source_id), None)
-    if not source_object:
+    object_id = target_object_id or source_id
+    obj = next((o for o in store.objects() if o["id"] == object_id), None)
+    if not obj:
         raise ValueError("unknown source")
+    revision_id = target_revision_id if target_revision_id is not None else obj["current_revision"]
     try:
-        target = store.validate_target(source_id, target_revision_id if target_revision_id is not None else source_object["current_revision"], anchor)
+        target = store.validate_target(object_id, revision_id, anchor)
     except ValueError as error:
-        if target_revision_id is not None and str(error) == "unknown object or mismatched revision":
+        if obj["kind"] == "SOURCE" and target_revision_id is not None and str(error) == "unknown object or mismatched revision":
             raise ValueError("资料版本已变化或不可用；请保留当前意见，刷新后重新圈选。") from error
         raise
-    source = target["source"]
-    project = store.configuration("PROJECT")
-    system = store.configuration("SYSTEM")
-    current_stage = stage(project["body"]["current_stage"])
-    documents = []
-    budget = system["body"]["ai_context_max_chars"]
-    for item in [source] + [s for s in store.sources() if s["id"] != source_id]:
-        entire = "\n".join(block["text"] for block in item["blocks"])
-        # The selected document has priority; other versions share the remainder.
-        allowance = min(len(entire), budget if item["id"] == source_id else max(0, budget // max(2, len(store.sources()))))
-        excerpt = entire[:allowance]
-        budget -= len(excerpt)
-        documents.append({"id": item["id"], "title": item["title"], "version_type": item["version_type"],
-                          "origin": item["origin"], "source_url": item["source_url"],
-                          "revision": digest(canonical(item).encode()), "text": excerpt,
-                          "truncated": len(excerpt) < len(entire)})
-    blocks = source["blocks"]
-    index = next((i for i, block in enumerate(blocks) if block["id"] == anchor.get("block_id")), 0)
-    neighbors = blocks[max(0, index - 1):min(len(blocks), index + 3)]
-    context = {"creative_stage": current_stage, "project_configuration_version": project["version"],
-               "story_background": project["body"]["story_background"],
-               "creative_background": project["body"]["creative_background"],
-               "target_medium": project["body"]["target_medium"], "audience": project["body"]["audience"],
-               "style": project["body"]["style"], "selected_source_id": source_id,
-               "selected_quote": anchor.get("quote", ""), "neighbor_blocks": neighbors,
-               "visual": next((v for v in target["visuals"] if v.get("id", v.get("file")) == anchor.get("visual_id")), None),
-               "region_points": anchor.get("points"),
-               "source_documents": documents, "comment_draft": draft}
-    return {"context": context, "context_sha256": digest(canonical(context).encode()),
+    payload = json.loads(target["revision"]["payload"])
+    if obj["kind"] == "SOURCE":
+        task_stage = "STORY_COMPILATION"
+        task_label = "资料审阅 · 表达当前意见"
+    elif object_id == "story-structure":
+        task_stage = "STORY_OUTLINE"
+        task_label = "故事结构审阅 · 表达当前意见"
+    else:
+        from .screenplay import EPISODE_FORMAT
+        if obj["kind"] != "EPISODE" or payload.get("format") != EPISODE_FORMAT:
+            raise ValueError("unsupported polish target")
+        task_stage = "SCRIPT_DRAFT"
+        task_label = "剧本审阅 · 表达当前意见"
+    project, system = store.configuration("PROJECT"), store.configuration("SYSTEM")
+    limit = system["body"]["ai_context_max_chars"]
+    context = {"review_task": task_label, "creative_stage": stage(task_stage),
+               "target_object_id": object_id, "target_revision_id": revision_id,
+               "anchor": {k: v for k, v in anchor.items() if k != "quote"},
+               "selected_quote": anchor.get("quote", ""), "comment_draft": draft,
+               "project_configuration_version": project["version"], "system_configuration_version": system["version"],
+               "source_documents": [], "notices": []}
+    if object_id == "story-structure":
+        selection = revision_record(store, payload["direction_selection_revision"])
+        if not selection or selection["object_id"] != SELECTION_ID:
+            raise ValueError("结构锁定的方向选择修订不可用；请保留意见并核对依据。")
+        ref = selection["payload"]
+        context["basis"] = {"direction_selection_revision": selection["id"],
+                            "direction": {"object_id": ref["source_id"], "revision_id": ref["source_revision"]}}
+        dependencies = [(ref["source_id"], ref["source_revision"], "该结构准确选用的方向；只解释改编关系，不覆盖结构自己的内容。")]
+    elif obj["kind"] == "EPISODE":
+        context["basis"] = payload["basis"]
+        context["screenplay_id"] = payload["screenplay_id"]
+        context["episode_number"] = payload["number"]
+        dependencies = [(ref["object_id"], ref["revision_id"], "该剧本锁定的" + label + "；只解释改编依据，差异以此剧本为准。")
+                        for label, ref in (("小说", payload["basis"]["story"]), ("结构", payload["basis"]["structure"]))]
+    else:
+        dependencies = []
+    visual = next((v for v in target["visuals"] if v.get("id", v.get("file")) == anchor.get("visual_id")), None)
+    if visual:
+        context["visual"] = visual
+        context["region_points"] = anchor.get("points")
+    required = len(canonical(context))
+    if required > limit:
+        raise ValueError(f"完整圈选、意见与准确身份需要 {required} 字符，超过参考总上限 {limit}；请缩小圈选或调高上限。未截断圈选，也未调用 AI。")
+    current = _document(store, object_id, revision_id, "target", "被评论的准确版本；原文与圈选附近内容是本次意见依据。")
+    # Required identity is not sacrificed to very long source metadata.
+    if not _append_document(context, current, draft, limit, anchor if anchor.get("type", "text") == "text" else None):
+        raise ValueError("准确目标及来源信息无法容纳在参考总上限内；请调高上限。未调用 AI。")
+    for oid, rid, purpose in dependencies:
+        needs_basis_text = bool(re.search(r"改编|依据|小说|结构|方向|原稿|原作", draft))
+        if not needs_basis_text:
+            purpose += " 当前意见不涉及这份依据正文，只保留准确版本。"
+        doc = _document(store, oid, rid, "basis", purpose)
+        if not _append_document(context, doc, draft, limit, allowance=500 if needs_basis_text else 0):
+            context["notices"].append("预算不足，改编依据正文未加入；准确依赖仍保留，不推断其内容。")
+            break
+        if not needs_basis_text:
+            context["source_documents"][-1]["identity_only"] = True
+    comparisons = _comparisons(store, draft, object_id)
+    if COMPARISON.search(draft) and not comparisons:
+        context["notices"].append("未定位独立比较文本；请在意见中写明资料标题或准确版本，不能用最新稿猜测。")
+    for doc in comparisons:
+        if (doc["id"], doc["revision"]) == (object_id, revision_id):
+            continue
+        if not _append_document(context, doc, draft, limit, allowance=1000):
+            context["notices"].append("预算不足，指定比较文本未加入；请调高上限后核对。")
+            break
+    # Global production facts are irrelevant to ordinary source/old-draft polish.
+    fields = [key for word, key in (("故事背景", "story_background"), ("创作背景", "creative_background"),
+              ("受众", "audience"), ("风格", "style"), ("载体", "target_medium")) if word in draft]
+    if fields or "项目阶段" in draft:
+        background = {key: project["body"][key] for key in fields}
+        if "项目阶段" in draft:
+            background["project_stage"] = stage(project["body"]["current_stage"])
+        background["boundary"] = "当前项目背景，仅用于理解意见；不能替代被评论版本或比较稿的事实。"
+        context["project_background"] = background
+        if len(canonical(context)) > limit:
+            del context["project_background"]
+            context["notices"].append("预算不足，当前项目背景未加入；优先保留准确原文与意见。")
+    if len(canonical(context)) > limit:
+        # Notices are meaningful input too. Do not send an over-limit context.
+        raise ValueError("必要参考及超限说明无法容纳在参考总上限内；请调高上限。未调用 AI。")
+    serialized = canonical(context)
+    return {"context": context, "context_sha256": digest(serialized.encode()),
+            "budget": {"limit": limit, "used": len(serialized), "unit": "Unicode characters in serialized context"},
             "model": system["body"]["ai_polish_model"], "reasoning_effort": system["body"]["ai_polish_effort"],
             "api_key_env_name": system["body"]["ai_polish_api_key_env"], "saved": False}
-
 
 def suggest(preview):
     env_name = preview["api_key_env_name"]
