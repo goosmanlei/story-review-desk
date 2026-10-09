@@ -32,7 +32,7 @@ test('return to a mounted edition reads its composition when an intermediate dir
  c.state.workspace='settings.workspace';c.state.breakdownData={design:{id:'v2'}};c.state.breakdownSceneData={scene:oldScene,shots:[]};
  c.location={href:'http://fixture/?breakdown_episode=e&breakdown_episode_revision=v3&breakdown_object=parent'};
  c.state.breakdownRenderedSelection=c.breakdownSelectionKey(new URL(c.location.href).searchParams);
- c.document={querySelector:()=>body};c.$=()=>host;c.el=()=>new Node();c.nodeText=(_t,_c,_text,parent)=>{const n=new Node();parent.append(n);return n};
+ c.window={scrollY:0};c.document={querySelector:()=>body};c.$=()=>host;c.el=()=>new Node();c.nodeText=(_t,_c,_text,parent)=>{const n=new Node();parent.append(n);return n};
  c.history={state:null,replaceState(){}};c.rememberProductionDraft=()=>{};c.productionTab=()=> 'breakdown';c.breakdownHeading=c.renderAudiovisualEdition=c.renderComments=()=>{};
  c.activateBreakdownScene=()=>assert.fail('must not reuse a mounted reader with an intermediate edition directory');
  let requests=0;c.api=async()=>{requests++;return {design:{object_id:'e',id:'v3'},episode:'e',episodes:[],scenes:[],shots:[]}};
