@@ -56,7 +56,28 @@ async function loadEntityManagement(result,{epoch,onReadStart}={}){
     const groups=types.map(t=>({key:t,title:productionLabels[t]||t,items:rows.filter(e=>e.payload.entity_type===t).sort((a,b)=>businessCode(a).localeCompare(businessCode(b),undefined,{numeric:true})||a.object_id.localeCompare(b.object_id))})).filter(g=>g.items.length),page=groupedCardPage(groups,memory.page,memory.rows);memory.page=page.page;content.replaceChildren();managementSections(content,page.groups,(list,row)=>entitySmallCard(list,row,{stateCount:result.entity_state_counts[row.object_id],materialCount:Object.values(result.entity_material_counts[row.object_id]||{}).reduce((sum,n)=>sum+n,0),adoption:result.entity_adoption_statuses[row.object_id],preview:result.entity_previews[row.object_id]}));if(!rows.length)nodeText('p','production-meta','没有符合筛选条件的实体',content);
     bottom.replaceChildren();reviewPagination(bottom,page,(p,rows)=>{memory.page=p;memory.rows=rows;refresh(false);content.scrollIntoView({block:'start'});bottom.querySelector('[aria-label="每页行数"]')?.focus({preventScroll:true})});managementRoute('entity_',memory);
   }
-  state.refreshEntityIndex=async()=>{const fresh=await api('/api/production/index?view=settings');if(workspace!==state.workspace||epoch!==productionLoadEpoch)return;Object.assign(result,fresh);refresh(false)};refresh(false);
+  let indexRequest=0,indexNotice=null;
+  const ownsIndex=()=>workspace===state.workspace&&epoch===productionLoadEpoch&&panel.isConnected;
+  state.refreshEntityIndex=async(savedMessage='')=>{
+    if(!ownsIndex())return;
+    const request=++indexRequest;
+    try{
+      const fresh=await api('/api/production/index?view=settings');
+      if(!ownsIndex()||request!==indexRequest)return;
+      indexNotice?.remove();indexNotice=null;
+      const focused=document.activeElement,focusKey=focused?.dataset.filterKey,focusValue=focused?.dataset.filterValue,focusObject=focused?.dataset.objectId;
+      Object.assign(result,fresh);refresh(false);
+      if(focused&&!focused.isConnected){
+        const replacement=[...host.querySelectorAll('button')].find(button=>focusKey!==undefined?button.dataset.filterKey===focusKey&&button.dataset.filterValue===focusValue:focusObject&&button.dataset.objectId===focusObject);
+        replacement?.focus({preventScroll:true});
+      }
+    }catch(error){
+      if(!ownsIndex()||request!==indexRequest)return;
+      indexNotice?.remove();indexNotice=el('div','production-issue');indexNotice.setAttribute('role','status');
+      nodeText('p',null,(savedMessage?savedMessage+'；':'')+`列表当前显示尚未更新：${error.message}。可重新读取列表或打开实体核对。`,indexNotice);
+      productionButton(indexNotice,'重新读取列表',()=>state.refreshEntityIndex(savedMessage));panel.append(indexNotice);
+    }
+  };refresh(false);
   const target=params.get('production_object')||params.get('production_entity');if(target){onReadStart?.({workspace,loadEpoch:epoch,readEpoch:productionReadEpoch});await openUnifiedMaterial({object_id:target,revision_id:params.get('production_revision'),params},null)}
 }
 function readableSearchMatches(query,terms){
