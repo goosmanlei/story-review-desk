@@ -58,7 +58,7 @@ async function renderMaterialRelations(host,materialId){
   const box=el('details','material-relations');host.append(box);
   try{const data=await api('/api/production/material-relations?'+new URLSearchParams({material_id:materialId}));
     if(!data.relations.length){box.remove();return}nodeText('summary',null,'素材关系 · '+data.relations.length,box);
-    for(const row of data.relations){const p=row.payload,section=el('section');nodeText('h4',null,p.type_label+' · '+({required:'必需',optional:'可选',conditional:'条件满足时',one_of:'择一路线'})[p.necessity],section);
+    for(const row of data.relations){const p=row.payload,section=el('section'),label=p.type_label==='existing-candidate'?'已有候选':p.type_label;nodeText('h4',null,label+' · '+({required:'必需',optional:'可选',conditional:'条件满足时',one_of:'择一路线'})[p.necessity],section);
       const host=materialTextSurface(section,row);materialReferenceLink(host,p.upstream,'上游素材');
       if(row.downstream)materialReferenceLink(host,row.downstream,'下游素材');else nodeText('p','production-issue','下游需求尚未建立',host);materialReferenceLink(host,p.context,'适用位置');
       renderAudiovisualDesign(host,row);if(p.group)nodeText('p',null,'路线组：'+p.group+' / '+p.route,host);if(p.condition)nodeText('p',null,'条件：'+p.condition,host);
