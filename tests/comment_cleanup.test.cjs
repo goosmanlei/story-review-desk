@@ -48,7 +48,7 @@ test('known success plus unreadable pending storage stays truthful and cannot ca
  await f.context.saveComment();assert.equal(f.requests.length,1);assert.match(notice(root),/已保存/);assert.doesNotMatch(notice(root),/尚未确认/);await f.context.saveComment();assert.equal(f.requests.length,1);assert.equal(root.querySelector('#comment-editor-text'),input);assert.match(root.querySelector('#toast').textContent,/已保存/);f.context.localStorage.getItem=get;
 });
 test('known edit success is persisted and retry cleanup does not PATCH the old expected_version again',async()=>{
- const f=fixture();f.target();f.context.state.editing='existing';f.context.state.comments=[{id:'existing',version:1,body:'old',status:'OPEN',anchor:{type:'global'},target_object_id:'source-1',target_revision_id:'rev-1'}];const key=f.context.key(),root=editor(f);root.querySelector('#comment-editor-text').value='edited';const restore=failDelete(f,key,'body');
+ const f=fixture();f.target();f.context.state.editing='existing';f.context.state.comments=[{id:'existing',version:1,body:'old',status:'OPEN',anchor:{type:'global'},target_object_id:'source-1',target_revision_id:'rev-1'}];f.context.beginCommentEdit(f.context.state.comments[0]);const key=f.context.key(),root=editor(f);root.querySelector('#comment-editor-text').value='edited';const restore=failDelete(f,key,'body');
  await f.context.saveComment();assert.equal(f.requests.length,1);assert.equal(f.requests[0].method,'PATCH');assert.equal(JSON.parse(f.storage.get(key+':submission')).editing,'existing');assert.match(notice(root),/已保存/);
  await f.context.saveComment();assert.equal(f.requests.length,1);restore();await f.context.saveComment();assert.equal(f.requests.length,1);assert.equal(f.context.state.anchor,null);
 });
