@@ -23,7 +23,9 @@ def context(store, asset):
         if evidence:
             exact=p.ref_record(store,evidence['record'])
             unique[canonical_id(store,exact['object_id'])]=exact
-    return {'call': call, 'requirements': list(unique.values()), 'associated_requirements':plans, 'inputs': inputs}
+    from .review_decisions import snapshot
+    return {'call': call, 'requirements': list(unique.values()), 'associated_requirements':plans,
+            'inputs': inputs, 'judgments': snapshot(store, asset['object_id'], asset['id'])}
 
 
 def enrich_media(store, media):

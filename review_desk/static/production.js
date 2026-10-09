@@ -84,11 +84,15 @@ function productionBasisSummary(record){
   return `剧本依据：${label?'版本'+label[1]:title} · 已确认 · ${p.episodes.length} 集`;
 }
 function productionRefLink(parent,ref,label,referenceTitles=[]){
-  if(label)label=businessTitle(ref,label);
   if(!ref?.object_id||!ref.revision_id)return;
+  const kind=ref.kind||(state.productionRecords||[]).find(row=>row.object_id===ref.object_id)?.kind;
+  if(['AV_SHOT','AV_SCENE'].includes(kind)){
+    const button=productionButton(parent,label?businessTitle({...ref,kind},label):productionName(ref,referenceTitles),()=>openUnifiedMaterial(ref,button));button.className='production-ref';button.setAttribute('aria-haspopup','dialog');return button;
+  }
   const basis=state.productionRecords?.find(r=>r.object_id===ref.object_id&&r.kind==='INPUT_LOCK');
   if(basis){nodeText('span','production-ref',basis.id===ref.revision_id?productionBasisSummary(basis):(label||'剧本依据')+' · 历史版本',parent);return}
   if(ref.scene_id||ref.block_ids)return materialReferenceLink(parent,ref,label||`${productionName(ref,referenceTitles)} · ${ref.scene_id?reviewPositionLabel('scene',ref.scene_id,ref.object_id):'正文依据'}`,true);
+  if(label)label=businessTitle(ref,label);
   const episode=state.screenplays.flatMap(v=>v.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);
   if(episode){const url=new URL(location.href);url.search='';url.searchParams.set('workspace','story.script');url.searchParams.set('script',episode.payload.screenplay_id);url.searchParams.set('episode',episode.object_id);if(ref.scene_id)url.searchParams.set('scene',ref.scene_id);const a=link(label||`${reviewPositionText(episode.payload.title)} · ${ref.scene_id?reviewPositionLabel('scene',ref.scene_id,ref.object_id):'本集'}`,url.href,parent);a.className='production-ref';a.title=`修订 ${ref.revision_id}\n${(ref.block_ids||[]).join(', ')}`;return}
   const script=state.screenplays.find(s=>s.object_id===ref.object_id&&s.id===ref.revision_id);
@@ -367,6 +371,7 @@ function preserveCardPosition(){
 }
 function renderProductionReaderContent(){
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;root.replaceChildren();
+  if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
   if(typeof isMaterialReview==='function'&&isMaterialReview()){renderUnifiedCard(root);return}
   if(state.workspace==='settings.workspace'&&state.productionEntityDetail){
@@ -441,19 +446,24 @@ function locateProductionComment(comment,local=false){
   paintProductionReview();renderComments();
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}
-function showProductionJudgment(root){
-  const r=state.productionSelected,target=productionRef(r),title=r.payload.title,box=el('section','production-editor');
+function showProductionJudgment(root,record=state.productionSelected){
+  if(root.querySelector?.('.production-editor'))return;
+  const r=record,target=productionRef(r),title=r.payload.title,box=el('section','production-editor');
+  state.productionJudgmentDrafts||={};const draft=state.productionJudgmentDrafts[r.id]||={verdict:'passed',actor:'',reason:'',pendingRequest:null};draft.open=true;
   const workspace=state.workspace,loadEpoch=productionLoadEpoch,readEpoch=productionReadEpoch;
-  let closed=false,saving=false,saved=false,pendingRequest=null,save;
+  let closed=false,saving=!!draft.saving,saved=!!draft.saved,pendingRequest=draft.pendingRequest,save;
   const isOpen=()=>!closed&&box.isConnected&&state.workspace===workspace&&productionLoadEpoch===loadEpoch&&productionReadEpoch===readEpoch;
   nodeText('h3',null,'审阅结论仅针对此版本',box);
   const verdict=el('select');verdict.setAttribute('aria-label','审阅结果');for(const key of ['passed','changes_requested','rejected'])verdict.append(new Option(productionLabels[key],key));
   const actor=el('input');actor.placeholder='审阅者';actor.setAttribute('aria-label','审阅者');
   const reason=el('textarea');reason.placeholder='结论依据';reason.setAttribute('aria-label','结论依据');box.append(verdict,actor,reason);
-  const notice=nodeText('p','production-issue','',box);notice.hidden=true;notice.setAttribute('role','status');
+  verdict.value=draft.verdict;actor.value=draft.actor;reason.value=draft.reason;
+  const remember=()=>{draft.verdict=verdict.value;draft.actor=actor.value;draft.reason=reason.value};for(const node of [verdict,actor,reason])node.oninput=remember;
+  const notice=nodeText('p','production-issue',draft.pendingRequest?'上次保存结果待确认；原样重试将先核对记录。':'',box);notice.hidden=!draft.pendingRequest;notice.setAttribute('role','status');
   const ordered=value=>Array.isArray(value)?value.map(ordered):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(key=>[key,ordered(value[key])])):value;
   const same=(left,right)=>JSON.stringify(ordered(left))===JSON.stringify(ordered(right));
-  const controls=()=>{for(const node of [verdict,actor,reason,save])node.disabled=saving||saved};
+  const controls=()=>{for(const node of [verdict,actor,reason,save])node.disabled=!!draft.saving||!!draft.saved};
+  draft.updateControls=()=>{if(isOpen())controls()};
   const readAttempt=async request=>{
     const response=await reviewFetch('/api/production?object_id='+encodeURIComponent(request.object_id));
     if(response.status===404)return 'absent';
@@ -462,10 +472,10 @@ function showProductionJudgment(root){
     return row.object_id===request.object_id&&row.kind==='JUDGMENT'&&row.version===1&&same(row.payload,request.payload)?'saved':'changed';
   };
   save=productionButton(box,'保存审阅',async()=>{
-    if(!isOpen()||saving||saved)return;
+    if(!isOpen()||draft.saving||draft.saved)return;
     if(!actor.value.trim()||!reason.value.trim())throw Error('请填写审阅者和结论依据');
     const payload={format:'production-judgment-v1',title:title+' · 审阅',blocks:[{id:'review',text:reason.value}],target,verdict:verdict.value,actor:actor.value,reason:reason.value};
-    saving=true;notice.hidden=true;controls();
+    remember();saving=true;draft.saving=true;notice.hidden=true;controls();
     try{
       let confirmed=false;
       if(pendingRequest){
@@ -479,6 +489,7 @@ function showProductionJudgment(root){
       }
       if(!confirmed){
         if(!pendingRequest||!same(payload,pendingRequest.payload))pendingRequest=JSON.parse(JSON.stringify({object_id:'review-'+crypto.randomUUID(),expected_version:0,payload}));
+        draft.pendingRequest=pendingRequest;
         try{await api('/api/production/judgment',{method:'POST',body:JSON.stringify(pendingRequest)})}
         catch(error){
           if(!isOpen())return;
@@ -487,17 +498,14 @@ function showProductionJudgment(root){
           if(status!=='saved')throw Error(`${error.message}；审阅尚未确认保存，可原样重试`);
         }
       }
-      saved=true;pendingRequest=null;toast(`「${title}」的审阅已记录；采用保持原样`);
-      if(!isOpen())return;
-      closed=true;box.remove();
-      if(state.productionSelected?.id!==target.revision_id)return;
-      let refreshOwner=null;
-      const refresh=loadProductionWorkspace({onReadStart:owner=>{refreshOwner=owner}}),initialOwner={workspace,loadEpoch:productionLoadEpoch,readEpoch};
-      try{await refresh}
-      catch(error){const owner=refreshOwner||initialOwner;if(state.workspace===owner.workspace&&productionLoadEpoch===owner.loadEpoch&&productionReadEpoch===owner.readEpoch)toast(`「${title}」的审阅已保存；当前页面尚未完整更新：${error.message}`)}
+      const savedId=pendingRequest.object_id;
+      saved=true;draft.saved=true;pendingRequest=null;delete state.productionJudgmentDrafts[r.id];toast(`「${title}」的审阅已记录；采用保持原样`);
+      if(isOpen()){closed=true;box.remove()}
+      try{await refreshMaterialJudgments(target,savedId)}
+      catch(error){if(root.isConnected)toast(`「${title}」的审阅已保存；判断显示尚未更新：${error.message}`)}
     }catch(error){if(isOpen()){notice.hidden=false;notice.textContent=error.message;toast(error.message)}}
-    finally{saving=false;if(isOpen())controls()}
-  });productionButton(box,'取消',()=>{closed=true;box.remove()});root.append(box);controls();
+    finally{saving=false;draft.saving=false;draft.updateControls?.()}
+  });productionButton(box,'取消',()=>{closed=true;draft.open=false;if(!draft.saving&&!draft.pendingRequest)delete state.productionJudgmentDrafts[r.id];box.remove()});root.append(box);controls();
 }
 async function renderProductionReadiness(root,r,options={}){
   const readEpoch=productionReadEpoch;

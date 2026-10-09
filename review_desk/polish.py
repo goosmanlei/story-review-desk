@@ -48,11 +48,12 @@ def _excerpt(blocks, draft, anchor=None, radius=450):
             left = min(positions); right = left + max(len(t) for t in terms)
         elif re.search(r"结尾|末段|最后", draft):
             left = right = len(text)
-        elif re.search(r"开头|起句|首段|第一章", draft):
+        elif re.search(r"开头|开场|起句|首段|第一章", draft):
             left = right = 0
         else:
             # A bounded lexical window, rather than an unrelated document opening.
-            terms = set(re.findall(r"[\u4e00-\u9fff]{2}", draft))
+            terms = {draft[i:i + 2] for i in range(len(draft) - 1)
+                     if re.fullmatch(r"[\u4e00-\u9fff]{2}", draft[i:i + 2])}
             best = max(blocks, key=lambda b: sum(t in b["text"] for t in terms), default=None)
             left = right = starts[best["id"]] if best else 0
     if len(text) <= 1200:

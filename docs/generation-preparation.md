@@ -31,6 +31,8 @@ ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的�
 
 ## 采纳、取消与并发
 
+状态素材方案有两条替代许可路径：本方案版本的明确采纳，或所属实体有效且完整的整体生成许可；无需重复点击两次。实体自身需求仍独立审阅。两项决定独立取消，不改另一项已有决定。采纳方案没有真实结果时仍显示未生成；原件选择、生成结果审阅及实际采用各自成立。范围和历史理由由既有判断记录只读投影，不另建账本。
+
 新模型 `entity-generation-v1` 的范围为 `{entity,relationships,states,requirements,dependencies}`，全部为准确修订。`dependencies` 递归锁定方案引用，未来原件的具体选择在执行输入中另存。生成结果不进入采纳范围。决策使用每个实体唯一的 JUDGMENT 身份，采纳和取消分别形成 `accepted`、`revoked` 新修订。取消指明被取消的决策；不得删除记录或通过更换判断 ID 绕过取消。
 
 `POST /api/production/entity-decision` 与 CLI `production-entity-decide FILE` 接受 `{entity_id,action:accept|revoke,expected_version,scope,decision_ref?,acceptance_mode?,actor,reason}`。读接口给出当前 `decision_version`、`decision_scope` 和 `acceptance_mode`；写操作在既有原子导入事务中检查版本和范围。`content` 仅认可准确内容，`generation` 还要求准备完整；内容认可的具体语义与旧记录兼容见[素材卡与关系契约](materials-and-relationships.md)。重复或过期请求返回 409，不静默认可新内容。普通 judgment 导入同样执行校验，无绕过入口。
@@ -39,7 +41,7 @@ ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的�
 
 ## 执行输入
 
-`GET /api/production/generation-ready?requirement_id=ID`／CLI `production-generation-ready ID` 检查方案当前版本、所属实体有效采纳、前置原件的明确采用及完整性、范围和图像谱系。实际平台可用性及额度仍在调用前现场核对；工具不发起生成。
+`GET /api/production/generation-ready?requirement_id=ID`／CLI `production-generation-ready ID` 检查方案当前版本、单版明确采纳或所属状态的有效整体生成许可、前置原件的明确采用及完整性、范围和图像谱系。实际平台可用性及额度仍在调用前现场核对；工具不发起生成。
 
 `GET /api/production/generation-package?requirement_id=ID` 返回准确执行清单；CLI `production-generation-package ID --output DIR` 写入空目录，包含清单和必要参考原件。阻断时拒绝输出可执行包。清单保留方案、决策、最终提示词和参数、参考的准确修订与 SHA-256；原件不得以平台链接替代。实际 CALL 可携带此清单中的 `generation_requirement`、`generation_acceptances` 和真实输入，提交时再次检查一致性；已发生的历史调用不改写。取消后已提交调用仍可登记实际产出，但其方案、采纳及执行输入必须与提交时相同；取消会阻止新的提交。
 
@@ -55,11 +57,11 @@ ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的�
 
 `video_capabilities.json` 保存脱敏的只读渠道观察、CLI 版本和观察时间，`video_modes.py` 校验组合。当前 pippit-tool-cli 的 Seedance 首尾帧入口要求两张有序图片；2.5 配置还要求 adaptive 且禁止独立音频。2.0 Fast 未提供完整模式组合，不能继承 2.5 的限制或通过结论。单首帧路径尚无已核实入口。普通参考显式设置 `task_type=reference`，不同时设置 `generate_type=1`。配置变更需重新观察并更新契约；本地检查不证明账号权限、额度、服务接受请求或媒体效果。
 
-计划检查可以在未选原件时核对模式、参数、角色与编号。`ready` 还要求独立采纳、准确版本/候选、文件、组成、裁切或时间范围及原有谱系检查全部通过。准备包保留 `execution`、各输入的 `role`、`material_selection`、计划位置、逐媒体编号与原件哈希。新 CALL 必须保留相同渠道、模式、参数、顺序、准确候选、组成、角色和必要范围；选定信息也可沿冻结方案准确追溯。改选保留模式和角色，已提交方案变更进入新制作版本。旧 CALL 不补造模式或改写回执，后续状态登记也不得改变原执行输入。
+计划检查可以在未选原件时核对模式、参数、角色与编号。`ready` 还要求适用的准确采纳许可、准确版本/候选、文件、组成、裁切或时间范围及原有谱系检查全部通过。准备包保留 `execution`、各输入的 `role`、`material_selection`、计划位置、逐媒体编号与原件哈希。新 CALL 必须保留相同渠道、模式、参数、顺序、准确候选、组成、角色和必要范围；选定信息也可沿冻结方案准确追溯。改选保留模式和角色，已提交方案变更进入新制作版本。旧 CALL 不补造模式或改写回执，后续状态登记也不得改变原执行输入。
 
 ## 阅读、评论和媒体
 
-基础信息、状态、方案、素材分别在其标题旁切换真实修订；只有多个版本时提供选择器。历史内容可评论，但不得把混合版本采纳为当前方案。采纳历史从按钮附近的更多菜单进入，无记录不占位。剧情依据直接链接到相关集场。
+基础信息、状态、方案、素材分别在其标题旁切换真实修订；只有多个版本时提供选择器。历史内容可评论，但不得把混合版本采纳为当前方案。按钮旁的“整体采纳范围与理由”和“本版采纳范围与理由”提供准确内容、已有理由及折叠历史；各范围项链接到记录的准确修订。剧情依据直接链接到相关集场。
 
 所有已支持评论的文字和图像区域使用一致的轻边线、评论图标和焦点反馈，选区后就近添加评论。不可评论的导航和说明不使用此样式。方案的描述、提示词、参数及参考说明投影为准确评论块，原有正文块和历史锚点不改写。
 
