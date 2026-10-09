@@ -347,6 +347,7 @@ function restoreStoryDraft(){const key=storyDraftMetaKey();if(!key||state.anchor
 function forgetStoryDraft(){const key=storyDraftMetaKey();if(key)localStorage.removeItem(key)}
 function switchWorkspace(id,updateUrl=true){
   const read=++workspaceReadEpoch;
+  if(typeof invalidateProductionReads==='function')invalidateProductionReads();
   if(['story.sources','story.outline','story.script'].includes(id)&&!storyDataReady){
     return loadStoryData().then(()=>{if(read!==workspaceReadEpoch)return;initializeStoryReaders(new URL(location.href));const result=switchWorkspace(id,updateUrl);restoreSourceChapter(new URL(location.href),{initial:true});return result}).catch(error=>{if(read===workspaceReadEpoch)toast(error.message)});
   }
@@ -375,7 +376,7 @@ function switchWorkspace(id,updateUrl=true){
   if(id==='project.configuration')renderConfigurations({preserve:true});if(id==='production.approach')Promise.resolve(renderApproach()).then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});if(id==='story.outline'){restoreStoryDraft();renderStructureReader();renderComments()}
   if(source){restoreStoryDraft();renderDocument();renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
-  if(isProduction())loadProductionWorkspace().then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>toast(e.message));else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
+  if(isProduction())loadProductionWorkspace().then(()=>{if(read===workspaceReadEpoch&&state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>{if(read===workspaceReadEpoch)toast(e.message)});else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
 
   if(!isProduction()&&id!=='production.approach'&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition();
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);

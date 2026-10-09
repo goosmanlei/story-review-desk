@@ -66,6 +66,12 @@ function productionEntityIcon(type){
 }
 const productionDimensionLabels={appearance:'整体外观',clothing:'服装',injury:'伤势',health:'健康',fatigue:'疲劳',voice:'声音',attachments:'随身物',layout:'空间布局',dressing:'场景布置',time_light:'时间与光照',structure:'完整结构',condition:'状况',contents:'组成与内容',placement:'使用位置',lyrics_scope:'歌词范围',rendition:'演唱方式',performers:'演唱者'};
 let productionLoadEpoch=0,productionReadEpoch=0;
+// A new page choice ends every read owned by the previous production page,
+// including another child of the same workspace and a later return to it.
+function invalidateProductionReads(){
+  ++productionLoadEpoch;++productionReadEpoch;
+  if(typeof invalidateBreakdownReads==='function')invalidateBreakdownReads();
+}
 function productionButton(parent,text,action){const b=nodeText('button',null,text,parent);b.type='button';b.onclick=()=>Promise.resolve().then(action).catch(e=>toast(e.message));return b}
 function productionVisuals(){return (state.productionSelected?.payload.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:reviewPositionText(state.productionSelected.payload.title),alt:reviewPositionText(state.productionSelected.payload.title),description:`${c.role} · ${c.width}×${c.height} · ${c.sha256}`}))}
 function productionName(ref,referenceTitles=[]){
@@ -142,11 +148,12 @@ function renderProductionEntityNavigation(root,r){
   root.append(section);
 }
 async function loadProductionWorkspace({onReadStart}={}){
+  invalidateProductionReads();
   const route=new URL(location.href),legacyObject=route.searchParams.get('production_object');
   if(typeof productionTab==='function'&&legacyObject&&!route.searchParams.has('breakdown_object')&&!route.searchParams.has('material_id')&&(!route.searchParams.has('production_tab')||productionTab()==='breakdown')&&!route.searchParams.has('production_entity')){
     const workspace=state.workspace,read=++productionReadEpoch;
     let linked;try{linked=await api('/api/production?'+new URLSearchParams({object_id:legacyObject,...(route.searchParams.get('production_revision')?{revision_id:route.searchParams.get('production_revision')}:{})}))}
-    catch(error){if(state.workspace===workspace&&read===productionReadEpoch){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','准确旧目标不可用：'+error.message,host);state.productionSelected=null}throw error}
+    catch(error){if(state.workspace!==workspace||read!==productionReadEpoch)return;const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','准确旧目标不可用：'+error.message,host);state.productionSelected=null;throw error}
     if(state.workspace!==workspace||read!==productionReadEpoch)return;
     const row=linked.record;
     if(workspace==='settings.workspace'&&['ENTITY','STATE','REPRESENTATION'].includes(row.kind))route.searchParams.set('production_tab','entities');
@@ -160,7 +167,7 @@ async function loadProductionWorkspace({onReadStart}={}){
   if(typeof productionTab==='function'){const tab=productionTab();if(tab==='retired'){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','此旧页面已退役，目标不可用。请从生产制作选择当前子页。',host);state.productionSelected=null;return}if(tab==='breakdown')return loadProductionBreakdown();if(tab==='materials')return loadProductionMaterials()}
   const workspace=state.workspace,epoch=++productionLoadEpoch,readEpoch=productionReadEpoch,view=$('#production-view');view.replaceChildren();const loading=nodeText('p',null,'正在读取制作记录…',view);
   let result;try{result=await api(typeof productionTab==='function'?'/api/production/index?'+new URLSearchParams({view:'settings',object_id:new URL(location.href).searchParams.get('production_object')||''}):'/api/production')}
-  catch(error){if(state.workspace===workspace&&epoch===productionLoadEpoch&&readEpoch===productionReadEpoch&&loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
+  catch(error){if(state.workspace!==workspace||epoch!==productionLoadEpoch||readEpoch!==productionReadEpoch)return;if(loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请通过左侧导航重新打开本页。`,view)}throw error}
   if(state.workspace!==workspace||epoch!==productionLoadEpoch)return;
   state.productionRecords=result.records;
   if(workspace==='settings.workspace'&&result.entity_state_counts)return loadEntityManagement(result,{epoch,onReadStart});
