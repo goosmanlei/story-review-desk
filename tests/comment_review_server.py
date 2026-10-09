@@ -1,6 +1,8 @@
 """Task-preview-only HTTP fault fixture for real browser decision checks."""
 import argparse
 import json
+import time
+import threading
 from pathlib import Path
 
 from review_desk.server import ReviewHandler, ReviewServer
@@ -9,10 +11,17 @@ from review_desk.server import ReviewHandler, ReviewServer
 class FaultHandler(ReviewHandler):
     def do_GET(self):
         control = self.server.fault_file
-        fault = json.loads(control.read_text()) if control.exists() else {}
-        if fault.get('mode') == 'missing' and self.path.startswith('/api/comment-review/content?'):
-            control.write_text('{}\n')
-            return self._json({'error': '隔离验收：准确目标已不可用；未替换为最新稿'}, 404)
+        with self.server.fault_lock:
+            fault = json.loads(control.read_text()) if control.exists() else {}
+            matches = (self.path.startswith('/api/comment-review/content?')
+                       if fault.get('mode') != 'image-missing' else self.path.split('?')[0] == fault.get('path'))
+            if matches:
+                control.write_text('{}\n')
+        if matches:
+            if fault.get('mode') in ('delay', 'delay-failure'):
+                time.sleep(min(3, max(0, float(fault.get('seconds', 2)))))
+            if fault.get('mode') in ('missing', 'delay-failure', 'image-missing'):
+                return self._json({'error': '隔离验收：准确目标已不可用；未替换为最新稿'}, 404)
         return super().do_GET()
 
     def do_PATCH(self):
@@ -43,6 +52,7 @@ def main():
     with ReviewServer(('127.0.0.1', a.port), root, config) as server:
         server.RequestHandlerClass = FaultHandler
         server.fault_file = a.fault_file.resolve()
+        server.fault_lock = threading.Lock()
         print('隔离故障验收：http://127.0.0.1:%s/' % server.server_port, flush=True)
         try: server.serve_forever()
         except KeyboardInterrupt: pass
