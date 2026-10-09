@@ -1,5 +1,19 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 function fixture(){const c={state:{comments:[]},productionLabels:{},URL,URLSearchParams,location:{href:"http://fixture/?workspace=settings.workspace&production_tab=breakdown"}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
+test('project handoff exposes the selected original and its exact requirements without borrowing another version',()=>{
+  for(const historical of [false,true]){
+    const c=fixture(),seen=[];c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
+    for(const name of ['renderProductionAcceptance','materialRoundControl','reviewChoiceButtons'])c[name]=()=>{};
+    c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialDefaultCandidate=()=>null;c.materialCandidateChoice=items=>items[0];
+    c.materialMedia=(_host,item)=>seen.push(item.component.file);c.renderActualGeneration=(_host,context)=>seen.push(context.call.id);
+    c.renderMaterialRequirements=(_host,need)=>seen.push(need.id);
+    const need={id:'current-demand',object_id:'project',payload:{media_type:'project'}},asset={id:'exact-asset',payload:{components:[{role:'original',file:'exact.zip'}]}},exact={...need,id:'bound-demand'};
+    const round={number:1,results:[asset],definition_records:{requirement:historical?null:exact}};
+    c.breakdownPrompt({append(){}},need,{video_details:{project:{material_versions:{project:[round]},review_contexts:{'exact-asset':{call:{id:'actual-edit'}}}}}});
+    assert.ok(seen.includes('exact.zip'));assert.ok(seen.includes('actual-edit'));assert.ok(!seen.includes('current-demand'));
+    assert.equal(seen.includes('bound-demand'),!historical);assert.equal(seen.includes('此版本未保留完整素材要求。'),historical);
+  }
+});
 test('episode count deduplicates comment ids, includes closed and uses exact view revisions only',()=>{const c=fixture(),ep={comment_targets:[{object_id:'scene',revision_id:'old'},{object_id:'shot',revision_id:'same'},{object_id:'shot',revision_id:'same'}]};c.state.comments=[{id:'1',status:'OPEN',target_object_id:'scene',target_revision_id:'old'},{id:'1',status:'OPEN',target_object_id:'scene',target_revision_id:'old'},{id:'2',status:'CLOSED',target_object_id:'shot',target_revision_id:'same'},{id:'3',status:'DELETED',target_object_id:'shot',target_revision_id:'same'},{id:'4',status:'OPEN',target_object_id:'scene',target_revision_id:'new'},{id:'5',status:'OPEN',target_object_id:'episode',target_revision_id:'old'}];assert.equal(c.breakdownEpisodeCount(ep),2);c.state.comments[0].body='edited';assert.equal(c.breakdownEpisodeCount(ep),2);c.state.comments[2].status='OPEN';assert.equal(c.breakdownEpisodeCount(ep),2)});
 test('grouping partitions exactly the explicitly related canonical identities regardless of obsolete owner filter',()=>{const c=fixture();c.state.breakdownLevels=['shot'];const items=[{object_id:'a',canonical_material_id:'one',classification:{key:'image:character',label:'图像—角色'}},{object_id:'alias',canonical_material_id:'one',classification:{key:'image:character',label:'图像—角色'}},{object_id:'shared',classification:{key:'audio:shared',label:'音频—共有'}},{object_id:'missing',media_type:'video'}];const groups=c.groupedShotMaterials(items);assert.equal(groups.length,3);assert.deepEqual(Array.from(groups.flatMap(g=>g.items),i=>i.canonical_material_id||i.object_id).sort(),['missing','one','shared']);assert.equal(c.groupedShotMaterials([]).length,0)});
 test('late scene response cannot repaint after a later selection or workspace switch',async()=>{
