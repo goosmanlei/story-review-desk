@@ -41,7 +41,7 @@ test('shared shot renderer retains exact background and material trace while cha
 });
 test('project handoff exposes the selected original and its exact requirements without borrowing another version',()=>{
   for(const historical of [false,true]){
-    const c=fixture(),seen=[];c.el=()=>({append(){},dataset:{}});c.preserveBreakdownDetailPosition=()=>{};c.nodeText=(_t,_c,text)=>seen.push(text);
+    const c=fixture(),seen=[];c.el=()=>({append(){},addEventListener(){},dataset:{}});c.preserveBreakdownDetailPosition=()=>{};c.nodeText=(_t,_c,text)=>seen.push(text);
     for(const name of ['renderProductionAcceptance','materialRoundControl','reviewChoiceButtons'])c[name]=()=>{};
     c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialDefaultCandidate=()=>null;c.materialCandidateChoice=items=>items[0];
     c.materialMedia=(_host,item)=>seen.push(item.component.file);c.renderActualGeneration=(_host,context)=>seen.push(context.call.id);

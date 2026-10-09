@@ -135,6 +135,29 @@ function renderActualGeneration(parent,context){
   renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[],null,true);
   materialField(host,call,'call.prompt','提示词','pre');parent.append(box);
 }
+function materialGenerationDetails(parent,item){
+  const context=item.review_context;
+  if(!context?.call){renderActualGeneration(parent,context);return}
+  const detail=el('details','material-generation-details'),key=item.record.id+':'+context.call.id;
+  state.materialGenerationOpen||={};detail.open=!!state.materialGenerationOpen[key];
+  const summary=nodeText('summary',null,context.call.payload.method==='external-edit'?'制作记录 · 工具与完整说明':'生成细节 · 参考、参数与完整 Prompt',detail);
+  let position=null;
+  const close=()=>{
+    detail.open=false;state.materialGenerationOpen[key]=false;
+    summary.focus({preventScroll:true});
+    requestAnimationFrame(()=>{if(!detail.isConnected||detail.open)return;
+      if(position){for(const [node,top,left] of position.parents)if(node.isConnected){node.scrollTop=top;node.scrollLeft=left}window.scrollTo(position.x,position.y)}
+      else summary.scrollIntoView({block:'nearest'});
+    });
+  };
+  summary.onclick=event=>{
+    if(detail.open){event.preventDefault();close()}
+    else {const parents=[];for(let node=detail.parentElement;node;node=node.parentElement)parents.push([node,node.scrollTop,node.scrollLeft]);position={parents,x:window.scrollX,y:window.scrollY};state.materialGenerationOpen[key]=true}
+  };
+  detail.addEventListener('toggle',()=>{state.materialGenerationOpen[key]=detail.open});
+  renderActualGeneration(detail,context);
+  productionButton(detail,'收起生成细节',close);parent.append(detail);
+}
 function renderMaterialRequirements(parent,requirement){
   const info=el('section','material-requirements');nodeText('h3',null,'素材要求',info);const host=materialTextSurface(info,requirement);
   const blocks=requirement.payload.blocks||[],description=productionTextBlocks(requirement).find(b=>b.field==='generation.output.description');
@@ -363,7 +386,7 @@ function renderMaterialCard(parent,model,options={}){
       if(options.selectComponent&&!options.multipleCards)select.id='production-component';select.onchange=()=>{options.selectComponent?.(select.value,item.record.id)};box.append(select);
     }
     const player=materialMedia(box,item,{fullPlayback:referenceContext?(item.component.role==='original'?'原件':'预览'):null});if(!referencePlayer)referencePlayer=player;
-    renderActualGeneration(box,item.review_context);
+    materialGenerationDetails(box,item);
   }
   // A version owns one demand definition. Result associations are uses, not
   // interchangeable historical definitions for every related state.
