@@ -60,6 +60,8 @@ async function openCommentReview(row,context,trigger){
   const decision=el('section','comment-review-decision');dialog.append(decision);
   const notice=nodeText('p','structure-alert','',dialog);notice.hidden=true;notice.setAttribute('role','alert');
   let read=0;
+  const readingTarget=JSON.stringify(commentReviewTarget());
+  const ownsRead=epoch=>epoch===read&&dialog.open&&JSON.stringify(commentReviewTarget())===readingTarget;
   const showDecision=()=>{
     decision.replaceChildren();const comment=currentReviewComment(row);
     nodeText('h3',null,`${comment.business_code||'原意见'} · ${comment.status==='OPEN'?'尚未关闭':'已关闭'}`,decision);
@@ -75,11 +77,11 @@ async function openCommentReview(row,context,trigger){
     const epoch=++read;body.replaceChildren();nodeText('p',null,'正在读取准确稿件…',body);
     try{
       const data=await api(commentReviewURL({object_id:ref.object_id,revision_id:ref.revision_id},true));
-      if(epoch!==read||!dialog.open)return;
+      if(!ownsRead(epoch))return;
       body.replaceChildren();nodeText('h3',null,`${label} · ${reviewRevisionLabel(ref)}`,body);
       renderCommentReviewContent(body,data.record,anchor);
       body.querySelector('mark')?.scrollIntoView({block:'center',behavior:'instant'});
-    }catch(error){if(epoch===read&&dialog.open){body.replaceChildren();nodeText('p','structure-alert',error.message,body)}}
+    }catch(error){if(ownsRead(epoch)){body.replaceChildren();nodeText('p','structure-alert',error.message,body)}}
   };
   const activate=b=>{for(const n of navigation.children)n.setAttribute('aria-pressed',String(n===b))};
   const button=(label,action)=>{const b=nodeText('button',null,label,navigation);b.onclick=()=>{activate(b);action()};return b};
@@ -113,6 +115,7 @@ function renderCommentReviewContent(root,record,anchor){
   const blocks=record.kind==='SOURCE'?doc.blocks:structureBlocks(doc);
   const visuals=record.kind==='SOURCE'?(doc.assets||[]).map(a=>({...a,id:a.file})):structureVisuals(doc);
   const focus=el('section','comment-review-exact');root.append(focus);
+  if(!anchor){appendReviewManuscript(focus,record);return}
   if(anchor?.type==='visual'||anchor?.type==='region'){
     const visual=visuals.find(v=>v.id===anchor.visual_id&&(!anchor.asset_file||v.file===anchor.asset_file));
     if(!visual){nodeText('p','structure-alert','准确原图已不可用；未替换为新图。',focus);return}
@@ -130,12 +133,34 @@ function renderCommentReviewContent(root,record,anchor){
       p.append(document.createTextNode(text.slice(to||from,right).join('')+(right<text.length?'…':'')));
     }
   }
-  if(anchor){const full=el('details','comment-review-full');nodeText('summary',null,'阅读这份准确稿件的完整图文',full);full.addEventListener('toggle',()=>{if(!full.open||full.dataset.loaded)return;full.dataset.loaded='true';for(const block of blocks)nodeText('p',null,block.text,full);for(const visual of visuals)appendReviewVisual(full,visual)});root.append(full)}
+  const full=el('details','comment-review-full');nodeText('summary',null,'阅读这份准确稿件的完整图文',full);
+  full.addEventListener('toggle',()=>{
+    focus.hidden=full.open;
+    if(!full.open||full.dataset.loaded)return;
+    full.dataset.loaded='true';appendReviewManuscript(full,record);
+  });root.append(full);
+}
+function appendReviewManuscript(root,record){
+  const doc=record.payload;
+  if(record.kind==='SOURCE'){
+    for(const block of doc.blocks)nodeText('p',null,block.text,root);
+    for(const asset of doc.assets||[])appendReviewVisual(root,{...asset,id:asset.file});
+  }else{
+    for(const section of doc.sections){
+      nodeText('h4',null,section.title,root);
+      for(const block of section.blocks)nodeText('p',null,block.text,root);
+      for(const visual of section.visuals||[])appendReviewVisual(root,visual);
+    }
+  }
 }
 function appendReviewVisual(root,visual,anchor){
   const figure=el('figure'),frame=el('div','comment-review-image'),img=el('img');
   img.src=reviewURL('/assets/'+encodeURIComponent(visual.file));img.alt=visual.alt||visual.title;frame.append(img);
-  img.addEventListener('error',()=>{nodeText('p','structure-alert','准确原图文件不可用；未替换为其他图像。',frame)});
+  img.classList.add('structure-image-trigger');img.dataset.reviewDialogTrigger='';img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
+  let unavailable=false;
+  img.onclick=()=>{if(!unavailable)openStructureImage(visual,img)};
+  img.onkeydown=event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();img.click()}};
+  img.addEventListener('error',()=>{unavailable=true;img.setAttribute('aria-disabled','true');nodeText('p','structure-alert','准确原图文件不可用；未替换为其他图像。',frame)},{once:true});
   if(anchor?.type==='region'){
     const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 1 1');svg.setAttribute('preserveAspectRatio','none');
     const polygon=document.createElementNS(svg.namespaceURI,'polygon');polygon.setAttribute('points',anchor.points.map(p=>`${p.x},${p.y}`).join(' '));svg.append(polygon);frame.append(svg);
