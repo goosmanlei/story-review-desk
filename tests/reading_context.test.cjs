@@ -71,7 +71,7 @@ for(const [workspace,anchor] of [['story.sources',{type:'text',block_id:'paragra
 });
 test('collapse retains edit identity; cancel still drops only the current draft and pending copy',()=>{
  const f=fixture(),c=comment(visual);f.state.comments=[c];f.state.anchor=visual;f.state.editing=c.id;f.context.renderComments();const key=f.context.key();f.storage.set(key,'unsaved editing');f.context.renderComments();f.root.all().find(n=>n.textContent==='收起草稿').onclick();assert.equal(f.state.editing,c.id);assert.equal(f.context.key(),key);
- f.context.togglePanel();f.root.all().find(n=>n.textContent==='取消编辑').onclick();assert.equal(f.state.anchor,null);assert.equal(f.state.editing,null);assert.equal(f.storage.has(key),false);assert.equal(c.body,'Technical opinion');
+ f.context.togglePanel();f.root.all().find(n=>n.textContent==='放弃此页修改').onclick();assert.equal(f.state.anchor,null);assert.equal(f.state.editing,null);assert.equal(f.storage.has(key),false);assert.equal(c.body,'Technical opinion');
 });
 test('busy submission keeps collapse disabled',()=>{const f=fixture();f.state.anchor=visual;const key=f.context.key();f.storage.set(key,'pending');f.context.saves.add(key);f.context.renderComments();assert.equal(f.root.all().find(n=>n.textContent==='收起草稿').disabled,true)});
 for(const anchor of [visual,region])test(`source ${anchor.type} locator uses the actual source renderer and ignores a same-id visual elsewhere`,()=>{
