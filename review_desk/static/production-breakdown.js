@@ -251,6 +251,13 @@ function breakdownPrompt(parent,need,context){
   const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'素材候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
+  if(['project','document'].includes(need.payload.media_type)){
+    if(selected){materialMedia(section,selected);renderActualGeneration(section,detail.review_contexts?.[selected.record.id])}
+    else nodeText('p','production-meta','尚未交付原文件',section);
+    if(model.need)renderMaterialRequirements(section,model.need);
+    else nodeText('p','production-meta','此版本未保留完整素材要求。',section);
+    return;
+  }
   if(selected){
     const actual=detail.review_contexts?.[selected.record.id],call=actual?.call;
     nodeText('h4',null,'所选候选的真实生成内容',section);

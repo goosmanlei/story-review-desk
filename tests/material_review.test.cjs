@@ -5,6 +5,13 @@ for(const f of ['production.js','material-review.js'])vm.runInContext(fs.readFil
 const need=(id,revision=id+'-v1',media='image')=>({object_id:id,id:revision,current_revision:revision,payload:{media_type:media}});
 const item=(id,refs,media='image')=>({id,record:{object_id:id,id:id+'-v1',payload:{media_type:media,candidate_requirements:refs}}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
+test('an external edit displays its actual production note without inventing an unknown model',()=>{
+ const c={};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ const text=[];c.el=()=>({});c.nodeText=(_t,_c,value)=>text.push(value);c.materialTextSurface=x=>x;c.renderMaterialInputs=()=>{};
+ c.materialField=(_host,_row,_field,label)=>text.push(label);c.materialParameters=()=>assert.fail('external edit is not a model call');
+ c.renderActualGeneration({append(){}},{call:{payload:{method:'external-edit',tool:'vector editor',inputs:[],prompt:'layout'}}});
+ assert.deepEqual(text,['制作记录','vector editor','制作说明']);
+});
 test('an exact review link chooses its candidate and its original call, not the first result',()=>{
  const a={record:{id:'first'},review_context:{call:{id:'call-first'}}},b={record:{id:'requested'},review_context:{call:{id:'call-requested'}}};
  assert.equal(ctx.materialCandidateChoice([a,b],'requested'),b);
