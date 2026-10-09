@@ -338,7 +338,12 @@ function renderMaterialCard(parent,model,options={}){
   renderHistoricalProductionDefinition(box,need,model.round,options.definitionHistory||[]);
   materialCompareControl(heading,model);
   if(need)renderProductionAcceptance(heading,need);
-  renderMaterialRelations(box,model.material_id||need?.object_id,need||items[0]?.record||model.identity);
+  // Read uses of the same definition shown below. A frozen plan can have no
+  // active need; its result revision must never be paired with the demand ID.
+  const definitionRecords=model.round?.definition_records;
+  const requirement=model.exactPreparingRevision?need:definitionRecords?definitionRecords.requirement:need;
+  const relationRecord=requirement||materialCandidateChoice(items,options.selectedCandidateId)?.record||(!model.round?model.identity:null);
+  if(relationRecord)renderMaterialRelations(box,relationRecord.object_id,relationRecord);
   if(options.selectCandidate&&items.length){
     const chosen=materialCandidateChoice(items,options.selectedCandidateId);
     reviewChoiceButtons(box,'本轮候选',items.map((item,index)=>({id:item.record.id,label:'候选'+(item.candidate_number||item.record.candidate_number||index+1)})),chosen.record.id,options.selectCandidate);
@@ -362,8 +367,6 @@ function renderMaterialCard(parent,model,options={}){
   }
   // A version owns one demand definition. Result associations are uses, not
   // interchangeable historical definitions for every related state.
-  const definitionRecords=model.round?.definition_records;
-  const requirement=model.exactPreparingRevision?need:definitionRecords?definitionRecords.requirement:need;
   if(requirement)renderMaterialRequirements(box,requirement);
   else if(definitionRecords)nodeText('p','production-meta','此版本未保留完整素材要求。',box);
   if(!items.length&&need)renderGenerationRecipe(box,need,!!requirement,{historical:!!model.historicalRecipe});
