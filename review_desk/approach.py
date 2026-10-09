@@ -126,10 +126,11 @@ def read_document(root):
         require(type(value["schema_version"]) is int and value["schema_version"] in (1, 2))
         require(isinstance(value["tabs"], list))
         tab_ids = [tab["id"] for tab in value["tabs"]]
-        require(tab_ids[:2] == ["story", "materials"])
         require(all(identifier(item) for item in tab_ids) and len(set(tab_ids)) == len(tab_ids))
         if value["schema_version"] == 1:
-            require(len(tab_ids) == 2)
+            require(tab_ids == ["story", "materials"])
+        else:
+            require({"story", "materials"}.issubset(tab_ids))
         for tab in value["tabs"]:
             require(all(isinstance(tab[key], str) for key in ("label", "title", "lead")))
             require(isinstance(tab["sections"], list))

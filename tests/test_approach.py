@@ -67,6 +67,22 @@ class ApproachTest(unittest.TestCase):
             self.assertEqual(caught.exception.code, 503)
             self.assertEqual(self.get("/api/sources"), [])
 
+    def test_schema_two_preserves_instance_order_and_legacy_routes(self):
+        value = {"schema_version": 2, "tabs": [
+            {"id": name, "label": name, "title": name, "lead": "", "sections": []}
+            for name in ("introduction", "materials", "story", "another-method")
+        ]}
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get("/api/production-approach"), value)
+        for broken in (
+            {**value, "schema_version": 1},
+            {**value, "tabs": value["tabs"][:2]},
+            {**value, "tabs": []},
+        ):
+            self.path.write_text(json.dumps(broken))
+            with self.assertRaises(HTTPError):
+                self.get("/api/production-approach")
+
     def test_rich_method_document_round_trip_and_invalid_blocks(self):
         value = {"schema_version": 2, "tabs": [
             {"id": name, "label": name, "title": "方法", "lead": "说明", "sections": []}
