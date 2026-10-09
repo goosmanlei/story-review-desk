@@ -323,6 +323,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     from .production_breakdown import summary
                     with production.read_scope(store):
                         return self._json(summary(store,param('object_id'),param('revision_id')))
+                if path == '/api/production/judgments':
+                    from .review_decisions import snapshot as judgment_snapshot
+                    with production.read_scope(store):
+                        return self._json(judgment_snapshot(store, param('object_id'), param('revision_id')))
                 if path == '/api/production/acceptance':
                     from .production_acceptance import snapshot as acceptance_snapshot
                     with production.read_scope(store):
