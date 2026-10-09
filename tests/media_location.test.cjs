@@ -31,6 +31,7 @@ test('reference audition seeks and stops independently of the comment selection,
  assert.equal(f.player.reviewAudition({start_seconds:2.7,end_seconds:7.08}),true);
  assert.equal(f.media.currentTime,2.7);assert.equal(f.media.paused,false);
  const fields=f.player.all().filter(n=>n.tagName==='input');assert.equal(fields[0].value,'1.00');assert.equal(fields[1].value,'2.00');
+ f.player.all().find(n=>n.textContent==='清除选段').onclick();
  f.media.currentTime=7.2;f.media.ontimeupdate();assert.equal(f.media.currentTime,7.08);assert.equal(f.media.paused,true);
  f.player.all().find(n=>n.textContent==='播放完整原件').onclick();assert.equal(f.media.currentTime,0);assert.equal(f.media.paused,false);
 });
