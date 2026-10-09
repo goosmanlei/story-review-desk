@@ -2,7 +2,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8');
 // Real menu, route handlers and comment renderer; layout is synthetic, not browser acceptance.
 class Element{
-  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.listeners={};this.className='';this.value='';this.scrollTop=0;this.clientHeight=600;this.scrollHeight=12000;this.rect=()=>({top:0,bottom:600});
+  constructor(tag='div'){this.tag=tag;this.children=[];this.dataset={};this.attrs={};this.listeners={};this.className='';this.value='';this.scrollLeft=0;this.scrollTop=0;this.clientHeight=600;this.scrollHeight=12000;this.rect=()=>({top:0,bottom:600});
     this.classList={contains:x=>this.className.split(' ').includes(x),add:x=>{if(!this.classList.contains(x))this.className+=' '+x},remove:x=>{this.className=this.className.split(' ').filter(y=>y!==x).join(' ')},toggle:(x,on)=>{on??=!this.classList.contains(x);on?this.classList.add(x):this.classList.remove(x);return on}}}
   append(...nodes){for(const node of nodes){this.children.push(node);node.parent=this}}
   replaceChildren(...nodes){this.children=[];this.append(...nodes)}
@@ -26,7 +26,7 @@ const sources=[
   {id:'plain',title:'资料',target_revision_id:'plain-r1',blocks:[{id:'chapter-10',text:'普通段落同名 ID'}]}
 ];
 const base='http://isolated/?workspace=story.sources&source=refinement-a';
-async function fixture(href=base,{internal=true,settle=true}={}){
+async function fixture(href=base,{internal=true,settle=true,historyState=null,navigation=false}={}){
   const root=new Element(),nodes=new Map(),storage=new Map(),listeners={},frames=new Map(),writes=[],scrolls=[],requests=[];let frame=0,pageY=0;
   for(const id of ['source-list','source-view','selection-action','comment-body','open-count','comments-toggle','toast','instance-title','story-creation-shell','story-workspace','screenplay-workspace','structure-workspace','configuration-view','approach-view','placeholder-view','production-view','open-story-sources','open-story-structure','open-story-script','view-title','view-symbol','brand-home','screenplay-comments','comments-close']){const n=new Element();n.id=id;root.append(n);nodes.set('#'+id,n)}
   const topbar=new Element();topbar.className='workspace-topbar';topbar.rect=()=>({top:0,bottom:70});root.append(topbar);
@@ -34,12 +34,13 @@ async function fixture(href=base,{internal=true,settle=true}={}){
   reader.scrollTo=value=>{reader.scrollTop=value.top;scrolls.push({container:'reader',top:value.top,visible:!nodes.get('#story-workspace').hidden})};
   const context={URL,console,CSS:{escape:x=>x},setTimeout:()=>0,clearTimeout(){},
     requestAnimationFrame:fn=>{frames.set(++frame,fn);return frame},cancelAnimationFrame:id=>frames.delete(id),
-    location:{href},history:{pushState(_s,_t,url){context.location.href=String(url);writes.push({type:'push',url:String(url)})},replaceState(_s,_t,url){context.location.href=String(url);writes.push({type:'replace',url:String(url)})}},
+    location:{href},history:{state:historyState,pushState(s,_t,url){this.state=s;context.location.href=String(url);writes.push({type:'push',url:String(url)})},replaceState(s,_t,url){this.state=s;if(String(url)!==context.location.href)writes.push({type:'replace',url:String(url)});context.location.href=String(url)}},
     document:{addEventListener(){},querySelector:s=>root.querySelector(s),querySelectorAll:s=>root.querySelectorAll(s),createElement:t=>new Element(t),createTextNode:t=>{const n=new Element('text');n.textContent=t;return n},scrollingElement:{scrollTop:0,scrollHeight:12000}},
     window:{innerHeight:800,addEventListener:(name,fn)=>listeners[name]=fn,scrollBy:value=>{pageY+=value.top;scrolls.push({container:'window',top:pageY,visible:!nodes.get('#story-workspace').hidden})},scrollTo(_x,y){pageY=y}},
     getSelection:()=>({removeAllRanges(){}}),getComputedStyle:()=>({overflowY:internal?'auto':'visible'}),
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
   vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);
+  if(navigation){vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/navigation.js'),'utf8'),context);context.renderWorkspaceTabs=()=>{}}
   const framework={workspaces:['story.sources','story.outline','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
   context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/configurations?summary=1':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplays?metadata=1':{versions:[]},'/api/sources?with_revision=1&metadata=1':sources.map(({id,title,target_revision_id})=>({id,title,target_revision_id})),'/api/screenplay-summaries':{episodes:[]}}[url])}};
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;globalThis.saves=commentSaves;
@@ -53,8 +54,8 @@ async function fixture(href=base,{internal=true,settle=true}={}){
   const flush=()=>{let count=0;while(frames.size){assert.ok(++count<10,'frames settle');const pending=[...frames.values()];frames.clear();for(const fn of pending)fn()}};
   await context.init();assert.doesNotMatch(reader.textContent||'',/^加载失败/);if(settle)flush();
   const chapter=(source,id)=>root.querySelector(`.source-chapter-button[data-source-id="${source}"][data-block-id="${id}"]`);
-  const pop=(url,apply=true)=>{context.location.href=url;listeners.popstate();if(apply)flush()};
-  const popAsync=async(url,apply=true)=>{context.location.href=url;await listeners.popstate();if(apply)flush()};
+  const pop=(url,apply=true,s=null)=>{context.location.href=url;context.history.state=s;listeners.popstate({state:s});if(apply)flush()};
+  const popAsync=async(url,apply=true,s=null)=>{context.location.href=url;context.history.state=s;await listeners.popstate({state:s});if(apply)flush()};
   return {context,root,nodes,reader,storage,frames,writes,scrolls,requests,flush,chapter,pop,popAsync};
 }
 
@@ -121,9 +122,9 @@ test('hidden source does not scroll; cross-workspace history applies only after 
   f.pop(base+'&source_chapter=chapter-1',false);f.context.switchWorkspace('project.configuration');const before=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,before);
 });
 
-test('passive scroll highlighting and unrelated same-source history do not write routes or move the reader',async()=>{
+test('passive highlighting preserves URL; an entry without a snapshot uses its accurate chapter',async()=>{
   const f=await fixture(base+'&source_chapter=chapter-1');f.reader.scrollTop=5600;f.context.syncSourceChapter();assert.equal(f.context.state.sourceChapter,'chapter-10');assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-1');
-  f.pop(base+'&source_chapter=chapter-1&structure_revision=unrelated');assert.equal(f.reader.scrollTop,5600);assert.equal(f.writes.length,0);
+  f.pop(base+'&source_chapter=chapter-1&structure_revision=unrelated');assert.equal(f.reader.scrollTop,488);assert.equal(f.writes.length,0);
 });
 
 test('nonstory entry loads no story text; entering the reader restores exact chapter and loads only once',async()=>{
@@ -152,4 +153,50 @@ test('failed first story read remains retryable without marking partial data rea
   await f.context.switchWorkspace('story.sources');assert.equal(f.context.state.workspace,'project.configuration');
   f.context.fetch=fetch;await f.context.switchWorkspace('story.sources');f.flush();
   assert.equal(f.context.state.workspace,'story.sources');assert.equal(f.context.state.current.id,'plain');
+});
+
+// Controlled frame/response ordering supplements real browser history acceptance.
+test('identical source URLs restore each entry snapshot, including long-block interior and reload',async()=>{
+  const f=await fixture(base+'&source_chapter=chapter-1'),c=f.context,href=c.location.href;
+  f.reader.scrollTop=1400;c.rememberSourceReadingPosition();const a=JSON.parse(JSON.stringify(c.history.state));
+  c.switchWorkspace('story.outline');c.switchWorkspace('story.sources');f.flush();
+  assert.equal(c.location.href,href);f.reader.scrollTop=2200;c.rememberSourceReadingPosition();const b=JSON.parse(JSON.stringify(c.history.state));
+  c.switchWorkspace('story.outline');f.pop(href,true,a);assert.equal(f.reader.scrollTop,1400);
+  f.pop(href,true,b);assert.equal(f.reader.scrollTop,2200);f.pop(href,true,a);assert.equal(f.reader.scrollTop,1400);
+  const reload=await fixture(href,{historyState:b});assert.equal(reload.reader.scrollTop,2200);
+  // No URL cache may stand in for an entry without its own snapshot.
+  f.pop(href,true,null);assert.equal(f.reader.scrollTop,488);
+});
+
+test('snapshot identity rejects a different source, revision or route and preserves other history state',async()=>{
+  const f=await fixture(base+'&source_chapter=chapter-10'),c=f.context;c.history.state={unrelated:{keep:42}};
+  f.reader.scrollTop=6300;c.rememberSourceReadingPosition();assert.equal(c.history.state.unrelated.keep,42);
+  const saved=JSON.parse(JSON.stringify(c.history.state));
+  for(const field of ['source','revision','url']){const invalid=JSON.parse(JSON.stringify(saved));invalid.sourceReading[field]='different';f.pop(c.location.href,true,invalid);assert.equal(f.reader.scrollTop,5488)}
+});
+
+test('queued entry and ordinary tab restoration yield to the last same-URL chapter, comment or editor',async()=>{
+  const f=await fixture(base+'&source_chapter=chapter-10',{navigation:true}),c=f.context,href=c.location.href;
+  f.reader.scrollTop=6200;c.rememberWorkspacePosition();const saved=JSON.parse(JSON.stringify(c.history.state));
+  f.pop(href,false,saved);f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,5488);
+  c.restoreWorkspacePosition();f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,5488);
+  f.pop(href,false,saved);const comment={id:'old',target_object_id:'refinement-a',target_revision_id:'source-a-r1',anchor:{type:'text',block_id:'chapter-1',quote:'first'}};
+  c.locateComment(comment);const block=f.root.querySelector('#block-chapter-1');assert.equal(block.located,true);const before=f.reader.scrollTop;f.flush();assert.equal(f.reader.scrollTop,before);
+  f.pop(href,false,saved);c.startDraft(comment.anchor);const editor=f.root.querySelector('#comment-editor-text');editor.value='original source draft';editor.listeners.input();f.flush();assert.equal(editor.value,'original source draft');assert.equal(c.state.anchor,comment.anchor);assert.ok(f.requests.every(r=>!r.method));
+});
+
+test('layout changes use verified text within the block; missing text falls back to the accurate chapter',async()=>{
+  const f=await fixture(base+'&source_chapter=chapter-10'),c=f.context;f.reader.scrollTop=6100;c.rememberSourceReadingPosition();
+  const saved=JSON.parse(JSON.stringify(c.history.state));saved.sourceReading.layout=['old layout'];saved.sourceReading.point={block:'chapter-10',offset:1,quote:'confirmed',gap:4};
+  const block=f.root.querySelector('#block-chapter-10');block.textContent='xconfirmed';let located=false;c.sourceTextPointRect=()=>{located=true;return {top:300}};
+  f.pop(c.location.href,true,saved);assert.ok(located);assert.notEqual(f.reader.scrollTop,6100);
+  saved.sourceReading.point.quote='changed text';located=false;f.pop(c.location.href,true,saved);assert.equal(located,false);assert.equal(f.reader.scrollTop,5488);
+});
+
+test('late history story-read success or failure cannot displace a newer workspace',async()=>{
+  for(const failure of [false,true]){
+    const f=await fixture('http://isolated/?workspace=project.configuration'),c=f.context,fetch=c.fetch;let release;const pending=new Promise(resolve=>release=resolve);
+    c.fetch=async(...args)=>{if(args[0]==='/api/sources?with_revision=1'){await pending;if(failure)throw Error('late failure')}return fetch(...args)};
+    const old=f.popAsync(base+'&source_chapter=chapter-10',false);c.switchWorkspace('production.approach');release();await old;f.flush();assert.equal(c.state.workspace,'production.approach');assert.equal(f.scrolls.length,0);
+  }
 });
