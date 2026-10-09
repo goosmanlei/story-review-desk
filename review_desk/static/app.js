@@ -81,7 +81,7 @@ function loadStoryData(){
 }
 function initializeStoryReaders(url){
   state.structureRevision=resolveStructureRevision(url.searchParams.get('structure_revision'));
-  state.structureRouteError=url.searchParams.get('structure_revision')&&!state.structureRevision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择下方可用版本。':null;
+  state.structureRouteError=url.searchParams.get('structure_revision')&&!state.structureRevision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择可用稿次。':null;
   chooseSource(url.searchParams.get('source')||state.sources[0]?.id,true,false,url.searchParams.has('source'));
   chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
 }
