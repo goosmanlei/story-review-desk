@@ -18,20 +18,27 @@ async function renderProductionAcceptance(host,row){
   let data,serial=0;
   const refresh=async()=>{const token=++serial;try{
     const next=await api('/api/production/acceptance?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));
-    if(token===serial){data=next;draw()}
+    if(box.isConnected&&token===serial){data=next;draw()}
   }catch(error){if(box.isConnected&&token===serial){box.replaceChildren();nodeText('p','production-issue',error.message,box)}}};
   const entry={box,refresh};
   productionAcceptancePanels.add(entry);
   Promise.resolve().then(()=>{for(const panel of productionAcceptancePanels)if(!panel.box.isConnected)productionAcceptancePanels.delete(panel)});
   const draw=()=>{box.replaceChildren();
     const button=productionButton(box,data.accepted?'取消采纳此版':'采纳此版',async()=>{
+      if(!box.isConnected||button.disabled)return;
       button.disabled=true;++serial;
-      try{data=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});draw();
+      try{const next=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});if(box.isConnected){data=next;draw()}
         for(const panel of productionAcceptancePanels){if(!panel.box.isConnected)productionAcceptancePanels.delete(panel);else if(panel!==entry)panel.refresh()}
       }catch(error){if(box.isConnected){button.disabled=false;toast(error.message);refresh()}}
     });button.disabled=!data.can_change;
     if(!data.can_change)nodeText('small','production-meta','历史版本',box);
     else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
+    const info=el('details');nodeText('summary',null,'本版采纳范围与理由',info);
+    nodeText('p',null,row.kind==='REQUIREMENT'?'仅认可此素材方案版本；可与所属状态的有效整体生成许可择一。采纳不选择原件、不接受结果、不调用模型；准确参考及生成前检查仍须满足。':'认可此版设计及下列准确子项；实际生成、原件审阅与采用分别决定。',info);
+    renderDecisionScope(info,data.scope,data.scope_records||[]);
+    if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
+    if(data.history?.length){const history=el('details');nodeText('summary',null,'方案决定历史 · '+data.history.length,history);for(const decision of data.history){const entry=renderReviewDecision(history,decision,{historical:true});renderDecisionScope(entry,decision.payload.acceptance_scope,decision.scope_records||[])}info.append(history)}
+    box.append(info);
   };
   await refresh();
 }
