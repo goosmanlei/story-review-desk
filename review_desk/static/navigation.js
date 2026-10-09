@@ -60,6 +60,7 @@ function rememberWorkspaceRoute(){
   if(['settings.workspace','materials.workspace','production.workspace'].includes(id)&&typeof productionTab==='function')workspaceSubRoutes.set(workspaceGroup(id)+':'+productionTab(),url.href);
 }
 function rememberWorkspacePosition(){
+  if(typeof rememberSourceReadingPosition==='function')rememberSourceReadingPosition();
   const offsets={};
   for(const selector of workspacePositionSelectors){const node=document.querySelector(selector);if(node)offsets[selector]=[node.scrollLeft||0,node.scrollTop||0]}
   workspacePositions.set(location.href,{window:[window.scrollX||0,window.scrollY||0],offsets});
@@ -67,11 +68,12 @@ function rememberWorkspacePosition(){
 }
 function restoreWorkspacePosition(){
   const href=location.href;
+  const sourceGuard=typeof state!=='undefined'&&state.workspace==='story.sources'&&typeof sourceReadingRestoreGuard==='function'?sourceReadingRestoreGuard():null;
   let position=workspacePositions.get(href);
   if(!position){try{const saved=JSON.parse(sessionStorage.getItem('review-view-position')||'null');if(saved?.url===href)position=saved.position}catch{}}
   if(!position)return;
   requestAnimationFrame(()=>{
-    if(location.href!==href)return;
+    if(location.href!==href||sourceGuard&&!sourceGuard())return;
     for(const [selector,offset] of Object.entries(position.offsets||{})){const node=document.querySelector(selector);if(node){node.scrollLeft=Number(offset[0])||0;node.scrollTop=Number(offset[1])||0}}
     window.scrollTo(Number(position.window?.[0])||0,Number(position.window?.[1])||0);
   });
