@@ -142,7 +142,7 @@ async function renderMaterialRelations(host,materialId,selected=null){
     if(owner===(isEntityReview()?state.entityReview:state.materialReview))rememberMaterialRelations([...data.relations,...(data.comment_records||[])]);
     const groups=[['旧备选',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics==='alternative')],['沿用方案',rows.filter(r=>r.direction==='outgoing')],['其他用途依据',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics!=='alternative')]];
     for(const [label,group] of groups){if(!group.length)continue;const section=el('div','material-use-group');nodeText('h4',null,label+' · '+group.length,section);
-      if(label==='旧备选')nodeText('p','production-meta','供比较和复用选择；列入备选不表示已选为输入，也不转授旧认可。先核完整状态、风格、原生规格与图像谱系。',section);
+      if(label==='旧备选')nodeText('p','production-meta','供比较和复用选择；列入备选不表示已选为输入，也不转授旧认可。'+(selected?.payload.media_type==='audio'?'先核声音身份、内容、噪声和本次用途；所选片段须符合实际渠道限制。':'先核完整状态、风格、原生规格与图像谱系。'),section);
       for(const row of group){const p=row.payload,line=el('article','material-use-row'),out=row.direction==='outgoing',target=out?row.downstream_record:row.upstream_record,reference=out?row.downstream:p.upstream;
         line.dataset.relationId=row.object_id;
         if(target&&reference){const title=businessTitle(target),button=productionButton(line,title,()=>out?openUnifiedMaterial(reference,button):openMaterialReference(reference,button));button.classList.add('material-reference');button.setAttribute('aria-haspopup','dialog')}

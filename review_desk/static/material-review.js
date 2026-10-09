@@ -140,15 +140,15 @@ function renderMaterialRequirements(parent,requirement){
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false){
   const plan=need.payload.generation,box=el('section','material-plan');box.dataset.requirementId=need.object_id;
-  nodeText('h3',null,'生成方案',box);
+  nodeText('h3',null,plan?.method==='reuse'?'复用方案':'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
   materialExecution(host,plan);
-  materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
+  if(plan.method!=='reuse')materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
-  if(plan.blockers?.length){nodeText('h4',null,'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
-  materialField(host,need,'generation.prompt','提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
+  if(plan.blockers?.length){nodeText('h4',null,plan.method==='reuse'?'复用前仍需':'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
+  materialField(host,need,'generation.prompt',plan.method==='reuse'?'复用说明':'提示词','pre');if(!requirementsShown)materialField(host,need,'generation.output.review_criteria','检查要点');parent.append(box);
 }
 function materialVersions(){return (isEntityReview()?state.entityReview:state.materialReview)?.material_versions||{}}
 function materialRecordRound(row){for(const rounds of Object.values(materialVersions()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;if(Number.isInteger(row.material_version))return row.material_version;if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];return null}
