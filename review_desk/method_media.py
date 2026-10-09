@@ -23,6 +23,8 @@ def inputs(store, payload, baseline=None):
         content = copy.deepcopy(row['payload'])
         if row['kind'] == 'SOURCE':
             content = store.source(row['object_id'])
+            methods.require(content and methods.checksum(content) == row['payload']['source_revision'],
+                            '准确源资料已变化；请恢复原版本或新建步骤，不能用当前资料替换')
             if ref.get('block_ids'):
                 content = {**content, 'blocks': [b for b in content['blocks'] if b['id'] in ref['block_ids']]}
         records.append({'object_id': row['object_id'], 'revision_id': row['id'], 'kind': row['kind'], 'payload': content})
@@ -105,7 +107,7 @@ def administrative(store, object_id, payload, current):
     if parent['payload'] != payload and {k:v for k,v in parent['payload'].items() if k not in ignored} == {k:v for k,v in payload.items() if k not in ignored}:
         changed = copy.deepcopy(payload)
         changed['method_adjustment'] = {'parent': {'object_id':object_id, 'revision_id':parent['id']}, 'operation':'administrative'}
-        return changed, {'revision_id':parent['id'], 'role':'method_adjustment.parent'}
+        return changed, {'revision_id':parent['id'], 'role':'payload.method_adjustment.parent'}
     return payload, None
 
 
