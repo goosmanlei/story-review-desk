@@ -131,6 +131,14 @@ test('a time opinion outside current coverage opens its original file separately
  ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'time',component_id:'original',start_seconds:1,end_seconds:2}});
  assert.equal(data.historicalMedia.record,asset);assert.equal(data.unassignedOpen,false);
 });
+test('an original linked only by review_state locates its exact historical state without claiming coverage',async()=>{
+ const {ctx,data}=setup(),asset=row('image','ASSET',{title:'历史原件',components:[{id:'original',mime:'image/png'}]});
+ data.media=[{id:'retained-image',state:null,review_state:ref(second),record:asset,component_id:'original'}];
+ await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
+ ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original'}});
+ assert.equal(ctx.state.productionChildDetail.record,second);assert.equal(ctx.state.entityReviewMedia,'retained-image');
+ assert.equal(data.unassignedOpen,false);assert.equal(data.media[0].state,null);
+});
 test('time comment location scopes a repeated component id to the exact asset revision',()=>{
  const {ctx}=setup();ctx.state.entityReview={};let selector,component,focused=false;
  const player={dataset:{},scrollIntoView:()=>{},focus:()=>{focused=true}};

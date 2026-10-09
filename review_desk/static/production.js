@@ -421,7 +421,7 @@ function renderProductionRecord(root,detail,entityCard=false){
 }
 function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.start<Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
 function paintProductionReview(){
-  if(!isProduction())return;paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
+  if(!isProduction())return;if(typeof paintMaterialUseText==='function')paintMaterialUseText();paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
   const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
   for(const para of document.querySelectorAll('#production-blocks [data-block-id]'))para.classList.toggle('comment-flash',para===target);
 }
@@ -432,6 +432,7 @@ function renderProductionTransitions(root,transitions){
   root.append(section);
 }
 function locateProductionComment(comment,local=false){
+  if(typeof locateMaterialRelationComment==='function'&&locateMaterialRelationComment(comment))return;
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
   if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
   if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
