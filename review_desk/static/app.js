@@ -81,6 +81,7 @@ function loadStoryData(){
 }
 function initializeStoryReaders(url){
   state.structureRevision=resolveStructureRevision(url.searchParams.get('structure_revision'));
+  state.structureRouteError=url.searchParams.get('structure_revision')&&!state.structureRevision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择下方可用版本。':null;
   chooseSource(url.searchParams.get('source')||state.sources[0]?.id,true,false,url.searchParams.has('source'));
   chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
 }
@@ -850,6 +851,7 @@ function commentCard(comment){
 
 function hasCommentTarget(){
   if(!['story.sources','story.outline','story.script'].includes(state.workspace)&&!isProduction())return false;
+  if(isScript()&&state.screenplayRouteError)return false;
   const target=commentTarget();
   if(!(target.target_object_id||target.source_id)||!target.target_revision_id)return false;
   return !isStructure()||!!state.structure?.revisions.some(revision=>revision.id===target.target_revision_id);

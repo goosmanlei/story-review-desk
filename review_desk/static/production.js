@@ -84,11 +84,15 @@ function productionBasisSummary(record){
   return `剧本依据：${label?'版本'+label[1]:title} · 已确认 · ${p.episodes.length} 集`;
 }
 function productionRefLink(parent,ref,label,referenceTitles=[]){
-  if(label)label=businessTitle(ref,label);
   if(!ref?.object_id||!ref.revision_id)return;
+  const kind=ref.kind||(state.productionRecords||[]).find(row=>row.object_id===ref.object_id)?.kind;
+  if(['AV_SHOT','AV_SCENE'].includes(kind)){
+    const button=productionButton(parent,label?businessTitle({...ref,kind},label):productionName(ref,referenceTitles),()=>openUnifiedMaterial(ref,button));button.className='production-ref';button.setAttribute('aria-haspopup','dialog');return button;
+  }
   const basis=state.productionRecords?.find(r=>r.object_id===ref.object_id&&r.kind==='INPUT_LOCK');
   if(basis){nodeText('span','production-ref',basis.id===ref.revision_id?productionBasisSummary(basis):(label||'剧本依据')+' · 历史版本',parent);return}
   if(ref.scene_id||ref.block_ids)return materialReferenceLink(parent,ref,label||`${productionName(ref,referenceTitles)} · ${ref.scene_id?reviewPositionLabel('scene',ref.scene_id,ref.object_id):'正文依据'}`,true);
+  if(label)label=businessTitle(ref,label);
   const episode=state.screenplays.flatMap(v=>v.episodes).find(e=>e.object_id===ref.object_id&&e.id===ref.revision_id);
   if(episode){const url=new URL(location.href);url.search='';url.searchParams.set('workspace','story.script');url.searchParams.set('script',episode.payload.screenplay_id);url.searchParams.set('episode',episode.object_id);if(ref.scene_id)url.searchParams.set('scene',ref.scene_id);const a=link(label||`${reviewPositionText(episode.payload.title)} · ${ref.scene_id?reviewPositionLabel('scene',ref.scene_id,ref.object_id):'本集'}`,url.href,parent);a.className='production-ref';a.title=`修订 ${ref.revision_id}\n${(ref.block_ids||[]).join(', ')}`;return}
   const script=state.screenplays.find(s=>s.object_id===ref.object_id&&s.id===ref.revision_id);
@@ -367,6 +371,7 @@ function preserveCardPosition(){
 }
 function renderProductionReaderContent(){
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;root.replaceChildren();
+  if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
   if(typeof isMaterialReview==='function'&&isMaterialReview()){renderUnifiedCard(root);return}
   if(state.workspace==='settings.workspace'&&state.productionEntityDetail){

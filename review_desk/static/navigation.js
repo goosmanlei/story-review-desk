@@ -1,12 +1,19 @@
 function businessCode(row){if(['SOURCE','STORY'].includes(row?.kind))return '';return row?.material_code||row?.business_code||(typeof state==='undefined'?null:state.businessCodes)?.get(row?.object_id||row?.id)||''}
 function businessTitle(row,title=row?.payload?.title||row?.title||''){
   if(['SOURCE','STORY'].includes(row?.kind))return String(title);
-  const code=businessCode(row),raw=String(title).replace(/完整形态/gu,'实体状态');
+  const code=businessCode(row),raw=row?.kind==='AV_SHOT'&&!code?String(title):readableProductionTitle(row,title);
   // A shot's stored local prefix is a legacy position, not a second identity.
   const positioned=row?.kind==='AV_SHOT'&&code?raw.replace(/^E\d+-\d+\s*/u,''):row?.business_scene_id?raw.replace(/^\d+-\d+\s*/,(row.business_scene_code||reviewPositionLabel('scene',row.business_scene_id))+' · '):raw;
   const text=reviewPositionText(positioned);
   if(!code||text===code||text.startsWith(code+' · '))return text;
   return code+' · '+(text.startsWith(code+' ')?text.slice(code.length).trim():text);
+}
+function readableProductionTitle(row,title=row?.payload?.title||row?.title||''){
+  const raw=String(title).replace(/完整形态/gu,'实体状态'),scope=row?.payload?.scope||row?.scope;
+  const sourceCode=(typeof state==='undefined'?null:state.businessCodes)?.get(scope?.object_id)||'';
+  if(row?.kind==='AV_SHOT')return raw.replace(/^(?:E\d+-\d+\s*|\d+\s*·\s*A\d+\s*·\s*\d+\s+)/iu,'');
+  if(sourceCode.startsWith('ASH'))return raw.replace(/\b\d+\s*·\s*A\d+\s*·\s*\d+\s+/u,sourceCode+' · ');
+  return raw;
 }
 function renderBusinessCodeCatalog(root){
   const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
