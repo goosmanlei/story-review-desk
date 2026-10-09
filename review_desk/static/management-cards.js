@@ -45,9 +45,12 @@ function managementScopeRoute(filters){
 }
 function managementScopeFilters(parent,filters,catalog,locations,change){
   const episodes=[['','全部集'],...catalog.episodes.map(ep=>[ep.object_id,reviewPositionLabel('episode',ep)])];
-  const scenes=[['','全部场'],...catalog.episodes.filter(ep=>!filters.episode||ep.object_id===filters.episode).flatMap(ep=>(ep.scenes||[]).map(sc=>[sc.id,managementSceneLabel(sc.id,ep.object_id,catalog)]))];
+  const available=catalog.episodes.filter(ep=>!filters.episode||ep.object_id===filters.episode).flatMap(ep=>(ep.scenes||[]).map(sc=>({ep,sc}))),counts=new Map();
+  for(const {sc} of available)counts.set(sc.id,(counts.get(sc.id)||0)+1);
+  const choices=available.map(({ep,sc})=>({ep,sc,value:counts.get(sc.id)>1?JSON.stringify([ep.object_id,sc.id]):sc.id,label:(counts.get(sc.id)>1?reviewPositionLabel('episode',ep)+' / ':'')+managementSceneLabel(sc.id,ep.object_id,catalog)}));
+  const scenes=[['','全部场'],...choices.map(({value,label})=>[value,label])];
   flatFilterGroup(parent,'episode','视听集',episodes,filters.episode,null,value=>{filters.episode=value;filters.scene='';filters.scope_revision=catalog.episodes.find(ep=>ep.object_id===value)?.id||'';change()});
-  flatFilterGroup(parent,'scene','视听场',scenes,filters.scene,null,value=>{filters.scene=value;const ep=catalog.episodes.find(ep=>(ep.scenes||[]).some(sc=>sc.id===value));if(ep){filters.episode=ep.object_id;filters.scope_revision=ep.id}change()});
+  flatFilterGroup(parent,'scene','视听场',scenes,filters.scene,null,value=>{const choice=choices.find(sc=>sc.value===value);filters.scene=choice?.sc.id||'';if(choice){filters.episode=choice.ep.object_id;filters.scope_revision=choice.ep.id}change()});
 }
 function managementLegacyNotice(parent,memory){
   if(memory.legacyScope)nodeText('p','production-issue','此旧链接按源剧本集场定位，可能对应多个视听场。请在上方重新选择视听制作范围。',parent);

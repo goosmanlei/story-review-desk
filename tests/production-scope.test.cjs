@@ -26,3 +26,8 @@ test('switching manager keeps filters but applies the source exact scope; return
 test('a scoped material opens its unique accurate reference instead of its head',async()=>{
  const c=fixture('http://fixture/');let ref;c.openUnifiedMaterial=async value=>{ref=value};await c.openManagementMaterial({object_id:'material',scope_references:[{object_id:'material',revision_id:'old'}]},null);assert.equal(ref.revision_id,'old');assert.equal(ref.defaultSelection,undefined);
 });
+
+test('a scene shared by two current editions uses an explicit parent choice',()=>{
+ const c=fixture('http://fixture/'),filters={episode:'',scene:''},catalog={episodes:['one','two'].map(id=>({object_id:id,id:id+'-exact',kind:'AV_EPISODE',scenes:[{id:'shared',kind:'AV_SCENE',title:'共有场'}]}))};
+ c.managementScopeFilters({},filters,catalog,[],()=>{});const options=c.groups[1].options;assert.notEqual(options[1][0],options[2][0]);c.groups[1].change(options[2][0]);assert.equal(filters.episode,'two');assert.equal(filters.scope_revision,'two-exact');assert.equal(filters.scene,'shared');
+});
