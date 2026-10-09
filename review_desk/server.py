@@ -438,6 +438,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(store.comment_anchor_states(comments))
         if path == "/api/comments/context":
             return self._json(store.context())
+        if path in ('/api/comment-review', '/api/comment-review/content'):
+            from . import comment_review
+            try:
+                operation = comment_review.content if path.endswith('/content') else comment_review.snapshot
+                return self._json(operation(store, query.get('object_id', [None])[0],
+                                            query.get('revision_id', [None])[0]))
+            except (ValueError, Conflict) as exc:
+                return self._json({'error': str(exc)}, 404)
         if path == "/api/screenplays":
             return self._json(screenplay_snapshot(store,metadata=query.get('metadata')==['1']))
         if path == "/api/screenplay-summaries":
@@ -466,7 +474,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
