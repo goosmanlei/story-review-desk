@@ -261,20 +261,22 @@ for(const explicit of [false,true])test(`${explicit?'exact current':'ordinary'} 
   assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
   assert.ok(f.controls.some(([kind,id])=>kind==='edit-inputs'&&id===f.current.id));assert.ok(f.controls.some(([kind])=>kind==='accept'));assert.deepEqual(f.inputs,[]);
 });
-test('an earlier preparation link cannot replace a frozen material definition',()=>{
+test('an earlier demand reads its original definition separately without rewriting a frozen material version',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;
+  const before=JSON.stringify(f.rounds);
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
-  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
+  assert.match(text,/plan 1/);assert.doesNotMatch(text,/plan 2/);assert.match(text,/原方案/);
+  assert.equal(JSON.stringify(f.rounds),before);assert.deepEqual(f.controls,[['accept',f.old.id]]);
 });
 test('a frozen definition source outside the member list remains a requirement without creating an editable recipe',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);Object.assign(f.rounds[0],{frozen:true,plan:null,members:[],definition_records:{requirement:f.old}});f.detail.selectedMaterialRounds={'video-need':1};f.detail.localPlans={'video-need':f.old};
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
   assert.match(text,/original requirement/);assert.doesNotMatch(text,/plan 1/);assert.deepEqual(f.inputs,[]);assert.ok(!f.controls.some(([kind])=>kind==='edit-inputs'||kind==='route'));
 });
-test('locating an older member plan in a frozen empty version retains the frozen requirements and reads the old recipe without saving controls',()=>{
+test('locating an older demand in a frozen empty version reads its own requirements and recipe without saving controls',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;f.detail.localPlans={'video-need':f.old};
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
-  assert.match(text,/current requirement/);assert.doesNotMatch(text,/original requirement/);assert.match(text,/plan 1/);assert.match(text,/原方案/);
+  assert.match(text,/original requirement/);assert.doesNotMatch(text,/current requirement/);assert.match(text,/plan 1/);assert.match(text,/原方案/);
   assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[['accept',f.old.id]]);
 });
 test('returning from another material version leaves an old explicit preparation link and reads that version normally',()=>{

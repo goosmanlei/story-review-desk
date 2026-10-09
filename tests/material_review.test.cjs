@@ -5,6 +5,32 @@ for(const f of ['production.js','material-review.js'])vm.runInContext(fs.readFil
 const need=(id,revision=id+'-v1',media='image')=>({object_id:id,id:revision,current_revision:revision,payload:{media_type:media}});
 const item=(id,refs,media='image')=>({id,record:{object_id:id,id:id+'-v1',payload:{media_type:media,candidate_requirements:refs}}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
+test('old design demands keep their own definition without assigning another plan results to them',()=>{
+ const old={...need('shot-video','old','video'),kind:'REQUIREMENT',version:1,current_revision:'now',payload:{media_type:'video',scope:{object_id:'shot',revision_id:'design-one'},generation:{prompt:'old start to old end'}}};
+ const current={...old,id:'now',version:2,payload:{...old.payload,scope:{object_id:'shot',revision_id:'design-two'},generation:{prompt:'new start to new end'}}};
+ const round={number:1,plan:current,definition_records:{requirement:current},members:[old,current],results:[{id:'actual',object_id:'asset',kind:'ASSET',payload:{components:[{role:'original'}]}}]};
+ for(const frozen of [false,true]){
+  round.frozen=frozen;const data={material_versions:{'shot-video':[round]}};
+  const before=JSON.stringify(round),model=ctx.materialRoundModels([old],[],data)[0];
+  assert.equal(model.need,old);assert.equal(model.historicalRecipe,true);assert.equal(model.candidates.length,0);assert.equal(JSON.stringify(round),before);
+  assert.equal(ctx.materialHistoricalDefinition(current,round),false);
+ }
+ assert.equal(ctx.materialHistoricalDefinition(old,{definition_records:{requirement:old}}),false);
+ assert.equal(ctx.materialHistoricalDefinition(old,{definition_records:{}}),true,'missing definition does not fill an exact old record from a head');
+});
+test('material opinion groups explain the old record without moving its comment to the current definition',()=>{
+ const old={...need('video','old'),kind:'REQUIREMENT',version:1,payload:{title:'old'}},current={...old,id:'current',version:4};
+ const c={state:{productionSelected:current,materialReview:{record:current,history:[old]},comments:[]},businessTitle:r=>r.payload.title,commentCard:c=>c};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ const labels=[],rendered=[];c.nodeText=(_tag,_class,text)=>labels.push(text);
+ const comment={id:'old-opinion',target_revision_id:'old'},newComment={id:'new-opinion',target_revision_id:'current'};
+ c.appendMaterialReviewComments({append:v=>rendered.push(v)},[comment,newComment]);
+ assert.deepEqual(labels,['原方案意见 · old · 需求记录 1','所读记录的意见']);assert.deepEqual(rendered,[comment,newComment]);assert.equal(comment.target_revision_id,'old');
+});
+test('old demand with no recorded output remains readable and does not borrow current output text',()=>{
+ const c={state:{comments:[]},productionTextBlocks:()=>[],materialTextSurface:x=>x,materialField:()=>{},el:()=>({}),nodeText:()=>{}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ c.materialTextSurface=x=>x;
+ assert.doesNotThrow(()=>c.renderMaterialRequirements({append(){}},{id:'old',payload:{title:'old',generation:{prompt:'kept'}}}));
+});
 test('an external edit displays its actual production note without inventing an unknown model',()=>{
  const c={};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
  const text=[];c.el=()=>({});c.nodeText=(_t,_c,value)=>text.push(value);c.materialTextSurface=x=>x;c.renderMaterialInputs=()=>{};

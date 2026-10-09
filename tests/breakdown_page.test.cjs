@@ -1,5 +1,20 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 function fixture(){const c={state:{comments:[]},productionLabels:{},URL,URLSearchParams,location:{href:"http://fixture/?workspace=settings.workspace&production_tab=breakdown"}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
+test('historical shot reads its hydrated exact demand and inputs instead of the identity current plan',()=>{
+ const c=fixture(),seen=[];
+ vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
+ c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialCandidateChoice=()=>null;c.materialDefaultCandidate=()=>null;
+ c.renderProductionAcceptance=(_host,row)=>seen.push(row.id);c.materialRoundControl=()=>{};
+ c.renderHistoricalProductionDefinition=(_host,row)=>seen.push(row.id);c.renderMaterialRequirements=(_host,row)=>seen.push(row.payload.generation.prompt);
+ c.materialTextSurface=(_host,row)=>{seen.push(row.id);return {}};c.materialExecution=c.materialParameters=()=>{};
+ c.renderMaterialInputs=(_host,_inputs,rows)=>seen.push(rows[0].id);c.renderMaterialRouteChoices=()=>assert.fail('old reading must not expose route writes');
+ c.renderLinkedPrompt=(_host,row,_inputs,_rows,_field,context)=>{assert.equal(context,null);seen.push(row.payload.generation.prompt)};
+ const exact={id:'old',object_id:'video',kind:'REQUIREMENT',current_revision:'now',payload:{media_type:'video',generation:{prompt:'old start to old end',inputs:[]}},review_input_records:[{id:'old-frame'}]},now={...exact,id:'now',payload:{...exact.payload,generation:{prompt:'wrong current start'}}};
+ const metadata={...exact,payload:{media_type:'video'}},round={number:1,plan:now,definition_records:{requirement:now},results:[]};
+ c.breakdownPrompt({append(){}},metadata,{video_details:{video:{record:exact,history:[now,exact],material_versions:{video:[round]}}}});
+ assert.ok(seen.includes('old start to old end'));assert.ok(seen.includes('old-frame'));assert.ok(!seen.includes('wrong current start'));assert.ok(!seen.includes('now'));
+});
 test('shared shot renderer retains exact background and material trace while changes and selected inputs stay visible',()=>{
   const c=fixture();
   class E {constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){}}}append(...nodes){this.children.push(...nodes)}}
