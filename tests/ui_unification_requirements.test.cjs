@@ -429,15 +429,15 @@ test('reference save refresh keeps the draft attached to the original immutable 
 
 test('flat management scope choices preserve authoritative labels and single selection linkage',async()=>{
  const {c}=fixture(),host=new Element('div'),filters={episode:'',scene:''},changes=[];
- const catalog={episodes:[{object_id:'e1',number:1},{object_id:'e2',number:2}]},locations=[{episode:'e1',scene:'s1'},{episode:'e2',scene:'s2'}];
- c.reviewPositionLabel=(kind,row)=>kind==='episode'?'E0'+row.number:row==='s1'?'S001':'S002';
- c.state.businessCodes=new Map([['scene:e1:s1','S001'],['scene:e2:s2','S002']]);assert.equal(c.managementSceneLabel('s1',null,catalog),'S001');
+ const catalog={episodes:[{object_id:'e1',id:'er1',kind:'AV_EPISODE',number:1,scenes:[{id:'s1',kind:'AV_SCENE',title:'首场'}]},{object_id:'e2',id:'er2',kind:'AV_EPISODE',number:2,scenes:[{id:'s2',kind:'AV_SCENE',title:'次场'}]}]},locations=[{episode:'e1',scene:'s1'},{episode:'e2',scene:'s2'}];
+ c.reviewPositionLabel=(kind,row)=>kind==='episode'?'AE00'+row.number:row==='s1'?'S001':'S002';
+ c.state.businessCodes=new Map([['s1','AS001'],['s2','AS002']]);assert.equal(c.managementSceneLabel('s1','e1',catalog),'AS001 · 首场');
  const draw=()=>{host.replaceChildren();c.managementScopeFilters(host,filters,catalog,locations,()=>{changes.push({...filters});draw()})};
  const button=value=>host.all().find(n=>n.dataset.filterValue===value);
- draw();assert.equal(host.all().some(n=>n.tag==='select'),false);assert.equal(button('e1').textContent,'E01');assert.equal(button('s1').textContent,'S001');
+ draw();assert.equal(host.all().some(n=>n.tag==='select'),false);assert.equal(button('e1').textContent,'AE001');assert.equal(button('s1').textContent,'AS001 · 首场');
  await button('s1').onclick();assert.equal(filters.scene,'s1');assert.equal(button('s1').attributes['aria-pressed'],'true');
- await button('e2').onclick();assert.equal(filters.episode,'e2');assert.equal(filters.scene,'');assert.equal(button('s1'),undefined);assert.equal(button('s2').textContent,'S002');
+ await button('e2').onclick();assert.equal(filters.episode,'e2');assert.equal(filters.scene,'');assert.equal(button('s1'),undefined);assert.equal(button('s2').textContent,'AS002 · 次场');
  await button('s2').onclick();await button('s2').onclick();assert.equal(filters.scene,'');
  await button('e2').onclick();assert.equal(filters.episode,'');assert.ok(button('s1'));assert.ok(changes.length>=5);
- filters.scene='missing';draw();assert.equal(filters.scene,'');
+ filters.scene='missing';draw();assert.equal(filters.scene,'missing');
 });
