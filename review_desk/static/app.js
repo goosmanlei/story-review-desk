@@ -62,9 +62,12 @@ function unpackReviewGraph(graph){
 const api=async(path,options={})=>{const response=await reviewFetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
-const isStructure=()=>state.workspace==='story.outline';
-const isScript=()=>state.workspace==='story.script';
-const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
+const isStructure=()=>state.workspace==='story.outline'&&!state.unifiedCardRoot;
+const isScript=()=>state.workspace==='story.script'&&!state.unifiedCardRoot;
+const isProductionWorkspace=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
+// A complete card owns review actions while the underlying workspace stays put.
+// Keep ownership until its close handler has saved the draft and restored parent state.
+const isProduction=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace)||!!state.unifiedCardRoot;
 let storyDataReady=false,storyDataRead=null,workspaceReadEpoch=0;
 async function loadStoryDirectory(){
   const [sources,screenplays]=await Promise.all([api('/api/sources?with_revision=1&metadata=1'),api('/api/screenplays?metadata=1')]);
@@ -482,20 +485,20 @@ function switchWorkspace(id,updateUrl=true,restorePosition=true){
   renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
   $('#story-workspace').hidden=!source;$('#screenplay-workspace').hidden=id!=='story.script';$('#structure-workspace').hidden=id!=='story.outline';$('#configuration-view').hidden=id!=='project.configuration';$('#approach-view').hidden=id!=='production.approach';
-  $('#placeholder-view').hidden=storyChild||isProduction()||id==='project.configuration'||id==='production.approach';
-  $('#production-view').hidden=!isProduction();
-  $('#comments-toggle').hidden=!storyChild&&!isProduction();closePanel();
+  $('#placeholder-view').hidden=storyChild||isProductionWorkspace()||id==='project.configuration'||id==='production.approach';
+  $('#production-view').hidden=!isProductionWorkspace();
+  $('#comments-toggle').hidden=!storyChild&&!isProductionWorkspace();closePanel();
   const titles={'story.sources':['故事创作','故'],'story.outline':['故事创作','故'],'story.script':['故事创作','故'],'settings.workspace':['生产制作','制'],'materials.workspace':['生产制作','制'],'project.configuration':['系统管理','管'],'production.approach':['制作思路','思']};
   $('#view-title').textContent=titles[id]?.[0]||'故事创作';$('#view-symbol').textContent=titles[id]?.[1]||'故';
   if(id==='project.configuration')renderConfigurations({preserve:true});if(id==='production.approach')Promise.resolve(renderApproach()).then(()=>{if(state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});if(id==='story.outline'){restoreStoryDraft();renderStructureReader();renderComments()}
   if(source){restoreStoryDraft();renderDocument();renderComments();scheduleSourceChapter()}
   if(id==='story.script'){restoreScriptDraft();renderScriptIndex();renderScriptReader();renderComments()}
-  if(isProduction()){
+  if(isProductionWorkspace()){
     const loading=loadProductionWorkspace(),loadEpoch=productionLoadEpoch;
     loading.then(()=>{if(read===workspaceReadEpoch&&loadEpoch===productionLoadEpoch&&state.workspace===id&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()}).catch(e=>{if(read===workspaceReadEpoch&&loadEpoch===productionLoadEpoch)toast(e.message)});
   }else if(!storyChild&&id!=='project.configuration'&&id!=='production.approach')renderPlaceholder(id);
 
-  if(restorePosition&&!isProduction()&&id!=='production.approach'&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition();
+  if(restorePosition&&!isProductionWorkspace()&&id!=='production.approach'&&typeof restoreWorkspacePosition==='function')restoreWorkspacePosition();
   if(updateUrl&&!(storyChild&&['story.sources','story.outline','story.script'].includes(previous)))window.scrollTo(0,0);
 }
 

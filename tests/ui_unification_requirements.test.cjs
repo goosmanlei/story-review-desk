@@ -44,6 +44,21 @@ function fixture(){
 }
 const row=(object_id,kind,payload={},id=object_id+'-r1')=>({object_id,id,current_revision:id,kind,version:1,created_at:'2026-10-04',payload:{title:object_id,blocks:[],...payload}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
+
+test('existing originals are visible before folded downstream plans without changing exact use edges',async()=>{
+  const f=fixture(),asset=row('old-image','ASSET',{components:[{id:'original',role:'original',mime:'image/png',file:'old.png'}]}),need=row('need','REQUIREMENT');
+  const edge=row('alternative','MATERIAL_RELATION',{semantics:'alternative',upstream:ref(asset),purpose:'compare old image'});
+  edge.direction='incoming';edge.upstream_record=asset;edge.downstream_record=need;
+  const downstream=Array.from({length:48},(_,i)=>({...row('use-'+i,'MATERIAL_RELATION',{semantics:'reuse',purpose:'planned use'}),direction:'outgoing',downstream:ref(need),downstream_record:need}));
+  const relations=[edge,...downstream],before=JSON.stringify(relations),previewed=[];f.c.state.materialReview={record:need};
+  f.c.api=async()=>({relations});f.c.openMaterialReference=reference=>previewed.push(reference);
+  const host=new Element('main');await f.c.renderMaterialRelations(host,need.object_id,need);
+  const groups=host.all().filter(n=>n.className==='material-use-group');assert.equal(groups[0].tag,'section');assert.match(groups[0].textContent,/已有形象 · 1/);
+  assert.equal(groups[1].tag,'details');assert.equal(groups[1].open,undefined);assert.match(groups[1].textContent,/沿用方案 · 48/);
+  const card=groups[0].all().find(n=>n.tag==='button');await card.onclick();assert.deepEqual(previewed,[edge.payload.upstream]);
+  assert.equal(groups[0].all().find(n=>n.tag==='img').src,'/api/production/files/old.png');
+  assert.equal(JSON.stringify(relations),before);assert.equal(f.c.state.materialReview.relation_records[0].id,edge.id);
+});
 function material(){
   const need=row('need','REQUIREMENT',{media_type:'image',slot:'overall',scope:{object_id:'form',revision_id:'form-r1'}});
   const asset=row('asset','ASSET',{media_type:'image',candidate_requirements:[ref(need)],components:[{id:'original',role:'original',mime:'image/png'},{id:'preview',role:'preview',mime:'image/png'}]});

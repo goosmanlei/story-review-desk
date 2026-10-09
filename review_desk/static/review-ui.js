@@ -159,7 +159,7 @@ if(typeof window!=='undefined')window.addEventListener('popstate',event=>{
   event.stopImmediatePropagation();dialog.closedByHistory=true;dialog.close();
 },{capture:true});
 function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
-  const readingPositions=[...document.querySelectorAll('.breakdown-body,.breakdown-scene-list,.review-dialog-body,.unified-card-material')].map(node=>({node,top:node.scrollTop,left:node.scrollLeft})),windowPosition=typeof window!=='undefined'?{x:window.scrollX,y:window.scrollY}:null;
+  const readingPositions=[...document.querySelectorAll('#screenplay-reader,#structure-reader,#source-view,.breakdown-body,.breakdown-scene-list,.review-dialog-body,.unified-card-material')].map(node=>({node,top:node.scrollTop,left:node.scrollLeft})),windowPosition=typeof window!=='undefined'?{x:window.scrollX,y:window.scrollY}:null;
   const restoreReading=()=>{for(const p of readingPositions)if(p.node.isConnected){p.node.scrollTop=p.top;p.node.scrollLeft=p.left}if(windowPosition)window.scrollTo(windowPosition.x,windowPosition.y)};
   const dialog=el('dialog','review-dialog '+className),header=el('header','review-dialog-header');
   const title=nodeText('h2',null,label,header);title.id='review-dialog-'+(++reviewDialogSerial);dialog.setAttribute('aria-labelledby',title.id);
