@@ -665,7 +665,7 @@ function textSelectionAnchor(host,blocks,attribute){
   return {block_id:blocks[first].id,end_block_id:blocks[last].id,start,end,quote};
 }
 function selectedAnchor(){
-  if(isProduction())return state.productionSelected?textSelectionAnchor($('#production-blocks'),productionTextBlocks(state.productionSelected),'data-block-id'):null;
+  if(isProduction())return state.productionSelected?textSelectionAnchor(state.unifiedCardRoot?.querySelector('#production-blocks')||$('#production-blocks'),productionTextBlocks(state.productionSelected),'data-block-id'):null;
   if(isStructure())return selectedStructureAnchor();
   if(isScript())return scriptScene()?textSelectionAnchor($('#screenplay-text'),scriptEpisode().payload.blocks,'data-block-id'):null;
   if(state.workspace!=='story.sources'||!state.current)return null;
@@ -686,7 +686,7 @@ function selectionBounds(host){
 function updateSelectionAction(){
   const anchor=selectionPointer===null&&!state.drawMode?selectedAnchor():null;
   if(!anchor){hideSelectionAction();return}
-  const selection=getSelection(),range=selection.getRangeAt(0),host=$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view'),bounds=selectionBounds(host);
+  const selection=getSelection(),range=selection.getRangeAt(0),host=isProduction()&&state.unifiedCardRoot?state.unifiedCardRoot:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view'),bounds=selectionBounds(host);
   const rects=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0&&r.right>bounds.left&&r.left<bounds.right&&r.bottom>bounds.top&&r.top<bounds.bottom);
   if(!rects.length){hideSelectionAction();return}
   // Stay by the visible end of the gesture, even when the beginning has scrolled away.

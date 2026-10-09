@@ -209,6 +209,56 @@ class UIProjectionRequirementsTest(unittest.TestCase):
         self.assertEqual(responses[1]['focused_outside']['object_id'], 'need-full-overall')
         self.assertEqual(responses[2]['detail']['record']['id'], exact['revision_id'])
 
+    def test_entity_demand_is_in_list_count_and_card_without_extending_approval(self):
+        from review_desk import generation as g
+        self.setup_plans()
+        self.decide()
+        scope=g.current_scope(self.store,'songbook')
+        accepted=g.accepted(self.store,'songbook')['id']
+        need=self.requirement('entity-identity')
+        need['payload']['scope']=self.ref('songbook')
+        self.put(need)
+        view=g.snapshot(self.store,'songbook')
+        self.assertIn('entity-identity',[r['object_id'] for r in view['requirements']])
+        self.assertIn('entity-identity',view['material_versions'])
+        self.assertEqual(view['decision_scope'],scope)
+        self.assertEqual(g.accepted(self.store,'songbook')['id'],accepted)
+        entries=ui.material_entries(self.store)
+        self.assertIn('entity-identity',[r['object_id'] for r in entries])
+        counts=ui.entity_summaries(self.store,[view['entity']],entries)['entity_material_counts']
+        self.assertEqual(counts['songbook']['audio'],3)
+        card=ui.card(self.store,'entity-identity',self.ref('entity-identity')['revision_id'])
+        self.assertIn('entity-identity',card['entity_review']['material_versions'])
+
+    def test_retired_need_does_not_hide_exact_subject_or_coverage(self):
+        from unittest.mock import patch
+        self.subject_only_asset()
+        self.put(self.full())
+        self.change('voice',states=[self.ref('full')],state_coverage=[{'state':self.ref('full'),'role':'overall','component_id':'original','detail':'完整覆盖'}])
+        detail=p.snapshot(self.store,object_id='voice')
+        detail['review_context']['requirements']=[{'unavailable':True,'payload':{}}]
+        with patch.object(p,'snapshot',return_value=detail):
+            card=ui.card(self.store,'voice')
+        self.assertEqual(card['scope']['id'],self.ref('full')['revision_id'])
+        self.assertEqual(card['entity_review']['entity']['object_id'],'songbook')
+        self.assertEqual(card['form']['object_id'],'full')
+
+    def test_each_shot_demand_has_complete_exact_source_navigation(self):
+        self.scene_and_state()
+        for oid,slot in [('shot-camera','camera'),('shot-frame','first_frame'),('shot-video','video')]:
+            need=self.requirement(oid);need['payload'].update(scope=self.ref('shot'),slot=slot)
+            self.put(need)
+        for oid in ('shot-camera','shot-frame','shot-video'):
+            card=ui.card(self.store,oid)
+            self.assertIsNone(card['entity_review'])
+            self.assertEqual(card['scope']['id'],self.ref('shot')['revision_id'])
+            self.assertEqual({i['object_id'] for i in card['source_materials']},{'shot-camera','shot-frame','shot-video'})
+        # A state's application to a shot remains a reference to that state's
+        # demand, never a demand originating in this shot.
+        self.applicability('applied-state-demand','need-full-overall','shot')
+        card=ui.card(self.store,'shot-camera')
+        self.assertNotIn('need-full-overall',{i['object_id'] for i in card['source_materials']})
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -393,6 +393,15 @@ def _snapshot(store, entity_id, revision_id=None):
     content_accepted=content_decision if content_decision and content_decision['payload']['verdict']=='accepted' and (
         compatible or (content_decision['payload'].get('acceptance_model')==CONTENT_MODEL and content_decision['payload']['acceptance_scope']==scope)) else None
     acceptance_mode='generation' if prep['complete'] else 'content'
+    # Entity-level demands are browsing context. Keep the immutable decision
+    # scope and preparation above unchanged; displaying them grants no approval.
+    if not revision_id:
+        own = ref(data['entity'])
+        from .production_breakdown import exact_scoped
+        entity_needs = [r for r in exact_scoped(store, 'REQUIREMENT', own['revision_id'])
+                        if r['payload'].get('status') != 'withdrawn']
+        data['requirements'] = list({r['id']: r for r in [*data['requirements'], *entity_needs]}.values())
+        for need in entity_needs:targets[need['id']] = need
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*retained_states,*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     from .material_plans import snapshot as material_snapshot, memberships as plan_memberships

@@ -3,7 +3,7 @@ const isMaterialReview=()=>isProduction()&&!!state.materialReview&&materialRows(
 function materialVersionCommentRows(round){return [...new Map([...(round?.members||[]),...Object.values(round?.definition_records||{})].filter(Boolean).map(row=>[row.id,row])).values()]}
 function materialRows(detail){
   const contexts=Object.values(detail.review_contexts||{current:detail.review_context}).filter(Boolean);
-  return [detail.record,...detail.history,...(detail.candidate_records||[]),...Object.values(detail.material_versions||{}).flatMap(rounds=>rounds.flatMap(materialVersionCommentRows)),...contexts.flatMap(c=>[c.call,...c.requirements])].filter(Boolean);
+  return [detail.record,...(detail.history||[]),...(detail.candidate_records||[]),...Object.values(detail.material_versions||{}).flatMap(rounds=>rounds.flatMap(materialVersionCommentRows)),...contexts.flatMap(c=>[c.call,...(c.requirements||[])])].filter(Boolean);
 }
 function materialReviewComments(){const ids=new Set(materialRows(state.materialReview).map(r=>r.id));return state.comments.filter(c=>ids.has(c.target_revision_id))}
 function materialCardModels(needs,items){
@@ -314,9 +314,7 @@ function renderMaterialWorkspace(root,detail){
   const displayed=materialCandidateChoice(candidates,candidateTarget)?.record;
   if(displayed?.payload.blocks?.length){nodeText('h3',null,'生成结果自检',root);reviewTextBlocks(root,displayed)}
   if(!displayed)return;
-  const uses=el('section');nodeText('h3',null,'关联用途',uses);
-  for(const item of displayed.payload.state_coverage||[]){productionRefLink(uses,item.state);nodeText('p',null,item.detail,uses)}
-  root.append(uses);
+  renderMaterialUses(root,displayed,detail.reference_titles||[]);
   const actions=el('div','production-toolbar');
   const activate=fn=>()=>{focusProductionReview({record:displayed,history:detail.history,uses:detail.uses});return fn()};
   if(!round&&detail.history.length>1)productionButton(actions,'并排比较版本',activate(()=>showProductionCompare(root)));
@@ -324,6 +322,12 @@ function renderMaterialWorkspace(root,detail){
   root.append(actions);
   const requirement=detail.adoptionContext?.requirements?.find(need=>need.object_id===mid);
   if(requirement&&typeof renderMaterialAdoptionControls==='function')renderMaterialAdoptionControls(root,{...detail,record:requirement,candidate_records:candidates.map(item=>item.record)});
+}
+function renderMaterialUses(root,record,titles=[]){
+  const coverage=record.payload.state_coverage||[];if(!coverage.length)return;
+  const uses=el('section');nodeText('h3',null,'关联用途',uses);
+  for(const item of coverage){productionRefLink(uses,item.state,productionName(item.state,titles));nodeText('p',null,item.detail,uses)}
+  root.append(uses);
 }
 let materialCommentLocation=null;
 function cancelMaterialCommentLocation(){
