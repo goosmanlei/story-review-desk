@@ -19,6 +19,32 @@ class MediaMethodTest(unittest.TestCase):
     setup_plans = fixtures.GenerationTest.setup_plans
     decide = fixtures.GenerationTest.decide
 
+    def test_supporting_inputs_freeze_exact_docs_and_validate_outer_references(self):
+        import json
+        self.setup_plans()
+        seed(self.store, 'media-plan', ['draft', 'review', 'result'])
+        old = p.record(self.store, 'need-full-overall')
+        # Real originals can quote retired historical links. That document is
+        # evidence, not a request to revive its transitive references.
+        extra = self.store.put_object('support', 'NOTE', {'text': '原件比对', 'archive_text': json.dumps({'revision_id': 'retired'})})
+        ref = self.ref('support')
+        value = {'object_id': old['object_id'], 'payload': old['payload'], 'expected_version': old['version'],
+                 'run_id': 'support-run', 'step_id': 'first', 'supporting_references': [ref],
+                 'method_conditions': {'need_sound': True}}
+        prepared = mm.prepare(self.store, value)
+        inputs = prepared['request']['inputs']
+        self.assertEqual(json.loads(inputs['supporting_records'][0]['content_json'])['text'], '原件比对')
+        self.assertTrue(prepared['request']['conditions']['need_sound'])
+        self.assertEqual(methods.prepare(self.store, prepared['request']), prepared['execution'])
+        with self.assertRaisesRegex(ValueError, '媒体类型'):
+            mm.prepare(self.store, {**value, 'method_conditions': {'media_type': 'video'}})
+        with self.assertRaises((ValueError, KeyError)):
+            mm.prepare(self.store, {**value, 'step_id': 'bad', 'supporting_references': [{'object_id':'missing','revision_id':'missing'}]})
+        with self.assertRaises(ValueError):
+            mm.prepare(self.store, {**value, 'step_id': 'too-many', 'supporting_references': [ref]*101})
+        with self.assertRaises(Conflict):
+            mm.prepare(self.store, {**value, 'supporting_references': []})
+
     def test_prepare_rejects_source_content_drift(self):
         import json
         from test_review import SOURCE
