@@ -57,6 +57,26 @@ class MethodsTest(unittest.TestCase):
             methods.save(self.store, {'category': 'skill', 'name': 'review', 'expected_version': 2, 'payload': payload})
         self.assertEqual(methods.read(self.store, self.method['object_id'])['payload']['title'], 'Other editor')
 
+    def test_delivered_instructions_include_required_package_files(self):
+        payload = copy.deepcopy(self.method['payload'])
+        payload['files']['references/contract.md'] = 'Return the exact record shape.'
+        method = methods.save(self.store, {'category': 'skill', 'name': 'review', 'expected_version': 1, 'payload': payload})
+        binding = methods.save(self.store, {'category': 'binding', 'name': 'comment-polish', 'expected_version': 1,
+            'payload': {'work_type': 'comment-polish', 'rules': [{**methods.reference(method), 'when': {}}]}})
+        execution = methods.prepare(self.store, self.request)
+        delivered = methods.instructions(execution['payload']['package'])
+        self.assertIn(payload['files']['references/contract.md'], delivered)
+        self.assertIn(self.resource['payload']['files']['references/main.md'], delivered)
+
+    def test_resume_rejects_damaged_original_resource(self):
+        methods.prepare(self.store, self.request)
+        payload = copy.deepcopy(self.resource['payload'])
+        payload['files']['references/main.md'] = 'A different text under a damaged original revision.'
+        self.store.db.execute('UPDATE revisions SET payload=? WHERE id=?',
+            (json.dumps(payload), self.resource['revision_id']))
+        with self.assertRaisesRegex(ValueError, '恢复准确资源包'):
+            methods.prepare(self.store, self.request)
+
     def test_wrong_target_run_work_or_inputs_cannot_reuse_receipt(self):
         execution = methods.prepare(self.store, self.request)
         identity = {k: self.request[k] for k in ('work_type', 'run_id', 'step_id', 'target')}
