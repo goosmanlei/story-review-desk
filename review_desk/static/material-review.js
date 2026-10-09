@@ -3,13 +3,13 @@ function reviewDecisionLabel(row){
   const p=row.payload;return p.review_type==='generation_master'&&p.verdict==='accepted'?'母版认可':({accepted:'认可',passed:'通过',changes_requested:'需修改',rejected:'不通过',revoked:'已取消',pending:'待定',impact_resolved:'变更已复核'})[p.verdict]||p.verdict;
 }
 function reviewDecisionTime(value){return new Date(value).toLocaleString('zh-CN')}
-function renderReviewDecision(parent,row,{historical=false}={}){
+function renderReviewDecision(parent,row,{historical=false,targetRevision=null}={}){
   const p=row.payload,box=el('details','review-decision');
   box.dataset.decisionId=row.id;
   nodeText('summary',null,`${historical?'历史 · ':''}${reviewDecisionLabel(row)} · ${p.actor==='user'?'用户':p.actor} · ${reviewDecisionTime(row.created_at)}`,box);
   nodeText('p',null,p.reason,box);
   nodeText('p','production-meta',p.review_type==='generation_master'?'范围：此准确原件作为母版；新候选、派生用途与镜头采用分别决定。':p.acceptance_model?'范围：此决定记录的准确内容及子项；取消仅作用于这条许可路径。':'范围：记录中指定的准确对象修订；不会自动建立素材采用。',box);
-  materialReferenceLink(box,p.target,'查看判断对应的准确对象'+(row.target_version?' · 记录修订 '+row.target_version:''));
+  if(p.target.revision_id!==targetRevision)materialReferenceLink(box,p.target,'查看判断对应的准确对象'+(row.target_version?' · 记录修订 '+row.target_version:''));
   for(const block of p.blocks||[])if(block.text!==p.reason)nodeText('p',null,block.text,box);
   if(p.evidence?.reply)nodeText('p',null,'当时回复：'+p.evidence.reply,box);
   parent.append(box);return box;
@@ -22,17 +22,19 @@ function renderDecisionScope(parent,scope,records=[]){
     for(const ref of refs){const exact=records.find(r=>r.id===ref.revision_id),line=el('p');materialReferenceLink(line,ref,exact?`${businessCode(exact)||''} · ${exact.title} · 记录修订 ${exact.version}`:null);section.append(line)}parent.append(section);
   }
 }
-function renderMaterialResultReview(root,row,context){
+function renderMaterialResultReview(root,row,context,{readOnly=false}={}){
   const section=el('section','material-result-review');section.dataset.judgmentTarget=row.id;section.setAttribute('aria-label','本原件人工判断');root.append(section);
   let serial=0;
   const draw=(data,newDecision=null)=>{const expanded=new Set([...section.querySelectorAll?.('[data-decision-id]')||[]].filter(node=>node.open).map(node=>node.dataset.decisionId));section.replaceChildren();nodeText('h3',null,'本原件人工判断',section);
     nodeText('p','production-meta',`${businessTitle(row)} · 记录修订 ${row.version}；仅适用于此原件。`,section);
     if(data.conflicting)nodeText('p','production-issue','此原件有相反意见，尚无统一结论；请核对各份依据。',section);
     if(!data.current.length)nodeText('p',null,'此准确原件尚无人工判断。',section);
-    for(const item of data.current){const decision=renderReviewDecision(section,item);decision.open=expanded.has(item.id)||item.object_id===newDecision}
+    for(const item of data.current){const decision=renderReviewDecision(section,item,{targetRevision:readOnly?row.id:null});decision.open=expanded.has(item.id)||item.object_id===newDecision}
     if(data.history.length){const history=el('details');nodeText('summary',null,'其他修订与判断历史 · '+data.history.length,history);nodeText('p','production-meta','以下记录不作为此原件的当前结论；新修订与另一候选不会继承旧认可。',history);for(const item of data.history)renderReviewDecision(history,item,{historical:true});section.append(history)}
-    productionButton(section,'记录本版本审阅结论',()=>showProductionJudgment(section,row));
-    const draft=state.productionJudgmentDrafts?.[row.id];if(draft&&draft.open!==false&&!draft.saved)showProductionJudgment(section,row);
+    if(!readOnly){
+      productionButton(section,'记录本版本审阅结论',()=>showProductionJudgment(section,row));
+      const draft=state.productionJudgmentDrafts?.[row.id];if(draft&&draft.open!==false&&!draft.saved)showProductionJudgment(section,row);
+    }
   };
   section.refreshJudgments=async newDecision=>{const token=++serial;const data=await api('/api/production/judgments?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));if(section.isConnected&&token===serial){context.judgments=data;context.judgmentEpoch=state.judgmentEpochs?.[row.id]||0;draw(data,newDecision)}};
   if(context?.judgments&&(context.judgmentEpoch||0)===(state.judgmentEpochs?.[row.id]||0))draw(context.judgments);else section.refreshJudgments().catch(error=>{if(section.isConnected)nodeText('p','production-issue',error.message,section)});
@@ -547,6 +549,7 @@ async function openMaterialReference(ref,trigger,source=false){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
       const session=components.some(c=>/^(audio|video)\//.test(c.mime))?referenceReviewSession(dialog,detail):null;
       if(!components.length)throw new Error('引用的文件组成不存在');
+      renderMaterialResultReview(body,row,detail.review_contexts?.[row.id]||detail.review_context||{},{readOnly:true});
       for(const c of components){
         const url='/api/production/files/'+encodeURIComponent(c.file);
         if(c.mime.startsWith('image/')){const img=el('img');img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
@@ -558,7 +561,9 @@ async function openMaterialReference(ref,trigger,source=false){
       }
 
     }
-    for(const b of (p.blocks||[]).filter(b=>!ref.block_ids?.length||ref.block_ids.includes(b.id)))nodeText('p','reference-text',b.text,body);
+    const blocks=(p.blocks||[]).filter(b=>!ref.block_ids?.length||ref.block_ids.includes(b.id));
+    if(row.kind==='ASSET'&&blocks.length)nodeText('h3',null,'生成时自检 · '+reviewDecisionTime(row.created_at),body);
+    for(const b of blocks)nodeText('p','reference-text',b.text,body);
     if(row.kind==='REQUIREMENT')nodeText('p','production-issue','此引用是尚未产出准确原件的素材需求',body);
     if(p.generation){nodeText('h3',null,'参数 · '+(p.generation.model||'模型未知'),body);nodeText('pre',null,row.review_parameter_text||JSON.stringify(p.generation.parameters,null,2),body);renderMaterialInputs(body,p.generation.inputs||[],row.review_input_records||[],row);nodeText('h3',null,'提示词',body);nodeText('pre',null,p.generation.prompt,body)}
     paintReviewCommentCounts();
