@@ -112,9 +112,10 @@ function renderMaterialInputs(host,inputs,records=[],need=null){
   }
 }
 function renderActualGeneration(parent,context){
-  const call=context?.call,box=el('section','material-actual-inputs');nodeText('h3',null,'生成内容',box);
+  const call=context?.call,external=call?.payload.method==='external-edit'&&!call.payload.model,box=el('section','material-actual-inputs');nodeText('h3',null,external?'制作记录':'生成内容',box);
   if(!call){nodeText('p','production-meta','未登记真实调用，无法还原生成内容',box);parent.append(box);return}
   const host=materialTextSurface(box,call);
+  if(external){nodeText('p','production-meta',call.payload.tool,host);renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[]);materialField(host,call,'call.prompt','制作说明','pre');parent.append(box);return}
   materialExecution(host,call.payload);
   materialParameters(host,call,'call',call.payload.model);
   renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[]);
