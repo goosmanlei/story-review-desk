@@ -61,6 +61,7 @@ class ProductionScopeTest(unittest.TestCase):
         _,historical=graph(self.store,old['object_id'],old['revision_id'],'other-scene')
         self.assertIn(oldshot['revision_id'],{row['id'] for row,_ in historical})
         self.assertNotIn('other-scene',{loc['scene'] for _,loc in graph(self.store)[1]})
+        with self.assertRaisesRegex(ValueError,'所属'):graph(self.store,scene='av-scene')
         with self.assertRaisesRegex(ValueError,'不属于'):graph(self.store,'av-episode',scene='other-scene')
         with self.assertRaises((KeyError,ValueError)):graph(self.store,'av-episode','missing')
 

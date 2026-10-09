@@ -9,6 +9,7 @@ from .material_storage import canonical_id
 
 def graph(store, episode=None, revision=None, scene=None):
     editions = sorted(light.rows(store, 'AV_EPISODE'), key=lambda r: (r['payload']['number'], r['object_id']))
+    if scene and not episode:raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
     if revision and not episode: raise ValueError('准确视听版本需要指定视听集')
     if episode:
         selected = light.record(store, episode, revision)
