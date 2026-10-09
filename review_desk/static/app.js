@@ -491,7 +491,7 @@ function renderConfigurations({preserve=false}={}){
       input.name=key;input.setAttribute('aria-label',spec.label);
       if(spec.type!=='favicon')label.append(input);
       if(spec.type==='env_name'){input.autocomplete='off';nodeText('small',null,'只保存环境变量名，不保存密钥；变量需由服务容器提供。',label)}
-      if(spec.type==='integer'){input.min=spec.min;input.max=spec.max;input.step=1;nodeText('small',null,`填写 ${spec.min}—${spec.max} 之间的整数，限制润色参考的上下文字数。`,label)}
+      if(spec.type==='integer'){input.min=spec.min;input.max=spec.max;input.step=1;nodeText('small',null,`填写 ${spec.min}—${spec.max} 之间的整数，限制完整参考的字符总数，包含原文、意见、背景、来源信息与格式；完整圈选无法容纳时会提示调整。`,label)}
       if(['env_name','integer'].includes(spec.type)){
         const error=nodeText('small','config-field-error','',label);error.id=`config-${scope}-${key}-error`;error.hidden=true;input.setAttribute('aria-describedby',error.id);
         const check=()=>validateField(input,spec,error);input.onblur=check;input.oninput=()=>{if(!error.hidden)check()};validationFields.push({input,check});
@@ -883,14 +883,16 @@ function renderComments({replaceDraft=false}={}){
     const cancel=nodeText('button','destructive',state.editing?'取消编辑':'取消本次评论',actions);cancel.onclick=()=>abandonDraft(state.editing?'未保存的编辑已放弃':'本次未提交评论已取消');editor.append(actions);
     bindCommentEditorShortcuts(textarea,{submit:save,cancel});
     if(state.preview){const basis=el('details','context-preview');basis.open=state.previewExpanded;basis.addEventListener('toggle',()=>{state.previewExpanded=basis.open});const summary=el('summary',null,'本次润色参考 · 可核对');basis.append(summary);
-      const context=state.preview.context;nodeText('p',null,`创作阶段：${context.creative_stage.label}；故事背景：${context.story_background}；创作背景：${context.creative_background}`,basis);
-      nodeText('p',null,`载体：${context.target_medium}；受众：${context.audience}；风格：${context.style}`,basis);
-      nodeText('p',null,`当前圈选：${context.selected_quote}；上下文段落：${context.neighbor_blocks.map(b=>b.text).join(' / ')}`,basis);
+      const context=state.preview.context;nodeText('p',null,context.review_task||`${context.creative_stage.label}审阅`,basis);
+      if(state.preview.budget)nodeText('small',null,`参考共 ${state.preview.budget.used} / ${state.preview.budget.limit} 字符（含原文、意见、背景、来源信息与格式）。`,basis);
+      nodeText('p',null,`当前圈选：${context.selected_quote||'整体／图像意见'}`,basis);
+      if(context.project_background)nodeText('p',null,`项目背景：${Object.values(context.project_background).map(value=>typeof value==='object'?value.label:value).join('；')}`,basis);
       if(context.visual)nodeText('p',null,`图像／图示：${context.visual.title} · ${context.visual.file}；圈选点：${context.region_points?JSON.stringify(context.region_points):'整图'}`,basis);
-      for(const doc of context.source_documents){const row=el('p');nodeText('strong',null,`${doc.title} · ${doc.version_type} · ${doc.truncated?'节选':'全文'}：`,row);nodeText('span',null,doc.text,row);basis.append(row)}
-      nodeText('small',null,`上下文 SHA-256：${state.preview.context_sha256}`,basis);editor.append(basis)}
+      for(const doc of context.source_documents){const row=el('div');nodeText('strong',null,`${doc.title} · ${doc.role==='comparison'?'仅供比较':doc.role==='basis'?'准确改编依据':'当前评论依据'} · ${doc.identity_only?'版本身份':doc.truncated?'节选':'全文'}`,row);nodeText('p',null,doc.purpose||doc.version_type,row);if(!doc.identity_only)nodeText('p',null,doc.text||'总预算内未容纳正文；以完整圈选为准，不推断缺失内容。',row);const identity=el('details');nodeText('summary',null,'版本与出处',identity);nodeText('small',null,`${doc.id} · ${doc.revision}；${doc.origin||''} ${doc.source_url||''}${Number.isInteger(doc.start)?`；原文字符 ${doc.start}—${doc.end} / ${doc.total_chars}`:''}`,identity);row.append(identity);basis.append(row)}
+      for(const notice of context.notices||[])nodeText('p','config-field-error',notice,basis);
+      const back=nodeText('button',null,'回到意见',basis);back.onclick=()=>{state.previewExpanded=false;basis.open=false;textarea.focus({preventScroll:true});textarea.scrollIntoView({block:'nearest'})};editor.append(basis)}
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
-      const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{try{localStorage.setItem(draftKey(),state.suggestion)}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，原输入与润色建议仍保留，请复制留存后重试。');return}state.suggestion=null;commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
+      const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{try{localStorage.setItem(draftKey(),state.suggestion)}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，原输入与润色建议仍保留，请复制留存后重试。');return}state.suggestion=null;state.preview=null;state.previewExpanded=false;commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
   nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
   if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,open);else for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
@@ -971,9 +973,9 @@ async function polishComment(){
   const key=draftKey(),target=commentTarget(),request={...target,anchor:state.anchor,body:text};
   $('[data-polish]').disabled=true;
   try{
-    const preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
+    const preview=state.preview&&state.previewRequest===JSON.stringify(request)?state.preview:await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
     if(!sameDraft(key,text,target))return;
-    state.preview=preview;state.previewExpanded=false;
+    state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=false;
     const result=await api('/api/comments/polish',{method:'POST',body:JSON.stringify({...request,expected_context_sha256:preview.context_sha256})});
     if(!sameDraft(key,text,target))return;
     state.suggestion=result.suggestion;if(renderPolishFeedback(key,text,target))toast('润色建议已生成，原草稿未修改');
@@ -985,7 +987,7 @@ async function previewPolish(){
   try{
     const preview=await api('/api/comments/polish-context',{method:'POST',body:JSON.stringify(request)});
     if(!sameDraft(key,text,target))return;
-    state.preview=preview;state.previewExpanded=true;if(renderPolishFeedback(key,text,target))toast('已列出 AI 将参考的资料与创作上下文');
+    state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=true;if(renderPolishFeedback(key,text,target))toast('已列出本次润色使用的准确参考');
   }catch(error){if(sameDraft(key,text,target))toast(error.message)}
 }
 async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
