@@ -6,6 +6,7 @@ import time
 import queue
 import threading
 import os
+import fcntl
 import shutil
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -122,6 +123,15 @@ class ReviewServer(HTTPServer):
 
 
 class ReviewHandler(BaseHTTPRequestHandler):
+    def handle_one_request(self):
+        self._write_window = None
+        try:
+            return super().handle_one_request()
+        finally:
+            if self._write_window is not None:
+                self._write_window.close()
+                self._write_window = None
+
     def parse_request(self):
         if not super().parse_request():
             return False
@@ -147,6 +157,16 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self._json({'error': '体验版本已更新，请刷新页面后重新操作',
                         'publication_changed': True}, 409)
             return False
+        if self.command not in ('GET', 'HEAD', 'OPTIONS'):
+            window = (self.server.root / '.runtime/http-write.lock').open('a')
+            try:
+                fcntl.flock(window, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                window.close()
+                self.close_connection = True
+                self._json({'error': '正在更新系统配置，草稿未提交；请稍后重试', 'write_window': True}, 503)
+                return False
+            self._write_window = window
         return True
 
     cache_paths = frozenset(('/api/production/index', '/api/production/breakdown',
@@ -178,6 +198,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", (MEDIA_TYPE if graph else "application/json")+"; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-store")
+        if status == 503:
+            self.send_header('Retry-After', '5')
         self.send_header('Vary', 'Accept, Accept-Encoding')
         self.send_header('X-Review-Cache', getattr(self, '_cache_state', 'bypass'))
         if compressed:

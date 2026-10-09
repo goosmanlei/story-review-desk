@@ -214,6 +214,9 @@ def choose_route(store, request):
             elif action=='optional' and type(key) is int and key in optional and type(value) is bool:plan['inputs'][key]['enabled']=value
             else:raise ValueError('此方案没有该路线或条件选项')
             payload['shot_reference_operation']={'id':op,'fingerprint':fingerprint,'operation':'route'}
+            from .method_media import adjusted, activation
+            if activation(store) or payload.get('method_basis'):
+                adjusted(payload, need, 'route', request)
             p.validate_payload(store,need['object_id'],'REQUIREMENT',payload)
             result=store._put_object(need['object_id'],'REQUIREMENT',payload,need['version'],
                 [{'revision_id':ref['revision_id'],'role':path} for path,ref in p.references(payload)])

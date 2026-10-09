@@ -232,7 +232,10 @@ class Store:
         if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
             raise Conflict("object version or kind changed")
         if kind == 'REQUIREMENT' and payload.get('generation'):
-            from .method_media import verify
+            from .method_media import verify, administrative
+            payload, administrative_ref = administrative(self, object_id, payload, current)
+            if administrative_ref:
+                dependencies = [d for d in dependencies if not d['role'].startswith('method_adjustment.')] + [administrative_ref]
             verify(self, object_id, payload)
         if kind == "CALL":
             from .generation import validate_call

@@ -447,6 +447,21 @@ def restore(store, export_dir):
                     dependencies_by_revision.setdefault(dependency['from_revision'],set()).add((dependency['to_revision'],dependency['role']))
                 for revision in framework["revisions"]:
                     payload = json.loads(revision["payload"])
+                    from . import methods
+                    if payload.get('format') in methods.FORMATS.values():
+                        method_row = methods.read(store, revision_id=revision['id'])
+                        methods.validate(store, payload)
+                        methods.verify_dependencies(store, method_row)
+                        if payload['format'] == methods.FORMATS['execution']:
+                            methods.verify_execution(store, methods.reference(method_row), {k:payload[k] for k in ('work_type','run_id','step_id','target')}, payload['inputs'])
+                            methods.require(methods.resolve(store, payload['work_type'], payload['conditions'], payload['package']['binding']) == payload['package'], '恢复方法与执行快照不同')
+                        elif payload['format'] == methods.FORMATS['artifact']:
+                            execution = methods.read(store, **payload['execution'])
+                            methods.artifact(store, {**payload, 'inputs':execution['payload']['inputs']})
+                    if payload.get('method_basis') or payload.get('method_adjustment'):
+                        if objects[revision['object_id']]['kind'] == 'REQUIREMENT':
+                            from .method_media import verify
+                            verify(store, revision['object_id'], payload, revision['id'])
                     if payload.get("format") in FORMATS:
                         validate_payload(store, revision["object_id"], objects[revision["object_id"]]["kind"], payload, inspect=False, check_current=False)
                         expected_deps = {(ref["revision_id"], role) for role, ref in references(payload) if not consolidation.deleted(store, ref['revision_id'])}

@@ -12,6 +12,7 @@ from urllib.request import ProxyHandler, Request, build_opener
 from review_desk.server import ReviewHandler, ReviewServer
 from review_desk.store import Store
 from test_review import SOURCE
+from test_methods import seed
 
 
 class PolishRevisionHTTPTest(unittest.TestCase):
@@ -19,6 +20,7 @@ class PolishRevisionHTTPTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix='polish-revision-test-')
         self.root = Path(self.temp.name)
         store = Store(self.root / '.runtime/review.sqlite3')
+        seed(store)
         store.put_source(SOURCE)
         self.old = next(row for row in store.objects() if row['id'] == SOURCE['id'])['current_revision']
         store.put_source({**SOURCE, 'id': 'other-source'})
@@ -39,7 +41,7 @@ class PolishRevisionHTTPTest(unittest.TestCase):
                 ready.put(server)
                 server.serve_forever(poll_interval=.01)
 
-        self.stub_patch = patch('review_desk.server.suggest', side_effect=lambda preview: {
+        self.stub_patch = patch('review_desk.server.suggest', side_effect=lambda preview, store: {
             'suggestion': '[MOCK ONLY] technical opinion', 'saved': False,
             'context_sha256': preview['context_sha256']})
         self.stub = self.stub_patch.start()
