@@ -169,6 +169,16 @@ test('closing an obsolete modal cannot restore its saved reader or URL over newe
   assert.equal(ctx.state.productionSelected,newReader);
   assert.equal(new URL(ctx.location.href).searchParams.get('workspace'),'story.sources');
 });
+test('closing during a second reference save waits for that response instead of refreshing the earlier receipt',async()=>{
+  for(const pending of [true,false]){
+    const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f),receipts=[];
+    ctx.fetch=async()=>({ok:true,json:async()=>m.result});
+    const selection={saved:{number:1},pending,onSaved:result=>receipts.push(result)};
+    await ctx.openUnifiedMaterial({...ref(f.need),shotReference:selection},null);
+    m.dialog.isConnected=false;m.dialog.listeners.close();
+    assert.equal(receipts.length,pending?0:1);
+  }
+});
 test('saving the restored outer draft cannot overwrite a closed modal draft',async()=>{
   const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f);
   ctx.restoreProductionDraft();ctx.state.anchor={type:'global'};ctx.state.editing='outer-comment';

@@ -81,6 +81,7 @@ function loadStoryData(){
 }
 function initializeStoryReaders(url){
   state.structureRevision=resolveStructureRevision(url.searchParams.get('structure_revision'));
+  state.structureRouteError=url.searchParams.get('structure_revision')&&!state.structureRevision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择可用稿次。':null;
   chooseSource(url.searchParams.get('source')||state.sources[0]?.id,true,false,url.searchParams.has('source'));
   chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
 }
@@ -845,11 +846,12 @@ function commentCard(comment){
     const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>editComment(comment);
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
   }else{const reopen=nodeText('button',null,'重新打开',actions);reopen.onclick=()=>changeComment(comment,'REOPEN')}
-  card.append(actions);return card;
+  card.append(actions);if(typeof appendCommentReviewAction==='function')appendCommentReviewAction(card,comment);return card;
 }
 
 function hasCommentTarget(){
   if(!['story.sources','story.outline','story.script'].includes(state.workspace)&&!isProduction())return false;
+  if(isScript()&&state.screenplayRouteError)return false;
   const target=commentTarget();
   if(!(target.target_object_id||target.source_id)||!target.target_revision_id)return false;
   return !isStructure()||!!state.structure?.revisions.some(revision=>revision.id===target.target_revision_id);
@@ -865,6 +867,7 @@ function renderComments({replaceDraft=false}={}){
   $('#open-count').textContent=`${open.length} 待处理`;
   const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
   $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史待决 ${older}`:`查看评论 · ${open.length}`;
+  if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
   if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);if(typeof isEntityReview==='function'&&isEntityReview())nodeText('small',null,'评论对象：'+(state.productionSelected.kind==='REPRESENTATION'?'整个实体':state.productionSelected.payload.title),editor);
@@ -990,7 +993,15 @@ async function previewPolish(){
     state.preview=preview;state.previewRequest=JSON.stringify(request);state.previewExpanded=true;if(renderPolishFeedback(key,text,target))toast('已列出本次润色使用的准确参考');
   }catch(error){if(sameDraft(key,text,target))toast(error.message)}
 }
-async function changeComment(comment,action){try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}catch(error){toast(error.message)}}
+const commentChanges=new Set();
+async function changeComment(comment,action){
+  if(commentChanges.has(comment.id))return;
+  commentChanges.add(comment.id);commentReviewDialog?.reviewRefresh?.();
+  commentReviewDialog?.reviewError?.('');
+  try{await api(`/api/comments/${comment.id}`,{method:'PATCH',body:JSON.stringify({action,expected_version:comment.version})});await refreshComments();toast(action==='CLOSE'?'评论已关闭':'评论已重新打开')}
+  catch(error){toast(error.message);commentReviewDialog?.reviewError?.(error.message);if(error.status===409)await refreshComments().catch(()=>{})}
+  finally{commentChanges.delete(comment.id);commentReviewDialog?.reviewRefresh?.()}
+}
 function selectComment(id){state.selected=id;openPanel();renderActiveReader();renderComments();setTimeout(()=>$('#comment-'+escapeSelector(id))?.scrollIntoView({block:'nearest'}),0)}
 function revealLocatedComment(){
   if(window.innerWidth<1200){

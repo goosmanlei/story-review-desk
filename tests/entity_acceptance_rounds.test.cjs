@@ -85,3 +85,14 @@ test('entity own refresh failure stays quiet after a new actual detail read take
  const newer=f.context.openProductionRecord('new-entity');await flush();requests[1].reject(Error('old refresh failure'));await saving;assert.ok(!f.messages.some(s=>s.includes('old refresh failure')));
  requests[2].reject(Error('new read stopped'));await assert.rejects(newer,/new read stopped/);
 });
+
+test('entity decision reload retains the chosen material version and candidate',async()=>{
+ const f=setup();f.context.reloadEntityReview=f.realReload;
+ Object.assign(f.data,{selectedMaterialRounds:{need:2},selectedCandidates:{need:'candidate-one'},unifiedMaterialId:'need'});
+ const fresh={...f.data,selectedMaterialRounds:undefined,selectedCandidates:undefined,unifiedMaterialId:undefined};
+ f.context.fetch=async()=>({ok:true,json:async()=>fresh});
+ await f.realReload();
+ assert.equal(f.context.state.entityReview.selectedMaterialRounds.need,2);
+ assert.equal(f.context.state.entityReview.selectedCandidates.need,'candidate-one');
+ assert.equal(f.context.state.entityReview.unifiedMaterialId,'need');
+});

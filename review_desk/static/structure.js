@@ -68,11 +68,13 @@ function watchStructureIndex(){
 function structureRevision(){return state.structure?.revisions.find(r=>r.id===state.structureRevision)||null}
 function resolveStructureRevision(id){
   const revisions=state.structure?.revisions||[];
-  return revisions.some(revision=>revision.id===id)?id:revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
+  if(id)return revisions.some(revision=>revision.id===id)?id:null;
+  return revisions.some(revision=>revision.id===state.structure.current_revision)?state.structure.current_revision:null;
 }
 function chooseStructureRevision(id,updateUrl=true){
   if(typeof rememberStoryDraft==='function')rememberStoryDraft();
   const revision=resolveStructureRevision(id),changed=revision!==state.structureRevision;
+  state.structureRouteError=id&&!revision?'指定的结构修订不存在或已不可用；未打开其他稿次。请选择可用稿次。':null;
   if(changed){
     if(isStructure()){
       getSelection()?.removeAllRanges();hideSelectionAction();
@@ -207,6 +209,7 @@ function renderStructureReader(){
   const versions=el('nav','structure-versions');versions.setAttribute('aria-label','结构稿版本');
   for(const revision of state.structure.revisions){const button=nodeText('button','source-button'+(revision.id===state.structureRevision?' active':''),'',versions);button.type='button';button.dataset.revisionId=revision.id;button.setAttribute('aria-pressed',String(revision.id===state.structureRevision));nodeText('strong',null,`第 ${revision.version} 稿`,button);commentCountLabel(button,revisionCommentCount('story-structure',revision.id));button.onclick=()=>chooseStructureRevision(revision.id)}
   status.append(versions);versions.scrollLeft=versionScroll;revealStructureVersion(versions);
+  if(state.structureRouteError){const issue=nodeText('p','production-issue',state.structureRouteError,status);issue.setAttribute('role','alert');return}
   if(!active){nodeText('p','structure-empty','请选择一个结构稿版本继续阅读。',status);return}
   const doc=active.payload;
   const directoryHead=el('header');nodeText('h2',null,'章节目录',directoryHead);nodeText('p',null,'版本评论数包含已关闭评论。',directoryHead);index.append(directoryHead);
@@ -224,7 +227,7 @@ function renderStructureReader(){
   }
   const tail=el('section','structure-review-tail');nodeText('h2',null,'意见处理与版本记录',tail);
   if(doc.responses?.length){for(const item of doc.responses){const c=state.comments.find(c=>c.id===item.comment_id);const row=el('p');nodeText('b',null,c?`回应原稿意见：${c.body}`:`意见 ${item.comment_id}`,row);nodeText('span',null,item.explanation,row);if(c){const back=nodeText('button',null,'查看原稿意见',row);back.type='button';back.onclick=()=>openStructureResponseComment(c)}tail.append(row)}}
-  else nodeText('p',null,'本稿尚无关联意见处理说明。',tail);
+  else nodeText('p',null,'本稿没有直接回应记录；可在评论面板复核历史意见与后续回应。',tail);
   const allOpen=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN');nodeText('p',null,`待决意见 ${allOpen.length} 条；新稿不会自动关闭原稿意见。`,tail);
   const overall=nodeText('button',null,'添加整体意见',tail);overall.type='button';overall.onclick=()=>startDraft({type:'global'});
   reader.append(tail);reader.scrollTop=structureReadingPositions.get(active.id)||0;chapters.scrollTop=directoryScroll;paintStructureRegions();watchStructureIndex();
