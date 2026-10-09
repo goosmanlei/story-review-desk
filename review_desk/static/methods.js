@@ -84,7 +84,10 @@ function drawMethods(root){
       else{for(const key of ['purpose','applies','inputs','outputs','checks'])payload[key]=fields[key].value;for(const key of ['work_types','required_inputs','steps'])payload[key]=fields[key].value.split(/[,，]/).map(v=>v.trim()).filter(Boolean);payload.resources=references.map(r=>r()).filter(Boolean);}
     }
     const result=await api('/api/methods/save',{method:'POST',body:JSON.stringify({category,name:name.value.trim(),expected_version:record?.version||0,payload})});
-    methodView.selected=result.object_id;methodView.draft=null;methodView.data=await api('/api/methods');drawMethods(root);nodeText('p','config-save-status',`已保存第 ${result.version} 版。工作环节选择此版后，新执行会取得对应正文与共用章节。`,root);
+    if(methodView.page!==page)return;
+    methodView.selected=result.object_id;methodView.draft=null;methodView.data=await api('/api/methods');
+    if(methodView.page!==page||state.workspace!=='project.configuration'||state.configSection!=='METHODS')return;
+    drawMethods(root);nodeText('p','config-save-status',`已保存第 ${result.version} 版。工作环节选择此版后，新执行会取得对应正文与共用章节。`,root);
   }catch(error){notice.textContent=error.message+'；当前输入保留。可在新页面核对已保存版本后合并修改。'}finally{submit.disabled=false}};
 }
 function parseMethodConditions(value){const result={};for(const part of value.split(/[,，]/).filter(s=>s.trim())){const i=part.indexOf('=');if(i<1)throw Error('条件请使用 字段=值');result[part.slice(0,i).trim()]=part.slice(i+1).trim()}return result}

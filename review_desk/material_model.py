@@ -4,7 +4,7 @@ import json
 from .store import canonical, digest, Conflict
 from . import material_storage as storage
 
-ASSOCIATION_KEYS={'format','title','scope','states','generation','status','change','planned_shots','preparation_task','plan_source_sha256','shot_reference_operation'}
+ASSOCIATION_KEYS={'format','title','scope','states','generation','status','change','planned_shots','preparation_task','plan_source_sha256','shot_reference_operation','method_basis','method_adjustment'}
 
 
 def requirement_fields(payload):

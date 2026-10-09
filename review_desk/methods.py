@@ -214,7 +214,7 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
 
 
 def instructions(package):
-    return package['files']['SKILL.md'] + ''.join('\n\n## 共用资料：' + r['title'] + ' / ' + r['reference']['section'] + '\n' + r['content'] for r in package['resources'])
+    return package['files']['SKILL.md'] + ''.join('\n\n## 包内文件：' + name + '\n' + body for name, body in package['files'].items() if name != 'SKILL.md') + ''.join('\n\n## 共用资料：' + r['title'] + ' / ' + r['reference']['section'] + '\n' + r['content'] for r in package['resources'])
 
 
 def prepare(store, request):
@@ -230,6 +230,9 @@ def prepare(store, request):
         execution = read(store, object_id)
         if execution['payload']['inputs'] != inputs or execution['payload'].get('private', False) != (request.get('private') is True) or execution['payload']['conditions'] != request.get('conditions', {}) or (request.get('binding') is not None and execution['payload']['package']['binding'] != request['binding']):
             raise Conflict('恢复输入与冻结执行冲突；沿原输入恢复，换法或换输入须新建步骤')
+        verify_execution(store, reference(execution), identity, inputs)
+        verify_dependencies(store, execution)
+        require(resolve(store, request['work_type'], execution['payload']['conditions'], execution['payload']['package']['binding']) == execution['payload']['package'], '冻结方法或共用资料不可用；请恢复准确资源包')
         return execution
     package = resolve(store, request['work_type'], request.get('conditions'), request.get('binding'))
     missing = [key for key in package['required_inputs'] if inputs.get(key) in (None, '', [], {})]
@@ -301,6 +304,9 @@ def artifact(store, value):
         old = read(store, oid)
         require(old['payload'] == payload, '步骤产物已经冻结；修订须创建新步骤及依据')
         return old
+    if identity['work_type'] == 'media-plan':
+        from .method_media import validate_stage
+        validate_stage(store, execution, stage, output)
     return _save(store, oid, payload, 0, prior + [{'revision_id': execution['revision_id'], 'role': 'artifact-execution'}])
 
 

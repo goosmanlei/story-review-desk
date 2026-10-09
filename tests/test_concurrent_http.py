@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 import gzip
+import fcntl
 import hashlib
 import json
 from pathlib import Path
@@ -15,6 +16,31 @@ from test_comment_source_reuse import document, source_row
 
 
 class ConcurrentHttpTest(unittest.TestCase):
+    def test_write_window_blocks_all_mutations_and_preserves_reads(self):
+        with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1', 0), root, {'id': 'isolated', 'title': 'isolated'}) as server:
+            base = 'http://127.0.0.1:' + str(server.server_port)
+            thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}); thread.start()
+            opener = build_opener(ProxyHandler({}))
+            try:
+                with (Path(root) / '.runtime/http-write.lock').open('a') as window:
+                    fcntl.flock(window, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    for method, path in [('POST', '/api/comments'), ('POST', '/api/production/acceptance'),
+                                         ('PATCH', '/api/configurations/PROJECT'), ('POST', '/api/methods/save'),
+                                         ('PUT', '/api/production/files/test')]:
+                        with self.assertRaises(HTTPError) as caught:
+                            opener.open(Request(base + path, data=b'{}', method=method), timeout=5)
+                        with caught.exception as response:
+                            self.assertEqual(response.code, 503)
+                            self.assertTrue(json.load(response)['write_window'])
+                    with opener.open(base + '/api/instance', timeout=5) as response:
+                        self.assertEqual(response.status, 200)
+                value = {'expected_version': 0, 'updates': {}}
+                with opener.open(Request(base + '/api/configurations/PROJECT', data=json.dumps(value).encode(), method='PATCH'), timeout=5) as response:
+                    self.assertEqual(json.load(response)['version'], 1)
+                self.assertEqual(len(server.store.configuration_events()), 1)
+            finally:
+                server.shutdown(); thread.join(timeout=10)
+
     def test_existing_wal_requires_explicit_reviewed_conversion(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root)/'.runtime/review.sqlite3'

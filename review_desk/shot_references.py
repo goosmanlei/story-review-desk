@@ -217,6 +217,9 @@ def select(store, request):
             if not payload.get('generation'):raise ValueError('历史制作版本没有完整方案，需先补齐')
             inputs[index]=value;payload['generation']['inputs']=inputs
             payload['shot_reference_operation']={'id':op,'fingerprint':fingerprint,'source_number':chosen['number'],'index':index}
+            from .method_media import adjusted, activation
+            if activation(store) or payload.get('method_basis'):
+                adjusted(payload, base, 'reference', request, call)
             p.validate_payload(store,need['object_id'],'REQUIREMENT',payload)
             deps=[{'revision_id':ref['revision_id'],'role':path} for path,ref in p.references(payload)]
             put=store._put_object(need['object_id'],'REQUIREMENT',payload,need['version'],deps)
