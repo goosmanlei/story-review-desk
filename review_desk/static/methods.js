@@ -1,4 +1,5 @@
 /* Working methods live in the existing configuration workspace. */
+const methodWorkLabels={'comment-polish':'评论润色','media-plan':'媒体方案','novel-writing':'小说写作','reader-review':'独立读者'};
 let methodView = {category:'skill', selected:null, data:null, draft:null};
 async function renderMethods(root){
   if(methodView.draft&&methodView.page){root.replaceChildren(methodView.page);return}
@@ -10,16 +11,16 @@ async function renderMethods(root){
 }
 function drawMethods(root){
   root.replaceChildren();
-  const page=el('article','config-page');root.append(page);
+  const page=el('article','config-page methods-page');root.append(page);
   methodView.page=page;
-  const tabs=el('div','config-choice-row');page.append(tabs);
+  const tabs=el('div','config-choice-row method-tabs');page.append(tabs);
   for(const [key,label] of [['skill','方法'],['resource','共用资料'],['binding','工作环节']]){
-    const button=el('button',key===methodView.category?'active':'',label);button.type='button';
+    const button=el('button',key===methodView.category?'active':'',label);button.type='button';button.setAttribute('aria-pressed',key===methodView.category?'true':'false');
     button.onclick=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？'))return;methodView={...methodView,category:key,selected:null,draft:null};drawMethods(root)};tabs.append(button);
   }
   const category=methodView.category,records=methodView.data[category],picker=el('select');picker.setAttribute('aria-label','选择'+({skill:'方法',resource:'共用资料',binding:'工作环节'}[category]));
   picker.append(new Option('新建'+({skill:'方法',resource:'共用资料',binding:'工作环节'}[category]),''));
-  for(const row of records)picker.append(new Option(`${row.payload.title||row.payload.work_type} · 第 ${row.version} 版`,row.object_id));
+  for(const row of records)picker.append(new Option(`${row.payload.title||methodWorkLabels[row.payload.work_type]||row.payload.work_type} · 第 ${row.version} 版`,row.object_id));
   picker.value=methodView.selected||'';picker.onchange=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？')){picker.value=methodView.selected||'';return}methodView.selected=picker.value||null;methodView.draft=null;drawMethods(root)};page.append(picker);
   const record=records.find(r=>r.object_id===methodView.selected),p=record?.payload||{};
   const form=el('form','config-form');page.append(form);const fields={};
@@ -37,7 +38,7 @@ function drawMethods(root){
   if(category==='resource'&&!Object.keys(fileValues).length)fileValues['references/main.md']='';
   const fileEditors={};
   if(category!=='binding'){
-    const container=el('section');form.append(container);
+    const container=el('section','method-files');form.append(container);
     function addFile(path,body){const row=el('div','config-field');row.append(el('span',null,path));const input=el('textarea');input.rows=path==='SKILL.md'?18:10;input.value=body;input.setAttribute('aria-label',path);row.append(input);container.append(row);fileEditors[path]=input;if(path!=='SKILL.md'){const remove=el('button',null,'移除 '+path);remove.type='button';remove.onclick=()=>{delete fileEditors[path];row.remove();methodView.draft=true};row.append(remove)}}
     for(const [path,body] of Object.entries(fileValues))addFile(path,body);
     const path=el('input');path.placeholder='references/example.md';path.setAttribute('aria-label','新增包内文件路径');container.append(path);
@@ -46,24 +47,26 @@ function drawMethods(root){
   if(category==='resource')field('sections','章节标识 = 包内文件（每行一个）',Object.entries(p.sections||{'main':'references/main.md'}).map(([k,v])=>`${k} = ${v}`).join('\n'),true);
   const references=[];
   if(category==='skill'){
-    nodeText('h3',null,'共用章节',form);
+    const resourceGroup=el('section','method-resources');form.append(resourceGroup);
+    nodeText('h3',null,'共用章节',resourceGroup);
     const available=[...methodView.data.resource];
     for(const exact of p.resources||[]){if(!available.some(r=>r.object_id===exact.object_id&&r.payload.sections[exact.section])){const old=methodView.data.referenced[exact.revision_id];if(old)available.push({...old,payload:{...old.payload,sections:{[exact.section]:old.payload.sections[exact.section]}}})}}
     for(const resource of available){for(const section of Object.keys(resource.payload.sections)){
+      const resourceRow=el('div','method-resource-row');resourceGroup.append(resourceRow);
       const exact=p.resources?.find(r=>r.object_id===resource.object_id&&r.section===section),row=el('label','config-choice');
       const enabled=el('input');enabled.type='checkbox';enabled.checked=!!exact;
       const frozen=exact&&methodView.data.referenced[exact.revision_id];
       row.append(enabled,el('span',null,`${resource.payload.title} / ${section} · 第 ${frozen?.version||resource.version} 版`));
-      const condition=el('input');condition.placeholder='仅在条件满足时加载，例如 mode=video';condition.setAttribute('aria-label',`${resource.payload.title} ${section} 的加载条件`);condition.value=Object.entries(exact?.when||{}).map(([k,v])=>`${k}=${v}`).join(', ');form.append(row,condition);
+      const condition=el('input');condition.placeholder='仅在条件满足时加载，例如 mode=video';condition.setAttribute('aria-label',`${resource.payload.title} ${section} 的加载条件`);condition.value=Object.entries(exact?.when||{}).map(([k,v])=>`${k}=${v}`).join(', ');resourceRow.append(row,condition);condition.disabled=!enabled.checked;enabled.onchange=()=>{condition.disabled=!enabled.checked};
       const update=el('input');update.type='checkbox';update.checked=!exact||exact.revision_id===resource.revision_id;
-      if(exact&&exact.revision_id!==resource.revision_id){const updateLabel=el('label');updateLabel.append(update,document.createTextNode(`改用第 ${resource.version} 版（未选则保留第 ${frozen?.version} 版）`));form.append(updateLabel)}
+      if(exact&&exact.revision_id!==resource.revision_id){const updateLabel=el('label');updateLabel.append(update,document.createTextNode(`改用第 ${resource.version} 版（未选则保留第 ${frozen?.version} 版）`));resourceRow.append(updateLabel)}
       references.push(()=>enabled.checked?{object_id:resource.object_id,revision_id:update.checked?resource.revision_id:exact.revision_id,section,when:parseMethodConditions(condition.value)}:null);
     }}
   }
   const rules=[];
   if(category==='binding'){
     nodeText('p','config-explanation','选择本环节的新工作使用的方法。已有执行继续取得原准确版本。条件为空表示默认；更具体的匹配优先。',form);
-    const group=el('div');form.append(group);
+    const group=el('div','method-rules');form.append(group);
     function ruleEditor(rule={}){const row=el('div','config-field');const conditions=el('input');conditions.placeholder='适用条件，例如 mode=video';conditions.setAttribute('aria-label','方法选择条件');conditions.value=Object.entries(rule.when||{}).map(([k,v])=>`${k}=${v}`).join(', ');
       const choice=el('select');choice.setAttribute('aria-label','执行方法版本');choice.append(new Option('请选择方法',''));
       for(const m of methodView.data.skill)choice.append(new Option(`${m.payload.title} · 第 ${m.version} 版`,JSON.stringify({object_id:m.object_id,revision_id:m.revision_id})));
