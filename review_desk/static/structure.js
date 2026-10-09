@@ -227,7 +227,7 @@ function renderStructureReader(){
   }
   const tail=el('section','structure-review-tail');nodeText('h2',null,'意见处理与版本记录',tail);
   if(doc.responses?.length){for(const item of doc.responses){const c=state.comments.find(c=>c.id===item.comment_id);const row=el('p');nodeText('b',null,c?`回应原稿意见：${c.body}`:`意见 ${item.comment_id}`,row);nodeText('span',null,item.explanation,row);if(c){const back=nodeText('button',null,'查看原稿意见',row);back.type='button';back.onclick=()=>openStructureResponseComment(c)}tail.append(row)}}
-  else nodeText('p',null,'本稿尚无关联意见处理说明。',tail);
+  else nodeText('p',null,'本稿没有直接回应记录；可在评论面板复核历史意见与后续回应。',tail);
   const allOpen=state.comments.filter(c=>c.target_object_id==='story-structure'&&c.status==='OPEN');nodeText('p',null,`待决意见 ${allOpen.length} 条；新稿不会自动关闭原稿意见。`,tail);
   const overall=nodeText('button',null,'添加整体意见',tail);overall.type='button';overall.onclick=()=>startDraft({type:'global'});
   reader.append(tail);reader.scrollTop=structureReadingPositions.get(active.id)||0;chapters.scrollTop=directoryScroll;paintStructureRegions();watchStructureIndex();
