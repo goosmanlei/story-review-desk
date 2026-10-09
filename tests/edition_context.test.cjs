@@ -23,3 +23,19 @@ test('edition change cannot reuse a scene from another edition even when every c
  const c=fixture(),a=new URLSearchParams('breakdown_episode_revision=v1'),b=new URLSearchParams('breakdown_episode_revision=v2');
  assert.notEqual(c.breakdownSelectionKey(a),c.breakdownSelectionKey(b));
 });
+
+test('return to a mounted edition reads its composition when an intermediate directory already advanced',async()=>{
+ const c=fixture();
+ class Node{constructor(){this.children=[];this.dataset={}}append(...n){this.children.push(...n)}replaceChildren(...n){this.children=n}querySelector(){return null}querySelectorAll(){return []}setAttribute(){}remove(){}}
+ const body=new Node(),nav=new Node(),host=new Node();body.dataset={readingKey:'old',sceneId:'parent'};
+ const oldScene=scene('parent','parent-v3',[]);host.dataset={breakdownWorkspace:'settings.workspace',breakdownTab:'breakdown'};host.querySelector=()=>nav;
+ c.state.workspace='settings.workspace';c.state.breakdownData={design:{id:'v2'}};c.state.breakdownSceneData={scene:oldScene,shots:[]};
+ c.location={href:'http://fixture/?breakdown_episode=e&breakdown_episode_revision=v3&breakdown_object=parent'};
+ c.state.breakdownRenderedSelection=c.breakdownSelectionKey(new URL(c.location.href).searchParams);
+ c.document={querySelector:()=>body};c.$=()=>host;c.el=()=>new Node();c.nodeText=(_t,_c,_text,parent)=>{const n=new Node();parent.append(n);return n};
+ c.history={state:null,replaceState(){}};c.rememberProductionDraft=()=>{};c.productionTab=()=> 'breakdown';c.breakdownHeading=c.renderAudiovisualEdition=c.renderComments=()=>{};
+ c.activateBreakdownScene=()=>assert.fail('must not reuse a mounted reader with an intermediate edition directory');
+ let requests=0;c.api=async()=>{requests++;return {design:{object_id:'e',id:'v3'},episode:'e',episodes:[],scenes:[],shots:[]}};
+ vm.runInContext('let productionLoadEpoch=0,productionReadEpoch=0',c);
+ await c.loadProductionBreakdown();assert.equal(requests,1);assert.equal(c.state.breakdownData.design.id,'v3');
+});

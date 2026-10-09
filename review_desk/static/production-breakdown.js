@@ -494,7 +494,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   const targetId=params.get('breakdown_object'),targetRevision=params.get('breakdown_revision'),edition=params.get('breakdown_episode_revision'),disclosures=breakdownDisclosureState(host);
   const existing=state.breakdownSceneData,existingNav=host.querySelector('.breakdown-scene-list');
   const exact=existing&&[existing.scene,...existing.shots.map(s=>s.record)].find(r=>r.object_id===targetId&&(!targetRevision||r.id===targetRevision));
-  if(!refresh&&oldBody&&existingNav&&host.dataset.breakdownWorkspace===workspace&&host.dataset.breakdownTab===productionTab()&&state.breakdownRenderedSelection===breakdownSelectionKey(params)&&exact&&oldBody.dataset.sceneId===existing.scene.object_id){
+  if(!refresh&&(!edition||state.breakdownData?.design?.id===edition)&&oldBody&&existingNav&&host.dataset.breakdownWorkspace===workspace&&host.dataset.breakdownTab===productionTab()&&state.breakdownRenderedSelection===breakdownSelectionKey(params)&&exact&&oldBody.dataset.sceneId===existing.scene.object_id){
     activateBreakdownScene(existing,oldBody,existingNav,epoch,params,savedPosition);return;
   }
   // Keep the mounted reader and its geometry while requests are pending. The
@@ -540,7 +540,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   if(resolved.error){nodeText('p','production-issue',resolved.error,body);state.breakdownCurrent=null;state.breakdownSceneData=null;breakdownRoute({breakdown_episode_revision:data.design.id,breakdown_scene:null,production_object:null,production_revision:null});commit();renderComments()}
   else if(selected)await showBreakdownScene(selected,body,sceneList,epoch,params,savedPosition,commit);else{nodeText('p',null,'本集尚无场次设计',body);commit()}
   const materialTarget=params.get('production_object');
-  if(epoch===breakdownEpoch&&workspace===state.workspace&&materialTarget&&params.has('material_id')&&!data.scenes.some(r=>r.object_id===materialTarget)&&!data.shots.some(r=>r.object_id===materialTarget)){
+  if(!resolved.error&&epoch===breakdownEpoch&&workspace===state.workspace&&materialTarget&&params.has('material_id')&&!data.scenes.some(r=>r.object_id===materialTarget)&&!data.shots.some(r=>r.object_id===materialTarget)){
     breakdownRoute({material_id:null,material_version:null,material_round:null,material_target:null,production_entity:null,entity_state:null});
     await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params},null);
   }
