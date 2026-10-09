@@ -64,11 +64,70 @@ def catalog(store):
         for name in result:
             if item['payload']['format'] == FORMATS[name]:
                 result[name].append(item)
+    result['condition_texts'] = {}
     result['referenced'] = {}
     for item in result['skill'] + result['binding']:
-        for ref in item['payload'].get('resources', item['payload'].get('rules', [])):
+        refs = item['payload'].get('resources', item['payload'].get('rules', []))
+        # Send exact JSON text as well: browser numbers cannot represent every
+        # integer that the ledger and resolver already support.
+        result['condition_texts'][item['revision_id']] = [
+            json.dumps(ref['when'], ensure_ascii=False, allow_nan=False) if 'when' in ref else None
+            for ref in refs]
+        for ref in refs:
             row = read(store, ref['object_id'], ref['revision_id'])
             result['referenced'][row['revision_id']] = row
+    return result
+
+
+def parse_conditions(value):
+    """Parse the shared editor transport before any revision is appended."""
+    require(isinstance(value, str), '条件必须为文本')
+
+    def unique(pairs):
+        result = {}
+        for key, item in pairs:
+            require(key not in result, '条件字段重复：' + key)
+            result[key] = item
+        return result
+
+    def invalid_constant(value):
+        raise ValueError('条件不支持非有限数值：' + value)
+
+    def decode(raw):
+        return json.loads(raw, object_pairs_hook=unique, parse_constant=invalid_constant)
+
+    raw = value.strip()
+    if not raw:
+        return {}
+    if raw.startswith('{'):
+        try:
+            result = decode(raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError('条件 JSON 无效：' + exc.msg) from None
+        require(isinstance(result, dict), '条件必须为 JSON 对象')
+    else:
+        # Keep the existing simple field=value string notation. Structured or
+        # punctuated values use a JSON object, not a new condition language.
+        pairs = []
+        for part in re.split('[,，]', raw):
+            key, separator, item = part.partition('=')
+            key, item = key.strip(), item.strip()
+            require(bool(separator and key and item), '条件请使用 JSON 对象或 字段=值；值不能为空')
+            if item in ('true', 'false', 'null') or item.startswith('"') or re.match(r'^-?[0-9]', item):
+                try:
+                    item = decode(item)
+                except json.JSONDecodeError:
+                    raise ValueError('条件值无效；文本请加双引号，复杂值请使用 JSON 对象') from None
+            else:
+                require(not any(c in item for c in '{}[]"=') and item not in ('NaN', 'Infinity', '-Infinity'),
+                        '复杂条件请使用 JSON 对象；数值必须有限')
+            pairs.append((key, item))
+        result = unique(pairs)
+    # Reject overflow such as 1e999 instead of serializing Infinity into history.
+    try:
+        json.dumps(result, allow_nan=False)
+    except ValueError:
+        raise ValueError('条件数值必须有限') from None
     return result
 
 
@@ -169,6 +228,19 @@ def save(store, value):
     name = identifier(value.get('name'))
     payload = copy.deepcopy(value['payload'])
     payload['format'] = FORMATS[category]
+    if 'condition_texts' in value:
+        require(category in ('skill', 'binding'), '此项没有条件编辑')
+        refs = payload.get('resources', []) if category == 'skill' else payload.get('rules', [])
+        texts = value['condition_texts']
+        require(isinstance(texts, list) and len(texts) == len(refs), '条件与引用数量不一致')
+        for index, (ref, raw) in enumerate(zip(refs, texts), 1):
+            if raw is None and category == 'skill':
+                ref.pop('when', None)
+                continue
+            try:
+                ref['when'] = parse_conditions(raw)
+            except ValueError as exc:
+                raise ValueError('第 %s 项条件：%s' % (index, exc)) from None
     oid = 'method.' + category + '.' + name
     previous = store.db.execute('SELECT 1 FROM objects WHERE id=?', (oid,)).fetchone()
     if payload.get('source') or (previous and read(store, oid)['payload'].get('source')):
