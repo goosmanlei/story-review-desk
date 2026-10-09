@@ -1,5 +1,43 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
 function fixture(){const c={state:{comments:[]},productionLabels:{},URL,URLSearchParams,location:{href:"http://fixture/?workspace=settings.workspace&production_tab=breakdown"}};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
+test('shared shot renderer retains exact background and material trace while changes and selected inputs stay visible',()=>{
+  const c=fixture();
+  class E {constructor(tag){this.tag=tag;this.children=[];this.dataset={};this.classList={add(){}}}append(...nodes){this.children.push(...nodes)}}
+  c.el=tag=>new E(tag);c.nodeText=(tag,_class,text,parent)=>{const n=new E(tag);n.text=text;parent.append(n);return n};
+  c.breakdownShotTitle=()=> 'shot';c.businessTitle=row=>row.object_id;
+  c.renderAudiovisualSources=c.renderProductionAcceptance=()=>{};
+  c.breakdownShotText=host=>c.nodeText('p',null,'米尚未交付，袋子仍在画外',host);
+  c.renderShotDemands=host=>c.nodeText('p',null,'本方案直接输入',host);
+  c.materialReferenceLink=(host,ref)=>{const n=new E('a');n.reference=ref;host.append(n)};
+  c.materialSmallCard=(host,item)=>{const n=new E('card');n.id=item.object_id;host.append(n);return n};
+  const ref=(id,version)=>({object_id:id,revision_id:version}),from=ref('prop','before'),to=ref('prop','after'),background=ref('bag','historical');
+  const parent=new E('main');
+  c.renderBreakdownShot(parent,{record:{object_id:'shot',id:'exact-shot',payload:{fps:24,duration_frames:120,states:[from,to],continuity_context:[background],state_transitions:[{from,to,action:'接过后才掰角'}]}},context:{materials:[{object_id:'material',media_type:'image'}]}});
+  const copy=parent.children[0].children[0],trace=copy.children.find(n=>n.tag==='details');
+  assert.ok(trace);assert.equal(trace.open,undefined,'trace is closed by default');
+  assert.ok(copy.children.some(n=>n.text==='米尚未交付，袋子仍在画外'));
+  assert.ok(copy.children.some(n=>n.text==='本方案直接输入'));
+  const changes=copy.children.find(n=>n.children.some(v=>v.text==='本镜状态变化'));
+  assert.ok(changes.children.some(n=>n.children.some(v=>v.text==='接过后才掰角')));
+  assert.deepEqual(trace.children.filter(n=>n.reference).map(n=>n.reference),[from,to,background]);
+  const materials=trace.children.find(n=>n.tag==='aside');assert.ok(materials);
+  assert.ok(materials.children.some(n=>n.children.some(v=>v.id==='material')));
+  assert.equal(parent.children[0].children.length,1,'same material cards are not repeated beside the shot');
+});
+test('project handoff exposes the selected original and its exact requirements without borrowing another version',()=>{
+  for(const historical of [false,true]){
+    const c=fixture(),seen=[];c.el=()=>({append(){}});c.nodeText=(_t,_c,text)=>seen.push(text);
+    for(const name of ['renderProductionAcceptance','materialRoundControl','reviewChoiceButtons'])c[name]=()=>{};
+    c.productionRef=r=>({object_id:r.object_id,revision_id:r.id});c.materialDefaultCandidate=()=>null;c.materialCandidateChoice=items=>items[0];
+    c.materialMedia=(_host,item)=>seen.push(item.component.file);c.renderActualGeneration=(_host,context)=>seen.push(context.call.id);
+    c.renderMaterialRequirements=(_host,need)=>seen.push(need.id);
+    const need={id:'current-demand',object_id:'project',payload:{media_type:'project'}},asset={id:'exact-asset',payload:{components:[{role:'original',file:'exact.zip'}]}},exact={...need,id:'bound-demand'};
+    const round={number:1,results:[asset],definition_records:{requirement:historical?null:exact}};
+    c.breakdownPrompt({append(){}},need,{video_details:{project:{material_versions:{project:[round]},review_contexts:{'exact-asset':{call:{id:'actual-edit'}}}}}});
+    assert.ok(seen.includes('exact.zip'));assert.ok(seen.includes('actual-edit'));assert.ok(!seen.includes('current-demand'));
+    assert.equal(seen.includes('bound-demand'),!historical);assert.equal(seen.includes('此版本未保留完整素材要求。'),historical);
+  }
+});
 test('episode count deduplicates comment ids, includes closed and uses exact view revisions only',()=>{const c=fixture(),ep={comment_targets:[{object_id:'scene',revision_id:'old'},{object_id:'shot',revision_id:'same'},{object_id:'shot',revision_id:'same'}]};c.state.comments=[{id:'1',status:'OPEN',target_object_id:'scene',target_revision_id:'old'},{id:'1',status:'OPEN',target_object_id:'scene',target_revision_id:'old'},{id:'2',status:'CLOSED',target_object_id:'shot',target_revision_id:'same'},{id:'3',status:'DELETED',target_object_id:'shot',target_revision_id:'same'},{id:'4',status:'OPEN',target_object_id:'scene',target_revision_id:'new'},{id:'5',status:'OPEN',target_object_id:'episode',target_revision_id:'old'}];assert.equal(c.breakdownEpisodeCount(ep),2);c.state.comments[0].body='edited';assert.equal(c.breakdownEpisodeCount(ep),2);c.state.comments[2].status='OPEN';assert.equal(c.breakdownEpisodeCount(ep),2)});
 test('grouping partitions exactly the explicitly related canonical identities regardless of obsolete owner filter',()=>{const c=fixture();c.state.breakdownLevels=['shot'];const items=[{object_id:'a',canonical_material_id:'one',classification:{key:'image:character',label:'图像—角色'}},{object_id:'alias',canonical_material_id:'one',classification:{key:'image:character',label:'图像—角色'}},{object_id:'shared',classification:{key:'audio:shared',label:'音频—共有'}},{object_id:'missing',media_type:'video'}];const groups=c.groupedShotMaterials(items);assert.equal(groups.length,3);assert.deepEqual(Array.from(groups.flatMap(g=>g.items),i=>i.canonical_material_id||i.object_id).sort(),['missing','one','shared']);assert.equal(c.groupedShotMaterials([]).length,0)});
 test('late scene response cannot repaint after a later selection or workspace switch',async()=>{

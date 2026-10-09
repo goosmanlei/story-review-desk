@@ -77,7 +77,9 @@ def slot(store, value, index):
 def with_identity(store,result):
     if result['material_id']:
         from .material_storage import canonical_id
+        from .version_consolidation import material_epoch
         result['canonical_material_id']=canonical_id(store,result['material_id'])
+        result['baseline_id']=material_epoch(store,result['material_id'])
         result.update(mp.card_counts(store,[result['material_id']])[result['material_id']])
         code=store.db.execute('SELECT prefix,number FROM business_codes WHERE object_id=?',(result['canonical_material_id'],)).fetchone()
         if code:result['material_code']=code[0]+str(code[1]).zfill(3)
@@ -214,7 +216,7 @@ def select(store, request):
                         if key not in request:value.pop(key,None)
             if not payload.get('generation'):raise ValueError('历史制作版本没有完整方案，需先补齐')
             inputs[index]=value;payload['generation']['inputs']=inputs
-            payload['shot_reference_operation']={'id':op,'fingerprint':fingerprint,'source_number':chosen['number']}
+            payload['shot_reference_operation']={'id':op,'fingerprint':fingerprint,'source_number':chosen['number'],'index':index}
             p.validate_payload(store,need['object_id'],'REQUIREMENT',payload)
             deps=[{'revision_id':ref['revision_id'],'role':path} for path,ref in p.references(payload)]
             put=store._put_object(need['object_id'],'REQUIREMENT',payload,need['version'],deps)
@@ -228,6 +230,11 @@ def select(store, request):
 
 
 def response(store, row, repeated):
+    from .version_consolidation import material_epoch
     members=mp.memberships(store,row['id'])
-    return {'requirement_id':row['object_id'],'revision_id':row['id'],'number':next(v['number'] for v in members if v['material_id']==row['object_id']),
+    number=next(v['number'] for v in members if v['material_id']==row['object_id'])
+    frozen=store.db.execute('SELECT frozen FROM material_plan_versions WHERE material_id=? AND number=?',(row['object_id'],number)).fetchone()[0]
+    return {'requirement_id':row['object_id'],'revision_id':row['id'],'number':number,
+            'baseline_id':material_epoch(store,row['object_id']), 'frozen':bool(frozen),
+            'selected_index':row['payload'].get('shot_reference_operation',{}).get('index'),
             'already_applied':repeated,'slots':slots(store,row['payload']['generation']['inputs'])}

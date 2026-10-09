@@ -18,20 +18,27 @@ async function renderProductionAcceptance(host,row){
   let data,serial=0;
   const refresh=async()=>{const token=++serial;try{
     const next=await api('/api/production/acceptance?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));
-    if(token===serial){data=next;draw()}
+    if(box.isConnected&&token===serial){data=next;draw()}
   }catch(error){if(box.isConnected&&token===serial){box.replaceChildren();nodeText('p','production-issue',error.message,box)}}};
   const entry={box,refresh};
   productionAcceptancePanels.add(entry);
   Promise.resolve().then(()=>{for(const panel of productionAcceptancePanels)if(!panel.box.isConnected)productionAcceptancePanels.delete(panel)});
   const draw=()=>{box.replaceChildren();
     const button=productionButton(box,data.accepted?'取消采纳此版':'采纳此版',async()=>{
+      if(!box.isConnected||button.disabled)return;
       button.disabled=true;++serial;
-      try{data=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});draw();
+      try{const next=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});if(box.isConnected){data=next;draw()}
         for(const panel of productionAcceptancePanels){if(!panel.box.isConnected)productionAcceptancePanels.delete(panel);else if(panel!==entry)panel.refresh()}
       }catch(error){if(box.isConnected){button.disabled=false;toast(error.message);refresh()}}
     });button.disabled=!data.can_change;
     if(!data.can_change)nodeText('small','production-meta','历史版本',box);
     else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
+    const info=el('details');nodeText('summary',null,'本版采纳范围与理由',info);
+    nodeText('p',null,row.kind==='REQUIREMENT'?'仅认可此素材方案版本；可与所属状态的有效整体生成许可择一。采纳不选择原件、不接受结果、不调用模型；准确参考及生成前检查仍须满足。':'认可此版设计及下列准确子项；实际生成、原件审阅与采用分别决定。',info);
+    renderDecisionScope(info,data.scope,data.scope_records||[]);
+    if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
+    if(data.history?.length){const history=el('details');nodeText('summary',null,'方案决定历史 · '+data.history.length,history);for(const decision of data.history){const entry=renderReviewDecision(history,decision,{historical:true});renderDecisionScope(entry,decision.payload.acceptance_scope,decision.scope_records||[])}info.append(history)}
+    box.append(info);
   };
   await refresh();
 }
@@ -47,7 +54,7 @@ function renderAudiovisualEdition(host,data){
 function renderShotDemands(host,context){
   const needs=context.requirements||[];if(!needs.length){nodeText('p','production-meta','本镜尚无素材需求',host);return}
   const section=el('section','shot-demands'),select=el('select'),body=el('div');select.setAttribute('aria-label','本镜素材需求');
-  for(const need of needs)select.append(new Option(need.payload.title,need.object_id));
+  for(const need of needs)select.append(new Option(readableProductionTitle(need),need.object_id));
   const routed=new URL(location.href).searchParams.get('shot_material_id');
   select.value=(needs.find(r=>r.object_id===routed)||needs.find(r=>r.payload.media_type==='video')||needs[0]).object_id;
   const draw=()=>{body.replaceChildren();const need=needs.find(r=>r.object_id===select.value);breakdownPrompt(body,need,context);renderMaterialRelations(body,need.object_id)};
@@ -71,7 +78,7 @@ function productionTabs(){if(typeof renderWorkspaceTabs==='function')renderWorks
 function breakdownRoute(values){const url=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)url.searchParams.delete(k);else url.searchParams.set(k,v)}history.replaceState(history.state,'',url)}
 function breakdownHeading(host){productionTabs(host)}
 function breakdownSceneTitle(row){return (businessCode(row)||reviewPositionLabel('scene',row.payload.source?.scene_id||row.payload.scene_id,row.payload.source?.object_id))+' · '+row.payload.title.replace(/^\d+-\d+\s*/,'')}
-function breakdownShotTitle(row){return reviewPositionLabel('shot',row)+' · '+row.payload.title.replace(/^E\d+-\d+\s*/i,'')}
+function breakdownShotTitle(row){return businessCode(row)||state.businessCodes?businessTitle(row):reviewPositionLabel('shot',row)+' · '+readableProductionTitle(row)}
 function breakdownEpisodeTitle(episode){
   if(!episode)return '';
   const title=String(episode.title||episode.payload?.title||''),number=episode.number??episode.payload?.number;
@@ -108,7 +115,7 @@ async function refreshShotReference(context,slot,result){
   // A draft stays on its original immutable text, even when only inputs changed.
   const draft=state.anchor?Object.fromEntries(['productionSelected','productionDetail','anchor','editing','selected','reviewCommentScope','productionDraftScope'].map(key=>[key,state[key]])):null;
   state.breakdownVideoSelections[context.need.id]={number:result.number};
-  breakdownRoute({shot_material_id:context.need.object_id,shot_plan:result.number,shot_candidate:null});
+  breakdownRoute({shot_material_id:context.need.object_id,shot_plan:result.number,shot_baseline:result.baseline_id||null,shot_candidate:null});
   await loadProductionBreakdown({refresh:true}).catch(e=>toast(e.message));
   const shot=document.querySelector(`[data-shot-id="${CSS.escape(context.need.payload.scope.object_id)}"]`);
   const target=slot.routeKey?shot?.querySelector(`[data-route-key="${CSS.escape(slot.routeKey)}"]`):shot?.querySelector(`[data-input-index="${slot.index}"] button`);target?.focus({preventScroll:true});
@@ -116,10 +123,23 @@ async function refreshShotReference(context,slot,result){
 }
 function openShotReference(item,context,trigger){
   const slot=item.slot;if(!slot?.material_id||!slot.record){toast('准确素材身份缺失，需先修复此参考槽位');return}
-  const params=new URLSearchParams({material_id:slot.material_id,...(slot.number?{material_version:slot.number}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
+  const params=new URLSearchParams({material_id:slot.material_id,...(slot.number?{material_version:slot.number}:{}),...(slot.baseline_id?{material_baseline:slot.baseline_id}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
   const ref=slot.candidate||productionRef(slot.record);
+  const parentDialog=typeof reviewDialogStack==='undefined'?null:reviewDialogStack.at(-1)||null;
+  const onSaved=result=>{
+    const refresh=()=>{
+      if(trigger&&!trigger.isConnected)return;
+      // An earlier closed dialog may finish while another input is being read.
+      // Wait for that reader to return before touching its restored parent.
+      const top=typeof reviewDialogStack==='undefined'?null:reviewDialogStack.at(-1)||null;
+      if(top&&top!==parentDialog){top.addEventListener('close',()=>afterReviewDialogReturn(refresh),{once:true});return}
+      trigger?.closest('.shot-demands')?.querySelectorAll('input,select,button').forEach(control=>control.disabled=true);
+      return context.onSaved?context.onSaved(result):refreshShotReference(context,slot,result);
+    };
+    if(typeof afterReviewDialogReturn==='function')afterReviewDialogReturn(refresh);else refresh();
+  };
   return openUnifiedMaterial({...ref,params,component_id:item.value.component_id,defaultSelection:!slot.number,
-    shotReference:{...context,slot,indirect:slot.direct===false,onSaved:result=>{const section=trigger?.closest('.shot-demands');section?.querySelectorAll('input,select,button').forEach(control=>control.disabled=true);const refresh=()=>context.onSaved?context.onSaved(result):refreshShotReference(context,slot,result);if(typeof afterReviewDialogReturn==='function')afterReviewDialogReturn(refresh);else refresh()}}},trigger);
+    shotReference:{...context,slot,indirect:slot.direct===false,onSaved}},trigger);
 }
 function renderShotInputs(host,row,inputs,records,context){
   const items=shotReferenceItems(row,inputs,records);if(!items.length)return;
@@ -133,7 +153,8 @@ function renderShotInputs(host,row,inputs,records,context){
       const label=item.slot.direct===false?item.label.replace(/ · 声音$/u,''):item.label+(materialInputRole(item.value)?' · '+materialInputRole(item.value):'');
       const exactState=r.kind==='ASSET'&&item.referenceLabel&&!r.payload.title.includes(item.referenceLabel)?item.referenceLabel+' · ':'';
       const title=r.payload.title.startsWith(label)?r.payload.title:label+' · '+exactState+r.payload.title;
-      const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:(item.slot.issues.length?'◌ ':'✓ ')+shotReferenceLabel(item.slot)+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(item.value.use?' · 用途：'+item.value.use:'')+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 已登记裁切区域':'');
+      const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
+      const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:(item.slot.issues.length?'◌ ':'✓ ')+shotReferenceLabel(item.slot)+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(item.value.use?' · 用途：'+item.value.use:'')+range;
     }else nodeText('p','production-issue',item.label+' · 准确引用缺失，需先修复槽位',line);
     list.append(line);
   }
@@ -146,19 +167,37 @@ function renderShotReferenceChoice(box,model,item){
     nodeText('p','production-meta','间接参考的 '+shotReferenceLabel(context.slot)+' 属于“'+shotReferenceOwnerTitle(context.slot)+'”。当前镜头通过该方案传递此素材；这里浏览不保存，也不修改共享上游方案或其他镜头。',actions);
     materialReferenceLink(actions,context.slot.selection_owner,'查看选定归属方案');return;
   }
-  nodeText('p','production-meta',`为此素材方案版本 ${context.number} 的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 已提交版本改选将建立新制作版本。':''),actions);
-  const selectionFields=renderReferenceSelectionFields(actions,item,context.slot);
+  const purpose=nodeText('p','production-meta','',actions);
+  context.drafts||={};
+  const identity=JSON.stringify([model.material_id,model.round?.number,item?.record.id||null,item?.component.id||null]);
+  const selectionFields=renderReferenceSelectionFields(actions,item,context.slot,()=>{context.drafts[identity]=selectionFields.snapshot();context.error=null;refresh()},context.drafts[identity]);
   const actionLabel=item?'选为方案参考':'选定此版本，候选待选';
-  const button=productionButton(actions,context.result?'已保存 · 方案版本 '+context.result.number:context.busy?'正在保存…':actionLabel,async()=>{
-    if(context.busy)return;context.busy=true;button.disabled=true;button.textContent='正在保存…';
-    const bounds=selectionFields();
-    const choice=JSON.stringify([model.material_id,model.round.number,item?.record.id||null,item?.component.id||null,bounds]);if(context.requestChoice!==choice){context.requestChoice=choice;context.requestId='shot-ref-'+crypto.randomUUID()}
-    const request={id:context.requestId,requirement_id:context.need.object_id,expected_revision:context.need.id,plan_number:context.number,index:context.slot.index,input_key:context.slot.input_key,material_id:model.material_id,number:model.round.number,...(item?{candidate:productionRef(item.record),component_id:item.component.id,...bounds}:{candidate:null})};
-    try{const result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(request)});context.source.saved=result;context.result=result;
-      if(context.dialog.isConnected&&state.shotReferenceContext===context){button.textContent='已保存 · 方案版本 '+result.number;nodeText('p','production-meta',`参考 ${context.slot.index+1} 已选为 V${request.number} C${item?.candidate_number||item?.record.candidate_number||'?'}`,actions)}
-      else if(!context.dialog.isConnected&&context.pageActive?.())context.source.onSaved(result);
-    }catch(e){context.busy=false;if(context.dialog.isConnected&&state.shotReferenceContext===context){button.disabled=false;button.textContent=actionLabel;nodeText('p','production-issue','保存失败：'+e.message,actions)}}
-  });button.disabled=context.busy||!model.round||!!(item&&(item.record.payload.placeholder||item.component?.role!=='original'));
+  const savedChoice=()=>context.slot.number===model.round?.number&&(context.slot.material_id===model.material_id||context.slot.canonical_material_id===model.material_id)&&(context.slot.candidate?.revision_id||null)===(item?.record.id||null)&&(!item||context.slot.value.component_id===item.component.id);
+  const unchanged=()=>savedChoice()&&JSON.stringify(selectionFields())===JSON.stringify(referenceSelectionBounds(context.slot,item));
+  const button=productionButton(actions,actionLabel,async()=>{
+    if(context.busy||button.disabled)return;
+    let bounds;try{bounds=selectionFields()}catch(error){context.error=error.message;refresh();return}
+    const value={requirement_id:context.need.object_id,expected_revision:context.need.id,plan_number:context.number,index:context.slot.index,input_key:context.slot.input_key,material_id:model.material_id,number:model.round.number,...(item?{candidate:productionRef(item.record),component_id:item.component.id,...bounds}:{candidate:null})};
+    const choice=JSON.stringify(value);if(context.requestChoice!==choice){context.requestChoice=choice;context.requestId='shot-ref-'+crypto.randomUUID()}
+    const request={id:context.requestId,...value};context.busy=true;context.source.pending=true;context.error=null;refresh();
+    try{const result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(request)});
+      const slot=result.slots.find(s=>s.index===(result.selected_index??request.index));
+      if(result.requirement_id!==request.requirement_id||!slot)throw Error('保存回执与当前消费位置不匹配，请重新打开核对');
+      context.need={...context.need,id:result.revision_id};context.number=result.number;context.frozen=!!result.frozen;
+      context.slot={...context.slot,...slot};context.source.saved=result;context.result=result;
+    }catch(error){context.error='保存失败：'+error.message}
+    finally{context.busy=false;context.source.pending=false;if(context.dialog.isConnected&&state.shotReferenceContext===context)context.choiceView?.refresh();else if(!context.dialog.isConnected&&context.pageActive?.()&&context.source.saved)context.source.onSaved(context.source.saved)}
+  });
+  const discard=productionButton(actions,'放弃范围修改',()=>{delete context.drafts[identity];context.error=null;selectionFields.restore(referenceSelectionBounds(context.slot,item));refresh()});
+  const message=nodeText('small','production-meta','',actions);message.setAttribute('role','status');
+  const refresh=()=>{if(!actions.isConnected)return;let same=false;try{same=unchanged()}catch{}
+    purpose.textContent=`为此素材方案版本 ${context.number} 的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 已提交版本改选将建立新制作版本。':'');
+    button.disabled=context.busy||same||!model.round||!!(item&&(item.record.payload.placeholder||item.component?.role!=='original'));
+    button.textContent=context.busy?'正在保存…':same?'已保存 · 方案版本 '+context.number:context.slot.number?'保存修改 · 未保存':actionLabel;
+    message.textContent=context.error||(item&&item.component?.role!=='original'?'试听／预览组成仅供比较；请选择原件后保存。':'');message.className=context.error?'production-issue':'production-meta';
+    discard.hidden=!context.drafts[identity]||same;discard.disabled=context.busy;
+  };
+  context.choiceView={refresh};refresh();
   if(!item)nodeText('p','production-meta','可先选定此版本；候选仍待选，完成选定前不能执行制作。',actions);
 }
 function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
@@ -212,6 +251,13 @@ function breakdownPrompt(parent,need,context){
   const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'素材候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
+  if(['project','document'].includes(need.payload.media_type)){
+    if(selected){materialMedia(section,selected);renderActualGeneration(section,detail.review_contexts?.[selected.record.id])}
+    else nodeText('p','production-meta','尚未交付原文件',section);
+    if(model.need)renderMaterialRequirements(section,model.need);
+    else nodeText('p','production-meta','此版本未保留完整素材要求。',section);
+    return;
+  }
   if(selected){
     const actual=detail.review_contexts?.[selected.record.id],call=actual?.call;
     nodeText('h4',null,'所选候选的真实生成内容',section);
@@ -326,17 +372,12 @@ function groupedShotMaterials(items){
   for(const item of unique){const c=item.classification||{key:item.media_type+':other',label:'其他-'+({image:'图像',audio:'声音',video:'视频',project:'工程',document:'文档'}[item.media_type]||'其他')};if(!groups.has(c.key))groups.set(c.key,{...c,items:[]});groups.get(c.key).items.push(item)}
   const media=['image','audio','video','project','document'];return [...groups.values()].sort((a,b)=>media.indexOf(a.key.split(':')[0])-media.indexOf(b.key.split(':')[0])||a.label.localeCompare(b.label,'zh-CN'));
 }
-async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
-  const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
-  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
-  body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
-  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
-  const page=el('section','breakdown-scene');body.append(page);
-  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
-  for(const item of data.shots){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
+function renderBreakdownShot(parent,item){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);renderAudiovisualSources(title,shot);renderProductionAcceptance(title,shot);heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
-    breakdownShotText(text,shot);renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
-    row.append(text,materials);page.append(row);nodeText('h4',null,'本镜素材',materials);
+    breakdownShotText(text,shot);const trace=renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
+    row.append(text);parent.append(row);
+    if(trace){row.classList.add('shot-with-state-trace');trace.append(materials)}else row.append(materials);
+    nodeText('h4',null,'关联素材',materials);
     if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
     const items=item.context.materials||[];
     for(const group of groupedShotMaterials(items)){const section=el('section','breakdown-material-group');nodeText('h5',null,group.label,section);materials.append(section);
@@ -344,7 +385,15 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
         openUnifiedMaterial({...item.reference,...choice?.reference,object_id:choice?.reference?.object_id||item.reference?.object_id||item.object_id,revision_id:choice?.reference?.revision_id||item.reference?.revision_id||item.id,params,defaultSelection:!choice&&item.association!=='adoption'&&item.record?.kind!=='ASSET'},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
     }
     if(!items.length)nodeText('p','production-meta','本镜暂无关联素材',materials);
-  }
+}
+async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
+  const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
+  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
+  body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
+  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
+  const page=el('section','breakdown-scene');body.append(page);
+  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
+  for(const item of data.shots)renderBreakdownShot(page,item);
   state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.context.requirements)];
   if(commit)commit();
   state.breakdownRenderedSelection=breakdownSelectionKey(restore||new URLSearchParams());
@@ -432,12 +481,21 @@ async function openBreakdownSceneNotes(row,comment){
 }
 
 function renderShotStateContext(host,shot,context={}){
-  const values=[['本镜使用的实体状态',shot.payload.states||[]],['连续性背景',shot.payload.continuity_context||[]]];
-  for(const [title,refs] of values){if(!refs.length)continue;const detail=el('details');nodeText('summary',null,title+' · '+refs.length,detail);for(const ref of refs){const record=[...(context.states||[]),...(context.continuity_states||[])].find(r=>r.id===ref.revision_id);materialReferenceLink(detail,ref,record?businessTitle(record):'查看实体状态')};host.append(detail)}
+  const records=[...(context.states||[]),...(context.continuity_states||[])];
+  const link=(parent,ref)=>{const row=records.find(r=>r.id===ref.revision_id);materialReferenceLink(parent,ref,row?businessTitle(row):'查看实体状态')};
+  const transitions=shot.payload.state_transitions||[];
+  if(transitions.length){const changes=el('div','shot-state-changes');nodeText('h4',null,'本镜状态变化',changes);for(const value of transitions){const line=el('div');link(line,value.from);nodeText('span',null,' → ',line);link(line,value.to);nodeText('p',null,value.action,line);changes.append(line)}host.append(changes)}
+  const used=shot.payload.states||[],background=shot.payload.continuity_context||[];
+  if(!used.length&&!background.length)return;
+  // Narrative continuity is already visible directly above. Keep one exact
+  // trace on demand, instead of repeating the materials as two default lists.
+  const detail=el('details');nodeText('summary',null,'状态依据',detail);
+  for(const [title,refs] of [['镜内状态',used],['画外连续性依据',background]]){if(!refs.length)continue;nodeText('h4',null,title,detail);for(const ref of refs)link(detail,ref)}
+  host.append(detail);return detail;
 }
 async function refreshMaterialPlan(result){
   const epoch=productionLoadEpoch,workspace=state.workspace,target=state.productionSelected?.id;
-  const params=new URLSearchParams({material_id:result.requirement_id,material_version:result.number});
+  const params=new URLSearchParams({material_id:result.requirement_id,material_version:result.number,...(result.baseline_id?{material_baseline:result.baseline_id}:{})});
   const value=await readUnifiedCard(result.requirement_id,result.revision_id,params);
   if(epoch!==productionLoadEpoch||workspace!==state.workspace||target!==state.productionSelected?.id)return;
   activateUnifiedCard(value);renderProductionReader();renderComments();
@@ -453,13 +511,21 @@ function renderMaterialRouteChoices(host,need,onSaved){
   for(const key of conditions){const label=el('label'),select=el('select');nodeText('span',null,'条件 · '+key,label);select.setAttribute('aria-label','条件 '+key);select.dataset.routeKey='condition:'+key;for(const [v,title] of [['','待判断'],['true','满足'],['false','不满足']])select.append(new Option(title,v));select.value=key in (plan.conditions||{})?String(plan.conditions[key]):'';select.disabled=need.id!==need.current_revision;select.onchange=()=>{if(select.value)save('condition',key,select.value==='true',select)};label.append(select);box.append(label)}
   for(const slot of slots.filter(s=>s.rule?.necessity==='optional')){const label=el('label'),input=el('input');input.type='checkbox';input.dataset.routeKey='optional:'+slot.index;input.checked=slot.active;input.disabled=need.id!==need.current_revision;input.onchange=()=>save('optional',slot.index,input.checked,input);label.append(input,document.createTextNode('使用可选参考：'+(slot.record?.payload.title||slot.index+1)));box.append(label)}
 }
-function renderReferenceSelectionFields(host,item,slot){
-  if(!item)return ()=>({});
-  const current=slot.candidate?.revision_id===item.record.id?slot.value:{},component=item.component,readers=[];
-  const add=(key,title,fields,initial)=>{const wrap=el('fieldset'),legend=el('legend'),toggle=el('input');toggle.type='checkbox';toggle.setAttribute('aria-label',title);toggle.checked=!!current[key];legend.append(toggle,document.createTextNode(title));wrap.append(legend);const values={};
-    for(const [name,label,max,step] of fields){const line=el('label'),input=el('input');input.type='number';input.min='0';input.max=String(max);input.step=String(step);input.value=String(current[key]?.[name]??initial[name]);input.setAttribute('aria-label',label);input.disabled=!toggle.checked;line.append(document.createTextNode(label),input);wrap.append(line);values[name]=input}toggle.onchange=()=>Object.values(values).forEach(input=>input.disabled=!toggle.checked);host.append(wrap);readers.push(()=>toggle.checked?{[key]:Object.fromEntries(Object.entries(values).map(([key,input])=>[key,Number(input.value)]))}:{});
+function referenceSelectionBounds(slot,item){
+  const value=item&&slot.candidate?.revision_id===item.record.id&&slot.value.component_id===item.component.id?slot.value:{};
+  return Object.fromEntries([['crop',['x','y','width','height']],['range',['start_seconds','end_seconds']]].filter(([key])=>value[key]).map(([key,fields])=>[key,Object.fromEntries(fields.map(name=>[name,value[key][name]]))]));
+}
+function renderReferenceSelectionFields(host,item,slot,onChange=()=>{},draft=null){
+  const controls=[],current=referenceSelectionBounds(slot,item),component=item?.component;
+  const add=(key,title,fields,initial)=>{const wrap=el('fieldset'),legend=el('legend'),toggle=el('input');toggle.type='checkbox';toggle.setAttribute('aria-label',title);toggle.checked=draft?.[key]?.enabled??!!current[key];legend.append(toggle,document.createTextNode(title));wrap.append(legend);const values={};
+    for(const [name,label,max,step] of fields){const line=el('label'),input=el('input');input.type='number';input.min='0';input.max=String(max);input.step=String(step);input.value=String(draft?.[key]?.[name]??current[key]?.[name]??initial[name]);input.setAttribute('aria-label',label);input.disabled=!toggle.checked;input.oninput=onChange;line.append(document.createTextNode(label),input);wrap.append(line);values[name]=input}toggle.onchange=()=>{Object.values(values).forEach(input=>input.disabled=!toggle.checked);onChange()};host.append(wrap);controls.push({key,toggle,values,initial});
   };
+  if(item){
   if(component.mime.startsWith('image/')||component.mime.startsWith('video/'))add('crop','使用局部区域（0–1比例）',[['x','左边界',1,.01],['y','上边界',1,.01],['width','区域宽度',1,.01],['height','区域高度',1,.01]],{x:0,y:0,width:1,height:1});
   if(component.mime.startsWith('audio/')||component.mime.startsWith('video/'))add('range','使用时间段（秒）',[['start_seconds','开始秒数',component.duration_seconds,.01],['end_seconds','结束秒数',component.duration_seconds,.01]],{start_seconds:0,end_seconds:component.duration_seconds});
-  return ()=>Object.assign({},...readers.map(read=>read()));
+  }
+  const read=()=>Object.fromEntries(controls.filter(c=>c.toggle.checked).map(({key,values})=>[key,Object.fromEntries(Object.entries(values).map(([name,input])=>{if(input.value.trim()===''||!Number.isFinite(Number(input.value)))throw Error('请填写完整的范围数值');return [name,Number(input.value)]}))]));
+  read.snapshot=()=>Object.fromEntries(controls.map(({key,toggle,values})=>[key,{enabled:toggle.checked,...Object.fromEntries(Object.entries(values).map(([name,input])=>[name,input.value]))}]));
+  read.restore=bounds=>{for(const {key,toggle,values,initial} of controls){toggle.checked=!!bounds[key];for(const [name,input] of Object.entries(values)){input.value=String(bounds[key]?.[name]??initial[name]);input.disabled=!toggle.checked}}};
+  return read;
 }

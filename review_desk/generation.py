@@ -133,8 +133,10 @@ def contents(store, scope):
 
 def preparation(store, scope):
     data = contents(store, scope); issues=[]
+    from .production_description import description
     for row in [data['entity'], *data['states']]:
-        if not str(row['payload'].get('production_description', '')).strip():
+        if not description(row['payload'], data['entity']['payload']['entity_type'],
+                           data['entity']['payload'].get('attribute_definitions', {})):
             issues.append({'object_id':row['object_id'], 'code':'description_missing', 'message':row['payload']['title']+'：制作描述待完善'})
         for message in row['payload'].get('production_blockers', []):
             issues.append({'object_id':row['object_id'], 'code':'content_unresolved', 'message':message})
@@ -383,10 +385,12 @@ def _snapshot(store, entity_id, revision_id=None):
     d=decision(store,entity_id);a=selected if selected and selected['payload'].get('acceptance_model')==MODEL and selected['payload']['verdict']=='accepted' else (accepted(store,entity_id,scope) if not revision_id else None)
     revoke=d if not revision_id and d and d['payload']['verdict']=='accepted' else None
     history=[]
+    from .review_decisions import scope_records
     for row in store.db.execute("""SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='JUDGMENT'
             AND json_extract(r.payload,'$.acceptance_model') IN ('entity-current-v1','entity-generation-v1','entity-content-v1')
             AND json_extract(r.payload,'$.target.object_id')=? ORDER BY r.created_at DESC,r.version DESC,r.id DESC""",(entity_id,)):
-        h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict']})
+        h=p.record(store,revision_id=row[0]);history.append({'revision_id':h['id'],'created_at':h['created_at'],'actor':h['payload']['actor'],'verdict':h['payload']['verdict'],
+            'decision':h,'scope_records':scope_records(store,h['payload'].get('acceptance_scope'))})
     prep=preparation(store,scope)
     compatible=content_scope(store,entity_id,d,rows) if not revision_id else None
     content_decision=selected if revision_id else d
@@ -436,14 +440,15 @@ def _snapshot(store, entity_id, revision_id=None):
             if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
     if not any(material_versions.values()):material_versions=legacy_versions
     from .material_plans import card_counts
-    return {**base,**data,'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    from .review_decisions import scope_records
+    return {**base,**data,'decision_scope_records':scope_records(store,scope),'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',
             'acceptance_mode':acceptance_mode,'decision_scope':scope,
             'can_accept':not revision_id and not a and not revoke,
             'can_revoke':bool(revoke),'revoke_target':ref(revoke) if revoke else None,
-            'decision_version':d['version'] if d and d['object_id']==decision_id(entity_id) else 0,'preparation':prep,'history':history,
+            'decision':d,'decision_version':d['version'] if d and d['object_id']==decision_id(entity_id) else 0,'preparation':prep,'history':history,
             'adoptions':[r for r in p.current_records(store,{'RELATION'}) if r['payload'].get('relation_type')=='adoption'],'previous_accepted':None,'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
 
 

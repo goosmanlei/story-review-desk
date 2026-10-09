@@ -57,13 +57,14 @@ test('selecting the same revision neither adds history nor rebuilds an active ed
   f.button('revision-8').onclick();assert.equal(f.root.querySelector('#comment-editor-text'),editor);assert.equal(editor.value,'unique unsaved text');assert.equal(f.pushes.length,0);
 });
 
-test('initial load and actual popstate use the same missing and invalid parameter fallback without history writes',async()=>{
+test('initial load and actual popstate distinguish ordinary default from explicit invalid target without history writes',async()=>{
   for(const query of ['?workspace=story.outline','?workspace=story.outline&structure_revision=missing']){
     const f=await fixture('http://isolated/?workspace=story.outline&structure_revision=revision-8');
     f.context.startDraft({type:'global'});const key=f.context.key();f.storage.set(key,'old revision draft');
     Object.assign(f.context.state,{editing:'old-comment',selected:'old-comment',suggestion:'old suggestion',preview:{},previewExpanded:true,pending:{},drawMode:'old-image',reviewCommentScope:{target_revision_id:'revision-8'}});
     f.pop('http://isolated/'+query);const fresh=await fixture('http://isolated/'+query);
-    assert.equal(f.context.state.structureRevision,fresh.context.state.structureRevision);assert.equal(f.context.state.structureRevision,'revision-10');
+    assert.equal(f.context.state.structureRevision,fresh.context.state.structureRevision);assert.equal(f.context.state.structureRevision,query.includes('missing')?null:'revision-10');
+    if(query.includes('missing'))assert.match(f.context.state.structureRouteError,/不存在/);
     for(const name of ['anchor','editing','selected','suggestion','preview','pending','drawMode','reviewCommentScope'])assert.equal(f.context.state[name],null,name);
     assert.equal(f.context.state.previewExpanded,false);assert.equal(f.root.querySelector('#comment-editor-text'),null);assert.equal(f.storage.get(key),'old revision draft');assert.equal(f.pushes.length,0);
     f.pop('http://isolated/?workspace=story.outline&structure_revision=revision-8');assert.equal(f.context.state.structureRevision,'revision-8');assert.equal(f.pushes.length,0);
