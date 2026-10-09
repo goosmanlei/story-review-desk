@@ -1,3 +1,12 @@
+// Only successful entity decisions invalidate in-flight entity detail reads.
+const entityDecisionReads=new Map();
+async function readEntityDecisionView(url){
+  for(let attempt=0;attempt<2;attempt++){
+    const started=new Map(entityDecisionReads),result=await api(url),owner=(result.entity_review||result).entity?.object_id;
+    if(!owner||(started.get(owner)||0)===(entityDecisionReads.get(owner)||0))return result;
+  }
+  throw Error('实体决定在读取期间已更新，请重新打开核对当前状态。');
+}
 /* The settings workspace is a review surface. Content changes use the shared tools. */
 const isEntityReview=()=>isProduction()&&!!state.entityReview;
 const entityReviewDetail=record=>({record,history:[record],uses:[]});
@@ -68,7 +77,7 @@ async function openEntityReview(owner,detail,epoch,exactRevision,view=null){
   const workspace=state.workspace,cardRoot=state.unifiedCardRoot||null,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner||!url.searchParams.has('production_entity')&&url.searchParams.get('production_object')===owner;
   const reviewRevision=same?url.searchParams.get('entity_acceptance'):null;
   const query=new URLSearchParams({entity_id:owner,...(reviewRevision?{revision_id:reviewRevision}:{})});
-  const data=await api('/api/production/entity-review?'+query);
+  const data=await readEntityDecisionView('/api/production/entity-review?'+query);
   data.planMaterialVersions=data.material_versions;
   if(epoch!==productionReadEpoch||(state.unifiedCardRoot||null)!==cardRoot||!isProduction()||state.workspace!==workspace||workspace==='settings.workspace'&&!state.unifiedCardRoot&&state.productionVisibleEntities&&!state.productionVisibleEntities.has(owner)&&!(exactRevision&&data.entity.payload.status==='withdrawn'))return;
   const retained=view?.();
@@ -219,16 +228,26 @@ function renderEntityReview(root){
   const accept=productionButton(actions,data.can_revoke?'取消采纳':'采纳',async()=>{
     if(data.decisionSave||!isEntityReview()||state.entityReview!==data||entityReviewHasHistoricalContent(data,state.productionEntityDetail.record,state.productionChildDetail?.record)||entityReviewWithdrawals(data,state.productionEntityDetail.record,state.productionChildDetail?.record).length)return;
     accept.disabled=true;const action=data.can_revoke?'revoke':'accept',reason=action==='accept'?(data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳此实体的基础信息、关系、全部实体状态和素材生成方案，允许推进素材生成。'):'取消当前采纳，保留历史制作与意见。';
+    const refreshIndex=state.refreshEntityIndex;
     const epoch=productionReadEpoch,owns=()=>isEntityReview()&&state.entityReview===data&&productionReadEpoch===epoch&&accept.isConnected;
     const label=action==='accept'?'采纳':'取消采纳',savedMessage=`「${data.entity.payload.title}」的${label}已保存`;
     data.decisionSave={message:''};
     try{await api('/api/production/entity-decision',{method:'POST',body:JSON.stringify({entity_id:data.entity.object_id,action,decision_ref:data.revoke_target,expected_version:data.decision_version,scope:data.decision_scope||data.scope,acceptance_mode:data.acceptance_mode,actor:'用户',reason})})}
-    catch(error){data.decisionSave.message=`${label}结果待确认：${error.message}。请重新打开此实体核对后再操作。`;if(owns()){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}return}
+    catch(error){
+      const outcome=error.status===409?'版本已变化，本次未保存':error.status>=400&&error.status<500?'本次未保存':'结果待确认';
+      data.decisionSave.message=`${label}${outcome}：${error.message}。请重新打开此实体核对后再操作。`;
+      if(owns()){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}return;
+    }
+    entityDecisionReads.set(data.entity.object_id,(entityDecisionReads.get(data.entity.object_id)||0)+1);
     data.decisionSave.message=savedMessage+'；请重新打开此实体核对当前状态。';toast(savedMessage);
-    if(!owns())return;
+    // Saving belongs to the submitted entity; its list outlives this detail.
+    // Capture that list, never a replacement page's callback after the POST.
+    const indexRefresh=refreshIndex?.(savedMessage);
+    if(!owns()){await indexRefresh;return}
     const refresh=reloadEntityReview(),refreshEpoch=productionReadEpoch;
-    try{await refresh;await state.refreshEntityIndex?.()}
+    try{await refresh}
     catch(error){data.decisionSave.message=savedMessage+`；当前显示尚未更新：${error.message}。请重新打开此实体核对。`;if(isEntityReview()&&state.entityReview===data&&productionReadEpoch===refreshEpoch&&accept.isConnected){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}}
+    await indexRefresh;
   });accept.classList.add('entity-review-accept');accept.title=withdrawals.length?withdrawals[0].label+'；保留历史内容与评论，不对此版本采纳或取消。':viewingHistory?'正在查看历史内容，不能执行采纳或取消；请查看当前状态。':data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳基础信息、关系、全部实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需核对准确认可。';accept.disabled=!!data.decisionSave||(!data.can_accept&&!data.can_revoke)||viewingHistory||!!withdrawals.length;
   const scopeInfo=el('details','entity-decision-scope');nodeText('summary',null,'整体采纳范围与理由',scopeInfo);
   nodeText('p',null,'覆盖下列准确基础信息、直接关系、全部实体状态及状态素材方案；实体自身需求独立审阅。状态方案可单独采纳，也可使用有效的整体生成许可。两条路径择一，原件选择与生成前检查仍须满足。',scopeInfo);
