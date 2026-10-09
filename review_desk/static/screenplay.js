@@ -47,12 +47,12 @@ function renderScriptCommentCounts(){
     button.querySelector('.screenplay-scene-count').textContent='评论 '+counts.get(button.dataset.sceneId);
   }
 }
-const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id;
+const scriptDraftMetaKey=episode=>'review-script-editor:'+episode.id+(commentPageId?':page:'+commentPageId:'');
 function rememberScriptDraft(){
   const episode=scriptEpisode();
   if(!episode||!state.anchor)return;
   if(typeof markActiveCommentDraft==='function')markActiveCommentDraft();
-  try{localStorage.setItem(scriptDraftMetaKey(episode),JSON.stringify({anchor:state.anchor,editing:state.editing}))}
+  try{rememberLiveCommentEdit();localStorage.setItem(scriptDraftMetaKey(episode),JSON.stringify({anchor:state.anchor,editing:state.editing}))}
   catch{if(typeof rememberCommentDraftFailure==='function')rememberCommentDraftFailure();toast('本机草稿定位信息保存失败。当前仍可编辑，刷新后可能无法恢复原位置。')}
 }
 function forgetScriptDraft(){

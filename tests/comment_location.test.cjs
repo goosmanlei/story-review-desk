@@ -12,7 +12,8 @@ function setup(){
  const detail=record=>({record,history:[newAsset,oldAsset],review_context:{call:record.id===oldAsset.id?oldCall:newCall,requirements:[plan]},review_contexts:{[oldAsset.id]:{call:oldCall,requirements:[plan]},[newAsset.id]:{call:newCall,requirements:[plan]}},material_versions:{need:rounds},selectedMaterialRounds:{need:2}});
  const reader={scrollIntoView(){},querySelector:()=>({scrollIntoView(){}}),querySelectorAll:()=>[{dataset:{reviewFrom:0,reviewTo:10},reviewLocate:()=>true}]};
  const requests=[],messages=[],nodes={'#toast':{classList:{add(){},remove(){}},set textContent(message){messages.push(message)}}};
- const ctx={URL,URLSearchParams,console,window:{innerWidth:1440},CSS:{escape:value=>value},setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?reader:nodes[s]||null,querySelectorAll:()=>[],createElement:t=>new Element(t)},fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,reject,resolve:data=>resolve({ok:true,json:async()=>data})}))};
+ const stored=new Map();
+ const ctx={URL,URLSearchParams,console,window:{innerWidth:1440},CSS:{escape:value=>value},setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:k=>stored.get(k)||null,setItem:(k,v)=>stored.set(k,String(v)),removeItem:k=>stored.delete(k)},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?reader:nodes[s]||null,querySelectorAll:()=>[],createElement:t=>new Element(t)},fetch:(url,options)=>new Promise((resolve,reject)=>requests.push({url,options,reject,resolve:data=>resolve({ok:true,json:async()=>data})}))};
  vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);for(const name of files)vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
  vm.runInContext('globalThis.state=state;globalThis.key=draftKey;openPanel=()=>{};hideSelectionAction=()=>{};',ctx);
  ctx.state.workspace='materials.workspace';ctx.state.productionRecords=[plan,newAsset];ctx.state.materialReview=detail(newAsset);ctx.state.productionSelected=newAsset;
@@ -83,7 +84,7 @@ test('leaving the workspace ignores the old response and does not open an editor
  const f=setup(),editing=f.click(f.comment(f.oldAsset));f.ctx.state.workspace='story.sources';f.requests[0].resolve(f.detail(f.oldAsset));await editing;assert.equal(f.ctx.state.workspace,'story.sources');assert.equal(f.ctx.state.editing,null);assert.equal(f.requests.length,1);
 });
 for(const workspace of ['story.sources','story.outline'])test(`${workspace}: ordinary comment editing still starts immediately`,async()=>{
- const f=setup(),c=f.comment(f.plan);f.ctx.state.workspace=workspace;await f.click(c);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.anchor,c.anchor);assert.equal(f.requests.length,0);
+ const f=setup(),c=f.comment(f.plan);f.ctx.state.workspace=workspace;if(workspace==='story.sources')f.ctx.state.current={id:c.target_object_id,target_revision_id:c.target_revision_id};else{c.target_object_id='story-structure';f.ctx.state.structureRevision=c.target_revision_id}await f.click(c);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.anchor,c.anchor);assert.equal(f.requests.length,0);
 });
 
 for(const kind of ['ASSET','CALL'])test(`${kind}: a recorded material card identity survives the same historical load`,async()=>{
