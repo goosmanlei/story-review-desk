@@ -61,7 +61,7 @@ def projection(store, entries, episode=None, revision=None, scene=None):
     def owner(reference, loc, evidence):
         row = light.ref_record(store, reference)
         if row.get('unavailable'): return
-        if row['kind'] == 'ENTITY': entities[row['object_id']].append({**loc, 'evidence': evidence})
+        if row['kind'] == 'ENTITY': entities[row['object_id']].append({**loc, 'reference':{**b.ref(row),'version':row['version'],'title':row['payload']['title']}, 'evidence': evidence})
         elif row['kind'] == 'STATE': owner(row['payload']['entity'], loc, evidence)
 
     def add(row, loc, evidence):
