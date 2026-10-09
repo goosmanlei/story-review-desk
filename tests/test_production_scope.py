@@ -52,6 +52,7 @@ class ProductionScopeTest(unittest.TestCase):
         sc=p.record(self.store,'av-scene');self.store.put_object('av-scene','AV_SCENE',{**sc['payload'],'shots':[self.ref('av-shot')]},expected_version=1)
         ep=p.record(self.store,'av-episode');self.store.put_object('av-episode','AV_EPISODE',{**ep['payload'],'scenes':[self.ref('av-scene')]},expected_version=1)
         r=projection(self.store,[]);self.assertEqual({l['scene'] for l in r['entity_locations']['voice']},{'av-scene'})
+        self.assertEqual(r['entity_locations']['voice'][0]['reference']['revision_id'],self.ref('voice')['revision_id'])
 
     def test_exact_old_episode_keeps_old_children_after_new_design_and_scope(self):
         self.split();old=self.ref('av-episode');oldshot=self.ref('av-shot')
