@@ -255,3 +255,38 @@ test('missing exact file composition is reported instead of falling back to anot
   const rounds=[{number:9,results:[]},{number:2,results:[two.record]},{number:7,results:[one.record]}];assert.equal(ctx.materialDefaultRound(rounds).number,7);
   for(const r of rounds)r.results=[];assert.equal(ctx.materialDefaultRound(rounds).number,9);
  });
+
+test('shared material cards read relations from the displayed exact definition or candidate',async t=>{
+ const row=(object,id,kind='REQUIREMENT')=>({object_id:object,id,kind,payload:{title:object,components:[]}});
+ const current=row('need','current'),frozen=row('need','frozen'),a=row('asset-a','a','ASSET'),b=row('asset-b','b','ASSET');
+ const scenarios=[
+  {name:'frozen definition with no active plan',need:null,round:{model:'plan-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
+  {name:'direct candidate in a frozen material',need:null,identity:a,round:{model:'plan-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
+  {name:'exact old demand overrides another round definition',need:frozen,exactPreparingRevision:true,round:{definition_records:{requirement:current}},expected:frozen},
+  {name:'preparing plan remains its own exact record',need:current,expected:current},
+  {name:'missing frozen definition uses exact selected candidate',need:null,round:{definition_records:{}},selectedCandidateId:b.id,expected:b},
+  {name:'standalone original uses its own identity',need:null,identity:a,material_id:undefined,expected:a},
+  {name:'frozen version without an original still uses its definition',need:null,candidates:[],round:{model:'plan-v1',members:[],definition_records:{requirement:frozen}},expected:frozen},
+ ];
+ for(const s of scenarios)await t.test(s.name,()=>{
+  const c={state:{},URLSearchParams};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+  const node=()=>({dataset:{},append(){},addEventListener(){}}),requests=[];
+  c.el=node;c.nodeText=()=>{};c.businessTitle=r=>r.object_id;c.materialModelCode=()=>'';c.reviewPositionText=x=>x;
+  c.renderHistoricalProductionDefinition=()=>{};c.materialCompareControl=()=>{};c.renderProductionAcceptance=()=>{};
+  c.renderMaterialRelations=(_box,object,record)=>requests.push({object,record});c.materialRoundControl=()=>{};c.reviewChoiceButtons=()=>{};
+  c.materialMedia=()=>{};c.renderActualGeneration=()=>{};c.renderMaterialRequirements=()=>{};c.renderMaterialPlaceholder=()=>{};c.renderGenerationRecipe=()=>{};
+  const model={material_id:'need',identity:current,candidates:[a,b].map(record=>({record,components:[],component:{mime:'application/zip'}})),...s};
+  const before=JSON.stringify(model);c.renderMaterialCard(node(),model,{selectCandidate:()=>{},selectedCandidateId:s.selectedCandidateId});
+  assert.equal(requests.length,1);assert.equal(requests[0].record,s.expected);assert.equal(requests[0].object,s.expected.object_id);assert.equal(JSON.stringify(model),before);
+ });
+});
+
+test('late relation success or error cannot populate a replaced material card',async t=>{
+ for(const reject of [false,true])await t.test(reject?'late error':'late success',async()=>{
+  let resolve,rejectRequest;const box={isConnected:true,append(){},remove(){assert.fail('detached card should be ignored')}};
+  const c={URLSearchParams,state:{materialReview:{}},isEntityReview:()=>false,el:()=>box,api:()=>new Promise((a,b)=>{resolve=a;rejectRequest=b}),nodeText:()=>assert.fail('late card should not render'),rememberMaterialRelations:()=>assert.fail('late card should not alter comment records')};
+  vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
+  const pending=c.renderMaterialRelations({append(){}},'need',{object_id:'need',id:'frozen',payload:{}});box.isConnected=false;c.state.materialReview={};
+  if(reject)rejectRequest(new Error('previous object error'));else resolve({relations:[]});await pending;
+ });
+});
