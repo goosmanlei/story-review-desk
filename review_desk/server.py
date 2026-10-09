@@ -386,7 +386,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == '/api/production/index':
                     from .production_breakdown import index
                     with production.read_scope(store):
-                        return self._json(index(store,param('view'),param('object_id')))
+                        return self._json(index(store,param('view'),param('object_id'),scope=param('scope'),scope_episode=param('scope_episode'),scope_revision=param('scope_revision'),scope_scene=param('scope_scene')))
                 if path in ('/api/production/card','/api/production/scene'):
                     from . import ui_projection
                     with production.read_scope(store):
@@ -400,7 +400,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/materials":
                     from .ui_projection import material_list as materials
                     with production.read_scope(store):
-                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1"))
+                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1", scope=param('scope'), scope_revision=param('scope_revision')))
                 if path == "/api/production":
                     return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
                 if path == "/api/production/impact":

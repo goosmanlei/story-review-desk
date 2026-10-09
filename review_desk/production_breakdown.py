@@ -35,7 +35,7 @@ def rows(store, kind, condition='', params=()):
     return [p.record_view(r) for r in store.db.execute(sql+(' AND '+condition if condition else '')+' ORDER BY o.id', (kind, *params))]
 
 
-def index(store, view, object_id=None):
+def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None):
     kinds={'settings':('ENTITY','STATE','REPRESENTATION')}.get(view)
     if not kinds:raise ValueError('unknown production index')
     values=[r for kind in kinds for r in rows(store,kind)]
@@ -47,7 +47,12 @@ def index(store, view, object_id=None):
     result={'records':values,'material_assets':{}}
     if view=='settings':
         from .ui_projection import entity_summaries, material_entries
-        result.update(entity_summaries(store,[r for r in values if r['kind']=='ENTITY'],material_entries(store)))
+        entries=material_entries(store)
+        result.update(entity_summaries(store,[r for r in values if r['kind']=='ENTITY'],entries))
+        if scope == 'av':
+            from .production_scope import projection
+            projected=projection(store,entries,scope_episode,scope_revision,scope_scene)
+            result.update({key:projected[key] for key in ('management_episodes','entity_locations')})
     return result
 
 
