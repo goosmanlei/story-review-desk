@@ -18,20 +18,27 @@ async function renderProductionAcceptance(host,row){
   let data,serial=0;
   const refresh=async()=>{const token=++serial;try{
     const next=await api('/api/production/acceptance?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));
-    if(token===serial){data=next;draw()}
+    if(box.isConnected&&token===serial){data=next;draw()}
   }catch(error){if(box.isConnected&&token===serial){box.replaceChildren();nodeText('p','production-issue',error.message,box)}}};
   const entry={box,refresh};
   productionAcceptancePanels.add(entry);
   Promise.resolve().then(()=>{for(const panel of productionAcceptancePanels)if(!panel.box.isConnected)productionAcceptancePanels.delete(panel)});
   const draw=()=>{box.replaceChildren();
     const button=productionButton(box,data.accepted?'取消采纳此版':'采纳此版',async()=>{
+      if(!box.isConnected||button.disabled)return;
       button.disabled=true;++serial;
-      try{data=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});draw();
+      try{const next=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});if(box.isConnected){data=next;draw()}
         for(const panel of productionAcceptancePanels){if(!panel.box.isConnected)productionAcceptancePanels.delete(panel);else if(panel!==entry)panel.refresh()}
       }catch(error){if(box.isConnected){button.disabled=false;toast(error.message);refresh()}}
     });button.disabled=!data.can_change;
     if(!data.can_change)nodeText('small','production-meta','历史版本',box);
     else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
+    const info=el('details');nodeText('summary',null,'本版采纳范围与理由',info);
+    nodeText('p',null,row.kind==='REQUIREMENT'?'仅认可此素材方案版本；可与所属状态的有效整体生成许可择一。采纳不选择原件、不接受结果、不调用模型；准确参考及生成前检查仍须满足。':'认可此版设计及下列准确子项；实际生成、原件审阅与采用分别决定。',info);
+    renderDecisionScope(info,data.scope,data.scope_records||[]);
+    if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
+    if(data.history?.length){const history=el('details');nodeText('summary',null,'方案决定历史 · '+data.history.length,history);for(const decision of data.history){const entry=renderReviewDecision(history,decision,{historical:true});renderDecisionScope(entry,decision.payload.acceptance_scope,decision.scope_records||[])}info.append(history)}
+    box.append(info);
   };
   await refresh();
 }
@@ -47,7 +54,7 @@ function renderAudiovisualEdition(host,data){
 function renderShotDemands(host,context){
   const needs=context.requirements||[];if(!needs.length){nodeText('p','production-meta','本镜尚无素材需求',host);return}
   const section=el('section','shot-demands'),select=el('select'),body=el('div');select.setAttribute('aria-label','本镜素材需求');
-  for(const need of needs)select.append(new Option(need.payload.title,need.object_id));
+  for(const need of needs)select.append(new Option(readableProductionTitle(need),need.object_id));
   const routed=new URL(location.href).searchParams.get('shot_material_id');
   select.value=(needs.find(r=>r.object_id===routed)||needs.find(r=>r.payload.media_type==='video')||needs[0]).object_id;
   const draw=()=>{body.replaceChildren();const need=needs.find(r=>r.object_id===select.value);breakdownPrompt(body,need,context);renderMaterialRelations(body,need.object_id)};
@@ -71,7 +78,7 @@ function productionTabs(){if(typeof renderWorkspaceTabs==='function')renderWorks
 function breakdownRoute(values){const url=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)url.searchParams.delete(k);else url.searchParams.set(k,v)}history.replaceState(history.state,'',url)}
 function breakdownHeading(host){productionTabs(host)}
 function breakdownSceneTitle(row){return (businessCode(row)||reviewPositionLabel('scene',row.payload.source?.scene_id||row.payload.scene_id,row.payload.source?.object_id))+' · '+row.payload.title.replace(/^\d+-\d+\s*/,'')}
-function breakdownShotTitle(row){return reviewPositionLabel('shot',row)+' · '+row.payload.title.replace(/^E\d+-\d+\s*/i,'')}
+function breakdownShotTitle(row){return businessCode(row)||state.businessCodes?businessTitle(row):reviewPositionLabel('shot',row)+' · '+readableProductionTitle(row)}
 function breakdownEpisodeTitle(episode){
   if(!episode)return '';
   const title=String(episode.title||episode.payload?.title||''),number=episode.number??episode.payload?.number;
@@ -212,6 +219,13 @@ function breakdownPrompt(parent,need,context){
   const route=(number,candidate=null)=>{const url=new URL(location.href);url.searchParams.set('shot_material_id',need.object_id);url.searchParams.set('shot_plan',number);const baseline=rounds.find(r=>r.number===number)?.baseline_id;if(baseline)url.searchParams.set('shot_baseline',baseline);else url.searchParams.delete('shot_baseline');if(candidate)url.searchParams.set('shot_candidate',candidate);else url.searchParams.delete('shot_candidate');history.pushState(history.state,'',url);state.breakdownRenderedSelection=breakdownSelectionKey(url.searchParams)};
   if(round)materialRoundControl(bar,need.object_id,rounds,round,number=>{state.breakdownVideoSelections[need.id]={number};route(number);repaint()});
   if(candidates.length)reviewChoiceButtons(section,'素材候选',candidates.map((item,index)=>({id:item.record.id,label:'候选'+(item.record.candidate_number||index+1)})),selected.record.id,id=>{selection.candidate=id;route(round.number,id);repaint()});
+  if(['project','document'].includes(need.payload.media_type)){
+    if(selected){materialMedia(section,selected);renderActualGeneration(section,detail.review_contexts?.[selected.record.id])}
+    else nodeText('p','production-meta','尚未交付原文件',section);
+    if(model.need)renderMaterialRequirements(section,model.need);
+    else nodeText('p','production-meta','此版本未保留完整素材要求。',section);
+    return;
+  }
   if(selected){
     const actual=detail.review_contexts?.[selected.record.id],call=actual?.call;
     nodeText('h4',null,'所选候选的真实生成内容',section);
@@ -326,17 +340,10 @@ function groupedShotMaterials(items){
   for(const item of unique){const c=item.classification||{key:item.media_type+':other',label:'其他-'+({image:'图像',audio:'声音',video:'视频',project:'工程',document:'文档'}[item.media_type]||'其他')};if(!groups.has(c.key))groups.set(c.key,{...c,items:[]});groups.get(c.key).items.push(item)}
   const media=['image','audio','video','project','document'];return [...groups.values()].sort((a,b)=>media.indexOf(a.key.split(':')[0])-media.indexOf(b.key.split(':')[0])||a.label.localeCompare(b.label,'zh-CN'));
 }
-async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
-  const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
-  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
-  body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
-  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
-  const page=el('section','breakdown-scene');body.append(page);
-  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
-  for(const item of data.shots){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
+function renderBreakdownShot(parent,item){const shot=item.record,row=el('article','breakdown-row breakdown-shot');row.dataset.shotId=shot.object_id;row.dataset.shotRevision=shot.id;
     const text=el('section','breakdown-shot-copy'),materials=el('aside','breakdown-shot-materials'),heading=el('header'),title=el('div','breakdown-shot-heading');nodeText('h3',null,breakdownShotTitle(shot),title);renderAudiovisualSources(title,shot);renderProductionAcceptance(title,shot);heading.append(title);nodeText('small',null,`${shot.payload.duration_frames/shot.payload.fps} 秒`,heading);text.append(heading);
     breakdownShotText(text,shot);const trace=renderShotStateContext(text,shot,item.context);renderShotDemands(text,item.context);
-    row.append(text);page.append(row);
+    row.append(text);parent.append(row);
     if(trace){row.classList.add('shot-with-state-trace');trace.append(materials)}else row.append(materials);
     nodeText('h4',null,'关联素材',materials);
     if(item.context.missing_materials?.length)nodeText('p','production-issue',`${item.context.missing_materials.length} 项准确素材引用已删除，需重新选择后才能生成。`,materials);
@@ -346,7 +353,15 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
         openUnifiedMaterial({...item.reference,...choice?.reference,object_id:choice?.reference?.object_id||item.reference?.object_id||item.object_id,revision_id:choice?.reference?.revision_id||item.reference?.revision_id||item.id,params,defaultSelection:!choice&&item.association!=='adoption'&&item.record?.kind!=='ASSET'},trigger)},false,{includesHistory:item.generation_scope==='history',showHistoryScope:true}).dataset.reviewDialogTrigger='';
     }
     if(!items.length)nodeText('p','production-meta','本镜暂无关联素材',materials);
-  }
+}
+async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
+  const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
+  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
+  body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
+  breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_scene:scene.object_id,production_tab:'breakdown'});
+  const page=el('section','breakdown-scene');body.append(page);
+  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);renderProductionAcceptance(heading,data.scene);
+  for(const item of data.shots)renderBreakdownShot(page,item);
   state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.context.requirements)];
   if(commit)commit();
   state.breakdownRenderedSelection=breakdownSelectionKey(restore||new URLSearchParams());

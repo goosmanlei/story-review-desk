@@ -45,7 +45,17 @@ def snapshot(store, object_id, revision_id=None):
             effective.update({key: row for key in covered})
     accepted = all(key in effective and effective[key]['payload']['verdict'] == 'accepted' for key in keys)
     approvals = {r['id']: r for r in effective.values() if r['payload']['verdict'] == 'accepted'}
-    return {'target': ref(target), 'scope': exact, 'decision': decision,
+    history = [p.record(store, revision_id=r[0]) for r in store.db.execute("""
+        SELECT r.id FROM revisions r JOIN objects o ON o.id=r.object_id
+        WHERE o.kind='JUDGMENT' AND json_extract(r.payload,'$.acceptance_model')=?
+        AND EXISTS (SELECT 1 FROM json_each(r.payload,'$.acceptance_scope') s
+                    WHERE json_extract(s.value,'$.object_id')=?)
+        ORDER BY json_extract(r.payload,'$.decision_sequence') DESC""", (MODEL, target['object_id']))]
+    from .review_decisions import scope_records
+    for row in history:
+        row['scope_records'] = scope_records(store, row['payload']['acceptance_scope'])
+    return {'target': ref(target), 'scope': exact, 'scope_records': scope_records(store, exact),
+            'decision': decision, 'history': history,
             'accepted': accepted, 'acceptances': [ref(r) for r in approvals.values()],
             'partial': bool(approvals) and not accepted,
             'can_change': target['id'] == target['current_revision']}

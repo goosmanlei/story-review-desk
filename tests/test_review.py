@@ -169,9 +169,9 @@ class ReviewTest(unittest.TestCase):
         preview = build_context(self.store, "fixture", anchor, "请核对字词")
         context = preview["context"]
         self.assertEqual(context["creative_stage"]["id"], "STORY_COMPILATION")
-        self.assertEqual(context["story_background"], "来自收录资料的故事背景")
-        self.assertEqual(context["creative_background"], "首阶段只做故事采编")
-        self.assertEqual(context["neighbor_blocks"][0]["text"], SOURCE["blocks"][0]["text"])
+        self.assertNotIn("story_background", context)
+        self.assertNotIn("creative_background", context)
+        self.assertEqual(context["target_object_id"], "fixture")
         self.assertIn("甲乙𪎊丁", context["source_documents"][0]["text"])
         self.assertEqual(len(preview["context_sha256"]), 64)
         response = {"output": [{"content": [{"type": "output_text", "text": "建议核对字词"}]}]}
@@ -180,7 +180,7 @@ class ReviewTest(unittest.TestCase):
         payload = json.loads(remote.call_args.args[0].data)
         self.assertEqual(result["suggestion"], "建议核对字词")
         self.assertFalse(payload["store"])
-        self.assertEqual(json.loads(payload["input"])["creative_background"], "首阶段只做故事采编")
+        self.assertEqual(json.loads(payload["input"]), context)
         self.assertEqual(json.loads(payload["input"])["source_documents"][0]["source_url"], SOURCE["source_url"])
         self.assertNotIn("reasoning", payload)
         self.assertEqual(migrate("SYSTEM", 1, {"ai_polish_model": "gpt-4.1-mini"})["ai_polish_effort"], "off")
