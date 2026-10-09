@@ -22,7 +22,7 @@ function fixture(){
   };
   vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
   const model={material_id:'song',round:{number:1}};
-  const render=()=>{box.all().slice(1).forEach(e=>e.isConnected=false);box.children=[];c.renderShotReferenceChoice(box,model,item);return box.all().find(e=>e.tag==='button')};
+  const render=player=>{box.all().slice(1).forEach(e=>e.isConnected=false);box.children=[];c.renderShotReferenceChoice(box,model,item,player);return box.all().find(e=>e.tag==='button'&&!e.textContent?.startsWith('试听'))};
   const input=name=>box.all().find(e=>e.attrs['aria-label']===name);
   return {c,context,box,item,slot,model,calls,saved,render,input};
 }
@@ -31,6 +31,24 @@ test('selected current reference carries the consolidation baseline to the share
   f.c.openShotReference({slot:f.slot,value:f.slot.value},{need:f.context.need,number:1},null);
   assert.equal(opened.params.get('material_baseline'),'baseline');
   assert.equal(opened.params.get('material_target'),'candidate');
+});
+test('audition follows saved and unsaved reference fields, discard restores them, and comment selection has no write',()=>{
+  const f=fixture(),played=[],player={reviewAudition:b=>{played.push(plain(b));return true},reviewPause(){}};f.render(player);
+  const audition=f.box.all().find(e=>e.textContent?.startsWith('试听'));
+  assert.equal(audition.textContent,'试听已保存片段 · 1–4 秒');audition.onclick();
+  f.input('结束秒数').value='5';f.input('结束秒数').oninput();assert.equal(audition.textContent,'试听未保存范围 · 1–5 秒');audition.onclick();
+  f.box.all().find(e=>e.textContent==='放弃范围修改').onclick();assert.equal(audition.textContent,'试听已保存片段 · 1–4 秒');audition.onclick();
+  assert.deepEqual(played,[{start_seconds:1,end_seconds:4},{start_seconds:1,end_seconds:5},{start_seconds:1,end_seconds:4}]);assert.equal(f.calls.length,0);
+  f.item.component={...f.item.component,id:'preview',role:'preview'};f.render(player);assert.equal(f.input('使用时间段（秒）').checked,false);assert.equal(f.box.all().find(e=>e.textContent?.startsWith('试听')).hidden,true);
+});
+test('invalid reference audition is refused without saving or changing the user numbers',()=>{
+  const f=fixture(),player={reviewAudition:()=>false,reviewPause(){}};f.render(player);
+  f.input('开始秒数').value='6';f.input('开始秒数').oninput();f.box.all().find(e=>e.textContent?.startsWith('试听')).onclick();
+  assert.match(f.context.error,/起点须早于终点/);assert.equal(f.input('开始秒数').value,'6');assert.equal(f.calls.length,0);
+});
+test('another material version sharing a candidate does not inherit the saved range',()=>{
+  const f=fixture();f.model.round.number=2;f.render();assert.equal(f.input('使用时间段（秒）').checked,false);
+  f.model.round.number=1;f.render();assert.equal(f.input('使用时间段（秒）').checked,true);assert.equal(f.input('结束秒数').value,'4');
 });
 test('saving releases busy and another range edit is unsaved and can be submitted',async()=>{
   const f=fixture(),button=f.render();f.input('结束秒数').value='5';f.input('结束秒数').oninput?.();
