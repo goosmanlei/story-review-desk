@@ -31,3 +31,7 @@ test('a scene shared by two current editions uses an explicit parent choice',()=
  const c=fixture('http://fixture/'),filters={episode:'',scene:''},catalog={episodes:['one','two'].map(id=>({object_id:id,id:id+'-exact',kind:'AV_EPISODE',scenes:[{id:'shared',kind:'AV_SCENE',title:'共有场'}]}))};
  c.managementScopeFilters({},filters,catalog,[],()=>{});const options=c.groups[1].options;assert.notEqual(options[1][0],options[2][0]);c.groups[1].change(options[2][0]);assert.equal(filters.episode,'two');assert.equal(filters.scope_revision,'two-exact');assert.equal(filters.scene,'shared');
 });
+
+test('reopening a historical manager URL cannot return through a stale current shot',()=>{
+ const c=fixture('http://fixture/?workspace=materials.workspace&production_tab=materials&production_scope_episode=ep&production_scope_revision=old&production_scope_scene=scene&breakdown_episode=ep&breakdown_scene=scene&breakdown_object=current-shot&breakdown_revision=current');c.state.workspace='materials.workspace';c.selectProductionTab('breakdown');const p=new URL(c.location.href).searchParams;assert.equal(p.get('breakdown_object'),'ep');assert.equal(p.get('breakdown_revision'),'old');
+});
