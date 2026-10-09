@@ -62,7 +62,7 @@ function renderShotDemands(host,context){
   section.append(select,body);host.append(section);draw();
 }
 function paintMaterialUseText(){
-  const data=isEntityReview()?state.entityReview:state.materialReview;
+  const data=typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview;
   const records=[...(data?.relation_records||[]),...(data?.comment_records||[])];
   for(const surface of document.querySelectorAll('.material-use-details [data-production-blocks]')){
     const row=records.find(r=>r.id===surface.dataset.productionBlocks);if(!row)continue;
@@ -75,7 +75,7 @@ function paintMaterialUseText(){
   }
 }
 function locateMaterialRelationComment(comment){
-  const data=isEntityReview()?state.entityReview:state.materialReview;
+  const data=typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview;
   const row=[...(data?.relation_records||[]),...(data?.comment_records||[]),state.productionSelected].find(r=>r?.id===comment.target_revision_id);
   if(row?.kind!=='MATERIAL_RELATION')return false;
   let surface=document.querySelector(`[data-production-blocks="${CSS.escape(row.id)}"]`);
