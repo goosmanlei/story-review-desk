@@ -83,9 +83,9 @@ test('earlier revision opinions remain in the entity panel',async()=>{
 test('locating a current opinion resets an earlier historical state context',async()=>{
  const {ctx,data}=setup();const old={...form,id:'old',current_revision:form.id};data.comment_records=[old];
  await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
- ctx.locateEntityReviewComment({id:'old-comment',target_revision_id:'old',anchor:{type:'global'}});
+ ctx.locateEntityReviewComment({id:'old-comment',target_object_id:form.object_id,target_revision_id:'old',anchor:{type:'global'}});
  assert.equal(ctx.state.productionChildDetail.record,old);assert.equal(data.historicalTarget,old);
- ctx.locateEntityReviewComment({id:'current-comment',target_revision_id:entity.id,anchor:{type:'global'}});
+ ctx.locateEntityReviewComment({id:'current-comment',target_object_id:entity.object_id,target_revision_id:entity.id,anchor:{type:'global'}});
  assert.equal(ctx.state.productionChildDetail.record,form);assert.equal(data.historicalTarget,null);
 });
 test('state media excludes entity-only candidates, other states and other revisions',()=>{
@@ -107,44 +107,46 @@ test('several materials can describe one state and reuse requires explicit cover
  assert.equal(ctx.entityReviewStateMedia({media},second)[0].range,range);
 });
 test('unassigned media comments open their separate area without changing the selected state',async()=>{
- const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'待关联声音'}),item={id:'voice',state:null,record:asset,component_id:'original'};data.media=[item];
+ const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'待关联声音',components:[{id:'original',mime:'audio/wav',file:'voice.wav',duration_seconds:10}]}),item={id:'voice',state:null,record:asset,component_id:'original'};data.media=[item];
  await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
- ctx.selectEntityReviewState(second);ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'time',component_id:'original',start_seconds:1,end_seconds:2}});
+ ctx.selectEntityReviewState(second);ctx.locateEntityReviewComment({id:'c',target_object_id:asset.object_id,target_revision_id:asset.id,anchor:{type:'time',component_id:'original',asset_file:'voice.wav',start_seconds:1,end_seconds:2}});
  assert.equal(data.unassignedOpen,true);assert.equal(ctx.state.productionChildDetail.record,second);
  assert.equal(ctx.state.entityReviewUnassignedMedia,item.id);assert.equal(ctx.entityReviewStateMedia(data,second).length,0);
  ctx.selectEntityReviewState(form);assert.equal(data.unassignedOpen,false);
 });
 test('mapped media comments select their state; historical unlinked media stays separate',async()=>{
- const {ctx,data}=setup(),asset=row('image','ASSET',{title:'图像',components:[{id:'original',mime:'image/png'}]}),old={...asset,id:'old-image',current_revision:asset.id};
+ const {ctx,data}=setup(),asset=row('image','ASSET',{title:'图像',components:[{id:'original',mime:'image/png',file:'image.png'}]}),old={...asset,id:'old-image',current_revision:asset.id};
  data.media=[{id:'image',state:ref(second),record:asset,component_id:'original'}];data.comment_records=[old];
  await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
- ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original'}});
+ ctx.locateEntityReviewComment({id:'c',target_object_id:asset.object_id,target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original',asset_file:'image.png'}});
  assert.equal(ctx.state.productionChildDetail.record,second);assert.equal(ctx.state.entityReviewMedia,'image');assert.equal(data.unassignedOpen,false);
- ctx.locateEntityReviewComment({id:'old',target_revision_id:old.id,anchor:{type:'visual',visual_id:'original'}});
+ ctx.locateEntityReviewComment({id:'old',target_object_id:old.object_id,target_revision_id:old.id,anchor:{type:'visual',visual_id:'original',asset_file:'image.png'}});
  assert.equal(data.historicalMedia.record,old);assert.equal(data.historicalMedia.state,null);assert.equal(data.historicalTarget,old);
  assert.equal(ctx.entityReviewStateMedia(data,second)[0].record,asset);
 });
 test('a time opinion outside current coverage opens its original file separately',async()=>{
- const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'声音',components:[{id:'original',mime:'audio/wav'}]});
+ const {ctx,data}=setup(),asset=row('voice','ASSET',{title:'声音',components:[{id:'original',mime:'audio/wav',file:'voice.wav',duration_seconds:10}]});
  data.media=[{id:'voice',state:ref(form),record:asset,component_id:'original',range:{start_seconds:3,end_seconds:5}}];
  await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
- ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'time',component_id:'original',start_seconds:1,end_seconds:2}});
+ ctx.locateEntityReviewComment({id:'c',target_object_id:asset.object_id,target_revision_id:asset.id,anchor:{type:'time',component_id:'original',asset_file:'voice.wav',start_seconds:1,end_seconds:2}});
  assert.equal(data.historicalMedia.record,asset);assert.equal(data.unassignedOpen,false);
 });
 test('an original linked only by review_state locates its exact historical state without claiming coverage',async()=>{
- const {ctx,data}=setup(),asset=row('image','ASSET',{title:'历史原件',components:[{id:'original',mime:'image/png'}]});
+ const {ctx,data}=setup(),asset=row('image','ASSET',{title:'历史原件',components:[{id:'original',mime:'image/png',file:'image.png'}]});
  data.media=[{id:'retained-image',state:null,review_state:ref(second),record:asset,component_id:'original'}];
  await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>{};
- ctx.locateEntityReviewComment({id:'c',target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original'}});
+ ctx.locateEntityReviewComment({id:'c',target_object_id:asset.object_id,target_revision_id:asset.id,anchor:{type:'visual',visual_id:'original',asset_file:'image.png'}});
  assert.equal(ctx.state.productionChildDetail.record,second);assert.equal(ctx.state.entityReviewMedia,'retained-image');
  assert.equal(data.unassignedOpen,false);assert.equal(data.media[0].state,null);
 });
-test('time comment location scopes a repeated component id to the exact asset revision',()=>{
- const {ctx}=setup();ctx.state.entityReview={};let selector,component,focused=false;
- const player={dataset:{},scrollIntoView:()=>{},focus:()=>{focused=true}};
- ctx.CSS={escape:x=>x};ctx.$=()=>null;ctx.document.querySelector=value=>{selector=value;return value.startsWith('[data-comment-media]')?null:{querySelector:value=>{component=value;return player}}};
- ctx.locateProductionComment({id:'c',target_revision_id:'voice-v2',anchor:{type:'time',component_id:'original',start_seconds:1.2}},true);
- assert.equal(selector,'[data-review-revision="voice-v2"]');assert.equal(component,'[data-component-id="original"]');assert.equal(player.currentTime,1.2);assert.equal(focused,true);
+test('time location checks exact revision, file and unclipped range before touching a player',()=>{
+ const {ctx}=setup(),asset=row('voice','ASSET',{title:'声音',components:[{id:'original',mime:'audio/wav',file:'voice.wav',duration_seconds:10}]},'voice-v2');
+ ctx.state.productionSelected=asset;ctx.CSS={escape:x=>x};let selector,located=null;
+ const player={dataset:{reviewFrom:0,reviewTo:10},reviewLocate:anchor=>{located=anchor;return true}};
+ const root={querySelectorAll:value=>{selector=value;return [player]}};ctx.$=selector=>selector==='#production-reader'?root:null;
+ const comment={id:'c',target_object_id:asset.object_id,target_revision_id:asset.id,anchor:{type:'time',component_id:'original',asset_file:'voice.wav',start_seconds:1.2,end_seconds:2}};
+ assert.equal(ctx.locateProductionComment(comment,true),true);
+ assert.equal(selector,'.review-media-player[data-review-revision="voice-v2"][data-review-file="voice.wav"]');assert.equal(located,comment.anchor);
 });
 
 test('refreshing a media comment keeps the explicitly selected state',async()=>{

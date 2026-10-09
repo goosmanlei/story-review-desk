@@ -377,7 +377,7 @@ function preserveCardPosition(){
   return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
 }
 function renderProductionReaderContent(){
-  const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;root.replaceChildren();
+  const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;if(typeof pauseReviewMedia==='function')pauseReviewMedia(root);root.replaceChildren();
   if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
   if(typeof isMaterialReview==='function'&&isMaterialReview()){renderUnifiedCard(root);return}
@@ -438,11 +438,22 @@ function renderProductionTransitions(root,transitions){
   for(const t of transitions){const row=el('div','production-need');productionRefLink(row,t.from);nodeText('span',null,' → ',row);productionRefLink(row,t.to);nodeText('p',null,t.action,row);productionRefLink(row,t.source,'查看转换依据');section.append(row)}
   root.append(section);
 }
+function productionCommentLocationIssue(comment,row){
+  if(comment.anchor_state?.valid===false)return comment.anchor_state.reason||'原圈选已失效；评论仍保留。';
+  if(!row||row.id!==comment.target_revision_id||row.object_id!==comment.target_object_id)return '评论所属的准确修订不可用；未打开其他版本。';
+  const a=comment.anchor;
+  if(!['time','visual','region'].includes(a.type))return null;
+  const component=row.payload.components?.find(c=>c.id===(a.component_id||a.visual_id));
+  if(!component||!component.file||typeof component.mime!=='string'||component.file!==a.asset_file)return '评论所属的原文件组成不可用；未替换为预览或其他文件。';
+  if(a.type==='time'&&(!/^(audio|video)\//.test(component.mime)||!Number.isFinite(a.start_seconds)||!Number.isFinite(a.end_seconds)||a.start_seconds<0||a.start_seconds>=a.end_seconds||Number.isFinite(component.duration_seconds)&&a.end_seconds>component.duration_seconds))return '原评论的时间范围已不可用；未改写圈选。';
+  if(a.type!=='time'&&!component.mime.startsWith('image/'))return '原评论的图像组成不可用；评论仍保留。';
+  return null;
+}
 function locateProductionComment(comment,local=false){
   if(typeof locateMaterialRelationComment==='function'&&locateMaterialRelationComment(comment))return;
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
   if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
-  if(comment.anchor_state?.valid===false)return toast(comment.anchor_state.reason);
+  const issue=productionCommentLocationIssue(comment,state.productionSelected);if(issue){toast(issue);return false}
   if(typeof productionTab==='function'&&['breakdown','shots'].includes(productionTab())&&state.productionSelected?.kind==='AV_SCENE'&&comment.anchor.type==='text'&&!document.querySelector('[data-production-blocks="'+CSS.escape(comment.target_revision_id)+'"] [data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]'))return openBreakdownSceneNotes(state.productionSelected,comment);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
   // A merged display never migrates the original field. Reveal its exact text
@@ -455,10 +466,15 @@ function locateProductionComment(comment,local=false){
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
   // Component ids can repeat across state references and unassigned candidates.
   // Locate the exact asset revision before looking up its image or player.
-  const exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,mediaRoot=typeof isEntityReview==='function'&&isEntityReview()?(document.querySelector('[data-comment-media]'+exact)||document.querySelector(exact)):$('#production-reader');
-  if(a.type==='time'){const media=mediaRoot?.querySelector(`[data-component-id="${CSS.escape(a.component_id)}"]`);if(media){media.dataset.reviewSeek=a.start_seconds;media.currentTime=a.start_seconds;const player=media.closest?.('.review-media-player');if(player?.reviewLocate)player.reviewLocate(a);else{media.scrollIntoView({block:'center'});media.focus()}}}
-  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?mediaRoot?.querySelector(`[data-visual-id="${CSS.escape(a.visual_id)}"]`):mediaRoot||$('#production-reader');target?.scrollIntoView({block:'center'})}
+  const root=state.unifiedCardRoot||$('#production-reader'),exact=`[data-review-revision="${CSS.escape(comment.target_revision_id)}"]`,file=`[data-review-file="${CSS.escape(a.asset_file||'')}"]`;
+  if(a.type==='time'){
+    const player=[...root?.querySelectorAll('.review-media-player'+exact+file)||[]].find(p=>Number(p.dataset.reviewFrom)<=a.start_seconds&&a.end_seconds<=Number(p.dataset.reviewTo));
+    if(!player?.reviewLocate){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
+    if(player.reviewLocate(a)===false){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
+  }
+  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?root?.querySelector(exact+' '+file+` [data-visual-id="${CSS.escape(a.visual_id)}"]`):root;if(!target){toast('原圈选当前无法显示；评论仍保留。');return false}target.scrollIntoView({block:'center'})}
   paintProductionReview();renderComments();
+  return true;
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}
 function showProductionJudgment(root,record=state.productionSelected){

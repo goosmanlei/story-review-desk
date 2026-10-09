@@ -383,7 +383,8 @@ function cancelMaterialCommentLocation(){
   if(pending?.loading&&pending.epoch===productionReadEpoch)++productionReadEpoch;
 }
 function selectCommentMaterialRound(data,row,comment,materialId=null){
-  if(comment.material_scopes?.length&&data.legacy_material_versions)data.material_versions=data.legacy_material_versions;
+  if(comment.material_plan_scopes?.length&&data.planMaterialVersions)data.material_versions=data.planMaterialVersions;
+  else if(!comment.material_plan_scopes?.length&&comment.material_scopes?.length&&data.legacy_material_versions){data.planMaterialVersions||=data.material_versions;data.material_versions=data.legacy_material_versions}
   const versions=data.material_versions||{},scopes=comment.material_plan_scopes?.length?comment.material_plan_scopes:comment.material_scopes||[];
   if(scopes.length){
     const matches=scopes.filter(scope=>versions[scope.material_id]);
@@ -410,7 +411,9 @@ async function locateMaterialComment(comment){
   const request={workspace:state.workspace,loading:false,epoch:null};materialCommentLocation=request;
   const current=()=>materialCommentLocation===request&&state.workspace===request.workspace&&(request.epoch===null||request.epoch===productionReadEpoch);
   try{
-    let detail=state.materialReview,row=detail&&materialRows(detail).find(r=>r.id===comment.target_revision_id);if(!row)return false;
+    let detail=state.materialReview,row=detail&&materialRows(detail).find(r=>r.id===comment.target_revision_id);
+    const issue=productionCommentLocationIssue(comment,row);if(issue){toast(issue);return false}
+    if(typeof rememberProductionDraft==='function')rememberProductionDraft();
     const card=state.materialCommentCard,materialId=card?.data===detail&&(comment.material_plan_scopes?.length?comment.material_plan_scopes:comment.material_scopes)?.some(scope=>scope.material_id===card.material_id)?card.material_id:null;
     const asset=row.kind==='ASSET'&&row.id!==detail.record.id?row:row.kind==='CALL'&&row.id!==detail.review_context?.call?.id?detail.history.find(r=>r.payload.production?.revision_id===row.id):null;
     if(asset){
@@ -423,7 +426,7 @@ async function locateMaterialComment(comment){
     if(!current()||!selectCommentMaterialRound(detail,row,comment,materialId))return false;
     if(row.kind==='ASSET'&&(comment.anchor.component_id||comment.anchor.visual_id)){detail.selectedComponents||={};detail.selectedComponents[row.id]=comment.anchor.component_id||comment.anchor.visual_id;if(row.id===detail.record.id)detail.componentId=detail.selectedComponents[row.id]}
     if(row.kind==='REQUIREMENT'){detail.localPlans||={};detail.localPlans[row.object_id]=row}
-    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();if(materialPlanCommentNeedsHistory(row,comment))await openMaterialPlanHistory(row,comment);else locateProductionComment(comment,true);return true;
+    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();if(materialPlanCommentNeedsHistory(row,comment)){await openMaterialPlanHistory(row,comment);return true}return locateProductionComment(comment,true)!==false;
   }catch(error){if(current())toast(error.message);return false}
   finally{if(materialCommentLocation===request)materialCommentLocation=null}
 }

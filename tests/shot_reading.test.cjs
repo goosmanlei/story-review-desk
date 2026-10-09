@@ -6,6 +6,8 @@ class Node{
   get textContent(){return this.ownText+this.children.map(n=>n.textContent).join('')}
   all(){return this.children.flatMap(n=>[n,...n.all()])}
   querySelectorAll(){return this.all().filter(n=>n.dataset.blockId)}
+  hasAttribute(){return false}
+  scrollIntoView(){this.scrolled=true}
 }
 function fixture(){
  const ctx={state:{},URL,URLSearchParams,location:{href:'http://fixture/'},el:tag=>new Node(tag),reviewSurface:n=>n,nodeText:(tag,cls,text,parent)=>{const n=new Node(tag);n.ownText=text;parent.append(n);return n},document:{querySelectorAll:()=>[]}};
@@ -46,8 +48,9 @@ test('common and original scene values are separately accessible without changin
 test('locating a folded old field reveals its exact ancestor without moving the anchor',()=>{
  const ctx=fixture(),row=shot('old',{blocks:[{id:'purpose-old',field:'purpose',text:'看清交接'},{id:'performance-old',field:'performance',text:'看清交接'}]}),surface=render(ctx,row),details=surface.children.find(n=>n.tagName==='DETAILS');
  ctx.state.productionSelected=row;ctx.document.querySelector=selector=>selector.includes('data-production-blocks="old"')?surface:null;ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=()=>{};ctx.renderComments=()=>{};
- const comment={id:'comment',target_revision_id:'old',anchor:{type:'text',block_id:'performance-old',start:0,end:4,quote:'看清交接'}};const before=JSON.stringify(comment);ctx.locateProductionComment(comment,true);
- assert.equal(details.open,true);assert.equal(ctx.state.selected,'comment');assert.equal(JSON.stringify(comment),before);
+ ctx.document.querySelectorAll=()=>surface.querySelectorAll();
+ const comment={id:'comment',target_object_id:row.object_id,target_revision_id:'old',anchor:{type:'text',block_id:'performance-old',start:0,end:4,quote:'看清交接'}};const before=JSON.stringify(comment);ctx.locateProductionComment(comment,true);
+ assert.equal(details.open,true);assert.equal(ctx.state.selected,'comment');assert.equal(surface.querySelectorAll().find(n=>n.dataset.blockId==='performance-old').scrolled,true);assert.equal(JSON.stringify(comment),before);
 });
 
 test('same spoken words remain repeated events, while explicit ambience can be shared',()=>{
