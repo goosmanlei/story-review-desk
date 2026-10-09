@@ -186,7 +186,7 @@ function renderWorkspaceTabs(){
 function workspacePageDescriptor(workspace,params){
   if(workspace==='production.approach'&&typeof approachSelectedTab==='function'){
     const tab=approachSelectedTab(params);
-    if(!['story','materials'].includes(tab.id))return ['制作方法',tab.label,'按目录阅读完整方法、模板与案例，形成方案后回到生产制作。'];
+    if(!['story','materials'].includes(tab.id))return ['制作思路',tab.label,''];
   }
   if(workspace==='production.approach')return params.get('tab')==='materials'
     ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']
