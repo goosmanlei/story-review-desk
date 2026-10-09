@@ -225,6 +225,65 @@ function genericMaterialFixture(ctx){
   return {scope,detail,rounds,old1,new1,old2,new2,shown,render,plan};
 }
 function descendants(node){return [node,...(node.children||[]).flatMap(descendants)]}
+function preparingRevisionFixture(ctx){
+  const f=genericMaterialFixture(ctx),old=f.plan(1),current=f.plan(2);
+  for(const [revision,label] of [[old,'original'],[current,'current']]){
+    revision.payload.blocks=[{id:'purpose',text:label+' requirement'}];
+    revision.payload.generation.output.description=label+' description';
+    revision.payload.generation.parameters={duration:label==='original'?12:18};
+    revision.payload.generation.inputs=[{reference:{object_id:'image',revision_id:label+'-image'},use:label+' input'}];
+  }
+  old.current_revision=current.id;old.review_shot_slots=[];current.review_shot_slots=[];
+  f.rounds.splice(0,f.rounds.length,{number:1,model:'plan-v1',frozen:false,plan:current,members:[old,current],results:[],definition_records:{requirement:current}});
+  Object.assign(f.detail,{record:old,history:[current,old],explicitRevision:true});
+  ctx.state.productionSelected=old;ctx.state.productionRecords=[f.scope,old,current];
+  const controls=[],inputs=[];
+  ctx.renderProductionAcceptance=(_host,need)=>controls.push(['accept',need.id]);
+  ctx.renderMaterialRouteChoices=(_host,need)=>controls.push(['route',need.id]);
+  ctx.renderShotInputs=(_host,need)=>controls.push(['edit-inputs',need.id]);
+  ctx.renderShotReferenceChoice=()=>controls.push(['reference-choice']);
+  ctx.renderMaterialAdoptionControls=()=>controls.push(['adopt']);
+  ctx.renderMaterialInputs=(_host,values,_records,need)=>inputs.push([need.id,values[0]?.reference.revision_id]);
+  return {...f,old,current,controls,inputs};
+}
+test('an exact earlier preparation revision keeps its own requirements, prompt and comment targets without editing the latest plan',()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx),before=JSON.stringify(f.rounds),root=f.render();
+  const nodes=descendants(root),text=nodes.map(n=>n.textContent||'').join('\n');
+  assert.match(text,/plan 1/);assert.doesNotMatch(text,/plan 2/);assert.match(text,/原方案/);
+  assert.match(text,/original requirement/);assert.match(text,/original description/);assert.doesNotMatch(text,/current requirement|current description/);assert.match(text,/"duration": 12/);assert.doesNotMatch(text,/"duration": 18/);
+  assert.ok(nodes.some(n=>n.dataset?.productionBlocks===f.old.id));assert.ok(!nodes.some(n=>n.dataset?.productionBlocks===f.current.id));
+  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[['accept',f.old.id]]);assert.equal(JSON.stringify(f.rounds),before);
+  assert.equal(ctx.materialCommentContext().number,1);assert.equal(ctx.state.productionSelected.id,f.old.id);
+});
+for(const explicit of [false,true])test(`${explicit?'exact current':'ordinary'} preparation entry still shows the editable current plan`,()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx);f.detail.explicitRevision=explicit;if(explicit)f.detail.record=f.current;
+  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
+  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
+  assert.ok(f.controls.some(([kind,id])=>kind==='edit-inputs'&&id===f.current.id));assert.ok(f.controls.some(([kind])=>kind==='accept'));assert.deepEqual(f.inputs,[]);
+});
+test('an earlier preparation link cannot replace a frozen material definition',()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;
+  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
+  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
+});
+test('a frozen definition source outside the member list remains a requirement without creating an editable recipe',()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx);Object.assign(f.rounds[0],{frozen:true,plan:null,members:[],definition_records:{requirement:f.old}});f.detail.selectedMaterialRounds={'video-need':1};f.detail.localPlans={'video-need':f.old};
+  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
+  assert.match(text,/original requirement/);assert.doesNotMatch(text,/plan 1/);assert.deepEqual(f.inputs,[]);assert.ok(!f.controls.some(([kind])=>kind==='edit-inputs'||kind==='route'));
+});
+test('locating an older member plan in a frozen empty version retains the frozen requirements and reads the old recipe without saving controls',()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;f.detail.localPlans={'video-need':f.old};
+  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
+  assert.match(text,/current requirement/);assert.doesNotMatch(text,/original requirement/);assert.match(text,/plan 1/);assert.match(text,/原方案/);
+  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[['accept',f.old.id]]);
+});
+test('returning from another material version leaves an old explicit preparation link and reads that version normally',()=>{
+  const ctx=setup(),f=preparingRevisionFixture(ctx),next=f.plan(3);
+  f.rounds.unshift({number:2,model:'plan-v1',plan:next,members:[next],results:[]});f.render();
+  ctx.switchMaterialRound(f.detail,'video-need',2);f.render();ctx.switchMaterialRound(f.detail,'video-need',1);
+  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
+  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.equal(f.detail.explicitRevision,false);
+});
 test('a non-entity demand defaults to the latest candidate original without copying adoption range',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);f.render();
   assert.equal(f.shown.length,1);assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(f.shown[0].component.id,'original');assert.equal(f.shown[0].range,undefined);
