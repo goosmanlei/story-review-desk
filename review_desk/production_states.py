@@ -31,7 +31,9 @@ def validate_state(store, p):
     if p.get("reference_mode", "material") not in ("material", "description"):
         raise ValueError("unsupported state reference mode")
     if p.get("reference_mode") == "description":
-        _text(p.get("production_description"), "description-only state needs production description")
+        from .production_description import description
+        _text(description(p, entity['payload']['entity_type'], entity['payload'].get('attribute_definitions', {})),
+              "description-only state needs production description")
         if p["reference_media"] == "none":
             raise ValueError("description mode describes presentation, not a mention")
     if not p["sources"]:
@@ -145,7 +147,8 @@ def validate_reference_requirement(store, p):
     if (p["states"] != [p["scope"]] or len(p["entities"]) != 1 or
             p["entities"][0]["object_id"] != scope["payload"]["entity"]["object_id"]):
         raise ValueError("state reference requirement must bind its exact state and owner")
-    if role == "overall" and (p["slot"] != "overall" or (p["required"] is not True and p.get('status') != 'withdrawn') or
+    optional_review = scope['payload'].get('reference_mode') == 'description' and p['usage'] == 'review_reference'
+    if role == "overall" and (p["slot"] != "overall" or (p["required"] is not True and p.get('status') != 'withdrawn' and not optional_review) or
             p["media_type"] != scope["payload"]["reference_media"]):
         raise ValueError("overall state reference must be the required overall slot with matching media")
     if role == "detail" and p["slot"] == "overall":
