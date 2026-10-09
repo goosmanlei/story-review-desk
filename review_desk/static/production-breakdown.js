@@ -129,7 +129,7 @@ function renderShotInputs(host,row,inputs,records,context){
     if(item.slot?.nonmedia){materialReferenceLink(line,item.ref,item.label+' · '+businessTitle(item.row),true)}
     else if(item.slot?.record){const r=item.slot.record,component=item.slot.component;
       const issues=(item.slot.issues||[]).filter(issue=>!['尚未选定素材版本','尚未选定候选'].includes(issue));
-      const owner=item.slot.direct===false?'选定归属：'+shotReferenceOwnerTitle(item.slot):'当前方案选定';
+      const owner=item.slot.direct===false?'选择归属：'+shotReferenceOwnerTitle(item.slot):'当前方案的参考选择';
       const label=item.slot.direct===false?item.label.replace(/ · 声音$/u,''):item.label+(materialInputRole(item.value)?' · '+materialInputRole(item.value):'');
       const exactState=r.kind==='ASSET'&&item.referenceLabel&&!r.payload.title.includes(item.referenceLabel)?item.referenceLabel+' · ':'';
       const title=r.payload.title.startsWith(label)?r.payload.title:label+' · '+exactState+r.payload.title;
