@@ -234,7 +234,7 @@ async function openUnifiedMaterial(ref,trigger){
     result.defaultSelection=!!ref.defaultSelection;
     state.shotReferenceContext=ref.shotReference?{...ref.shotReference,dialog,source:ref.shotReference,pageActive:owns}:null;
     if(ref.component_id){const data=result.entity_review||result.detail;data.selectedComponents||={};data.selectedComponents[ref.revision_id]=ref.component_id;if(!result.entity_review)result.detail.componentId=ref.component_id}
-    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);if(result.position_review)title.textContent=businessTitle(result.detail.record);renderProductionReader();renderComments();
+    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);if(ref.readingLabel)title.textContent=ref.readingLabel;else if(result.position_review)title.textContent=businessTitle(result.detail.record);renderProductionReader();renderComments();
   }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','production-issue',error.message,body)}}
 }
 
