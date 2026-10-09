@@ -192,11 +192,11 @@ def select(store, request):
                 from .generation import PLAN
                 definition=chosen['definition']['generation']
                 original=base['payload'].get('generation',need['payload'].get('generation',{}))
-                payload['generation']={**copy.deepcopy(original),'format':PLAN,**{k:copy.deepcopy(definition[k]) for k in ('method','model','parameters','prompt','randomization') if k in definition}}
+                payload['generation']={**copy.deepcopy(original),'format':PLAN,**{k:copy.deepcopy(definition[k]) for k in ('method','model','parameters','prompt','randomization','execution') if k in definition}}
                 for i,entry in enumerate(inputs):
                     if 'reference' not in entry:
                         exact={k:entry[k] for k in ('object_id','revision_id')}
-                        inputs[i]={'reference':exact,**{k:entry[k] for k in ('component_id','crop','range') if k in entry},'use':original.get('inputs',[])[i].get('use','准确历史参考') if i<len(original.get('inputs',[])) else '准确历史参考'}
+                        inputs[i]={'reference':exact,**{k:entry[k] for k in ('component_id','crop','range','role') if k in entry},'use':original.get('inputs',[])[i].get('use','准确历史参考') if i<len(original.get('inputs',[])) else '准确历史参考'}
                 value.setdefault('use',inputs[index].get('use','准确历史参考'))
                 # A real call contains only the active route. A new draft must
                 # still retain the other declared alternatives and constraints.

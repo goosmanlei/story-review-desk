@@ -34,6 +34,18 @@ function materialParameters(host,row,prefix,model){
   const name=nodeText('span',null,model||'模型未知',heading);if(block)name.dataset.blockId=block.id;
   materialField(host,row,prefix+'.parameters',null,'pre');
 }
+function materialExecution(host,value){
+  const execution=value.execution;if(!execution)return;
+  const modes={reference:'普通参考生成',first_frame:'固定首帧',first_last_frame:'固定首尾帧',edit:'视频编辑',extend:'视频延长'};
+  nodeText('h4',null,'生成方式',host);
+  nodeText('p',null,(modes[execution.mode]||'待判断的生成方式')+' · '+execution.channel,host);
+  if(execution.start_constraint==='reference')nodeText('p','production-meta','起始画面作为构图参考；具体起点、身份和动作须检查生成原件。',host);
+  else if(execution.start_constraint==='fixed')nodeText('p','production-meta','要求固定起点；准备前须确认此模式支持端点角色及全部参考组合。',host);
+}
+function materialInputRole(value){
+  const names={reference_image:'普通图像参考',first_frame:'固定首帧',last_frame:'固定尾帧',reference_audio:'音频参考',reference_video:'普通视频参考',source_video:'待编辑或延长的视频'};
+  return value.role?(names[value.role]||'输入角色待核实'):'';
+}
 function materialInputs(inputs,records=[],slots=[]){
   const counts={};return inputs.flatMap((value,index)=>{
     const ref=value.reference||value,row=records.find(r=>r.id===ref.revision_id)||(state.productionRecords||[]).find(r=>r.id===ref.revision_id);
@@ -51,7 +63,7 @@ function renderMaterialInputs(host,inputs,records=[],need=null){
   const effective=materialInputs(inputs,records);if(!effective.length)return;
   nodeText('h4',null,'参考输入',host);
   for(const item of effective){
-    const line=el('div','material-input');if(item.missing)nodeText('p','production-issue',item.label+' · 准确输入记录或文件组成缺失',line);else materialReferenceLink(line,item.ref,item.label+' · '+businessTitle(item.row),['EPISODE','SOURCE','STORY'].includes(item.row.kind));
+    const line=el('div','material-input');if(item.missing)nodeText('p','production-issue',item.label+' · 准确输入记录或文件组成缺失',line);else materialReferenceLink(line,item.ref,item.label+(materialInputRole(item.value)?' · '+materialInputRole(item.value):'')+' · '+businessTitle(item.row),['EPISODE','SOURCE','STORY'].includes(item.row.kind));
     nodeText('small','production-meta',(item.row?materialVersionLabel(item.row):'版本未知')+''+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 使用裁切区域':''),line);
     if(need)materialField(line,need,`generation.inputs.${item.index}.use`,null);else if(item.value.use)nodeText('p',null,item.value.use,line);
     host.append(line);
@@ -61,6 +73,7 @@ function renderActualGeneration(parent,context){
   const call=context?.call,box=el('section','material-actual-inputs');nodeText('h3',null,'生成内容',box);
   if(!call){nodeText('p','production-meta','未登记真实调用，无法还原生成内容',box);parent.append(box);return}
   const host=materialTextSurface(box,call);
+  materialExecution(host,call.payload);
   materialParameters(host,call,'call',call.payload.model);
   renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[]);
   materialField(host,call,'call.prompt','提示词','pre');parent.append(box);
@@ -83,6 +96,7 @@ function renderGenerationRecipe(parent,need,requirementsShown=false){
   nodeText('h3',null,'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
+  materialExecution(host,plan);
   materialParameters(host,need,'generation',plan.model);renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);

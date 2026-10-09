@@ -43,6 +43,20 @@ ENTITY 和 STATE 可登记 `production_description`，表示供制作使用的�
 
 `GET /api/production/generation-package?requirement_id=ID` 返回准确执行清单；CLI `production-generation-package ID --output DIR` 写入空目录，包含清单和必要参考原件。阻断时拒绝输出可执行包。清单保留方案、决策、最终提示词和参数、参考的准确修订与 SHA-256；原件不得以平台链接替代。实际 CALL 可携带此清单中的 `generation_requirement`、`generation_acceptances` 和真实输入，提交时再次检查一致性；已发生的历史调用不改写。取消后已提交调用仍可登记实际产出，但其方案、采纳及执行输入必须与提交时相同；取消会阻止新的提交。
 
+## 视频渠道、模式与输入角色
+
+普通参考借鉴构图与身份；固定首帧或首尾帧要求渠道将图片用作端点。Prompt 写“以此图开始”不能改变上传角色。新视频方案使用 `generation.execution` 声明 `channel`、`mode` 与 `start_constraint`，每个直接输入使用 `role`。例如：
+
+```json
+{"execution":{"channel":"pippit-tool-cli","mode":"reference","start_constraint":"reference"},"parameters":{"duration":20,"resolution":"720p","aspect_ratio":"16:9","task_type":"reference"},"inputs":[{"reference":{"object_id":"exact-image","revision_id":"exact-revision"},"component_id":"original","role":"reference_image","use":"起始构图"}]}
+```
+
+`reference` 使用 `reference_image/reference_audio/reference_video`；`first_last_frame` 按顺序使用 `first_frame/last_frame`；`edit/extend` 的源视频为 `source_video`。`start_constraint` 分别为 `reference`（借鉴起始构图）、`fixed`（固定起点）或 `none`（未设计起点）。未知渠道、型号或模式保持待核实，不能因 Prompt、输入数量或能力开关单独正确就标为已验证。
+
+`video_capabilities.json` 保存脱敏的只读渠道观察、CLI 版本和观察时间，`video_modes.py` 校验组合。当前 pippit-tool-cli 的 Seedance 首尾帧入口要求两张有序图片；2.5 配置还要求 adaptive 且禁止独立音频。2.0 Fast 未提供完整模式组合，不能继承 2.5 的限制或通过结论。单首帧路径尚无已核实入口。普通参考显式设置 `task_type=reference`，不同时设置 `generate_type=1`。配置变更需重新观察并更新契约；本地检查不证明账号权限、额度、服务接受请求或媒体效果。
+
+计划检查可以在未选原件时核对模式、参数、角色与编号。`ready` 还要求独立采纳、准确版本/候选、文件、组成、裁切或时间范围及原有谱系检查全部通过。准备包保留 `execution`、各输入的 `role`、`material_selection`、计划位置、逐媒体编号与原件哈希。新 CALL 必须保留相同渠道、模式、参数、顺序、准确候选、组成、角色和必要范围；选定信息也可沿冻结方案准确追溯。改选保留模式和角色，已提交方案变更进入新制作版本。旧 CALL 不补造模式或改写回执，后续状态登记也不得改变原执行输入。
+
 ## 阅读、评论和媒体
 
 基础信息、状态、方案、素材分别在其标题旁切换真实修订；只有多个版本时提供选择器。历史内容可评论，但不得把混合版本采纳为当前方案。采纳历史从按钮附近的更多菜单进入，无记录不占位。剧情依据直接链接到相关集场。
@@ -59,7 +73,7 @@ ASSET 可用 `candidate_requirements` 将候选明确对应到准确需求，要
 
 验证覆盖：方案完整性、循环和错误输入拒绝、采纳／取消／重新采纳、结果不改变采纳、新方案必须重新认可、引用选择与范围、I2I 上限、并发拒绝、历史和恢复。浏览器必须操作文字／图像／音频评论、各区域版本、空素材和窄屏，并回归故事采编、结构、剧本及用户草稿。技术评论只写隔离实例。
 
-实际工具在执行时选择并记录到 CALL，生成方案无需指定工具。两处页面共用的素材卡、准确实际输入及关系契约见 [materials-and-relationships.md](materials-and-relationships.md)。
+未声明渠道约束的旧方案仍可阅读。需要按具体渠道核验的视频方案必须在准备前声明渠道、模式和输入角色，实际工具与准备依据一致后才能登记新调用。两处页面共用的素材卡、准确实际输入及关系契约见 [materials-and-relationships.md](materials-and-relationships.md)。
 
 
 镜头视频的上游输入由本镜方案逐槽明确选定，校验与保存契约见[镜头制作](production-breakdown.md#镜头视频版本与准确参考)。它不使用全局采用或普通大卡默认候选补齐缺项；镜头方案仍需独立认可，完整参考不自动授予生成许可。历史实际输入、文件组成、裁切和时间范围保留。

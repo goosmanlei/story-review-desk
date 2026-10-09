@@ -67,10 +67,10 @@ def scheme(payload, kind):
     for item in value.get('inputs', []):
         ref = item.get('reference', item)
         # Keep exact nonmedia inputs too: they may actually condition a call.
-        inputs.append({**ref, **{k: item[k] for k in ('component_id', 'range', 'crop', 'selection_state') if k in item}})
+        inputs.append({**ref, **{k: item[k] for k in ('component_id', 'range', 'crop', 'selection_state', 'role') if k in item}})
     return {'method': 'generate' if value.get('method') == 'generation' else value.get('method'), 'model': value.get('model'),
             'parameters': params, 'prompt': value.get('prompt'), 'inputs': inputs,
-            'randomization': strategy}
+            'randomization': strategy, **({'execution':copy.deepcopy(value['execution'])} if 'execution' in value else {})}
 
 
 def identity(payload):

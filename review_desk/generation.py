@@ -42,6 +42,8 @@ def validate_plan(store, object_id, payload):
     for issue in p._list(plan, 'blockers'):
         p._text(issue, 'execution blocker')
     inputs = p._list(plan, 'inputs')
+    from .video_modes import validate_shape
+    validate_shape(plan.get('execution'), inputs)
     scope = p.ref_record(store, payload['scope'])
     if scope['kind'] == 'STATE':
         if not complete(scope):
@@ -495,15 +497,34 @@ def readiness(store, requirement_id):
                 asset,component=p.component_for(store,ref(target),selection['component_id'])
                 validate_component(p.root_of(store),component,inspect=False);p.validate_selection(component,selection)
                 if asset['payload'].get('placeholder'):raise ValueError('占位素材不能作为生成参考')
-                inputs.append({'asset':ref(asset),'component':component,'use':item['use'],**{k:selection[k] for k in ('crop','range') if k in selection}})
+                inputs.append({'asset':ref(asset),'component':component,'use':item['use'],
+                               **{k:selection[k] for k in ('crop','range') if k in selection},
+                               **{k:copy.deepcopy(item[k]) for k in ('role','material_selection') if k in item},
+                               'plan_input_index':index+1})
             except (KeyError,ValueError,OSError) as exc:issues.append(str(exc))
+    contract = None
+    if plan and plan['method'] == 'generate':
+        from .input_contracts import planned_contract, label_inputs, check
+        declarations = [{'media_type': p.ref_record(store, item['reference'])['payload']['media_type'],
+                         'role': item.get('role')} for _, item in selected_inputs]
+        contract = planned_contract(plan, declarations)
+        issues.extend(contract['issues'])
+        mode = contract.get('mode_check')
+        if mode and not mode['verified']:
+            issues.extend(mode['unknowns'])
+        if len(inputs) == len(selected_inputs):
+            actual_contract = check(plan['model'], plan['prompt'], label_inputs(inputs),
+                                    parameters=plan['parameters'], execution=plan.get('execution'))
+            issues.extend(actual_contract['issues'])
+            contract['selected_inputs'] = actual_contract
     images=[v for v in inputs if v['component']['mime'].startswith('image/')] if need['payload']['media_type']=='image' else []
     depths=[p.ref_record(store,v['asset'])['payload'].get('lineage',{}).get('i2i_depth') for v in images]
     if any(type(d) is not int for d in depths):issues.append('图像参考谱系未知，应回到可追溯的干净母版')
     depth=1+max((d for d in depths if type(d) is int),default=-1)
     if plan and plan['method']=='generate' and images and depth>2:issues.append('图像参考超过两代，应回到干净母版')
     if plan and any(r['revision_id']!=p.record(store,r['object_id'])['id'] for r in need['payload']['states']):issues.append('素材状态已有更新')
-    return {'requirement':need,'plan':plan,'acceptances':approvals,'inputs':inputs,'i2i_depth':max(depth,0),'issues':issues,'ready':not issues}
+    return {'requirement':need,'plan':plan,'acceptances':approvals,'inputs':inputs,'i2i_depth':max(depth,0),
+            'input_contract':contract,'issues':list(dict.fromkeys(issues)),'ready':not issues}
 
 
 def package(store, requirement_id):
@@ -513,11 +534,12 @@ def package(store, requirement_id):
     from .input_contracts import label_inputs, check
     from .material_plans import randomization
     inputs=label_inputs(ready['inputs'])
-    contract=check(plan['model'],plan['prompt'],inputs)
+    contract=check(plan['model'],plan['prompt'],inputs,parameters=plan['parameters'],execution=plan.get('execution'))
     if contract['issues']:raise Conflict('；'.join(contract['issues']))
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']),'acceptances':ready['acceptances'],
             'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
             'randomization':randomization(plan),
+            **({'execution':copy.deepcopy(plan['execution'])} if 'execution' in plan else {}),
             'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':inputs,'input_contract':contract,'i2i_depth':ready['i2i_depth'],
             'execution_note':'执行前重新检查有效采纳、参考文件、平台可用性及现有额度；此包不表示已经调用模型。'}
 
@@ -541,7 +563,7 @@ def validate_call(store, object_id, payload):
     executed = old and store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown') LIMIT 1", (object_id,)).fetchone()
     if executed:
         if old['payload'].get('actual_seed') is not None and payload.get('actual_seed')!=old['payload']['actual_seed']:raise Conflict('cannot rewrite actual random seed')
-        for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization'):
+        for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization','execution'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
         return
     if payload.get('status') not in ('submitted','completed','failed','unknown'):return
@@ -556,14 +578,16 @@ def validate_call(store, object_id, payload):
         from .shot_references import applies
         if not applies(store,need):return
     manifest=package(store,need['object_id'])
-    if manifest['inputs'] and not manifest['input_contract']['verified']:
+    if (manifest['inputs'] or manifest.get('execution')) and not manifest['input_contract']['verified']:
         raise Conflict('参考输入的模型契约尚未核实，不能登记新执行调用')
     if manifest['requirement']!=payload['generation_requirement'] or manifest['acceptances']!=payload.get('generation_acceptances'):
         raise Conflict('生成依据或采纳已变化')
-    for field in ('model','parameters','prompt'):
-        if manifest[field]!=payload.get(field):raise Conflict('实际生成输入不同于采纳方案：'+field)
+    for field in ('model','parameters','prompt','execution'):
+        if manifest.get(field)!=payload.get(field):raise Conflict('实际生成输入不同于采纳方案：'+field)
+    if manifest.get('execution') and payload.get('tool') != manifest['execution']['channel']:
+        raise Conflict('实际调用渠道不同于准备依据')
     from .material_plans import randomization
     if manifest['randomization']!=randomization(payload):raise Conflict('实际随机策略不同于采纳方案')
-    expected=[{'object_id':v['asset']['object_id'],'revision_id':v['asset']['revision_id'],'component_id':v['component']['id'],**{k:v[k] for k in ('crop','range') if k in v}} for v in manifest['inputs']]
+    expected=[{'object_id':v['asset']['object_id'],'revision_id':v['asset']['revision_id'],'component_id':v['component']['id'],**{k:v[k] for k in ('crop','range','role') if k in v}} for v in manifest['inputs']]
     actual=[v for v in payload['inputs'] if v.get('component_id')]
     if expected!=actual:raise Conflict('实际生成参考不同于准备包')
