@@ -100,3 +100,22 @@ class FocusedContextTest(unittest.TestCase):
         self.store.set_configuration('PROJECT', {'style': 'changed'}, 0)
         changed = build_context(self.store, SOURCE['id'], self.anchor, '语气疑问')
         self.assertNotEqual(changed['context_sha256'], result['context_sha256'])
+
+    def test_overall_opinion_selects_relevant_structure_text_without_word_alignment_bias(self):
+        from test_structure import direction, document
+        from review_desk.structure import select_direction, import_structure
+        self.store.put_source(direction('direction', '测试方向'))
+        selection = select_direction(self.store, 'direction', 0)
+        payload = document(selection['revision'])
+        for section in payload['sections']:
+            section.pop('visuals', None)
+        payload['sections'][0]['blocks'][0]['text'] = '与本条意见无关的前文。' * 300
+        adult = '成人分工清楚：八名成人持续压闸，李寄可以随时停止尝试。'
+        payload['sections'][3]['blocks'][0]['text'] = adult
+        revision = import_structure(self.store, payload, 0)['revision']
+        ctx = build_context(self.store, None, {'type': 'global'},
+                            '本稿的成人分工交代清楚，请把赞同意见写得自然些。',
+                            'story-structure', revision)['context']
+        self.assertIn(adult, ctx['source_documents'][0]['text'])
+        self.assertEqual(ctx['basis']['direction']['object_id'], 'direction')
+        self.assertTrue(ctx['source_documents'][1]['identity_only'])
