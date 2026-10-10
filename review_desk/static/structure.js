@@ -106,17 +106,11 @@ function openStructureResponseComment(comment){
 function structureMarkParts(block,revision){
   const blocks=structureBlocks(revision.payload),index=blocks.findIndex(b=>b.id===block.id),letters=chars(block.text),marks=[];
   for(const c of state.comments.filter(c=>c.target_revision_id===revision.id&&c.target_object_id==='story-structure'&&(!c.anchor.type||c.anchor.type==='text'))){
-    const a=c.anchor,first=blocks.findIndex(b=>b.id===a.block_id),last=blocks.findIndex(b=>b.id===a.end_block_id);
-    if(first<0||last<first||index<first||index>last)continue;
-    marks.push({start:index===first?a.start:0,end:index===last?a.end:letters.length,comment:c});
+    for(const range of textAnchorBlockRanges(c.anchor,blocks,index))marks.push({...range,comment:c});
   }
   const draft=newDraftAnchor();
   if(draft?.type==='text'){
-    const first=blocks.findIndex(b=>b.id===draft.block_id),last=blocks.findIndex(b=>b.id===draft.end_block_id);
-    if(first>=0&&last>=first&&index>=first&&index<=last){
-      const start=index===first?draft.start:0,end=index===last?draft.end:letters.length;
-      if(start<end)marks.push({start,end,draft:true});
-    }
+    for(const {start,end} of textAnchorBlockRanges(draft,blocks,index))if(start<end)marks.push({start,end,draft:true});
   }
   const cuts=[...new Set([0,letters.length,...marks.flatMap(m=>[m.start,m.end])])].sort((a,b)=>a-b),fragment=document.createDocumentFragment();
   for(let i=0;i<cuts.length-1;i++){

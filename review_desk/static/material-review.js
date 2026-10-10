@@ -91,11 +91,29 @@ function materialTextSurface(parent,row){
 // An authored arrangement is accepted only for its exact source and displayed
 // companions. New comments retain original offsets; old comments use the exact
 // source reader if their original range is not part of this arrangement.
+function compositionContainsTextAnchor(row,anchor,alreadyRead=[]){
+  const blocks=productionTextBlocks(row),parts=row.review_composition.sections.flatMap(section=>section.parts).filter(part=>!alreadyRead.includes(part.text));
+  for(const a of anchor.segments||[anchor]){
+    const first=blocks.findIndex(b=>b.id===a.block_id),last=blocks.findIndex(b=>b.id===(a.end_block_id||a.block_id));
+    if(first<0||last<first)return false;
+    for(let i=first;i<=last;i++){
+      const text=Array.from(blocks[i].text),start=i===first?a.start:0,end=i===last?a.end:text.length;let cursor=start;
+      if(!Number.isInteger(start)||!Number.isInteger(end)||start<0||end>text.length||end<start)return false;
+      for(const part of parts.filter(p=>p.block_id===blocks[i].id).sort((a,b)=>a.start-b.start)){
+        if(part.end<=cursor)continue;
+        if(part.start>cursor&&!(part.start===cursor+1&&text[cursor]==='\n'))return false;
+        cursor=Math.max(cursor,part.end);if(cursor>=end)break;
+      }
+      if(cursor<end)return false;
+    }
+  }
+  return true;
+}
 function renderRecordComposition(parent,row,companions=[],alreadyRead=[]){
   const composition=row.review_composition;
   if(!composition||(composition.requires||[]).some(id=>!companions.includes(id)))return false;
   const anchor=state.productionSelected?.id===row.id&&state.anchor;
-  if(anchor?.type==='text'&&!composition.sections.some(s=>s.parts.some(p=>p.block_id===anchor.block_id&&(!anchor.end_block_id||anchor.end_block_id===anchor.block_id)&&p.start<=anchor.start&&p.end>=anchor.end)))return false;
+  if(anchor?.block_id&&(anchor.type||'text')==='text'&&!compositionContainsTextAnchor(row,anchor,alreadyRead))return false;
   const surface=materialTextSurface(parent,row);
   for(const section of composition.sections){
     const parts=section.parts.filter(part=>!alreadyRead.includes(part.text));if(!parts.length)continue;
@@ -112,10 +130,14 @@ function renderOriginalReviewText(parent,row){
 async function openProductionCommentOriginal(row,comment){
   const {dialog,body}=openReviewDialog('评论原文 · '+businessTitle(row),document.activeElement,'material-reference-dialog');
   const session=referenceReviewSession(dialog,{record:row,history:[row],uses:[]});dialog.reviewFocus=session.focus;
-  const blocks=productionTextBlocks(row),start=blocks.findIndex(b=>b.id===comment.anchor.block_id),end=blocks.findIndex(b=>b.id===(comment.anchor.end_block_id||comment.anchor.block_id));
-  if(start<0||end<start){nodeText('p','production-issue','评论对应的准确文字不可用；未定位到相近内容。',body);return false}
+  const blocks=productionTextBlocks(row),ranges=productionCommentTextRange(comment);
+  if(!ranges?.valid){nodeText('p','production-issue','评论对应的准确文字不可用；未定位到相近内容。',body);return false}
   const surface=materialTextSurface(body,row);
-  for(const block of blocks.slice(start,end+1))nodeText('p',null,block.text,surface).dataset.blockId=block.id;
+  for(const range of ranges.segments||[ranges])for(let i=range.first;i<=range.last;i++){
+    const block=blocks[i],start=i===range.first?range.anchor.start:0,end=i===range.last?range.anchor.end:chars(block.text).length;
+    if(comment.anchor.segments){const line=nodeText('p',null,chars(block.text).slice(start,end).join(''),surface);line.dataset.blockId=block.id;line.dataset.anchorOffset=start}
+    else nodeText('p',null,block.text,surface).dataset.blockId=block.id;
+  }
   session.focus();state.selected=comment.id;state.reviewCommentScope=reviewBlockScope(surface,'text');paintProductionReview();openPanel();renderComments();
   surface.querySelector('.comment-mark.selected')?.scrollIntoView({block:'center'});return true;
 }
@@ -205,8 +227,8 @@ function renderMaterialRequirements(parent,requirement){
   const anchor=state.productionSelected?.id===requirement.id&&state.anchor||state.comments.find(c=>c.id===state.selected&&c.target_revision_id===requirement.id)?.anchor;
   // Show an old output-description anchor with its exact original prefix and
   // offsets. Ordinary reading shows the equivalent requirement only once.
-  const locatingDescription=repeated&&anchor?.type==='text'&&(anchor.block_id===description.id||anchor.end_block_id===description.id);
-  for(const block of blocks){if(locatingDescription&&anchor.block_id===description.id&&(!anchor.end_block_id||anchor.end_block_id===description.id)&&block===repeated)continue;const node=nodeText('p',null,block.text,host);node.dataset.blockId=block.id}
+  const locatingDescription=repeated&&anchor?.block_id&&(anchor.type||'text')==='text'&&(anchor.segments||[anchor]).some(a=>a.block_id===description.id||a.end_block_id===description.id);
+  for(const block of blocks){if(locatingDescription&&(anchor.segments||[anchor]).every(a=>a.block_id===description.id&&(!a.end_block_id||a.end_block_id===description.id))&&block===repeated)continue;const node=nodeText('p',null,block.text,host);node.dataset.blockId=block.id}
   if(!repeated||locatingDescription)materialField(host,requirement,'generation.output.description',repeated?null:'需求描述');
   materialField(host,requirement,'generation.output.review_criteria','检查要点');
 }

@@ -28,10 +28,12 @@ const scriptEpisodeComments=episode=>state.comments.filter(comment=>comment.targ
 function scriptSceneCommentCounts(episode){
   const scenes=episode.payload.scenes,counts=new Map(scenes.map(scene=>[scene.id,0]));
   for(const comment of scriptEpisodeComments(episode)){
-    const first=scenes.findIndex(scene=>scene.block_ids.includes(comment.anchor.block_id));
-    const last=scenes.findIndex(scene=>scene.block_ids.includes(comment.anchor.end_block_id));
-    if(first<0)continue;
-    for(let index=first;index<=Math.max(first,last);index++)counts.set(scenes[index].id,counts.get(scenes[index].id)+1);
+    const selected=new Set();
+    for(const a of textAnchorSegments(comment.anchor)){
+      const first=scenes.findIndex(scene=>scene.block_ids.includes(a.block_id)),last=scenes.findIndex(scene=>scene.block_ids.includes(a.end_block_id));
+      if(first>=0)for(let index=first;index<=Math.max(first,last);index++)selected.add(scenes[index].id);
+    }
+    for(const id of selected)counts.set(id,counts.get(id)+1);
   }
   return counts;
 }
