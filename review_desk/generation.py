@@ -496,10 +496,6 @@ def readiness(store, requirement_id):
         if not a:issues.append(p.ref_record(store,entity)['payload']['title']+'：当前生成方案未采纳')
         elif ref(need) not in a['payload']['acceptance_scope']['requirements']:issues.append('素材方案不在当前采纳范围内')
         else:approvals.append(ref(a))
-    if scope['kind'].startswith('AV_'):
-        design = content_acceptance(store, scope['object_id'], scope['id'])
-        if design['accepted']: approvals.extend(design['acceptances'])
-        else: issues.append('所用准确视听设计尚未采纳')
     if plan:
         issues.extend(plan.get('blockers',[]))
         from .shot_references import applies, slots

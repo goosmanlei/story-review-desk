@@ -137,59 +137,35 @@ class AudiovisualTest(unittest.TestCase):
         self.assertNotEqual(before, after)
         self.assertEqual([r['number'] for r in material_plans.snapshot(self.store, 'a')], [2, 1])
 
-    def test_acceptance_is_exact_and_concurrent_decisions_are_rejected(self):
+    def test_material_acceptance_remains_exact_without_design_gate(self):
         from review_desk import production_acceptance as acceptance
         from review_desk.store import Conflict
-        self.composition()
-        request = {'object_id': 'av-episode', 'expected_revision': self.ref('av-episode')['revision_id'],
-                   'expected_decision': None, 'actor': '隔离测试', 'action': 'accept'}
-        accepted = acceptance.decide(self.store, request)
-        self.assertTrue(accepted['accepted'])
-        self.assertEqual(len(accepted['scope']), 3)
-        with self.assertRaises(Conflict): acceptance.decide(self.store, request)
-
-        revoked = acceptance.decide(self.store, {**request, 'action': 'revoke',
-            'expected_decision': p.record(self.store, accepted['decision']['object_id']) and
-                acceptance.ref(accepted['decision'])})
-        self.assertFalse(revoked['accepted'])
-        previous = p.record(self.store, 'av-episode')
-        self.put({'object_id': previous['object_id'], 'kind': previous['kind'], 'expected_version': previous['version'],
-                  'payload': {**previous['payload'], 'purpose': '另一个明确意图'}})
-        self.assertFalse(acceptance.snapshot(self.store, 'av-episode')['accepted'])
-        with self.assertRaises(Conflict): acceptance.decide(self.store, request)
-
-    def test_group_acceptance_child_override_and_restore_have_one_order(self):
-        from review_desk import production_acceptance as a
-        from review_desk.bundle import export, restore
-        from review_desk.store import Store, Conflict
-        import shutil
         self.composition(); self.put(self.need('need'))
-        def decide(oid,action):
-            view=a.snapshot(self.store,oid)
-            return a.decide(self.store,{'object_id':oid,'expected_revision':view['target']['revision_id'],
-                'expected_decision':a.ref(view['decision']) if view['decision'] else None,'action':action,'actor':'隔离测试'})
-        parent=decide('av-episode','accept')
-        self.assertTrue(a.snapshot(self.store,'av-shot')['accepted'])
-        self.assertFalse(a.snapshot(self.store,'need')['accepted'])
+        with self.assertRaisesRegex(ValueError, '不使用'):
+            acceptance.snapshot(self.store, 'av-shot')
+        request={'object_id':'need','expected_revision':self.ref('need')['revision_id'],
+                 'expected_decision':None,'actor':'隔离测试','action':'accept'}
         self.assertFalse(generation.readiness(self.store,'need')['ready'])
-        decide('need','accept')
-        self.assertTrue(a.snapshot(self.store,'av-shot')['accepted'])
+        result=acceptance.decide(self.store,request)
         self.assertTrue(generation.readiness(self.store,'need')['ready'])
-        decide('av-shot','revoke')
+        with self.assertRaises(Conflict):acceptance.decide(self.store,request)
+        acceptance.decide(self.store,{**request,'action':'revoke','expected_decision':acceptance.ref(result['decision'])})
         self.assertFalse(generation.readiness(self.store,'need')['ready'])
-        self.assertTrue(a.snapshot(self.store,'av-episode')['partial'])
-        with self.assertRaises(Conflict):
-            a.decide(self.store,{'object_id':'av-episode','expected_revision':self.ref('av-episode')['revision_id'],
-                'expected_decision':a.ref(parent['decision']),'action':'revoke','actor':'隔离测试'})
-        decide('av-episode','accept')
-        self.assertTrue(generation.readiness(self.store,'need')['ready'])
-        export(self.store,self.root/'export');dest=self.root/'acceptance-restore'
+
+    def test_material_permission_restore_does_not_recreate_design_permission(self):
+        from review_desk import production_acceptance as a, bundle
+        from review_desk.store import Store
+        import shutil
+        self.composition();self.put(self.need('need'))
+        a.decide(self.store,{'object_id':'need','expected_revision':self.ref('need')['revision_id'],
+                            'expected_decision':None,'action':'accept','actor':'隔离测试'})
+        bundle.export(self.store,self.root/'export');dest=self.root/'acceptance-restore'
         shutil.copytree(self.root/'export',dest/'export');restored=Store(dest/'.runtime/review.sqlite3')
         try:
-            restore(restored,dest/'export')
-            self.assertEqual(a.snapshot(restored,'av-shot'),a.snapshot(self.store,'av-shot'))
-        finally: restored.close()
-
+            bundle.restore(restored,dest/'export')
+            self.assertTrue(generation.readiness(restored,'need')['ready'])
+            with self.assertRaises(ValueError):a.snapshot(restored,'av-shot')
+        finally:restored.close()
 
 
 if __name__ == '__main__':

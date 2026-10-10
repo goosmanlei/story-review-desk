@@ -15,7 +15,8 @@ def validate(store, payload):
     if not p.ID.fullmatch(str(payload.get('downstream_id', ''))):
         raise ValueError('需求关系需要稳定的下游需求身份')
     p.ref_record(store, payload.get('context'))
-    for key in ('purpose', 'preserve', 'change', 'check', 'type_id', 'type_label'):
+    explanatory = () if payload.get('explanation_policy') == 'executable-only-v1' else ('purpose', 'preserve', 'change', 'check')
+    for key in (*explanatory, 'type_id', 'type_label'):
         p._text(payload.get(key), key)
     if payload.get('semantics') not in SEMANTICS:
         raise ValueError('未知通用关系语义须显式使用 description')

@@ -101,6 +101,8 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     selected = p.record(store, object_id, revision_id)
     scope_revision = selected['id']
     direct = exact_scoped(store, 'REQUIREMENT', scope_revision, metadata=metadata)
+    if selected['payload'].get('reading_contract') == 'audiovisual-three-part-v1':
+        direct = [read_ref(store, item['requirement']) for item in selected['payload'].get('products', [])]
     links = [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type'] in ('applicability','occurrence')]
     entities = list(selected['payload'].get('entities', []))
     states = list(selected['payload'].get('states', []))
@@ -134,6 +136,10 @@ def material_comment_targets(store, revision):
     from . import list_reading as light
     needs={r['object_id']:r for r in exact_scoped(store,'REQUIREMENT',revision,metadata=True)
            if r['payload'].get('status')!='withdrawn'}
+    shot = light.record(store, revision_id=revision)
+    for item in shot['payload'].get('products', []):
+        need = light.ref_record(store, item['requirement'])
+        needs[need['object_id']] = need
     for link in exact_scoped(store,'RELATION',revision,metadata=True):
         if link['payload']['relation_type'] in ('applicability','occurrence'):
             subject=light.ref_record(store,link['payload']['subject'])

@@ -3,7 +3,7 @@ from . import production as p
 from .store import Conflict, digest
 
 MODEL = 'production-content-v1'
-KINDS = {'AV_EPISODE', 'AV_SCENE', 'AV_SHOT', 'MATERIAL_RELATION', 'REQUIREMENT'}
+KINDS = {'MATERIAL_RELATION', 'REQUIREMENT'}
 
 
 def ref(row):
@@ -62,7 +62,7 @@ def snapshot(store, object_id, revision_id=None):
 
 
 def validate(store, object_id, value, check_current=True):
-    target = p.ref_record(store, value.get('target'), KINDS)
+    target = p.ref_record(store, value.get('target'), KINDS | ({'AV_EPISODE','AV_SCENE','AV_SHOT'} if not check_current else set()))
     if object_id != decision_id(target) or value.get('verdict') not in ('accepted', 'revoked'):
         raise ValueError('制作采纳身份或动作无效')
     if value.get('acceptance_scope') != scope(store, target):
