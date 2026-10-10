@@ -192,7 +192,7 @@ async function renderStoryProductionLinks(root,episode,scene){
       url.searchParams.set('workspace','settings.workspace');url.searchParams.set('production_tab','breakdown');
       url.searchParams.set('breakdown_object',record.object_id);url.searchParams.set('breakdown_revision',record.id);
       history.pushState(null,'',url);switchWorkspace('settings.workspace',false);
-    }else if(['ENTITY','STATE','REQUIREMENT'].includes(record.kind))openUnifiedMaterial(productionRef(record),trigger);
+    }else if(['ENTITY','STATE','REQUIREMENT'].includes(record.kind))openUnifiedMaterial({...productionRef(record),work:{...productionRef(episode),scene_id:scene.id}},trigger);
     else openMaterialReference(productionRef(record),trigger);
   };
   try{

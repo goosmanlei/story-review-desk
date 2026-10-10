@@ -99,7 +99,7 @@ function relationSceneLabel(source){
 }
 
 function renderEntityRelations(root,data){
-  const rows=(data.relationships||[]).map(r=>data.localVersions?.[r.object_id]||r);if(!rows.length)return;
+  const rows=(data.relationships||[]).map(r=>data.localVersions?.[r.object_id]||r).filter(r=>reviewWorkMatches(r));if(!rows.length)return;
   const section=el('section','entity-relationships-reading');nodeText('h3',null,'人物与故事关系',section);
   for(const row of rows){const line=el('article');renderOriginalReviewText(line,row);for(const ref of row.payload.entities||[])if(ref.object_id!==data.entity.object_id)productionRefLink(line,{...ref,kind:'ENTITY'},productionName(ref,(data.related_entities||[]).map(r=>({object_id:r.object_id,revision_id:r.id,title:r.payload.title}))));entitySources(line,row);section.append(line)}
   const graph=productionButton(section,'用关系图查看',()=>{const {body}=openReviewDialog('人物关系',graph,'material-reference-dialog');renderEntityRelationGraph(body,data)});

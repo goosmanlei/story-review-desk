@@ -55,7 +55,7 @@ test('existing originals precede grouped downstream decisions without changing e
   f.c.api=async()=>({relations});f.c.openUnifiedMaterial=reference=>previewed.push(reference);
   const host=new Element('main');await f.c.renderMaterialRelations(host,need.object_id,need);
   const groups=host.all().filter(n=>n.className==='material-use-group');assert.ok(groups.length,host.textContent);assert.equal(groups[0].tag,'section');assert.match(groups[0].textContent,/已有形象/);
-  assert.equal(groups[1].tag,'section');assert.match(groups[1].textContent,/沿用方案/);
+  assert.equal(groups.length,1);assert.ok(host.all().some(n=>n.tag==='select'),'other work remains navigable without 48 default use paragraphs');
   const card=groups[0].all().find(n=>n.tag==='button');await card.onclick();assert.deepEqual(previewed,[edge.payload.upstream]);
   assert.equal(groups[0].all().find(n=>n.tag==='img').src,'/api/production/files/old.png');
   assert.equal(JSON.stringify(relations),before);assert.equal(f.c.state.materialReview.relation_records[0].id,edge.id);

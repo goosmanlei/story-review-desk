@@ -5,16 +5,19 @@ function renderAudiovisualSources(host,row){
   const sources=row.payload.sources||[];
   for(const [index,source] of sources.entries())materialReferenceLink(host,source,'故事依据'+(sources.length>1?' '+(index+1):''),'full_scene');
 }
-function renderAudiovisualDesign(host,row){
-  if(renderRecordComposition(host,row))return;
+function renderAudiovisualDesign(host,row,companions=[],alreadyRead=[]){
+  if(renderRecordComposition(host,row,companions,alreadyRead))return true;
   const surface=materialTextSurface(host,row),labels={purpose:'叙事目的',structure:'编排与拆镜理由',rhythm:'节奏',continuity:'连续性',preserve:'保留',change:'允许变化',check:'检查方式'};
   for(const block of productionTextBlocks(row)){
+    if(alreadyRead.includes(block.text))continue;
+    if(row.kind==='AV_SCENE'&&['spatial','axis','lighting','color','sound'].includes(block.field))continue;
     const line=el('p');if(labels[block.field])nodeText('b',null,labels[block.field]+'　',line);
     nodeText('span',null,block.text,line).dataset.blockId=block.id;surface.append(line);
   }
 }
 const productionAcceptancePanels=new Set();
 async function renderProductionAcceptance(host,row){
+  if(state.reviewWork&&row?.kind==='REQUIREMENT'){const button=productionButton(host,'决定此素材方案的生成许可',()=>openUnifiedMaterial({...productionRef(row),work:null},button));return}
   if(!row||!['AV_EPISODE','AV_SCENE','AV_SHOT','REQUIREMENT','MATERIAL_RELATION'].includes(row.kind))return;
   const box=el('div','production-toolbar production-acceptance');host.append(box);
   let data,serial=0;
@@ -36,8 +39,8 @@ async function renderProductionAcceptance(host,row){
     if(!data.can_change)nodeText('small','production-meta','历史版本',box);
     else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
     const info=el('section','decision-scope');
-    nodeText('p',null,row.kind==='REQUIREMENT'?'仅认可此素材方案版本；可与所属状态的有效整体生成许可择一。采纳不选择原件、不接受结果、不调用模型；准确参考及生成前检查仍须满足。':'认可此版设计及下列准确子项；实际生成、原件审阅与采用分别决定。',info);
-    renderDecisionScope(info,data.scope,data.scope_records||[]);
+    if(row.kind==='REQUIREMENT')nodeText('p',null,'仅认可此素材方案；也可沿所属状态的整体生成许可执行。原件及结果另行判断。',info);
+    if(row.kind!=='AV_SHOT')renderDecisionScope(info,data.scope,data.scope_records||[]);
     if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
     renderDecisionHistory(info,data.history||[]);
     box.append(info);
@@ -135,13 +138,16 @@ async function renderInputRelationPurpose(parent,value,need=null){
 function relationReadingSections(row){return row.review_composition?.sections.map(s=>({label:s.label,texts:s.parts.map(p=>p.text)}))||productionTextBlocks(row).map(b=>({label:({preserve:'保留',change:'变化与限制',check:'检查'})[b.field]||'',texts:[b.text]}))}
 async function renderMaterialRelations(host,materialId,selected=null,{comparisons=null}={}){
   const box=el('section','material-relations');host.append(box);
-  const owner=isEntityReview()?state.entityReview:state.materialReview;
+  const owner=isEntityReview()?state.entityReview:state.materialReview,work=state.reviewWork;
   try{const data=await api('/api/production/material-relations?'+new URLSearchParams({material_id:materialId,...(selected?{revision_id:selected.id}:{})}));
     if(!box.isConnected)return;
     const declared=new Set((selected?.payload.generation?.inputs||[]).map(v=>v.relation?.revision_id).filter(Boolean));
     const rank=r=>r.context_record?.kind==='STATE'?0:r.downstream_record?.payload.media_type==='video'?1:2;
-    const rows=data.relations.filter(row=>!declared.has(row.id)).sort((a,b)=>rank(a)-rank(b)||String(businessCode(a.downstream_record)||a.payload.downstream_id).localeCompare(String(businessCode(b.downstream_record)||b.payload.downstream_id),undefined,{numeric:true}));
-    if(!rows.length){box.remove();return}
+    const candidates=data.relations.filter(row=>!declared.has(row.id));
+    const rows=candidates.filter(row=>row.direction==='incoming'||work&&row.downstream_record?.payload.media_type==='video'&&(['AV_SCENE','AV_SHOT','AV_EPISODE'].includes(row.context_record?.kind)?reviewWorkMatches(row.context_record,work):false)).sort((a,b)=>rank(a)-rank(b)||String(businessCode(a.downstream_record)||a.payload.downstream_id).localeCompare(String(businessCode(b.downstream_record)||b.payload.downstream_id),undefined,{numeric:true}));
+    const other=candidates.filter(row=>!rows.includes(row));
+    if(other.length){const select=el('select');select.setAttribute('aria-label','查看其他使用处');select.append(new Option('查看其他使用处',''));for(const row of other)select.append(new Option(businessTitle(row.downstream_record),row.id));select.onchange=()=>{const row=other.find(r=>r.id===select.value);if(row){const context=row.context_record;openUnifiedMaterial({...productionRef(row.downstream_record),work:['AV_SCENE','AV_SHOT'].includes(context?.kind)?productionRef(context):null},select)}select.value=''};box.append(select)}
+    if(!rows.length&&!other.length){box.remove();return}
     if(owner===(isEntityReview()?state.entityReview:state.materialReview))rememberMaterialRelations([...data.relations,...(data.comment_records||[])]);
     const alternatives=rows.filter(r=>r.direction==='incoming'&&r.payload.semantics==='alternative');
     const image=row=>row.upstream_record?.payload.components?.find(c=>c.role==='original'&&c.mime.startsWith('image/'));
@@ -207,37 +213,49 @@ function breakdownShotFields(shot){
   }).filter(item=>typeof item.value==='string'&&item.value.trim());
 }
 function breakdownCommonConditions(items){
-  const shots=items.map(item=>item.record),fields={},sounds=[];
+  const shots=items.map(item=>item.record),fields={},sounds=[],shared=[];
   if(shots.length<2)return {fields,sounds};
   for(const key of ['spatial','axis','lighting','color','continuity']){
     const value=shots[0].payload[key];
     if(typeof value==='string'&&value.trim()&&shots.every(shot=>shot.payload[key]===value))fields[key]=value;
+    const groups=new Map();for(const shot of shots){const text=shot.payload[key];if(typeof text!=='string'||!text.trim())continue;if(!groups.has(text))groups.set(text,[]);groups.get(text).push(shot)}
+    for(const [text,group] of groups)if(group.length>1)shared.push({key,value:text,shots:group});
   }
   // Equal dialogue can be an intentional repeated event. Only an explicitly
   // typed background sound may move out of the individual shot's sequence.
   const background=shot=>(shot.payload.sound||[]).filter(item=>item&&typeof item==='object'&&['ambience','environment','music'].includes(item.type)).map(item=>item.text||item.description).filter(Boolean);
   for(const value of background(shots[0]))if(!sounds.includes(value)&&shots.every(shot=>background(shot).includes(value)))sounds.push(value);
-  return {fields,sounds};
+  return {fields,sounds,...(shared.length?{shared}:{})};
 }
 function breakdownFieldLine(host,item,label=item.label){
   const line=el('p');nodeText('b',null,label+'　',line);const span=nodeText('span',null,item.value,line);
   if(item.block)span.dataset.blockId=item.block.id;host.append(line);return span;
 }
+function breakdownReadingConditions(data,composedScene,sceneText,sceneRead=[]){
+  const common={...breakdownCommonConditions(data.shots),sceneId:data.scene.id,composedScene,sceneText,sceneRead};
+  if(composedScene===true){
+    const shown=(row,value)=>!row.review_composition||row.review_composition.sections.some(section=>section.parts.some(part=>part.text===value));
+    common.fields=Object.fromEntries(Object.entries(common.fields).filter(([key,value])=>data.shots.every(item=>shown(item.record,value))));
+    common.shared=(common.shared||[]).filter(group=>group.shots.every(row=>shown(row,group.value)));
+  }
+  return common;
+}
 function renderBreakdownConditions(host,data,common){
-  if(data.scene.review_composition)return;
-  const scene=data.scene,box=el('section','breakdown-conditions');nodeText('h3',null,'场面与摄影',box);
+  const scene=data.scene,box=el('section','breakdown-conditions');
   const seen=new Set();
-  const add=(row,field,value,label)=>{if(!value||seen.has(value))return;seen.add(value);const surface=materialTextSurface(box,row),block=productionTextBlocks(row).find(b=>b.field===field&&b.text===value);breakdownFieldLine(surface,{value,label,block})};
-  for(const key of ['spatial','axis','lighting','color'])add(scene,key,scene.payload[key],breakdownShotLabels[key]);
+  const add=(row,field,value,label)=>{if(!value||seen.has(value)||common.sceneText?.includes(value))return;seen.add(value);const surface=materialTextSurface(box,row),block=productionTextBlocks(row).find(b=>b.field===field&&b.text===value);breakdownFieldLine(surface,{value,label,block})};
+  if(!common.composedScene)for(const key of ['spatial','axis','lighting','color'])add(scene,key,scene.payload[key],breakdownShotLabels[key]);
   const sceneSound=Array.isArray(scene.payload.sound)?scene.payload.sound:[scene.payload.sound];
   for(const sound of sceneSound)add(scene,'sound',typeof sound==='string'?sound:sound?.text||sound?.description,'声音');
   for(const [key,value] of Object.entries(common.fields)){if(key==='continuity'&&scene.payload.continuity===value)continue;add(data.shots[0].record,key,value,breakdownShotLabels[key])}
   for(const value of common.sounds)add(data.shots[0].record,'sound',value,'声音');
-  if(box.childElementCount>1)host.append(box);
+  for(const group of common.shared||[]){if(seen.has(group.value)||common.sceneText?.includes(group.value))continue;add(group.shots[0],group.key,group.value,breakdownShotLabels[group.key]);if(group.shots.length!==data.shots.length)nodeText('small','production-meta','适用镜头：'+group.shots.map(businessCode).join('、'),box)}
+  if(box.childElementCount)host.append(box);
 }
 
 function breakdownShotText(parent,shot,common={fields:{},sounds:[]},coveredVoices=[],companions=[]){
-  if(renderRecordComposition(parent,shot,companions))return;
+  const shared=(common.shared||[]).filter(group=>group.shots.some(row=>row.id===shot.id)).map(group=>group.value);
+  if(renderRecordComposition(parent,shot,companions,[...Object.values(common.fields),...shared,...(common.sceneRead||[])]))return true;
   const blocks=productionTextBlocks(shot),fields=breakdownShotFields(shot),byKey=new Map(fields.map(item=>[item.key,item]));
   const text=reviewSurface(el('div'));text.dataset.productionBlocks=shot.id;text.reviewFocus=()=>{state.breakdownReviewFocus=(state.breakdownReviewFocus||0)+1;focusProductionReview(entityReviewDetail(shot),false)};text.onpointerdown=text.reviewFocus;text.onfocusin=text.reviewFocus;parent.append(text);
   const original=[],shown=new Set();
@@ -247,7 +265,7 @@ function breakdownShotText(parent,shot,common={fields:{},sounds:[]},coveredVoice
       if(block&&block.id!==other.block?.id)original.push(item);
       continue;
     }
-    if(common.fields[key]===value){original.push(item);continue}
+    if(common.fields[key]===value||common.sceneText?.includes(value)||(common.shared||[]).some(group=>group.key===key&&group.value===value&&group.shots.some(row=>row.id===shot.id))){original.push(item);continue}
     breakdownFieldLine(text,item,same?{purpose:'叙事目的与表演',framing:'构图与机位运动'}[key]:item.label);
     if(block)shown.add(block.id);
   }
@@ -617,9 +635,8 @@ function renderBreakdownShot(parent,item,common={fields:{},sounds:[]},references
   const actions=el('div'),design=el('div','breakdown-shot-design');text.append(actions,design);
   const references=referencesParent?.register?referencesParent:el('section','shot-references');if(!referencesParent?.register)(referencesParent||text).append(references);
   const video=(item.context.requirements||[]).find(r=>r.payload.media_type==='video');
-  const draw= (reading,source)=>{design.replaceChildren();breakdownShotText(design,shot,common,reading?.parts.filter(p=>p.role==='voice').map(p=>p.text)||[],[common.sceneId,...(source?[source.id]:[])].filter(Boolean))};
+  const draw= (reading,source)=>{design.replaceChildren();const composed=breakdownShotText(design,shot,common,reading?.parts.filter(p=>p.role==='voice').map(p=>p.text)||[],[common.sceneId,...(source?[source.id]:[])].filter(Boolean));if(composed!==true)renderShotStateContext(design,shot,item.context)};
   if(video)breakdownPrompt(actions,video,item.context,draw,references);else draw(null,null);
-  renderShotStateContext(design,shot,item.context);
   if(references.register){references.designs.set(shot.id,shot)}else renderProductionAcceptance(references,shot);
 
 }
@@ -690,8 +707,10 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
   body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
   breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_episode_revision:state.breakdownData.design?.id||null,breakdown_scene:scene.object_id,production_tab:'breakdown',...(state.breakdownData.design?{production_scope_episode:state.breakdownData.design.object_id,production_scope_revision:state.breakdownData.design.id,production_scope_scene:scene.object_id}:{})});
   const page=el('section','breakdown-scene');body.append(page);
-  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);renderAudiovisualDesign(page,data.scene);
-  const common={...breakdownCommonConditions(data.shots),sceneId:data.scene.id};renderBreakdownConditions(page,data,common);
+  const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);
+  const alreadyRead=[...body.parentElement?.parentElement?.querySelectorAll('.audiovisual-edition [data-block-id]')||[]].map(node=>node.textContent);
+  const composedScene=renderAudiovisualDesign(page,data.scene,[...data.shots.map(s=>s.record.id),...data.shots.flatMap(s=>s.context.requirements.map(r=>r.id))],alreadyRead);
+  const common=breakdownReadingConditions(data,composedScene,page.textContent,[...page.querySelectorAll?.('[data-block-id]')||[]].map(node=>node.textContent));renderBreakdownConditions(page,data,common);
   const references=createSceneReferenceReader(data);
   for(const item of data.shots)renderBreakdownShot(page,item,common,references);page.append(references.host);
   state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.context.requirements)];
