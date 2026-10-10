@@ -506,6 +506,30 @@ class Store:
     def _validate_blocks(blocks, anchor):
         if not isinstance(blocks, list) or not blocks or not isinstance(anchor, dict):
             raise ValueError("invalid text blocks or anchor")
+        if "segments" in anchor:
+            segments = anchor["segments"]
+            if not isinstance(segments, list) or len(segments) < 2:
+                raise ValueError("invalid text anchor segments")
+            ids = [b["id"] for b in blocks]
+            occupied = {}
+            for part in segments:
+                if not isinstance(part, dict) or set(part) != {"block_id", "end_block_id", "start", "end", "quote"}:
+                    raise ValueError("invalid text anchor segment")
+                Store._validate_blocks(blocks, part)
+                first, last = ids.index(part["block_id"]), ids.index(part["end_block_id"])
+                for index in range(first, last + 1):
+                    start = part["start"] if index == first else 0
+                    end = part["end"] if index == last else len(blocks[index]["text"])
+                    ranges = occupied.setdefault(index, [])
+                    if any(start < old_end and old_start < end for old_start, old_end in ranges):
+                        raise ValueError("overlapping text anchor segments")
+                    ranges.append((start, end))
+            expected = {"block_id": segments[0]["block_id"], "start": segments[0]["start"],
+                        "end_block_id": segments[-1]["end_block_id"], "end": segments[-1]["end"],
+                        "quote": "\n".join(part["quote"] for part in segments)}
+            if any(type(anchor.get(key)) is not type(value) or anchor.get(key) != value for key, value in expected.items()):
+                raise Conflict("segmented anchor differs from exact passages")
+            return blocks
         ids = [b["id"] for b in blocks]
         try:
             start_index = ids.index(anchor["block_id"])

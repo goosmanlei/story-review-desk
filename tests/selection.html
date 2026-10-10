@@ -49,7 +49,7 @@ async function main(){
     for(const boundary of ['sibling-zero','sibling-text-zero','parent-gap','inside','reverse','external-title','external-prefix','label-only','other-revision','hidden-gap'])await test(attribute+' / '+boundary,async()=>{
       const root=d.createElement('section');
       root.innerHTML=`<h3>外部标题</h3><div data-production-blocks="boundary-exact"><p><b>动作　</b><span ${attribute}="prompt" data-anchor-offset="6">甲𪎊乙。</span></p><p><span ${attribute}="prompt" data-anchor-offset="16">后段。</span></p></div><summary>生成细节</summary><div data-production-blocks="other"><span ${attribute}="other">另一修订</span></div>`;
-      root.style.display="none";d.body.append(root);
+      root.style.position='absolute';root.style.left='-10000px';d.body.append(root);
       const [heading,host,summary,other]=root.children,label=host.querySelector('b'),span=host.querySelector('span'),second=host.querySelectorAll('span')[1];
       if(boundary!=='hidden-gap')second.parentElement.remove();
       const blocks=[{id:'prompt',text:'技术前言。甲𪎊乙。\n隐藏原文\n后段。'}];
@@ -69,9 +69,10 @@ async function main(){
         w.getSelection().removeAllRanges();w.getSelection().addRange(r);
         if(boundary==='reverse')w.getSelection().setBaseAndExtent(r.endContainer,r.endOffset,r.startContainer,r.startOffset);
         const anchor=w.textSelectionAnchor(host,blocks,attribute);
-        const valid=['sibling-zero','sibling-text-zero','parent-gap','inside','reverse'].includes(boundary);
+        const valid=['sibling-zero','sibling-text-zero','parent-gap','inside','reverse','hidden-gap'].includes(boundary);
         assert(Boolean(anchor)===valid,'边界未按实际选入文字判断');
-        if(valid){assert(anchor.quote==='甲𪎊乙。','标签、空行或隐藏字进入引用');assert(anchor.start===5&&anchor.end===9,'Unicode 原文偏移错误')}
+        if(boundary==='hidden-gap'){assert(anchor.quote==='甲𪎊乙。\n后段。','隐藏原文进入引用');assert(anchor.segments.length===2,'跨空缺范围没有逐段保留')}
+        else if(valid){assert(anchor.quote==='甲𪎊乙。','标签、空行或隐藏字进入引用');assert(anchor.start===5&&anchor.end===9,'Unicode 原文偏移错误')}
         if(attribute==='data-block-id'){
           state.workspace='settings.workspace';state.productionSelected={id:'boundary-exact',object_id:'boundary',payload:{blocks}};state.unifiedCardRoot=root;
           const selected=w.selectedAnchor();assert(Boolean(selected)===valid,'制作选区入口与共用边界不一致');
@@ -80,6 +81,22 @@ async function main(){
       }finally{w.getSelection().removeAllRanges();state.workspace=oldWorkspace;state.productionSelected=oldSelected;state.unifiedCardRoot=oldRoot;root.remove()}
     });
   }
+  for(const mode of ['different-block-gap','reordered','hidden-node','astral-half'])await test('组合选区 / '+mode,async()=>{
+    const root=d.createElement('div');root.style.position='absolute';root.style.left='-10000px';
+    const blocks=[{id:'first',text:'甲𪎊乙。'},{id:'gap',text:'未选的拆镜、节奏、连续性'},{id:'last',text:'米铺😀空间。'}];
+    root.innerHTML='<p data-block-id="first">甲𪎊乙。</p><p data-block-id="last">米铺😀空间。</p>';
+    if(mode==='reordered')root.prepend(root.lastChild);
+    if(mode==='hidden-node'){const hidden=d.createElement('p');hidden.dataset.blockId='gap';hidden.textContent=blocks[1].text;hidden.hidden=true;root.firstChild.after(hidden)}
+    d.body.append(root);
+    try{
+      const r=d.createRange();r.setStart(root.firstChild.firstChild,0);r.setEnd(root.lastChild.firstChild,root.lastChild.textContent.length);
+      if(mode==='astral-half'){r.setStart(root.firstChild.firstChild,1);r.setEnd(root.firstChild.firstChild,2)}
+      w.getSelection().removeAllRanges();w.getSelection().addRange(r);
+      const a=w.textSelectionAnchor(root,blocks,'data-block-id');
+      if(mode==='astral-half')assert(a===null,'半个代理对被当成完整 Unicode 字符');
+      else{assert(a?.segments?.length===2,'没有保留两段准确引用');assert(a.quote===(mode==='reordered'?'米铺😀空间。\n甲𪎊乙。':'甲𪎊乙。\n米铺😀空间。'),'引用包含未选字或顺序改变')}
+    }finally{w.getSelection().removeAllRanges();root.remove()}
+  });
   if(location.hash==='#boundaries-only'){
     document.querySelector('#result').textContent=`${passed} passed, ${failed} failed`;
     document.title=`${failed?'FAIL':'PASS'} — 准确正文边界检查`;return;
