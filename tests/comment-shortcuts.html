@@ -65,7 +65,7 @@ document.querySelector('#run').onclick=async()=>{checks.length=0;try{
  ok(requests===1&&q('#comment-editor-text').readOnly&&[...actions().children].every(b=>b.disabled),name+'提交中按键与按钮共用限制且只发一次请求');release();await wait(()=>!q('#comment-editor-text'))}finally{w().fetch=realFetch}
  c=(await getComments()).find(x=>x.id===c.id);ok(c.version===3&&c.body===ctx.name+'延迟保存',name+'连续快捷键只产生一次编辑');
  edit(c);text(ctx.name+'失败保留草稿');w().fetch=async(p,opts)=>p.startsWith('/api/comments/')&&opts?.method==='PATCH'?new (w().Response)(JSON.stringify({error:'隔离模拟版本冲突'}),{status:409}):realFetch(p,opts);
- try{key('Enter',{metaKey:true});await wait(()=>q('#toast').textContent==='隔离模拟版本冲突');ok(q('#comment-editor-text').value===ctx.name+'失败保留草稿'&&!q('#comment-editor-text').readOnly&&!actions().querySelector('.primary').disabled,name+'提交失败保留草稿并解除限制')}finally{w().fetch=realFetch}cancel();
+ try{key('Enter',{metaKey:true});await wait(()=>q('.comment-edit-conflict')&&!q('#comment-editor-text').readOnly&&!actions().querySelector('.primary').disabled);ok(q('#comment-editor-text').value===ctx.name+'失败保留草稿'&&!q('#comment-editor-text').readOnly&&!actions().querySelector('.primary').disabled,name+'提交失败保留草稿并解除限制')}finally{w().fetch=realFetch}cancel();
  w().changeComment(c,'CLOSE');await wait(()=>!q('#comment-'+c.id));w().changeComment((await getComments()).find(x=>x.id===c.id),'REOPEN');await wait(()=>q('#comment-'+c.id));
  ok((await getComments()).find(x=>x.id===c.id).status==='OPEN',name+'原有关闭与重开可用');
  }

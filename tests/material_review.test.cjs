@@ -256,7 +256,7 @@ test('missing exact file composition is reported instead of falling back to anot
   for(const r of rounds)r.results=[];assert.equal(ctx.materialDefaultRound(rounds).number,9);
  });
 
-test('shared material cards read relations from the displayed exact definition or candidate',async t=>{
+test('shared material cards display the exact definition and candidate without relation lists',async t=>{
  const row=(object,id,kind='REQUIREMENT')=>({object_id:object,id,kind,payload:{title:object,components:[]}});
  const current=row('need','current'),frozen=row('need','frozen'),a=row('asset-a','a','ASSET'),b=row('asset-b','b','ASSET');
  const scenarios=[
@@ -273,11 +273,11 @@ test('shared material cards read relations from the displayed exact definition o
   const node=()=>({dataset:{},append(){},addEventListener(){}}),requests=[];
   c.el=node;c.nodeText=()=>{};c.businessTitle=r=>r.object_id;c.materialModelCode=()=>'';c.reviewPositionText=x=>x;
   c.renderHistoricalProductionDefinition=()=>{};c.materialCompareControl=()=>{};c.renderProductionAcceptance=()=>{};
-  c.renderMaterialRelations=(_box,object,record)=>requests.push({object,record});c.materialRoundControl=()=>{};c.reviewChoiceButtons=()=>{};
+  c.renderMaterialRelations=()=>assert.fail('relations do not belong in this card');c.renderSelectedGenerationRecipe=(_box,record,candidate)=>requests.push({record,candidate});c.materialRoundControl=()=>{};c.reviewChoiceButtons=()=>{};
   c.materialMedia=()=>{};c.renderActualGeneration=()=>{};c.renderMaterialRequirements=()=>{};c.renderMaterialPlaceholder=()=>{};c.renderGenerationRecipe=()=>{};
   const model={material_id:'need',identity:current,candidates:[a,b].map(record=>({record,components:[],component:{mime:'application/zip'}})),...s};
   const before=JSON.stringify(model);c.renderMaterialCard(node(),model,{selectCandidate:()=>{},selectedCandidateId:s.selectedCandidateId});
-  assert.equal(requests.length,1);assert.equal(requests[0].record,s.expected);assert.equal(requests[0].object,s.expected.object_id);assert.equal(JSON.stringify(model),before);
+  assert.equal(requests.length,1);assert.equal(requests[0].record??null,['ASSET'].includes(s.expected.kind)?null:s.expected);if(s.selectedCandidateId)assert.equal(requests[0].candidate.record.id,s.selectedCandidateId);assert.equal(JSON.stringify(model),before);
  });
 });
 

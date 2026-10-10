@@ -26,11 +26,12 @@ async function renderProductionAcceptance(host,row){
         for(const panel of productionAcceptancePanels){if(!panel.box.isConnected)productionAcceptancePanels.delete(panel);else if(panel!==entry)panel.refresh()}
       }catch(error){if(box.isConnected){button.disabled=false;toast(error.message);refresh()}}
     });button.disabled=!data.can_change;
+    if(row.kind==='REQUIREMENT')renderReviewHelp(box,row);
     if(!data.can_change)nodeText('small','production-meta','历史版本',box);
     else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
     const info=el('section','decision-scope');
     if(row.kind==='REQUIREMENT')nodeText('p',null,'仅认可此素材方案；也可沿所属状态的整体生成许可执行。原件及结果另行判断。',info);
-    if(row.kind!=='AV_SHOT')renderDecisionScope(info,data.scope,data.scope_records||[]);
+    if(!['AV_SHOT','REQUIREMENT'].includes(row.kind))renderDecisionScope(info,data.scope,data.scope_records||[]);
     if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
     renderDecisionHistory(info,data.history||[]);
     box.append(info);
@@ -231,9 +232,15 @@ function renderShotInputs(host,row,inputs,records,context,{pure=false}={}){
       const title=r.payload.title.startsWith(label)?r.payload.title:label+' · '+exactState+r.payload.title;
       const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
       const selectionLabel=!item.slot.number?'方案引用 · 尚未选定版本与原件':!item.slot.candidate?'方案引用 · 版本 '+item.slot.number+' · 原件待选':shotReferenceLabel(item.slot);
+      if(context.compact||pure){
+        const button=productionButton(line,businessTitle(r,title),()=>openShotReference(item,context,button));button.className='material-reference';button.dataset.reviewDialogTrigger='';
+        nodeText('small','production-meta',selectionLabel+range+(item.slot.direct===false?' · 间接':''),line);
+      }else{
       const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:selectionLabel+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(!pure&&item.value.use?' · 用途：'+item.value.use:'')+range;
+      }
     }else nodeText('p','production-issue',item.label+' · 准确引用缺失，需先修复槽位',line);
-    if(!pure){if(item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
+    if(!context.compact&&!pure){if(item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
+
     renderInputRelationPurpose(line,item.value,row.kind==='REQUIREMENT'?row:null)}
     list.append(line);
   }
@@ -530,7 +537,7 @@ function renderShotProductPlan(parent,need,context){
   const source=model.need||round?.definition_records?.call;
   const controls=el('div','av-plan-controls');parent.append(controls);
   if(rounds.length>1)materialRoundControl(controls,need.object_id,rounds,round||{number:null},number=>{rememberProductionDraft();state.breakdownVideoSelections[need.id]={number};breakdownRoute({shot_material_id:need.object_id,shot_plan:number,shot_candidate:null,shot_baseline:rounds.find(r=>r.number===number)?.baseline_id||null});parent.replaceChildren();renderShotProductPlan(parent,need,context);restoreBreakdownPromptDraft(parent);paintReviewCommentCounts()});
-  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.dataset.reviewDialogTrigger='';
+  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
   if(!source){nodeText('p','production-meta','此版本未保留准确生成方案',parent);return}
   const plan=source.kind==='CALL'?source.payload:source.payload.generation;
   if(!plan){nodeText('p','production-meta',need.payload.media_type==='project'?'此产物为已有工程；尚无模型生成方案，可打开素材核对工程与交付要求。':'此产物尚无生成方案',parent);return}
