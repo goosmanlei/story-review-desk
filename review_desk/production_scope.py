@@ -124,6 +124,13 @@ def projection(store, entries, episode=None, revision=None, scene=None):
                         owner(ref, loc, {**evidence, 'kind': kind, 'record': b.ref(row)})
                         visit(light.ref_record(store, ref), {'kind': kind, 'relation_record': b.ref(row)})
         at_scope(b.ref(position))
+        # A revised shot explicitly pins its products and key-state materials.
+        # Their own scope may correctly name an earlier shot revision; follow
+        # this composition, never replace its exact plan with today's head.
+        concrete = [item['requirement'] for item in position['payload'].get('products', [])]
+        concrete += [ref for item in position['payload'].get('key_states', []) for ref in item.get('requirements', [])]
+        for reference in { (ref['object_id'], ref['revision_id']): ref for ref in concrete }.values():
+            visit(light.ref_record(store, reference), {'kind': 'composed_requirement'})
         refs = [*position['payload'].get('entities', []), *position['payload'].get('states', []), *position['payload'].get('continuity_context', [])]
         for occurrence in position['payload'].get('occurrences', []): refs += [occurrence['entity'], *occurrence.get('states', [])]
         for transition in position['payload'].get('state_transitions', []): refs += [transition['from'], transition['to']]

@@ -71,3 +71,27 @@ class ProductionScopeTest(unittest.TestCase):
         self.assertEqual(graph(self.store),([],[]))
         self.assertEqual(projection(self.store,[{'canonical_material_id':'unassigned','object_id':'unassigned'}])['entries'][0]['locations'],[])
         self.assertEqual(list(self.store.db.execute('SELECT id,current_revision FROM objects ORDER BY id')),before)
+
+    def test_revised_shot_follows_its_exact_product_not_old_scope_or_latest_plan(self):
+        self.composition()
+        for oid in ('original-input', 'later-input'):
+            need=self.need(oid);need['payload']['scope']=self.ref('story');self.put(need)
+        need=self.need('product')
+        need['payload']['generation']['inputs']=[{'reference':self.ref('original-input'),'use':'保留原方案输入'}]
+        self.put(need);exact=self.ref('product')
+        old_scope=p.record(self.store,'product')['payload']['scope']
+        shot=p.record(self.store,'av-shot')
+        self.store.put_object('av-shot','AV_SHOT',{**shot['payload'],
+            'products':[{'label':'首帧','requirement':exact}],
+            'key_states':[{'id':'start','description':'起点','requirements':[exact]}]},expected_version=shot['version'])
+        sc=p.record(self.store,'av-scene');self.store.put_object('av-scene','AV_SCENE',{**sc['payload'],'shots':[self.ref('av-shot')]},expected_version=sc['version'])
+        ep=p.record(self.store,'av-episode');self.store.put_object('av-episode','AV_EPISODE',{**ep['payload'],'scenes':[self.ref('av-scene')]},expected_version=ep['version'])
+        row=p.record(self.store,'product')
+        self.store.put_object('product','REQUIREMENT',{**row['payload'],'generation':{
+            **row['payload']['generation'],'inputs':[{'reference':self.ref('later-input'),'use':'后来的方案输入'}] }},expected_version=row['version'])
+        self.assertNotEqual(old_scope,self.ref('av-shot'))
+        result=projection(self.store,ui.material_entries(self.store))
+        uses={v['object_id']:{loc['scene'] for loc in v['locations']} for v in result['entries']}
+        self.assertEqual(uses['product'],{'av-scene'})
+        self.assertEqual(uses['original-input'],{'av-scene'})
+        self.assertEqual(uses['later-input'],set())
