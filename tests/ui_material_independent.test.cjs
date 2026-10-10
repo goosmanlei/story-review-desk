@@ -132,10 +132,10 @@ for(const submitted of [false,true])test(`P05/C06 empty frozen video version ${s
   const call={object_id:'old-call',id:'old-call-r1',kind:'CALL',payload:{format:'production-call-v1',status:'failed',model:'historical-model',prompt:'EXACT FAILED CALL',inputs:[],parameters:{}}};
   const round={number:2,model:'plan-v1',frozen:true,plan:null,members:submitted?[call]:[],results:[],definition_records:{requirement:null,call:submitted?call:null}};
   const context={adoptions:[],video_details:{'video-need':{material_versions:{'video-need':[round]},review_contexts:{}}}};
-  const parent=new Element('section');c.breakdownPrompt(parent,need,context);
+  c.state.breakdownVideoSelections={[need.id]:{number:2}};const parent=new Element('section');c.renderShotProductPlan(parent,need,context);
   const text=parent.all().map(n=>n.textContent||'').join('\n');
   assert.ok(!text.includes('CURRENT PLAN MUST NOT BE BORROWED'));
-  assert.ok(submitted?text.includes('EXACT FAILED CALL'):text.includes('未保留完整生成方案'));
+  assert.ok(submitted?text.includes('EXACT FAILED CALL'):text.includes('未保留准确生成方案'));
 });
 
 function sharedMaterialFixture(){

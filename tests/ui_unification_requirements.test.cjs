@@ -37,6 +37,7 @@ function fixture(){
   c.materialMedia=(parent,item)=>{const n=c.el(item.component.mime.startsWith('image/')?'img':'video');n.src='/api/production/files/'+item.component.file;n.dataset.reviewRevision=item.record.id;parent.append(n);return n};
   c.link=(label,url,parent)=>{const n=c.nodeText('a',null,label,parent);n.href=url;return n};c.reviewMediaPlayer=()=>{};c.renderMaterialResultReview=()=>{};c.renderComments=()=>{};c.paintProductionReview=()=>{};c.paintReviewCommentCounts=()=>{};c.rememberProductionDraft=()=>{};c.restoreProductionDraft=()=>{};
   c.productionEntityIcon=()=>new Element('svg');c.materialReferenceLink=(parent,ref,label)=>{const n=c.nodeText('a',null,label,parent);n.reference=ref;return n};
+  c.originalProductionTextBlocks=c.productionTextBlocks;
   c.productionTextBlocks=row=>Object.entries(row.payload.generation?{'generation.prompt':row.payload.generation.prompt}:{'call.prompt':row.payload.prompt}).filter(([,text])=>typeof text==='string').map(([field,text])=>({id:field,field,text}));
   c.materialReferenceRequest=ref=>({url:'/?revision='+ref.revision_id});
   c.openMaterialReference=()=>{};c.toast=message=>{throw Error(message)};
@@ -109,43 +110,68 @@ function videoFixture(){
   const context={adoptions:[],video_details:{[need.object_id]:{record:need,material_versions:{[need.object_id]:[round]},review_contexts:{[asset.id]:{call,inputs:[input],requirements:[need]}}}}};
   return {...f,input,need,call,asset,round,context};
 }
-test('10.2/10.4 selected generated video renders actual prompt and exact references without changing text',async()=>{
-  const {c,reader,need,call,input,context}=videoFixture();c.breakdownPrompt(reader,need,context);
-  const prompt=reader.all().find(n=>n.className==='shot-generation-prompt');assert.equal(prompt.textContent,call.payload.prompt);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
-  const inline=prompt.all().find(n=>n.tag==='a');assert.equal(inline.textContent,'@图片1');assert.equal(inline.href,'/?revision='+input.id);
-  const opened=[];c.openUnifiedMaterial=ref=>opened.push(ref);await reader.querySelectorAll('[data-material-id]')[0].onclick();assert.equal(opened[0].revision_id,input.id);assert.equal(opened[0].component_id,'original');assert.equal(opened[0].params.get('material_version'),'3');assert.equal(opened[0].params.get('material_target'),input.id);
+test('product reader keeps parameters, inputs and full Prompt on the exact selected definition',async()=>{
+  const f=videoFixture(),{c,reader,need,context,round}=f,seen=[];
+  const old={...need,id:'old-definition',payload:{...need.payload,generation:{model:'old-model',parameters:{version:1},inputs:[{reference:ref(f.input)}],prompt:'old complete\nPrompt 🧵'}}};
+  const older={number:1,model:'plan-v1',plan:old,definition_records:{requirement:old},members:[old],results:[]};
+  round.number=2;context.video_details[need.object_id].material_versions[need.object_id]=[round,older];
+  c.renderShotInputs=(_p,r,inputs,records)=>seen.push(['inputs',r.id,inputs]);
+  c.materialParameters=(_p,r)=>seen.push(['parameters',r.id,r.payload.generation.parameters]);
+  c.renderReviewHelp=()=>{};
+  c.renderShotProductPlan(reader,need,context);
+  assert.ok(reader.textContent.includes(need.payload.generation.prompt));
+  const control=reader.all().find(n=>n.attributes['aria-label']==='素材版本');
+  await control.children.find(n=>n.dataset.choiceId===1).onclick();
+  assert.ok(reader.textContent.includes(old.payload.generation.prompt));
+  assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
+  assert.deepEqual(seen.slice(-2).map(v=>v[1]),['old-definition','old-definition']);
+  let opened;c.openUnifiedMaterial=r=>opened=r;await reader.all().find(n=>n.tag==='button'&&n.textContent==='查看素材').onclick();
+  assert.equal(opened.revision_id,old.id);assert.equal(opened.params.get('material_version'),'1');
 });
-test('10.4 candidate without a real call reports the gap and never fills it from the plan',()=>{
-  const {c,reader,need,context,asset}=videoFixture();delete context.video_details[need.object_id].review_contexts[asset.id];c.breakdownPrompt(reader,need,context);
-  assert.match(reader.textContent,/未保留准确生成记录/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
+test('a bound historical product is not replaced by its identity current plan',()=>{
+  const {c,need,context,round}=videoFixture();
+  const old={...need,id:'bound-old',review_input_records:[{id:'exact-old-input'}],payload:{...need.payload,generation:{...need.payload.generation,prompt:'old full prompt'}}};
+  context.video_details[need.object_id].record=old;
+  const selected=c.breakdownPromptSelection({...old,payload:{media_type:'video'}},context);
+  assert.equal(selected.model.need,old);assert.equal(selected.round,undefined);
+  assert.equal(selected.referenceContext.frozen,true);assert.equal(round.plan,need);
 });
-test('video prompt links keep the deployment prefix and exact old revision',()=>{
-  const {c,reader,need,input,context}=videoFixture();c.REVIEW_DEPLOYMENT={base_path:'/lijizhanshe'};
-  c.breakdownPrompt(reader,need,context);
-  const inline=reader.all().find(n=>n.className==='shot-generation-prompt').all().find(n=>n.tag==='a');
-  assert.equal(inline.href,'/lijizhanshe/?revision='+input.id);
-  assert.equal(inline.textContent,'@图片1');
+test('product Prompt links preserve exact source text, Unicode offsets and deployment prefix',()=>{
+  const {c,reader,need,call,input,context}=videoFixture();
+  need.payload.generation={...call.payload};need.review_input_records=[input];need.review_shot_slots=call.review_shot_slots;
+  c.reviewURL=url=>'/lijizhanshe'+url;c.renderReviewHelp=()=>{};
+  const before=JSON.stringify(need);c.renderShotProductPlan(reader,need,context);
+  const pre=reader.all().find(n=>n.className==='shot-generation-prompt');
+  assert.equal(pre.textContent,call.payload.prompt);assert.equal(JSON.stringify(need),before);
+  assert.equal(pre.all().find(n=>n.tag==='a').href,'/lijizhanshe/?revision='+input.id);
 });
-test('video defaults to latest empty version and exact manual old version retains its actual prompt',async()=>{
-  const {c,reader,need,call,round,context}=videoFixture();context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/尚无生成原件/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
-  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();assert.ok(reader.textContent.includes(call.payload.prompt));assert.equal(c.state.breakdownVideoSelections[need.id].number,1);
+for(const workspace of ['settings.workspace','production.workspace'])test(`three sections keep real states and product order in ${workspace}`,async()=>{
+  const {c,reader,need,context}=videoFixture();c.state.workspace=workspace;
+  c.productionTextBlocks=c.originalProductionTextBlocks;
+  c.renderShotProductPlan=(host,n)=>c.nodeText('p',null,n.id,host);c.restoreBreakdownPromptDraft=()=>{};
+  const image=row('frame','REQUIREMENT',{media_type:'image'}),project=row('title-layer','REQUIREMENT',{media_type:'project'});
+  const shot=row('shot','AV_SHOT',{purpose:'看见她夺回回答权',key_states:[{description:'转牌前姓名不可见',requirements:[ref(image)]},{description:'转牌后两字可读',requirements:[ref(project),ref(image)]}],products:[{label:'首帧',requirement:ref(image)},{label:'字层工程',requirement:ref(project)},{label:'视频',requirement:ref(need)}],performance:'obsolete action',sound:['obsolete sound']});
+  const before=JSON.stringify(shot);c.renderThreePartShot(reader,{record:shot,context:{...context,requirements:[need,image,project]}});
+  assert.deepEqual(reader.all().filter(n=>n.tag==='h4').map(n=>n.textContent),['叙事目的','镜头关键状态','生成方案']);
+  assert.deepEqual(reader.all().filter(n=>n.attributes.role==='tab').map(n=>n.textContent),['首帧','字层工程','视频']);
+  assert.equal(reader.all().filter(n=>n.attributes.role==='tab'&&n.attributes['aria-selected']==='true')[0].textContent,'首帧');
+  assert.equal(reader.all().filter(n=>n.className==='av-key-state').length,2);
+  assert.ok(!reader.textContent.includes('obsolete'));assert.equal(reader.all().some(n=>['details','select'].includes(n.tag)),false);
+  const tabs=reader.all().filter(n=>n.attributes.role==='tab');await tabs[1].onclick();assert.equal(c.state.breakdownProductSelections[shot.id],project.object_id);
+  let opened;c.openUnifiedMaterial=ref=>opened=ref;
+  await reader.all().find(n=>n.className==='av-state-demands').children[0].onclick();assert.equal(opened.revision_id,image.id);
+  assert.equal(JSON.stringify(shot),before);
 });
-test('10.1/10.4 row material opens the exact video version and candidate chosen beside its prompt',async()=>{
-  const {c,reader,need,asset,call,round,context}=videoFixture();
-  const other=row('video-other','ASSET',{...asset.payload},'video-other-r1');round.results.push(other);round.members.push(other);context.video_details[need.object_id].review_contexts[other.id]={call,inputs:[],requirements:[need]};
-  context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  const scene=row('scene','AV_SCENE'),shot=row('shot','AV_SHOT',{number:1,duration_frames:120,fps:24});
-  Object.assign(context,{requirements:[need],materials:[{object_id:need.object_id,id:need.id,title:need.payload.title,media_type:'video',slot:'video',generated:true}],entities:[],states:[]});
-  c.state.workspace='production.workspace';c.state.breakdownData={episode:'episode'};c.api=async()=>({scene,shared:[],shots:[{record:shot,context}]});c.breakdownSelect=()=>{};vm.runInContext('breakdownEpoch=7',c);
-  const opened=[];c.openUnifiedMaterial=reference=>opened.push(reference);
-  await c.showBreakdownScene(scene,reader,new Element('nav'),7);
-  const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
-  const candidate=reader.all().find(n=>n.attributes['aria-label']==='素材候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
-  await new Promise(resolve=>setImmediate(resolve));const own=reader.querySelectorAll('[data-material-id]').find(n=>n.dataset.materialId===need.object_id);assert.ok(own,reader.textContent);await own.onclick();
-  assert.equal(opened.length,1);assert.equal(opened[0].object_id,other.object_id);assert.equal(opened[0].revision_id,other.id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
+test('only-video and empty shots do not fabricate states or other products',()=>{
+  const {c,need,context}=videoFixture();c.renderShotProductPlan=()=>{};c.restoreBreakdownPromptDraft=()=>{};
+  for(const products of [[],[{label:'镜头视频',requirement:ref(need)}]]){
+    const root=new Element('main'),shot=row('single','AV_SHOT',{purpose:'声音提供信息',key_states:[],products});
+    c.renderThreePartShot(root,{record:shot,context:{...context,requirements:[need]}});
+    assert.equal(root.all().filter(n=>n.className==='av-key-state').length,0);
+    assert.equal(root.all().filter(n=>n.attributes.role==='tab').length,products.length);
+    assert.ok(root.textContent.includes(products.length?'本镜没有需独立准备素材的关键状态':'本镜尚未登记产物方案'));
+  }
 });
-
 function mockManagementModal(c){c.openUnifiedMaterial=async ref=>{const result=await c.readUnifiedCard(ref.object_id,ref.revision_id,ref.params);c.activateUnifiedCard(result);c.renderProductionReader()}}
 async function materialListFixture(linked){
   const f=fixture(),{c}=f,{need,asset}=material(),candidate={...asset,object_id:'historical-candidate',id:'historical-candidate-r1'};
@@ -181,33 +207,6 @@ test('history result summaries explain D3 once while preserving an exact histori
   assert.doesNotMatch(card.textContent,/含历史版本|已生成/,'the filter group already states the list-wide range');
   assert.deepEqual(opened,['historical-candidate']);
   assert.equal(card.dataset.materialId,'need');
-});
-
-for(const workspace of ['settings.workspace','production.workspace'])test(`scene cards expose each supplied generation scope without rebinding ${workspace} links`,async()=>{
-  const {c,reader}=fixture(),media=workspace==='production.workspace'?'video':'audio';
-  const scene=row('scene','AV_SCENE'),shot=row('shot','AV_SHOT',{number:1,duration_frames:120,fps:24});
-  const items=[
-    {object_id:'historical-need',id:'historical-need-r3',title:'Changed current plan',media_type:media,generated:true,generation_scope:'history',version_count:2,candidate_count:1},
-    {object_id:'exact-empty',id:'exact-empty-r1',title:'An exact record',media_type:media,generated:false,generation_scope:'exact',version_count:1,candidate_count:0},
-    {object_id:'old-projection',id:'old-projection-r1',title:'An older projection',media_type:media,generated:true}
-  ];
-  c.state.workspace=workspace;c.state.breakdownData={episode:'episode'};
-  c.location.href='http://fixture/?workspace='+workspace;
-  c.api=async()=>({scene,shared:[],shots:[{record:shot,context:{requirements:[],materials:items,entities:[],states:[]}}]});
-  c.breakdownShotText=()=>{};c.breakdownSelect=()=>{};vm.runInContext('breakdownEpoch=9',c);
-  const opened=[];c.openUnifiedMaterial=reference=>opened.push(reference);
-  c.state.breakdownVideoSelections={'historical-need-r3':{number:1,candidate:'old-original-r1'}};
-  await c.showBreakdownScene(scene,reader,new Element('nav'),9);
-  const cards=reader.querySelectorAll('[data-material-id]');
-  assert.deepEqual(cards.map(n=>n.dataset.materialId),items.map(i=>i.object_id));
-  assert.match(cards[0].textContent,/版本 2 个 · 候选 1 个/);
-  assert.match(cards[1].textContent,/版本 1 个 · 候选 0 个/);assert.doesNotMatch(cards[1].textContent,/历史/);
-  assert.match(cards[2].textContent,/版本未登记 · 候选未登记/);assert.doesNotMatch(cards[2].textContent,/历史/);
-  for(const card of cards)assert.equal(card.dataset.reviewDialogTrigger,'');
-  await cards[0].onclick();await cards[1].onclick();
-  assert.equal(opened[0].revision_id,'historical-need-r3');
-  assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),'old-original-r1');
-  assert.equal(opened[1].revision_id,'exact-empty-r1');assert.equal(opened[1].params,null);
 });
 
 test('unowned demand sees a real older plan result without replacing its exact current reader',()=>{
@@ -429,7 +428,7 @@ test('an empty reference version can be saved without a candidate and frozen ver
   assert.ok(f.box.textContent.includes('候选仍待选'));await f.button().onclick();assert.equal(requests[0].candidate,null);assert.equal(requests[0].component_id,undefined);
 });
 test('an exact shot video candidate mismatch never falls back to another result',()=>{
-  const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_plan=1&shot_candidate=missing';c.breakdownPrompt(reader,need,context);
+  const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_plan=1&shot_candidate=missing';c.renderShotProductPlan(reader,need,context);
   assert.ok(reader.textContent.includes('准确素材候选不属于此制作版本'));assert.ok(!reader.textContent.includes('真实生成内容'));
 });
 test('saved reference routing waits for the modal history entry to return',()=>{
@@ -456,4 +455,16 @@ test('flat management scope choices preserve authoritative labels and single sel
  await button('s2').onclick();await button('s2').onclick();assert.equal(filters.scene,'');
  await button('e2').onclick();assert.equal(filters.episode,'');assert.ok(button('s1'));assert.ok(changes.length>=5);
  filters.scene='missing';draw();assert.equal(filters.scene,'missing');
+});
+
+// A real retained candidate can share a state identity with a new preparation.
+test('material entry keeps its exact old state when the current work uses a newer state',()=>{
+  const f=entityFilterFixture(),data=f.review(f.a),old={...f.aForm,id:'retained-state-r1'};
+  data.retained_states=[old];f.c.reviewWorkMatches=()=>true;
+  f.c.entityMaterialRoute=()=>({row:f.asset,selected:{material_id:'need'}});
+  f.c.restoreEntityMaterialRoute=()=>{f.c.state.productionChildDetail={record:old}};
+  f.c.activateUnifiedCard({detail:{record:f.asset,history:[f.asset]},entity_review:data,form:old,params:new URLSearchParams(),review_work:{object_id:'work'},explicit:true});
+  assert.equal(f.c.state.productionChildDetail.record.id,old.id);
+  assert.ok(data.states.some(r=>r.id===old.id));
+  assert.ok(!data.currentStates.some(r=>r.id===old.id));
 });

@@ -12,7 +12,7 @@
 | `REPRESENTATION` | 仍有用途的身份、声线或布局说明；不冒充候选或调用 |
 | `AV_EPISODE` | 视听集，`story_episode` 固定故事集边界，`scenes` 按顺序引用准确视听场修订 |
 | `AV_SCENE` | 视听场，`sources` 可含同集多个故事场的部分正文，`shots` 按顺序引用准确镜头修订 |
-| `AV_SHOT` | 视听镜头，包含完整表达、动作起止、时长、实体状态和准确正文范围 |
+| `AV_SHOT` | 视听镜头，包含叙事目的、必要镜内状态、实际产物及准确正文范围 |
 | `REQUIREMENT` | 一项持续素材需求，`scope` 绑定实体、状态或视听位置；同镜可有多需求 |
 | `MATERIAL_RELATION` | 上下游素材生产关系，说明语境、用途、保留与变化约束、必要性和检查方法 |
 | `CALL` / `ASSET` | 不可伪造的实际调用与产物，真实原件、组成、来源和输入保持准确 |
@@ -63,8 +63,8 @@ flowchart LR
 | entity | `entity_type:character/space/prop/song`、`subtype`、`aliases`、`facts`、`choices`、`unknowns`、`sources`。同一类型中的别名冲突必须显式解决。仅提及对象仍可登记，无自动制作要求。 |
 | state | `state_model:complete-v1`、`entity`、`dimensions`、`reference_media:image/audio/none`、`sources`、`facts`、`choices`、`unknowns`。完整快照可跨场复用，不把局部伤势或普通动作独立当作状态。 |
 | representation | `entities`、`states`、`sources`、`choices`、`unknowns`。选择的基准通过 adoption 关系查询，不把候选混入设定事实。 |
-| av-episode / av-scene | `input_lock`、`sources`、`purpose`、`continuity`、`structure`、`rhythm`；集另有 `story_episode,number,scenes`，场有 `shots`。所有子项使用相同输入锁且故事范围必须包含在父项范围内。 |
-| av-shot | `input_lock,sources,purpose,framing,spatial,axis,movement,action_start,action_end,performance,lighting,color,editing,continuity,duration_frames,fps,sound,entities,states`；动作变化用准确 `state_transitions`，画外连续性背景用 `continuity_context`。 |
+| av-episode / av-scene | `reading_contract:audiovisual-three-part-v1`、`input_lock`、`sources`；集另有 `story_episode,number,scenes`，场有 `shots`。准确子项锁与范围须一致，集场说明独立存于当前工作稿。 |
+| av-shot | `reading_contract:audiovisual-three-part-v1`、`input_lock,sources,purpose,key_states,products,duration_frames,fps,entities,states`。镜内状态及产物绑定已有准确需求，详见 [视听制作](production-breakdown.md)。 |
 | requirement | `scope`、`slot`、`required`、`purpose`、`media_type`、`usage:generation_input/post_audio/editorial`、`entities`、`states`、`specification`，可选 `generation` 逐素材生成方案。缺项以槽位为单位显示。 |
 | asset | `media_type`、`subjects`（可空，支持项目级声音）、`states`、`components`、`production` 实际制作引用、`lineage`。组件包含 `id,role,file,sha256,bytes,mime` 和实际宽高／时长等。必须有原件；工程素材可登记工程文件为原件。可选 `candidate_requirements` 绑定准确需求，但不表示已按该方案执行或采用。 |
 | call | `method`、`status:planned/submitted/completed/failed/unknown`、`tool`、`model`、`prompt`、`parameters`、`inputs`、`outputs`、`receipt`、`usage`、`lineage`。completed 必须有实际结果；网络结果不明保留 unknown，不自动重复扣费。 |
@@ -116,7 +116,7 @@ flowchart LR
 
 原件、预览、工程是同一候选的不同 component。组件各自保存媒体信息与哈希，评论和采用指明 component_id；不能从预览图哈希推断原件未变化。工程文件中的本地依赖采用相对路径，逐镜包和工程包包含所需原件、素材清单、元数据、提示词和制作回执。临时下载地址只留追溯信息。
 
-当前完整 bundle 使用 Schema 9，包含视听对象、素材关系、准确版本与候选、评论及最小清理凭据。遍历全部保留修订的文件组成并校验原件；退役生产类型在导入与恢复时均拒绝。故事域的兼容读取不意味着可恢复旧制作体系。实例还通过策略绑定准确清理基线。
+当前完整 bundle 使用 Schema 10，包含视听对象、素材关系、准确版本与候选、评论及最小清理凭据。遍历全部保留修订的文件组成并校验原件；退役生产类型在导入与恢复时均拒绝。故事域的兼容读取不意味着可恢复旧制作体系。实例还通过策略绑定准确清理基线。
 
 导出先校验数据、布局和全部原件哈希，再暂存元数据文件，最后替换清单；不复制或替换媒体目录。校验、暂存或文件替换发生可捕获错误时，保留上一份完整导出的内容；首次导出失败则移除本次已发布的部分元数据。共享目录的导出和发布仍须按序执行，不支持多个写入者同时发布同一目录。
 
