@@ -352,7 +352,7 @@ function focusProductionReview(detail,paint=true){
     if(context){const round=state.entityReview.material_versions?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialVersionRoute(url.searchParams,context.material_id,round||context)}
     else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version');url.searchParams.delete('material_baseline')}
   }
-  if(state.workspace==='settings.workspace'&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
+  if((state.workspace==='settings.workspace'||state.unifiedCardRoot&&state.entityReview)&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
   if(typeof isMaterialReview==='function'&&isMaterialReview()){url.searchParams.set('production_object',state.materialReview.record.object_id);url.searchParams.set('production_revision',state.materialReview.record.id);url.searchParams.set('material_target',r.id)}
   history.replaceState(history.state,'',url);
   for(const blocks of document.querySelectorAll('[data-production-blocks]')){if(blocks.dataset.productionBlocks===r.id)blocks.id='production-blocks';else{blocks.removeAttribute('id');for(const para of blocks.querySelectorAll('.comment-flash'))para.classList.remove('comment-flash')}}
@@ -426,11 +426,91 @@ function renderProductionRecord(root,detail,entityCard=false){
   if(['AV_SHOT','AV_SCENE'].includes(r.kind)){if(r.id===r.current_revision)renderProductionReadiness(root,r).catch(e=>nodeText('p','production-issue',e.message,root));else nodeText('p','production-meta','当前正在阅读历史修订。查看现有缺项或改变采用，请切换到当前版本；历史制作输入保留在下方精确引用中。',root)}
   const details=el('details');nodeText('summary',null,'完整记录与历史引用',details);nodeText('pre',null,JSON.stringify({record:r,uses:detail.uses},null,2),details);references.append(details);
 }
-function productionCommentTextNode(anchor){return [...document.querySelectorAll('#production-blocks [data-block-id]')].find(node=>node.dataset.blockId===anchor.block_id&&(!node.hasAttribute('data-anchor-offset')||(Number(node.dataset.anchorOffset)<=anchor.start&&anchor.end<=Number(node.dataset.anchorOffset)+Array.from(node.textContent).length)))}
+function productionCommentTextRange(comment){
+  const row=state.productionSelected,a=comment?.anchor;
+  if(!a||comment.anchor_state?.valid===false||(a.type||'text')!=='text'||row?.object_id!==comment.target_object_id||row.id!==comment.target_revision_id)return null;
+  const blocks=productionTextBlocks(row),first=blocks.findIndex(b=>b.id===a.block_id),last=blocks.findIndex(b=>b.id===(a.end_block_id||a.block_id));
+  if(first<0||last<first)return null;
+  const valid=Number.isInteger(a.start)&&Number.isInteger(a.end)&&a.start>=0&&a.end>=0&&a.start<=Array.from(blocks[first].text).length&&a.end<=Array.from(blocks[last].text).length&&(first!==last||a.start<a.end);
+  return {blocks,first,last,valid,anchor:a};
+}
+function productionTextHidden(node){
+  for(let parent=node;parent;parent=parent.parentElement){
+    if(parent.hidden||parent.getAttribute?.('aria-hidden')==='true')return true;
+    if(typeof getComputedStyle==='function'){const style=getComputedStyle(parent);if(style.display==='none'||style.visibility==='hidden')return true}
+  }
+  return false;
+}
+function productionCommentTextSurface(comment){
+  const range=productionCommentTextRange(comment);if(!range)return null;
+  const root=state.reviewReferenceContext?.dialog||state.unifiedCardRoot||document.querySelector('#production-reader')||document.querySelector('#production-view');
+  const surfaces=[...root?.querySelectorAll('[data-production-blocks]')||[]].filter(host=>host.dataset.productionBlocks===comment.target_revision_id&&!productionTextHidden(host)&&productionTextSurfaceContainsRange(range,host));
+  // A visible exact surface wins over a collapsed copy. Otherwise reveal only
+  // the selected exact surface, within the current card/reference container.
+  return surfaces.find(host=>host.getClientRects?.().length)||surfaces[0]||null;
+}
+function productionTextSurfaceContainsRange(range,surface){
+  const nodes=productionCommentTextNodes(range,surface);if(!range.valid)return !!nodes.length;
+  for(let index=range.first;index<=range.last;index++){
+    const text=Array.from(range.blocks[index].text),start=index===range.first?range.anchor.start:0,end=index===range.last?range.anchor.end:text.length;
+    let cursor=start;
+    const parts=nodes.filter(n=>n.dataset.blockId===range.blocks[index].id).map(n=>({start:Number(n.dataset.anchorOffset||0),end:Number(n.dataset.anchorOffset||0)+Array.from(n.textContent).length})).sort((a,b)=>a.start-b.start);
+    for(const part of parts){if(part.start>cursor&&!(part.start===cursor+1&&text[cursor]==='\n'))return false;cursor=Math.max(cursor,part.end);if(cursor>=end)break}
+    if(cursor<end)return false;
+  }
+  return true;
+}
+function productionCommentTextNodes(range,surface){
+  return [...surface.querySelectorAll('[data-block-id]')].filter(node=>{
+    if(productionTextHidden(node))return false;
+    const index=range.blocks.findIndex(b=>b.id===node.dataset.blockId);if(index<range.first||index>range.last)return false;
+    if(!range.valid)return index===range.first;
+    const start=index===range.first?range.anchor.start:0,end=index===range.last?range.anchor.end:Array.from(range.blocks[index].text).length;
+    const base=Number(node.dataset.anchorOffset||0),length=Array.from(node.textContent).length;
+    return base<end&&start<base+length;
+  });
+}
+function productionCommentTextNode(anchor){
+  const comment={anchor,target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id},surface=productionCommentTextSurface(comment);
+  return surface?productionCommentTextNodes(productionCommentTextRange(comment),surface)[0]:null;
+}
+function paintProductionCommentText(comment){
+  // Clear prior selection without flattening unrelated interactive markup.
+  for(const node of document.querySelectorAll('[data-production-comment-text]')){
+    for(const mark of [...node.querySelectorAll('.comment-mark')])mark.replaceWith(document.createTextNode(mark.textContent));
+    node.normalize();
+    node.removeAttribute('data-production-comment-text');node.classList.remove('comment-flash');
+  }
+  for(const node of document.querySelectorAll('#production-blocks .comment-flash'))node.classList.remove('comment-flash');
+  const range=productionCommentTextRange(comment),surface=productionCommentTextSurface(comment);if(!range||!surface)return;
+  if(surface.closest('.material-use-details'))return; // Already uses the shared full comment renderer.
+  const nodes=productionCommentTextNodes(range,surface);
+  for(const node of nodes){
+    const index=range.blocks.findIndex(b=>b.id===node.dataset.blockId),block=range.blocks[index],base=Number(node.dataset.anchorOffset||0),text=node.textContent,length=Array.from(text).length;
+    // Excerpts carry Unicode offsets into the original block. Preserve their
+    // exact text and labels; missing/invalid legacy ranges get only a block cue.
+    node.dataset.productionCommentText='';
+    if(!range.valid||Array.from(block.text).slice(base,base+length).join('')!==text){node.classList.add('comment-flash');continue}
+    const start=Math.max(0,(index===range.first?range.anchor.start:0)-base),end=Math.min(length,(index===range.last?range.anchor.end:Array.from(block.text).length)-base);
+    paintProductionTextMark(node,start,end,comment);
+  }
+}
+function paintProductionTextMark(node,start,end,comment){
+  // Wrap text leaves, retaining reference links and other inline controls.
+  const walker=document.createTreeWalker(node,4),leaves=[];let offset=0,leaf;
+  while(leaf=walker.nextNode()){const length=Array.from(leaf.textContent).length;leaves.push({leaf,offset,length});offset+=length}
+  for(const {leaf,offset,length} of leaves){
+    const from=Math.max(0,start-offset),to=Math.min(length,end-offset);if(from>=to)continue;
+    const letters=Array.from(leaf.textContent),mark=el('span','comment-mark selected'+(comment.status==='CLOSED'?' closed':''),letters.slice(from,to).join(''));
+    mark.dataset.commentIds=comment.id;mark.title=comment.body;
+    mark.onclick=()=>{if(window.getSelection()?.isCollapsed)selectComment(comment.id)};
+    leaf.replaceWith(document.createTextNode(letters.slice(0,from).join('')),mark,document.createTextNode(letters.slice(to).join('')));
+  }
+}
 function paintProductionReview(){
   if(!isProduction())return;if(typeof paintMaterialUseText==='function')paintMaterialUseText();paintStructureRegions();for(const player of document.querySelectorAll('.review-media-player'))player.reviewPaintComments?.();
-  const selected=state.comments.find(c=>c.id===state.selected&&c.target_revision_id===state.productionSelected?.id),target=selected?productionCommentTextNode(selected.anchor):null;
-  for(const para of document.querySelectorAll('#production-blocks [data-block-id]'))para.classList.toggle('comment-flash',para===target);
+  const selected=state.comments.find(c=>c.id===state.selected&&c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id);
+  paintProductionCommentText(selected);
 }
 function renderProductionTransitions(root,transitions){
   if(!transitions?.length)return;
@@ -458,8 +538,8 @@ function locateProductionComment(comment,local=false){
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
   // A merged display never migrates the original field. Reveal its exact text
   // in the same immutable shot before the shared locator and paint run.
-  if(a.type==='text'){
-    const node=productionCommentTextNode(a);
+  if((a.type||'text')==='text'){
+    const surface=productionCommentTextSurface(comment),node=surface&&productionCommentTextNodes(productionCommentTextRange(comment),surface)[0];
     for(let parent=node?.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;
   }
   if(select&&component&&select.value!==component){select.value=component;select.onchange()}
@@ -471,8 +551,9 @@ function locateProductionComment(comment,local=false){
     if(!player?.reviewLocate){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
     if(player.reviewLocate(a)===false){toast('原文件或圈选范围当前无法显示；评论仍保留。');return false}
   }
-  else{const target=a.block_id?productionCommentTextNode(a):a.visual_id?root?.querySelector(exact+' '+file+` [data-visual-id="${CSS.escape(a.visual_id)}"]`):root;if(!target){toast('原圈选当前无法显示；评论仍保留。');return false}target.scrollIntoView({block:'center'})}
-  paintProductionReview();renderComments();
+  paintProductionReview();
+  if(a.type!=='time'){const surface=a.block_id?productionCommentTextSurface(comment):null,target=a.block_id?(surface?.querySelector('.comment-mark.selected')||productionCommentTextNode(a)):a.visual_id?root?.querySelector(exact+' '+file+` [data-visual-id="${CSS.escape(a.visual_id)}"]`):root;if(!target){toast('原圈选当前无法显示；评论仍保留。');return false}target.scrollIntoView({block:'center'})}
+  renderComments();
   return true;
 }
 function showProductionCompare(root){const box=el('section');nodeText('h3',null,'同一素材的候选比较',box);const columns=el('div','production-compare');for(let i=0;i<2;i++){const col=el('div'),select=el('select');select.setAttribute('aria-label',`比较版本 ${i+1}`);for(const r of state.productionDetail.history)select.append(new Option(`版本 ${r.version}`,r.id));select.selectedIndex=Math.min(i,select.options.length-1);const pane=el('div');const draw=()=>{pane.replaceChildren();const r=state.productionDetail.history.find(r=>r.id===select.value);productionMedia(pane,r.payload.components.find(c=>c.role==='original'),false)};select.onchange=draw;col.append(select,pane);columns.append(col);draw()}box.append(columns);root.append(box);box.scrollIntoView({block:'center'})}

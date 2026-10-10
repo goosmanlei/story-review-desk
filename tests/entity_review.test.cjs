@@ -139,6 +139,21 @@ test('an original linked only by review_state locates its exact historical state
  assert.equal(ctx.state.productionChildDetail.record,second);assert.equal(ctx.state.entityReviewMedia,'retained-image');
  assert.equal(data.unassignedOpen,false);assert.equal(data.media[0].state,null);
 });
+test('CALL location reuses the retained exact original and its full inputs, without adding a second call',async()=>{
+ const {ctx,data}=setup(),old={...second,id:'state-old',current_revision:second.id},call=row('call','CALL',{title:'actual',format:'production-call-v1',prompt:'No hanging rope, no post bindings.'}),asset=row('image','ASSET',{title:'original'});
+ const inputs=[entity,old,row('reference-a','ASSET'),row('reference-b','ASSET')],context={call,inputs};
+ data.comment_records=[call];data.media=[{id:'exact-original',record:asset,state:null,review_state:ref(old),component_id:'original',associated_states:[{state:old,entity}],review_context:context}];
+ await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>true;
+ const comment={id:'technical',target_object_id:call.object_id,target_revision_id:call.id,anchor:{type:'text',block_id:'@review/call/prompt',start:0,end:33}};
+ const before=JSON.stringify(data.media);assert.equal(ctx.locateEntityReviewComment(comment),true);
+ assert.equal(ctx.state.productionChildDetail.record,old);assert.equal(ctx.state.entityReviewMedia,'exact-original');assert.equal(data.historicalCall,null);assert.equal(data.historicalMedia,null);assert.equal(data.localVersions.image,asset);assert.equal(data.selectedComponents[asset.id],'original');assert.equal(data.retained_states[0],old);assert.equal(JSON.stringify(data.media),before);assert.equal(data.media[0].review_context,context);
+ const historical={id:'historical-state-comment',target_object_id:old.object_id,target_revision_id:old.id};ctx.state.comments=[comment,historical];assert.equal(ctx.entityReviewComments().includes(historical),true);
+ ctx.locateEntityReviewComment(comment);assert.equal(data.retained_states.length,1);assert.equal(data.comment_targets.filter(t=>t.object_id===old.object_id&&t.revision_id===old.id).length,1);
+});
+test('independent CALL remains readable when no exact original card exists',async()=>{
+ const {ctx,data}=setup(),call=row('call','CALL',{title:'independent'});data.comment_records=[call];await ctx.openEntityReview('person',{record:entity},0,null);ctx.locateProductionComment=()=>true;
+ ctx.locateEntityReviewComment({id:'independent',target_object_id:call.object_id,target_revision_id:call.id,anchor:{type:'global'}});assert.equal(data.historicalCall,call);
+});
 test('time location checks exact revision, file and unclipped range before touching a player',()=>{
  const {ctx}=setup(),asset=row('voice','ASSET',{title:'声音',components:[{id:'original',mime:'audio/wav',file:'voice.wav',duration_seconds:10}]},'voice-v2');
  ctx.state.productionSelected=asset;ctx.CSS={escape:x=>x};let selector,located=null;

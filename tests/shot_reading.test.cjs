@@ -47,8 +47,8 @@ test('common and original scene values are separately accessible without changin
 });
 test('locating a folded old field reveals its exact ancestor without moving the anchor',()=>{
  const ctx=fixture(),row=shot('old',{blocks:[{id:'purpose-old',field:'purpose',text:'看清交接'},{id:'performance-old',field:'performance',text:'看清交接'}]}),surface=render(ctx,row),details=surface.children.find(n=>n.tagName==='DETAILS');
- ctx.state.productionSelected=row;ctx.document.querySelector=selector=>selector.includes('data-production-blocks="old"')?surface:null;ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=()=>{};ctx.renderComments=()=>{};
- ctx.document.querySelectorAll=()=>surface.querySelectorAll();
+ ctx.state.productionSelected=row;ctx.document.querySelector=()=>({querySelectorAll:()=>[surface]});ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=()=>{};ctx.renderComments=()=>{};
+ surface.querySelector=()=>null;ctx.document.querySelectorAll=()=>surface.querySelectorAll();
  const comment={id:'comment',target_object_id:row.object_id,target_revision_id:'old',anchor:{type:'text',block_id:'performance-old',start:0,end:4,quote:'看清交接'}};const before=JSON.stringify(comment);ctx.locateProductionComment(comment,true);
  assert.equal(details.open,true);assert.equal(ctx.state.selected,'comment');assert.equal(surface.querySelectorAll().find(n=>n.dataset.blockId==='performance-old').scrolled,true);assert.equal(JSON.stringify(comment),before);
 });
@@ -67,11 +67,11 @@ test('Prompt comments prefer a containing exact excerpt and reveal full text for
  const ctx=fixture(),prompt='技术前言。看她一眼🐍，接回歌本。技术后文。',row={id:'exact-plan',object_id:'need',kind:'REQUIREMENT',payload:{generation:{prompt}}};
  const block=ctx.productionTextBlocks(row).find(b=>b.field==='generation.prompt'),full=new Node('pre'),excerpt=new Node('span'),details=new Node('details');
  full.dataset.blockId=excerpt.dataset.blockId=block.id;full.ownText=prompt;details.append(full);
- excerpt.ownText='看她一眼🐍，接回歌本。';excerpt.dataset.anchorOffset=6;excerpt.hasAttribute=key=>key==='data-anchor-offset';
- ctx.document.querySelectorAll=()=>[excerpt,full];ctx.state.productionSelected=row;ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=ctx.renderComments=()=>{};
- const action={type:'text',block_id:block.id,start:6,end:11,quote:'看她一眼🐍'};
+ excerpt.ownText='看她一眼🐍，接回歌本。';excerpt.dataset.anchorOffset=5;excerpt.hasAttribute=key=>key==='data-anchor-offset';
+ const excerptHost=new Node('div'),fullHost=new Node('div');excerptHost.dataset.productionBlocks=fullHost.dataset.productionBlocks=row.id;excerptHost.append(excerpt);fullHost.append(details);excerptHost.querySelector=fullHost.querySelector=()=>null;ctx.document.querySelector=()=>({querySelectorAll:()=>[excerptHost,fullHost]});ctx.document.querySelectorAll=()=>[excerpt,full];ctx.state.productionSelected=row;ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=ctx.renderComments=()=>{};
+ const action={type:'text',block_id:block.id,start:5,end:10,quote:'看她一眼🐍'};
  assert.equal(ctx.productionCommentTextNode(action),excerpt);
- const old={id:'old-comment',target_revision_id:row.id,target_object_id:row.object_id,anchor:{type:'text',block_id:block.id,start:18,end:23,quote:'技术后文。'}};
+ const old={id:'old-comment',target_revision_id:row.id,target_object_id:row.object_id,anchor:{type:'text',block_id:block.id,start:16,end:21,quote:'技术后文。'}};
  const before=JSON.stringify(old);assert.equal(ctx.locateProductionComment(old,true),true);assert.equal(details.open,true);assert.equal(full.scrolled,true);assert.equal(JSON.stringify(old),before);
 });
 
