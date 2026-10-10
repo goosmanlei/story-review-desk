@@ -73,6 +73,34 @@ def media_file(root, filename):
     return path, media_type(filename)[1]
 
 
+def validate_collaboration(diagram):
+    """Validate passive role/feedback/workflow data, independent of instance prose."""
+    def require(condition):
+        if not condition:
+            raise ValueError('invalid production approach collaboration diagram')
+    def text(value):
+        return isinstance(value, str) and bool(value.strip())
+    require(isinstance(diagram, dict) and set(diagram) == {'type', 'roles', 'exchanges', 'constraint', 'workflow'})
+    require(diagram['type'] == 'collaboration' and text(diagram['constraint']))
+    roles = diagram['roles']
+    require(isinstance(roles, list) and 2 <= len(roles) <= 6)
+    for role in roles:
+        require(isinstance(role, dict) and set(role) == {'id', 'title', 'value'})
+        require(text(role['title']) and text(role['value']))
+        require(isinstance(role['id'], str) and re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', role['id']))
+    ids = [role['id'] for role in roles]
+    require(len(set(ids)) == len(ids))
+    exchanges = diagram['exchanges']
+    require(isinstance(exchanges, list) and len(exchanges) == len(roles) - 1)
+    for index, edge in enumerate(exchanges):
+        require(isinstance(edge, dict) and set(edge) == {'from', 'to', 'label'})
+        require(edge['from'] == ids[index] and edge['to'] == ids[index + 1] and text(edge['label']))
+    workflow = diagram['workflow']
+    require(isinstance(workflow, dict) and set(workflow) == {'label', 'stages'})
+    require(text(workflow['label']) and isinstance(workflow['stages'], list))
+    require(2 <= len(workflow['stages']) <= 12 and all(text(stage) for stage in workflow['stages']))
+
+
 def read_document(root):
     path = root / "content" / "production-approach.json"
     if not path.exists():
@@ -150,6 +178,9 @@ def read_document(root):
                 require(isinstance(section["id"], str) and section["id"].isascii())
                 require(section["id"].replace("-", "").isalnum())
                 require(isinstance(section["title"], str))
+                if "diagram" in section:
+                    require(tab.get("layout", {}).get("type") == "cycle")
+                    validate_collaboration(section["diagram"])
                 if "blocks" in section:
                     require(value["schema_version"] == 2)
                     require(not any(key in section for key in ("paragraphs", "flow", "table", "note", "links")))
