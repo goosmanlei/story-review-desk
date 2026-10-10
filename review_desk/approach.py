@@ -80,8 +80,16 @@ def validate_collaboration(diagram):
             raise ValueError('invalid production approach collaboration diagram')
     def text(value):
         return isinstance(value, str) and bool(value.strip())
-    require(isinstance(diagram, dict) and set(diagram) == {'type', 'roles', 'exchanges', 'constraint', 'workflow'})
-    require(diagram['type'] == 'collaboration' and text(diagram['constraint']))
+    require(isinstance(diagram, dict))
+    fields = {'type', 'roles', 'exchanges', 'workflow'}
+    require(set(diagram) in (fields | {'constraint'}, fields | {'support'}))
+    require(diagram['type'] == 'collaboration')
+    if 'support' in diagram:
+        support = diagram['support']
+        require(isinstance(support, dict) and set(support) == {'title', 'value', 'text'})
+        require(all(text(support[key]) for key in support))
+    else:
+        require(text(diagram['constraint']))
     roles = diagram['roles']
     require(isinstance(roles, list) and 2 <= len(roles) <= 6)
     for role in roles:
@@ -165,10 +173,15 @@ def read_document(root):
             if 'layout' in tab:
                 layout = tab['layout']
                 require(value['schema_version'] == 2 and isinstance(layout, dict))
-                require(set(layout) == {'type', 'return_label'} and layout['type'] == 'cycle')
-                require(isinstance(layout['return_label'], str) and bool(layout['return_label'].strip()))
-                require(len(tab['sections']) >= 2)
-                require(all('blocks' in section and all(block.get('type') == 'paragraph' for block in section['blocks']) for section in tab['sections']))
+                if layout.get('type') == 'diagram':
+                    require(set(layout) == {'type', 'anchors'} and isinstance(layout['anchors'], dict))
+                    require(len(tab['sections']) == 1 and tab['sections'][0].get('blocks') == [] and 'diagram' in tab['sections'][0])
+                    require(all(identifier(key) and target == tab['sections'][0]['id'] and key != target for key, target in layout['anchors'].items()))
+                else:
+                    require(set(layout) == {'type', 'return_label'} and layout['type'] == 'cycle')
+                    require(isinstance(layout['return_label'], str) and bool(layout['return_label'].strip()))
+                    require(len(tab['sections']) >= 2)
+                    require(all('blocks' in section and all(block.get('type') == 'paragraph' for block in section['blocks']) for section in tab['sections']))
             ids = set()
             section_ids = [section['id'] for section in tab['sections']]
             require(all(isinstance(id, str) for id in section_ids))
@@ -179,7 +192,7 @@ def read_document(root):
                 require(section["id"].replace("-", "").isalnum())
                 require(isinstance(section["title"], str))
                 if "diagram" in section:
-                    require(tab.get("layout", {}).get("type") == "cycle")
+                    require(tab.get("layout", {}).get("type") in ("cycle", "diagram"))
                     validate_collaboration(section["diagram"])
                 if "blocks" in section:
                     require(value["schema_version"] == 2)
