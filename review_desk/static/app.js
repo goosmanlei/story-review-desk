@@ -830,7 +830,7 @@ function textSelectionAnchor(host,blocks,attribute){
 function selectedAnchor(){
   if(isProduction()){
     if(!state.productionSelected)return null;
-    const root=state.unifiedCardRoot||document,selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
+    const root=state.reviewReferenceContext?.dialog||state.unifiedCardRoot||document,selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
     const hosts=range?[...root.querySelectorAll('[data-production-blocks]')].filter(node=>node.dataset.productionBlocks===state.productionSelected.id&&textSelectionRange(node,range)):[];
     const host=hosts.length===1?hosts[0]:null;
     return host?textSelectionAnchor(host,productionTextBlocks(state.productionSelected),'data-block-id'):null;
@@ -855,7 +855,7 @@ function selectionBounds(host){
 function updateSelectionAction(){
   const anchor=selectionPointer===null&&!state.drawMode?selectedAnchor():null;
   if(!anchor){hideSelectionAction();return}
-  const selection=getSelection(),range=selection.getRangeAt(0),host=isProduction()&&state.unifiedCardRoot?state.unifiedCardRoot:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view'),bounds=selectionBounds(host);
+  const selection=getSelection(),range=selection.getRangeAt(0),host=state.reviewReferenceContext?.dialog||(isProduction()&&state.unifiedCardRoot?state.unifiedCardRoot:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view')),bounds=selectionBounds(host);
   const rects=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0&&r.right>bounds.left&&r.left<bounds.right&&r.bottom>bounds.top&&r.top<bounds.bottom);
   if(!rects.length){hideSelectionAction();return}
   // Stay by the visible end of the gesture, even when the beginning has scrolled away.

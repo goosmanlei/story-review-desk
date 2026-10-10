@@ -189,9 +189,10 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
   nodeText('h4',null,effective.every(i=>i.row&&!['ASSET','REQUIREMENT'].includes(i.row.kind))?'文字依据':actual?'实际使用的参考':'参考输入',host);
   for(const item of effective){
     const line=el('div','material-input');if(item.missing)nodeText('p','production-issue',item.label+' · 准确输入记录或文件组成缺失',line);else materialReferenceLink(line,item.ref,item.label+(materialInputRole(item.value)?' · '+materialInputRole(item.value):'')+' · '+businessTitle(item.row),['EPISODE','SOURCE','STORY'].includes(item.row.kind));
+    bindRelationSummary(line.querySelector('button,a'),need?.review_shot_slots?.find(slot=>slot.index===item.index)?.relation_context);
     if(!item.row||['ASSET','REQUIREMENT'].includes(item.row.kind))nodeText('small','production-meta',(item.row?materialVersionLabel(item.row):'版本未知')+''+(item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:'')+(item.value.crop?' · 使用裁切区域':''),line);
-    if(need&&item.row?.kind==='REQUIREMENT')nodeText('p','production-meta','方案引用 · 尚未选定原件',line);
-    if(need&&item.row?.kind==='ASSET')nodeText('p','production-meta','方案已指定此准确原件；实际使用以调用记录为准',line);
+    if(need&&!actual&&item.row?.kind==='REQUIREMENT')nodeText('p','production-meta','方案引用 · 尚未选定原件',line);
+    if(need&&!actual&&item.row?.kind==='ASSET')nodeText('p','production-meta','方案已指定此准确原件；实际使用以调用记录为准',line);
     if(!compact){if(need&&!item.value.relation)materialField(line,need,`generation.inputs.${item.index}.use`,null);else if(item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line)}
     if(item.row&&!['ASSET','REQUIREMENT'].includes(item.row.kind)){line.classList.add('material-logic-input');line.title='文字依据 · 准确版本 '+item.row.version+'；不作为媒体上传'}
     if(!compact)renderInputRelationPurpose(line,item.value,need);
@@ -257,9 +258,9 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
     if(!call){nodeText('p','production-meta','此候选未保留完整的历史生成依据。',box);return}
     const host=materialTextSurface(box,call);nodeText('p','production-meta','实际调用 · '+businessTitle(call),host);
     materialExecution(host,call.payload);if(call.payload.tool)nodeText('p','production-meta',call.payload.tool,host);materialParameters(host,call,'call',call.payload.model);
-    renderMaterialInputs(host,call.payload.inputs||[],item?.review_context?.inputs||call.review_input_records||[],null,true,{compact:true});
+    renderMaterialInputs(host,call.payload.inputs||[],item?.review_context?.inputs||call.review_input_records||[],call,true,{compact:true});
     if(!(call.payload.inputs||[]).length)nodeText('p','production-meta','实际调用未登记参考素材',host);
-    materialField(host,call,'call.prompt','完整 Prompt','pre');
+    renderLinkedPrompt(host,call,call.payload.inputs||[],item?.review_context?.inputs||call.review_input_records||[],'call.prompt');
     if(!call.payload.prompt)nodeText('p','production-meta','此调用未保留完整 Prompt。',host);
     return;
   }
@@ -275,7 +276,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   if(editable&&!state.reviewWork&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:round?.number,frozen:false,compact:true,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true});
   if(!(plan.inputs||[]).length)nodeText('p','production-meta','本方案没有参考素材输入',host);
-  materialField(host,need,'generation.prompt','完整 Prompt','pre');
+  renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt');
   if(!plan.prompt)nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=false}={}){

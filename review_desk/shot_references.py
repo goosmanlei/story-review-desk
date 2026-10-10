@@ -101,6 +101,23 @@ def enrich_detail(store, detail):
     for row in targets:
         if row and row['kind'] in ('REQUIREMENT', 'CALL'):
             row['review_shot_slots'] = slots(store, inputs_for(store, row))
+            from .business_relations import input_context
+            basis = row if row['kind'] == 'REQUIREMENT' else None
+            if row['kind'] == 'CALL':
+                reference = row['payload'].get('generation_requirement') or row['payload'].get('prepared_plan')
+                basis = p.ref_record(store, reference) if reference else None
+            if basis:
+                declared = basis['payload'].get('generation', {}).get('inputs', [])
+                if row['kind'] == 'CALL':
+                    from .material_relations import active_inputs
+                    declared = [value for _, value in active_inputs(store, basis['payload'].get('generation', {}), basis['object_id'])[0]]
+                for item, value in zip(row['review_shot_slots'], declared):
+                    if row['kind'] == 'CALL':
+                        actual = row['payload'].get('inputs', [])[item['index']]
+                        if not (all(actual.get(k, actual.get('reference', {}).get(k)) == value['reference'].get(k) for k in ('object_id', 'revision_id'))
+                                and all(actual.get(k) == value.get(k) for k in ('component_id', 'crop', 'range'))):
+                            continue
+                    item['relation_context'] = input_context(store, basis['object_id'], value)
             if row['kind']=='REQUIREMENT' and row['payload'].get('generation'):
                 from .material_relations import active_inputs, rules
                 plan=row['payload']['generation']

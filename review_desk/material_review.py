@@ -5,6 +5,11 @@ from . import production as p
 def context(store, asset):
     call_ref = asset['payload'].get('production')
     call = p.ref_record(store, call_ref, {'CALL'}) if call_ref else None
+    if call:
+        # Entity cards consume these contexts directly, without going through
+        # production.snapshot. Enrich the exact call at this shared boundary.
+        from .shot_references import enrich_detail
+        enrich_detail(store, {'record': call})
     plans = [p.ref_record(store, ref, {'REQUIREMENT'})
              for ref in asset['payload'].get('candidate_requirements', [])]
     inputs = []

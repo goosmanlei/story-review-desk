@@ -116,6 +116,14 @@ async function renderMaterialRelations(host,materialId,selected=null,{comparison
   const owner=isEntityReview()?state.entityReview:state.materialReview,work=state.reviewWork;
   try{const data=await api('/api/production/material-relations?'+new URLSearchParams({material_id:materialId,...(selected?{revision_id:selected.id}:{})}));
     if(!box.isConnected)return;
+    if(data.relations.some(row=>row.payload.relation_type==='business')){
+      rememberMaterialRelations([...data.relations,...(data.comment_records||[])]);
+      for(const row of data.relations.filter(r=>r.payload.relation_type==='business'&&r.payload.status!=='withdrawn')){
+        const target=row.endpoint_records?.find(r=>r.object_id!==materialId);
+        if(target){const button=productionButton(box,businessTitle(target),()=>openUnifiedMaterial(productionRef(target),button));bindRelationSummary(button,{record:row,summary:row.payload.summary})}
+      }
+      return;
+    }
     const declared=new Set((selected?.payload.generation?.inputs||[]).map(v=>v.relation?.revision_id).filter(Boolean));
     const rank=r=>r.context_record?.kind==='STATE'?0:r.downstream_record?.payload.media_type==='video'?1:2;
     const candidates=data.relations.filter(row=>!declared.has(row.id));
@@ -234,6 +242,7 @@ function renderShotInputs(host,row,inputs,records,context,{pure=false}={}){
       const selectionLabel=!item.slot.number?'方案引用 · 尚未选定版本与原件':!item.slot.candidate?'方案引用 · 版本 '+item.slot.number+' · 原件待选':shotReferenceLabel(item.slot);
       if(context.compact||pure){
         const button=productionButton(line,businessTitle(r,title),()=>openShotReference(item,context,button));button.className='material-reference review-reference-button';button.dataset.reviewDialogTrigger='';
+        bindRelationSummary(button,item.slot.relation_context);
         nodeText('small','production-meta',selectionLabel+range+(item.slot.direct===false?' · 间接':''),line);
       }else{
       const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:selectionLabel+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(!pure&&item.value.use?' · 用途：'+item.value.use:'')+range;
@@ -328,6 +337,7 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
       if(span.entity)a.setAttribute('aria-label','@'+span.text+'；'+a.title);
       a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
+      bindRelationSummary(a,input.slot?.relation_context||row.review_shot_slots?.find(slot=>slot.index===input.index)?.relation_context);
     }else pre.append(document.createTextNode(span.text));offset=span.end;
   }
   pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);

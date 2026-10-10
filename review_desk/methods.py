@@ -6,6 +6,7 @@ artifacts. No model execution, private installation path or story import here.
 import copy
 import json
 import re
+from contextlib import nullcontext
 from pathlib import Path, PurePosixPath
 
 from .store import Conflict, canonical, digest
@@ -482,7 +483,7 @@ def export_registry(store, executions=()):
     return result
 
 
-def restore_registry(store, archive):
+def restore_registry(store, archive, *, transaction=True):
     """Atomic append-only restoration, with exact history and optimistic heads."""
     body = copy.deepcopy(archive)
     sha = body.pop('sha256', None)
@@ -495,8 +496,11 @@ def restore_registry(store, archive):
         require(row['revision_id'] == checksum({k: row[k] for k in ('object_id', 'version', 'payload')}), '方法版本身份损坏')
         require(all(d['revision_id'] in ids for d in row['dependencies']), '方法包缺少准确依赖')
     inserted = 0
-    with store.db:
-        store.db.execute('BEGIN IMMEDIATE')
+    with store.db if transaction else nullcontext():
+        if transaction:
+            store.db.execute('BEGIN IMMEDIATE')
+        else:
+            require(store.db.in_transaction, '方法恢复需要所属事务')
         for oid in {r['object_id'] for r in rows}:
             current = store.db.execute('SELECT version FROM objects WHERE id=?', (oid,)).fetchone()
             require(not current or current[0] <= max(r['version'] for r in rows if r['object_id'] == oid), '目标已更新；不能用旧方法包覆盖当前版本')

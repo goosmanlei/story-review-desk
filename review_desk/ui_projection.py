@@ -22,6 +22,9 @@ def _material_entries(store):
     links={};cache={};entries=[]
     for link in b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='applicability'"):
         links.setdefault(link['payload']['subject']['revision_id'],[]).append(link['payload']['scope'])
+    from .business_relations import material_bindings
+    for _, subject, scope in material_bindings(store):
+        links.setdefault(subject['revision_id'], []).append(scope)
     for row in [*needs,*(a for a in assets if a['object_id'] not in used)]:
         value=row['payload'];scope=value.get('scope');owners={};locations=[]
         def add_scope(reference,relation):
@@ -325,6 +328,10 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
                 # A state/entity applicability link expresses suitability, not
                 # the use of every material attached to that state/entity.
                 add(subject,'applicable',{'kind':'direct_requirement','record':b.ref(link),'scope':b.ref(scoped)})
+        for link in context.get('business_relations', []):
+            other = next(oid for oid in link['payload']['endpoints'] if oid != scoped['object_id'])
+            add(p.record(store, other), 'applicable',
+                {'kind':'business_relation','record':b.ref(link),'scope':b.ref(scoped)})
         for adoption in context['adoptions']:
             add(p.ref_record(store,adoption['payload']['asset']),'adoption',
                 {'kind':'adoption','record':b.ref(adoption),'selection':adoption['payload']})

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS business_comments (comment_id TEXT PRIMARY KEY,number
 TYPES = (
     ('视听集', 'AE', 'AE001', '本实例内；准确引用故事集，设计版本独立'),
     ('视听场', 'AS', 'AS001', '本实例内；可组合多个故事场或局部正文'),
-    ('需求关系', 'MR', 'MR001', '本实例内；语境和准确方案分别保存'),
+    ('业务关系', 'R', 'R-EN012->EN055', '一对稳定对象一条关系；箭头指向依赖方，短横线表示相关；旧RL/MR只读回查'),
     ('集', 'E', 'E02', '同一剧本版本内；按该版本完整集序编号'),
     ('场', 'S', 'S003', '同一剧本版本内；按完整集场顺序连续编号，不在每集重新起号'),
     ('视听镜', 'ASH', 'ASH001', '本实例内独立编号；不沿用旧镜头 SH，不随切集、切场或显示顺序重置'),
@@ -26,7 +26,6 @@ TYPES = (
     ('素材', 'M', 'M001', '本实例内；准确共享身份共用编号，旧身份可追溯'),
     ('素材版本', 'MV', 'M001 / MV002', '同一准确素材身份内；沿用方案版本号'),
     ('素材候选', 'MC', 'M001 / MV002 / MC001', '同一素材版本内；按实际结果登记顺序分配'),
-    ('实体关系', 'RL', 'RL001', '本实例内；不计素材采用及后台依赖边'),
     ('制作设定审阅对象', 'RV', 'RV001', '本实例内；保留旧审阅对象身份'),
     ('评论', 'C', 'C001', '本实例内；原文圈选、修订和评论身份不变'),
     ('审阅决定', 'DC', 'DC001', '本实例内，每个可访问的决定对象'),
@@ -105,7 +104,7 @@ def restore(store, rows, candidates=(), comments=()):
         if existing:
             payload=json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?',(existing['current_revision'],)).fetchone()[0]);expected='RL' if existing['kind']=='RELATION' and payload.get('relation_type')=='entity' else 'ST' if existing['kind']=='DELETED_STATE' else PREFIXES.get(existing['kind'])
             if row.get('prefix') not in {expected, LEGACY_PREFIXES.get(existing['kind'])}:raise ValueError('number prefix differs from object kind')
-        if set(row) != {'object_id', 'prefix', 'number'} or row['prefix'] not in {v[1] for v in TYPES} | {'D','B'} or type(row['number']) is not int or row['number'] < 1:
+        if set(row) != {'object_id', 'prefix', 'number'} or row['prefix'] not in {v[1] for v in TYPES} | {'D','B','RL','MR'} or type(row['number']) is not int or row['number'] < 1:
             raise ValueError('invalid business code allocation')
         store.db.execute('INSERT INTO business_codes VALUES (?,?,?)', (row['object_id'], row['prefix'], row['number']))
     for row in comments:
@@ -196,6 +195,9 @@ def annotate(store, value, *, share_records=False):
                 if original == v:
                     return dict(annotated) if share_records else _clone_json_tree(annotated)
         result = {k:walk(i) for k,i in v.items()}
+        if v.get('kind') == 'RELATION' and v.get('payload', {}).get('relation_type') == 'business':
+            from .business_relations import code as relation_code
+            result['business_code'] = relation_code(store, v, codes)
         if v.get('id') in comment_codes and 'anchor' in v and 'body' in v:result['business_code']=comment_codes[v['id']]
         oid = v.get('object_id') or v.get('id')
         if isinstance(oid,str) and oid in codes and ('payload' in v or 'title' in v):
@@ -242,4 +244,12 @@ def display_dump(store):
     rows=visible_codes(store);mapping={r['object_id']:code(r) for r in rows}
     aliases={r['alias_id']:r['material_id'] for r in store.db.execute('SELECT * FROM material_aliases')}
     result = [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
+    from .business_relations import available, current, code as relationship_code
+    if available(store):
+        legacy = dict(store.db.execute('SELECT alias_id,relation_id FROM business_relation_aliases'))
+        for row in result:
+            if row['object_id'] in legacy:
+                row['current_relation_id'] = legacy[row['object_id']]
+                row['read_only'] = True
+        result.extend({'object_id':r['object_id'], 'display_code':relationship_code(store,r,mapping)} for r in current(store))
     return result

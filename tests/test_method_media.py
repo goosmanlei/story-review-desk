@@ -18,6 +18,36 @@ class MediaMethodTest(unittest.TestCase):
     need = fixtures.GenerationTest.need
     setup_plans = fixtures.GenerationTest.setup_plans
     decide = fixtures.GenerationTest.decide
+    media = fixtures.GenerationTest.media
+
+    def test_original_reading_does_not_reactivate_retired_ancestors(self):
+        import json
+        from review_desk import version_consolidation as vc
+        self.setup_plans(); self.media()
+        seed(self.store, 'media-plan', ['draft', 'review', 'result'])
+        # An original may retain an accurate historical link after the
+        # referenced plan was retired. Reading it must not revive that link.
+        original = p.record(self.store, 'voice')
+        self.store.put_object('voice', 'ASSET', {
+            **original['payload'], 'lineage': {'historical_plan': self.ref('need-wet-overall')}}, original['version'])
+        retired = self.ref('need-wet-overall')
+        self.store.db.execute('INSERT INTO consolidation_revisions VALUES (?,?,?,?,?,?,?,?)',
+                             (retired['revision_id'], retired['object_id'], 'REQUIREMENT', 1, None, 'test', None, 'test'))
+        self.store.db.commit()
+        old = p.record(self.store, 'need-full-overall')
+        payload = copy.deepcopy(old['payload'])
+        payload['generation']['inputs'] = [{'reference': self.ref('voice'), 'component_id': 'original',
+                                           'use': '声音身份', 'range': {'start_seconds': 0, 'end_seconds': .5}}]
+        prepared = mm.prepare(self.store, {'object_id': old['object_id'], 'payload': payload,
+            'expected_version': old['version'], 'run_id': 'retired-ancestor', 'step_id': 'first'})
+        reading = prepared['request']['inputs']['relation_readings'][0]
+        self.assertEqual(json.loads(reading['content_json'])['lineage']['historical_plan'], retired)
+        self.assertEqual(methods.prepare(self.store, prepared['request']), prepared['execution'])
+        self.assertIsNotNone(vc.deleted(self.store, retired['revision_id']))
+        payload['generation']['inputs'][0]['reference'] = retired
+        with self.assertRaises((ValueError, Conflict)):
+            mm.prepare(self.store, {'object_id': old['object_id'], 'payload': payload,
+                'expected_version': old['version'], 'run_id': 'retired-ancestor', 'step_id': 'invalid'})
 
     def test_supporting_inputs_freeze_exact_docs_and_validate_outer_references(self):
         import json

@@ -54,11 +54,12 @@ def snapshot(store, object_id, revision_id=None):
     from .review_decisions import scope_records
     for row in history:
         row['scope_records'] = scope_records(store, row['payload']['acceptance_scope'])
+    from .business_relations import archived_ids
     return {'target': ref(target), 'scope': exact, 'scope_records': scope_records(store, exact),
             'decision': decision, 'history': history,
             'accepted': accepted, 'acceptances': [ref(r) for r in approvals.values()],
             'partial': bool(approvals) and not accepted,
-            'can_change': target['id'] == target['current_revision']}
+            'can_change': target['id'] == target['current_revision'] and object_id not in archived_ids(store)}
 
 
 def validate(store, object_id, value, check_current=True):

@@ -3,13 +3,17 @@ from . import production as p
 
 
 def is_relationship(row):
-    return row['kind'] == 'RELATION' and row['payload'].get('relation_type') == 'entity'
+    return row['kind'] == 'RELATION' and row['payload'].get('relation_type') in ('entity', 'business')
+
+
+def endpoints(row):
+    return row['payload'].get('endpoints') or [e['object_id'] for e in row['payload']['entities']]
 
 
 def for_entity(rows, entity_id):
     return sorted((r for r in rows if is_relationship(r)
                    and r['payload'].get('status') != 'withdrawn'
-                   and any(e['object_id'] == entity_id for e in r['payload']['entities'])),
+                   and entity_id in endpoints(r)),
                   key=lambda r: r['object_id'])
 
 
@@ -42,8 +46,9 @@ def validate(store, payload):
 def nodes(store, relationships, historical=False):
     result = {}
     for row in relationships:
-        for ref in row['payload']['entities']:
-            result[ref['object_id']] = p.ref_record(store, ref) if historical else p.record(store, ref['object_id'])
+        refs = row['payload'].get('entities') or [{'object_id': oid} for oid in endpoints(row)]
+        for ref in refs:
+            result[ref['object_id']] = p.ref_record(store, ref) if historical and ref.get('revision_id') else p.record(store, ref['object_id'])
     return list(result.values())
 
 
@@ -64,5 +69,7 @@ def layout(store, entity_id, relationships):
         if not isinstance(ids, list) or any(not isinstance(i, str) for i in ids) or len(ids) != len(set(ids)):
             raise ValueError('invalid relationship display order')
         # A withdrawn edge or historical scope can have fewer edges than config.
-        result[key] = [oid for oid in ids if oid in allowed]
+        from .business_relations import available
+        aliases = dict(store.db.execute('SELECT alias_id,relation_id FROM business_relation_aliases')) if available(store) else {}
+        result[key] = list(dict.fromkeys(aliases.get(oid, oid) for oid in ids if aliases.get(oid, oid) in allowed))
     return result

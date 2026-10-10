@@ -96,6 +96,9 @@ def material_uses(store, entries):
     for link in b.rows(store, 'MATERIAL_RELATION'):
         value=link['payload']
         add(value['upstream'],value['context'],{'kind':'material_relation','record':b.ref(link),'semantics':value['semantics']})
+    from .business_relations import material_bindings
+    for link, subject, scope in material_bindings(store):
+        add(subject, scope, {'kind': 'business_relation', 'record': b.ref(link)})
     return entries
 
 
