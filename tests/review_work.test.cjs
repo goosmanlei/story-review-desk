@@ -26,3 +26,11 @@ test('common authored text is grouped without resurrecting represented raw field
  const shots=[0,1,2].map(i=>({record:{id:'shot-'+i,payload:{axis:i===2?'unique direction':'same selected direction',color:'raw colour already represented by scene',sound:[]},review_composition:{sections:[{parts:[{text:i===2?'unique direction':'same selected direction'}]}]}}}));
  const common=c.breakdownReadingConditions({scene:{id:'scene'},shots},true,'scene professional text');assert.equal(common.fields.color,undefined);assert.equal(common.shared.length,1);assert.equal(common.shared[0].value,'same selected direction');assert.equal(common.shared[0].shots.length,2);
 });
+
+test('shared exact input shows common identity once and preserves distinct stage requirements',()=>{
+ const c=fixture(),lines=[];vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
+ c.nodeText=(tag,_class,text)=>lines.push([tag,text]);const read=new Set();
+ for(const check of ['sing after pressing the book','speak after the song ends'])c.renderSharedRelationSections({},[{label:'保留',texts:['same exact identity']},{label:'当前表演',texts:[check]}],read);
+ c.renderSharedRelationSections({},[{label:'另一含义',texts:['same exact identity']}],read);
+ assert.deepEqual(lines.filter(x=>x[0]==='p').map(x=>x[1]),['same exact identity','sing after pressing the book','speak after the song ends','same exact identity']);
+});

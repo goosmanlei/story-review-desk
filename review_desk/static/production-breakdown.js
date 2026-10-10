@@ -136,6 +136,12 @@ async function renderInputRelationPurpose(parent,value,need=null){
   }catch(error){if(parent.isConnected)nodeText('p','production-issue','用途意见读取失败：'+error.message,parent)}
 }
 function relationReadingSections(row){return row.review_composition?.sections.map(s=>({label:s.label,texts:s.parts.map(p=>p.text)}))||productionTextBlocks(row).map(b=>({label:({preserve:'保留',change:'变化与限制',check:'检查'})[b.field]||'',texts:[b.text]}))}
+function renderSharedRelationSections(parent,sections,read){
+  for(const section of sections){
+    const texts=section.texts.filter(text=>{const key=JSON.stringify([section.label||'',text]);if(read.has(key))return false;read.add(key);return true});
+    if(!texts.length)continue;if(section.label)nodeText('h4',null,section.label,parent);for(const text of texts)nodeText('p',null,text,parent);
+  }
+}
 async function renderMaterialRelations(host,materialId,selected=null,{comparisons=null}={}){
   const box=el('section','material-relations');host.append(box);
   const owner=isEntityReview()?state.entityReview:state.materialReview,work=state.reviewWork;
@@ -154,10 +160,10 @@ async function renderMaterialRelations(host,materialId,selected=null,{comparison
     const groups=[['已有形象',alternatives.filter(image)],['旧备选',alternatives.filter(r=>!image(r))],['沿用方案',rows.filter(r=>r.direction==='outgoing')],['其他用途依据',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics!=='alternative')]];
     for(const [label,group] of groups){if(!group.length)continue;const section=el('section','material-use-group');nodeText('h4',null,label,section);
       if(['已有形象','旧备选'].includes(label))nodeText('p','production-meta','供本需求比较，尚未选用；旧原件的认可仅适用于原件。',section);
-      const clusters=new Map();for(const row of group){const key=label==='沿用方案'?JSON.stringify(relationReadingSections(row)):row.id;if(!clusters.has(key))clusters.set(key,[]);clusters.get(key).push(row)}
+      const clusters=new Map(),sharedRead=new Set();for(const row of group){const key=label==='沿用方案'?JSON.stringify(relationReadingSections(row)):row.id;if(!clusters.has(key))clusters.set(key,[]);clusters.get(key).push(row)}
       for(const cluster of clusters.values()){
       const shared=cluster.length>1,clusterHost=shared?el('section','shared-material-uses'):section;
-      if(shared){section.append(clusterHost);for(const part of relationReadingSections(cluster[0])){if(part.label)nodeText('h4',null,part.label,clusterHost);for(const text of part.texts)nodeText('p',null,text,clusterHost)}}
+      if(shared){section.append(clusterHost);renderSharedRelationSections(clusterHost,relationReadingSections(cluster[0]),sharedRead)}
       for(const row of cluster){const p=row.payload,line=el('article','material-use-row'),out=row.direction==='outgoing',target=out?row.downstream_record:row.upstream_record,reference=out?row.downstream:p.upstream;
         line.dataset.relationId=row.object_id;
         if(target&&reference){
@@ -647,14 +653,11 @@ async function renderSharedReferencePurposes(parent,uses){
   const content=el('div','shared-reference-purpose');parent.append(content);
   const results=await Promise.allSettled(uses.filter(u=>u.item.value.relation).map(async use=>({use,row:(await api('/api/production?'+new URLSearchParams(use.item.value.relation))).record})));
   if(!content.isConnected)return;
-  const groups=new Map();
+  const read=new Set();
   for(const result of results){
     if(result.status==='rejected'){nodeText('p','production-issue','用途读取失败：'+result.reason.message,content);continue}
-    const {row}=result.value,sections=row.review_composition?.sections||[{label:'',parts:productionTextBlocks(row).map(b=>({text:b.text}))}];
-    const key=JSON.stringify(sections.map(s=>[s.label,s.parts.map(p=>p.text)]));
-    if(groups.has(key))continue;groups.set(key,true);
-    const section=el('section');content.append(section);
-    for(const group of sections){if(group.label)nodeText('h4',null,group.label,section);for(const part of group.parts)nodeText('p',null,part.text,section)}
+    const {row}=result.value;
+    renderSharedRelationSections(content,relationReadingSections(row),read);
   }
 }
 
