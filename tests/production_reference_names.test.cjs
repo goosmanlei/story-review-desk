@@ -86,3 +86,11 @@ test('displayed dependency and source labels normalize location codes while exac
  assert.equal(f.context.productionName(ref(asset)),'E02 / SH004 河口素材');f.context.productionRefLink(f.root,ref(asset),'参考图 · E2-004 河口素材');assert.equal(f.root.children[0].textContent,'参考图 · E02 / SH004 河口素材');assert.deepEqual(f.root.children[0].reference,ref(asset));
  f.context.productionRefLink(f.root,{...ref(episode),scene_id:'s003',block_ids:['b']});assert.equal(f.root.children[1].textContent,'E02 灯火 · S003');assert.equal(JSON.stringify([asset,episode]),before);
 });
+
+// A fresh story visit has not fetched the production directory.
+test('typed entity relation opens its exact shared card without a production index',async()=>{
+  const f=fixture();delete f.state.productionRecords;const reference={object_id:'person',revision_id:'old-person',kind:'ENTITY'};
+  f.context.openUnifiedMaterial=ref=>f.calls.push({type:'card',ref});
+  f.context.productionRefLink(f.root,reference,'Historical person');await f.root.children[0].onclick();
+  assert.deepEqual(plain(f.calls),[{type:'card',ref:reference}]);
+});

@@ -55,6 +55,29 @@ class GenerationTest(unittest.TestCase):
         self.decide();self.assertEqual(g.decision(self.store,'songbook')['version'],3)
         self.assertTrue(g.readiness(self.store,'need-full-overall')['ready'])
 
+    def test_single_state_plan_and_entity_permit_are_alternative_exact_paths(self):
+        from review_desk import production_acceptance as acceptance
+        self.setup_plans()
+        def single(action):
+            view = acceptance.snapshot(self.store, 'need-full-overall')
+            return acceptance.decide(self.store, {
+                'object_id': 'need-full-overall', 'expected_revision': view['target']['revision_id'],
+                'expected_decision': acceptance.ref(view['decision']) if view['decision'] else None,
+                'action': action, 'actor': '技术测试'})
+        single('accept')
+        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
+        self.assertIsNone(g.accepted(self.store, 'songbook'))
+        self.assertFalse(g.readiness(self.store, 'need-wet-overall')['ready'])
+        single('revoke')
+        self.assertFalse(g.readiness(self.store, 'need-full-overall')['ready'])
+        self.decide()
+        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
+        self.assertTrue(g.readiness(self.store, 'need-wet-overall')['ready'])
+        with self.assertRaises(ValueError):
+            acceptance.snapshot(self.store, 'full')  # STATE has no independent adoption.
+        self.decide('revoke')
+        self.assertFalse(g.readiness(self.store, 'need-full-overall')['ready'])
+
     def test_changes_reject_stale_acceptance_atomically_and_require_every_plan(self):
         self.setup_plans();scope=g.current_scope(self.store,'songbook');self.decide()
         self.change('wet',production_description='边缘破损，完整描述改变。')

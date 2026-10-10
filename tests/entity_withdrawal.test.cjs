@@ -20,16 +20,16 @@ function setup(){
  context.reviewSurface=node=>node;context.renderEntityRelations=()=>{};context.productionEntityIcon=()=>new Element('svg');context.renderEntityReviewMedia=(_parent,items)=>renderedMedia.push(...items);
  context.renderComments=()=>{};context.renderProductionReader=()=>{};context.paintProductionReview=()=>{};
  context.openProductionRecord=async(...args)=>opened.push(args);context.fetch=async(url,options)=>{requests.push({url,options});return {ok:true,json:async()=>({})}};context.reloadEntityReview=async()=>{};context.toast=()=>{};
- const render=()=>{const root=new Element('main');context.renderEntityReview(root);return {root,text:root.textContent,nodes:root.all(),accept:root.all().find(n=>n.tag==='button'&&n.textContent==='采纳')}};
+ const render=()=>{const root=new Element('main');context.renderEntityReview(root);return {root,text:root.textContent,nodes:root.all(),accept:root.all().find(n=>n.tag==='button'&&['认可设计内容','认可设计及制作许可'].includes(n.textContent))}};
  return {context,data,entity,form,target,first,second,assets,opened,renderedMedia,requests,render,realRenderMedia};
 }
 test('withdrawn exact page preserves content and originals but removes completion cues and follows exact merge references',async()=>{
  const f=setup(),before=JSON.stringify(f.data),view=f.render();
- assert.match(view.text,/此实体已撤回/);assert.match(view.text,/此状态已撤回/);assert.equal(view.text.split(f.entity.payload.withdrawal_reason).length-1,1);assert.match(view.text,/原文中的待审说明保留 🧵/);assert.match(view.text,/保留素材 · 2 份候选/);
+ assert.match(view.text,/此实体已撤回/);assert.match(view.text,/此状态已撤回/);assert.equal(view.text.split(f.entity.payload.withdrawal_reason).length-1,1);assert.match(view.text,/原文中的待审说明保留 🧵/);assert.match(view.text,/保留的历史原件/);
  assert.doesNotMatch(view.text,/生成前待完善|此状态的素材方案待完善|待关联状态|完整状态 · 0/);assert.equal(view.accept.disabled,true);assert.match(view.accept.title,/撤回/);await view.accept.onclick();assert.equal(f.requests.length,0);
  const targets=view.nodes.filter(n=>n.tag==='button'&&[f.target.payload.title,f.first.payload.title,f.second.payload.title].includes(n.textContent));assert.equal(targets.length,3);for(const button of targets)await button.onclick();
  assert.deepEqual(f.opened,[[f.target.object_id,f.target.id,true],[f.first.object_id,f.first.id,true],[f.second.object_id,f.second.id,true]]);
- const media=view.nodes.find(n=>n.className?.includes('entity-review-unassigned'));media.open=true;media.ontoggle();assert.deepEqual(f.renderedMedia.map(m=>m.record.id),f.assets.map(r=>r.id));delete f.data.unassignedOpen;delete f.data.evidenceViews;assert.equal(JSON.stringify(f.data),before);
+ const media=view.nodes.find(n=>n.className?.includes('entity-review-unassigned'));assert.deepEqual(f.renderedMedia.map(m=>m.record.id),f.assets.map(r=>r.id));delete f.data.unassignedOpen;delete f.data.evidenceViews;assert.equal(JSON.stringify(f.data),before);
 });
 test('old v1 remains unchanged while a proven current withdrawal is stated separately',()=>{
  const f=setup(),oldEntity=row(f.entity.object_id,'ENTITY',{entity_type:'prop'},'entity-v1'),oldForm=row(f.form.object_id,'STATE',{entity:ref(oldEntity)},'form-v1');oldEntity.current_revision=f.entity.id;oldForm.current_revision=f.form.id;
@@ -46,7 +46,7 @@ test('an explicitly withdrawn historical version is not labeled as the current e
 });
 test('a withdrawn state does not fabricate withdrawal of its active entity or remove real current entity issues',()=>{
  const f=setup();delete f.entity.payload.status;delete f.entity.payload.withdrawal_reason;delete f.entity.payload.merged_into;const view=f.render();
- assert.match(view.text,/此状态已撤回/);assert.doesNotMatch(view.text,/此实体.*撤回|此状态的素材方案待完善/);assert.match(view.text,/生成前待完善/);assert.equal(view.accept.disabled,true);
+ assert.match(view.text,/此状态已撤回/);assert.doesNotMatch(view.text,/此实体.*撤回|此状态的素材方案待完善/);assert.doesNotMatch(view.text,/生成前待完善/);assert.equal(view.accept.disabled,true);
 });
 test('missing cause and destinations remain unknown; a different cached target revision cannot supply its historical title',()=>{
  const f=setup();delete f.entity.payload.withdrawal_reason;delete f.form.payload.withdrawal_reason;f.form.payload.merged_into=null;f.target.id='new-entity-v9';f.target.payload.title='新版名称不冒充旧版';const view=f.render();
@@ -54,7 +54,7 @@ test('missing cause and destinations remain unknown; a different cached target r
 });
 test('active current records retain their completion hints, original media section and acceptance callback',async()=>{
  const f=setup();for(const r of [f.entity,f.form]){delete r.payload.status;delete r.payload.withdrawal_reason;delete r.payload.merged_into}f.data.states=[f.form];f.data.scope={entity:ref(f.entity),states:[ref(f.form)]};f.data.decision_version=0;const view=f.render();
- assert.doesNotMatch(view.text,/已撤回|归并至|保留素材/);assert.match(view.text,/此状态的素材方案待完善/);assert.match(view.text,/关联素材 · 2 份候选/);assert.match(view.text,/生成前待完善/);assert.equal(view.accept.disabled,false);
+ assert.doesNotMatch(view.text,/已撤回|归并至|保留素材/);assert.match(view.text,/此状态的素材方案待完善/);assert.match(view.text,/已有原件/);assert.doesNotMatch(view.text,/生成前待完善/);assert.equal(view.accept.disabled,false);
  await view.accept.onclick();assert.equal(f.requests.length,1);assert.equal(JSON.parse(f.requests[0].options.body).action,'accept');
 });
 test('withdrawn latest material round stays neutral while its real selector still reveals the exact old plan and both originals',async()=>{
@@ -70,7 +70,7 @@ test('withdrawn latest material round stays neutral while its real selector stil
 test('a withdrawn plan with an existing recipe and result retains its exact commentable fields and original',()=>{
  const f=setup(),need=row('need','REQUIREMENT',{status:'withdrawn',media_type:'image',generation:{model:'technical',parameters:{},inputs:[],prompt:'原方案仍可评论',output:{name:'准确旧方案'}}});
  const item={record:f.assets[0],component:{id:'original'}};const shown=[];f.context.materialMedia=(_host,value)=>shown.push(value);f.context.renderActualGeneration=()=>{};
- const parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[item]});assert.match(parent.textContent,/此素材需求已撤回/);assert.doesNotMatch(parent.textContent,/查看原方案/);assert.match(parent.textContent,/素材要求/);assert.doesNotMatch(parent.textContent,/原方案仍可评论/);assert.equal(need.payload.generation.prompt,'原方案仍可评论');assert.deepEqual(shown,[item]);assert.ok(parent.all().some(n=>n.dataset.productionBlocks===need.id));assert.doesNotMatch(parent.textContent,/此版本未附生成方案/);
+ const parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[item]});assert.match(parent.textContent,/此素材需求已撤回/);assert.doesNotMatch(parent.textContent,/查看原方案/);assert.match(parent.textContent,/要做成什么/);assert.doesNotMatch(parent.textContent,/原方案仍可评论/);assert.equal(need.payload.generation.prompt,'原方案仍可评论');assert.deepEqual(shown,[item]);assert.ok(parent.all().some(n=>n.dataset.productionBlocks===need.id));assert.doesNotMatch(parent.textContent,/此版本未附生成方案/);
 });
 test('an active material without a recipe or result keeps its actionable placeholder and preparation message',()=>{
  const f=setup(),need=row('need','REQUIREMENT',{media_type:'image'}),parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[]});

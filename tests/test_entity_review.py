@@ -48,6 +48,24 @@ class EntityReviewTest(unittest.TestCase):
         self.assertEqual(len(current['states']), 3)
         self.assertNotEqual(snapshot['content_key'], current['content_key'])
 
+    def test_switchable_originals_keep_exact_historical_state_names_outside_acceptance_scope(self):
+        from review_desk import generation, ui_projection
+        self.setup_full(); self.media(); self.associate(states=('full', 'wet'))
+        original = self.ref('voice')
+        old_states = [p.record(self.store, key) for key in ('full', 'wet')]
+        for key in ('full', 'wet'):
+            self.change(key, lambda payload: payload.update(title='当前新名称'))
+        before = self.store.revisions()
+        snapshot = generation.snapshot(self.store, 'songbook')
+        titles = {item['revision_id']: item['title'] for item in snapshot['reference_titles']}
+        for row in old_states:
+            self.assertEqual(titles[row['id']], row['payload']['title'])
+            self.assertNotIn({'object_id': row['object_id'], 'revision_id': row['id']}, snapshot['scope']['states'])
+        detail = ui_projection.card(self.store, original['object_id'], original['revision_id'])
+        names = detail['entity_review']['reference_titles']
+        self.assertTrue(all(any(r['revision_id'] == row['id'] and r['title'] == row['payload']['title'] for r in names) for row in old_states))
+        self.assertEqual(before, self.store.revisions())
+
     def test_note_comments_bind_exact_entity_and_state_fields_and_survive_restore(self):
         self.setup_full()
         saved = []

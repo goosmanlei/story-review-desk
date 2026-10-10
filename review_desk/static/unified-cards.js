@@ -80,11 +80,11 @@ function renderUnifiedSelected(data){
   if(selected.round)state.materialCommentCard={data,material_id:key,number:selected.round.number};
   const chosen=materialCandidateChoice(selected.candidates,data.selectedCandidates[key]);
   const options=entityMaterialCandidateOptions(data,selected);
-  renderMaterialCard(right,selected,{...options,roundChange:number=>{
+  renderMaterialCard(right,selected,{...options,renderResult:(host,item)=>renderMaterialResultReview(host,item.record,item.review_context||data.materialContexts?.[item.record.id]||{}),roundChange:number=>{
     rememberProductionDraft();switchMaterialRound(data,key,number);delete data.selectedCandidates[key];renderProductionReader();renderComments();focusMaterialRoundControl(key);
   },planVersion:(h,row)=>entityVersionControl(h,row,next=>{data.localVersions||={};data.localVersions[next.object_id]=next}),assetVersion:(h,item)=>entityVersionControl(h,item.record,next=>{data.localVersions||={};data.localVersions[next.object_id]=next})});
-  if(chosen)renderMaterialResultReview(right,chosen.record,chosen.review_context||data.materialContexts?.[chosen.record.id]||{});
-  if(chosen?.record.payload.blocks?.length){nodeText('h3',null,'生成时自检 · '+reviewDecisionTime(chosen.record.created_at),right);reviewTextBlocks(right,chosen.record)}
+
+
   if(chosen)renderMaterialUses(right,chosen.record,data.reference_titles||[]);
 }
 function renderUnifiedCard(root){
@@ -98,7 +98,8 @@ function renderUnifiedCard(root){
     const episode=data.shared?.find(item=>item.record.kind==='AV_EPISODE')?.record;
     nodeText('span','production-meta',[episode&&businessTitle(episode),breakdownSceneTitle(data.scene)].filter(Boolean).join(' / '),controls);
     if(row.kind==='AV_SCENE'){nodeText('h2',null,breakdownSceneTitle(row),left);renderAudiovisualSources(left,row);renderAudiovisualDesign(left,row)}
-    for(const item of data.shots)renderBreakdownShot(left,item);
+    if(row.kind!=='AV_SCENE')renderAudiovisualDesign(left,data.scene);
+    const common={...breakdownCommonConditions(data.shots),sceneId:data.scene.id},references=createSceneReferenceReader(data);renderBreakdownConditions(left,data,common);for(const item of data.shots)renderBreakdownShot(left,item,common,references);left.append(references.host);
   }
   else if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
   else if(state.materialReview){

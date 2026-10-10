@@ -441,7 +441,16 @@ def _snapshot(store, entity_id, revision_id=None):
     if not any(material_versions.values()):material_versions=legacy_versions
     from .material_plans import card_counts
     from .review_decisions import scope_records
-    return {**base,**data,'decision_scope_records':scope_records(store,scope),'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    # All switchable originals bring their exact historical use names. These
+    # are labels only; they never extend the entity's acceptance scope.
+    title_refs = {ref['revision_id']: ref for row in targets.values() if row['kind'] == 'ASSET'
+                  for item in row['payload'].get('state_coverage', []) for ref in [item['state']]}
+    reference_titles = []
+    for reference in title_refs.values():
+        target = p.ref_record(store, reference)
+        if not target.get('unavailable'):
+            reference_titles.append({**reference, 'title': target['payload']['title']})
+    return {'reference_titles': reference_titles,**base,**data,'decision_scope_records':scope_records(store,scope),'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'accepted':a,'content_accepted':content_accepted,'status':'accepted' if a or content_accepted else 'unaccepted',

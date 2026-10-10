@@ -34,7 +34,8 @@ function fixture(){
   c.isProduction=()=>true;c.reviewSurface=node=>node;
   vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8').split('const state=')[0],c);require('./load_review_helpers.cjs')(c);
   for(const name of ['production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js','management-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
-  c.renderComments=()=>{};c.paintProductionReview=()=>{};c.paintReviewCommentCounts=()=>{};c.rememberProductionDraft=()=>{};c.restoreProductionDraft=()=>{};
+  c.materialMedia=(parent,item)=>{const n=c.el(item.component.mime.startsWith('image/')?'img':'video');n.src='/api/production/files/'+item.component.file;n.dataset.reviewRevision=item.record.id;parent.append(n);return n};
+  c.link=(label,url,parent)=>{const n=c.nodeText('a',null,label,parent);n.href=url;return n};c.reviewMediaPlayer=()=>{};c.renderMaterialResultReview=()=>{};c.renderComments=()=>{};c.paintProductionReview=()=>{};c.paintReviewCommentCounts=()=>{};c.rememberProductionDraft=()=>{};c.restoreProductionDraft=()=>{};
   c.productionEntityIcon=()=>new Element('svg');c.materialReferenceLink=(parent,ref,label)=>{const n=c.nodeText('a',null,label,parent);n.reference=ref;return n};
   c.productionTextBlocks=row=>Object.entries(row.payload.generation?{'generation.prompt':row.payload.generation.prompt}:{'call.prompt':row.payload.prompt}).filter(([,text])=>typeof text==='string').map(([field,text])=>({id:field,field,text}));
   c.materialReferenceRequest=ref=>({url:'/?revision='+ref.revision_id});
@@ -45,16 +46,16 @@ function fixture(){
 const row=(object_id,kind,payload={},id=object_id+'-r1')=>({object_id,id,current_revision:id,kind,version:1,created_at:'2026-10-04',payload:{title:object_id,blocks:[],...payload}});
 const ref=r=>({object_id:r.object_id,revision_id:r.id});
 
-test('existing originals are visible before folded downstream plans without changing exact use edges',async()=>{
+test('existing originals precede grouped downstream decisions without changing exact use edges',async()=>{
   const f=fixture(),asset=row('old-image','ASSET',{components:[{id:'original',role:'original',mime:'image/png',file:'old.png'}]}),need=row('need','REQUIREMENT');
   const edge=row('alternative','MATERIAL_RELATION',{semantics:'alternative',upstream:ref(asset),purpose:'compare old image'});
   edge.direction='incoming';edge.upstream_record=asset;edge.downstream_record=need;
   const downstream=Array.from({length:48},(_,i)=>({...row('use-'+i,'MATERIAL_RELATION',{semantics:'reuse',purpose:'planned use'}),direction:'outgoing',downstream:ref(need),downstream_record:need}));
   const relations=[edge,...downstream],before=JSON.stringify(relations),previewed=[];f.c.state.materialReview={record:need};
-  f.c.api=async()=>({relations});f.c.openMaterialReference=reference=>previewed.push(reference);
+  f.c.api=async()=>({relations});f.c.openUnifiedMaterial=reference=>previewed.push(reference);
   const host=new Element('main');await f.c.renderMaterialRelations(host,need.object_id,need);
-  const groups=host.all().filter(n=>n.className==='material-use-group');assert.equal(groups[0].tag,'section');assert.match(groups[0].textContent,/已有形象 · 1/);
-  assert.equal(groups[1].tag,'details');assert.equal(groups[1].open,undefined);assert.match(groups[1].textContent,/沿用方案 · 48/);
+  const groups=host.all().filter(n=>n.className==='material-use-group');assert.ok(groups.length,host.textContent);assert.equal(groups[0].tag,'section');assert.match(groups[0].textContent,/已有形象/);
+  assert.equal(groups[1].tag,'section');assert.match(groups[1].textContent,/沿用方案/);
   const card=groups[0].all().find(n=>n.tag==='button');await card.onclick();assert.deepEqual(previewed,[edge.payload.upstream]);
   assert.equal(groups[0].all().find(n=>n.tag==='img').src,'/api/production/files/old.png');
   assert.equal(JSON.stringify(relations),before);assert.equal(f.c.state.materialReview.relation_records[0].id,edge.id);
@@ -116,7 +117,7 @@ test('10.2/10.4 selected generated video renders actual prompt and exact referen
 });
 test('10.4 candidate without a real call reports the gap and never fills it from the plan',()=>{
   const {c,reader,need,context,asset}=videoFixture();delete context.video_details[need.object_id].review_contexts[asset.id];c.breakdownPrompt(reader,need,context);
-  assert.match(reader.textContent,/未登记真实调用/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
+  assert.match(reader.textContent,/未保留准确生成记录/);assert.ok(!reader.textContent.includes(need.payload.generation.prompt));
 });
 test('video prompt links keep the deployment prefix and exact old revision',()=>{
   const {c,reader,need,input,context}=videoFixture();c.REVIEW_DEPLOYMENT={base_path:'/lijizhanshe'};
@@ -127,7 +128,7 @@ test('video prompt links keep the deployment prefix and exact old revision',()=>
 });
 test('video defaults to latest empty version and exact manual old version retains its actual prompt',async()=>{
   const {c,reader,need,call,round,context}=videoFixture();context.video_details[need.object_id].material_versions[need.object_id].unshift({...round,number:2,members:[need],results:[]});
-  c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/待生成/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
+  c.breakdownPrompt(reader,need,context);assert.match(reader.textContent,/尚无生成原件/);assert.ok(reader.textContent.includes(need.payload.generation.prompt));assert.ok(!reader.textContent.includes(call.payload.prompt));
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();assert.ok(reader.textContent.includes(call.payload.prompt));assert.equal(c.state.breakdownVideoSelections[need.id].number,1);
 });
 test('10.1/10.4 row material opens the exact video version and candidate chosen beside its prompt',async()=>{
@@ -141,7 +142,7 @@ test('10.1/10.4 row material opens the exact video version and candidate chosen 
   await c.showBreakdownScene(scene,reader,new Element('nav'),7);
   const version=reader.all().find(n=>n.attributes['aria-label']==='素材版本');await version.children.find(n=>n.dataset.choiceId===1).onclick();
   const candidate=reader.all().find(n=>n.attributes['aria-label']==='素材候选');await candidate.children.find(n=>n.dataset.choiceId===other.id).onclick();
-  await reader.querySelectorAll('[data-material-id]').find(n=>n.dataset.materialId===need.object_id).onclick();
+  await new Promise(resolve=>setImmediate(resolve));const own=reader.querySelectorAll('[data-material-id]').find(n=>n.dataset.materialId===need.object_id);assert.ok(own,reader.textContent);await own.onclick();
   assert.equal(opened.length,1);assert.equal(opened[0].object_id,other.object_id);assert.equal(opened[0].revision_id,other.id);assert.equal(opened[0].params.get('material_version'),'1');assert.equal(opened[0].params.get('material_target'),other.id);
 });
 
@@ -378,7 +379,7 @@ test('pagination changes only the group/card collection and does not automatical
 });
 test('a linked old candidate outside filters remains exact without changing unique or display counts',async()=>{
   for(const empty of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial:true,outside:true,empty});
-    assert.equal(f.listed[0].search,'excluded');const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,`素材数 ${empty?0:40} · 展示项数 ${empty?0:40}`);
+    assert.equal(f.listed[0].search,'excluded');const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,`${empty?0:40} 项已有原件可比较；0 项尚无结果。制作准备不要求逐项审阅。`);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
   }
 });

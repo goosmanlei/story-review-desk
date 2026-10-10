@@ -288,7 +288,7 @@ test('an exact earlier preparation revision keeps its own requirements, prompt a
 for(const explicit of [false,true])test(`${explicit?'exact current':'ordinary'} preparation entry still shows the editable current plan`,()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.detail.explicitRevision=explicit;if(explicit)f.detail.record=f.current;
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
-  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
+  assert.match(text,/current requirement/);assert.doesNotMatch(text,/plan 2|plan 1/);assert.doesNotMatch(text,/原方案/);
   assert.ok(f.controls.some(([kind,id])=>kind==='edit-inputs'&&id===f.current.id));assert.ok(f.controls.some(([kind])=>kind==='accept'));assert.deepEqual(f.inputs,[]);
 });
 test('an earlier demand reads its original definition separately without rewriting a frozen material version',()=>{
@@ -314,7 +314,7 @@ test('returning from another material version leaves an old explicit preparation
   f.rounds.unshift({number:2,model:'plan-v1',plan:next,members:[next],results:[]});f.render();
   ctx.switchMaterialRound(f.detail,'video-need',2);f.render();ctx.switchMaterialRound(f.detail,'video-need',1);
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
-  assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.equal(f.detail.explicitRevision,false);
+  assert.match(text,/current requirement/);assert.doesNotMatch(text,/plan 2|plan 1/);assert.equal(f.detail.explicitRevision,false);
 });
 test('a non-entity demand defaults to the latest candidate original without copying adoption range',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);f.render();

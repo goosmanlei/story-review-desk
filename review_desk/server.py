@@ -46,7 +46,7 @@ class ReviewServer(HTTPServer):
             super().server_close()
             raise ValueError('bounded HTTP deployment requires reviewed SQLite DELETE mode; stop connections and back up before changing journal mode')
         from .read_cache import attach, source_version
-        self.cache_version = source_version()
+        self.cache_version = source_version() + hashlib.sha256(json.dumps(self.config, sort_keys=True).encode()).hexdigest()
         attach(self.store, version=self.cache_version)
         from .web_assets import WebAssets
         self.web_assets = WebAssets(self.deployment)
@@ -183,6 +183,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
         from .business_codes import annotate
         if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach'):
             value = annotate(self.server.store, value, share_records=True)
+        if self.command == 'GET' and status == 200 and urlsplit(self.path).path.startswith('/api/production') and urlsplit(self.path).path != '/api/production/package':
+            from .review_composition import attach as compose
+            compose(value, self.server.config.get('production_reading'))
         from .json_transport import encode
         graph, compressed = self._representation()
         data = encode(value, graph=graph, compressed=compressed)
