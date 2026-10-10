@@ -9,7 +9,7 @@ from review_desk.store import Store, Conflict
 
 
 class ConsolidationTest(unittest.TestCase):
-    for _name in ('setUp','tearDown','spec','put','ref','entity','full','need','media','change','setup_plans','decide','generate'):
+    for _name in ('setUp','tearDown','spec','put','ref','entity','full','need','media','change','setup_plans','generate'):
         locals()[_name] = getattr(fixtures.PlanVersionsTest, _name)
 
     def prepared(self):

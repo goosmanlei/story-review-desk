@@ -291,14 +291,15 @@ function entityFilterFixture({exactMaterial=false}={}){
   c.renderProductionReader=()=>{rendered.push(c.state.productionSelected.id);const reader=c.state.unifiedCardRoot||c.$('#production-reader');reader.replaceChildren();c.nodeText('p',null,c.state.entityReview.entity.payload.title,reader)};
   const filter=(key,value)=>host.all().find(n=>n.dataset.filterKey===key&&n.dataset.filterValue===value);
   const clear=()=>host.all().find(n=>n.tag==='button'&&n.textContent==='清除筛选');
+  const search=value=>{const field=host.all().find(n=>n.attributes?.['aria-label']==='搜索制作记录');field.value=value;return field.oninput()};
   const waiting=async count=>{while(held.length<count)await new Promise(resolve=>waiters.push(resolve))};
-  return {...f,a,b,aForm,bForm,asset,held,rendered,filter,clear,waiting,review};
+  return {...f,a,b,aForm,bForm,asset,held,rendered,filter,clear,search,waiting,review};
 }
 const drain=()=>new Promise(resolve=>setImmediate(resolve));
 
 test('7.3/C.2 pending entity response cannot repopulate a filter with zero matches',async()=>{
   const f=entityFilterFixture(),loading=f.c.loadProductionWorkspace();await f.waiting(1);
-  await f.filter('acceptance','accepted').onclick();assert.equal(f.c.state.productionVisibleEntities.size,0);
+  await f.search('no matching entity');assert.equal(f.c.state.productionVisibleEntities.size,0);
   f.held[0].release();await loading;
   assert.equal(f.c.state.entityReview,null);assert.equal(f.c.state.productionSelected,null);assert.deepEqual(f.rendered,[]);
   assert.match(f.c.$('#production-reader').textContent,/没有符合筛选条件的实体/);
@@ -306,7 +307,7 @@ test('7.3/C.2 pending entity response cannot repopulate a filter with zero match
 });
 test('7.3/C.2 clearing an empty filter opens a fresh first entity and ignores the older pending response',async()=>{
   const f=entityFilterFixture(),loading=f.c.loadProductionWorkspace();await f.waiting(1);
-  await f.filter('acceptance','accepted').onclick();await f.clear().onclick();await f.waiting(2);
+  await f.search('no matching entity');await f.clear().onclick();await f.waiting(2);
   f.held[1].release();await drain();assert.equal(f.c.state.productionEntityId,f.a.object_id);assert.deepEqual(f.rendered,[f.aForm.id]);
   f.held[0].release();await loading;assert.deepEqual(f.rendered,[f.aForm.id]);assert.equal(f.c.state.productionVisibleEntities.size,2);
 });
@@ -319,12 +320,12 @@ test('7.3/C.2 a nonempty filter excludes a pending owner before its response can
 test('5.6/7.3 exact entity material link and clearing a still-visible filter retain the requested old candidate',async()=>{
   const f=entityFilterFixture({exactMaterial:true}),loading=f.c.loadProductionWorkspace();await f.waiting(1);f.held[0].release();await loading;
   assert.equal(f.c.state.productionSelected.id,f.asset.id);assert.equal(f.c.state.entityReview.selectedMaterialRounds.need,1);
-  await f.filter('acceptance','unaccepted').onclick();await f.clear().onclick();await drain();
+  await f.search('a-entity');await f.clear().onclick();await drain();
   assert.equal(f.held.length,1);assert.equal(f.c.state.productionSelected.id,f.asset.id);assert.equal(f.c.state.entityReview.selectedMaterialRounds.need,1);
   const params=new URL(f.c.location.href).searchParams;assert.equal(params.get('production_revision'),f.asset.id);assert.equal(params.get('material_version'),'1');
 });
 test('7.3/C.2 a previous empty entity filter does not suppress card refreshes on the breakdown page',async()=>{
-  const f=entityFilterFixture(),loading=f.c.loadProductionWorkspace();await f.waiting(1);await f.filter('acceptance','accepted').onclick();f.held[0].release();await loading;
+  const f=entityFilterFixture(),loading=f.c.loadProductionWorkspace();await f.waiting(1);await f.search('no matching entity');f.held[0].release();await loading;
   const read=f.c.api;f.c.api=url=>url.startsWith('/api/production/breakdown')?Promise.resolve({lock:null,scenes:[],shots:[],episodes:[]}):read(url);
   f.c.location.href='http://fixture/?workspace=settings.workspace&production_tab=breakdown';await f.c.loadProductionBreakdown();
   const old=f.review(f.a);f.c.activateUnifiedCard({detail:{record:f.a,history:[f.a],uses:[]},entity_review:old,scope:null,params:new URLSearchParams()});f.c.state.unifiedCardRoot=new Element('dialog');

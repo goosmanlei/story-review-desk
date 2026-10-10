@@ -259,6 +259,11 @@ class Store:
                 raise ValueError("invalid dependency")
             target = self.db.execute("SELECT id FROM revisions WHERE id=?", (ref.get("revision_id"),)).fetchone()
             if not target:
+                from .version_consolidation import retained_call_reference
+                from .production import references
+                exact = dict(references(payload)).get(ref['role'], {})
+                if kind == 'CALL' and exact.get('revision_id') == ref.get('revision_id') and retained_call_reference(self, object_id, ref['role'], exact):
+                    continue
                 raise ValueError("unknown dependency revision")
             refs.append((revision_id, target["id"], ref["role"]))
         stamp = now()
@@ -267,6 +272,9 @@ class Store:
         else:
             self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
         self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, self._encode_material(payload), stamp))
+        if kind == 'CALL':
+            from .version_consolidation import preserve_call_references
+            preserve_call_references(self, object_id, revision_id, new_version, payload)
         self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
         if kind == 'RELATION' and payload.get('relation_type') == 'business':
             from .business_relations import register
@@ -502,6 +510,8 @@ class Store:
         if scopes:value['material_scopes'] = scopes
         plans = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_plan_comments WHERE comment_id=? ORDER BY material_id', (value['id'],))]
         if plans:value['material_plan_scopes'] = plans
+        value['history_sources'] = [json.loads(event[0]) for event in self.db.execute(
+            "SELECT body FROM comment_events WHERE comment_id=? AND action='HISTORY_IMPORT' ORDER BY id", (value['id'],))]
         return value
 
     def comment(self, comment_id):

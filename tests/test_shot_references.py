@@ -17,7 +17,7 @@ from review_desk.bundle import export, restore
 class ShotReferenceTest(unittest.TestCase):
     setUp=fixtures.PlanVersionsTest.setUp
     tearDown=fixtures.PlanVersionsTest.tearDown
-    for name in ('spec','put','ref','entity','full','need','media','change','setup_plans','decide','generate'):
+    for name in ('spec','put','ref','entity','full','need','media','change','setup_plans','generate'):
         locals()[name]=getattr(fixtures.PlanVersionsTest,name)
     scene_shot=breakdown.BreakdownTest.scene_shot
 
@@ -37,14 +37,6 @@ class ShotReferenceTest(unittest.TestCase):
         if round.get('definition_records',{}).get('call'):value=sr.inputs_for(self.store,round['definition_records']['call'])[index]
         return {'id':operation,'requirement_id':'video','expected_revision':row['id'],'plan_number':round['number'],'index':index,'input_key':sr.input_key(value),'material_id':'need-full-overall','number':1,'candidate':self.ref(candidate),'component_id':p.record(self.store,candidate)['payload']['components'][0]['id'], **{k:value[k] for k in ('range','crop') if k in value}}
 
-    def approve(self):
-        from review_desk import production_acceptance as a
-        for oid in ('video',):
-            current=a.snapshot(self.store,oid)
-            if not current['accepted']:
-                a.decide(self.store,{'object_id':oid,'expected_revision':current['target']['revision_id'],
-                    'expected_decision':a.ref(current['decision']) if current['decision'] else None,
-                    'action':'accept','actor':'隔离测试'})
 
     def test_draft_save_is_atomic_per_slot_idempotent_and_keeps_other_inputs(self):
         old=self.prepare();request=self.request();result=sr.select(self.store,request)
@@ -80,22 +72,21 @@ class ShotReferenceTest(unittest.TestCase):
         self.assertEqual(p.record(self.store,'video')['id'],before)
 
     def test_readiness_package_and_new_call_share_guard_without_generating(self):
-        self.prepare();self.approve()
+        self.prepare()
         self.assertFalse(g.readiness(self.store,'video')['ready'])
         with self.assertRaises(Conflict):g.package(self.store,'video')
         plan=p.record(self.store,'video')['payload']['generation']
         for status in ('submitted','completed','failed','unknown'):
             with self.assertRaises((Conflict,ValueError)):self.put(self.spec('rejected-'+status,'CALL',method='generation',tool='fixture',status=status,inputs=[],outputs=[],generation_requirement=self.ref('video'),generation_acceptances=[],**{k:plan[k] for k in ('model','parameters','prompt')}))
         sr.select(self.store,self.request());sr.select(self.store,self.request(index=1,operation='second-slot'))
-        self.assertFalse(g.readiness(self.store,'video')['ready']) # changed plan needs approval
-        self.approve()
+        self.assertTrue(g.readiness(self.store,'video')['ready']) # accurate selections suffice
         self.assertTrue(g.readiness(self.store,'video')['ready']);self.assertEqual(len(g.package(self.store,'video')['inputs']),2)
 
     def test_submitted_failed_unknown_are_locked_and_change_creates_new_plan(self):
         for status in ('submitted','failed','unknown'):
             with self.subTest(status=status):
                 if status!='submitted':self.tearDown();self.setUp()
-                self.prepare(True);sr.select(self.store,self.request(index=1));self.approve()
+                self.prepare(True);sr.select(self.store,self.request(index=1))
                 old=p.record(self.store,'video');plan=old['payload']['generation']
                 # Fixture model does not have a paid provider contract. Store
                 # an existing immutable execution to exercise revision handling.
@@ -164,7 +155,7 @@ class ShotReferenceTest(unittest.TestCase):
 
     def test_http_endpoints_reject_incomplete_inputs_and_replay_selection_once(self):
         from review_desk.server import ReviewServer
-        self.prepare();self.approve();server=ReviewServer(('127.0.0.1',0),self.root,{'id':'fixture','title':'fixture'});base='http://127.0.0.1:'+str(server.server_port)
+        self.prepare();server=ReviewServer(('127.0.0.1',0),self.root,{'id':'fixture','title':'fixture'});base='http://127.0.0.1:'+str(server.server_port)
         def request(path,body=None):
             results=[]
             def client():

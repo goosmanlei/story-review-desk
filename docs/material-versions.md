@@ -38,13 +38,13 @@
 
 服务端仅允许目标是该版本准确成员，或该版本完整定义已验证的要求、检查项、输出、制作方案来源。来源可不在旧成员表；这不会扩大候选归属或改变原成员。`comment_records` 和 `comment_targets` 包含这些准确来源。同评论 ID 重试必须保持正文、锚点和版本上下文一致。评论及选择候选均不创建版本。
 
-认可实体内容、审阅候选与采用候选分别记录。采用使用 `RELATION.relation_type=adoption`，锁定使用位置准确修订、需求槽位、候选修订、component_id 和必要 range/crop。共享素材不会将一个状态的采用复制到其他状态。
+内容意见沿准确评论保存；采用候选单独记录准确选择。采用使用 `RELATION.relation_type=adoption`，锁定使用位置准确修订、需求槽位、候选修订、component_id 和必要 range/crop。共享素材不会将一个状态的采用复制到其他状态。
 
 ## 归档、导出与恢复
 
 受管 JSON 请求、回执和制作归档使用 `material-archive-reference-v1` 保存原字节重建配方。字符串与嵌套 JSON 字符串引用同一内容图；空白、键序、Unicode 转义、重复键与数字原写法均可恢复。容器物理哈希与原文件逻辑哈希分开；HTTP（含 Range）、媒体校验和后台脚本经 `material_archives.read_bytes/read_json` 得到原字节。图片、音频和视频原件不作转换。
 
-当前完整模型采用 Schema 11，保存视听编排、统一关系及旧别名映射、稳定业务编号、方案与候选、评论及准确来源的最小清理凭据。共享内容仍存于唯一 material-content.json，manifest 校验物理哈希，保留原件按逻辑哈希验证。清理后的实例只使用当前净化导出恢复；退役生产类型不会从旧包复活。详见[切换与恢复](version-consolidation.md)。
+当前完整模型采用 Schema 12，保存视听编排、统一关系及旧别名映射、稳定业务编号、方案与候选、评论及准确来源的最小清理凭据。共享内容仍存于唯一 material-content.json，manifest 校验物理哈希，保留原件按逻辑哈希验证。清理后的实例只使用当前净化导出恢复；退役生产类型不会从旧包复活。详见[切换与恢复](version-consolidation.md)。
 
 旧素材轮次、旧方案索引及旧物理模型迁移的 HTTP/CLI 入口均已退役；不以逆向迁移恢复旧业务。`material-model-verify` 和对应 GET 接口只读校验当前物理存储。正常创作继续使用不可变修订、版本冻结和准确候选规则。
 

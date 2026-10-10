@@ -974,6 +974,10 @@ async function editComment(comment){
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.business_code?comment.business_code+' · ':'')+(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
+  for(const source of comment.history_sources||[]){
+    nodeText('small','comment-history-source',`${source.author==='user'?'用户':source.author} · ${new Date(source.occurred_at).toLocaleString('zh-CN')} · 历史导入${source.statement_kind==='reported'?'（当时转述）':source.statement_kind==='ai_check'?'（AI 检查）':''}`,card);
+    nodeText('p','comment-help',source.scope,card);
+  }
   appendAnchorQuote(card,comment.anchor);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
@@ -1002,7 +1006,7 @@ function renderComments({replaceDraft=false}={}){
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
   $('#open-count').textContent=`${open.length} 待处理`;
   const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
-  $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史待决 ${older}`:`查看评论 · ${open.length}`;
+  $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史意见 ${older}`:`查看评论 · ${open.length}`;
   if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
   if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
@@ -1010,7 +1014,7 @@ function renderComments({replaceDraft=false}={}){
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);appendAnchorQuote(editor,state.anchor);if(isProduction()&&state.productionSelected?.payload){
       const row=state.productionSelected,component=row.payload.components?.find(c=>c.id===(state.anchor.component_id||state.anchor.visual_id)&&c.file===state.anchor.asset_file);
       const label=component?({original:'原件',preview:'预览',thumbnail:'缩略图'})[component.role]||'媒体':'';
-      nodeText('small',null,'评论对象：'+(row.kind==='REPRESENTATION'?'整个实体':row.payload.title)+(label?' · '+label:''),editor);
+      nodeText('small',null,'评论对象：'+row.payload.title+(label?' · '+label:''),editor);
     }
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=retained?.value??readCommentDraftStorage(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     if(Number.isInteger(retained?.start))textarea.setSelectionRange?.(retained.start,retained.end,retained.direction);

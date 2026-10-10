@@ -70,7 +70,6 @@ class CompleteStatesTest(unittest.TestCase):
 
     def test_detail_cannot_replace_overall_and_passed_does_not_adopt(self):
         self.setup_full();self.media();self.put(self.need(),self.shot());self.associate('detail')
-        self.put(self.spec('review','JUDGMENT',target=self.ref('voice'),verdict='passed',actor='测试',reason='仅技术测试'))
         self.assertFalse(p.readiness(self.store,'shot')['inputs_ready'])
         self.adopt()
         self.assertIn('missing_exact_state_coverage',p.readiness(self.store,'full')['requirements'][0]['issues'])

@@ -26,12 +26,10 @@ TYPES = (
     ('素材', 'M', 'M001', '本实例内；准确共享身份共用编号，旧身份可追溯'),
     ('素材版本', 'MV', 'M001 / MV002', '同一准确素材身份内；沿用方案版本号'),
     ('素材候选', 'MC', 'M001 / MV002 / MC001', '同一素材版本内；按实际结果登记顺序分配'),
-    ('制作设定审阅对象', 'RV', 'RV001', '本实例内；保留旧审阅对象身份'),
     ('评论', 'C', 'C001', '本实例内；原文圈选、修订和评论身份不变'),
-    ('审阅决定', 'DC', 'DC001', '本实例内，每个可访问的决定对象'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
-                AV_EPISODE='AE', AV_SCENE='AS', AV_SHOT='ASH', MATERIAL_RELATION='MR', EPISODE='E', REPRESENTATION='RV', JUDGMENT='DC')
+                AV_EPISODE='AE', AV_SCENE='AS', AV_SHOT='ASH', MATERIAL_RELATION='MR', EPISODE='E')
 LEGACY_PREFIXES = {'SOURCE': 'D', 'STORY': 'B'}
 
 

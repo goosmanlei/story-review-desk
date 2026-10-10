@@ -33,7 +33,7 @@ def main():
     evidence.add_argument('--validate-only', action='store_true')
     subs.add_parser("structure-get")
     subs.add_parser("structure-review")
-    subs.add_parser("script-input")
+    subs.add_parser("script-input").add_argument("revision_id")
     subs.add_parser("screenplay-get")
     subs.add_parser("screenplay-review")
     screenplay_import = subs.add_parser("screenplay-import")
@@ -80,7 +80,7 @@ def main():
     production_source.add_argument('revision_id')
     production_source.add_argument('--scene')
     production_source.add_argument('--block', action='append')
-    for command in ("production-import", "production-adopt", "production-judge", "production-file", "production-entity-decide"):
+    for command in ("production-import", "production-adopt", "production-file"):
         sub = subs.add_parser(command)
         sub.add_argument("file", type=Path)
         if command == "production-import":
@@ -160,7 +160,7 @@ def main():
         elif args.command == "screenplay-import":
             result = import_screenplay(store, json.loads(args.file.read_text()))
         elif args.command == "script-input":
-            result = script_input(store)
+            result = script_input(store, args.revision_id)
         elif args.command == "structure-import":
             result = import_structure(store, json.loads(args.file.read_text()), args.expected_version)
         elif args.command == "config-get":
@@ -201,10 +201,6 @@ def main():
             result = production.import_records(store, read_json(args.file), args.validate_only)
         elif args.command == "production-adopt":
             result = production.adopt(store, json.loads(args.file.read_text()))
-        elif args.command == "production-judge":
-            result = production.judge(store, json.loads(args.file.read_text()))
-        elif args.command == "production-entity-decide":
-            result = generation.decide(store, json.loads(args.file.read_text()))
         elif args.command == "production-generation-ready":
             result = generation.readiness(store, args.scope)
         elif args.command == "production-generation-package":

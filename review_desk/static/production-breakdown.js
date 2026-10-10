@@ -5,40 +5,6 @@ function renderAudiovisualSources(host,row){
   const sources=row.payload.sources||[];
   for(const [index,source] of sources.entries())materialReferenceLink(host,source,'故事依据'+(sources.length>1?' '+(index+1):''),'full_scene');
 }
-const productionAcceptancePanels=new Set();
-async function renderProductionAcceptance(host,row){
-  if(state.reviewWork&&row?.kind==='REQUIREMENT'){const button=productionButton(host,'决定此素材方案的生成许可',()=>openUnifiedMaterial({...productionRef(row),work:null},button));return}
-  if(!row||!['REQUIREMENT','MATERIAL_RELATION'].includes(row.kind))return;
-  const box=el('div','production-toolbar production-acceptance');host.append(box);
-  let data,serial=0;
-  const refresh=async()=>{const token=++serial;try{
-    const next=await api('/api/production/acceptance?'+new URLSearchParams({object_id:row.object_id,revision_id:row.id}));
-    if(box.isConnected&&token===serial){data=next;draw()}
-  }catch(error){if(box.isConnected&&token===serial){box.replaceChildren();nodeText('p','production-issue',error.message,box)}}};
-  const entry={box,refresh};
-  productionAcceptancePanels.add(entry);
-  Promise.resolve().then(()=>{for(const panel of productionAcceptancePanels)if(!panel.box.isConnected)productionAcceptancePanels.delete(panel)});
-  const draw=()=>{box.replaceChildren();
-    const button=productionButton(box,data.accepted?'取消认可':row.kind==='REQUIREMENT'?'认可此制作方案':'认可此设计',async()=>{
-      if(!box.isConnected||button.disabled)return;
-      button.disabled=true;++serial;
-      try{const next=await api('/api/production/acceptance',{method:'POST',body:JSON.stringify({object_id:row.object_id,expected_revision:row.id,expected_decision:data.decision?productionRef(data.decision):null,action:data.accepted?'revoke':'accept',actor:'用户'})});if(box.isConnected){data=next;draw()}
-        for(const panel of productionAcceptancePanels){if(!panel.box.isConnected)productionAcceptancePanels.delete(panel);else if(panel!==entry)panel.refresh()}
-      }catch(error){if(box.isConnected){button.disabled=false;toast(error.message);refresh()}}
-    });button.disabled=!data.can_change;
-    if(row.kind==='REQUIREMENT')renderReviewHelp(box,row);
-    if(!data.can_change)nodeText('small','production-meta','历史版本',box);
-    else if(data.partial)nodeText('small','production-meta','部分子项已采纳',box);
-    const info=el('section','decision-scope');
-    if(row.kind==='REQUIREMENT')nodeText('p',null,'仅认可此素材方案；也可沿所属状态的整体生成许可执行。原件及结果另行判断。',info);
-    if(!['AV_SHOT','REQUIREMENT'].includes(row.kind))renderDecisionScope(info,data.scope,data.scope_records||[]);
-    if(data.decision){nodeText('p',null,'涉及本版的最新决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),info);nodeText('p',null,data.decision.payload.reason,info)}
-    renderDecisionHistory(info,data.history||[]);
-    box.append(info);
-  };
-  await refresh();
-}
-
 function paintMaterialUseText(){
   const data=typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview;
   const records=[...(data?.relation_records||[]),...(data?.comment_records||[])];
@@ -136,7 +102,7 @@ async function renderMaterialRelations(host,materialId,selected=null,{comparison
     const image=row=>row.upstream_record?.payload.components?.find(c=>c.role==='original'&&c.mime.startsWith('image/'));
     const groups=[['已有形象',alternatives.filter(image)],['旧备选',alternatives.filter(r=>!image(r))],['沿用方案',rows.filter(r=>r.direction==='outgoing')],['其他用途依据',rows.filter(r=>r.direction==='incoming'&&r.payload.semantics!=='alternative')]];
     for(const [label,group] of groups){if(!group.length)continue;const section=el('section','material-use-group');nodeText('h4',null,label,section);
-      if(['已有形象','旧备选'].includes(label))nodeText('p','production-meta','供本需求比较，尚未选用；旧原件的认可仅适用于原件。',section);
+      if(['已有形象','旧备选'].includes(label))nodeText('p','production-meta','供本需求比较，尚未选用。',section);
       const clusters=new Map(),sharedRead=new Set();for(const row of group){const key=label==='沿用方案'?JSON.stringify(relationReadingSections(row)):row.id;if(!clusters.has(key))clusters.set(key,[]);clusters.get(key).push(row)}
       for(const cluster of clusters.values()){
       const shared=cluster.length>1,clusterHost=shared?el('section','shared-material-uses'):section;
@@ -152,7 +118,7 @@ async function renderMaterialRelations(host,materialId,selected=null,{comparison
         if(out&&row.upstream_matches===false)materialReferenceLink(line,p.upstream,'所引旧版：'+businessTitle(row.upstream_record)+' · 记录修订 '+row.upstream_record.version);
         if(out&&row.result){const button=productionButton(line,'查看此版原件候选',()=>openUnifiedMaterial(row.result,button));button.classList.add('material-reference')}
         if(!out&&image(row)){
-          const original=target,component=image(row);materialMedia(line,{record:original,component,components:original.payload.components});renderMaterialResultReview(line,original,{});
+          const original=target,component=image(row);materialMedia(line,{record:original,component,components:original.payload.components});
           const data=isEntityReview()?state.entityReview:state.materialReview;if(data){data.comment_records||=[];if(!data.comment_records.some(r=>r.id===original.id))data.comment_records.push(original);if(isEntityReview()){data.comment_targets||=[];if(!data.comment_targets.some(r=>r.revision_id===original.id))data.comment_targets.push(productionRef(original))}}
         }
 

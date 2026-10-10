@@ -21,7 +21,7 @@ def create(destination):
         f.change('generated', components=components)
         plan = p.record(f.store, 'need-full-overall')['payload']['generation']
         f.change('need-full-overall', generation={**plan, 'prompt': '新版方案尚未生成'})
-        for oid, title in [('zero', '隔离 · 零状态未采纳'), ('single', '隔离 · 单状态已采纳'),
+        for oid, title in [('zero', '隔离 · 零状态'), ('single', '隔离 · 单状态'),
                            ('other', '隔离 · 另一个关联实体')]:
             entity = f.entity(oid);entity['payload'].update(title=title, production_description='隔离完整描述')
             f.put(entity)
@@ -35,9 +35,6 @@ def create(destination):
                          label=label, direction=direction, category='use', basis='script',
                          sources=[f.source], applies_to=[f.source]))
         view = er.snapshot(f.store, 'single')
-        g.decide(f.store, {'entity_id':'single','action':'accept','expected_version':view['decision_version'],
-                          'scope':view['decision_scope'],'acceptance_mode':view['acceptance_mode'],
-                          'actor':'隔离技术验收','reason':'测试记录，不是作品采纳'})
         # Model an older stored original whose scheme/version was not registered.
         with f.store.db:
             f.store.db.execute("DELETE FROM material_plan_comments WHERE material_id='voice'")

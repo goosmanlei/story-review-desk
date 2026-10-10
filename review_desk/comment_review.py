@@ -7,6 +7,7 @@ import json
 
 from .store import Conflict, canonical, digest
 from .structure import revision_record, object_revisions, STRUCTURE_ID
+from .production import KINDS
 
 FORMAT = 'comment-handling-v1'
 
@@ -15,8 +16,8 @@ def exact_revision(store, object_id, revision_id):
     revision = revision_record(store, revision_id)
     obj = store.db.execute('SELECT kind FROM objects WHERE id=?', (object_id,)).fetchone()
     if not revision or revision['object_id'] != object_id or not obj or (
-            obj['kind'] != 'SOURCE' and object_id != STRUCTURE_ID):
-        raise ValueError('准确故事修订不存在或不匹配；未替换为最新稿')
+            obj['kind'] not in {'SOURCE', 'EPISODE', *KINDS} and object_id != STRUCTURE_ID):
+        raise ValueError('准确内容修订不存在或不匹配；未替换为最新稿')
     if obj['kind'] == 'SOURCE':
         source = store.source(object_id)
         if not source or revision['payload'].get('source_revision') != digest(canonical(source).encode()):
@@ -63,7 +64,7 @@ def import_evidence(store, documents, validate_only=False):
             if len(matches) != 1 or item.get('explanation', matches[0]['explanation']) != matches[0]['explanation']:
                 raise ValueError('补充定位不得改写既有结构回应')
         elif not all(isinstance(item.get(k), str) and item[k].strip() for k in ('decision', 'explanation')):
-            raise ValueError('资料作者处理须保存原决定和理由')
+            raise ValueError('作者处理须保存实际处理方式和理由')
         provenance = item.get('provenance', {})
         if not isinstance(provenance.get('file'), str) or not isinstance(provenance.get('sha256'), str) or len(provenance['sha256']) != 64:
             raise ValueError('author evidence provenance required')
@@ -153,4 +154,7 @@ def snapshot(store, object_id, revision_id):
 
 def content(store, object_id, revision_id):
     record = exact_revision(store, object_id, revision_id)
+    if record['kind'] in KINDS:
+        from .review_text import production_text_blocks
+        record['review_blocks'] = production_text_blocks(record['payload'])
     return {'record': record}

@@ -74,11 +74,17 @@ def missing_view(receipt, store=None):
     if store is not None and kind == 'STATE':
         row = store.db.execute("SELECT json_extract(r.payload,'$.entity.object_id') FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.id=?",(receipt['object_id'],)).fetchone()
         owner = row[0] if row else None
+    retired = kind in ('JUDGMENT', 'REPRESENTATION')
+    comments = []
+    if retired and store is not None:
+        for row in store.db.execute("SELECT DISTINCT comment_id FROM comment_events WHERE action='HISTORY_IMPORT' AND json_extract(body,'$.source_revision')=?", (receipt['revision_id'],)):
+            comments.append(store.comment(row[0]))
     return {'id': receipt['revision_id'], 'object_id': receipt['object_id'], 'kind': kind,
             'version': receipt['old_number'], 'current_revision': None, 'created_at': '',
+            'retired_review': retired, 'history_comments': comments,
             'owner_object_id': owner,
             'cleaned_target': True, 'unavailable': True, 'material_round_numbers': {},
-            'payload': {'format': 'version-deletion-receipt-v1', 'title': NOTICE,
+            'payload': {'format': 'version-deletion-receipt-v1', 'title': '此审批记录已退役；有实际内容的历史意见保存在原准确内容的评论中。' if retired else NOTICE,
                         'blocks': [], 'sources': [], 'entities': [], 'states': [], 'inputs': [],
                         'components': [], 'facts': [], 'choices': [], 'unknowns': [],
                         'status': 'unavailable', 'placeholder': True}}
@@ -137,9 +143,38 @@ def guard_write(store, object_id, payload):
         return
     if not store.db.execute('SELECT 1 FROM objects WHERE id=?', (object_id,)).fetchone() and store.db.execute('SELECT 1 FROM consolidation_revisions WHERE object_id=?', (object_id,)).fetchone():
         raise Conflict('deleted object identity cannot be recreated')
-    for _, ref in p.references(payload, include_unavailable=True):
+    for path, ref in p.references(payload, include_unavailable=True):
         if ref.get('unavailable') or deleted(store, ref['revision_id']):
+            if retained_call_reference(store, object_id, path, ref):
+                continue
             raise Conflict(NOTICE)
+
+
+def retained_call_reference(store, object_id, path, ref):
+    """Only an unchanged retired approval reference in a real old CALL survives.
+
+    validate_call independently checks all frozen execution fields. This is not
+    permission for a new call to consume a deleted record.
+    """
+    receipt = deleted(store, ref.get('revision_id'))
+    if not receipt or receipt['kind'] not in ('JUDGMENT', 'REPRESENTATION') or receipt['object_id'] != ref.get('object_id'):
+        return False
+    row = store.db.execute("SELECT r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.id=? AND o.kind='CALL'", (object_id,)).fetchone()
+    if not row or not store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown')", (object_id,)).fetchone():
+        return False
+    return dict(p.references(json.loads(row[0]), include_unavailable=True)).get(path) == ref
+
+
+def preserve_call_references(store, object_id, revision_id, version, payload):
+    refs = [(path,ref) for path,ref in p.references(payload) if retained_call_reference(store, object_id, path, ref)]
+    if not refs:
+        return
+    plan_id = deleted(store, refs[0][1]['revision_id'])['plan_id']
+    raw = canonical(payload)
+    store.db.execute('INSERT INTO consolidation_revisions VALUES (?,?,?,?,?,?,?,?)',
+        (revision_id,object_id,'CALL',version,version,digest(raw.encode()),row_hash(object_id,version,payload),plan_id))
+    store.db.executemany('INSERT INTO consolidation_missing VALUES (?,?,?,?)',
+        [(revision_id,path,ref['object_id'],ref['revision_id']) for path,ref in refs])
 
 
 def dump(store):

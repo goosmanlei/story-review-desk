@@ -7,7 +7,7 @@ from pathlib import Path
 from review_desk.bundle import export, restore
 from review_desk.store import Conflict, Store
 from review_desk.structure import (
-    confirm_structure, import_structure, review_context, script_input,
+    import_structure, review_context, script_input,
     select_direction, snapshot,
 )
 from review_desk.polish import build_context
@@ -84,21 +84,14 @@ class StructureTest(unittest.TestCase):
         self.assertEqual(self.store.comment(text["id"])["status"], "OPEN")
         self.assertEqual(self.store.comment(text["id"])["target_revision_id"], first["revision"])
         self.assertEqual(len(snapshot(self.store)["revisions"]), 2)
-        confirmed = confirm_structure(self.store, second["revision"], "隔离测试者", "仅验证交接")
-        handoff = script_input(self.store)
+        handoff = script_input(self.store, second["revision"])
         self.assertEqual(handoff["structure"]["id"], second["revision"])
-        self.assertEqual(len(handoff["pending_at_confirmation"]), 3)
-        self.assertFalse(handoff["requires_re_review"])
-        self.assertEqual(confirmed["kind"], "JUDGMENT")
         self.store.create_comment({"target_object_id": "story-structure", "target_revision_id": second["revision"],
                                    "anchor": {"type": "global"}, "body": "确认后新提出的整体问题"})
-        self.assertTrue(script_input(self.store)["requires_re_review"])
-        self.assertEqual(len(script_input(self.store)["post_confirmation_pending"]), 1)
         changed = select_direction(self.store, "direction-b", 1)
         self.assertTrue(snapshot(self.store)["direction_changed"])
         self.assertEqual(snapshot(self.store)["selection_history"][0]["payload"]["source_id"], "direction-a")
         self.assertEqual(snapshot(self.store)["revisions"][-1]["payload"]["direction_selection_revision"], selected["revision"])
-        self.assertTrue(script_input(self.store)["requires_re_review"])
         with self.assertRaises(Conflict):
             import_structure(self.store, document(selected["revision"], second["revision"]), 2)
         self.assertEqual(changed["version"], 2)
@@ -117,7 +110,7 @@ class StructureTest(unittest.TestCase):
             restore(restored, restored_export)
             self.assertEqual(len(restored.comments()), 4)
             self.assertEqual(len(restored.events()), 7)
-            self.assertEqual(script_input(restored)["structure"]["id"], second["revision"])
+            self.assertEqual(script_input(restored, second["revision"])["structure"]["id"], second["revision"])
             self.assertEqual(export(restored, restored_export)["files"], manifest["files"])
         finally:
             restored.close()
@@ -132,8 +125,8 @@ class StructureTest(unittest.TestCase):
             self.store.create_comment({"target_object_id": "story-structure", "target_revision_id": first["revision"],
                                        "anchor": {"type": "region", "visual_id": "relation-graph", "asset_file": "relation.svg",
                                                   "points": [{"x": .2, "y": .2}, {"x": .2, "y": .2}, {"x": .2, "y": .2}]}, "body": "空区域"})
-        with self.assertRaises(Conflict):
-            confirm_structure(self.store, "wrong", "测试")
+        with self.assertRaises(ValueError):
+            script_input(self.store, "wrong")
 
     def test_source_image_and_explicit_broken_reference(self):
         seed_methods(self.store)

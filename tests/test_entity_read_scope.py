@@ -22,7 +22,6 @@ class EntityReadScopeTest(unittest.TestCase):
     adopt=fixtures.GenerationTest.adopt
     change=fixtures.GenerationTest.change
     setup_plans=fixtures.GenerationTest.setup_plans
-    decide=fixtures.GenerationTest.decide
 
     def read(self, revision=None):
         value=er.snapshot(self.store,'songbook',revision)
@@ -31,7 +30,7 @@ class EntityReadScopeTest(unittest.TestCase):
         return value
 
     def test_entity_state_plan_asset_relation_comment_decision_import_and_history_are_fresh(self):
-        self.setup_plans();self.decide();accepted=g.decision(self.store,'songbook');before=self.read()
+        self.setup_plans();before=self.read()
         self.change('songbook',facts=['外部确认的新事实'])
         self.assertEqual(self.read()['entity']['payload']['facts'],['外部确认的新事实'])
         self.change('full',production_description='修改后的完整状态')
@@ -54,10 +53,9 @@ class EntityReadScopeTest(unittest.TestCase):
         self.assertIn(comment['target_revision_id'],{r['id'] for r in self.read()['comment_records']})
         self.store.change_comment(comment['id'],'CLOSE',1)
         self.read();self.assertEqual(self.store.comment(comment['id'])['status'],'CLOSED')
-        self.decide('revoke');self.assertEqual(self.read()['decision_version'],2)
         new=self.full('imported',production_description='导入的新状态');self.put(new)
         self.assertIn('imported',{r['object_id'] for r in self.read()['states']})
-        historical=self.read(accepted['id']);self.assertEqual(historical['scope'],before['scope'])
+        historical=self.read(before['entity']['id'])
         self.assertEqual(historical['entity']['id'],before['entity']['id'])
         export(self.store,self.root/'export');dest=self.root/'empty';shutil.copytree(self.root/'export',dest/'export')
         other=Store(dest/'.runtime/review.sqlite3')

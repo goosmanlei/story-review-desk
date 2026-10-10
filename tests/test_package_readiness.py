@@ -83,7 +83,7 @@ class PackageReadinessTest(unittest.TestCase):
         manifest = p.package_manifest(self.store, 'songbook')
         self.assertIn(optional['file'], manifest['files'])
         self.assertEqual(manifest['readiness'], ready)
-        self.assertEqual(manifest['readiness']['creative_acceptance'], [])
+        self.assertNotIn('creative_acceptance', manifest['readiness'])
 
     def test_missing_and_same_size_corrupt_optional_block_package_without_recounting_or_history_changes(self):
         self.required();optional = self.optional()

@@ -25,13 +25,13 @@ async function render(changes={}){
 
 test('missing required input keeps the original disabled button and required summary',async()=>{
   const f=await render({inputs_ready:false,package_available:false,missing_count:1,requirements:[row('required',true,['missing_adoption'],false)]});
-  assert.equal(f.button.disabled,true);assert.match(f.text(),/必要输入：1 项，缺项或待复核 1 项/);assert.doesNotMatch(f.text(),/暂不能下载完整清单/);
+  assert.equal(f.button.disabled,true);assert.match(f.text(),/必要输入：1 项，缺项 1 项/);assert.doesNotMatch(f.text(),/暂不能下载完整清单/);
 });
 
 test('unselected optional input and optional quality warnings stay downloadable',async()=>{
   for(const optional of [row('optional',false,['missing_adoption'],false),row('optional',false,['below_minimum_sample_rate'])]){
     const f=await render({requirements:[row('required'),optional]});
-    assert.equal(f.button.disabled,false);assert.match(f.text(),/必要输入齐备；作品是否接受单独记录/);
+    assert.equal(f.button.disabled,false);assert.match(f.text(),/必要输入齐备/);
     assert.match(f.text(),optional.adoption?/采样率不足/:/尚未采用/);assert.doesNotMatch(f.text(),/暂不能下载完整清单/);
   }
 });
@@ -39,7 +39,7 @@ test('unselected optional input and optional quality warnings stay downloadable'
 test('broken optional original disables only download and gives one precise reason',async()=>{
   const reason='missing media or byte size mismatch';
   const f=await render({package_available:false,package_issue:{object_id:'optional-asset',revision_id:'optional-asset-revision',title:'可选录音',component_id:'original',file:'exact.wav',reason},requirements:[row('required'),row('optional',false,[reason])]});
-  assert.equal(f.button.disabled,true);assert.match(f.text(),/必要输入：1 项，缺项或待复核 0 项/);assert.match(f.text(),/必要输入齐备/);
+  assert.equal(f.button.disabled,true);assert.match(f.text(),/必要输入：1 项，缺项 0 项/);assert.match(f.text(),/必要输入齐备/);
   assert.equal(f.root.all().filter(node=>(node.textContent||'').includes('文件缺失或大小不符')).length,1);
   assert.match(f.text(),/暂不能下载完整清单：「可选录音」的 original 组成：文件缺失或大小不符/);assert.doesNotMatch(f.text(),/missing media or byte size mismatch/);
   assert.equal(f.root.all().filter(node=>node.tag==='button'&&(node.textContent||'').startsWith('下载')).length,1);

@@ -22,76 +22,14 @@ class MaterialRelationshipsTest(unittest.TestCase):
     adopt=fixtures.GenerationTest.adopt
     change=fixtures.GenerationTest.change
     setup_plans=fixtures.GenerationTest.setup_plans
-    decide=fixtures.GenerationTest.decide
 
     def relationship(self):
         self.put(self.entity('owner'))
         return self.spec('belongs','RELATION',relation_type='entity',entities=[self.ref('owner'),self.ref('songbook')],
             label='使用歌本',direction='forward',category='use',basis='script',sources=[self.source],applies_to=[self.source])
 
-    def test_legacy_acceptance_can_be_cancelled_without_a_complete_plan_and_never_reappears(self):
-        self.put(self.entity());self.put(self.full())
-        scope=er.current_scope(self.store,'songbook')
-        self.put(self.spec('old-yes','JUDGMENT',acceptance_model=er.ACCEPTANCE_MODEL,acceptance_scope=scope,
-                           target=scope['entity'],verdict='accepted',actor='用户',reason='旧版认可'))
-        before=er.snapshot(self.store,'songbook');old=p.record(self.store,'old-yes')
-        self.assertTrue(before['can_revoke']);self.assertFalse(before['can_accept']);self.assertIsNone(before['accepted'])
-        request={'entity_id':'songbook','action':'revoke','decision_ref':self.ref('old-yes'),'expected_version':0,'actor':'用户','reason':'取消旧认可'}
-        g.decide(self.store,request)
-        self.assertEqual(p.record(self.store,'old-yes'),old)
-        after=er.snapshot(self.store,'songbook');self.assertFalse(after['can_revoke']);self.assertEqual(len(after['history']),2)
-        with self.assertRaises(Conflict):g.decide(self.store,request)
-        cancelled=g.decision(self.store,'songbook');self.assertFalse(er.snapshot(self.store,'songbook',cancelled['id'])['can_accept'])
-        export(self.store,self.root/'export');dest=self.root/'restored';shutil.copytree(self.root/'export',dest/'export')
-        recovered=Store(dest/'.runtime/review.sqlite3')
-        try:
-            restore(recovered,dest/'export');self.assertEqual(er.snapshot(recovered,'songbook'),after)
-        finally:recovered.close()
 
-    def test_legacy_content_cycle_has_no_generation_permission_and_rejects_changed_scope(self):
-        self.put(self.entity());self.put(self.full())
-        scope=er.current_scope(self.store,'songbook')
-        self.put(self.spec('old-yes','JUDGMENT',acceptance_model=er.ACCEPTANCE_MODEL,
-            acceptance_scope=scope,target=scope['entity'],verdict='accepted',actor='用户',reason='旧认可'))
-        original=p.record(self.store,'old-yes')
-        for action in ('revoke','accept','revoke','accept'):
-            view=er.snapshot(self.store,'songbook')
-            request={'entity_id':'songbook','action':action,'decision_ref':view['revoke_target'],
-                'expected_version':view['decision_version'],'scope':view['decision_scope'],
-                'acceptance_mode':view['acceptance_mode'],'actor':'测试','reason':'兼容循环'}
-            self.assertTrue(view['can_revoke'] if action=='revoke' else view['can_accept'])
-            g.decide(self.store,request)
-            with self.assertRaises(Conflict):g.decide(self.store,request)
-            self.assertIsNone(g.accepted(self.store,'songbook'))
-        self.assertEqual(p.record(self.store,'old-yes'),original)
-        current=g.decision(self.store,'songbook')
-        self.assertEqual(current['payload']['acceptance_model'],g.CONTENT_MODEL)
-        self.assertFalse(er.snapshot(self.store,'songbook',current['id'])['can_revoke'])
-        g.decide(self.store,{'entity_id':'songbook','action':'revoke','decision_ref':g.ref(current),'expected_version':current['version'],'actor':'测试','reason':'取消内容认可'});view=er.snapshot(self.store,'songbook')
-        self.change('full',production_description='改过的完整描述')
-        self.assertTrue(er.snapshot(self.store,'songbook')['can_accept'])
-        with self.assertRaises(Conflict):
-            g.decide(self.store,{'entity_id':'songbook','action':'accept','expected_version':view['decision_version'],
-                'scope':view['decision_scope'],'acceptance_mode':'content','actor':'测试','reason':'过期内容'})
-        export(self.store,self.root/'export');dest=self.root/'content-restored'
-        shutil.copytree(self.root/'export',dest/'export');restored=Store(dest/'.runtime/review.sqlite3')
-        try:
-            restore(restored,dest/'export')
-            self.assertEqual(g.decision(restored,'songbook'),g.decision(self.store,'songbook'))
-            self.assertIsNone(g.accepted(restored,'songbook'))
-        finally:restored.close()
 
-    def test_changed_relationship_invalidates_generation_but_keeps_cancel_and_media_adoption(self):
-        self.setup_plans();self.put(self.relationship());self.decide();old=g.decision(self.store,'songbook')
-        self.assertEqual(er.snapshot(self.store,'owner')['relationships'][0]['object_id'],'belongs')
-        self.media();self.associate();self.adopt()
-        self.assertTrue(p.readiness(self.store,'full')['requirements'][0]['adoption'])
-        self.change('belongs',label='保管歌本')
-        self.assertIsNone(g.accepted(self.store,'songbook'));self.assertTrue(er.snapshot(self.store,'songbook')['can_revoke'])
-        self.assertEqual(er.snapshot(self.store,'songbook',old['id'])['relationships'][0]['payload']['label'],'使用歌本')
-        self.decide('revoke');self.assertFalse(er.snapshot(self.store,'songbook')['can_revoke'])
-        self.decide();self.assertTrue(g.accepted(self.store,'songbook'))
-        self.change('belongs',status='withdrawn');self.assertIsNone(g.accepted(self.store,'songbook'))
 
     def test_media_keeps_its_requirement_round_when_the_plan_is_no_longer_in_current_preparation(self):
         self.setup_plans();self.media();self.associate('detail')
@@ -129,10 +67,10 @@ class MaterialRelationshipsTest(unittest.TestCase):
     def test_material_provenance_stays_on_exact_call_and_fields_are_commentable(self):
         self.setup_plans();plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan.pop('tool')
         plan['parameters']={'prompt':plan['prompt'],'pitch':1.0,'epsilon':1e-7,'nested':{'中文':'原参数'}}
-        self.change('need-full-overall',generation=plan);self.decide();manifest=g.package(self.store,'need-full-overall')
+        self.change('need-full-overall',generation=plan);manifest=g.package(self.store,'need-full-overall')
         self.assertNotIn('tool',manifest)
         call=self.spec('actual','CALL',method='generation',tool='external-cli',status='submitted',inputs=[],outputs=[],
-                       generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
+                       generation_requirement=manifest['requirement'], 
                        **{k:manifest[k] for k in ('model','parameters','prompt')})
         self.put(call);original=self.ref('actual');component=self.media()
         saved=p.record(self.store,'actual');parameters=next(b for b in production_text_blocks(saved['payload']) if b.get('field')=='call.parameters')

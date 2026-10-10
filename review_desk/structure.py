@@ -110,59 +110,31 @@ def import_structure(store, document, expected_version):
     return store.put_object(STRUCTURE_ID, "STORY", value, expected_version, deps)
 
 
-def confirm_structure(store, revision_id, reviewer, note=""):
-    current = object_record(store, STRUCTURE_ID)
-    if not current or current["current_revision"] != revision_id:
-        raise Conflict("only the current structure revision can be confirmed")
-    revision = revision_record(store, revision_id)
-    selection = object_record(store, SELECTION_ID)
-    if not selection or selection["current_revision"] != revision["payload"]["direction_selection_revision"]:
-        raise Conflict("direction selection changed; re-review before confirming")
-    if not isinstance(reviewer, str) or not reviewer.strip():
-        raise ValueError("reviewer name required")
-    pending = [c for c in store.comments() if c["target_object_id"] == STRUCTURE_ID and c["status"] == "OPEN"]
-    record_id = "structure-confirmation-" + str(uuid.uuid4())
-    payload = {"structure_revision": revision_id, "direction_selection_revision": selection["current_revision"],
-               "reviewer": reviewer.strip(), "note": str(note or "").strip(), "confirmed_at": now(),
-               "pending_comment_ids": [c["id"] for c in pending], "pending_comments": pending}
-    return store.put_object(record_id, "JUDGMENT", payload, 0,
-                            [{"revision_id": revision_id, "role": "CONFIRMS_STRUCTURE"},
-                             {"revision_id": selection["current_revision"], "role": "CONFIRMS_DIRECTION_BASIS"}])
-
-
 def snapshot(store):
     selection = object_record(store, SELECTION_ID)
     selected = revision_record(store, selection["current_revision"]) if selection else None
     structure = object_record(store, STRUCTURE_ID)
     revisions = object_revisions(store, STRUCTURE_ID)
     source = store.source(selected["payload"]["source_id"]) if selected else None
-    confirmations = [revision_record(store, row[0]) for row in store.db.execute(
-        "SELECT current_revision FROM objects WHERE kind='JUDGMENT' AND id LIKE 'structure-confirmation-%' ORDER BY created_at")]
     active = revisions[-1] if revisions else None
     stale = bool(active and selected and active["payload"]["direction_selection_revision"] != selected["id"])
     return {"selection": selected, "selection_history": object_revisions(store, SELECTION_ID),
             "direction_source": source, "revisions": revisions,
             "current_revision": structure["current_revision"] if structure else None,
-            "direction_changed": stale, "confirmations": confirmations}
+            "direction_changed": stale}
 
 
-def script_input(store):
-    data = snapshot(store)
-    if not data["confirmations"]:
-        raise ValueError("no confirmed structure version")
-    confirmation = data["confirmations"][-1]
-    revision_id = confirmation["payload"]["structure_revision"]
+def script_input(store, revision_id):
+    """Read an explicitly selected, immutable structure as a writing input."""
     revision = revision_record(store, revision_id)
-    selection = revision_record(store, confirmation["payload"]["direction_selection_revision"])
-    source = store.source(selection["payload"]["source_id"])
-    pending = confirmation["payload"].get("pending_comments") or [store.comment(cid) for cid in confirmation["payload"]["pending_comment_ids"]]
-    frozen = {comment["id"]: comment for comment in pending}
-    post_confirmation = [comment for comment in store.comments() if comment["target_object_id"] == STRUCTURE_ID and comment["status"] == "OPEN" and
-                         (comment["id"] not in frozen or comment["body"] != frozen[comment["id"]]["body"])]
-    return {"confirmation": confirmation, "structure": revision, "direction_selection": selection,
-            "direction_source": source, "pending_at_confirmation": pending,
-            "post_confirmation_pending": post_confirmation,
-            "requires_re_review": data["current_revision"] != revision_id or data["direction_changed"] or bool(post_confirmation)}
+    if not revision or revision['object_id'] != STRUCTURE_ID:
+        raise ValueError('需要准确的故事结构修订；不自动选择最新稿')
+    selection = revision_record(store, revision['payload']['direction_selection_revision'])
+    if not selection or selection['object_id'] != SELECTION_ID:
+        raise ValueError('结构的准确方向依据不存在')
+    source = store.source(selection['payload']['source_id'])
+    return {'structure': revision, 'direction_selection': selection, 'direction_source': source,
+            'comments': store.comments(target_object_id=STRUCTURE_ID, target_revision_id=revision_id)}
 
 
 def review_context(store):

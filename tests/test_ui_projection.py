@@ -19,7 +19,6 @@ class UiProjectionTest(unittest.TestCase):
     media = fixtures.PlanVersionsTest.media
     change = fixtures.PlanVersionsTest.change
     setup_plans = fixtures.PlanVersionsTest.setup_plans
-    decide = fixtures.PlanVersionsTest.decide
     generate = fixtures.PlanVersionsTest.generate
 
     def summary(self):
@@ -37,21 +36,6 @@ class UiProjectionTest(unittest.TestCase):
         self.assertEqual(sum(i['object_id'] == 'need-full-overall' for i in entries), 1)
         self.assertTrue(next(i for i in entries if i['object_id'] == 'need-full-overall')['generated'])
 
-    def test_current_acceptance_filter_tracks_content_changes_and_cancellation(self):
-        self.setup_plans()
-        self.assertEqual(self.summary()['entity_statuses']['songbook'], 'unaccepted')
-        self.decide()
-        self.assertEqual(self.summary()['entity_statuses']['songbook'], 'accepted')
-        self.change('songbook', production_description='当前基础描述已改变')
-        view = g.snapshot(self.store, 'songbook')
-        self.assertTrue(view['can_revoke'])
-        self.assertEqual(view['status'], 'unaccepted')
-        self.assertEqual(self.summary()['entity_statuses']['songbook'], 'unaccepted')
-        request = {'entity_id': 'songbook', 'action': 'revoke', 'decision_ref': view['revoke_target'],
-                   'expected_version': view['decision_version'], 'scope': view['decision_scope'],
-                   'acceptance_mode': view['acceptance_mode'], 'actor': 'fixture', 'reason': 'fixture only'}
-        g.decide(self.store, request)
-        self.assertEqual(self.summary()['entity_statuses']['songbook'], 'unaccepted')
 
     def test_facets_keep_other_filters_and_categories_remain_present_at_zero_results(self):
         self.setup_plans(); self.generate()

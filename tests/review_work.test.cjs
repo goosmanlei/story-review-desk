@@ -13,13 +13,6 @@ test('a child card inherits the original work; clearing work for a whole permiss
  c.state.reviewWork=null;c.location.href='http://fixture/?production_scope_episode=old&production_scope_revision=old-revision';assert.equal(c.currentReviewWork(),null);
 });
 
-test('work comparison cannot grant a plan until the full exact plan is explicitly opened',async()=>{
- const c=fixture(),opened=[];vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
- c.state.reviewWork={reference:{object_id:'work',revision_id:'exact'}};c.productionRef=row=>({object_id:row.object_id,revision_id:row.id});
- c.productionButton=(_host,label,click)=>({label,click});c.openUnifiedMaterial=ref=>opened.push(ref);c.api=()=>assert.fail('comparison must not request or save acceptance');
- let button;c.productionButton=(_host,label,click)=>(button={label,click});
- await c.renderProductionAcceptance({}, {kind:'REQUIREMENT',object_id:'plan',id:'old-plan'});assert.match(button.label,/生成许可/);button.click();assert.equal(opened[0].revision_id,'old-plan');assert.equal(opened[0].work,null);
-});
 
 test('shared exact input shows common identity once and preserves distinct stage requirements',()=>{
  const c=fixture(),lines=[];vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);

@@ -21,13 +21,12 @@ def create(destination):
         f.change('songbook',title='隔离测试 · 多状态未采纳')
         f.put(f.entity('zero'))
         f.change('zero',title='隔离测试 · 无完整状态',sources=[])
-        for oid,title in [('single','隔离测试 · 单状态已采纳'),('stale','隔离测试 · 需重新采纳')]:
+        for oid,title in [('single','隔离测试 · 单状态'),('stale','隔离测试 · 需重新采纳')]:
             entity=f.entity(oid);entity['payload'].update(title=title,production_description='隔离构造的基础描述');f.put(entity)
             form=f.full(oid+'-full',production_description='隔离完整状态');form['payload']['entity']=f.ref(oid);f.put(form)
             need=f.need(oid+'-full');need['payload']['entities']=[f.ref(oid)]
             need['payload']['generation']=copy.deepcopy(p.record(f.store,'need-full-overall')['payload']['generation']);f.put(need)
             view=er.snapshot(f.store,oid)
-            g.decide(f.store,{'entity_id':oid,'action':'accept','expected_version':view['decision_version'],'scope':view['scope'],'actor':'隔离技术验收','reason':'测试记录，不是作品采纳'})
         f.change('stale',production_description='隔离构造的基础描述已变化')
         f.change('need-full-overall',generation={**p.record(f.store,'need-full-overall')['payload']['generation'],'prompt':'隔离新版未生成'})
         f.store.put_object('fixture-story','STORY',{'title':'隔离测试剧本','blocks':[]})

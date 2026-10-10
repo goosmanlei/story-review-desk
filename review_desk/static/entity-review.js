@@ -1,13 +1,4 @@
-// Only successful entity decisions invalidate in-flight entity detail reads.
-const entityDecisionReads=new Map();
-async function readEntityDecisionView(url){
-  for(let attempt=0;attempt<2;attempt++){
-    const started=new Map(entityDecisionReads),result=await api(url),owner=(result.entity_review||result).entity?.object_id;
-    if(!owner||(started.get(owner)||0)===(entityDecisionReads.get(owner)||0))return result;
-  }
-  throw Error('实体决定在读取期间已更新，请重新打开核对当前状态。');
-}
-/* The settings workspace is a review surface. Content changes use the shared tools. */
+// Entity detail and exact material members share the production review surface.
 const isEntityReview=()=>isProduction()&&!!state.entityReview;
 const entityReviewDetail=record=>({record,history:[record],uses:[]});
 const entityReviewRows=data=>[data.entity,...data.states,...(data.requirements||[]),...(data.relationships||[]),...data.media.map(m=>m.record),...(data.comment_records||[])];
@@ -101,8 +92,9 @@ function restoreEntityMaterialRoute(data,route){
 async function openEntityReview(owner,detail,epoch,exactRevision,view=null){
   const workspace=state.workspace,cardRoot=state.unifiedCardRoot||null,url=new URL(location.href),same=state.productionEntityId===owner||url.searchParams.get('production_entity')===owner||!url.searchParams.has('production_entity')&&url.searchParams.get('production_object')===owner;
   const reviewRevision=same?url.searchParams.get('entity_acceptance'):null;
+  if(reviewRevision)throw new Error('旧审批记录已退役；此链接不自动跳到当前设计。请沿原意见查看准确内容。');
   const query=new URLSearchParams({entity_id:owner,...(reviewRevision?{revision_id:reviewRevision}:{})});
-  const data=await readEntityDecisionView('/api/production/entity-review?'+query);
+  const data=await api('/api/production/entity-review?'+query);
   data.planMaterialVersions=data.material_versions;
   if(epoch!==productionReadEpoch||(state.unifiedCardRoot||null)!==cardRoot||!isProduction()||state.workspace!==workspace||workspace==='settings.workspace'&&!state.unifiedCardRoot&&state.productionVisibleEntities&&!state.productionVisibleEntities.has(owner)&&!(exactRevision&&data.entity.payload.status==='withdrawn'))return;
   const retained=view?.();
@@ -115,8 +107,7 @@ async function openEntityReview(owner,detail,epoch,exactRevision,view=null){
   state.entityReview=data;state.productionEntityId=owner;
   state.productionEntityDetail=entityReviewDetail(data.historicalTarget?.kind==='ENTITY'?data.historicalTarget:data.entity);
   state.productionChildDetail=form?entityReviewDetail(form):null;state.entityReviewMedia=null;state.entityReviewUnassignedMedia=null;
-  // Current browsing follows live content; only a deliberate historical link
-  // keeps an acceptance revision. Legacy workflow URLs return to the entity.
+  // Keep the deliberately selected entity/state revision.
   url.searchParams.delete('entity_submission');
   if(!reviewRevision)url.searchParams.delete('entity_acceptance');
   url.searchParams.set('production_entity',owner);if(form)url.searchParams.set('entity_state',form.object_id);history.replaceState(history.state,'',url);
@@ -228,7 +219,7 @@ function entityReviewHasHistoricalContent(data,entity,form){
     Object.values(data.localVersions||{}).some(row=>['ENTITY','STATE'].includes(row.kind)&&row.id!==row.current_revision);
 }
 function entityReviewWithdrawals(data,entity,form){
-  // A historical acceptance contains its old scope, not today's entity payload.
+  // Historical entity revisions keep their own withdrawn status.
   const current=!data.historical&&data.entity.payload.status==='withdrawn'?data.entity:null;
   const withdrawn=current||(entity.payload.status==='withdrawn'?entity:null),rows=[];
   if(withdrawn)rows.push({record:withdrawn,label:current&&entity.id!==current.id?'此实体当前已撤回':withdrawn.id===withdrawn.current_revision?'此实体已撤回':'此实体版本已撤回'});
@@ -256,43 +247,8 @@ function renderEntityReview(root){
   if(data.retained_states?.length){data.currentStates||=data.states;data.states=[...new Map([...data.states,...data.retained_states].map(row=>[row.id,row])).values()];data.states.sort(productionStateOrder)}
   const viewingHistory=entityReviewHasHistoricalContent(data,entity,form),withdrawals=entityReviewWithdrawals(data,entity,form),withdrawnEntity=withdrawals.some(item=>item.record.kind==='ENTITY');
   const header=el('header','entity-review-header'),identity=el('div'),badge=el('small','production-pill production-entity-badge');badge.dataset.entityType=entity.payload.entity_type;badge.append(productionEntityIcon(entity.payload.entity_type));nodeText('span',null,productionLabels[entity.payload.entity_type],badge);const title=nodeText('h2','entity-card-title',businessTitle(entity),identity);title.append(badge);header.append(identity);
-  const actions=el('div','production-toolbar');
   if(state.reviewWork)nodeText('p','production-meta','用于当前作品：'+reviewPositionText(state.reviewWork.title),identity);
-  let saveNotice;const showSaveNotice=message=>{if(!saveNotice){saveNotice=nodeText('p','production-issue',message,actions);saveNotice.setAttribute('role','status')}else saveNotice.textContent=message};
-  if(data.decisionSave?.message)showSaveNotice(data.decisionSave.message);
-  const accept=productionButton(actions,data.can_revoke?'取消认可':data.acceptance_mode==='content'?'认可设计内容':'认可设计及制作许可',async()=>{
-    if(data.decisionSave||!isEntityReview()||state.entityReview!==data||entityReviewHasHistoricalContent(data,state.productionEntityDetail.record,state.productionChildDetail?.record)||entityReviewWithdrawals(data,state.productionEntityDetail.record,state.productionChildDetail?.record).length)return;
-    accept.disabled=true;const action=data.can_revoke?'revoke':'accept',reason=action==='accept'?(data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳此实体的基础信息、关系、全部实体状态和素材生成方案，允许推进素材生成。'):'取消当前采纳，保留历史制作与意见。';
-    const refreshIndex=state.refreshEntityIndex;
-    const epoch=productionReadEpoch,owns=()=>isEntityReview()&&state.entityReview===data&&productionReadEpoch===epoch&&accept.isConnected;
-    const label=action==='accept'?'采纳':'取消采纳',savedMessage=`「${data.entity.payload.title}」的${label}已保存`;
-    data.decisionSave={message:''};
-    try{await api('/api/production/entity-decision',{method:'POST',body:JSON.stringify({entity_id:data.entity.object_id,action,decision_ref:data.revoke_target,expected_version:data.decision_version,scope:data.decision_scope||data.scope,acceptance_mode:data.acceptance_mode,actor:'用户',reason})})}
-    catch(error){
-      const outcome=error.status===409?'版本已变化，本次未保存':error.status>=400&&error.status<500?'本次未保存':'结果待确认';
-      data.decisionSave.message=`${label}${outcome}：${error.message}。请重新打开此实体核对后再操作。`;
-      if(owns()){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}return;
-    }
-    entityDecisionReads.set(data.entity.object_id,(entityDecisionReads.get(data.entity.object_id)||0)+1);
-    data.decisionSave.message=savedMessage+'；请重新打开此实体核对当前状态。';toast(savedMessage);
-    // Saving belongs to the submitted entity; its list outlives this detail.
-    // Capture that list, never a replacement page's callback after the POST.
-    const indexRefresh=refreshIndex?.(savedMessage);
-    if(!owns()){await indexRefresh;return}
-    const refresh=reloadEntityReview(),refreshEpoch=productionReadEpoch;
-    try{await refresh}
-    catch(error){data.decisionSave.message=savedMessage+`；当前显示尚未更新：${error.message}。请重新打开此实体核对。`;if(isEntityReview()&&state.entityReview===data&&productionReadEpoch===refreshEpoch&&accept.isConnected){showSaveNotice(data.decisionSave.message);toast(data.decisionSave.message)}}
-    await indexRefresh;
-  });accept.classList.add('entity-review-accept');accept.title=withdrawals.length?withdrawals[0].label+'；保留历史内容与评论，不对此版本采纳或取消。':viewingHistory?'正在查看历史内容，不能执行采纳或取消；请查看当前状态。':data.acceptance_mode==='content'?'采纳当前基础信息、关系、实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需完善并认可方案。':'采纳基础信息、关系、全部实体状态及状态素材方案；实体自身的素材需求独立审阅。生成前仍需核对准确认可。';accept.disabled=!!data.decisionSave||(!data.can_accept&&!data.can_revoke)||viewingHistory||!!withdrawals.length;
-  const scopeInfo=el('section','entity-decision-scope');
-  nodeText('p',null,'覆盖下列准确基础信息、直接关系、全部实体状态及状态素材方案；实体自身需求独立审阅。状态方案可单独采纳，也可使用有效的整体生成许可。两条路径择一，原件选择与生成前检查仍须满足。',scopeInfo);
-  renderDecisionScope(scopeInfo,data.decision_scope||data.scope,data.decision_scope_records||[]);
-  nodeText('p','production-meta',data.acceptance_mode==='content'?'本次仅认可内容；完整生成方案仍需完善后重新认可。':'本次包含完整方案许可；采纳不调用模型，结果及采用分别决定。',scopeInfo);
-  if(data.decision){nodeText('p',null,'最新整体决定：'+reviewDecisionLabel(data.decision)+' · '+data.decision.payload.actor+' · '+reviewDecisionTime(data.decision.created_at),scopeInfo);nodeText('p',null,data.decision.payload.reason,scopeInfo)}
-  renderDecisionHistory(scopeInfo,data.history||[]);
-  actions.append(scopeInfo);
   identity.classList.add('entity-review-identity');entityVersionControl(identity,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});root.append(header);renderEntityWithdrawals(root,withdrawals);
-  if(data.historicalTarget?.kind==='REPRESENTATION'){const old=el('section');nodeText('h3',null,'历史关联说明',old);reviewTextBlocks(old,data.historicalTarget);root.append(old)}
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);basics.append(basicHeading);
   if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
   const ownNeeds=(data.requirements||[]).filter(r=>r.payload.scope?.object_id===entity.object_id&&r.payload.scope.revision_id===entity.id);
@@ -329,19 +285,8 @@ function renderEntityReview(root){
   }
   if(entity.payload.lyrics?.length){const lyrics=el('section','entity-review-lyrics');nodeText('h3',null,'歌词原文与段落',lyrics);for(const lyric of entity.payload.lyrics){nodeText('h4',null,lyric.section,lyrics);nodeText('p',null,lyric.text,lyrics);productionRefLink(lyrics,lyric.source,'查看歌词依据')}root.append(lyrics)}
   renderEntityRelations(root,data);
-  const decisions=el('section','entity-review-decisions');
-  if(state.reviewWork){
-    const decide=productionButton(decisions,'决定整体设计与生成许可',()=>openUnifiedMaterial({...productionRef(data.entity),work:null,permission:true},decide));
-  }else{
-    nodeText('h3',null,'设计认可',decisions);
-    if(state.reviewPermission){
-      nodeText('p',null,'以下是本次整体决定覆盖的完整准确内容。原件判断不转授到这些方案，保存许可也不会发起生成。',decisions);
-      for(const reference of data.decision_scope_records||[]){const row=entityReviewRows(data).find(r=>r.object_id===reference.object_id&&r.id===reference.id),section=el('section');nodeText('h4',null,(row?businessTitle(row):reference.title)+' · 记录修订 '+reference.version,section);if(row)renderOriginalReviewText(section,row);else{nodeText('p','production-issue','此准确内容尚未载入，不能保存整体决定。',section);accept.disabled=true}decisions.append(section)}
-    }
-    decisions.append(actions);
-  }
-  root.append(decisions);
 }
+
 function renderMaterialPlaceholder(parent,need){
   const p=need.payload,type=p.media_type,box=el('div',type==='audio'?'entity-review-missing-audio':'entity-review-missing-image');
   box.dataset.requirementRevision=need.id;box.dataset.mediaType=type;box.append(productionEntityIcon(type));
@@ -438,7 +383,6 @@ function locateEntityReviewComment(comment){
   }
   if(row.kind==='CALL')restoreEntityCallContext(data,row);
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
-  if(row.kind==='REPRESENTATION')data.historicalTarget=row;
   data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
   if(materialPlanCommentNeedsHistory(row,comment))return openProductionCommentOriginal(row,comment).then(()=>true);return locateProductionComment(comment,true)!==false;

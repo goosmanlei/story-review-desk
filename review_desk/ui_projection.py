@@ -90,28 +90,18 @@ def management_episodes(store):
 
 
 def entity_summaries(store, entities, entries):
-    counts={row['object_id']:{} for row in entities};statuses={};adoption_statuses={};seen=set()
+    counts={row['object_id']:{} for row in entities};seen=set()
     for item in entries:
         for eid in set(item['entity_ids']):
             key=(eid,item.get('canonical_material_id',item['object_id']))
             if key in seen:continue
             seen.add(key)
             if eid in counts:counts[eid][item['media_type']]=counts[eid].get(item['media_type'],0)+1
-    rows=None
-    for entity in entities:
-        eid=entity['object_id'];decision=g.decision(store,eid);accepted=False
-        if decision and decision['payload']['verdict']=='accepted':
-            if rows is None:rows=p.current_records(store)
-            scope=g.current_scope(store,eid,rows)
-            accepted=bool(g.accepted(store,eid,scope) or g.content_scope(store,eid,decision,rows) or
-                decision['payload'].get('acceptance_model')==g.CONTENT_MODEL and decision['payload']['acceptance_scope']==scope)
-        statuses[eid]='accepted' if accepted else 'unaccepted'
-        adoption_statuses[eid]='accepted' if accepted else 'stale' if decision and decision['payload']['verdict']=='accepted' else 'unaccepted'
     from .entity_review import full_states
     from .navigation_search import entity_fields, codes
     from .list_associations import entity_locations
-    rows = rows if rows is not None else p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
-    return {'management_episodes':management_episodes(store),'entity_material_counts':counts,'entity_statuses':statuses,'entity_adoption_statuses':adoption_statuses,
+    rows = p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
+    return {'management_episodes':management_episodes(store),'entity_material_counts':counts,
             'entity_search_fields':entity_fields(entities,[r for r in rows if r['kind']=='STATE'],codes(store)),
             'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
             'entity_locations':entity_locations(store,entities,rows),

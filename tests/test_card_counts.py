@@ -35,10 +35,10 @@ class CardCountsTest(UiProjectionTest):
         self.assertEqual(normal['entity_material_counts'], duplicate['entity_material_counts'])
 
     def test_failed_call_does_not_create_candidate(self):
-        self.setup_plans();self.decide()
+        self.setup_plans()
         plan = g.package(self.store, 'need-full-overall')
         self.put(self.spec('failed-count-call', 'CALL', status='failed', method='generation', tool='test',
                            outputs=[], inputs=[], generation_requirement=plan['requirement'],
-                           generation_acceptances=plan['acceptances'],
+                           
                            **{k:plan[k] for k in ('model','parameters','prompt')}))
         self.assertEqual(self.count(), {'version_count': 1, 'candidate_count': 0})

@@ -26,13 +26,11 @@ class MaterialVersionsTest(unittest.TestCase):
     media=fixtures.GenerationTest.media
     change=fixtures.GenerationTest.change
     setup_plans=fixtures.GenerationTest.setup_plans
-    decide=fixtures.GenerationTest.decide
 
     def generate(self, name='call1', asset='generated'):
-        if not g.accepted(self.store,'songbook'):self.decide()
         manifest=g.package(self.store,'need-full-overall')
         self.put(self.spec(name,'CALL',method='generation',tool='test',status='submitted',inputs=[],outputs=[],
-                           generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
+                           generation_requirement=manifest['requirement'], 
                            **{k:manifest[k] for k in ('model','parameters','prompt')}))
         if not self.store.db.execute("SELECT 1 FROM objects WHERE id='voice'").fetchone():self.media()
         component=p.record(self.store,'voice')['payload']['components'][0]
@@ -159,9 +157,9 @@ class MaterialVersionsTest(unittest.TestCase):
                                 view['review_contexts'][second]['call']['payload']['prompt'])
 
     def test_delayed_first_submission_uses_active_round_and_input_history_is_frozen(self):
-        self.setup_plans();self.decide();manifest=g.package(self.store,'need-full-overall')
+        self.setup_plans();manifest=g.package(self.store,'need-full-overall')
         self.put(self.spec('delayed','CALL',method='generation',tool='test',status='planned',inputs=[],outputs=[],
-            generation_requirement=manifest['requirement'],generation_acceptances=manifest['acceptances'],
+            generation_requirement=manifest['requirement'], 
             **{k:manifest[k] for k in ('model','parameters','prompt')}))
         self.generate();self.comment(1);self.change('delayed',status='submitted')
         current=p.record(self.store,'delayed')

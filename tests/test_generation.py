@@ -38,63 +38,15 @@ class GenerationTest(unittest.TestCase):
                 'output':{'name':'翻页声','description':'用于核对干湿纸页差异','review_criteria':['听清动作，无失真']},'blockers':[]}
             self.put(need)
 
-    def decide(self, action='accept', scope=None, expected=None):
-        current=er.snapshot(self.store,'songbook')
-        return g.decide(self.store,{'entity_id':'songbook','action':action,'expected_version':current['decision_version'] if expected is None else expected,
-            'scope':scope or current['scope'],'actor':'技术测试','reason':'隔离测试，非真实创作采纳'})
 
-    def test_accept_revoke_reaccept_and_comments_do_not_depend_on_candidates(self):
-        self.setup_plans();self.decide();first=g.decision(self.store,'songbook')
-        self.store.create_comment({'target_object_id':'full','target_revision_id':self.ref('full')['revision_id'],'anchor':{'type':'global'},'body':'采纳后继续评论'})
-        self.media();self.associate();self.assertTrue(er.snapshot(self.store,'songbook')['can_revoke'])
-        self.assertEqual(g.accepted(self.store,'songbook')['id'],first['id'])
-        ready=g.package(self.store,'need-full-overall');self.assertEqual(ready['acceptances'],[self.ref(first['object_id'])])
-        self.decide('revoke');self.assertFalse(g.readiness(self.store,'need-full-overall')['ready'])
-        self.assertEqual(er.snapshot(self.store,'songbook',first['id'])['accepted']['id'],first['id'])
-        with self.assertRaises(Conflict):self.decide(expected=1)
-        self.decide();self.assertEqual(g.decision(self.store,'songbook')['version'],3)
-        self.assertTrue(g.readiness(self.store,'need-full-overall')['ready'])
 
-    def test_single_state_plan_and_entity_permit_are_alternative_exact_paths(self):
-        from review_desk import production_acceptance as acceptance
-        self.setup_plans()
-        def single(action):
-            view = acceptance.snapshot(self.store, 'need-full-overall')
-            return acceptance.decide(self.store, {
-                'object_id': 'need-full-overall', 'expected_revision': view['target']['revision_id'],
-                'expected_decision': acceptance.ref(view['decision']) if view['decision'] else None,
-                'action': action, 'actor': '技术测试'})
-        single('accept')
-        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
-        self.assertIsNone(g.accepted(self.store, 'songbook'))
-        self.assertFalse(g.readiness(self.store, 'need-wet-overall')['ready'])
-        single('revoke')
-        self.assertFalse(g.readiness(self.store, 'need-full-overall')['ready'])
-        self.decide()
-        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
-        self.assertTrue(g.readiness(self.store, 'need-wet-overall')['ready'])
-        with self.assertRaises(ValueError):
-            acceptance.snapshot(self.store, 'full')  # STATE has no independent adoption.
-        self.decide('revoke')
-        self.assertFalse(g.readiness(self.store, 'need-full-overall')['ready'])
 
-    def test_changes_reject_stale_acceptance_atomically_and_require_every_plan(self):
-        self.setup_plans();scope=g.current_scope(self.store,'songbook');self.decide()
-        self.change('wet',production_description='边缘破损，完整描述改变。')
-        self.assertIsNone(g.accepted(self.store,'songbook'))
-        with self.assertRaises(Conflict):self.decide(scope=scope)
-        self.assertFalse(er.snapshot(self.store,'songbook')['can_accept']) # old requirement no longer covers current state
-        need=p.record(self.store,'need-wet-overall')['payload'];need=copy.deepcopy(need);need['scope']=self.ref('wet');need['states']=[self.ref('wet')]
-        self.change('need-wet-overall',**need);self.decide()
-        self.change('need-full-overall',generation={**p.record(self.store,'need-full-overall')['payload']['generation'],'prompt':'另一种处理'})
-        self.assertIsNone(g.accepted(self.store,'songbook'))
 
     def test_adoption_does_not_select_a_plan_input_and_changes_require_acceptance(self):
         self.setup_plans()
         plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
         plan['inputs']=[{'reference':self.ref('need-full-overall'),'use':'同一声源的干燥纸页母版'}]
-        self.change('need-wet-overall',generation=plan);self.decide()
-        self.assertTrue(g.accepted(self.store,'songbook'))
+        self.change('need-wet-overall',generation=plan)
         self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
         self.media();self.associate(range={'start_seconds':.1,'end_seconds':.8});self.adopt(range={'start_seconds':.1,'end_seconds':.8})
         self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
@@ -105,48 +57,20 @@ class GenerationTest(unittest.TestCase):
         sr.select(self.store,{'id':'explicit-reference','requirement_id':need['object_id'],'expected_revision':need['id'],
             'plan_number':1,'index':0,'input_key':sr.input_key(plan['inputs'][0]),'material_id':'need-full-overall',
             'number':membership['number'],'candidate':self.ref('voice'),'component_id':'original','range':{'start_seconds':.1,'end_seconds':.8}})
-        self.decide()
         result=g.package(self.store,'need-wet-overall');self.assertEqual(result['inputs'][0]['range'],{'start_seconds':.1,'end_seconds':.8})
         path=self.root/'package';g.write_package(self.store,'need-wet-overall',path)
         self.assertTrue((path/json.loads((path/'manifest.json').read_text())['inputs'][0]['path']).is_file())
         old=copy.deepcopy(plan);plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan['prompt']='前置方案更新'
         self.change('need-full-overall',generation=plan)
-        self.assertIsNone(g.accepted(self.store,'songbook'))
-        self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
+        self.assertTrue(g.readiness(self.store,'need-wet-overall')['ready'])
         self.change('need-full-overall',generation={**plan,'inputs':[{'reference':self.ref('need-full-overall'),'use':'循环草稿'}]})
         self.assertTrue(any('循环' in issue for issue in g.readiness(self.store,'need-full-overall')['issues']))
 
-    def test_execution_call_checks_current_decision_and_exact_inputs(self):
-        self.setup_plans();self.decide();package=g.package(self.store,'need-full-overall')
-        call=self.spec('draw','CALL',method='generation',status='submitted',tool='chosen-at-execution',inputs=[],outputs=[],generation_requirement=package['requirement'],generation_acceptances=package['acceptances'],**{k:package[k] for k in ('model','parameters','prompt')})
-        wrong=copy.deepcopy(call);wrong['payload']['prompt']='未采纳的输入'
-        with self.assertRaises(Conflict):self.put(wrong)
-        self.put(call);self.decide('revoke')
-        newer=copy.deepcopy(call);newer['object_id']='another'
-        with self.assertRaises(Conflict):self.put(newer)
-        self.assertEqual(p.record(self.store,'draw')['payload'],call['payload'])
-        component=self.media()
-        self.put(self.spec('generated','ASSET',media_type='audio',subjects=[],states=[],components=[component],production=self.ref('draw'),lineage={}))
-        self.change('draw',status='completed',outputs=[self.ref('generated')])
-        self.assertEqual(p.record(self.store,'draw')['payload']['generation_acceptances'],package['acceptances'])
 
-    def test_withdrawn_state_leaves_current_scope_but_preserves_accepted_history(self):
-        self.setup_plans();self.decide();old=g.decision(self.store,'songbook');scope=g.current_scope(self.store,'songbook')
-        self.put(self.spec('legacy-review','REPRESENTATION',review_model=er.MODEL,entities=[self.ref('songbook')],states=scope['states'],media=[],sources=[self.source],choices=[],unknowns=[]))
-        self.change('need-wet-overall',required=False,status='withdrawn',withdrawal_reason='与另一完整状态归并')
-        self.change('wet',status='withdrawn',withdrawal_reason='与另一完整状态归并')
-        self.change('legacy-review',status='withdrawn',withdrawal_reason='保留原送审内容历史')
-        current=g.current_scope(self.store,'songbook')
-        self.assertEqual(current['states'],[self.ref('full')])
-        self.assertEqual(current['requirements'],[self.ref('need-full-overall')])
-        self.assertEqual(er.current_scope(self.store,'songbook')['states'],[self.ref('full')])
-        self.assertEqual(er.snapshot(self.store,'songbook',old['id'])['scope'],scope)
-        self.assertFalse(g.readiness(self.store,'need-wet-overall')['ready'])
 
     def test_candidate_association_is_not_generation_or_adoption(self):
-        self.setup_plans();self.decide();before=g.accepted(self.store,'songbook')['id'];self.media();self.associate()
+        self.setup_plans();self.media();self.associate()
         self.change('voice',candidate_requirements=[self.ref('need-full-overall')])
-        self.assertEqual(g.accepted(self.store,'songbook')['id'],before)
         self.assertFalse(p.readiness(self.store,'full')['inputs_ready'])
         with self.assertRaisesRegex(ValueError,'exact state'):
             self.change('voice',candidate_requirements=[self.ref('need-wet-overall')])
@@ -155,12 +79,12 @@ class GenerationTest(unittest.TestCase):
         self.setup_plans()
         plan=copy.deepcopy(p.record(self.store,'need-full-overall')['payload']['generation']);plan['parameters']={'pitch':1.0,'epsilon':1e-7}
         self.change('need-full-overall',generation=plan)
-        self.decide();need=p.record(self.store,'need-full-overall')
+        need=p.record(self.store,'need-full-overall')
         self.assertEqual(need['review_parameter_text'],next(b['text'] for b in production_text_blocks(need['payload']) if b.get('field')=='generation.parameters'))
         block=next(b for b in production_text_blocks(need['payload']) if b.get('field')=='generation.prompt')
         anchor={'type':'text','block_id':block['id'],'end_block_id':block['id'],'start':0,'end':len(block['text']),'quote':block['text']}
         comment=self.store.create_comment({'target_object_id':need['object_id'],'target_revision_id':need['id'],'anchor':anchor,'body':'核对实际提示词'})
-        self.decide('revoke');before=er.snapshot(self.store,'songbook')
+        before=er.snapshot(self.store,'songbook')
         export(self.store,self.root/'export');dest=self.root/'recovered';shutil.copytree(self.root/'export',dest/'export')
         recovered=Store(dest/'.runtime/review.sqlite3')
         try:
@@ -169,6 +93,6 @@ class GenerationTest(unittest.TestCase):
         finally:recovered.close()
         (self.root/'config').mkdir();(self.root/'config/instance.json').write_text(json.dumps({'id':'test','title':'test'}))
         result=subprocess.run([sys.executable,'-m','review_desk','--instance',str(self.root),'production-generation-ready','need-full-overall'],capture_output=True,text=True,check=True)
-        self.assertFalse(json.loads(result.stdout)['ready'])
+        self.assertTrue(json.loads(result.stdout)['ready'])
 
 if __name__=='__main__':unittest.main()

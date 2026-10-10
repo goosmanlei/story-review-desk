@@ -66,7 +66,7 @@ class BundleIntegrityTest(unittest.TestCase):
             with self.subTest(kind=kind):
                 manifest = export(self.source, self.bundle)
                 oid = 'retired-' + name
-                self.source.put_object(oid, 'JUDGMENT', {
+                self.source.put_object(oid, 'GUIDANCE', {
                     'format': 'production-' + name + '-v1', 'title': oid,
                     'blocks': [{'id': 'notes', 'text': 'Old isolated fixture'}],
                 })

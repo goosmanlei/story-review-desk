@@ -101,7 +101,7 @@ def planned_contract(plan, declarations):
     issues = check_declared(plan['model'], plan['prompt'], [v['media_type'] for v in declarations])
     try:check_parameters(plan['model'], plan['parameters'])
     except ValueError as exc:issues.append(str(exc))
-    result = {'scope':'仅检查计划参数、附件编号和声明角色；原件、采纳和实际效果另验',
+    result = {'scope':'仅检查计划参数、附件编号和声明角色；原件和实际效果另验',
               'issues':issues, 'verified':not issues}
     if video_modes.applies(plan['model']) or plan.get('execution') is not None:
         mode = video_modes.check(plan['model'], plan['parameters'], plan.get('execution'), declarations)
