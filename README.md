@@ -92,7 +92,7 @@ git push origin main
 
 批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 在必要输入齐备且完整包的准确依赖与全部原件均有效时生成目录包；已采用的可选原件或历史输入缺失也会阻断导出。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
 
-Schema 10 导出保存当前工作稿和视听清理凭据，并保存新视听模型和仍有效的素材、不可变修订、准确意见、原件与最小退役凭据；完整定义采用内容寻址保存。恢复仅在空实例执行，实例清理策略拒绝旧格式重放。契约见 [素材版本](docs/material-versions.md) 与 [一次性切换](docs/version-consolidation.md)。凭据不进入公开导出，技术恢复不代替作品听审。
+Schema 11 导出保存统一关系索引、旧别名及迁移回执、当前工作稿和视听清理凭据，并保存新视听模型和仍有效的素材、不可变修订、准确意见、原件与最小退役凭据；完整定义采用内容寻址保存。恢复仅在空实例执行，实例清理策略拒绝旧格式重放。契约见 [素材版本](docs/material-versions.md) 与 [一次性切换](docs/version-consolidation.md)。凭据不进入公开导出，技术恢复不代替作品听审。
 
 `tests/test_complete_states.py` 验证完整形态、状态转换、整体与细节覆盖、就绪阻断和读取依赖并发保护；`tests/test_production.py` 验证原子批量导入、并发、来源、状态并存、一材多用、显式换版、变更复核、谱系、精确媒体评论和恢复；`tests/test_production_api.py` 验证真实 HTTP 上传、Range、来源及冲突响应。真实故事数据和浏览器操作证据归故事实例；测试夹具不计作媒体成果。
 

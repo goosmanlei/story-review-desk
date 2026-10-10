@@ -44,7 +44,7 @@
 
 受管 JSON 请求、回执和制作归档使用 `material-archive-reference-v1` 保存原字节重建配方。字符串与嵌套 JSON 字符串引用同一内容图；空白、键序、Unicode 转义、重复键与数字原写法均可恢复。容器物理哈希与原文件逻辑哈希分开；HTTP（含 Range）、媒体校验和后台脚本经 `material_archives.read_bytes/read_json` 得到原字节。图片、音频和视频原件不作转换。
 
-当前完整模型采用 Schema 9，保存视听编排、素材关系、稳定业务编号、方案与候选、评论及准确来源的最小清理凭据。共享内容仍存于唯一 material-content.json，manifest 校验物理哈希，保留原件按逻辑哈希验证。清理后的实例只使用当前净化导出恢复；退役生产类型不会从旧包复活。详见[切换与恢复](version-consolidation.md)。
+当前完整模型采用 Schema 11，保存视听编排、统一关系及旧别名映射、稳定业务编号、方案与候选、评论及准确来源的最小清理凭据。共享内容仍存于唯一 material-content.json，manifest 校验物理哈希，保留原件按逻辑哈希验证。清理后的实例只使用当前净化导出恢复；退役生产类型不会从旧包复活。详见[切换与恢复](version-consolidation.md)。
 
 旧素材轮次、旧方案索引及旧物理模型迁移的 HTTP/CLI 入口均已退役；不以逆向迁移恢复旧业务。`material-model-verify` 和对应 GET 接口只读校验当前物理存储。正常创作继续使用不可变修订、版本冻结和准确候选规则。
 
