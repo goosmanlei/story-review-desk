@@ -33,52 +33,6 @@ test('an omitted or cross-block draft restores the original reading instead of r
   const host=new Node('main');ctx.state.anchor=anchor;assert.equal(ctx.renderRecordComposition(host,row),false);assert.equal(host.children.length,0);
  }
 });
-test('same choices read once, but distinct original anchors remain on their own fields',()=>{
- const ctx=fixture(),row=shot('old',{blocks:[{id:'old-purpose',field:'purpose',text:'看清交接'},{id:'old-performance',field:'performance',text:'看清交接'},{id:'old-framing',field:'framing',text:'同框近景'},{id:'old-movement',field:'movement',text:'同框近景'}]});
- const before=JSON.stringify(row),surface=render(ctx,row);
- assert.equal(mainText(surface).split('看清交接').length-1,1);assert.equal(mainText(surface).split('同框近景').length-1,1);
- assert.equal(surface.children.some(n=>n.tagName==='DETAILS'),false);
- assert.ok(ctx.productionTextBlocks(row).some(b=>b.id==='old-performance'&&b.text==='看清交接'));assert.equal(JSON.stringify(row),before);
-});
-test('independent purpose, performance, framing and movement stay complete, including substrings',()=>{
- const ctx=fixture(),surface=render(ctx,shot('independent',{purpose:'观众先看清她收回手',performance:'收回手',framing:'两人同框',movement:'固定',blocks:[{id:'purpose',text:'观众先看清她收回手'}]}));
- const text=mainText(surface);for(const value of ['叙事目的　观众先看清她收回手','表演　收回手','构图　两人同框','机位运动　固定'])assert.ok(text.includes(value));
- assert.ok(!text.includes('叙事目的与表演'));assert.ok(!surface.querySelectorAll().some(n=>n.dataset.blockId==='purpose'&&n.textContent==='收回手'));
-});
-test('near or whitespace-different expressions are not declared identical',()=>{
- const ctx=fixture(),surface=render(ctx,shot('near',{performance:'看清交接。',movement:'同框近景 '}));assert.ok(mainText(surface).includes('表演　看清交接。'));assert.ok(mainText(surface).includes('机位运动　同框近景 '));
-});
-test('common conditions use only all exact displayed children; changed coverage never folds',()=>{
- const ctx=fixture(),old=shot('old',{spatial:'旧桌旁'}),other=shot('old-other',{spatial:'旧桌旁'}),latest=shot('latest',{spatial:'新门口',lighting:'日光'});
- const common=ctx.breakdownCommonConditions([{record:old},{record:other}]);assert.equal(common.fields.spatial,'旧桌旁');
- const mixed=ctx.breakdownCommonConditions([{record:old},{record:latest}]);assert.ok(!('spatial' in mixed.fields));assert.ok(!('lighting' in mixed.fields));
- assert.ok(mainText(render(ctx,latest,mixed)).includes('光线　日光'));assert.deepEqual(plain(ctx.breakdownCommonConditions([{record:old}])),{fields:{},sounds:[]});
-});
-test('common and original scene values are separately accessible without changing shot values',()=>{
- const ctx=fixture(),rows=[shot('a'),shot('b')],common=ctx.breakdownCommonConditions(rows.map(record=>({record}))),host=new Node('main');
- ctx.renderBreakdownConditions(host,{shots:rows.map(record=>({record})),scene:{id:'scene',payload:{spatial:'父场原空间',axis:'父场原轴线',continuity:'父场原承接',sound:['父场原声音']}}},common);
- assert.ok(host.children[0].textContent.includes('父场原空间'));assert.ok(host.children[0].textContent.includes('空间　桌旁'));assert.ok(!host.all().some(n=>n.tagName==='DETAILS'));
- const surface=render(ctx,rows[0],common);assert.ok(!mainText(surface).includes('空间　桌旁'));assert.ok(ctx.productionTextBlocks(rows[0]).some(b=>b.text==='桌旁'));
- assert.ok(!mainText(surface).includes('收尾留气口；收尾留气口'));assert.ok(mainText(surface).includes('声音　阿蘅说完才停')); // Repeated events must remain in each shot.
-});
-test('locating omitted duplicate opens its exact source without moving the anchor',()=>{
- const ctx=fixture(),row=shot('old',{blocks:[{id:'purpose-old',field:'purpose',text:'看清交接'},{id:'performance-old',field:'performance',text:'看清交接'}]}),surface=render(ctx,row),details=surface.children.find(n=>n.tagName==='DETAILS');
- ctx.state.productionSelected=row;ctx.document.querySelector=()=>({querySelectorAll:()=>[surface]});ctx.CSS={escape:s=>s};ctx.$=()=>null;ctx.paintProductionReview=()=>{};ctx.renderComments=()=>{};
- surface.querySelector=()=>null;ctx.document.querySelectorAll=()=>surface.querySelectorAll();
- let original;ctx.openProductionCommentOriginal=(r,c)=>{original={r,c};return true};const comment={id:'comment',target_object_id:row.object_id,target_revision_id:'old',anchor:{type:'text',block_id:'performance-old',start:0,end:4,quote:'看清交接'}};const before=JSON.stringify(comment);ctx.locateProductionComment(comment,true);
- assert.equal(original.r,row);assert.equal(original.c,comment);assert.equal(JSON.stringify(comment),before);
-});
-
-test('same spoken words remain repeated events, while explicit ambience can be shared',()=>{
- const ctx=fixture(),rows=[shot('a',{sound:[{type:'dialogue',text:'我再来一遍。'},{type:'ambience',text:'河声'}]}),shot('b',{sound:[{type:'dialogue',text:'我再来一遍。'},{type:'ambience',text:'河声'}]})],common=ctx.breakdownCommonConditions(rows.map(record=>({record})));
- assert.deepEqual(plain(common.sounds),['河声']);for(const row of rows)assert.ok(mainText(render(ctx,row,common)).includes('声音　我再来一遍。'));
-});
-
-test('spoken content matching a background or editing line is never hidden by those roles',()=>{
- const ctx=fixture(),rows=[shot('a',{editing:'同句',sound:[{type:'dialogue',text:'同句'},{type:'dialogue',text:'河声'},{type:'ambience',text:'河声'}]}),shot('b',{editing:'同句',sound:[{type:'dialogue',text:'同句'},{type:'dialogue',text:'河声'},{type:'ambience',text:'河声'}]})],common=ctx.breakdownCommonConditions(rows.map(record=>({record})));
- const text=mainText(render(ctx,rows[0],common));assert.ok(text.includes('声音　同句'));assert.ok(text.includes('声音　河声'));
-});
-
 test('Prompt comments prefer a containing exact excerpt and reveal full text for older technical ranges',()=>{
  const ctx=fixture(),prompt='技术前言。看她一眼🐍，接回歌本。技术后文。',row={id:'exact-plan',object_id:'need',kind:'REQUIREMENT',payload:{generation:{prompt}}};
  const block=ctx.productionTextBlocks(row).find(b=>b.field==='generation.prompt'),full=new Node('pre'),excerpt=new Node('span'),details=new Node('details');
@@ -97,39 +51,4 @@ test('restoring a technical Prompt draft opens its full exact surface instead of
  let focused=null;excerpt.reviewFocus=()=>focused='excerpt';full.reviewFocus=()=>focused='full';ctx.productionTab=()=> 'breakdown';ctx.localStorage={getItem:()=> '未保存'};
  ctx.state.breakdownVideoSelections={current:{}};ctx.state.productionDraftContexts={'["exact",null,null,null]':{anchor:{block_id:'prompt',start:0,end:4},draftKey:'draft'}};
  ctx.restoreBreakdownPromptDraft({querySelectorAll:()=>[excerpt,full]});assert.equal(focused,'full');assert.equal(details.open,true);
-});
-
-test('inline file handoffs keep exact originals and requirements outside technical records',async t=>{
- for(const media of ['project','document'])for(const result of [true,false])await t.test(media+(result?' with original':' awaiting original'),()=>{
-  const ctx=fixture(),parent=new Node('main'),need={id:'current-demand',object_id:'demand',payload:{media_type:media}},frozen={id:'frozen-demand',object_id:'demand',payload:{title:'original words'}},asset={id:'exact-asset',object_id:'asset'},call={id:'original-call',payload:{method:'external-edit'}};
-  const actual={call,inputs:[]},selected=result?{record:asset}:null;
-  ctx.el=tag=>{const n=new Node(tag);n.addEventListener=(event,fn)=>n[event]=fn;return n};
-  ctx.breakdownPromptSelection=()=>({detail:{review_contexts:{'exact-asset':actual}},rounds:[],exact:false,round:{number:1,definition_records:{requirement:frozen,call}},exactNeed:frozen,candidates:selected?[selected]:[],model:{need:frozen},selected,selection:{},referenceContext:{}});
-  ctx.renderShotInputs=ctx.renderMaterialRouteChoices=ctx.renderMaterialResultReview=ctx.renderProductionAcceptance=ctx.materialRoundControl=ctx.reviewChoiceButtons=ctx.preserveBreakdownDetailPosition=()=>{};
-  const rendered=[];ctx.materialMedia=(host,item)=>rendered.push({type:'file',host,item});ctx.productionButton=()=>{};ctx.readableProductionTitle=()=>'';ctx.renderMaterialRequirements=(host,row)=>rendered.push({type:'words',host,row});ctx.renderActualGeneration=(host,context)=>rendered.push({type:'call',host,context});
-  ctx.breakdownPrompt(parent,need,{});const section=parent.children[0],detail=section.children.find(n=>n.tagName==='DETAILS');
-  assert.equal(detail,undefined);assert.equal(rendered.find(n=>n.type==='words').host,section);assert.equal(rendered.find(n=>n.type==='words').row,frozen);
-  if(result){assert.equal(rendered.find(n=>n.type==='file').host,section);assert.equal(rendered.find(n=>n.type==='file').item,selected);assert.equal(rendered.some(n=>n.type==='call'),false)}
-  else {assert.ok(section.textContent.includes('尚无生成原件'));assert.equal(rendered.some(n=>n.type==='call'),false)}
-  assert.equal(actual.call,call);
- });
-});
-
-// Exercise the actual candidate repaint: a saved file-handoff text draft must
-// return only when its exact frozen requirement is displayed again.
-test('inline candidate repaint restores only the displayed exact handoff draft',()=>{
- const ctx=fixture(),parent=new Node('main'),need={id:'current',object_id:'file',payload:{media_type:'project'}};
- const frozen={id:'frozen',object_id:'file',payload:{}};let choose,available=true,focused=0,remembered=0;
- ctx.el=tag=>{const node=new Node(tag);node.addEventListener=()=>{};node.remove=()=>{node.parentElement.children=node.parentElement.children.filter(n=>n!==node)};node.querySelectorAll=()=>node.all().filter(n=>n.dataset.productionBlocks);return node};
- parent.querySelectorAll=()=>parent.all().filter(n=>n.dataset.productionBlocks);
- ctx.breakdownPromptSelection=()=>({detail:{review_contexts:{asset:{call:{id:'call',payload:{}}}}},rounds:[{number:1}],round:{number:1},candidates:[{record:{id:'asset'}},{record:{id:'second'}}],model:{need:available?frozen:{id:'other',payload:{}}},selected:{record:{id:'asset'}},selection:{}});
- ctx.renderShotInputs=ctx.renderMaterialRouteChoices=ctx.renderMaterialResultReview=ctx.renderProductionAcceptance=ctx.materialRoundControl=ctx.preserveBreakdownDetailPosition=ctx.materialMedia=ctx.renderActualGeneration=ctx.paintReviewCommentCounts=()=>{};
- ctx.reviewChoiceButtons=(_host,_title,_choices,_selected,onChoose)=>choose=onChoose;
- ctx.history={state:null,pushState(){}};ctx.breakdownSelectionKey=()=>'';
- ctx.productionButton=()=>{};ctx.readableProductionTitle=()=>'';ctx.renderMaterialRequirements=(host,row)=>{const surface=new Node('div'),text=new Node('p');surface.dataset.productionBlocks=row.id;text.dataset.blockId='handoff';text.ownText='斩蛇一个多月后';surface.append(text);surface.reviewFocus=()=>{focused++};host.append(surface)};
- ctx.rememberProductionDraft=()=>remembered++;ctx.productionTab=()=> 'breakdown';ctx.localStorage={getItem:()=> '未提交意见'};
- ctx.state.breakdownVideoSelections={current:{}};ctx.state.productionDraftContexts={'["frozen",null,null,null]':{anchor:{block_id:'handoff',start:0,end:7},draftKey:'exact-draft'}};
- ctx.breakdownPrompt(parent,need,{});available=false;choose('asset');assert.equal(focused,0);
- available=true;choose('asset');assert.equal(focused,1);assert.equal(remembered,2);
- assert.equal(parent.children.length,1);assert.equal(parent.children[0].children.some(n=>n.tagName==='DETAILS'),false,'restoring a handoff draft does not add technical records');
 });

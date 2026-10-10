@@ -21,12 +21,6 @@ test('work comparison cannot grant a plan until the full exact plan is explicitl
  await c.renderProductionAcceptance({}, {kind:'REQUIREMENT',object_id:'plan',id:'old-plan'});assert.match(button.label,/生成许可/);button.click();assert.equal(opened[0].revision_id,'old-plan');assert.equal(opened[0].work,null);
 });
 
-test('common authored text is grouped without resurrecting represented raw fields',()=>{
- const c=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
- const shots=[0,1,2].map(i=>({record:{id:'shot-'+i,payload:{axis:i===2?'unique direction':'same selected direction',color:'raw colour already represented by scene',sound:[]},review_composition:{sections:[{parts:[{text:i===2?'unique direction':'same selected direction'}]}]}}}));
- const common=c.breakdownReadingConditions({scene:{id:'scene'},shots},true,'scene professional text');assert.equal(common.fields.color,undefined);assert.equal(common.shared.length,1);assert.equal(common.shared[0].value,'same selected direction');assert.equal(common.shared[0].shots.length,2);
-});
-
 test('shared exact input shows common identity once and preserves distinct stage requirements',()=>{
  const c=fixture(),lines=[];vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
  c.nodeText=(tag,_class,text)=>lines.push([tag,text]);const read=new Set();

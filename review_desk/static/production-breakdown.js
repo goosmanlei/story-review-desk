@@ -233,7 +233,7 @@ function renderShotInputs(host,row,inputs,records,context,{pure=false}={}){
       const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
       const selectionLabel=!item.slot.number?'方案引用 · 尚未选定版本与原件':!item.slot.candidate?'方案引用 · 版本 '+item.slot.number+' · 原件待选':shotReferenceLabel(item.slot);
       if(context.compact||pure){
-        const button=productionButton(line,businessTitle(r,title),()=>openShotReference(item,context,button));button.className='material-reference';button.dataset.reviewDialogTrigger='';
+        const button=productionButton(line,businessTitle(r,title),()=>openShotReference(item,context,button));button.className='material-reference review-reference-button';button.dataset.reviewDialogTrigger='';
         nodeText('small','production-meta',selectionLabel+range+(item.slot.direct===false?' · 间接':''),line);
       }else{
       const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:selectionLabel+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(!pure&&item.value.use?' · 用途：'+item.value.use:'')+range;
@@ -506,7 +506,7 @@ function renderThreePartShot(parent,item){
     const line=nodeText('p',null,value.description,surface);if(block)line.dataset.blockId=block.id;
     const links=el('div','av-state-demands');stateHost.append(links);
     for(const reference of value.requirements){const need=item.context.requirements.find(r=>r.id===reference.revision_id&&r.object_id===reference.object_id);
-      const button=productionButton(links,need?businessTitle(need):'准确素材需求缺失',()=>openUnifiedMaterial(reference,button));button.disabled=!need;button.dataset.reviewDialogTrigger='';
+      const button=productionButton(links,need?businessTitle(need):'准确素材需求缺失',()=>openUnifiedMaterial(reference,button));button.disabled=!need;button.className='review-reference-button';button.dataset.reviewDialogTrigger='';
     }
   }
   if(!shot.payload.key_states?.length)nodeText('p','production-meta','本镜没有需独立准备素材的关键状态',states);
@@ -537,7 +537,7 @@ function renderShotProductPlan(parent,need,context){
   const source=model.need||round?.definition_records?.call;
   const controls=el('div','av-plan-controls');parent.append(controls);
   if(rounds.length>1)materialRoundControl(controls,need.object_id,rounds,round||{number:null},number=>{rememberProductionDraft();state.breakdownVideoSelections[need.id]={number};breakdownRoute({shot_material_id:need.object_id,shot_plan:number,shot_candidate:null,shot_baseline:rounds.find(r=>r.number===number)?.baseline_id||null});parent.replaceChildren();renderShotProductPlan(parent,need,context);restoreBreakdownPromptDraft(parent);paintReviewCommentCounts()});
-  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
+  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.className='review-reference-button';inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
   if(!source){nodeText('p','production-meta','此版本未保留准确生成方案',parent);return}
   const plan=source.kind==='CALL'?source.payload:source.payload.generation;
   if(!plan){nodeText('p','production-meta',need.payload.media_type==='project'?'此产物为已有工程；尚无模型生成方案，可打开素材核对工程与交付要求。':'此产物尚无生成方案',parent);return}

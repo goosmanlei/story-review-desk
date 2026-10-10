@@ -157,7 +157,7 @@ function selectEntityReviewState(row){
   const data=state.entityReview,previous=state.productionChildDetail?.record;
   data.materialTab='states';
   data.stateDescriptionVersions||={};if(previous)data.stateDescriptionVersions[previous.object_id]=previous;
-  row=data.stateDescriptionVersions[row.object_id]||row;
+  if(!(data.retained_states||[]).some(r=>r.id===row.id))row=data.stateDescriptionVersions[row.object_id]||row;
   if(previous?.id===row.id)return;
   cancelMaterialCommentLocation();rememberProductionDraft();
   data.stateMaterialViews||={};
@@ -309,7 +309,7 @@ function renderEntityReview(root){
   const nav=el('section','production-entity-context');nav.setAttribute('aria-label','选择状态');const currentStates=[...new Map((data.currentStates||data.states).filter(r=>productionCompleteState(r)&&r.payload.status!=='withdrawn').map(r=>[r.object_id,r])).values()],historyCount=data.states.filter(r=>!currentStates.some(s=>s.object_id===r.object_id)&&(!state.reviewWork||reviewWorkMatches(r)||r.id===form?.id)).length;const choices=el('div','production-entity-options');
   const scopedStates=state.reviewWork?data.states.filter(row=>reviewWorkMatches(row)||row.id===form?.id):data.states;
   for(const [index,row] of scopedStates.entries()){
-    const needs=(data.requirements||[]).filter(r=>r.payload.scope.revision_id===row.id),materialCount=entityReviewMaterialModels(needs,entityReviewMaterialItems(data,entityReviewStateMedia(data,row)),data).length,button=productionButton(choices,'',()=>selectEntityReviewState(row));nodeText('span',null,((data.retained_states||[]).some(r=>r.id===row.id)?'历史保留 · ':row.object_id===currentStates[0]?.object_id?'基础状态 · ':'')+businessTitle(row,entityReviewShort(row,entity)),button);button.title=entityReviewShort(row,entity)+' · '+entityReviewScope(row);if(materialCount)nodeText('small',null,materialCount+' 项素材',button);button.setAttribute('aria-pressed',String(row.object_id===form?.object_id));button.dataset.stateId=row.object_id;
+    const needs=(data.requirements||[]).filter(r=>r.payload.scope.revision_id===row.id),materialCount=entityReviewMaterialModels(needs,entityReviewMaterialItems(data,entityReviewStateMedia(data,row)),data).length,button=productionButton(choices,'',()=>selectEntityReviewState(row));nodeText('span',null,((data.retained_states||[]).some(r=>r.id===row.id)?'历史保留 · ':row.object_id===currentStates[0]?.object_id?'基础状态 · ':'')+businessTitle(row,entityReviewShort(row,entity)),button);button.title=entityReviewShort(row,entity)+' · '+entityReviewScope(row);if(materialCount)nodeText('small',null,materialCount+' 项素材',button);button.setAttribute('aria-pressed',String(row.id===form?.id));button.dataset.stateId=row.object_id;
   }nav.append(choices);
   const otherStates=data.states.filter(row=>!scopedStates.includes(row));
   if(otherStates.length){const select=el('select');select.setAttribute('aria-label','查看其他状态');select.append(new Option('查看其他状态',''));for(const row of otherStates)select.append(new Option(businessTitle(row),row.id));select.onchange=()=>{const row=otherStates.find(r=>r.id===select.value);if(row)openUnifiedMaterial({...productionRef(row),work:null},select);select.value=''};nav.append(select)}
