@@ -134,6 +134,13 @@ def read_document(root):
         for tab in value["tabs"]:
             require(all(isinstance(tab[key], str) for key in ("label", "title", "lead")))
             require(isinstance(tab["sections"], list))
+            if 'layout' in tab:
+                layout = tab['layout']
+                require(value['schema_version'] == 2 and isinstance(layout, dict))
+                require(set(layout) == {'type', 'return_label'} and layout['type'] == 'cycle')
+                require(isinstance(layout['return_label'], str) and bool(layout['return_label'].strip()))
+                require(len(tab['sections']) >= 2)
+                require(all('blocks' in section and all(block.get('type') == 'paragraph' for block in section['blocks']) for section in tab['sections']))
             ids = set()
             section_ids = [section['id'] for section in tab['sections']]
             require(all(isinstance(id, str) for id in section_ids))
