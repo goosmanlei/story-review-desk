@@ -14,6 +14,29 @@ const entityReviewRows=data=>[data.entity,...data.states,...(data.requirements||
 const entityReviewStateMedia=(data,form)=>form?data.media.filter(m=>(m.state||m.review_state)?.object_id===form.object_id&&(m.state||m.review_state).revision_id===form.id):[];
 const entityReviewUnassignedMedia=data=>data.media.filter(m=>!(m.state||m.review_state));
 const entityReviewMediaCount=items=>new Set(items.map(m=>m.record.id)).size;
+function entityReviewMediaState(data,item){
+  const scope=item?.state||item?.review_state;
+  let form=scope&&data.states.find(r=>r.id===scope.revision_id&&r.object_id===scope.object_id);
+  const retained=item?.associated_states?.find(s=>s.state?.id===scope?.revision_id&&s.state.object_id===scope.object_id&&s.state.payload?.entity?.object_id===data.entity.object_id)?.state;
+  if(!form&&retained&&!retained.unavailable){data.retained_states||=[];data.retained_states.push(retained);data.states.push(retained);form=retained}
+  if(form){data.comment_targets||=[];if(!data.comment_targets.some(t=>t.object_id===form.object_id&&t.revision_id===form.id))data.comment_targets.push(productionRef(form))}
+  return form;
+}
+function restoreEntityCallContext(data,row){
+  const card=state.materialCommentCard;
+  const results=card?.data===data?data.material_versions?.[card.material_id]?.find(r=>r.number===card.number)?.results:null;
+  const items=data.media.filter(m=>m.review_context?.call?.id===row.id&&m.review_context.call.object_id===row.object_id&&(!results||results.some(r=>r.id===m.record.id)));
+  const item=items.find(m=>m.id===state.entityReviewMedia)||items[0];
+  if(!item){data.historicalCall=row;return}
+  data.localVersions[item.record.object_id]=item.record;
+  data.selectedComponents||={};data.selectedComponents[item.record.id]=item.component_id||item.component?.id;
+  data.selectedCandidates||={};if(card?.data===data){data.unifiedMaterialId=card.material_id;data.selectedCandidates[card.material_id]=item.record.id}
+  const form=entityReviewMediaState(data,item);
+  if(form){state.productionChildDetail=entityReviewDetail(form);state.entityReviewMedia=item.id}
+  else if(item.state||item.review_state)data.historicalMedia={...item,state:null,review_state:null};
+  else{data.unassignedOpen=true;state.entityReviewUnassignedMedia=item.id}
+  data.historicalTarget=null;
+}
 const entityReviewShort=(row,entity)=>row.payload.title.startsWith(entity.payload.title)?row.payload.title.slice(entity.payload.title.length).replace(/^[\s·：:—-]+/u,'')||row.payload.title:row.payload.title;
 function entityReviewFocus(row){focusProductionReview(entityReviewDetail(row))}
 function entityReviewComments(){const data=state.entityReview,targets=[...data.comment_targets,...(data.historicalTarget?[productionRef(data.historicalTarget)]:[])];return state.comments.filter(c=>targets.some(t=>t.object_id===c.target_object_id&&t.revision_id===c.target_revision_id))}
@@ -68,7 +91,7 @@ function restoreEntityMaterialRoute(data,route){
   if(retained||items.some(item=>!item.state))data.unassignedOpen=true;
   if(row.kind==='REQUIREMENT')data.openRecipe=row.object_id;
   // Schema-1 snapshots have exact media/context but no material rounds.
-  if(row.kind==='CALL'&&!selected)data.historicalCall=row;
+  if(row.kind==='CALL')restoreEntityCallContext(data,row);
   if(row.kind==='ASSET'&&!items.length){const component=row.payload.components.find(c=>/^(image|audio|video)\//.test(c.mime));if(component)data.historicalMedia={id:'history:'+row.id,label:row.payload.title,record:row,component,component_id:component.id,state:null,role:'related',review_context:data.materialContexts?.[row.id]}}
   if(row.id!==row.current_revision)data.historicalTarget=row;
   focusProductionReview(entityReviewDetail(row),false);
@@ -263,7 +286,7 @@ function renderEntityReview(root){
   const ownNeeds=(data.requirements||[]).filter(r=>r.payload.scope?.object_id===entity.object_id&&r.payload.scope.revision_id===entity.id);
   if(ownNeeds.length){const materials=el('section','entity-state-materials');materials.setAttribute('aria-label','实体素材需求');nodeText('h3',null,'实体素材需求',materials);root.append(materials);renderUnifiedModels(materials,entityReviewMaterialModels(ownNeeds,[],data),data)}
   renderEntityRelations(root,data);
-  if(data.historicalCall)renderActualGeneration(root,{call:data.historicalCall,inputs:[]});
+  if(data.historicalCall){const context=Object.values(data.materialContexts||{}).find(c=>c.call?.id===data.historicalCall.id&&c.call.object_id===data.historicalCall.object_id);renderActualGeneration(root,context||{call:data.historicalCall,inputs:data.historicalCall.review_input_records||[]})}
   if(data.historicalRelation){const old=el('section');nodeText('h3',null,'历史关系',old);reviewTextBlocks(old,data.historicalRelation);root.append(old)}
   const nav=el('section','production-entity-context');nav.setAttribute('aria-label','选择状态');const currentStates=[...new Map((data.currentStates||data.states).filter(r=>productionCompleteState(r)&&r.payload.status!=='withdrawn').map(r=>[r.object_id,r])).values()],historyCount=data.states.filter(r=>!currentStates.some(s=>s.object_id===r.object_id)).length;nodeText('h3','production-entity-title',`实体状态 · ${currentStates.length}`+(historyCount?`（历史保留 ${historyCount}）`:''),nav);const choices=el('div','production-entity-options');
   for(const [index,row] of data.states.entries()){
@@ -366,9 +389,7 @@ function locateEntityReviewComment(comment){
     const item=candidates.find(m=>(m.state||m.review_state)?.revision_id===currentForm?.id&&contains(m))||candidates.find(contains);
     if(item){
       const scope=item.state||item.review_state;
-      let form=scope&&data.states.find(r=>r.id===scope.revision_id&&r.object_id===scope.object_id);
-      const retained=item.associated_states?.find(s=>s.state?.id===scope?.revision_id&&s.state.object_id===scope.object_id&&s.state.payload?.entity?.object_id===data.entity.object_id)?.state;
-      if(!form&&retained&&!retained.unavailable){data.retained_states||=[];data.retained_states.push(retained);data.states.push(retained);form=retained}
+      const form=entityReviewMediaState(data,item);
       if(form){state.productionChildDetail=entityReviewDetail(form);state.entityReviewMedia=item.id}
       else if(scope){const component=row.payload.components.find(c=>componentId?c.id===componentId:/^(image|audio|video)\//.test(c.mime));data.historicalMedia={...item,component,component_id:component.id,state:null,review_state:null,range:null,crop:null}}
       else{data.unassignedOpen=true;state.entityReviewUnassignedMedia=item.id}
@@ -377,15 +398,10 @@ function locateEntityReviewComment(comment){
       if(component)data.historicalMedia={id:'history:'+row.id,label:row.payload.title,record:row,component,component_id:component.id,state:null,role:'related',review_context:data.materialContexts?.[row.id]};
     }
   }
-  if(row.kind==='CALL'){
-    const item=data.media.find(m=>m.review_context?.call?.id===row.id);const form=item?.state&&data.states.find(s=>s.id===item.state.revision_id);
-    if(form){state.productionChildDetail=entityReviewDetail(form);data.historicalTarget=null}else data.historicalCall=row;
-  }
+  if(row.kind==='CALL')restoreEntityCallContext(data,row);
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
   if(row.kind==='REPRESENTATION')data.historicalTarget=row;
-  data.selectedCandidates||={};for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
+  data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
-  // Expand any collapsed exact text before using the common locate behavior.
-  for(const node of document.querySelectorAll('#production-blocks [data-block-id]'))if(node.dataset.blockId===comment.anchor.block_id){let parent=node.parentElement;while(parent){if(parent.tagName==='DETAILS')parent.open=true;parent=parent.parentElement}}
   if(materialPlanCommentNeedsHistory(row,comment))return openMaterialPlanHistory(row,comment).then(()=>true);return locateProductionComment(comment,true)!==false;
 }
