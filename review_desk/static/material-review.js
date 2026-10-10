@@ -92,11 +92,12 @@ function materialTextSurface(parent,row){
 // The help reads the same immutable field as comments and exports.
 function renderReviewHelp(parent,row){
   if(!productionTextBlocks(row).some(b=>b.field==='generation.output.review_criteria'&&b.text))return;
-  const box=el('span','review-help'),button=productionButton(box,'？',()=>{const pinned=box.dataset.pinned!=='true';box.dataset.pinned=String(pinned);button.setAttribute('aria-expanded',String(pinned))});
+  const box=el('span','review-help'),button=productionButton(box,'？',()=>{const pinned=box.dataset.pinned!=='true';box.dataset.pinned=String(pinned);button.setAttribute('aria-expanded',String(pinned));place()});
   button.setAttribute('aria-label','审阅标准');button.setAttribute('aria-expanded','false');
   const content=el('section','review-help-content');content.setAttribute('aria-label','审阅标准说明');
   const host=materialTextSurface(content,row);materialField(host,row,'generation.output.review_criteria',null);
-  box.append(content);box.onkeydown=event=>{if(event.key==='Escape'){event.stopPropagation();box.dataset.pinned='false';button.setAttribute('aria-expanded','false');button.blur()}};parent.append(box);return box;
+  const place=()=>{if(!content.getBoundingClientRect)return;content.style.transform='none';const rect=content.getBoundingClientRect(),width=document.documentElement.clientWidth;content.style.transform=`translateX(${Math.max(12-rect.left,Math.min(0,width-12-rect.right))}px)`};
+  box.append(content);box.onmouseenter=place;box.onfocusin=place;box.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();box.dataset.pinned='false';button.setAttribute('aria-expanded','false');button.blur()}};parent.append(box);return box;
 }
 
 // An authored arrangement is accepted only for its exact source and displayed
@@ -331,12 +332,14 @@ function materialDefaultRound(rounds){
 function switchMaterialRound(data,mid,number){
   cancelMaterialCommentLocation();
   const rounds=data.material_versions[mid],old=data.selectedMaterialRounds?.[mid]||rounds[0].number;
-  data.roundDrafts||={};data.roundDrafts[mid+':'+old]={row:state.productionSelected,anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope};
+  data.roundDrafts||={};data.roundDrafts[mid+':'+old]={row:state.productionSelected,candidateId:data.selectedCandidates?.[mid]||data.selectedCandidateId||(state.productionSelected?.kind==='ASSET'?state.productionSelected.id:null),anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope};
   data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=number;data.explicitRevision=false;delete data.selectedCandidateId;
   const round=rounds.find(r=>r.number===number);if(!round)throw Error('准确素材版本不存在；未替换为最新版本');const saved=data.roundDrafts[mid+':'+number];
   state.materialCommentCard={data,material_id:mid,number};
   const candidates=round.results.map(record=>({record})),preferred=typeof materialDefaultCandidate==='function'?materialDefaultCandidate({need:round.plan,identity:data.requirements?.find(r=>r.object_id===mid),candidates},data):null;
-  const row=saved?.row&&materialVersionCommentRows(round).some(r=>r.id===saved.row.id)?saved.row:materialCandidateChoice(candidates,preferred)?.record||round.plan||round.definition_records?.call||round.definition_records?.requirement;
+  const candidate=materialCandidateChoice(candidates,saved?.candidateId||preferred)?.record;
+  data.selectedCandidates||={};data.selectedCandidates[mid]=candidate?.id||null;data.selectedCandidateId=candidate?.id||null;
+  const row=saved?.row&&materialVersionCommentRows(round).some(r=>r.id===saved.row.id)?saved.row:candidate||round.plan||round.definition_records?.call||round.definition_records?.requirement;
   state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;state.drawMode=null;
   if(row)focusProductionReview({record:row,history:[row],uses:[]},false);
   if(saved&&row===saved.row){state.anchor=saved.anchor;state.editing=saved.editing;state.selected=saved.selected;state.reviewCommentScope=saved.scope}

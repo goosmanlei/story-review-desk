@@ -81,7 +81,7 @@ function restoreEntityMaterialRoute(data,route){
   if(!(data.comment_targets||[]).some(r=>r.object_id===row.object_id&&r.revision_id===row.id)){data.comment_targets||=[];data.comment_targets.push(productionRef(row))}
   if(selected){data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.round.number;state.materialCommentCard={data,material_id:selected.material_id,number:selected.round.number}}
   data.localVersions||={};if(['ASSET','REQUIREMENT'].includes(row.kind))data.localVersions[row.object_id]=row;
-  const scope=selected?.round.plan?.payload.scope||(row.kind==='REQUIREMENT'?row.payload.scope:null);
+  const scope=(row.kind==='REQUIREMENT'?row.payload.scope:null)||selected?.round.plan?.payload.scope;
   data.materialTab=scope?.object_id===data.entity.object_id?'entity':'states';
   const form=scope&&data.states.find(r=>r.object_id===scope.object_id&&r.id===scope.revision_id);
   if(form)state.productionChildDetail=entityReviewDetail(form);
@@ -90,7 +90,7 @@ function restoreEntityMaterialRoute(data,route){
   if(!form){const item=items.find(item=>item.state?.revision_id===state.productionChildDetail?.record.id)||items.find(item=>item.state&&data.states.some(s=>s.id===item.state.revision_id));const covered=item&&data.states.find(s=>s.id===item.state.revision_id&&s.object_id===item.state.object_id);if(covered)state.productionChildDetail=entityReviewDetail(covered)}
   const retained=selected&&data.media.some(item=>!item.state&&(data.material_versions[selected.material_id]||[]).some(round=>round.members.some(member=>member.kind==='ASSET'&&member.object_id===item.record.object_id&&member.id===item.record.id)));
   if(retained||items.some(item=>!item.state))data.unassignedOpen=true;
-  if(!form&&items.length&&items.every(item=>!(item.state||item.review_state)))data.materialTab='entity';
+  if(!scope&&!form&&items.length&&items.every(item=>!(item.state||item.review_state)))data.materialTab='entity';
   if(row.kind==='REQUIREMENT')data.openRecipe=row.object_id;
   // Schema-1 snapshots have exact media/context but no material rounds.
   if(row.kind==='CALL')restoreEntityCallContext(data,row);
