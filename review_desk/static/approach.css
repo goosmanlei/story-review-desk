@@ -137,3 +137,61 @@
 
 .approach-diagram { border-left: 0; }
 .approach-diagram .approach-section { margin: 0; padding: 0; }
+
+/* A shared foundation supports the whole collaboration, never one pillar per
+   participant. Keep type readable on narrow screens instead of shrinking art. */
+.approach-layout:has(.approach-foundation) { border-color: #dcded2; border-radius: 12px; box-shadow: none; overflow: hidden; }
+.approach-body:has(.approach-foundation) { padding: clamp(24px, 4vw, 56px); container: approach-figure / inline-size; }
+.approach-foundation {
+  --foundation-ink: #496752;
+  --foundation-line: #91a68a;
+  --collaboration-human: #ac826d;
+  --collaboration-ai: #799990;
+  max-width: 840px; margin: 10px auto 12px; color: var(--desk-ink); line-height: 1.5;
+}
+.approach-foundation-collaboration { display: grid; grid-template-columns: 100px minmax(30px,1fr) 112px minmax(30px,1fr) 100px; align-items: start; gap: 16px; padding: 16px 32px 0; }
+.approach-foundation-role,.approach-foundation-outcome { display: flex; flex-direction: column; align-items: center; gap: 8px; font-size: 17px; white-space: nowrap; }
+.approach-foundation-role svg { width: 64px; height: 64px; }
+.approach-foundation-role.is-human svg { color: var(--collaboration-human); }
+.approach-foundation-role.is-ai svg { color: var(--collaboration-ai); }
+.approach-foundation-outcome svg { width: 76px; height: 64px; color: #7d8b7a; }
+.approach-foundation-outcome span { font-weight: 500; }
+.approach-foundation-exchange { position: relative; height: 64px; }
+.approach-foundation-exchange i { position: absolute; left: 0; right: 0; height: 0; border-top: 1.5px solid; }
+.approach-foundation-forward { top: 21px; color: var(--collaboration-human); }
+.approach-foundation-return { top: 47px; color: var(--collaboration-ai); }
+.approach-foundation-exchange i::after { content: ''; position: absolute; width: 6px; height: 6px; top: -4px; border-top: 1.5px solid; border-right: 1.5px solid; }
+.approach-foundation-forward::after { right: 0; transform: rotate(45deg); }
+.approach-foundation-return::after { left: 0; transform: rotate(-135deg); }
+.approach-foundation-exchange > svg { position: absolute; left: calc(50% - 12px); top: 35px; width: 24px; height: 24px; color: var(--collaboration-ai); background: var(--desk-reader); }
+.approach-foundation-support { position: relative; height: 92px; margin: 24px 80px 0; color: var(--foundation-ink); }
+.approach-foundation-support::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 18px; border: 1.5px solid var(--foundation-line); border-top: 0; border-radius: 0 0 12px 12px; }
+.approach-foundation-lift { position: absolute; left: 50%; top: 18px; bottom: 0; border-left: 1.5px solid var(--foundation-line); }
+.approach-foundation-lift::before { content: ''; position: absolute; left: -5px; top: 2px; width: 7px; height: 7px; border-top: 1.5px solid var(--foundation-line); border-left: 1.5px solid var(--foundation-line); transform: rotate(45deg); }
+.approach-foundation-support-label { position: absolute; top: 40px; left: calc(50% + 14px); font-size: 14px; white-space: nowrap; }
+.approach-foundation-base { position: relative; border: 1px solid #b9cbb2; border-radius: 14px; background: var(--desk-selected, #e4eddf); padding: 26px 28px 30px; color: var(--foundation-ink); }
+.approach-foundation-title { display: block; text-align: center; font-size: 28px; font-weight: 600; letter-spacing: .06em; }
+.approach-foundation-pillars { display: flex; justify-content: center; align-items: center; gap: clamp(32px, 8vw, 100px); margin-top: 22px; }
+.approach-foundation-pillar { display: flex; align-items: center; gap: 12px; font-size: 21px; font-weight: 500; white-space: nowrap; }
+.approach-foundation-pillar svg { width: 40px; height: 40px; flex: none; }
+@media (max-width: 1000px) {
+  .approach-body:has(.approach-foundation) { padding: 24px 16px; }
+}
+@container approach-figure (max-width: 600px) {
+  .approach-foundation { margin: 8px auto; }
+  .approach-foundation-collaboration { grid-template-columns: 46px minmax(16px,1fr) 68px minmax(16px,1fr) 46px; gap: 8px; padding: 8px 0 0; }
+  .approach-foundation-role,.approach-foundation-outcome { font-size: 14px; gap: 6px; }
+  .approach-foundation-role svg { width: 46px; height: 50px; }
+  .approach-foundation-outcome svg { width: 60px; height: 50px; }
+  .approach-foundation-exchange { height: 50px; }
+  .approach-foundation-forward { top: 17px; }
+  .approach-foundation-return { top: 37px; }
+  .approach-foundation-exchange > svg { top: 27px; left: calc(50% - 10px); width: 20px; height: 20px; }
+  .approach-foundation-support { margin: 22px 22px 0; height: 80px; }
+  .approach-foundation-support-label { font-size: 13px; top: 34px; left: calc(50% + 10px); }
+  .approach-foundation-base { padding: 22px 12px 24px; border-radius: 12px; }
+  .approach-foundation-title { font-size: 25px; }
+  .approach-foundation-pillars { gap: 26px; margin-top: 18px; }
+  .approach-foundation-pillar { font-size: 16px; gap: 6px; }
+  .approach-foundation-pillar svg { width: 30px; height: 30px; }
+}

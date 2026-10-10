@@ -68,6 +68,37 @@ class ApproachTest(unittest.TestCase):
         self.assertIn("production.approach", [item["id"] for item in workspaces])
         self.assertNotIn("current", [item["id"] for item in workspaces])
 
+    def test_supported_collaboration_rejects_ambiguous_nodes_and_recovers(self):
+        diagram = {'type': 'supported-collaboration',
+                   'roles': [{'title': '作者', 'icon': 'human'}, {'title': '助手', 'icon': 'ai'}],
+                   'outcome': '共同作品', 'support': '共同基础', 'description': '双方在共同基础上持续协作。',
+                   'foundation': {'title': '平台', 'pillars': [
+                       {'title': '共同结构', 'icon': 'model'}, {'title': '共同流程', 'icon': 'process'}]}}
+        value = {'schema_version': 2, 'tabs': [
+            {'id': name, 'label': name, 'title': name, 'lead': '', 'sections': []}
+            for name in ('concept', 'story', 'materials')]}
+        value['tabs'][0].update(layout={'type': 'diagram', 'anchors': {'old': 'shared'}},
+                                sections=[{'id': 'shared', 'title': '协作', 'blocks': [], 'diagram': diagram}])
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        for change in ('missing-role', 'duplicate-role', 'unknown-icon', 'missing-pillar', 'duplicate-pillar', 'empty-description', 'markup'):
+            invalid = copy.deepcopy(value)
+            target = invalid['tabs'][0]['sections'][0]['diagram']
+            if change == 'missing-role': target['roles'].pop()
+            if change == 'duplicate-role': target['roles'][1]['icon'] = 'human'
+            if change == 'unknown-icon': target['roles'][0]['icon'] = '<svg onload=alert(1)>'
+            if change == 'missing-pillar': target['foundation']['pillars'].pop()
+            if change == 'duplicate-pillar': target['foundation']['pillars'][1]['icon'] = 'model'
+            if change == 'empty-description': target['description'] = ' '
+            if change == 'markup': target['foundation']['html'] = '<script>bad()</script>'
+            self.path.write_text(json.dumps(invalid))
+            with self.subTest(change=change), self.assertRaises(HTTPError) as caught:
+                self.get('/api/production-approach')
+            self.assertEqual(caught.exception.code, 503)
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        self.assertEqual(self.get('/api/comments'), [])
+
     def test_instance_document_round_trip_and_reload(self):
         value = {"schema_version": 1, "tabs": [
             {"id": id, "label": label, "title": "独立实例", "lead": "<b>原样文本</b>", "sections": []}

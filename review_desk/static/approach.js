@@ -179,7 +179,70 @@ function restoreApproachAnchor() {
   }));
 }
 
+function approachDiagramIcon(kind) {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 64 64');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.setAttribute('focusable', 'false');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '2');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  // Only fixed, local shapes are executable code. All editorial labels remain
+  // instance-owned text nodes; the instance cannot supply markup or SVG paths.
+  const shapes = {
+    human: [['circle', {cx:32, cy:19, r:10, fill:'currentColor', 'fill-opacity':'.1'}], ['path', {d:'M13 53c0-12 8-21 19-21s19 9 19 21', fill:'currentColor', 'fill-opacity':'.1'}]],
+    ai: [['rect', {x:15, y:15, width:34, height:34, rx:8, fill:'currentColor', 'fill-opacity':'.08'}], ['path', {d:'M24 8v7m16-7v7M24 49v7m16-7v7M8 24h7M8 40h7m34-16h7M49 40h7M32 23c1 5 4 8 9 9-5 1-8 4-9 9-1-5-4-8-9-9 5-1 8-4 9-9'}]],
+    film: [['rect', {x:7, y:12, width:50, height:40, rx:5, fill:'currentColor', 'fill-opacity':'.04'}], ['path', {d:'M7 21h50M7 43h50M17 12v9m10-9v9m10-9v9m10-9v9M17 43v9m10-9v9m10-9v9m10-9v9M26 26l12 6-12 6z'}]],
+    model: [['path', {d:'M21 32h9c8 0 2-17 13-17M30 32c8 0 2 17 13 17M30 32h13'}], ['rect', {x:8,y:25,width:13,height:14,rx:4}], ['rect', {x:43,y:9,width:13,height:12,rx:3}], ['rect', {x:43,y:26,width:13,height:12,rx:3}], ['rect', {x:43,y:43,width:13,height:12,rx:3}]],
+    process: [['path', {d:'M15 35V23a9 9 0 019-9h21m-7-7 7 7-7 7M49 29v12a9 9 0 01-9 9H19m7-7-7 7 7 7'}]],
+    clock: [['circle', {cx:32,cy:32,r:21}], ['path', {d:'M32 19v14l9 6'}]],
+  };
+  for (const [tag, attributes] of shapes[kind]) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attributes)) node.setAttribute(name, value);
+    svg.append(node);
+  }
+  return svg;
+}
+
+function renderSupportedCollaboration(diagram) {
+  const figure = el('figure', 'approach-foundation');
+  nodeText('figcaption', 'visually-hidden', diagram.description, figure);
+  const collaboration = el('div', 'approach-foundation-collaboration');
+  const participant = (title, icon, className) => {
+    const node = el('div', className);
+    node.append(approachDiagramIcon(icon));
+    nodeText('span', null, title, node);
+    return node;
+  };
+  const exchange = clock => {
+    const node = el('div', 'approach-foundation-exchange');
+    node.setAttribute('aria-hidden', 'true');
+    node.append(el('i', 'approach-foundation-forward'), el('i', 'approach-foundation-return'));
+    if (clock) node.append(approachDiagramIcon('clock'));
+    return node;
+  };
+  const [left, right] = diagram.roles;
+  collaboration.append(participant(left.title, left.icon, `approach-foundation-role is-${left.icon}`), exchange(false),
+    participant(diagram.outcome, 'film', 'approach-foundation-outcome'), exchange(true),
+    participant(right.title, right.icon, `approach-foundation-role is-${right.icon}`));
+  figure.append(collaboration);
+  const support = el('div', 'approach-foundation-support');
+  const arrow = el('span', 'approach-foundation-lift'); arrow.setAttribute('aria-hidden', 'true');
+  support.append(arrow); nodeText('span', 'approach-foundation-support-label', diagram.support, support);
+  figure.append(support);
+  const foundation = el('div', 'approach-foundation-base');
+  nodeText('strong', 'approach-foundation-title', diagram.foundation.title, foundation);
+  const pillars = el('div', 'approach-foundation-pillars');
+  for (const pillar of diagram.foundation.pillars) pillars.append(participant(pillar.title, pillar.icon, 'approach-foundation-pillar'));
+  foundation.append(pillars); figure.append(foundation);
+  return figure;
+}
+
 function renderApproachCollaboration(diagram) {
+  if (diagram.type === 'supported-collaboration') return renderSupportedCollaboration(diagram);
   const host = el('div', 'approach-collaboration');
   const roles = el('div', 'approach-collaboration-roles');
   for (const [index, role] of diagram.roles.entries()) {
