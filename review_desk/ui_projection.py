@@ -222,7 +222,7 @@ def card(store, object_id, revision_id=None, entity_id=None):
             form=None
     if entity:
         entity['adoptions']=b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='adoption'")
-        entity['reference_titles']=detail.get('reference_titles',[])
+        entity['reference_titles']=list({(r['object_id'], r['revision_id']): r for r in [*entity.get('reference_titles',[]), *detail.get('reference_titles',[])]}.values())
         # An explicit old demand/result remains reachable even when its source
         # has since advanced. This does not enter decision_scope or acceptance.
         if row['kind'] in ('REQUIREMENT','ASSET'):

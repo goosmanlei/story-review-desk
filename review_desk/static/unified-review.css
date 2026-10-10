@@ -201,3 +201,31 @@
 .unified-position-card > .unified-card-context { overflow:visible; }
 .management-material-uses { margin:6px 0 16px; }
 .management-material-uses summary { cursor:pointer; }
+
+/* Reading a scene is continuous; preparing its media follows the complete scene. */
+.breakdown-row{display:block;border:0;border-top:1px solid var(--desk-line);border-radius:0;margin:28px auto;background:transparent;cursor:auto;max-width:880px}
+.breakdown-shot-copy{padding:24px 0}
+.breakdown-shot-copy .entity-review-text{border:0;background:transparent;padding:0;box-shadow:none}
+.shot-action-reading p{font-size:16px;line-height:1.95;margin:18px 0}
+.breakdown-shot-design{margin-top:18px;font-size:14px;color:var(--desk-muted)}
+.breakdown-shot-design h4{font-size:13px;color:var(--desk-ink);margin-bottom:6px}
+.breakdown-conditions{margin:24px auto;padding:18px 24px;background:#edf2eb;max-width:832px}
+.breakdown-conditions .entity-review-text{background:transparent;border:0;padding:0;margin:0;box-shadow:none}
+.breakdown-scene>.entity-review-text{max-width:880px;margin:20px auto}
+.scene-reference-reading{border-top:2px solid var(--desk-line);margin:28px auto;max-width:1040px;padding:24px 0}
+.shot-references{border-top:1px solid var(--desk-line);margin:24px 0;padding:20px 0}
+.shot-material-links{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;margin-top:16px}
+.review-decision{padding:12px 0;border-top:1px solid var(--desk-line)}
+.review-decision h4{margin:0 0 8px}.review-decision p{margin:8px 0;line-height:1.7}
+.review-decision-history{margin:12px 0}.review-decision-history select{max-width:100%}
+.decision-scope{font-size:12px;line-height:1.65;max-width:760px}.decision-scope p{margin:5px 0}
+.material-use-details .entity-review-text{border:0;background:transparent;padding:0;box-shadow:none}
+.entity-relationships-reading article{padding:8px 0;border-bottom:1px solid var(--desk-line)}
+.entity-relationships-reading .entity-review-text{padding:0;border:0;background:transparent;box-shadow:none}
+.entity-review-sources{display:flex;flex-wrap:wrap;gap:4px;margin:10px 0}
+.entity-review-decisions{border-top:1px solid var(--desk-line);margin-top:24px;padding-top:18px}
+.entity-review-decisions .production-toolbar{display:block}
+.material-use-row:has(.entity-review-media-pane){padding:16px 0;margin:0}
+.material-original-comparisons .entity-review-media-pane .structure-visual-viewport.material-image-frame{height:440px;max-height:55vh}
+.audiovisual-edition{padding:14px 0;border-bottom:1px solid var(--desk-line)}
+@media(max-width:700px){.breakdown-shot-copy{padding:20px 8px}.breakdown-conditions{padding:16px}.shot-action-reading p{font-size:15px}.scene-reference-reading{padding:20px 8px}}

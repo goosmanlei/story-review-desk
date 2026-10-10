@@ -40,6 +40,8 @@ def production_text_blocks(payload):
         extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','axis','movement','action_start','action_end','motion','performance','lighting','color','editing','continuity')]
     if payload.get('format') in ('production-av-episode-v1', 'production-av-scene-v1', 'production-material-relation-v1'):
         extra += [(field, payload.get(field)) for field in ('purpose', 'structure', 'rhythm', 'continuity', 'preserve', 'change', 'check')]
+    if payload.get('format') == 'production-av-scene-v1':
+        extra += [(field, payload.get(field)) for field in ('spatial', 'axis', 'lighting', 'color', 'sound')]
     if payload.get('relation_type') == 'entity':
         extra.append(('relationship.label', payload.get('label')))
     plan = payload.get('generation') or {}

@@ -21,7 +21,7 @@ function relationSelection(rows,entityId,selection){
   if(!selection)return [];
   return rows.filter(r=>selection.kind==='edge'?r.object_id===selection.id:r.payload.entities.some(e=>e.object_id===selection.id)&&r.payload.entities.some(e=>e.object_id===entityId)).map(r=>r.object_id);
 }
-function renderEntityRelations(root,data){
+function renderEntityRelationGraph(root,data){
   const section=el('section','entity-relations'),heading=el('div','relation-heading');section.setAttribute('aria-label','实体关系');nodeText('h3',null,'关系',heading);section.append(heading);root.append(section);
   const rows=(data.relationships||[]).map(r=>data.localVersions?.[r.object_id]||r),entity=data.entity;
   const by=new Map([entity,...(data.related_entities||[])].map(r=>[r.object_id,r]));
@@ -96,4 +96,12 @@ function renderEntityRelations(root,data){
 function relationSceneLabel(source){
   const ep=state.screenplays.flatMap(s=>s.episodes).find(e=>e.id===source.revision_id);
   return `${ep?.payload.number?reviewPositionLabel('episode',ep)+' · ':''}${source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'全文'}`;
+}
+
+function renderEntityRelations(root,data){
+  const rows=(data.relationships||[]).map(r=>data.localVersions?.[r.object_id]||r);if(!rows.length)return;
+  const section=el('section','entity-relationships-reading');nodeText('h3',null,'人物与故事关系',section);
+  for(const row of rows){const line=el('article');renderOriginalReviewText(line,row);for(const ref of row.payload.entities||[])if(ref.object_id!==data.entity.object_id)productionRefLink(line,{...ref,kind:'ENTITY'},productionName(ref,(data.related_entities||[]).map(r=>({object_id:r.object_id,revision_id:r.id,title:r.payload.title}))));entitySources(line,row);section.append(line)}
+  const graph=productionButton(section,'用关系图查看',()=>{const {body}=openReviewDialog('人物关系',graph,'material-reference-dialog');renderEntityRelationGraph(body,data)});
+  root.append(section);
 }

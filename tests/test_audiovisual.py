@@ -168,7 +168,11 @@ class AudiovisualTest(unittest.TestCase):
             view=a.snapshot(self.store,oid)
             return a.decide(self.store,{'object_id':oid,'expected_revision':view['target']['revision_id'],
                 'expected_decision':a.ref(view['decision']) if view['decision'] else None,'action':action,'actor':'隔离测试'})
-        parent=decide('av-episode','accept'); decide('need','accept')
+        parent=decide('av-episode','accept')
+        self.assertTrue(a.snapshot(self.store,'av-shot')['accepted'])
+        self.assertFalse(a.snapshot(self.store,'need')['accepted'])
+        self.assertFalse(generation.readiness(self.store,'need')['ready'])
+        decide('need','accept')
         self.assertTrue(a.snapshot(self.store,'av-shot')['accepted'])
         self.assertTrue(generation.readiness(self.store,'need')['ready'])
         decide('av-shot','revoke')
