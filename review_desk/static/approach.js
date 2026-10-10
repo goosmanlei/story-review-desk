@@ -13,7 +13,7 @@ function approachSelectedTab(params = new URL(location.href).searchParams, hash 
   // anchor actually owned by the document; an explicit tab always takes priority.
   if (params.has('tab')) return tabs.find(tab => tab.id === params.get('tab')) || tabs[0];
   return tabs.find(tab => (tab.sections || []).some(section =>
-    hash === `#approach-${tab.id}-${section.id}` || (section.blocks || []).some(block =>
+    hash === `#approach-${tab.id}-${section.id}` || Object.keys(tab.layout?.anchors || {}).some(alias => hash === `#approach-${tab.id}-${alias}`) || (section.blocks || []).some(block =>
       block.type === 'heading' && block.id && hash === `#approach-${tab.id}-${block.id}`))) || tabs[0];
 }
 
@@ -158,7 +158,11 @@ function syncApproachIndex() {
 function restoreApproachAnchor() {
   if ($('#approach-view').hidden) return;
   syncApproachIndex();
-  const target = document.getElementById(location.hash.slice(1));
+  const tab = approachContent?.tabs.find(item => item.id === $('#approach-body').dataset?.tab);
+  const anchor = location.hash.slice(1);
+  const prefix = tab ? `approach-${tab.id}-` : '';
+  const alias = tab && anchor.startsWith(prefix) ? tab.layout?.anchors?.[anchor.slice(prefix.length)] : null;
+  const target = document.getElementById(alias ? prefix + alias : anchor);
   const owned = target && (target.classList.contains('approach-section') || target.classList.contains('approach-anchor')) && $('#approach-body').contains(target);
   if (owned) target.scrollIntoView({block: 'start'});
   scheduleApproachIndex();
@@ -193,8 +197,19 @@ function renderApproachCollaboration(diagram) {
       roles.append(link);
     }
   }
-  host.append(roles);
-  nodeText('p', 'approach-collaboration-constraint', diagram.constraint, host);
+  if (diagram.support) {
+    host.classList.add('approach-collaboration-supported');
+    const platform = el('div', 'approach-collaboration-platform');
+    const title = el('p', 'approach-collaboration-support-title');
+    nodeText('b', null, diagram.support.title, title);
+    nodeText('span', null, diagram.support.value, title);
+    platform.append(title, roles);
+    nodeText('p', 'approach-collaboration-support-text', diagram.support.text, platform);
+    host.append(platform);
+  } else {
+    host.append(roles);
+    nodeText('p', 'approach-collaboration-constraint', diagram.constraint, host);
+  }
   nodeText('p', 'approach-collaboration-label', diagram.workflow.label, host);
   const flow = el('ol', 'approach-collaboration-workflow');
   for (const stage of diagram.workflow.stages) nodeText('li', null, stage, flow);
@@ -211,7 +226,7 @@ async function renderApproach() {
   // Hash navigation must keep the mounted text and its browser reading position.
   if (host.dataset.tab === selected) { restoreApproachAnchor(); return; }
   delete host.dataset.tab;
-  host.classList.remove('approach-cycle');
+  host.classList.remove('approach-cycle', 'approach-diagram');
   approachIndexObserver?.disconnect();
   const index = $('#approach-index'), sidebar = $('#approach-sidebar');
   index.replaceChildren(); sidebar.hidden = true;
@@ -229,7 +244,7 @@ async function renderApproach() {
     if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
     host.setAttribute('aria-labelledby', `approach-tab-${tab.id}`);
     if (!tab.layout) nodeText('h2', null, tab.title, host);
-    nodeText('p', 'approach-lead', tab.lead, host);
+    if (tab.lead) nodeText('p', 'approach-lead', tab.lead, host);
     $('#approach-index-title').textContent = tab.label;
     index.setAttribute('aria-label', `${tab.label}阅读目录`);
     for (const section of tab.sections) {
@@ -238,6 +253,7 @@ async function renderApproach() {
     }
     sidebar.hidden = !!tab.layout || !tab.sections.length;
     host.classList.toggle('approach-cycle', tab.layout?.type === 'cycle');
+    host.classList.toggle('approach-diagram', tab.layout?.type === 'diagram');
     let content = host;
     if (tab.layout?.type === 'cycle') {
       content = el('div', 'approach-cycle-rows');
@@ -247,7 +263,10 @@ async function renderApproach() {
     }
     for (const section of tab.sections) {
       const article = el('section', 'approach-section'); article.id = `approach-${tab.id}-${section.id}`;
-      if (tab.layout?.type === 'cycle') {
+      const diagramOnly = section.diagram && section.blocks?.length === 0;
+      if (diagramOnly) {
+        article.setAttribute('aria-label', section.title);
+      } else if (tab.layout?.type === 'cycle') {
         const frame = el('div', 'approach-cycle-node');
         nodeText('h3', null, section.title, frame); article.append(frame);
       } else nodeText('h3', null, section.title, article);
