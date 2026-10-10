@@ -841,7 +841,7 @@ function selectedAnchor(){
   return textSelectionAnchor($('#source-text'),state.current.blocks,'data-block-id');
 }
 let selectionFrame=0,selectionPointer=null;
-function hideSelectionAction(){state.pending=null;$('#selection-action').hidden=true}
+function hideSelectionAction(){state.pending=null;const button=$('#selection-action');if(button)button.hidden=true}
 function selectionBounds(host){
   const bounds={left:8,top:8,right:innerWidth-8,bottom:innerHeight-8};
   for(let node=host;node;node=node.parentElement){
