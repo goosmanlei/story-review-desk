@@ -91,15 +91,16 @@ function materialTextSurface(parent,row){
 // An authored arrangement is accepted only for its exact source and displayed
 // companions. New comments retain original offsets; old comments use the exact
 // source reader if their original range is not part of this arrangement.
-function renderRecordComposition(parent,row,companions=[]){
+function renderRecordComposition(parent,row,companions=[],alreadyRead=[]){
   const composition=row.review_composition;
   if(!composition||(composition.requires||[]).some(id=>!companions.includes(id)))return false;
   const anchor=state.productionSelected?.id===row.id&&state.anchor;
   if(anchor?.type==='text'&&!composition.sections.some(s=>s.parts.some(p=>p.block_id===anchor.block_id&&(!anchor.end_block_id||anchor.end_block_id===anchor.block_id)&&p.start<=anchor.start&&p.end>=anchor.end)))return false;
   const surface=materialTextSurface(parent,row);
   for(const section of composition.sections){
+    const parts=section.parts.filter(part=>!alreadyRead.includes(part.text));if(!parts.length)continue;
     if(section.label)nodeText('h4',null,section.label,surface);
-    for(const part of section.parts){const line=nodeText('p',null,part.text,surface);line.dataset.blockId=part.block_id;line.dataset.anchorOffset=part.start}
+    for(const part of parts){const line=nodeText('p',null,part.text,surface);line.dataset.blockId=part.block_id;line.dataset.anchorOffset=part.start}
   }
   return true;
 }
@@ -210,6 +211,7 @@ function renderMaterialRequirements(parent,requirement){
   materialField(host,requirement,'generation.output.review_criteria','检查要点');
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=false}={}){
+  if(state.reviewWork&&!historical)return;
   const plan=need.payload.generation,box=el('section','material-plan');box.dataset.requirementId=need.object_id;
   nodeText('h3',null,historical?'原方案':plan?.method==='reuse'?'复用方案':'生成方案',box);
   if(!plan){nodeText('p',need.payload.status==='withdrawn'?'production-meta':'production-issue',need.payload.status==='withdrawn'?'此版本未附生成方案':'生成方案待完善',box);parent.append(box);return}
@@ -480,6 +482,7 @@ function renderMaterialWorkspace(root,detail){
   if(requirement&&typeof renderMaterialAdoptionControls==='function')renderMaterialAdoptionControls(root,{...detail,record:requirement,candidate_records:candidates.map(item=>item.record)});
 }
 function renderMaterialUses(root,record,titles=[]){
+  if(state.reviewWork)return;
   const coverage=record.payload.state_coverage||[];if(!coverage.length)return;
   const uses=el('section');nodeText('h3',null,'关联用途',uses);
   for(const item of coverage){productionRefLink(uses,item.state,productionName(item.state,titles));nodeText('p',null,item.detail,uses)}

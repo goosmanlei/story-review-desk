@@ -817,3 +817,18 @@ function showProductionChange(parent,change,options={}){
     finally{saving=false;if(isOpen())updateControls()}
   });productionButton(box,'取消',()=>{closed=true;box.remove()});parent.append(box);updateControls();
 }
+
+function currentReviewWork(){
+  if(state.unifiedCardRoot)return state.reviewWork?.reference||null;
+  const params=new URL(location.href).searchParams;
+  if(state.workspace==='settings.workspace'&&productionTab()==='breakdown'&&state.breakdownSceneData?.scene)return productionRef(state.breakdownSceneData.scene);
+  const episode=params.get('production_scope_episode'),revision=params.get('production_scope_revision');
+  return episode&&revision?{object_id:episode,revision_id:revision,scene_id:params.get('production_scope_scene')||undefined}:null;
+}
+function reviewWorkMatches(row,work=state.reviewWork){
+  if(!work)return true;
+  const refs=[row?.payload?.scope,row?.payload?.context,row&&productionRef(row)].filter(Boolean);
+  if(refs.some(ref=>work.positions.some(p=>p.object_id===ref.object_id&&p.revision_id===ref.revision_id)))return true;
+  if(['AV_SCENE','AV_SHOT','AV_EPISODE'].includes(row?.kind)||refs.some(ref=>work.positions.some(p=>p.object_id===ref.object_id)))return false;
+  return [...(row?.payload?.sources||[]),...(row?.payload?.applies_to||[])].some(ref=>work.sources.some(s=>s.object_id===ref.object_id&&s.revision_id===ref.revision_id&&(!s.scene_id||s.scene_id===ref.scene_id)));
+}

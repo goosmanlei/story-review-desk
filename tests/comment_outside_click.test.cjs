@@ -284,7 +284,7 @@ async function unifiedCloseFixture(){
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/unified-cards.js'),'utf8'),f.c,{filename:'unified-cards.js'});
   // Network/card painting are separate contracts. Execute the real modal owner,
   // panel relocation, saved-state close callback and setPanelOpen functions here.
-  Object.assign(f.c,{productionLoadEpoch:0,rememberProductionDraft(){},restoreProductionDraft(){},renderProductionReader(){},paintProductionReview(){},history:{state:{},replaceState(){}},
+  Object.assign(f.c,{productionLoadEpoch:0,currentReviewWork:()=>null,rememberProductionDraft(){},restoreProductionDraft(){},renderProductionReader(){},paintProductionReview(){},history:{state:{},replaceState(){}},
     readUnifiedCard:async(object_id,id)=>({record:{object_id,id}}),activateUnifiedCard:value=>{f.c.state.productionSelected=value.record},
     openReviewDialog(){const dialog=new Element('dialog'),body=new Element();dialog.className='unified-card-dialog';body.className='review-dialog-body';dialog.append(body);f.body.append(dialog);dialogs.push(dialog);return {dialog,body}}});
   return {...f,dialogs,close(dialog){f.dispatch('close',dialog,{detail:0});dialog.remove()}};

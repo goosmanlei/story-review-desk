@@ -396,6 +396,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                         reader=ui_projection.card if path.endswith('/card') else ui_projection.scene
                         options={'shot_revision':param('shot_revision'),'view':param('view'),'episode':param('episode'),'episode_revision':param('episode_revision')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
                         result = reader(store,param('object_id'),param('revision_id'),**options)
+                        if path.endswith('/card'):
+                            from .review_work import context as work_context
+                            result['review_work'] = work_context(store, param('work_object'), param('work_revision'), param('work_scene'))
                         from .prompt_reading import attach
                         attach(result, self.server.config.get('scene_reading'))
                         return self._json(result)
