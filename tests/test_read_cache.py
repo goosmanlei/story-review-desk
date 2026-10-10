@@ -28,6 +28,19 @@ class CachedEntityReadScopeTest(scope_tests.EntityReadScopeTest):
 
 
 class CacheTest(unittest.TestCase):
+    def test_retired_table_tokens_are_removed_without_resetting_live_tokens(self):
+        self.store.db.execute('CREATE TABLE retired_cache_fixture (id INTEGER)')
+        self.store.db.commit()
+        read_cache.initialize(self.store)
+        before = dict(self.store.db.execute('SELECT name,token FROM read_generations'))
+        self.store.db.execute('DROP TABLE retired_cache_fixture')
+        self.store.db.commit()
+        read_cache.initialize(self.store)
+        after = dict(self.store.db.execute('SELECT name,token FROM read_generations'))
+        self.assertEqual(after, {k: v for k, v in before.items() if k != 'retired_cache_fixture'})
+        tables = {r[0] for r in self.store.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='read_generations'")}
+        self.assertEqual(set(after), tables)
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
