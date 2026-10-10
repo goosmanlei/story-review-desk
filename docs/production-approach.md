@@ -99,3 +99,5 @@ Schema 2 的 cycle 节可提供 `diagram`，其 `type` 为 `collaboration`。它
 协作图可用 `support: {title,value,text}` 替代 `constraint`，表达承载角色协作的平台及其价值；两者不能混用。平台框内展示支持说明和角色双向交换，共同作品链仍在框外按序显示。循环节只有图示且blocks为空时，直接展示图示，section.title继续提供可访问名称及锚点，不重复显示外部标题。旧constraint图示仍按原契约显示。
 
 纯图阅读页可采用 `layout: {type: "diagram", anchors: {旧锚点: "实际节id"}}`，只接受一个blocks为空且提供diagram的节。aliases必须为合法id、不能与实际id相同，目标必须存在；页面直接展示图示，无内部目录、重复章节标题或空引言。旧锚点在阅读恢复时映射到准确内容，不添加空占位节点；其他子页及旧cycle布局保持兼容。
+
+两层支撑图可用 `diagram.type: "supported-collaboration"`：`roles` 为两个 `{title,icon}`，图标恰含 `human` 与 `ai`；`outcome` 为共同作品名称；`foundation` 含 `title` 与两个 `{title,icon}` 的 `pillars`，图标恰含 `model` 与 `process`；`support` 为共同支撑的连接短语，`description` 为完整关系的可访问说明。只接受上述字段及非空文字，缺失或重复角色／基础、未知图标均拒绝。实例提供全部文字，系统提供固定的静态 SVG 图标、双向交换和覆盖整个协作组的支撑线，不接受实例 SVG 或 HTML。上层使用轻线条，下层复用系统绿色纸面；窄屏保持原生字号及两层关系，不把整图按比例缩成小字。纯图页与旧链接沿用同一 `layout` 契约，旧协作和循环仍可读；没有业务对象或执行流程变更。

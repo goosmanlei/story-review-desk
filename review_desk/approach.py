@@ -81,6 +81,18 @@ def validate_collaboration(diagram):
     def text(value):
         return isinstance(value, str) and bool(value.strip())
     require(isinstance(diagram, dict))
+    if diagram.get('type') == 'supported-collaboration':
+        require(set(diagram) == {'type', 'roles', 'outcome', 'foundation', 'support', 'description'})
+        require(all(text(diagram[key]) for key in ('outcome', 'support', 'description')))
+        foundation = diagram['foundation']
+        require(isinstance(foundation, dict) and set(foundation) == {'title', 'pillars'} and text(foundation['title']))
+        for nodes, icons in ((diagram['roles'], {'human', 'ai'}), (foundation['pillars'], {'model', 'process'})):
+            require(isinstance(nodes, list) and len(nodes) == 2)
+            for node in nodes:
+                require(isinstance(node, dict) and set(node) == {'title', 'icon'})
+                require(text(node['title']) and isinstance(node['icon'], str) and node['icon'] in icons)
+            require({node['icon'] for node in nodes} == icons)
+        return
     fields = {'type', 'roles', 'exchanges', 'workflow'}
     require(set(diagram) in (fields | {'constraint'}, fields | {'support'}))
     require(diagram['type'] == 'collaboration')
