@@ -180,6 +180,13 @@ test('a reader remembered on another material version cannot restore its candida
   c.restoreUnifiedMaterialReader(data,'shared',b);assert.equal(c.state.productionSelected,b);assert.equal(c.state.anchor,null);
 });
 
+test('version return restores the viewed candidate together with its draft target',()=>{
+  const {c,data,shared,a,b}=sharedMaterialFixture();data.material_versions.shared.push({...data.material_versions.shared[0],number:1});
+  data.selectedMaterialRounds={shared:2};data.selectedCandidates={shared:a.id};c.state.productionSelected=a;c.state.anchor={type:'time',start_seconds:1,end_seconds:2};
+  c.switchMaterialRound(data,'shared',1);assert.equal(data.selectedCandidates.shared,b.id);
+  c.switchMaterialRound(data,'shared',2);assert.equal(data.selectedCandidates.shared,a.id);assert.equal(c.state.productionSelected,a);assert.equal(c.state.anchor.start_seconds,1);
+});
+
 test('candidate generation reads its actual call and never borrows a current plan when history is absent',()=>{
   const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);c.materialTextSurface=parent=>parent;
   const need={id:'need-current',object_id:'need',payload:{blocks:[],generation:{prompt:'CURRENT PLAN',inputs:[],parameters:{},output:{}}}},record={id:'asset-old',payload:{blocks:[]}},call={id:'call-old',object_id:'call',payload:{format:'production-call-v1',blocks:[],model:'old-model',parameters:{seed:7},prompt:'EXACT OLD CALL',inputs:[]}};

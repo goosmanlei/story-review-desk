@@ -91,7 +91,7 @@ function renderUnifiedSelected(data){
   data.materialSwitchPending=false;
   const options=entityMaterialCandidateOptions(data,selected);
   renderMaterialCard(right,selected,{...options,renderResult:(host,item)=>renderMaterialResultReview(host,item.record,item.review_context||data.materialContexts?.[item.record.id]||{}),roundChange:number=>{
-    rememberProductionDraft();switchMaterialRound(data,key,number);delete data.selectedCandidates[key];renderProductionReader();renderComments();focusMaterialRoundControl(key);
+    rememberProductionDraft();switchMaterialRound(data,key,number);renderProductionReader();renderComments();focusMaterialRoundControl(key);
   },planVersion:(h,row)=>entityVersionControl(h,row,next=>{data.localVersions||={};data.localVersions[next.object_id]=next}),assetVersion:(h,item)=>entityVersionControl(h,item.record,next=>{data.localVersions||={};data.localVersions[next.object_id]=next})});
 
 
