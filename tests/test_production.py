@@ -96,7 +96,6 @@ class ProductionTest(unittest.TestCase):
 
     def test_passed_is_not_adopted_and_new_candidate_does_not_replace(self):
         self.put(self.entity()); self.media(); self.put(self.requirement())
-        self.put(self.spec('review', 'JUDGMENT', target=self.ref('voice'), verdict='passed', actor='审阅者', reason='可用'))
         self.assertFalse(p.readiness(self.store, 'songbook')['inputs_ready'])
         use = self.adoption(); self.put(use)
         selected = p.record(self.store, 'use')['payload']['asset']
@@ -114,7 +113,7 @@ class ProductionTest(unittest.TestCase):
         self.assertTrue(p.readiness(self.store, 'other')['inputs_ready'])
         old = self.ref('songbook')
         changed = self.entity(); changed['expected_version'] = 1; changed['payload']['facts'].append('上游新要求'); self.put(changed)
-        self.assertFalse(p.readiness(self.store, 'songbook')['inputs_ready'])
+        self.assertTrue(p.readiness(self.store, 'songbook')['inputs_ready'])
         self.assertTrue(p.readiness(self.store, 'other')['inputs_ready'])
         self.assertEqual({r['object_id'] for r in p.impact(self.store, old['revision_id'])['affected']}, {'dialogue','use'})
 
@@ -204,11 +203,11 @@ class ProductionTest(unittest.TestCase):
         entity=self.entity(); entity['payload']['sources'].append({'object_id':'structure','revision_id':second['revision']})
         self.put(entity); revision=self.ref('songbook')['revision_id']
         self.assertIn(first['revision'],p.dependency_closure(self.store,revision))
-        self.assertEqual(p.stale_inputs(self.store,revision),[])
+        self.assertEqual(p.upstream_changes(self.store,revision),[])
         self.assertEqual(p.impact(self.store,first['revision'])['affected'],[])
         self.store.put_object('structure','STORY',{'title':'实质修订','blocks':[]},expected_version=2,
             dependencies=[{'revision_id':second['revision'],'role':'REVISES'}])
-        self.assertEqual([r['used_revision'] for r in p.stale_inputs(self.store,revision)],[second['revision']])
+        self.assertEqual([r['used_revision'] for r in p.upstream_changes(self.store,revision)],[second['revision']])
 
     def test_source_excerpt_preserves_historical_text_and_anchor(self):
         newer=copy.deepcopy(p.record(self.store,'episode')['payload'])
@@ -234,52 +233,7 @@ class ProductionTest(unittest.TestCase):
         self.assertEqual(source['episode_number'],3)
         self.assertEqual(source['blocks'][0]['text'],'女孩拿起完好的歌本。')
 
-    def test_reviewed_state_rename_keeps_exact_inputs_and_expires_on_later_change(self):
-        self.put(self.entity(), self.entity('other'))
-        self.put(self.spec('wet', 'STATE', entity=self.ref('songbook'), dimensions={'condition':'wet'},
-                           sources=[self.source], facts=['浸湿'], choices=[], unknowns=[]))
-        old = self.ref('wet')
-        for oid, scope in [('first', 'songbook'), ('second', 'other')]:
-            need = self.requirement(oid, scope)
-            need['payload']['states'] = [old]
-            self.put(need)
-        inputs = {oid:p.record(self.store, oid) for oid in ('first', 'second')}
-        payload = copy.deepcopy(p.record(self.store, 'wet')['payload'])
-        payload['title'] = '歌本·浸湿'
-        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':1, 'payload':payload})
-        for rec in inputs.values():
-            self.assertEqual(len(p.stale_inputs(self.store, rec['id'])), 1)
-        self.put(self.spec('naming-review', 'JUDGMENT', target=self.ref('wet'), verdict='impact_resolved',
-                           actor='命名复核者', reason='核对正文、维度和全部引用，仅标题改名',
-                           change={'old':old, 'new':self.ref('wet'), 'action':'keep', 'scope':'state_title_only'}))
-        for oid, rec in inputs.items():
-            self.assertEqual(p.record(self.store, oid), rec)
-            self.assertEqual(p.stale_inputs(self.store, rec['id']), [])
-        self.assertEqual(p.record(self.store, revision_id=old['revision_id'])['payload']['title'], 'wet')
-        self.assertTrue(p.impact(self.store, old['revision_id'])['affected'])
-        payload['facts'].append('书页撕裂')
-        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':2, 'payload':payload})
-        for rec in inputs.values():
-            self.assertEqual(len(p.stale_inputs(self.store, rec['id'])), 1)
 
-    def test_state_rename_review_cannot_exempt_content_changes_or_wrong_target(self):
-        self.put(self.entity())
-        self.put(self.spec('wet', 'STATE', entity=self.ref('songbook'), dimensions={'condition':'wet'},
-                           sources=[self.source], facts=[], choices=[], unknowns=[]))
-        old = self.ref('wet')
-        payload = copy.deepcopy(p.record(self.store, 'wet')['payload'])
-        payload.update(title='歌本·浸湿', facts=['正文发生修改'])
-        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':1, 'payload':payload})
-        review = self.spec('naming-review', 'JUDGMENT', target=self.ref('wet'), verdict='impact_resolved',
-                           actor='复核者', reason='尝试命名复核',
-                           change={'old':old, 'new':self.ref('wet'), 'action':'keep', 'scope':'state_title_only'})
-        with self.assertRaisesRegex(ValueError, 'only a title change'):
-            self.put(review)
-        prior = self.ref('wet'); payload['title'] = '歌本·湿润'
-        self.put({'object_id':'wet', 'kind':'STATE', 'expected_version':2, 'payload':payload})
-        review['payload']['change'].update(old=prior, new=self.ref('wet'))
-        with self.assertRaisesRegex(ValueError, 'exact new state target'):
-            self.put(review)
 
     def test_selected_asset_must_cover_required_identity_and_state(self):
         self.put(self.entity()); self.image()

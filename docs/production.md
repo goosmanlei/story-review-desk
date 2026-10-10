@@ -8,15 +8,13 @@
 | --- | --- |
 | `INPUT_LOCK` | 固定故事剧本与分集修订、真实确认依据和规格 |
 | `ENTITY` / `STATE` | 稳定身份与完整实体状态，共同通过 `sources` 回查故事场和正文；状态准确引用所属实体 |
-| `RELATION` | 实体、状态、需求／素材和镜头等对象的统一业务关系；采用等独立决定仍按原语义校验 |
-| `REPRESENTATION` | 仍有用途的身份、声线或布局说明；不冒充候选或调用 |
+| `RELATION` | 实体、状态、需求／素材和镜头等对象的统一业务关系；准确原件选择独立校验 |
 | `AV_EPISODE` | 视听集，`story_episode` 固定故事集边界，`scenes` 按顺序引用准确视听场修订 |
 | `AV_SCENE` | 视听场，`sources` 可含同集多个故事场的部分正文，`shots` 按顺序引用准确镜头修订 |
 | `AV_SHOT` | 视听镜头，包含叙事目的、必要镜内状态、实际产物及准确正文范围 |
 | `REQUIREMENT` | 一项持续素材需求，`scope` 绑定实体、状态或视听位置；同镜可有多需求 |
 | `MATERIAL_RELATION` | 迁移前只读历史身份；当前业务关系统一进入 `RELATION/business` |
 | `CALL` / `ASSET` | 不可伪造的实际调用与产物，真实原件、组成、来源和输入保持准确 |
-| `JUDGMENT` | 设计／方案采纳、结果审阅或变更复核；均以准确修订为目标 |
 
 对象 ID 是稳定身份，修订 ID 是不可变版本。集→场→镜向下固定准确修订；子项更新不会静默改写已有父级编排。需求归属也固定准确位置修订，跨位置复用需明确关系。旧场准备与旧镜头设计类型已经退出导入、读取目录及恢复，不通过改名自动转换。
 
@@ -37,21 +35,11 @@ flowchart LR
 
 图中是业务关系；落库依赖由使用方的准确修订指向来源。统一关系保存一对稳定端点，方案以准确 `relation` 固定其修订，避免需求与关系之间的修订循环。必需／可选、条件和择一路线留在每项方案输入，只检查明确选择的路线，普通关联不驱动调用。编号、方向、旧别名和写入契约见[统一关系](materials-and-relationships.md#关系契约)。
 
-## 实体卡审阅与版本采纳
+## 实体卡与准确评论
 
-工作方式是 AI 生成或修订，用户直接阅读并评论，AI 按准确版本的意见推进；没有送审步骤，也不在阅读页提供内容编辑入口。采纳定义为认可当前实体基础信息、全部完整状态和逐素材生成方案，允许准备素材生成。按钮在采纳后变为“取消采纳”，新评论和新候选不撤销方案认可；内容或方案修订后需重新认可。
+实体、状态、素材方案和原件直接阅读、切版与评论。意见绑定正在阅读的准确文字或原件，历史意见保留原锚点；AI 的实际修订沿已有回应打开准确新版本再返回。没有逐对象通过／撤销按钮、审批范围或审批历史面板。完整准备与执行约束见 [生成准备](generation-preparation.md)。
 
-基础信息常驻，状态平铺且默认基础状态。完整状态描述之后按图像、声音和视频分区，列出具体素材名称、用途、模型、参数、提示词、参考及检查要点。各区域只在有历史修订时显示版本选择；历史采纳从“更多”查看，无记录不占位。剧情依据与镜头链接靠近相关内容。
-
-文字、图像及时间段的可评论区域采用统一边线和评论图标；事实、制作选择、待确认、完整描述和方案文字均可圈选。评论区是全局功能，意见绑定实际阅读的对象修订；旧意见加载原文字／原文件，用户草稿继续按版本和锚点隔离。
-
-状态素材必须明确关联到该状态准确修订与文件组成，不能从实体身份推断。图片只在明确缺失的图像需求处占位；缺音频使用紧凑提示条，真实音频直接使用波形播放器，不放人物封面。未匹配当前状态的候选单独保留；旧素材评论独立打开原版本，不混入当前状态。
-
-素材卡使用共用的[方案版本与候选契约](material-versions.md)。当前方案尚无结果时显示真实需求占位，旧结果从版本选择器查看，不重复显示为另一张当前素材卡。跨状态复用或需求退出当前准备范围后，已有原件仍按准确方案与候选展示；素材记录修订号不代替方案版号。图像在固定高度的预览区域完整显示，声音保留原音频和片段评论。
-
-`GET /api/production/entity-review?entity_id=ID` 与 CLI `production-entity-review ID` 返回同一 `entity-workspace-v2` 聚合，包含实体、完整状态、素材、生成需求、精确评论目标、版本及来源。`scope` 锁定 `{entity,states,requirements,dependencies}`；新增候选不进入生成方案的采纳范围。`POST /api/production/entity-decision`／`production-entity-decide FILE` 原子检查范围及乐观版本，记录采纳或取消。执行另检查必要原件的明确采用及准确范围。
-
-完整字段、关系图、采纳／取消并发、生成前检查、输入包和迁移说明见 [实体生成准备契约](generation-preparation.md)。旧 `entity-current-v1` 的准确内容范围未变时，可沿历史决策链取消并重新认可；新决策使用 `entity-content-v1`，仍不作为生成许可。实体、状态、媒体范围改变后不能沿用旧认可；新生成方案继续独立核验完整准备和准确采用。仍有实际用途的 REPRESENTATION 保持准确来源。生产历史重放仅允许空的生产对象集合；普通导入不开放跳过当前校验的开关。
+素材候选和准确选择仍沿共用大卡与 [方案版本](material-versions.md) 读取；浏览不改选择。生产历史重放只允许空的生产对象集合；普通导入保持全部真实校验。
 
 ## 数据契约
 
@@ -59,16 +47,14 @@ flowchart LR
 
 | 类型 | 字段及约束 |
 | --- | --- |
-| input-lock | `screenplay` 精确引用、`episodes` 全部分集引用、`approval:{actor,statement,scope}`、`specification`。不得凭是否存在剧本自动填接受。 |
+| input-lock | `screenplay` 精确引用、`episodes` 全部分集引用、历史确认事实（如已有）、`specification`。不得凭是否存在剧本自动填接受。 |
 | entity | `entity_type:character/space/prop/song`、`subtype`、`aliases`、`facts`、`choices`、`unknowns`、`sources`。同一类型中的别名冲突必须显式解决。仅提及对象仍可登记，无自动制作要求。 |
 | state | `state_model:complete-v1`、`entity`、`dimensions`、`reference_media:image/audio/none`、`sources`、`facts`、`choices`、`unknowns`。完整快照可跨场复用，不把局部伤势或普通动作独立当作状态。 |
-| representation | `entities`、`states`、`sources`、`choices`、`unknowns`。选择的基准通过 adoption 关系查询，不把候选混入设定事实。 |
 | av-episode / av-scene | `reading_contract:audiovisual-three-part-v1`、`input_lock`、`sources`；集另有 `story_episode,number,scenes`，场有 `shots`。准确子项锁与范围须一致，集场说明独立存于当前工作稿。 |
 | av-shot | `reading_contract:audiovisual-three-part-v1`、`input_lock,sources,purpose,key_states,products,duration_frames,fps,entities,states`。镜内状态及产物绑定已有准确需求，详见 [视听制作](production-breakdown.md)。 |
 | requirement | `scope`、`slot`、`required`、`purpose`、`media_type`、`usage:generation_input/post_audio/editorial`、`entities`、`states`、`specification`，可选 `generation` 逐素材生成方案。缺项以槽位为单位显示。 |
 | asset | `media_type`、`subjects`（可空，支持项目级声音）、`states`、`components`、`production` 实际制作引用、`lineage`。组件包含 `id,role,file,sha256,bytes,mime` 和实际宽高／时长等。必须有原件；工程素材可登记工程文件为原件。可选 `candidate_requirements` 绑定准确需求，但不表示已按该方案执行或采用。 |
 | call | `method`、`status:planned/submitted/completed/failed/unknown`、`tool`、`model`、`prompt`、`parameters`、`inputs`、`outputs`、`receipt`、`usage`、`lineage`。completed 必须有实际结果；网络结果不明保留 unknown，不自动重复扣费。 |
-| judgment | `target`、`verdict`、`actor`、`reason`、可选 `change:{old,new,action}`；action 为 needs_review、keep、rework、replace。用户接受必须有真实确认依据，不由自检生成。 |
 | relation | `relation_type:adoption`、`scope`、`slot`、`asset`、`component_id`、`usage`、`crop` 或 `range`、`reason`。一个 scope＋slot 对应一个稳定采用对象，更新必须带 expected_version。 |
 
 
@@ -98,7 +84,7 @@ flowchart LR
 
 实体回答“是谁／是什么”，状态回答“此时完整地是什么样”。每次实际呈现或发声必须指向所属实体的完整状态；只在被关注的完整形态发生变化时拆分。跨场复用同一形态不会增加状态数，走、坐、回头等普通动作留在镜头说明。人物的衣着、掌心伤和额角伤若同时存在，必须在同一状态中同时说明，执行者无需拼接局部状态。
 
-`complete-v1` 状态的 `dimensions` 是已展开的完整描述，各字段为非空文字。角色包含 `appearance,clothing,injury,health,fatigue,voice,attachments`；空间包含 `layout,dressing,time_light`；道具包含 `structure,condition,contents,placement`；歌曲包含 `lyrics_scope,rendition,performers`。未获剧本或用户支持的细节明确写“未明确／待审”，同时归入 `unknowns` 或 `choices`，不能把未提及写成确定正常或健康。整体描述完整不等于造型已经批准。
+`complete-v1` 状态的 `dimensions` 是已展开的完整描述，各字段为非空文字。角色包含 `appearance,clothing,injury,health,fatigue,voice,attachments`；空间包含 `layout,dressing,time_light`；道具包含 `structure,condition,contents,placement`；歌曲包含 `lyrics_scope,rendition,performers`。未获剧本或用户支持的细节明确写“未明确／待审”，同时归入 `unknowns` 或 `choices`，不能把未提及写成确定正常或健康。整体描述完整仍需实际检查图像是否表达准确。
 
 集场和镜头采用 `state_model:complete-v1`。镜头的 `states` 对每个实体按时间排序，同一实体发生状态变化时，`state_transitions:[{from,to,action,source}]` 必须逐对说明动作及准确依据；来源正文必须在该镜头引用范围内。不得跨实体、遗漏转换或用局部状态冒充完整状态。`mention` 仍可关联已知事实状态，但不产生媒体生产义务；仅提及的完整状态使用 `reference_media:none`。
 
@@ -116,7 +102,7 @@ flowchart LR
 
 原件、预览、工程是同一候选的不同 component。组件各自保存媒体信息与哈希，评论和采用指明 component_id；不能从预览图哈希推断原件未变化。工程文件中的本地依赖采用相对路径，逐镜包和工程包包含所需原件、素材清单、元数据、提示词和制作回执。临时下载地址只留追溯信息。
 
-当前完整 bundle 使用 Schema 11，包含视听对象、统一关系及唯一对象对索引、旧别名和迁移凭据、准确版本与候选、评论及最小清理凭据。恢复时拒绝遗漏关系索引或别名，避免旧模型复活。遍历全部保留修订的文件组成并校验原件；退役生产类型在导入与恢复时均拒绝。故事域的兼容读取不意味着可恢复旧制作体系。实例还通过策略绑定准确清理基线。
+当前完整 bundle 使用 Schema 12，包含视听对象、统一关系及唯一对象对索引、旧别名和迁移凭据、准确版本与候选、评论及最小清理凭据。恢复时拒绝遗漏关系索引或别名，避免旧模型复活。遍历全部保留修订的文件组成并校验原件；退役生产类型在导入与恢复时均拒绝。故事域的兼容读取不意味着可恢复旧制作体系。实例还通过策略绑定准确清理基线。
 
 导出先校验数据、布局和全部原件哈希，再暂存元数据文件，最后替换清单；不复制或替换媒体目录。校验、暂存或文件替换发生可捕获错误时，保留上一份完整导出的内容；首次导出失败则移除本次已发布的部分元数据。共享目录的导出和发布仍须按序执行，不支持多个写入者同时发布同一目录。
 
@@ -165,7 +151,7 @@ CLI 均从系统仓库运行 `python3 -m review_desk --instance /path/to/instanc
 
 | HTTP | CLI | 作用 |
 | --- | --- | --- |
-| `GET /api/production/entity-review?entity_id=&revision_id=` | `production-entity-review ID [--revision SHA]` | 当前实体／状态／素材、准确评论目标、出场、采纳及历史 |
+| `GET /api/production/entity-review?entity_id=&revision_id=` | `production-entity-review ID [--revision SHA]` | 当前实体／状态／素材、准确评论目标、出场及历史 |
 | `GET /api/production?kind=&object_id=&revision_id=` | `production-get [--kind K] [--object ID] [--revision SHA]` | 类型、头修订或确切历史详情与使用反查 |
 | `GET /api/production/source?object_id=&revision_id=&scene_id=&block_ids=` | `production-source ID SHA [--scene ID] [--block ID ...]` | 读取精确来源正文；历史来源不得静默换成当前正文。HTTP block_ids 为逗号分隔。 |
 | `POST /api/production/import` | `production-import file.json [--validate-only]` | 同一事务验证／批量提交，保留乐观版本 |
@@ -182,7 +168,7 @@ CLI 均从系统仓库运行 `python3 -m review_desk --instance /path/to/instanc
 
 ## 页面最小功能
 
-- **实体管理**：按角色／空间／道具／歌曲浏览和检索；身份详情、别名、事实／选择／未知、并存状态、设定修订、基准采用；下方显示出场、来源及镜头使用。用户在页内直接评论和采纳当前版本，Codex 根据意见通过工具修订。
+- **实体管理**：按角色／空间／道具／歌曲浏览和检索；身份详情、别名、事实／选择／未知、并存状态、设定修订、基准采用；下方显示出场、来源及镜头使用。用户在页内直接评论准确版本，Codex 根据意见通过工具修订。
 - **素材管理**：按媒体与用途筛选真实素材；原件、预览和工程组件选择；并排选择两个确切版本进行比较；图像区域和音视频范围评论；实际制作及输入、候选、审阅、采用分别可读；新候选默认待审，不自动替换。
 - **视听制作**：集／场／镜有序导航、场次实体检查、镜头正文、声音与输入槽位；选择精确素材、查看缺项、下载逐镜包。后续镜头视频未生产时不得显示已完成。
 
@@ -200,7 +186,7 @@ CLI 均从系统仓库运行 `python3 -m review_desk --instance /path/to/instanc
 
 各实际图像调用记录全部参考的素材修订及 component。纯文字创建是新候选根；以图生图代数取实际生成参考的最深代数加一。本次最小实现的累计上限为两代，故事制作规则另要求优先一代。加入根母版、重命名或再次选为基准不会重置深度。验证器拒绝超限调用记录；故事执行工具在提交生成前应执行同一检查。具体作品的调用、谱系与原件以实例真实记录为准。
 
-身份、画面风格和具体修改范围通过提示词及干净母版共同固定。纹理漂移、人物辨识和声音表演属于作品审阅，不能用谱系校验或文件探测声称已经通过。工具／模型不可用、额度不足或用户尚未认可制作基准时，系统可以继续登记需求和缺项，不制造占位成果来满足就绪条件。
+身份、画面风格和具体修改范围通过提示词及干净母版共同固定。纹理漂移、人物辨识和声音表演属于作品审阅，不能用谱系校验或文件探测声称已经通过。工具／模型不可用、额度不足或准确制作输入尚未确定时，系统可以继续登记需求和缺项，不制造占位成果来满足就绪条件。
 
 ## 验证与分阶段交接
 
@@ -218,7 +204,7 @@ CLI 均从系统仓库运行 `python3 -m review_desk --instance /path/to/instanc
 
 ## 描述型声音状态与显式需求清理
 
-归并重复实体或完整状态时，通过新修订标记 `status: "withdrawn"`，并保存归并依据与准确目标；不删除旧身份、原件、调用、认可或评论。撤回项不再进入当前实体列表、实体完整状态清单、生成范围及当前覆盖缺项检查，历史准确链接仍可读取。被撤回的整体需求可设 `required: false`，但必须保留原状态、归属、媒体类型与整体槽位的准确关联；撤回需求不能用于新的生成许可。
+归并重复实体或完整状态时，通过新修订标记 `status: "withdrawn"`，并保存归并依据与准确目标；不删除旧身份、原件、调用或评论。撤回项不再进入当前实体列表、实体完整状态清单、生成范围及当前覆盖缺项检查，历史准确链接仍可读取。被撤回的整体需求可设 `required: false`，但必须保留原状态、归属、媒体类型与整体槽位的准确关联；撤回需求不能用于新的生成输入。
 
 已撤回的旧实体审阅记录仍验证其准确历史状态和素材范围，不再要求它包含后来新增的当前状态。故事端恢复按历史依赖回放，不将归并后的新对象头替换旧引用，也不通过重新抽取复活已撤回的重复项。
 

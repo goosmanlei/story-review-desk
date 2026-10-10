@@ -180,7 +180,7 @@ class UnifiedRelationsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.put(new_legacy)
         export(self.store, self.root/'export')
-        self.assertEqual(json.loads((self.root/'export/manifest.json').read_text())['schema_version'], 11)
+        self.assertEqual(json.loads((self.root/'export/manifest.json').read_text())['schema_version'], 12)
         dest = self.root/'restored'; shutil.copytree(self.root/'export', dest/'export')
         restored = Store(dest/'.runtime/review.sqlite3')
         try:

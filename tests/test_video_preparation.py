@@ -9,7 +9,6 @@ import unittest
 import test_generation as fixtures
 import test_production_breakdown as breakdown
 from review_desk import production as p, generation as g, material_plans as mp, shot_references as sr
-from review_desk import production_acceptance as acceptance
 from review_desk.production_media import ingest
 from review_desk.store import Store, Conflict
 from review_desk.bundle import export, restore
@@ -51,21 +50,13 @@ class VideoPreparationTest(unittest.TestCase):
                          'index':index, 'input_key':sr.input_key(item), 'material_id':name, 'number':1,
                          'candidate':self.ref(name+'-file'), 'component_id':'original'})
 
-    def approve(self):
-        for name in ('video',):
-            current = acceptance.snapshot(self.store, name)
-            if not current['accepted']:
-                acceptance.decide(self.store, {'object_id':name, 'expected_revision':current['target']['revision_id'],
-                    'expected_decision':acceptance.ref(current['decision']) if current['decision'] else None,
-                    'action':'accept', 'actor':'合成夹具测试'})
 
     def test_selection_package_exact_registration_history_and_restore(self):
-        self.prepare(); self.approve()
+        self.prepare()
         self.assertFalse(g.readiness(self.store, 'video')['ready'])
         self.select(0, 'select-start'); self.select(1, 'select-end')
         self.assertEqual(p.record(self.store,'video')['payload']['generation']['execution'], self.execution)
-        self.assertFalse(g.readiness(self.store, 'video')['ready']) # edits require fresh content acceptance
-        self.approve()
+        self.assertTrue(g.readiness(self.store, 'video')['ready']) # exact selections are sufficient
         path = self.root/'prepared'
         g.write_package(self.store, 'video', path)
         package = json.loads((path/'manifest.json').read_text())
@@ -77,7 +68,7 @@ class VideoPreparationTest(unittest.TestCase):
             self.assertTrue((path/i['path']).is_file())
             self.assertEqual(i['material_selection']['candidate_revision_id'], i['asset']['revision_id'])
         call = self.spec('synthetic-call', 'CALL', method='generation', status='submitted', tool='pippit-tool-cli',
-            generation_requirement=package['requirement'], generation_acceptances=package['acceptances'], outputs=[],
+            generation_requirement=package['requirement'],  outputs=[],
             inputs=[{**i['asset'], 'component_id':i['component']['id'], 'role':i['role']} for i in package['inputs']],
             **{k:package[k] for k in ('model','parameters','prompt','execution')})
         for field, value in [('tool','another-channel'), ('execution',{**self.execution,'mode':'reference'}),

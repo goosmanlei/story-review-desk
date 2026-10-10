@@ -57,7 +57,7 @@ class ScreenplayTest(unittest.TestCase):
         self.store.change_comment(c['id'], 'REOPEN', 3)
         self.assertEqual(self.store.comment(c['id'])['target_revision_id'], ep['revision_id'])
         self.assertEqual(before, self.store.configurations())
-        self.assertEqual(structure_snapshot(self.store)['confirmations'], [])
+        self.assertNotIn('confirmations', structure_snapshot(self.store))
         export(self.store, self.root / 'export')
         restored = Store(self.root / 'restore' / '.runtime' / 'review.sqlite3')
         try:

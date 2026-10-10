@@ -82,21 +82,15 @@ test('a lazy material list keeps the exact scope title supplied with its standal
  assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:'scope-v0'}),scope.object_id);
 });
 
-for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested member and submits its accurate judgment`,async()=>{
+for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested exact member without an approval action`,async()=>{
  const f=setup();f.a.payload.production={...f.b.payload.production};f.a.payload.components=f.b.payload.components.map(c=>({...c}));
  f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
  f.rounds.splice(0,f.rounds.length,{number:1,state:'produced',plan:f.plan,members:[f.plan,f.a,f.b],results:[f.b]});
  const before=JSON.stringify(f.rounds);await f.ctx.openProductionRecord(f.a.object_id,explicit?f.a.id:null);
  assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text'),[]);
  const candidates=f.root.all().find(n=>n.attributes['aria-label']==='本轮候选');assert.equal(candidates.children.length,1);assert.equal(candidates.children[0].textContent,'候选1');assert.equal(JSON.stringify(f.rounds),before);
- f.ctx.crypto=require('node:crypto').webcrypto;f.ctx.toast=()=>{};
- await new Promise(resolve=>setImmediate(resolve));await f.nodes('button').find(n=>n.textContent==='记录本版本审阅结论').onclick();
- assert.equal(f.ctx.state.productionSelected.id,f.a.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.a.id);
- const field=label=>f.root.all().find(n=>n.attributes['aria-label']===label);field('审阅者').value='Technical reviewer';field('结论依据').value='Exact member A';field('审阅结果').value='passed';
- const posts=[];let release;f.ctx.fetch=(url,options)=>{posts.push({url,payload:JSON.parse(options.body)});return new Promise(resolve=>{release=resolve})};
- const saving=f.nodes('button').find(n=>n.textContent==='保存审阅').onclick();await new Promise(resolve=>setImmediate(resolve));
- assert.equal(posts.length,1);assert.deepEqual(JSON.parse(JSON.stringify(posts[0].payload.payload.target)),{object_id:f.a.object_id,revision_id:f.a.id});
- f.ctx.state.workspace='story.sources';release({ok:true,json:async()=>({saved:true})});await saving;
+ assert.ok(!f.nodes('button').some(n=>n.textContent==='记录本版本审阅结论'));
+ assert.equal(f.ctx.state.productionSelected.id,f.a.id);
 });
 
 test('same-source switching retains each exact reader and never adopts a sibling',async()=>{

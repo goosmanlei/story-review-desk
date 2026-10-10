@@ -11,7 +11,7 @@ from review_desk.store import Store
 
 class ReferencePathsTest(unittest.TestCase):
     for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'entity', 'full', 'need', 'media', 'change',
-                 'setup_plans', 'decide', 'generate', 'scene_shot', 'prepare', 'request'):
+                 'setup_plans',  'generate', 'scene_shot', 'prepare', 'request'):
         locals()[name] = getattr(fixtures.ShotReferenceTest, name)
 
     def annotate(self, path=None):

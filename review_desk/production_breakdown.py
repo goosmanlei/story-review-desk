@@ -12,7 +12,7 @@ def ref(row):
 
 def validate_relation(store, value):
     scope = p.ref_record(store, value.get('scope'), POSITIONS | ({'STATE'} if value['relation_type']=='applicability' else set()))
-    subject = p.ref_record(store, value.get('subject'), {'ENTITY', 'STATE', 'REQUIREMENT', 'ASSET', 'REPRESENTATION'})
+    subject = p.ref_record(store, value.get('subject'), {'ENTITY', 'STATE', 'REQUIREMENT', 'ASSET'})
     p._text(value.get('reason'), 'relationship reason')
     if value.get('basis') not in ('source_fact', 'production_choice'):
         raise ValueError('relationship needs source_fact or production_choice')
@@ -38,12 +38,12 @@ def rows(store, kind, condition='', params=()):
 
 
 def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None):
-    kinds={'settings':('ENTITY','STATE','REPRESENTATION')}.get(view)
+    kinds={'settings':('ENTITY','STATE')}.get(view)
     if not kinds:raise ValueError('unknown production index')
     values=[r for kind in kinds for r in rows(store,kind)]
     if object_id and not any(r['object_id']==object_id for r in values):
         selected=p.record(store,object_id)
-        allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'}
+        allowed={'ASSET','REQUIREMENT','CALL'}
         if selected['kind'] in allowed or (view=='settings' and selected['kind']=='RELATION' and selected['payload'].get('relation_type') in ('entity','business')):
             values.append(selected)
     result={'records':values,'material_assets':{}}

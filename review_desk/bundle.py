@@ -92,6 +92,8 @@ def _write_content(store, path):
 
 
 def export(store, export_dir):
+    if store.db.execute("SELECT 1 FROM objects WHERE kind IN ('JUDGMENT','REPRESENTATION') LIMIT 1").fetchone():
+        raise ValueError('历史审批须先按准确迁移包退役，再生成有效完整导出')
     target=Path(export_dir);target.mkdir(parents=True,exist_ok=True)
     # The largest table must not coexist as rows, JSON text and encoded bytes.
     # Stage from disk while retaining the same manifest and rollback semantics.
@@ -212,7 +214,7 @@ def _export(store, export_dir, content_file):
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
     audiovisual_baseline = any(json.loads(row['receipt']).get('format') == 'production-cutover-result-v1'
                               for row in framework.get('consolidation_runs', []))
-    manifest = {"schema_version": 11 if framework.get('business_relations') or framework.get('business_relation_runs') else 10 if framework.get('audiovisual_cleanup_runs') else 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 12, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -228,7 +230,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
+    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -334,6 +336,8 @@ def restore(store, export_dir):
                 if not obj or obj["kind"] != "SOURCE":
                     raise ValueError("source object missing")
             for obj in objects.values():
+                if obj['kind'] in ('JUDGMENT', 'REPRESENTATION'):
+                    raise ValueError('旧审批对象不能恢复；须使用退役后的完整导出')
                 if obj["current_revision"] not in revisions or revisions[obj["current_revision"]]["object_id"] != obj["id"]:
                     raise ValueError("invalid current revision")
             redactions={r["revision_id"]:r for r in framework.get("relation_explanation_redactions",[])}

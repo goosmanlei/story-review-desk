@@ -59,7 +59,7 @@ for(const workspace of ['story.sources','story.outline','story.script','material
 });
 test('unknown structure revision has no target; a historical revision retains historical pending comments',()=>{
  const f=fixture();f.state.workspace='story.outline';f.state.structureRevision='missing';f.context.renderComments();assert.equal(f.nodes.get('#comments-toggle').hidden,true);
- f.state.structureRevision='structure-rev';f.state.comments=[comment({type:'global'},{target_object_id:'story-structure',target_revision_id:'older'})];f.context.renderComments();assert.equal(f.nodes.get('#comments-toggle').hidden,false);assert.match(f.nodes.get('#comments-toggle').textContent,/本稿评论 0 · 历史待决 1/);
+ f.state.structureRevision='structure-rev';f.state.comments=[comment({type:'global'},{target_object_id:'story-structure',target_revision_id:'older'})];f.context.renderComments();assert.equal(f.nodes.get('#comments-toggle').hidden,false);assert.match(f.nodes.get('#comments-toggle').textContent,/本稿评论 0 · 历史意见 1/);
 });
 for(const [workspace,anchor] of [['story.sources',{type:'text',block_id:'paragraph',end_block_id:'paragraph',start:0,end:5,quote:'Exact'}],['story.sources',visual],['story.sources',region],['story.outline',region],['story.script',{type:'text',block_id:'line',start:0,end:2,quote:'Hi'}],['materials.workspace',{type:'global'}]])test(`${workspace} ${anchor.type}: collapse and existing toggle reopen the exact draft without clearing pending metadata`,()=>{
  const f=fixture();Object.assign(f.state,{workspace,anchor:JSON.parse(JSON.stringify(anchor)),episode:{object_id:'episode',id:'episode-rev'},productionSelected:{object_id:'plan',id:'plan-rev'}});

@@ -282,21 +282,21 @@ test('an exact earlier preparation revision keeps its own requirements, prompt a
   assert.match(text,/plan 1/);assert.doesNotMatch(text,/plan 2/);assert.match(text,/生成方案/);
   assert.match(text,/original requirement/);assert.match(text,/original description/);assert.doesNotMatch(text,/current requirement|current description/);assert.match(text,/"duration": 12/);assert.doesNotMatch(text,/"duration": 18/);
   assert.ok(nodes.some(n=>n.dataset?.productionBlocks===f.old.id));assert.ok(!nodes.some(n=>n.dataset?.productionBlocks===f.current.id));
-  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[['accept',f.old.id]]);assert.equal(JSON.stringify(f.rounds),before);
+  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[]);assert.equal(JSON.stringify(f.rounds),before);
   assert.equal(ctx.materialCommentContext().number,1);assert.equal(ctx.state.productionSelected.id,f.old.id);
 });
 for(const explicit of [false,true])test(`${explicit?'exact current':'ordinary'} preparation entry still shows the editable current plan`,()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.detail.explicitRevision=explicit;if(explicit)f.detail.record=f.current;
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
   assert.match(text,/current requirement/);assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.doesNotMatch(text,/原方案/);
-  assert.ok(f.controls.some(([kind,id])=>kind==='edit-inputs'&&id===f.current.id));assert.ok(f.controls.some(([kind])=>kind==='accept'));assert.deepEqual(f.inputs,[]);
+  assert.ok(f.controls.some(([kind,id])=>kind==='edit-inputs'&&id===f.current.id));assert.ok(!f.controls.some(([kind])=>kind==='accept'));assert.deepEqual(f.inputs,[]);
 });
 test('an earlier demand reads its original definition separately without rewriting a frozen material version',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;
   const before=JSON.stringify(f.rounds);
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
   assert.match(text,/plan 1/);assert.doesNotMatch(text,/plan 2/);assert.match(text,/生成方案/);
-  assert.equal(JSON.stringify(f.rounds),before);assert.deepEqual(f.controls,[['accept',f.old.id]]);
+  assert.equal(JSON.stringify(f.rounds),before);assert.deepEqual(f.controls,[]);
 });
 test('a frozen definition source outside the member list remains a requirement without creating an editable recipe',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx);Object.assign(f.rounds[0],{frozen:true,plan:null,members:[],definition_records:{requirement:f.old}});f.detail.selectedMaterialRounds={'video-need':1};f.detail.localPlans={'video-need':f.old};
@@ -307,7 +307,7 @@ test('locating an older demand in a frozen empty version reads its own requireme
   const ctx=setup(),f=preparingRevisionFixture(ctx);f.rounds[0].frozen=true;f.detail.localPlans={'video-need':f.old};
   const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
   assert.match(text,/original requirement/);assert.doesNotMatch(text,/current requirement/);assert.match(text,/plan 1/);assert.match(text,/生成方案/);
-  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[['accept',f.old.id]]);
+  assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[]);
 });
 test('returning from another material version leaves an old explicit preparation link and reads that version normally',()=>{
   const ctx=setup(),f=preparingRevisionFixture(ctx),next=f.plan(3);

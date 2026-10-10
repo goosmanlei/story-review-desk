@@ -21,7 +21,6 @@ class PlanVersionsTest(unittest.TestCase):
     media=fixtures.MaterialVersionsTest.media
     change=fixtures.MaterialVersionsTest.change
     setup_plans=fixtures.MaterialVersionsTest.setup_plans
-    decide=fixtures.MaterialVersionsTest.decide
     generate=fixtures.MaterialVersionsTest.generate
 
     def test_same_scheme_multiple_calls_and_association_updates_are_one_version(self):

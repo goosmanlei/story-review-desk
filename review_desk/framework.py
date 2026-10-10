@@ -6,10 +6,10 @@ workspace has been implemented. Future modules add services within this frame.
 
 DOMAINS = {
     "story": {"label": "故事创作", "kinds": ("SOURCE", "STORY", "EPISODE", "SCENE")},
-    "settings": {"label": "生产制作", "kinds": ("ENTITY", "STATE", "REPRESENTATION", "RELATION", "SPACE")},
+    "settings": {"label": "生产制作", "kinds": ("ENTITY", "STATE", "RELATION", "SPACE")},
     "materials": {"label": "素材管理", "kinds": ("REQUIREMENT", "MATERIAL", "MATERIAL_RELATION", "ASSET", "PROMPT", "CALL")},
     "production": {"label": "镜头制作", "kinds": ("AV_EPISODE", "AV_SCENE", "AV_SHOT", "SHOT", "INPUT_LOCK")},
-    "collaboration": {"label": "审阅协作", "kinds": ("COMMENT", "JUDGMENT", "SUGGESTION")},
+    "collaboration": {"label": "审阅协作", "kinds": ("COMMENT", "SUGGESTION")},
     "project": {"label": "项目管理", "kinds": ("GUIDANCE", "NOTE")},
 }
 

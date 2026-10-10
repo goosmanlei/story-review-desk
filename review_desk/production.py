@@ -19,12 +19,12 @@ from . import production_states as full_states
 
 KINDS = {"AV_EPISODE": "av-episode", "AV_SCENE": "av-scene", "AV_SHOT": "av-shot",
          "MATERIAL_RELATION": "material-relation", "INPUT_LOCK": "input-lock", "ENTITY": "entity", "STATE": "state",
-         "REPRESENTATION": "representation", "REQUIREMENT": "requirement", "ASSET": "asset",
-         "CALL": "call", "JUDGMENT": "judgment", "RELATION": "relation"}
+         "REQUIREMENT": "requirement", "ASSET": "asset",
+         "CALL": "call", "RELATION": "relation"}
 FORMATS = {"production-" + v + "-v1": k for k, v in KINDS.items()}
 ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,159}$")
 USAGES = ("generation_input", "post_audio", "editorial", "review_reference")
-CHANGE_KINDS = {"AV_EPISODE", "AV_SCENE", "AV_SHOT", "MATERIAL_RELATION", "ENTITY", "STATE", "REPRESENTATION", "INPUT_LOCK", "EPISODE", "STORY",
+CHANGE_KINDS = {"AV_EPISODE", "AV_SCENE", "AV_SHOT", "MATERIAL_RELATION", "ENTITY", "STATE", "INPUT_LOCK", "EPISODE", "STORY",
                 "REQUIREMENT", "RELATION"}
 
 
@@ -80,6 +80,9 @@ def record(store, object_id=None, revision_id=None):
     if not row:
         from .version_consolidation import deleted, missing_view
         receipt = deleted(store, revision_id) if revision_id else None
+        if not revision_id and object_id:
+            old = store.db.execute("SELECT revision_id FROM consolidation_revisions WHERE object_id=? AND kind IN ('JUDGMENT','REPRESENTATION') AND new_number IS NULL ORDER BY old_number DESC LIMIT 1", (object_id,)).fetchone()
+            receipt = deleted(store, old[0]) if old else None
         if receipt:
             if object_id and receipt['object_id'] != object_id:
                 raise ValueError('deleted revision belongs to another object')
@@ -329,8 +332,6 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         episodes = _refs(store, p, "episodes", {"EPISODE"})
         if not episodes or len({e["object_id"] for e in episodes}) != len(episodes):
             raise ValueError("input lock needs distinct episodes")
-        for key in ("actor", "statement", "scope"):
-            _text(p.get("approval", {}).get(key), "approval." + key)
         if not isinstance(p.get("specification"), dict):
             raise ValueError("production specification required")
     elif kind == "ENTITY":
@@ -364,16 +365,6 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             parent = ref_record(store, previous, {"STATE"})
             if parent["payload"]["entity"]["object_id"] != p["entity"]["object_id"]:
                 raise ValueError("state transition crosses identities")
-    elif kind == "REPRESENTATION":
-        _refs(store, p, "entities", {"ENTITY"})
-        _refs(store, p, "states", {"STATE"})
-        for key in ("sources", "choices", "unknowns"):
-            _list(p, key)
-        if 'review_model' in p:
-            from . import entity_review
-            if p['review_model'] != entity_review.MODEL:
-                raise ValueError('unsupported entity review model')
-            entity_review.validate(store, object_id, p, check_current)
     elif kind == "REQUIREMENT":
         ref_record(store, p.get("scope"))
         for key in ("slot", "purpose", "media_type"):
@@ -411,7 +402,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                     "project": "application/", "document": ("application/", "text/")}[p["media_type"]]
         if any(not c["mime"].startswith(expected) for c in p["components"] if c["role"] == "original"):
             raise ValueError("original component does not match the asset media type")
-        _refs(store, p, "subjects", {"ENTITY", "REPRESENTATION", "AV_SHOT", "AV_SCENE", "AV_EPISODE", "INPUT_LOCK"})
+        _refs(store, p, "subjects", {"ENTITY", "AV_SHOT", "AV_SCENE", "AV_EPISODE", "INPUT_LOCK"})
         _refs(store, p, "states", {"STATE"})
         full_states.validate_asset_coverage(store, p)
         for candidate in p.get('candidate_requirements', []):
@@ -456,45 +447,6 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         if check_current:
             from .generation import validate_call
             validate_call(store, object_id, p)
-    elif kind == "JUDGMENT":
-        target = ref_record(store, p.get("target"))
-        from . import entity_review
-        if p.get('acceptance_model') == 'production-content-v1':
-            from .production_acceptance import validate
-            validate(store, object_id, p, check_current)
-        elif p.get('acceptance_model') == 'entity-content-v1':
-            from .generation import validate_content_decision
-            validate_content_decision(store, object_id, p, check_current)
-        elif p.get('acceptance_model') == 'entity-generation-v1':
-            from .generation import validate_decision
-            validate_decision(store, object_id, p, check_current)
-        elif 'acceptance_model' in p:
-            entity_review.validate_current_acceptance(store, p, check_current)
-        if p.get('verdict') == 'accepted' and entity_review.submission(target):
-            entity_review.validate_acceptance(store, target, check_current)
-        if p.get("verdict") not in ("pending", "passed", "changes_requested", "rejected", "accepted", "impact_resolved", "revoked"):
-            raise ValueError("invalid review verdict")
-        if p.get("verdict") == "revoked" and p.get("acceptance_model") not in ("entity-generation-v1", "entity-content-v1", "production-content-v1"):
-            raise ValueError("revocation requires a generation acceptance")
-        for key in ("actor", "reason"):
-            _text(p.get(key), key)
-        if p.get("change"):
-            change = p["change"]
-            old, new = ref_record(store, change.get("old")), ref_record(store, change.get("new"))
-            if old["object_id"] != new["object_id"] or old["id"] == new["id"] or change.get("action") not in ("needs_review", "keep", "rework", "replace"):
-                raise ValueError("invalid upstream change decision")
-            if change.get("scope") not in (None, "target", "state_title_only"):
-                raise ValueError("invalid change decision scope")
-            if change.get("scope") == "state_title_only":
-                before = {k: v for k, v in old["payload"].items() if k != "title"}
-                after = {k: v for k, v in new["payload"].items() if k != "title"}
-                if (old["kind"] != "STATE" or new["version"] <= old["version"] or
-                        before != after or old["payload"]["title"] == new["payload"]["title"] or
-                        p["target"]["revision_id"] != new["id"] or
-                        change["action"] != "keep" or p["verdict"] != "impact_resolved"):
-                    raise ValueError("state title review requires only a title change and the exact new state target")
-        from .production_changes import validate as validate_change
-        validate_change(store, object_id, p, check_current)
     elif kind == "RELATION" and p.get("relation_type") == "business":
         from .business_relations import validate
         validate(store, object_id, p, check_current=check_current)
@@ -670,8 +622,6 @@ def adopt(store, value):
     return import_records(store, {"format": "production-import-v1", "records": [{**value, "kind": "RELATION"}]})
 
 
-def judge(store, value):
-    return import_records(store, {"format": "production-import-v1", "records": [{**value, "kind": "JUDGMENT"}]})
 
 
 def snapshot(store, kind=None, object_id=None, revision_id=None):
@@ -680,6 +630,8 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
     if object_id or revision_id:
         selected = record(store, object_id, revision_id)
         if selected.get('unavailable'):
+            if selected.get('retired_review'):
+                return {'record':selected, 'history':[], 'comments':selected['history_comments'], 'uses':[], 'reference_titles':[]}
             from .version_consolidation import NOTICE
             raise ValueError(NOTICE)
         if selected["payload"].get("format") not in FORMATS:
@@ -779,39 +731,16 @@ def impact(store, revision_id):
             if row["id"] == row["current_revision"]:
                 affected.append({"object_id": row["object_id"], "revision_id": row["id"], "kind": row["kind"],
                                  "title": json.loads(row["payload"]).get("title", row["object_id"]), "role": row["role"]})
-    judgments = [r for r in current_records(store, {"JUDGMENT"})
-                 if r["payload"].get("change", {}).get("old", {}).get("revision_id") == revision_id]
-    return {"source": source, "changed": source["id"] != source["current_revision"],
-            "affected": list({(r["revision_id"], r["role"]): r for r in affected}.values()), "decisions": judgments}
+    return {"revision_id": revision_id,
+            "affected": list({(r["revision_id"], r["role"]): r for r in affected}.values())}
 
 
-def upstream_changes(store, target_revision, judgments=None):
-    from .production_changes import exact, review
-    values = dependency_closure(store, target_revision, include_history=False)
-    target = record(store, revision_id=target_revision)
-    judgments = judgments if judgments is not None else current_records(store, {"JUDGMENT"})
-    changes = []
-    for value in values.values():
-        if value["kind"] not in CHANGE_KINDS or value["id"] == value["current_revision"]:
-            continue
-        old = exact(value)
-        new = {"object_id": value["object_id"], "revision_id": value["current_revision"]}
-        result = review(judgments, exact(target), old, new)
-        naming = review(judgments, new, old, new, 'state_title_only')
-        # An explicit local rework/replace takes precedence over a naming-only
-        # exemption; an unresolved legacy group cannot be silently waived.
-        effective = result['decision']
-        kept = (effective['payload']['change']['action'] == 'keep' if effective else
-                not result['decisions'] and naming['decision'] is not None and
-                naming['decision']['payload']['change']['action'] == 'keep')
-        changes.append({"object_id": value["object_id"], "used_revision": value["id"],
-                        "current_revision": value["current_revision"], "action": "keep" if kept else "needs_review",
-                        **result})
-    return changes
-
-
-def stale_inputs(store, target_revision, judgments=None):
-    return [change for change in upstream_changes(store, target_revision, judgments) if change['action'] != 'keep']
+def upstream_changes(store, target_revision):
+    """Report newer heads without changing or disqualifying exact older inputs."""
+    return [{"object_id": row["object_id"], "used_revision": row["id"],
+             "current_revision": row["current_revision"]}
+            for row in dependency_closure(store, target_revision, include_history=False).values()
+            if row["kind"] in CHANGE_KINDS and row["id"] != row["current_revision"]]
 
 
 def asset_coverage(store, asset):
@@ -822,7 +751,7 @@ def asset_coverage(store, asset):
         subject = ref_record(store, ref)
         if subject['kind'] == 'ENTITY':
             entities.add(subject['object_id'])
-        elif subject['kind'] in ('REPRESENTATION', 'AV_SHOT'):
+        elif subject['kind'] == 'AV_SHOT':
             entities.update(r['object_id'] for r in subject['payload']['entities'])
             states.extend(subject['payload']['states'])
     for ref in states:
@@ -871,8 +800,8 @@ def _package_component_validator(store):
     return validate
 
 
-def _input_readiness(store, scope, validate_file):
-    subject = record(store, scope)
+def _input_readiness(store, scope, validate_file, *, exact_requirement=None):
+    subject = ref_record(store, exact_requirement["payload"]["scope"]) if exact_requirement else record(store, scope)
     heads = current_records(store)
     scope_ids = {scope}
     # Aggregate only the locked episode revisions, never newer script heads.
@@ -893,15 +822,14 @@ def _input_readiness(store, scope, validate_file):
     state_keys = {full_states.exact(r) for r in coverage['states']}
     requirements = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and
                     (r["payload"]["scope"]["object_id"] in scope_ids or full_states.exact(r['payload']['scope']) in state_keys)]
+    if exact_requirement is not None:
+        requirements = [exact_requirement]
     uses = {(r["payload"]["scope"]["object_id"], r["payload"]["slot"]): r for r in heads if r["kind"] == "RELATION" and r["payload"].get("relation_type") == "adoption"}
-    judgments = [r for r in heads if r["kind"] == "JUDGMENT"]
     rows = []
     for requirement in requirements:
         p = requirement["payload"]
         adoption = uses.get((p["scope"]["object_id"], p["slot"]))
         issues = []
-        pending_changes = []
-        change_reviews = []
         asset = None
         if not adoption:
             issues.append("missing_adoption")
@@ -936,30 +864,14 @@ def _input_readiness(store, scope, validate_file):
                 if spec.get("native_4k") and (component.get("role") != "original" or
                         asset["payload"].get("verification", {}).get("native_4k_passed") is not True):
                     issues.append("native_4k_not_verified")
-                adoption_reviews = [{'target': {'object_id': adoption['object_id'], 'revision_id': adoption['id']}, **change}
-                                    for change in upstream_changes(store, adoption["id"], judgments)]
-                change_reviews.extend(adoption_reviews)
-                adoption_changes = [change for change in adoption_reviews if change['action'] != 'keep']
-                if adoption_changes:
-                    issues.append("upstream_needs_review")
-                    pending_changes.extend(adoption_changes)
             except (ValueError, KeyError, OSError) as exc:
                 issues.append(str(exc))
-        requirement_reviews = [{'target': {'object_id': requirement['object_id'], 'revision_id': requirement['id']}, **change}
-                               for change in upstream_changes(store, requirement["id"], judgments)]
-        change_reviews.extend(requirement_reviews)
-        requirement_changes = [change for change in requirement_reviews if change['action'] != 'keep']
-        if requirement_changes:
-            issues.append("requirement_needs_review")
-            pending_changes.extend(requirement_changes)
-        reviews = [r for r in judgments if asset and r["payload"]["target"]["revision_id"] == asset["id"]]
-        rows.append({"requirement": requirement, "adoption": adoption, "asset": asset, "issues": issues, "reviews": reviews, 'pending_changes': pending_changes, 'change_reviews': change_reviews})
+        rows.append({"requirement": requirement, "adoption": adoption, "asset": asset, "issues": issues})
     return {"scope": subject, "requirements": rows, "state_coverage": coverage,
             "required_count": sum(r["requirement"]["payload"]["required"] for r in rows),
             "missing_count": sum(r["requirement"]["payload"]["required"] and bool(r["issues"]) for r in rows),
             "inputs_ready": not coverage['issues'] and any(r["requirement"]["payload"]["required"] for r in rows) and
-                            all(not r["issues"] for r in rows if r["requirement"]["payload"]["required"]),
-            "creative_acceptance": [r for r in judgments if r["payload"]["target"]["revision_id"] == subject["id"] and r["payload"]["verdict"] == "accepted"]}
+                            all(not r["issues"] for r in rows if r["requirement"]["payload"]["required"])}
 
 
 class _PackageFileError(ValueError):

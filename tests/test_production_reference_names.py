@@ -32,7 +32,7 @@ class ProductionReferenceNamesTest(unittest.TestCase):
                         aliases=[], facts=[], choices=[], unknowns=[], sources=[])
 
     def representation(self, oid, entities, sources=None):
-        return self.put(oid, 'REPRESENTATION', oid, entities=entities, states=[], sources=sources or [], choices=[], unknowns=[])
+        return self.put(oid, 'ENTITY', oid, entity_type='prop', subtype='fixture', aliases=[], facts=[], entities=entities, sources=sources or [], choices=[], unknowns=[])
 
     def test_old_and_current_names_are_exact_and_deduplicated_without_payload_or_export_changes(self):
         old = self.entity('Original exact name')

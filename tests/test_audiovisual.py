@@ -137,35 +137,7 @@ class AudiovisualTest(unittest.TestCase):
         self.assertNotEqual(before, after)
         self.assertEqual([r['number'] for r in material_plans.snapshot(self.store, 'a')], [2, 1])
 
-    def test_material_acceptance_remains_exact_without_design_gate(self):
-        from review_desk import production_acceptance as acceptance
-        from review_desk.store import Conflict
-        self.composition(); self.put(self.need('need'))
-        with self.assertRaisesRegex(ValueError, '不使用'):
-            acceptance.snapshot(self.store, 'av-shot')
-        request={'object_id':'need','expected_revision':self.ref('need')['revision_id'],
-                 'expected_decision':None,'actor':'隔离测试','action':'accept'}
-        self.assertFalse(generation.readiness(self.store,'need')['ready'])
-        result=acceptance.decide(self.store,request)
-        self.assertTrue(generation.readiness(self.store,'need')['ready'])
-        with self.assertRaises(Conflict):acceptance.decide(self.store,request)
-        acceptance.decide(self.store,{**request,'action':'revoke','expected_decision':acceptance.ref(result['decision'])})
-        self.assertFalse(generation.readiness(self.store,'need')['ready'])
 
-    def test_material_permission_restore_does_not_recreate_design_permission(self):
-        from review_desk import production_acceptance as a, bundle
-        from review_desk.store import Store
-        import shutil
-        self.composition();self.put(self.need('need'))
-        a.decide(self.store,{'object_id':'need','expected_revision':self.ref('need')['revision_id'],
-                            'expected_decision':None,'action':'accept','actor':'隔离测试'})
-        bundle.export(self.store,self.root/'export');dest=self.root/'acceptance-restore'
-        shutil.copytree(self.root/'export',dest/'export');restored=Store(dest/'.runtime/review.sqlite3')
-        try:
-            bundle.restore(restored,dest/'export')
-            self.assertTrue(generation.readiness(restored,'need')['ready'])
-            with self.assertRaises(ValueError):a.snapshot(restored,'av-shot')
-        finally:restored.close()
 
 
 if __name__ == '__main__':

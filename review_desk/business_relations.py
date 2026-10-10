@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS business_relation_runs (
  id TEXT PRIMARY KEY, receipt TEXT NOT NULL);
 '''
 ENDPOINT_KINDS = {'ENTITY', 'STATE', 'REQUIREMENT', 'ASSET', 'AV_SHOT',
-                  'AV_SCENE', 'AV_EPISODE', 'REPRESENTATION', 'INPUT_LOCK', 'STORY', 'EPISODE'}
+                  'AV_SCENE', 'AV_EPISODE', 'INPUT_LOCK', 'STORY', 'EPISODE'}
 CHOICES = ('semantics', 'necessity', 'group', 'route', 'condition')
 
 

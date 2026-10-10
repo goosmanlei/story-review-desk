@@ -22,7 +22,6 @@ class MaterialModelTest(unittest.TestCase):
     media=fixtures.PlanVersionsTest.media
     change=fixtures.PlanVersionsTest.change
     setup_plans=fixtures.PlanVersionsTest.setup_plans
-    decide=fixtures.PlanVersionsTest.decide
     generate=fixtures.PlanVersionsTest.generate
 
     def test_expand_repeated_children_are_independent_at_every_returned_position(self):

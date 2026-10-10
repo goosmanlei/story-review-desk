@@ -22,7 +22,7 @@ from .polish import build_context, suggest
 from .screenplay import snapshot as screenplay_snapshot, review_context as screenplay_review, import_screenplay
 from .screenplay_summaries import read_summaries
 from .store import Conflict, Store
-from .structure import select_direction, snapshot, confirm_structure, review_context, script_input
+from .structure import select_direction, snapshot, review_context, script_input
 from . import production, entity_review, generation
 from .production_media import asset_path, ingest
 
@@ -363,14 +363,6 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     from .production_breakdown import summary
                     with production.read_scope(store):
                         return self._json(summary(store,param('object_id'),param('revision_id')))
-                if path == '/api/production/judgments':
-                    from .review_decisions import snapshot as judgment_snapshot
-                    with production.read_scope(store):
-                        return self._json(judgment_snapshot(store, param('object_id'), param('revision_id')))
-                if path == '/api/production/acceptance':
-                    from .production_acceptance import snapshot as acceptance_snapshot
-                    with production.read_scope(store):
-                        return self._json(acceptance_snapshot(store, param('object_id'), param('revision_id')))
                 if path == '/api/production/story-related':
                     from .audiovisual import related
                     reference = {'object_id': param('object_id'), 'revision_id': param('revision_id')}
@@ -519,7 +511,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json(review_context(store))
         if path == "/api/story-structure/script-input":
             try:
-                return self._json(script_input(store))
+                return self._json(script_input(store, query.get("revision_id", [None])[0]))
             except ValueError as exc:
                 return self._json({"error": str(exc)}, 404)
         if path == "/default-favicon.svg":
@@ -564,7 +556,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({'error': str(exc)}, 409)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
-        if self.path in ("/api/production/working-note", "/api/production/material-route", "/api/production/acceptance", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
+        if self.path in ("/api/production/working-note", "/api/production/material-route", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt"):
             try:
                 value = self._input(20_000_000)
                 if self.path.endswith('working-note'):
@@ -573,20 +565,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 elif self.path.endswith('material-route'):
                     from .material_relations import choose_route
                     result=choose_route(self.server.store, value)
-                elif self.path.endswith('acceptance'):
-                    from .production_acceptance import decide
-                    result=decide(self.server.store,value)
                 elif self.path.endswith('shot-reference'):
                     from .shot_references import select
                     result=select(self.server.store,value)
                 elif self.path.endswith("import"):
                     result = production.import_records(self.server.store, value, value.get("validate_only") is True)
-                elif self.path.endswith("entity-decision"):
-                    result = generation.decide(self.server.store, value)
                 elif self.path.endswith("adopt"):
                     result = production.adopt(self.server.store, value)
-                else:
-                    result = production.judge(self.server.store, value)
                 return self._json(result, 201)
             except Conflict as exc:
                 return self._json({"error": str(exc)}, 409)
@@ -606,13 +591,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 409)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({"error": str(exc)}, 400)
-        if self.path in ("/api/story-structure/select-direction", "/api/story-structure/confirm"):
+        if self.path == "/api/story-structure/select-direction":
             try:
                 value = self._input()
-                if self.path.endswith("select-direction"):
-                    result = select_direction(self.server.store, value.get("source_id"), value.get("expected_version"))
-                else:
-                    result = confirm_structure(self.server.store, value.get("revision_id"), value.get("reviewer"), value.get("note", ""))
+                result = select_direction(self.server.store, value.get("source_id"), value.get("expected_version"))
                 return self._json(result, 201)
             except Conflict as exc:
                 return self._json({"error": str(exc)}, 409)

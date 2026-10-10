@@ -19,7 +19,6 @@ class RequirementCleanupTest(unittest.TestCase):
     need=fixtures.GenerationTest.need
     change=fixtures.GenerationTest.change
     setup_plans=fixtures.GenerationTest.setup_plans
-    decide=fixtures.GenerationTest.decide
 
     def remove(self,oid,**kw):
         return p.import_records(self.store,{'format':'production-import-v1','records':[],
@@ -34,9 +33,11 @@ class RequirementCleanupTest(unittest.TestCase):
         self.assertEqual(p.record(self.store,oid)['version'],2)
 
     def test_history_dependencies_and_atomic_rollback(self):
-        self.setup_plans();self.decide()
+        self.setup_plans()
+        plan=dict(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs']=[{'reference':self.ref('need-full-overall'),'use':'保留历史依赖'}]
+        self.change('need-wet-overall',generation=plan)
         with self.assertRaises(Conflict):self.remove('need-full-overall')
-        self.assertTrue(g.accepted(self.store,'songbook'))
         with self.assertRaises(ValueError):self.remove('songbook')
 
     def test_successful_removal_and_invalid_update_rolls_back(self):
@@ -57,11 +58,11 @@ class RequirementCleanupTest(unittest.TestCase):
         with self.assertRaises(ValueError):self.change('full',production_description='')
 
     def test_layout_round_trip_does_not_change_acceptance(self):
-        self.setup_plans();self.decide();scope=g.current_scope(self.store,'songbook')
+        self.setup_plans();scope=g.current_scope(self.store,'songbook')
         config=self.root/'config';config.mkdir(exist_ok=True)
         value={'format':'entity-relationship-layout-v1','entities':{'songbook':{'primary':[],'order':[]}}}
         (config/'entity-relationship-layout.json').write_text(json.dumps(value))
-        self.assertEqual(scope,g.current_scope(self.store,'songbook'));self.assertTrue(g.accepted(self.store,'songbook'))
+        self.assertEqual(scope,g.current_scope(self.store,'songbook'))
         export(self.store,self.root/'export');dest=self.root/'restored';shutil.copytree(self.root/'export',dest/'export')
         recovered=Store(dest/'.runtime/review.sqlite3')
         try:

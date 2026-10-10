@@ -10,7 +10,7 @@ from review_desk.production_breakdown import index
 
 
 class EntityMaterialIntegrityTest(unittest.TestCase):
-    for name in ('setUp','tearDown','spec','put','ref','entity','full','need','media','associate','adopt','change','setup_plans','decide','relationship'):
+    for name in ('setUp','tearDown','spec','put','ref','entity','full','need','media','associate','adopt','change','setup_plans','relationship'):
         locals()[name] = getattr(fixtures.MaterialRelationshipsTest, name)
 
     def history(self):
@@ -27,7 +27,7 @@ class EntityMaterialIntegrityTest(unittest.TestCase):
 
     def test_codes_preserve_exact_scopes_and_survive_restore_and_append(self):
         self.setup_plans();before=g.snapshot(self.store,'songbook');view=codes.annotate(self.store,before)
-        self.assertEqual(view['decision_scope'],before['decision_scope'])
+        self.assertEqual(view['scope'],before['scope'])
         self.assertRegex(view['entity']['business_code'],r'^EN\d{3}$')
         self.assertRegex(view['states'][0]['business_code'],r'^ST\d{3}$')
         saved=codes.dump(self.store);restored=self.recovered();self.assertEqual(codes.dump(restored),saved)
@@ -101,12 +101,12 @@ class EntityMaterialIntegrityTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'redaction'):explanations.verify_row(row,attestation)
 
     def test_retained_state_and_shared_media_context_does_not_expand_acceptance(self):
-        self.setup_plans();before=g.snapshot(self.store,'songbook')['decision_scope']
+        self.setup_plans();before=g.snapshot(self.store,'songbook')['scope']
         legacy=self.spec('legacy','STATE',entity=self.ref('songbook'),production_description='旧碎片状态',dimensions={'appearance':'旧碎片'},sources=[],facts=[],choices=[],unknowns=[])
         self.put(legacy)
         view=g.snapshot(self.store,'songbook')
         self.assertIn('legacy',[r['object_id'] for r in view['retained_states']])
-        self.assertEqual(view['decision_scope'],before)
+        self.assertEqual(view['scope'],before)
 
 
 if __name__=='__main__':unittest.main()

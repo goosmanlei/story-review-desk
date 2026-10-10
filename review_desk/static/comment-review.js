@@ -1,14 +1,16 @@
-/* Read-only evidence navigation. The existing comment ledger owns every decision. */
+/* Exact response navigation; the original comment owns its text and anchor. */
 const commentReviewReads=new Map();
 let commentReviewDialog=null;
 function commentReviewTarget(){
+  if(state.unifiedCardRoot&&state.productionSelected)return productionRef(state.productionSelected);
   return isStructure()?{object_id:'story-structure',revision_id:state.structureRevision}:
-    state.workspace==='story.sources'&&state.current?{object_id:state.current.id,revision_id:state.current.target_revision_id}:null;
+    state.workspace==='story.sources'&&state.current?{object_id:state.current.id,revision_id:state.current.target_revision_id}:
+    typeof isProduction==='function'&&isProduction()&&state.productionSelected?productionRef(state.productionSelected):null;
 }
 function commentReviewURL(target,content=false){return '/api/comment-review'+(content?'/content':'')+'?'+new URLSearchParams(target)}
 function commentReviewData(target){
   const key=JSON.stringify(target);
-  if(!commentReviewReads.has(key))commentReviewReads.set(key,api(commentReviewURL(target)).catch(error=>{commentReviewReads.delete(key);throw error}));
+  if(!commentReviewReads.has(key))commentReviewReads.set(key,api(commentReviewURL(target)).finally(()=>commentReviewReads.delete(key)));
   return commentReviewReads.get(key);
 }
 function reviewRevisionLabel(ref){return ref.unavailable?'准确稿件已不可用':ref.object_id==='story-structure'?`结构第 ${ref.version} 稿`:ref.title}
@@ -22,9 +24,9 @@ function appendCrossVersionReview(body){
     if(!historical.length){section.remove();return}
     const pending=historical.filter(row=>currentReviewComment(row).status==='OPEN');
     const answered=pending.filter(row=>row.responses.length).length;
-    const details=el('details');details.open=!activeComments().length;
-    nodeText('summary',null,`历史意见复核 · ${pending.length} 未关闭`,details);
-    nodeText('p','comment-help',`${answered} 条可查作者回应。未关闭表示仍待人工决定；未登记依据不能证明没有修改。`,details);
+    const details=el('section');
+    nodeText('h3',null,`历史意见复核 · ${pending.length} 未关闭`,details);
+    nodeText('p','comment-help',`${answered} 条可查作者回应。关闭与重开用于整理意见，不限制后续工作。`,details);
     const list=el('div','cross-version-list');details.append(list);
     const add=row=>{
       const comment=currentReviewComment(row),card=el('article','cross-version-row');
@@ -35,12 +37,12 @@ function appendCrossVersionReview(body){
     };
     pending.forEach(add);
     const closed=historical.filter(row=>currentReviewComment(row).status==='CLOSED');
-    if(closed.length){const history=el('details');nodeText('summary',null,`已关闭历史意见 · ${closed.length}`,history);for(const row of closed){add(row);history.append(list.lastChild)}details.append(history)}
+    if(closed.length){const history=el('section');nodeText('h4',null,`已关闭历史意见 · ${closed.length}`,history);for(const row of closed){add(row);history.append(list.lastChild)}details.append(history)}
     section.append(details);
   }).catch(error=>{if(section.isConnected)nodeText('p','structure-alert',`历史依据读取失败：${error.message}`,section)});
 }
 function appendCommentReviewAction(card,comment){
-  const target=commentReviewTarget();if(!target)return;
+  const target=(state.unifiedCardRoot||typeof isProduction==='function'&&isProduction())?{object_id:comment.target_object_id,revision_id:comment.target_revision_id}:commentReviewTarget();if(!target)return;
   commentReviewData(target).then(data=>{
     const row=data.reviews.find(row=>row.comment.id===comment.id);
     if(!row||!row.responses.length||!card.isConnected)return;
@@ -54,7 +56,7 @@ async function openCommentReview(row,context,trigger){
   const dialog=document.createElement('dialog');dialog.className='comment-review-dialog';dialog.setAttribute('aria-label',`复核 ${currentReviewComment(row).business_code||'旧意见'}`);
   const header=el('header');nodeText('h2',null,`复核 ${currentReviewComment(row).business_code||'旧意见'}`,header);
   const back=nodeText('button',null,'返回阅读位置',header);back.onclick=()=>dialog.close();dialog.append(header);
-  nodeText('p','comment-help',`从「${reviewRevisionLabel(context)}」进入。作者回应与人工关闭分别保存。`,dialog);
+  nodeText('p','comment-help',`从「${reviewRevisionLabel(context)}」进入。`,dialog);
   const navigation=el('nav','comment-review-navigation');navigation.setAttribute('aria-label','复核步骤');dialog.append(navigation);
   const body=el('div','comment-review-body');dialog.append(body);
   const decision=el('section','comment-review-decision');dialog.append(decision);
@@ -71,7 +73,7 @@ async function openCommentReview(row,context,trigger){
     const close=nodeText('button',null,comment.status==='OPEN'?'关闭评论':'重新打开',actions);
     close.disabled=commentChanges.has(comment.id);
     close.onclick=()=>changeComment(comment,comment.status==='OPEN'?'CLOSE':'REOPEN');
-    const keep=nodeText('button',null,'保留当前决定并返回',actions);keep.onclick=()=>dialog.close();
+    const keep=nodeText('button',null,'返回阅读位置',actions);keep.onclick=()=>dialog.close();
   };
   const showContent=async(ref,anchor,label)=>{
     const epoch=++read;body.replaceChildren();nodeText('p',null,'正在读取准确稿件…',body);
@@ -106,17 +108,22 @@ async function openCommentReview(row,context,trigger){
   dialog.reviewRefresh=showDecision;
   dialog.reviewError=message=>{notice.textContent=message||'';notice.hidden=!message};
   dialog.addEventListener('keydown',event=>{if(event.key==='Escape')event.stopPropagation()});
-  dialog.addEventListener('close',()=>{++read;dialog.remove();if(commentReviewDialog===dialog)commentReviewDialog=null;trigger?.isConnected&&trigger.focus({preventScroll:true})});
+  dialog.addEventListener('close',()=>{++read;for(const media of dialog.querySelectorAll('audio,video'))media.pause();dialog.remove();if(commentReviewDialog===dialog)commentReviewDialog=null;trigger?.isConnected&&trigger.focus({preventScroll:true})});
   document.body.append(dialog);commentReviewDialog=dialog;dialog.showModal();showDecision();await showOriginal();
 }
 
 function renderCommentReviewContent(root,record,anchor){
   const doc=record.payload;
-  const blocks=record.kind==='SOURCE'?doc.blocks:structureBlocks(doc);
-  const visuals=record.kind==='SOURCE'?(doc.assets||[]).map(a=>({...a,id:a.file})):structureVisuals(doc);
+  const production=String(doc.format||'').startsWith('production-');
+  const blocks=record.kind==='SOURCE'?doc.blocks:production?(record.review_blocks||productionTextBlocks(record)):record.kind==='EPISODE'?doc.blocks:structureBlocks(doc);
+  const visuals=record.kind==='SOURCE'?(doc.assets||[]).map(a=>({...a,id:a.file})):record.kind==='EPISODE'?[]:production?(doc.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:doc.title})):structureVisuals(doc);
   const focus=el('section','comment-review-exact');root.append(focus);
   if(!anchor){appendReviewManuscript(focus,record);return}
-  if(anchor?.type==='visual'||anchor?.type==='region'){
+  if(anchor?.type==='time'){
+    const component=(doc.components||[]).find(c=>c.id===anchor.component_id&&c.file===anchor.asset_file);
+    if(!component){nodeText('p','structure-alert','准确音视频文件已不可用；未替换为其他原件。',focus);return}
+    appendReviewMedia(focus,component,anchor);
+  }else if(anchor?.type==='visual'||anchor?.type==='region'){
     const visual=visuals.find(v=>v.id===anchor.visual_id&&(!anchor.asset_file||v.file===anchor.asset_file));
     if(!visual){nodeText('p','structure-alert','准确原图已不可用；未替换为新图。',focus);return}
     appendReviewVisual(focus,visual,anchor);
@@ -144,7 +151,15 @@ function renderCommentReviewContent(root,record,anchor){
 }
 function appendReviewManuscript(root,record){
   const doc=record.payload;
-  if(record.kind==='SOURCE'){
+  if(String(doc.format||'').startsWith('production-')){
+    for(const block of record.review_blocks||productionTextBlocks(record))nodeText('p',null,block.text,root);
+    for(const component of doc.components||[]){
+      if(component.mime.startsWith('image/'))appendReviewVisual(root,{...component,title:doc.title});
+      else if(/^(audio|video)\//.test(component.mime))appendReviewMedia(root,component);
+    }
+  }else if(record.kind==='EPISODE'){
+    for(const scene of doc.scenes){nodeText('h4',null,scene.heading||scene.title,root);for(const id of scene.block_ids){const block=doc.blocks.find(b=>b.id===id);if(block)nodeText('p',null,block.text,root)}}
+  }else if(record.kind==='SOURCE'){
     for(const block of doc.blocks)nodeText('p',null,block.text,root);
     for(const asset of doc.assets||[])appendReviewVisual(root,{...asset,id:asset.file});
   }else{
@@ -168,4 +183,15 @@ function appendReviewVisual(root,visual,anchor){
     const polygon=document.createElementNS(svg.namespaceURI,'polygon');polygon.setAttribute('points',anchor.points.map(p=>`${p.x},${p.y}`).join(' '));svg.append(polygon);frame.append(svg);
   }
   if(anchor)frame.classList.add('original-selection');figure.append(frame);nodeText('figcaption',null,visual.title,figure);nodeText('p',null,visual.description||visual.note||'',figure);root.append(figure);
+}
+
+function appendReviewMedia(root,component,anchor){
+  const media=el(component.mime.startsWith('audio/')?'audio':'video');media.controls=true;media.preload='metadata';media.src=reviewURL('/assets/'+encodeURIComponent(component.file));media.setAttribute('aria-label','准确原件'+(anchor?` · ${anchor.start_seconds}–${anchor.end_seconds} 秒`:''));
+  if(anchor){
+    nodeText('p',null,`原意见范围：${anchor.start_seconds}–${anchor.end_seconds} 秒`,root);
+    media.addEventListener('loadedmetadata',()=>{media.currentTime=anchor.start_seconds});
+    media.addEventListener('play',()=>{if(media.currentTime<anchor.start_seconds||media.currentTime>=anchor.end_seconds)media.currentTime=anchor.start_seconds});
+    media.addEventListener('timeupdate',()=>{if(!media.paused&&media.currentTime>=anchor.end_seconds)media.pause()});
+  }
+  media.addEventListener('error',()=>nodeText('p','structure-alert','准确原件读取失败；未替换文件。',root),{once:true});root.append(media);
 }

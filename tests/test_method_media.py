@@ -17,7 +17,6 @@ class MediaMethodTest(unittest.TestCase):
     full = fixtures.GenerationTest.full
     need = fixtures.GenerationTest.need
     setup_plans = fixtures.GenerationTest.setup_plans
-    decide = fixtures.GenerationTest.decide
     media = fixtures.GenerationTest.media
 
     def test_original_reading_does_not_reactivate_retired_ancestors(self):
@@ -87,7 +86,7 @@ class MediaMethodTest(unittest.TestCase):
             mm.inputs(self.store, {'source': reference})
 
     def test_cutover_uses_exact_frozen_plans_and_enforces_new_artifacts(self):
-        self.setup_plans(); self.decide()
+        self.setup_plans()
         seed(self.store, 'media-plan', ['draft', 'review', 'result'])
         activation = mm.activate(self.store)
         old = p.record(self.store, 'need-full-overall')
@@ -115,14 +114,13 @@ class MediaMethodTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '定稿'):
             mm.verify(self.store, old['object_id'], forged)
         self.put({'object_id': old['object_id'], 'kind': old['kind'], 'expected_version': old['version'], 'payload': changed})
-        self.assertFalse(g.readiness(self.store, old['object_id'])['ready'])
-        self.decide()
+        self.assertTrue(g.readiness(self.store, old['object_id'])['ready'])
         package = g.package(self.store, old['object_id'])
         self.assertEqual(package['method_basis'], changed['method_basis'])
         self.assertEqual(package['method_snapshot']['package']['method'], execution['payload']['package']['method'])
         self.assertNotIn('SKILL', package['prompt'])
         call = self.spec('method-call', 'CALL', method='generation', status='submitted', tool='test', inputs=[], outputs=[],
-                         generation_requirement=package['requirement'], generation_acceptances=package['acceptances'],
+                         generation_requirement=package['requirement'], 
                          **{key: package[key] for key in ('model', 'parameters', 'prompt')})
         with self.assertRaisesRegex(Conflict, '方法依据'):
             self.put(call)
@@ -134,7 +132,7 @@ class MediaMethodTest(unittest.TestCase):
 
 class ActivatedReferenceTest(unittest.TestCase):
     from test_shot_references import ShotReferenceTest as Fixture
-    for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'entity', 'full', 'need', 'media', 'change', 'setup_plans', 'decide', 'generate', 'scene_shot', 'request', 'approve'):
+    for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'entity', 'full', 'need', 'media', 'change', 'setup_plans',  'generate', 'scene_shot', 'request'):
         locals()[name] = getattr(Fixture, name)
 
     def prepare(self, complete=False):

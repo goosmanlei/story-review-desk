@@ -25,7 +25,6 @@ class UIProjectionRequirementsTest(unittest.TestCase):
     need = state_fixture.CompleteStatesTest.need
     setup_plans = generation_fixture.GenerationTest.setup_plans
     change = generation_fixture.GenerationTest.change
-    decide = generation_fixture.GenerationTest.decide
     generate = material_fixture.MaterialVersionsTest.generate
 
     def scene_and_state(self):
@@ -212,17 +211,13 @@ class UIProjectionRequirementsTest(unittest.TestCase):
     def test_entity_demand_is_in_list_count_and_card_without_extending_approval(self):
         from review_desk import generation as g
         self.setup_plans()
-        self.decide()
         scope=g.current_scope(self.store,'songbook')
-        accepted=g.accepted(self.store,'songbook')['id']
         need=self.requirement('entity-identity')
         need['payload']['scope']=self.ref('songbook')
         self.put(need)
         view=g.snapshot(self.store,'songbook')
         self.assertIn('entity-identity',[r['object_id'] for r in view['requirements']])
         self.assertIn('entity-identity',view['material_versions'])
-        self.assertEqual(view['decision_scope'],scope)
-        self.assertEqual(g.accepted(self.store,'songbook')['id'],accepted)
         entries=ui.material_entries(self.store)
         self.assertIn('entity-identity',[r['object_id'] for r in entries])
         counts=ui.entity_summaries(self.store,[view['entity']],entries)['entity_material_counts']

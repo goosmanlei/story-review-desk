@@ -9,10 +9,8 @@ class GroupedManagementTest(UiProjectionTest):
     def test_state_count_and_stale_adoption_follow_current_reader(self):
         self.setup_plans()
         self.assertEqual(self.summary()['entity_state_counts']['songbook'], 2)
-        self.decide()
-        self.assertEqual(self.summary()['entity_adoption_statuses']['songbook'], 'accepted')
+        self.assertNotIn('entity_adoption_statuses', self.summary())
         self.change('songbook', production_description='content changed')
-        self.assertEqual(self.summary()['entity_adoption_statuses']['songbook'], 'stale')
         self.assertEqual(self.summary()['entity_state_counts']['songbook'], 2)
 
     def test_cross_scene_duplicates_use_group_and_material_identity(self):

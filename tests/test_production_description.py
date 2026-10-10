@@ -30,8 +30,7 @@ class ProductionDescriptionTest(unittest.TestCase):
             self.change(oid, entity=self.ref('songbook'))
             self.change('need-'+oid+'-overall', scope=self.ref(oid), states=[self.ref(oid)])
         self.assertTrue(g.preparation(self.store, g.current_scope(self.store, 'songbook'))['complete'])
-        self.assertIsNone(g.accepted(self.store, 'songbook'))
-        self.assertFalse(g.readiness(self.store, 'need-full-overall')['ready'])
+        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
 
     def test_empty_explicit_value_and_unrelated_notes_are_not_descriptions(self):
         self.assertEqual(description({'production_description': '', 'blocks': [{'id':'description','text':'旧文'}]}), '')
