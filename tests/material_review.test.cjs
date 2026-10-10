@@ -168,6 +168,14 @@ test('block scope aggregates all live statuses and anchor kinds, excludes other 
  const audio=[c('t','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:1,end_seconds:3}),c('outside','r',{type:'time',component_id:'original',asset_file:'a.wav',start_seconds:8,end_seconds:9}),c('file','r',{type:'time',component_id:'original',asset_file:'b.wav',start_seconds:1,end_seconds:3})];
  assert.deepEqual(Array.from(ui.reviewBlockComments(audio,{revision:'r',kind:'audio',componentId:'original',file:'a.wav',from:0,to:5}),c=>c.id),['t']);
 });
+test('whole-original historical opinions stay visible on media but never cross exact revisions',()=>{
+ const rows=[{id:'history',target_revision_id:'old',anchor:{type:'global'},status:'OPEN'},
+ {id:'other',target_revision_id:'new',anchor:{type:'global'},status:'OPEN'}];
+ for(const kind of ['image','audio','video']){
+  assert.deepEqual(Array.from(ui.reviewBlockComments(rows,{revision:'old',kind,visualId:'original',componentId:'original',file:'exact',from:0,to:1}),c=>c.id),['history']);
+ }
+});
+
 test('effective inputs retain source order and type numbering, include exact storyline context',()=>{
  const refs=[{kind:'ENTITY',id:'person',object_id:'person',payload:{}},{kind:'ASSET',id:'i',object_id:'i',payload:{components:[{id:'original',mime:'image/png'}]}},{kind:'ASSET',id:'a',object_id:'a',payload:{components:[{id:'original',mime:'audio/wav'}]}},{kind:'ASSET',id:'j',object_id:'j',payload:{components:[{id:'original',mime:'image/png'}]}}];
  const inputs=refs.map(r=>({object_id:r.object_id,revision_id:r.id,component_id:r.kind==='ASSET'?'original':undefined}));

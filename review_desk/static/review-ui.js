@@ -34,8 +34,8 @@ function reviewBlockComments(comments,scope){
   const selected=new Map();for(const c of comments){if(!(scope.revisions||[scope.revision]).includes(c.target_revision_id))continue;const a=c.anchor;let matches=false;
     const scopes=scope.materialModel==='plan-v1'?c.material_plan_scopes:c.material_scopes;if(scope.materialId&&scopes?.length&&!scopes.some(s=>s.material_id===scope.materialId&&s.number===scope.materialNumber))continue;
     if(scope.kind==='text'){const order=scope.orderedBlockIds||scope.blockIds;matches=a.type==='global'||(!a.type||a.type==='text')&&(a.segments||[a]).some(part=>{const start=order.indexOf(part.block_id),end=order.indexOf(part.end_block_id||part.block_id);return scope.blockIds.some(id=>id===part.block_id||id===part.end_block_id||start>=0&&end>=start&&order.indexOf(id)>=start&&order.indexOf(id)<=end)})}
-    else if(scope.kind==='image')matches=['visual','region'].includes(a.type)&&a.visual_id===scope.visualId&&(!scope.file||a.asset_file===scope.file);
-    else matches=a.type==='time'&&a.component_id===scope.componentId&&(!scope.file||a.asset_file===scope.file)&&a.start_seconds<scope.to&&a.end_seconds>scope.from;
+    else if(scope.kind==='image')matches=a.type==='global'||['visual','region'].includes(a.type)&&a.visual_id===scope.visualId&&(!scope.file||a.asset_file===scope.file);
+    else matches=a.type==='global'||a.type==='time'&&a.component_id===scope.componentId&&(!scope.file||a.asset_file===scope.file)&&a.start_seconds<scope.to&&a.end_seconds>scope.from;
     if(matches)selected.set(c.id,c);
   }return [...selected.values()];
 }
@@ -129,7 +129,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   if(review){
     reviewSurface(box,'audio');let commentKey='';
     box.reviewPaintComments=()=>{
-      const comments=reviewBlockComments(state.comments,reviewBlockScope(box,'audio')),key=JSON.stringify(comments);
+      const comments=reviewBlockComments(state.comments,reviewBlockScope(box,'audio')).filter(c=>c.anchor.type==='time'),key=JSON.stringify(comments);
       if(key!==commentKey){commentKey=key;markers.replaceChildren();for(const comment of comments){
         const button=productionButton(markers,'',()=>{focus();if(options.locate)options.locate(comment);else locateComment(comment)});button.append(reviewIcon());button.dataset.commentId=comment.id;button.style.left=percent(clamp(comment.anchor.start_seconds))+'%';button.title=comment.anchor.start_seconds.toFixed(2)+' 秒 · '+comment.body;button.setAttribute('aria-label',(audio?'定位音频评论：':'定位视频评论：')+comment.body);
       }}

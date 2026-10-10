@@ -13,7 +13,7 @@ function commentReviewData(target){
   if(!commentReviewReads.has(key))commentReviewReads.set(key,api(commentReviewURL(target)).finally(()=>commentReviewReads.delete(key)));
   return commentReviewReads.get(key);
 }
-function reviewRevisionLabel(ref){return ref.unavailable?'准确稿件已不可用':ref.object_id==='story-structure'?`结构第 ${ref.version} 稿`:ref.title}
+function reviewRevisionLabel(ref){return ref.unavailable?'准确稿件已不可用':ref.object_id==='story-structure'?`结构第 ${ref.version} 稿`:ref.version?`${ref.title} · 修订 ${ref.version}`:ref.title}
 function currentReviewComment(row){return state.comments.find(c=>c.id===row.comment.id)||row.comment}
 function appendCrossVersionReview(body){
   const target=commentReviewTarget();if(!target||state.reviewCommentScope)return;
@@ -134,8 +134,8 @@ function renderCommentReviewContent(root,record,anchor){
     if(start<0||end<start){nodeText('p','structure-alert','准确正文位置已不可用；未查找相似句替代。',focus);return}
     for(let i=start;i<=end;i++){
       const block=blocks[i],p=nodeText('p',null,'',focus);p.dataset.reviewBlock=block.id;
-      const text=Array.from(block.text),from=anchor?.type==='text'?(i===start?part.start:0):0,to=anchor?.type==='text'?(i===end?part.end:text.length):0;
-      const left=anchor?.type==='text'?Math.max(0,from-200):0,right=anchor?.type==='text'?Math.min(text.length,to+200):text.length;
+      const text=Array.from(block.text),textAnchor=anchor?.type==='text'||(!anchor?.type&&anchor?.block_id),from=textAnchor?(i===start?part.start:0):0,to=textAnchor?(i===end?part.end:text.length):0;
+      const left=textAnchor?Math.max(0,from-200):0,right=textAnchor?Math.min(text.length,to+200):text.length;
       p.append(document.createTextNode((left?'…':'')+text.slice(left,from).join('')));
       if(to>from)nodeText('mark',null,text.slice(from,to).join(''),p);
       p.append(document.createTextNode(text.slice(to||from,right).join('')+(right<text.length?'…':'')));

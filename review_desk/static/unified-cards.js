@@ -235,16 +235,17 @@ async function openUnifiedMaterial(ref,trigger){
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
   const fields=['reviewWork','reviewPermission','shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','positionReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
   const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
+  const toggle=$('#comments-toggle'),toggleParent=toggle?.parentNode,toggleNext=toggle?.nextSibling;
   const {dialog,title,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
-  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
+  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(toggleParent)toggleParent.insertBefore(toggle,toggleNext?.parentNode===toggleParent?toggleNext:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params,Object.hasOwn(ref,'work')?ref.work:currentReviewWork());if(!dialog.isConnected||!owns())return;
     while(typeof reviewDialogStack!=='undefined'&&reviewDialogStack.at(-1)!==dialog&&dialog.isConnected){const upper=reviewDialogStack.at(-1);await new Promise(resolve=>upper.addEventListener('close',resolve,{once:true}));if(!dialog.isConnected||!owns())return;}
     result.defaultSelection=!!ref.defaultSelection;
     state.reviewPermission=!!ref.permission;
     state.shotReferenceContext=ref.shotReference?{...ref.shotReference,dialog,source:ref.shotReference,pageActive:owns}:null;
     if(ref.component_id){const data=result.entity_review||result.detail;data.selectedComponents||={};data.selectedComponents[ref.revision_id]=ref.component_id;if(!result.entity_review)result.detail.componentId=ref.component_id}
-    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);activateUnifiedCard(result);if(ref.readingLabel)title.textContent=ref.readingLabel;else if(result.position_review)title.textContent=businessTitle(result.detail.record);renderProductionReader();renderComments();
+    state.unifiedCardRoot=body;panel.remove();dialog.append(panel);if(toggle)dialog.append(toggle);activateUnifiedCard(result);if(ref.readingLabel)title.textContent=ref.readingLabel;else if(result.position_review)title.textContent=businessTitle(result.detail.record);renderProductionReader();renderComments();
   }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','production-issue',error.message,body)}}
 }
 
