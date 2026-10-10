@@ -229,3 +229,12 @@
 .material-original-comparisons .entity-review-media-pane .structure-visual-viewport.material-image-frame{height:440px;max-height:55vh}
 .audiovisual-edition{padding:14px 0;border-bottom:1px solid var(--desk-line)}
 @media(max-width:700px){.breakdown-shot-copy{padding:20px 8px}.breakdown-conditions{padding:16px}.shot-action-reading p{font-size:15px}.scene-reference-reading{padding:20px 8px}}
+/* One ownership selector; standards remain available beside review actions. */
+.entity-material-tabs{display:flex;gap:8px;margin:18px 0 8px;border-bottom:1px solid var(--desk-line);padding-bottom:8px}
+.entity-material-tabs [aria-selected=true]{background:#e5ecdf;border-color:#65775c;box-shadow:inset 3px 0 #65775c}
+.review-help{position:relative;display:inline-flex;vertical-align:middle;margin-left:8px}
+.review-help>button{border-radius:50%;width:28px;height:28px;min-height:28px;padding:0;font-weight:600}
+.review-help-content{display:none;position:absolute;right:0;bottom:100%;width:min(380px,75vw);max-height:50vh;overflow:auto;background:#fffdf7;border:1px solid var(--desk-line);padding:14px;box-shadow:0 6px 24px #0002;z-index:10;font-size:13px;line-height:1.7}
+.review-help:hover>.review-help-content,.review-help:focus-within>.review-help-content,.review-help[data-pinned=true]>.review-help-content{display:block}
+.review-help-content .entity-review-text{margin:0}
+.material-plan pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.7}
