@@ -94,3 +94,32 @@
   .approach-cycle-return { left: 20px; width: 20px; top: 25px; bottom: 25px; }
   .approach-cycle-return span { left: -23px; }
 }
+
+/* Internal relationships share the row width, rather than shrinking the prose. */
+.approach-collaboration { grid-column: 1 / -1; border: 1px solid #66716a; padding: 20px; min-width: 0; }
+.approach-collaboration-roles { display: flex; align-items: center; gap: 12px; }
+.approach-collaboration-role { flex: 1; min-width: 0; border: 1px solid #66716a; padding: 12px; text-align: center; }
+.approach-collaboration-role b,.approach-collaboration-role span { display: block; }
+.approach-collaboration-role b { font-size: 18px; }
+.approach-collaboration-exchange { flex: 0 0 auto; display: flex; flex-direction: column; align-items: center; font-size: 14px; }
+.approach-collaboration-arrow { font-size: 26px; line-height: 1.2; }
+.approach-collaboration-constraint { text-align: center; border-bottom: 1px solid #66716a; margin: 18px 0 0; padding-bottom: 16px; }
+.approach-collaboration-label { text-align: center; margin: 16px 0 10px; }
+.approach-collaboration-workflow { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 0; list-style: none; padding: 0; margin: 0; }
+.approach-collaboration-workflow li { display: flex; align-items: center; }
+.approach-collaboration-workflow li:not(:last-child)::after { content: "→"; margin: 0 12px; color: #66716a; }
+@media (max-width: 700px) {
+  .approach-collaboration { padding: 16px; }
+  .approach-collaboration-roles { flex-direction: column; gap: 8px; }
+  .approach-collaboration-role { width: 100%; box-sizing: border-box; }
+  .approach-collaboration-exchange { flex-direction: row; gap: 10px; }
+  .approach-collaboration-arrow { transform: rotate(90deg); }
+  .approach-collaboration-workflow { flex-direction: column; align-items: center; gap: 0; }
+  .approach-collaboration-workflow li { flex-direction: column; }
+  .approach-collaboration-workflow li:not(:last-child)::after { content: "↓"; margin: 5px 0; }
+}
+
+@media (min-width: 701px) {
+  .approach-cycle .approach-section-expanded .approach-cycle-node::after { display: none; }
+  .approach-cycle .approach-section-expanded:not(:last-child)::after { content: "↓"; position: absolute; bottom: 0; left: 16.7%; height: 34px; line-height: 34px; color: #66716a; }
+}
