@@ -52,7 +52,7 @@ class VideoPreparationTest(unittest.TestCase):
                          'candidate':self.ref(name+'-file'), 'component_id':'original'})
 
     def approve(self):
-        for name in ('shot', 'video'):
+        for name in ('video',):
             current = acceptance.snapshot(self.store, name)
             if not current['accepted']:
                 acceptance.decide(self.store, {'object_id':name, 'expected_revision':current['target']['revision_id'],

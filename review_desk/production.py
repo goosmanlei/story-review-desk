@@ -303,7 +303,12 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         raise ValueError("unsupported production format/kind")
     _text(payload.get("title"), "title")
     blocks = _list(payload, "blocks")
-    if not blocks or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
+    composition_only = (kind in {'AV_EPISODE','AV_SCENE','AV_SHOT'} and
+                        (payload.get('reading_contract') == 'audiovisual-three-part-v1' or payload.get('retired_design_text') is True)
+                        or kind == 'MATERIAL_RELATION' and payload.get('explanation_policy') == 'executable-only-v1')
+    if check_current and payload.get('retired_design_text'):
+        raise ValueError('历史清理收据不能作为新视听作品导入')
+    if (not blocks and not composition_only) or any(not isinstance(b, dict) or not b.get("id") or not isinstance(b.get("text"), str) or not b["text"].strip() for b in blocks):
         raise ValueError("reviewable text blocks are required")
     if len({b["id"] for b in blocks}) != len(blocks):
         raise ValueError("duplicate reviewable block id")
@@ -315,7 +320,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     p = payload
     if kind in {"AV_EPISODE", "AV_SCENE", "AV_SHOT"}:
         from .audiovisual import validate
-        validate(store, kind, p)
+        validate(store, kind, p, object_id)
     elif kind == "MATERIAL_RELATION":
         from .material_relations import validate
         validate(store, p)

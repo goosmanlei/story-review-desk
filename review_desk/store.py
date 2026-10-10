@@ -149,6 +149,10 @@ class Store:
             initialize_relationship_policy(self)
             from .state_cleanup import initialize as initialize_state_cleanup
             initialize_state_cleanup(self)
+            from .audiovisual_notes import SCHEMA as AV_NOTES_SCHEMA
+            self.db.executescript(AV_NOTES_SCHEMA)
+            from .audiovisual_cleanup import SCHEMA as AV_CLEANUP_SCHEMA
+            self.db.executescript(AV_CLEANUP_SCHEMA)
             from .version_consolidation import initialize as initialize_consolidation
             initialize_consolidation(self)
         except BaseException:
@@ -218,6 +222,8 @@ class Store:
             return [self._put_object(**record) for record in records]
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .audiovisual_cleanup import guard_write as guard_av
+        guard_av(self, object_id, kind, payload)
         from .methods import guard_write as guard_method
         guard_method(self, object_id, kind, payload, expected_version)
         from .version_consolidation import guard_write as guard_consolidation

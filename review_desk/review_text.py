@@ -38,6 +38,8 @@ def production_text_blocks(payload):
     extra = [('production_description', payload.get('production_description'))]
     if payload.get('format') == 'production-av-shot-v1':
         extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','axis','movement','action_start','action_end','motion','performance','lighting','color','editing','continuity')]
+        extra += [(f'key_states.{i}.description', state.get('description'))
+                  for i, state in enumerate(payload.get('key_states', []))]
     if payload.get('format') in ('production-av-episode-v1', 'production-av-scene-v1', 'production-material-relation-v1'):
         extra += [(field, payload.get(field)) for field in ('purpose', 'structure', 'rhythm', 'continuity', 'preserve', 'change', 'check')]
     if payload.get('format') == 'production-av-scene-v1':

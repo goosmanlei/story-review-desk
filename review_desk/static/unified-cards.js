@@ -93,13 +93,10 @@ function renderUnifiedCard(root){
   if(state.positionReview){
     card.classList.add('unified-position-card');right.remove();left.classList.add('breakdown-scene');
     const data=state.positionReview,row=data.record,controls=el('div','production-toolbar');left.append(controls);
-    const select=el('select');select.setAttribute('aria-label',row.kind==='AV_SHOT'?'镜头设计版本':'场设计版本');
-    for(const version of data.history)select.append(new Option('版本 '+version.version,version.id));select.value=row.id;select.onchange=()=>switchUnifiedPosition(row.object_id,select.value);controls.append(select);
     const episode=data.shared?.find(item=>item.record.kind==='AV_EPISODE')?.record;
     nodeText('span','production-meta',[episode&&businessTitle(episode),breakdownSceneTitle(data.scene)].filter(Boolean).join(' / '),controls);
     if(row.kind==='AV_SCENE'){nodeText('h2',null,breakdownSceneTitle(row),left);renderAudiovisualSources(left,row)}
-    const composedScene=renderAudiovisualDesign(left,data.scene,[...data.shots.map(s=>s.record.id),...data.shots.flatMap(s=>s.context.requirements.map(r=>r.id))]);
-    const common=breakdownReadingConditions(data,composedScene,left.textContent,[...left.querySelectorAll?.('[data-block-id]')||[]].map(node=>node.textContent)),references=createSceneReferenceReader(data);renderBreakdownConditions(left,data,common);for(const item of data.shots)renderBreakdownShot(left,item,common,references);left.append(references.host);
+    for(const item of data.shots)renderBreakdownShot(left,item);
   }
   else if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
   else if(state.materialReview){

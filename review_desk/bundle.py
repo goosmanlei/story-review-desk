@@ -114,6 +114,10 @@ def _export(store, export_dir, content_file):
         from .relation_explanations import dump as dump_redactions
         from .state_cleanup import dump as dump_state_cleanup
         framework.update(dump_state_cleanup(store))
+        from .audiovisual_notes import dump as dump_av_notes
+        framework['audiovisual_notes'] = dump_av_notes(store)
+        from .audiovisual_cleanup import dump as dump_av_cleanup
+        framework.update(dump_av_cleanup(store))
         from .version_consolidation import dump as dump_consolidation
         framework.update(dump_consolidation(store))
         framework["relation_redacted_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM relation_redacted_comments ORDER BY comment_id")]
@@ -206,7 +210,7 @@ def _export(store, export_dir, content_file):
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
     audiovisual_baseline = any(json.loads(row['receipt']).get('format') == 'production-cutover-result-v1'
                               for row in framework.get('consolidation_runs', []))
-    manifest = {"schema_version": 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 10 if framework.get('audiovisual_cleanup_runs') else 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -222,7 +226,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
+    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -250,6 +254,10 @@ def restore(store, export_dir):
         raise ValueError('this instance requires its exact audiovisual cutover receipt')
     from .state_cleanup import guard_restore
     guard_restore(store, framework)
+    from .audiovisual_cleanup import guard_restore as guard_av_restore
+    guard_av_restore(store, framework)
+    if schema >= 10 and not {'audiovisual_notes','audiovisual_cleanup_receipts','audiovisual_cleanup_runs'} <= set(framework):
+        raise ValueError('audiovisual reading contract and cleanup receipts missing')
     from . import version_consolidation as consolidation
     consolidation.guard_restore(store, framework)
     if schema >= 8 and not all(t in framework for t in consolidation.TABLES):
@@ -326,12 +334,18 @@ def restore(store, export_dir):
             redactions={r["revision_id"]:r for r in framework.get("relation_explanation_redactions",[])}
             if len(redactions)!=len(framework.get("relation_explanation_redactions",[])) or not set(redactions)<=revisions.keys():raise ValueError("invalid redaction locators")
             cleaned_states={r["revision_id"]:r for r in framework.get("state_cleanup_receipts",[])}
+            cleaned_av={r['revision_id']:r for r in framework.get('audiovisual_cleanup_receipts',[])}
+            if len(cleaned_av)!=len(framework.get('audiovisual_cleanup_receipts',[])) or not set(cleaned_av)<=revisions.keys():raise ValueError('invalid audiovisual cleanup identities')
             if len(cleaned_states)!=len(framework.get("state_cleanup_receipts",[])) or not set(cleaned_states)<=revisions.keys():raise ValueError("invalid state cleanup identities")
             for revision in revisions.values():
                 if revision["object_id"] not in objects:
                     raise ValueError("orphan revision")
                 payload = json.loads(revision["payload"])
                 if not consolidation.valid_identity(test, revision['object_id'], revision['version'], payload, revision['id']):
+                    if revision['id'] in cleaned_av:
+                        from .audiovisual_cleanup import verify_row
+                        if objects[revision['object_id']]['kind'] != cleaned_av[revision['id']]['kind']:raise ValueError('invalid audiovisual cleanup kind')
+                        verify_row(revision,cleaned_av[revision['id']]);continue
                     if revision["id"] in cleaned_states:
                         from .state_cleanup import verify_row
                         if objects[revision["object_id"]]["kind"]!="DELETED_STATE":raise ValueError("invalid cleaned state kind")
@@ -427,6 +441,10 @@ def restore(store, export_dir):
                     store.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (obj["id"], obj["kind"], obj["current_revision"], obj["version"], stamp, stamp))
                 for revision in test.revisions():
                     store.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision["id"], revision["object_id"], revision["version"], revision["payload"], now()))
+            from .audiovisual_notes import restore as restore_av_notes
+            restore_av_notes(store, framework.get('audiovisual_notes', []) if framework else [])
+            from .audiovisual_cleanup import restore as restore_av_cleanup
+            restore_av_cleanup(store, framework or {})
             from .state_cleanup import receipt_payload
             for table,keys in (("state_cleanup_receipts",("revision_id","object_id","entity_ref","original_sha256","receipt_sha256","reason")),("state_cleanup_preserved",("revision_id","payload_sha256")),("state_cleanup_comments",("comment_id","object_id","revision_id","anchor_sha256"))):
                 for row in framework.get(table,[]) if framework else []:

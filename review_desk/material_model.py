@@ -310,6 +310,12 @@ def _verify(store):
         payload=json.loads(revision['payload'])
         from .version_consolidation import valid_identity
         if not valid_identity(store, revision['object_id'], revision['version'], payload, revision['id']):
+            from .audiovisual_cleanup import verify_row as verify_cleaned_av
+            av_receipt=store.db.execute('SELECT * FROM audiovisual_cleanup_receipts WHERE revision_id=?',(revision['id'],)).fetchone()
+            if av_receipt:
+                if store.db.execute('SELECT kind FROM objects WHERE id=?',(revision['object_id'],)).fetchone()[0] != av_receipt['kind']:
+                    raise ValueError('invalid audiovisual cleanup kind')
+                verify_cleaned_av(revision,dict(av_receipt));continue
             from .state_cleanup import verify_row as verify_cleaned_state
             receipt=store.db.execute('SELECT * FROM state_cleanup_receipts WHERE revision_id=?',(revision['id'],)).fetchone()
             if receipt:

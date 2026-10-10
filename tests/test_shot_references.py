@@ -39,7 +39,7 @@ class ShotReferenceTest(unittest.TestCase):
 
     def approve(self):
         from review_desk import production_acceptance as a
-        for oid in ('shot','video'):
+        for oid in ('video',):
             current=a.snapshot(self.store,oid)
             if not current['accepted']:
                 a.decide(self.store,{'object_id':oid,'expected_revision':current['target']['revision_id'],

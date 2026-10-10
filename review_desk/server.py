@@ -552,10 +552,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({'error': str(exc)}, 409)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
-        if self.path in ("/api/production/material-route", "/api/production/acceptance", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
+        if self.path in ("/api/production/working-note", "/api/production/material-route", "/api/production/acceptance", "/api/production/shot-reference", "/api/production/import", "/api/production/adopt", "/api/production/judgment", "/api/production/entity-decision"):
             try:
                 value = self._input(20_000_000)
-                if self.path.endswith('material-route'):
+                if self.path.endswith('working-note'):
+                    from .audiovisual_notes import save
+                    result=save(self.server.store, value)
+                elif self.path.endswith('material-route'):
                     from .material_relations import choose_route
                     result=choose_route(self.server.store, value)
                 elif self.path.endswith('acceptance'):
