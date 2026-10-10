@@ -7,19 +7,6 @@
 .workspace-subnav .workspace-subtab.active { color: var(--desk-ink); border-bottom-color: var(--desk-red); font-weight: 700; }
 .workspace-subnav .workspace-subtab:focus-visible { outline: 2px solid var(--desk-red); outline-offset: -2px; }
 .configuration-layout-unified { grid-template-columns: minmax(0,1fr); }
-/* Wide story readers keep the original and its comments visible together.
-   A panel moved into a material dialog must not reserve space in the outer page. */
-@media(min-width:1200px) {
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) { --story-comments-width: 360px; }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) > .layout { margin-right: var(--story-comments-width); grid-template-columns: 200px minmax(0,1fr); }
-  body:has(#story-creation-shell:not([hidden])) > #comment-panel { width: var(--story-comments-width,440px); }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) .sidebar { padding-inline: 12px; }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) .workspace-content { width: calc(100% - 32px); }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) .workspace-topbar { padding-inline: 16px; gap: 12px; }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) :is(.text-reader,.structure-layout,.screenplay-stage) { grid-template-columns: 180px minmax(0,1fr); }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) :is(.text-reader-scroll .document,#screenplay-reader) { padding-inline: 24px; }
-  body:has(> #comment-panel:not([hidden])):has(#story-creation-shell:not([hidden])) :is(#structure-reader .structure-section,#structure-reader .structure-review-tail) { margin-inline: 24px; }
-}
 @media(max-width:700px) {
   .workspace-topbar { gap: 12px; }
   .workspace-topbar .view-context { gap: 7px; }

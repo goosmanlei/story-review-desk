@@ -892,42 +892,8 @@ function watchTextSelection(){
   window.addEventListener('blur',()=>{selectionPointer=null;hideSelectionAction()});
 }
 
-function preserveCommentReaderLine(){
-  const panel=$('#comment-panel');
-  if(panel.parentNode?.matches?.('.unified-card-dialog')&&typeof preserveUnifiedCommentReader==='function')return preserveUnifiedCommentReader(panel.parentNode);
-  if(panel.parentNode!==document.body||!(window.innerWidth>=1200)||$('#story-creation-shell').hidden)return ()=>{};
-  const reader=['#source-view','#structure-reader','#screenplay-reader'].map($).find(r=>r.getClientRects().length);
-  if(!reader)return ()=>{};
-  const visibleTop=()=>Math.max(70,reader.getBoundingClientRect().top,reader.querySelector('.structure-document-head')?.getBoundingClientRect().bottom||0);
-  const top=visibleTop(),bottom=Math.min(window.innerHeight,reader.getBoundingClientRect().bottom);
-  if(bottom<=top)return ()=>{};
-  const selected=[...reader.querySelectorAll('.comment-mark.selected')].find(mark=>{const r=mark.getBoundingClientRect();return r.top>=top&&r.top<bottom});
-  if(selected){const offset=selected.getBoundingClientRect().top-top;return ()=>{reader.scrollTop+=selected.getBoundingClientRect().top-visibleTop()-offset}}
-  const paragraph=[...reader.querySelectorAll('.source-text p,.structure-section p')].find(p=>{const r=p.getBoundingClientRect();return r.bottom>top+2&&r.top<bottom});
-  if(!paragraph){
-    const image=[...reader.querySelectorAll('img')].find(img=>{const r=img.getBoundingClientRect();return img.complete&&r.height>0&&r.bottom>top+2&&r.top<bottom});
-    if(!image)return ()=>{};
-    const rect=image.getBoundingClientRect(),fraction=Math.max(0,(top-rect.top)/rect.height),offset=rect.top+fraction*rect.height-top;
-    return ()=>{const next=image.getBoundingClientRect();reader.scrollTop+=next.top+fraction*next.height-visibleTop()-offset};
-  }
-  const rect=paragraph.getBoundingClientRect(),x=rect.left+Math.min(8,rect.width/2);
-  let anchor=paragraph;
-  // A point in a blank line can resolve to a newline above the clipped edge.
-  // Choose a fully visible glyph so repeated open/close does not drift by a line.
-  for(let y=Math.max(top,rect.top)+8;y<Math.min(bottom,top+180);y+=8){
-    const caret=document.caretPositionFromPoint?.(x,y),range=caret?document.createRange():document.caretRangeFromPoint?.(x,y);
-    if(caret)range.setStart(caret.offsetNode,caret.offset);
-    const text=range?.startContainer;
-    if(text?.nodeType!==Node.TEXT_NODE||!paragraph.contains(text)||!/\S/.test(text.textContent[range.startOffset]||''))continue;
-    range.setEnd(text,Math.min(text.length,range.startOffset+1));
-    const glyph=range.getBoundingClientRect();if(glyph.height&&glyph.top>=top&&glyph.bottom<=bottom){anchor=range;break}
-  }
-  const before=anchor.getBoundingClientRect().top-top;
-  // Keep the same visible text through line wrapping, rather than the old pixel scroll offset.
-  return ()=>{reader.scrollTop+=anchor.getBoundingClientRect().top-visibleTop()-before};
-}
 function setPanelOpen(open){
-  const panel=$('#comment-panel'),dialog=panel.parentNode?.matches?.('.unified-card-dialog')?panel.parentNode:null,opening=open&&panel.hidden,restore=panel.hidden===open?preserveCommentReaderLine():()=>{};
+  const panel=$('#comment-panel'),dialog=panel.parentNode?.matches?.('.unified-card-dialog')?panel.parentNode:null,opening=open&&panel.hidden,restore=panel.hidden===open&&dialog&&typeof preserveUnifiedCommentReader==='function'?preserveUnifiedCommentReader(dialog):()=>{};
   if(opening&&dialog&&!panel.contains(document.activeElement))dialog.commentReturnFocus=document.activeElement;
   const returnFocus=!open&&dialog&&panel.contains(document.activeElement);
   panel.hidden=!open;restore();

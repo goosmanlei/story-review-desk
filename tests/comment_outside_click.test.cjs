@@ -319,3 +319,13 @@ test('a late lower-card response waits for the newer upper card and returns to i
   stack.pop();f.close(f.dialogs[1]);await first;assert.equal(f.c.state.productionSelected.id,'first-old');assert.equal(f.panel.parentNode,f.dialogs[0]);
   stack.pop();f.close(f.dialogs[0]);assert.equal(f.c.state.productionSelected,original);assert.equal(f.panel.parentNode,f.body);
 });
+
+for(const width of [390,1199,1200,1440])test(`top-level comment toggles never inspect or scroll the story reader at width ${width}`,async()=>{
+  const f=await fixture();f.c.window.innerWidth=width;
+  const reader=f.node('#source-view');reader.scrollTop=417;
+  reader.getClientRects=()=>{throw Error('top-level overlay must not measure the reader for reflow')};
+  f.node('#story-creation-shell').hidden=false;
+  f.c.closePanel();f.c.openPanel();f.c.closePanel();f.c.openPanel();
+  assert.equal(reader.scrollTop,417);assert.equal(f.panel.hidden,false);
+  assert.equal(f.node('#comments-toggle').getAttribute('aria-expanded'),'true');
+});
