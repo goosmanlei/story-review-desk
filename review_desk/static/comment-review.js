@@ -77,6 +77,13 @@ async function openCommentReview(row,context,trigger){
   };
   const showContent=async(ref,anchor,label)=>{
     const epoch=++read;body.replaceChildren();nodeText('p',null,'正在读取准确稿件…',body);
+    if(ref.production_excerpt){
+      body.replaceChildren();nodeText('h3',null,label+' · '+ref.title,body);
+      const original=ref.production_excerpt.anchor;for(const a of original?.segments||[original])if(a?.quote)nodeText('blockquote',null,a.quote,body);
+      nodeText('p','comment-help',ref.matches_current?'当前内容仍与此处理记录一致。':'当前内容后来已修改；以上是当时保留的局部摘录。',body);
+      if(ref.current_reference){const open=nodeText('button',null,'打开当前内容',body);open.onclick=()=>{dialog.close();openUnifiedMaterial(ref.current_reference,trigger)}}
+      return;
+    }
     try{
       const data=await api(commentReviewURL({object_id:ref.object_id,revision_id:ref.revision_id},true));
       if(!ownsRead(epoch))return;
@@ -100,7 +107,7 @@ async function openCommentReview(row,context,trigger){
     });
     for(const evidence of response.evidence||[]){
       const b=button(evidence.label,()=>showContent(evidence,evidence.anchor,evidence.reason||'改动依据'));
-      b.disabled=evidence.anchor_state?.valid===false;
+      b.disabled=evidence.anchor_state?.valid===false&&!evidence.production_excerpt;
       if(b.disabled){b.textContent+='（引用不可用）';b.title='准确引用已不可用，未替换为其他稿件'}
     }
   });

@@ -31,7 +31,7 @@ function restoreEntityCallContext(data,row){
 const entityReviewShort=(row,entity)=>row.payload.title.startsWith(entity.payload.title)?row.payload.title.slice(entity.payload.title.length).replace(/^[\s·：:—-]+/u,'')||row.payload.title:row.payload.title;
 function entityReviewFocus(row){focusProductionReview(entityReviewDetail(row))}
 function entityReviewComments(){const data=state.entityReview,targets=[...data.comment_targets,...(data.historicalTarget?[productionRef(data.historicalTarget)]:[])];return state.comments.filter(c=>targets.some(t=>t.object_id===c.target_object_id&&t.revision_id===c.target_revision_id))}
-function entityReviewCommentGroup(comment){const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id),label=row?.kind==='ENTITY'?'实体':row?.kind==='STATE'?'状态 · '+entityReviewShort(row,data.entity):row?.kind==='ASSET'?'素材 · '+row.payload.title:row?.kind==='REQUIREMENT'?'素材方案 · '+row.payload.title:row?.kind==='MATERIAL_RELATION'?'参考用途 · '+(typeof materialRelationTitle==='function'?materialRelationTitle(row):row.payload.title):row?.kind==='RELATION'?'关系 · '+row.payload.title:row?.kind==='CALL'?'实际生成 · '+row.payload.title:'历史整体意见';const round=typeof materialRecordRound==='function'&&['ASSET','REQUIREMENT','CALL'].includes(row?.kind)?comment.material_plan_scopes?.[0]?.number||comment.material_scopes?.[0]?.number||materialRecordRound(row):null;return reviewPositionText(label)+(round?' · 版本 '+round:row&&row.id!==row.current_revision?' · 历史版本 '+row.version:'')}
+function entityReviewCommentGroup(comment){const data=state.entityReview,row=[...entityReviewRows(data),data.historicalTarget].find(r=>r?.id===comment.target_revision_id),label=row?.kind==='ENTITY'?'实体':row?.kind==='STATE'?'状态 · '+entityReviewShort(row,data.entity):row?.kind==='ASSET'?'素材 · '+row.payload.title:row?.kind==='REQUIREMENT'?'素材方案 · '+row.payload.title:row?.kind==='MATERIAL_RELATION'?'参考用途 · '+(typeof materialRelationTitle==='function'?materialRelationTitle(row):row.payload.title):row?.kind==='RELATION'?'关系 · '+row.payload.title:row?.kind==='CALL'?'实际生成 · '+row.payload.title:'历史整体意见';const round=typeof materialRecordRound==='function'&&['ASSET','REQUIREMENT','CALL'].includes(row?.kind)?comment.material_plan_scopes?.[0]?.number||comment.material_scopes?.[0]?.number||materialRecordRound(row):null;return reviewPositionText(label)+(row?.current_content||row?.candidate_id?(comment.original_context?.matches_current===false?' · 原意见':''):round?' · 版本 '+round:row&&row.id!==row.current_revision?' · 历史版本 '+row.version:'')}
 function appendEntityReviewComments(parent,comments){
   const groups=new Map();for(const comment of comments){const key=entityReviewCommentGroup(comment);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(comment)}
   for(const [label,rows] of groups){nodeText('h4','entity-review-comment-group',`${label} · ${rows.length}`,parent);for(const row of rows)parent.append(commentCard(row))}
@@ -82,7 +82,7 @@ function restoreEntityMaterialRoute(data,route){
   const retained=selected&&data.media.some(item=>!item.state&&(data.material_versions[selected.material_id]||[]).some(round=>round.members.some(member=>member.kind==='ASSET'&&member.object_id===item.record.object_id&&member.id===item.record.id)));
   if(retained||items.some(item=>!item.state))data.unassignedOpen=true;
   if(!scope&&!form&&items.length&&items.every(item=>!(item.state||item.review_state)))data.materialTab='entity';
-  if(row.kind==='REQUIREMENT')data.openRecipe=row.object_id;
+  if(row.kind==='REQUIREMENT')data.openRecipe=row.object_id;if(selected?.round.current_content){data.selectedCandidates||={};data.selectedCandidates[selected.material_id]=row.kind==='ASSET'?row.id:'current';}
   // Schema-1 snapshots have exact media/context but no material rounds.
   if(row.kind==='CALL')restoreEntityCallContext(data,row);
   if(row.kind==='ASSET'&&!items.length){const component=row.payload.components.find(c=>/^(image|audio|video)\//.test(c.mime));if(component)data.historicalMedia={id:'history:'+row.id,label:row.payload.title,record:row,component,component_id:component.id,state:null,role:'related',review_context:data.materialContexts?.[row.id]}}
@@ -169,6 +169,7 @@ function entityReviewScope(row){
   return scenes.length===1?sceneName(scenes[0]):`${sceneName(scenes[0])} 至 ${sceneName(scenes.at(-1))} · ${scenes.length} 场`;
 }
 function entityVersionControl(parent,row,onchange){
+  if(row.current_content||row.candidate_id)return;
   const data=state.entityReview,versions=data.versions?.[row.object_id]||[{id:row.id,version:row.version}];
   if(row.kind==='RELATION')return;
   const bar=reviewChoiceButtons(parent,reviewPositionText(row.payload.title)+'的版本',[...versions].sort((a,b)=>a.version-b.version).map(v=>({id:v.id,label:'版本 '+v.version})),row.id,async id=>{
@@ -281,16 +282,16 @@ function renderEntityReview(root){
   if(data.materialTab==='entity'){
     const materials=el('section','entity-state-materials');materials.setAttribute('aria-label','实体素材');root.append(materials);
     const models=entityReviewMaterialModels(ownNeeds,entityReviewMaterialItems(data,unassigned),data);
-    if(models.length)renderUnifiedModels(materials,models,data);else nodeText('p','production-meta','此实体版本尚无素材需求或原件',materials);
+    if(models.length)renderUnifiedModels(materials,models,data);else nodeText('p','production-meta','此实体尚无素材需求或原件',materials);
   }
   if(entity.payload.lyrics?.length){const lyrics=el('section','entity-review-lyrics');nodeText('h3',null,'歌词原文与段落',lyrics);for(const lyric of entity.payload.lyrics){nodeText('h4',null,lyric.section,lyrics);nodeText('p',null,lyric.text,lyrics);productionRefLink(lyrics,lyric.source,'查看歌词依据')}root.append(lyrics)}
   renderEntityRelations(root,data);
 }
 
-function renderMaterialPlaceholder(parent,need){
+function renderMaterialPlaceholder(parent,need,hasCandidates=false){
   const p=need.payload,type=p.media_type,box=el('div',type==='audio'?'entity-review-missing-audio':'entity-review-missing-image');
   box.dataset.requirementRevision=need.id;box.dataset.mediaType=type;box.append(productionEntityIcon(type));
-  const status=p.generation?.method==='reuse'?'复用方案':'未生成';
+  const status=hasCandidates?'当前方案':p.generation?.method==='reuse'?'复用方案':'未生成';
   box.setAttribute('aria-label',reviewPositionText(p.generation?.output.name||p.title)+' · '+status);nodeText('small',null,(productionMediaLabels[type]||'素材')+' · '+status,box);
   parent.append(box);
 }
@@ -328,7 +329,7 @@ function entityReviewMaterialModels(needs,items,data){
 }
 function entityMaterialCandidateOptions(data,model){
   const key=model.material_id||model.need?.object_id||model.candidates[0]?.record.object_id;
-  return {multipleCards:true,selectedComponents:data.selectedComponents,selectComponent:id=>{const chosen=materialCandidateChoice(model.candidates,data.selectedCandidates?.[key]);if(!chosen)return;data.selectedComponents||={};data.selectedComponents[chosen.record.id]=id;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="原件与预览组成"]`)?.focus({preventScroll:true})},selectedCandidateId:data.selectedCandidates?.[key],selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates||={};data.selectedCandidates[key]=id;state.selected=null;const item=model.candidates.find(i=>i.record.id===id);if(item)focusProductionReview(entityReviewDetail(item.record),false);restoreProductionDraft();renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="本轮候选"]`)?.focus({preventScroll:true})}};
+  return {multipleCards:true,selectedComponents:data.selectedComponents,selectComponent:id=>{const chosen=materialCandidateChoice(model.candidates,data.selectedCandidates?.[key]);if(!chosen)return;data.selectedComponents||={};data.selectedComponents[chosen.record.id]=id;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="原件与预览组成"]`)?.focus({preventScroll:true})},selectedCandidateId:data.selectedCandidates?.[key],selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates||={};data.selectedCandidates[key]=id;state.selected=null;const item=model.candidates.find(i=>i.record.id===id);const row=id==='current'?model.need:item?.record;if(row)focusProductionReview(entityReviewDetail(row),false);const url=new URL(location.href);url.searchParams.set('material_target',id);url.searchParams.set('material_id',key);history.replaceState(history.state,'',url);restoreProductionDraft();renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="本轮候选"]`)?.focus({preventScroll:true})}};
 }
 function renderStateMaterials(parent,data,form,withdrawn=false){
   const needs=(data.requirements||[]).filter(r=>r.payload.scope.object_id===form.object_id&&r.payload.scope.revision_id===form.id).map(r=>{const local=data.localVersions?.[r.object_id];return local?.payload.scope?.revision_id===form.id?local:r});

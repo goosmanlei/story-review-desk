@@ -34,6 +34,7 @@ function materialField(parent,row,field,label,tag='p'){
 }
 function materialTextSurface(parent,row){
   const host=reviewSurface(el('div','entity-review-text'));host.dataset.productionBlocks=row.id;
+  host.dataset.productionEditToken=String(row.edit_token||'');
   if(state.productionSelected?.id===row.id)host.id='production-blocks';
   const focus=()=>{const dialog=host.closest('.material-reference-dialog');if(dialog?.reviewFocus)dialog.reviewFocus();else focusProductionReview({record:row,history:[row],uses:[]})};host.reviewFocus=focus;host.onpointerdown=focus;host.onfocusin=focus;parent.append(host);return host;
 }
@@ -90,6 +91,11 @@ function renderOriginalReviewText(parent,row){
 async function openProductionCommentOriginal(row,comment){
   const {dialog,body}=openReviewDialog('评论原文 · '+businessTitle(row),document.activeElement,'material-reference-dialog');
   const session=referenceReviewSession(dialog,{record:row,history:[row],uses:[]});dialog.reviewFocus=session.focus;
+  if(comment.original_context&&!comment.original_context.matches_current){
+    nodeText('p','production-meta','内容后来已修改，以下保留发出意见时的原摘录。',body);
+    const anchor=comment.original_context.excerpt.anchor;for(const a of anchor.segments||[anchor])if(a.quote)nodeText('blockquote',null,a.quote,body);
+    nodeText('p',null,comment.body,body);return true;
+  }
   const blocks=productionTextBlocks(row),ranges=productionCommentTextRange(comment);
   if(!ranges?.valid){nodeText('p','production-issue','评论对应的准确文字不可用；未定位到相近内容。',body);return false}
   const surface=materialTextSurface(body,row);
@@ -130,7 +136,7 @@ function materialInputs(inputs,records=[],slots=[]){
     const type=component?.mime.split('/')[0]||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];if(!label)return [];
     if(slots.find(s=>s.index===index)?.active===false)return [{value,index,row,label:'备选 '+(slots.find(s=>s.index===index)?.rule?.route||index+1),ref:{...ref,...value}}];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
-  });
+  }).map(item=>item.row?.submission_only?{...item,ref:{...item.ref,snapshot_record:item.row}}:item);
 }
 function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false}={}){
   const effective=materialInputs(inputs,records);if(!effective.length)return;
@@ -142,7 +148,7 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
     if(need&&!actual&&item.row?.kind==='REQUIREMENT')nodeText('p','production-meta','方案引用 · 尚未选定原件',line);
     if(need&&!actual&&item.row?.kind==='ASSET')nodeText('p','production-meta','方案已指定此准确原件；实际使用以调用记录为准',line);
     if(!compact){if(need&&!item.value.relation)materialField(line,need,`generation.inputs.${item.index}.use`,null);else if(item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line)}
-    if(item.row&&!['ASSET','REQUIREMENT'].includes(item.row.kind)){line.classList.add('material-logic-input');line.title='文字依据 · 准确版本 '+item.row.version+'；不作为媒体上传'}
+    if(item.row&&!['ASSET','REQUIREMENT'].includes(item.row.kind)){line.classList.add('material-logic-input');line.title='文字依据 · '+materialVersionLabel(item.row)+'；不作为媒体上传'}
     if(!compact)renderInputRelationPurpose(line,item.value,need);
     host.append(line);
   }
@@ -158,6 +164,7 @@ function renderActualGeneration(parent,context){
   materialField(host,call,'call.prompt','提示词','pre');parent.append(box);
 }
 function materialGenerationDetails(parent,item){
+  if(item.record.candidate_id){renderActualGeneration(parent,item.review_context);return}
   const context=item.review_context;
   if(!context?.call){renderActualGeneration(parent,context);return}
   const detail=el('details','material-generation-details'),key=item.record.id+':'+context.call.id;
@@ -197,6 +204,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   const box=el('section','material-plan');nodeText('h3',null,'生成方案',box);parent.append(box);
   const call=item?.review_context?.call||(!item&&round?.definition_records?.call);
   if(item&&!call){
+    if(round?.current_content){nodeText('p','production-meta',item.review_context?.submission?.snapshot.source?.description||'此原件没有模型调用记录；未用当前方案补填。',box);return}
     nodeText('p','production-meta','此候选未保留完整的历史生成依据。',box);
     const linked=requirement&&((item.record.payload.candidate_requirements||[]).some(ref=>ref.object_id===requirement.object_id&&ref.revision_id===requirement.id)||round?.definition_records?.requirement?.id===requirement.id);
     if(!linked)return;
@@ -204,10 +212,11 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   }
   if(call){
     if(!call){nodeText('p','production-meta','此候选未保留完整的历史生成依据。',box);return}
-    const host=materialTextSurface(box,call);nodeText('p','production-meta','实际调用 · '+businessTitle(call),host);
+    const host=materialTextSurface(box,call);
+    if(item?.review_context?.submission){const submitted=item.review_context.requirements?.[0]?.payload;if(submitted?.purpose)nodeText('p',null,submitted.purpose,host)}
     materialExecution(host,call.payload);if(call.payload.tool)nodeText('p','production-meta',call.payload.tool,host);materialParameters(host,call,'call',call.payload.model);
     renderMaterialInputs(host,call.payload.inputs||[],item?.review_context?.inputs||call.review_input_records||[],call,true,{compact:true});
-    if(!(call.payload.inputs||[]).length)nodeText('p','production-meta','实际调用未登记参考素材',host);
+    if(!(call.payload.inputs||[]).length)nodeText('p','production-meta',Object.hasOwn(call.payload,'inputs')?'本次调用没有参考素材输入':'实际调用未登记参考素材',host);
     renderLinkedPrompt(host,call,call.payload.inputs||[],item?.review_context?.inputs||call.review_input_records||[],'call.prompt');
     if(!call.payload.prompt)nodeText('p','production-meta','此调用未保留完整 Prompt。',host);
     return;
@@ -217,9 +226,9 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   const host=materialTextSurface(box,need);box.dataset.requirementId=need.object_id;
   for(const block of need.payload.blocks||[])nodeText('p',null,block.text,host).dataset.blockId=block.id;
   materialField(host,need,'generation.output.description',null);
-  nodeText('p','production-meta',round?.frozen?'本版保存的计划输入；真实调用另行记录。':'计划输入；尚未登记生成结果。',host);
+  if(!round?.current_content)nodeText('p','production-meta',round?.frozen?'本版保存的计划输入；真实调用另行记录。':'计划输入；尚未登记生成结果。',host);
   materialExecution(host,plan);materialField(host,need,'generation.tool','工具');materialParameters(host,need,'generation',plan.model);
-  const editable=!item&&!round?.frozen&&(!need.current_revision||need.id===need.current_revision);
+  const editable=!round?.current_content&&!item&&!round?.frozen&&(!need.current_revision||need.id===need.current_revision);
   if(editable&&!state.reviewWork)renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(editable&&!state.reviewWork&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:round?.number,frozen:false,compact:true,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true});
@@ -240,9 +249,9 @@ function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=
   if(historical&&plan.blockers?.length){nodeText('h4',null,plan.method==='reuse'?'复用前仍需':'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
   if(historical)materialField(host,need,'generation.prompt',plan.method==='reuse'?'复用说明':'提示词','pre');parent.append(box);
 }
-function materialVersions(){return (isEntityReview()?state.entityReview:state.materialReview)?.material_versions||{}}
+function materialVersions(){return (typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview)?.material_versions||{}}
 function materialRecordRound(row){for(const rounds of Object.values(materialVersions()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;if(Number.isInteger(row.material_version))return row.material_version;if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];return null}
-function materialVersionLabel(row){const number=materialRecordRound(row);return number?'素材版本 '+number:'记录修订 '+row.version}
+function materialVersionLabel(row){if(row.candidate_id||row.component_snapshot)return '准确候选原件';if(row.submission_only)return '提交时内容';if(row.current_content)return '当前方案';const number=materialRecordRound(row);return number?'素材版本 '+number:'记录修订 '+row.version}
 function materialResultKey(row){return JSON.stringify([row.payload.production?.object_id,[...new Set(row.payload.components.filter(c=>c.role==='original').map(c=>c.sha256))].sort()])}
 function materialRoundResults(round,selected,explicit){return round.results.map(row=>explicit&&row.object_id===selected.object_id&&materialResultKey(row)===materialResultKey(selected)&&round.members.some(m=>m.id===selected.id)?selected:row)}
 function materialCandidateChoice(items,targetId){
@@ -261,12 +270,13 @@ function materialCandidateOptions(detail,items){
   const requested=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target');
   const targetId=items.some(i=>i.record.id===requested)?requested:typeof materialDefaultCandidate==='function'?materialDefaultCandidate({need:detail.record,candidates:items},detail):null;
   return {selectedComponents:detail.selectedComponents,selectedCandidateId:targetId,selectCandidate:id=>{
-    const item=items.find(i=>i.record.id===id);if(!item)return;
-    rememberProductionDraft();detail.selectedCandidateId=id;focusProductionReview({record:item.record,history:[item.record],uses:[]},false);
+    const item=items.find(i=>i.record.id===id),row=id==='current'?Object.values(detail.material_versions||{}).flat().find(r=>r.current_content&&r.plan)?.plan:item?.record;if(!row)return;
+    rememberProductionDraft();detail.selectedCandidateId=id;const url=new URL(location.href);url.searchParams.set('material_target',id);history.replaceState(history.state,'',url);focusProductionReview({record:row,history:[row],uses:[]},false);restoreProductionDraft();
     renderProductionReader();renderComments();document.querySelector('[aria-label="本轮候选"] [aria-pressed="true"]')?.focus({preventScroll:true});
   }};
 }
 function materialRoundControl(parent,mid,rounds,selected,change){
+  if(selected.current_content)return;
   return reviewChoiceButtons(parent,'素材版本',[...rounds].sort((a,b)=>a.number-b.number).map(r=>({id:r.number,label:'版本 '+r.number})),selected.number,change);
 }
 function reviewChoiceButtons(parent,label,choices,selected,change,{repeat=false}={}){
@@ -423,14 +433,16 @@ function renderMaterialCard(parent,model,options={}){
   const definitionRecords=model.round?.definition_records;
   const requirement=model.exactPreparingRevision?need:definitionRecords?definitionRecords.requirement:need;
 
-  if(options.selectCandidate&&items.length){
-    const chosen=materialCandidateChoice(items,options.selectedCandidateId);
-    reviewChoiceButtons(box,'本轮候选',items.map((item,index)=>({id:item.record.id,label:'候选'+(item.candidate_number||item.record.candidate_number||index+1)})),chosen.record.id,options.selectCandidate);
-    if(chosen.candidate_code||chosen.record.candidate_code)nodeText('small','business-code',chosen.candidate_code||chosen.record.candidate_code,box);items=[chosen];
+  if(options.selectCandidate&&(items.length||model.round?.current_content&&requirement)){
+    const working=model.round?.current_content&&requirement;
+    const selected=options.selectedCandidateId||(working?'current':null),chosen=selected==='current'?null:materialCandidateChoice(items,selected);
+    const choices=items.map((item,index)=>({id:item.record.id,label:'候选'+(item.candidate_number||item.record.candidate_number||index+1)}));if(working)choices.unshift({id:'current',label:'当前方案'});
+    reviewChoiceButtons(box,working?'当前方案与候选':model.round?.current_content?'候选':'本轮候选',choices,chosen?.record.id||'current',options.selectCandidate);
+    items=chosen?[chosen]:[];
   }
   if(options.selectedComponents)items=items.map(item=>{const component=item.components?.find(c=>c.id===options.selectedComponents[item.record.id]);return component?{...item,component}:item});
   if(need?.payload.status==='withdrawn')nodeText('p','production-meta','此素材需求已撤回',box);
-  else if(!items.length)renderMaterialPlaceholder(box,need||model.identity);
+  else if(!items.length)renderMaterialPlaceholder(box,need||model.identity,!!(model.round?.current_content&&model.candidates.length));
   for(const item of items){
     const h=el('div','entity-review-local-heading');if(need||items.length>1)nodeText('h4',null,reviewPositionText(item.record.payload.title),h);
     if(!model.round)options.assetVersion?.(h,item);box.append(h);
@@ -545,7 +557,7 @@ async function locateMaterialComment(comment){
     if(!current()||!selectCommentMaterialRound(detail,row,comment,materialId))return false;
     if(row.kind==='ASSET'&&(comment.anchor.component_id||comment.anchor.visual_id)){detail.selectedComponents||={};detail.selectedComponents[row.id]=comment.anchor.component_id||comment.anchor.visual_id;if(row.id===detail.record.id)detail.componentId=detail.selectedComponents[row.id]}
     if(row.kind==='REQUIREMENT'){detail.localPlans||={};detail.localPlans[row.object_id]=row}
-    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();if(materialPlanCommentNeedsHistory(row,comment)){await openProductionCommentOriginal(row,comment);return true}return locateProductionComment(comment,true)!==false;
+    state.reviewCommentScope=null;focusProductionReview({record:row,history:[row],uses:[]},false);state.selected=comment.id;renderProductionReader();if(comment.original_context?.matches_current===false||materialPlanCommentNeedsHistory(row,comment)){await openProductionCommentOriginal(row,comment);return true}return locateProductionComment(comment,true)!==false;
   }catch(error){if(current())toast(error.message);return false}
   finally{if(materialCommentLocation===request)materialCommentLocation=null}
 }
@@ -643,34 +655,39 @@ async function openMaterialReference(ref,trigger,source=false){
   const {dialog,title,body}=openReviewDialog(source?'剧情依据':'参考输入',trigger,'material-reference-dialog');
   nodeText('p',null,'读取中…',body);
   try{
-    const request=materialReferenceRequest(ref,source);
-    const detail=await api(request.url);
+    const request=ref.snapshot_record?{isSource:false}:materialReferenceRequest(ref,source);
+    const detail=ref.snapshot_record?{record:ref.snapshot_record}:await api(request.url);
     if(!dialog.isConnected)return;
     if(request.isSource){
       renderSourceReference({dialog,title,body},detail,ref,source);
       return;
     }
-    if(['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'].includes(detail.record.kind)){dialog.close();return openUnifiedMaterial(ref,trigger)}
-    const row=detail.record,p=row.payload;body.replaceChildren();const versions=[...new Set(Object.values(detail.material_versions||{}).flatMap(rs=>rs.filter(r=>r.members.some(m=>m.id===row.id)).map(r=>r.number)))];title.textContent=businessTitle(row)+' · '+(versions.length===1?'素材版本 '+versions[0]:'记录修订 '+row.version);body.dataset.referenceRevision=row.id;
+    if(!detail.record.submission_only&&['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'].includes(detail.record.kind)){dialog.close();return openUnifiedMaterial(ref,trigger)}
+    const row=detail.record,p=row.payload;body.replaceChildren();title.textContent=businessTitle(row)+' · '+materialVersionLabel(row);body.dataset.referenceRevision=row.id;
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
-      const session=components.some(c=>/^(audio|video)\//.test(c.mime))?referenceReviewSession(dialog,detail):null;
+      const session=!row.submission_only&&components.some(c=>/^(audio|video)\//.test(c.mime))?referenceReviewSession(dialog,detail):null;
       if(!components.length)throw new Error('引用的文件组成不存在');
 
       for(const c of components){
         const url='/api/production/files/'+encodeURIComponent(c.file);
         if(c.mime.startsWith('image/')){const img=el('img');img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
         else if(/^(audio|video)\//.test(c.mime)){
-          reviewMediaPlayer(body,c,row,ref,true,session);
+          reviewMediaPlayer(body,c,row,ref,!row.submission_only,session||{});
           nodeText('p','production-meta',(c.role==='original'?'原件':'预览')+(ref.range?` · ${ref.range.start_seconds}–${ref.range.end_seconds} 秒`:''),body);
         }
         if(!c.mime.startsWith('audio/'))link('下载原文件',url,body);
       }
 
     }
-    const blocks=(row.kind==='ASSET'&&!ref.block_ids?.length?[]:p.blocks||[]).filter(b=>!ref.block_ids?.length||ref.block_ids.includes(b.id));
+    const textBlocks=row.submission_only&&!p.generation&&String(p.format||'').startsWith('production-')?productionTextBlocks(row):p.sections?p.sections.flatMap(s=>[{id:'heading-'+s.id,text:s.title},...s.blocks]):p.blocks||[];
+    const blocks=(row.kind==='ASSET'&&!ref.block_ids?.length?[]:textBlocks).filter(b=>!ref.block_ids?.length||ref.block_ids.includes(b.id));
     if(row.kind==='ASSET'&&blocks.length)nodeText('h3',null,'评论对应的原文',body);
     for(const b of blocks)nodeText('p','reference-text',b.text,body);
+    if(row.submission_only&&row.kind==='INPUT_LOCK'){
+      if(p.screenplay)materialReferenceLink(body,p.screenplay,'本次使用的剧本',true);
+      for(const ref of p.episodes||[])materialReferenceLink(body,ref,'本次使用的分集正文',true);
+    }
     if(row.kind==='REQUIREMENT')nodeText('p','production-issue','此引用是尚未产出准确原件的素材需求',body);
     if(p.generation){nodeText('h3',null,'参数 · '+(p.generation.model||'模型未知'),body);nodeText('pre',null,row.review_parameter_text||JSON.stringify(p.generation.parameters,null,2),body);renderMaterialInputs(body,p.generation.inputs||[],row.review_input_records||[],row);nodeText('h3',null,'提示词',body);nodeText('pre',null,p.generation.prompt,body)}
     paintReviewCommentCounts();
@@ -710,11 +727,13 @@ function renderMaterialDemand(root,detail){
 
 function materialVersionParam(data){return Object.values(data?.material_versions||{}).some(rs=>rs.some(r=>r.model==='plan-v1'))?'material_version':'material_round'}
 function writeMaterialVersionRoute(params,mid,round){
+  if(round.current_content){params.set('material_id',mid);for(const key of ['material_round','material_version','material_baseline'])params.delete(key);return}
   params.set('material_id',mid);params.delete(round.model==='plan-v1'?'material_round':'material_version');
   params.set(round.model==='plan-v1'?'material_version':'material_round',round.number);
   if(round.baseline_id)params.set('material_baseline',round.baseline_id);else params.delete('material_baseline');
 }
 function normalizeConsolidatedMaterialRoute(params,versions){
+  if(Object.values(versions||{}).some(rs=>rs.some(r=>r.current_content))&&(params.has('material_round')||params.has('material_version'))){if(params.has('material_target')&&Object.values(versions).flatMap(rs=>rs.flatMap(r=>r.results||[])).some(r=>r.id===params.get('material_target'))){for(const key of ['material_round','material_version','material_baseline'])params.delete(key);}else throw Error('此制作历史稿已退役；请打开当前素材或准确候选。');}
   const parameter=params.has('material_round')?'material_round':'material_version',mid=params.get('material_id');
   const sets=Object.entries(versions||{}).filter(([id])=>!mid||id===mid),rounds=sets.flatMap(([,rs])=>rs),baseline=rounds.find(r=>r.baseline_id);
   if(!baseline||!params.has(parameter))return;

@@ -174,7 +174,7 @@ async function refreshShotReference(context,slot,result){
 }
 function openShotReference(item,context,trigger){
   const slot=item.slot;if(!slot?.material_id||!slot.record){toast('准确素材身份缺失，需先修复此参考槽位');return}
-  const params=new URLSearchParams({material_id:slot.material_id,...(slot.number?{material_version:slot.number}:{}),...(slot.baseline_id?{material_baseline:slot.baseline_id}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
+  const params=new URLSearchParams({material_id:slot.material_id,...(!slot.current_content&&slot.number?{material_version:slot.number}:{}),...(slot.baseline_id?{material_baseline:slot.baseline_id}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
   const ref=slot.candidate||productionRef(slot.record);
   const parentDialog=typeof reviewDialogStack==='undefined'?null:reviewDialogStack.at(-1)||null;
   const onSaved=result=>{
@@ -249,7 +249,7 @@ function renderShotReferenceChoice(box,model,item,player){
   const button=productionButton(actions,actionLabel,async()=>{
     if(context.busy||button.disabled)return;
     let bounds;try{bounds=selectionFields()}catch(error){context.error=error.message;refresh();return}
-    const value={requirement_id:context.need.object_id,expected_revision:context.need.id,plan_number:context.number,index:context.slot.index,input_key:context.slot.input_key,material_id:model.material_id,number:model.round.number,...(item?{candidate:productionRef(item.record),component_id:item.component.id,...bounds}:{candidate:null})};
+    const value={requirement_id:context.need.object_id,expected_revision:context.need.id,expected_content:{edit_token:context.need.edit_token,content_sha256:context.need.content_sha256},plan_number:context.number,index:context.slot.index,input_key:context.slot.input_key,material_id:model.material_id,number:model.round.number,...(item?{candidate:productionRef(item.record),component_id:item.component.id,...bounds}:{candidate:null})};
     const choice=JSON.stringify(value);if(context.requestChoice!==choice){context.requestChoice=choice;context.requestId='shot-ref-'+crypto.randomUUID()}
     const request={id:context.requestId,...value};context.busy=true;context.source.pending=true;context.error=null;refresh();
     try{const result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(request)});
@@ -412,7 +412,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   state.breakdownCatalog={workspace,tab:productionTab(),data};
   state.breakdownData=data;state.productionRecords=[data.lock,data.design,...data.scenes,...data.shots].filter(Boolean);
   const episodes=el('nav','screenplay-episodes breakdown-episode-tabs');episodes.setAttribute('aria-label','分集导航');staged.append(episodes);
-  {const scope='视听制作评论：本集准确集场镜及直接关联素材的全部方案版本与候选；含已关闭评论，按评论去重，不含故事正文和共享上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
+  {const scope='视听制作评论：本集准确集场镜及直接关联素材的当前方案与真实候选；含已关闭评论，按评论去重，不含故事正文和共享上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
   for(const ep of data.episodes)renderEpisodeCard(episodes,{...ep,payload:{number:ep.number,title:ep.title,scenes:ep.scenes}},ep.object_id===data.episode,breakdownEpisodeCount(ep),()=>{if(ep.object_id!==(new URL(location.href).searchParams.get('breakdown_episode')||data.episode))breakdownNavigate({breakdown_episode:ep.object_id,breakdown_episode_revision:null,breakdown_scene:null,breakdown_object:null,breakdown_revision:null})});
   const active=episodes.querySelector('.active');if(active){const r=active.getBoundingClientRect(),edge=episodes.getBoundingClientRect();if(r.right>edge.right)episodes.scrollLeft+=r.right-edge.right;if(r.left<edge.left)episodes.scrollLeft+=r.left-edge.left}
   for(const ep of data.episodes){const button=episodes.querySelector(`[data-episode-id="${CSS.escape(ep.object_id)}"]`);if(button)attachAudiovisualNote(button,ep.working_note)}
@@ -513,12 +513,12 @@ function renderShotProductPlan(parent,need,context){
   const source=model.need||round?.definition_records?.call;
   const controls=el('div','av-plan-controls');parent.append(controls);
   if(rounds.length>1)materialRoundControl(controls,need.object_id,rounds,round||{number:null},number=>{rememberProductionDraft();state.breakdownVideoSelections[need.id]={number};breakdownRoute({shot_material_id:need.object_id,shot_plan:number,shot_candidate:null,shot_baseline:rounds.find(r=>r.number===number)?.baseline_id||null});parent.replaceChildren();renderShotProductPlan(parent,need,context);restoreBreakdownPromptDraft(parent);paintReviewCommentCounts()});
-  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.className='review-reference-button';inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
+  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round&&!round.current_content?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.className='review-reference-button';inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
   if(!source){nodeText('p','production-meta','此版本未保留准确生成方案',parent);return}
   const plan=source.kind==='CALL'?source.payload:source.payload.generation;
   if(!plan){nodeText('p','production-meta',need.payload.media_type==='project'?'此产物为已有工程；尚无模型生成方案，可打开素材核对工程与交付要求。':'此产物尚无生成方案',parent);return}
   const inputs=plan.inputs||[],records=source.review_input_records||[];
-  renderShotInputs(parent,source,inputs,records,referenceContext,{pure:true});
+  if(need.current_content)renderMaterialInputs(parent,inputs,records,source,source.kind==='CALL',{compact:true});else renderShotInputs(parent,source,inputs,records,referenceContext,{pure:true});
   const surface=materialTextSurface(parent,source);materialParameters(surface,source,source.kind==='CALL'?'call':'generation',plan.model);
   renderLinkedPrompt(surface,source,inputs,records,source.kind==='CALL'?'call.prompt':'generation.prompt',referenceContext);
 }
@@ -585,28 +585,47 @@ function renderMaterialAdoptionControls(reader,detail){
 }
 function productionDraftKey(){
   const context=typeof materialCommentContext==='function'?materialCommentContext():null;
-  return JSON.stringify([state.productionSelected?.id||null,context?.material_id||null,context?.number||null,context?.model||null]);
+  return JSON.stringify([state.productionSelected?.id||null,context?.material_id||null,context?.number||null,context?.model||null,state.productionSelected?.edit_token||null]);
+}
+function productionDraftContexts(){
+  if(!state.productionDraftContexts){try{state.productionDraftContexts=JSON.parse(localStorage.getItem('review-production-drafts:'+commentPageId)||'{}')}catch{state.productionDraftContexts={}}}
+  return state.productionDraftContexts;
 }
 function rememberProductionDraft(){
   if(!isProduction()||!state.productionSelected||!state.anchor)return;
   if(typeof rememberLiveCommentEdit==='function')try{rememberLiveCommentEdit()}catch{rememberCommentDraftFailure()}
   if(state.productionDraftScope&&state.productionDraftScope!==productionDraftKey())return;
-  state.productionDraftContexts||={};state.productionDraftContexts[state.productionDraftScope||productionDraftKey()]={anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope,draftKey:typeof draftKey==='function'?draftKey():null};
+  const contexts=productionDraftContexts(),panel=$('#comment-panel');contexts[state.productionDraftScope||productionDraftKey()]={anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope,draftKey:typeof draftKey==='function'?draftKey():null,panelOpen:!!panel&&!panel.hidden};
+  try{localStorage.setItem('review-production-drafts:'+commentPageId,JSON.stringify(contexts))}catch{rememberCommentDraftFailure();toast('草稿位置未能保存到本机，当前输入仍保留。')}
 }
 function restoreProductionDraft(){
   const key=productionDraftKey(),changed=state.productionDraftScope&&state.productionDraftScope!==key;state.productionDraftScope=key;
-  const saved=state.productionDraftContexts?.[key];
-  if(saved){state.anchor=saved.anchor;state.editing=saved.editing;state.selected=saved.selected;state.reviewCommentScope=saved.scope}
+  const saved=productionDraftContexts()[key];
+  if(saved&&(saved.editing||saved.selected||saved.draftKey&&readCommentDraftStorage(saved.draftKey)!==null)){state.anchor=saved.anchor;state.editing=saved.editing;state.selected=saved.selected;state.reviewCommentScope=saved.scope;if(saved.panelOpen)openPanel()}
   else if(changed){state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null}
+}
+function appendStaleProductionDrafts(parent){
+  if(!isProduction()||!state.productionSelected?.current_content)return;
+  const current=JSON.parse(productionDraftKey());
+  for(const [key,saved] of Object.entries(productionDraftContexts())){
+    let previous,text;try{previous=JSON.parse(key);text=localStorage.getItem(saved.draftKey)}catch{continue}
+    if(previous[0]!==current[0]||previous[4]===current[4]||saved.editing||!text)continue;
+    const box=el('section','comment-editor');nodeText('strong',null,'当前内容修改前的未提交意见',box);
+    nodeText('p','comment-help','原圈选的正文已修改，草稿仍保留。请复制后重新圈选，避免提交到相似文字。',box);
+    if(saved.anchor?.quote)nodeText('blockquote',null,saved.anchor.quote,box);
+    nodeText('p',null,text,box);
+    const copy=nodeText('button',null,'复制草稿',box);copy.onclick=async()=>{try{await navigator.clipboard.writeText(text);toast('草稿已复制；请重新选择当前内容。')}catch{toast('复制失败，草稿仍在此处，可手动选择复制。')}};
+    parent.append(box);
+  }
 }
 function restoreBreakdownPromptDraft(row){
   if(!row||!['breakdown','shots'].includes(productionTab()))return;
   const surfaces=[...row.querySelectorAll('[data-production-blocks]')];
-  for(const [key,saved] of Object.entries(state.productionDraftContexts||{}).reverse()){
-    let revision;try{revision=JSON.parse(key)[0];if(!saved.anchor||!saved.draftKey||localStorage.getItem(saved.draftKey)===null)continue}catch{continue}
+  for(const [key,saved] of Object.entries(productionDraftContexts()).reverse()){
+    let revision,token;try{const parts=JSON.parse(key);revision=parts[0];token=parts[4]||'';if(!saved.anchor||!saved.draftKey||localStorage.getItem(saved.draftKey)===null)continue}catch{continue}
     // Only a displayed exact plan/call may restore a Prompt draft. Do not move
     // a draft to another shot, version or newer immutable revision.
-    const exact=surfaces.filter(node=>node.dataset.productionBlocks===revision),a=saved.anchor;
+    const exact=surfaces.filter(node=>node.dataset.productionBlocks===revision&&(node.dataset.productionEditToken||'')===String(token)),a=saved.anchor;
     const surface=exact.find(node=>!node.querySelectorAll||[...node.querySelectorAll('[data-block-id]')].some(text=>text.dataset.blockId===a.block_id&&(!text.hasAttribute('data-anchor-offset')||(Number(text.dataset.anchorOffset)<=a.start&&a.end<=Number(text.dataset.anchorOffset)+Array.from(text.textContent).length))));
     if(surface?.reviewFocus){for(let parent=surface.parentElement;parent;parent=parent.parentElement)if(parent.tagName==='DETAILS')parent.open=true;surface.reviewFocus();return}
   }
@@ -622,7 +641,7 @@ async function openBreakdownSceneNotes(row,comment){
 
 async function refreshMaterialPlan(result){
   const epoch=productionLoadEpoch,workspace=state.workspace,target=state.productionSelected?.id;
-  const params=new URLSearchParams({material_id:result.requirement_id,material_version:result.number,...(result.baseline_id?{material_baseline:result.baseline_id}:{})});
+  const params=new URLSearchParams({material_id:result.requirement_id,...(result.number?{material_version:result.number}:{}),...(result.baseline_id?{material_baseline:result.baseline_id}:{})});
   const value=await readUnifiedCard(result.requirement_id,result.revision_id,params);
   if(epoch!==productionLoadEpoch||workspace!==state.workspace||target!==state.productionSelected?.id)return;
   activateUnifiedCard(value);renderProductionReader();renderComments();
@@ -630,7 +649,7 @@ async function refreshMaterialPlan(result){
 function renderMaterialRouteChoices(host,need,onSaved){
   const slots=need.review_shot_slots||[],plan=need.payload.generation,groups=new Map(),conditions=new Set();
   if(!plan)return;
-  const save=async(action,key,value,control)=>{control.disabled=true;try{const result=await api('/api/production/material-route',{method:'POST',body:JSON.stringify({id:'route-'+crypto.randomUUID(),requirement_id:need.object_id,expected_revision:need.id,action,key,value})});if(control.isConnected)await onSaved(result,control.dataset.routeKey)}catch(error){if(control.isConnected){control.disabled=false;toast(error.message)}}};
+  const save=async(action,key,value,control)=>{control.disabled=true;try{const result=await api('/api/production/material-route',{method:'POST',body:JSON.stringify({id:'route-'+crypto.randomUUID(),requirement_id:need.object_id,expected_revision:need.id,expected_content:{edit_token:need.edit_token,content_sha256:need.content_sha256},action,key,value})});if(control.isConnected)await onSaved(result,control.dataset.routeKey)}catch(error){if(control.isConnected){control.disabled=false;toast(error.message)}}};
   for(const slot of slots){const rule=slot.rule;if(!rule)continue;if(rule.necessity==='one_of'){if(!groups.has(rule.group))groups.set(rule.group,new Map());groups.get(rule.group).set(rule.route,slot)}if(rule.necessity==='conditional')conditions.add(rule.condition)}
   if(!groups.size&&!conditions.size&&!slots.some(s=>s.rule?.necessity==='optional'))return;
   const box=el('div','material-route-controls');host.append(box);

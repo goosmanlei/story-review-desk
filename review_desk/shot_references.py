@@ -14,6 +14,9 @@ def input_key(value):
 
 
 def slot(store, value, index):
+    from .production_current import enabled, input_slot
+    if enabled(store):
+        return input_slot(store, value, index)
     result={'index':index,'input_key':input_key(value),'material_id':None,'number':None,'candidate':None,'candidate_number':None,'issues':[],'value':value}
     try:
         target=p.ref_record(store,value.get('reference',value))
@@ -100,6 +103,12 @@ def enrich_detail(store, detail):
         targets.append(actual.get('call'))
     for row in targets:
         if row and row['kind'] in ('REQUIREMENT', 'CALL'):
+            from .production_current import enabled
+            if enabled(store) and row['kind'] == 'CALL':
+                row['review_shot_slots'] = slots(store, inputs_for(store, row))
+                row['review_reference_links'] = []
+                row['review_prompt_links'] = []
+                continue
             row['review_shot_slots'] = slots(store, inputs_for(store, row))
             from .business_relations import input_context
             basis = row if row['kind'] == 'REQUIREMENT' else None
@@ -133,6 +142,9 @@ def enrich_detail(store, detail):
 def inputs_for(store,row):
     inputs=copy.deepcopy(row['payload'].get('generation',{}).get('inputs',[]) if row['kind']=='REQUIREMENT' else row['payload'].get('inputs',[]))
     if row['kind']=='CALL':
+        from .production_current import enabled, submission
+        if enabled(store):
+            return copy.deepcopy(submission(store, row['object_id'])['snapshot']['request'].get('inputs', []))
         source=row['payload'].get('generation_requirement') or row['payload'].get('prepared_plan')
         from .material_relations import active_inputs
         need=p.ref_record(store,source) if source else None
@@ -145,6 +157,10 @@ def inputs_for(store,row):
 
 
 def select(store, request):
+    from .production_current import enabled
+    if enabled(store):
+        from .production_operations import select as select_current
+        return select_current(store, request)
     """Optimistic, atomic selection; the revision itself is the durable receipt."""
     if not isinstance(request,dict):raise ValueError('reference selection must be an object')
     if request.get('path') is not None and request['path'] != [request.get('index')]:
@@ -250,6 +266,10 @@ def select(store, request):
 
 
 def response(store, row, repeated):
+    from .production_current import enabled, marker
+    if enabled(store):
+        return {'requirement_id': row['object_id'], 'revision_id': row['id'], **marker(row),
+                'already_applied': repeated, 'slots': slots(store, row['payload']['generation']['inputs'])}
     from .version_consolidation import material_epoch
     members=mp.memberships(store,row['id'])
     number=next(v['number'] for v in members if v['material_id']==row['object_id'])

@@ -37,6 +37,8 @@ class Store:
         self._material_functions()
         from .material_storage import row_factory
         self.db.row_factory = row_factory(self)
+        from .production_current import read_adapters
+        read_adapters(self)
         return self
 
     @classmethod
@@ -52,6 +54,8 @@ class Store:
         self._material_functions()
         from .material_storage import row_factory
         self.db.row_factory = row_factory(self)
+        from .production_current import read_adapters
+        read_adapters(self)
         return self
 
     def _material_functions(self):
@@ -71,6 +75,13 @@ class Store:
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.execute("PRAGMA secure_delete=ON")
+        from .production_current import enabled, read_adapters
+        if enabled(self):
+            self._material_functions()
+            from .material_storage import row_factory
+            self.db.row_factory = row_factory(self)
+            read_adapters(self)
+            return
         self.db.executescript("""
         CREATE TABLE IF NOT EXISTS sources (
           id TEXT PRIMARY KEY, document TEXT NOT NULL, revision TEXT NOT NULL
@@ -250,6 +261,9 @@ class Store:
         if kind == "CALL":
             from .generation import validate_call
             validate_call(self, object_id, payload)
+        from .production_current import enabled as current_enabled, RECORD_KINDS, write_record
+        if kind in RECORD_KINDS and current_enabled(self):
+            return write_record(self, object_id, kind, payload, current, dependencies)
         new_version = version + 1
         from .version_consolidation import new_identity
         revision_id = new_identity(self, object_id, new_version, payload)
@@ -512,7 +526,8 @@ class Store:
         if plans:value['material_plan_scopes'] = plans
         value['history_sources'] = [json.loads(event[0]) for event in self.db.execute(
             "SELECT body FROM comment_events WHERE comment_id=? AND action='HISTORY_IMPORT' ORDER BY id", (value['id'],))]
-        return value
+        from .production_current import enabled, comment_context
+        return comment_context(self, value) if enabled(self) else value
 
     def comment(self, comment_id):
         row = self.db.execute("SELECT * FROM comments WHERE id=?", (comment_id,)).fetchone()
@@ -660,9 +675,10 @@ class Store:
         # exact revision, anchor and media original is still validated; nothing
         # is retained on the store or reused by subsequent reads or writes.
         source_cache = {}
-        return [{**comment, "anchor_state": self.anchor_state(
+        return [{**comment, "anchor_state": ({"valid": False, "reason": "制作内容后来已修改；这里保留原意见与原摘录，未定位到相似文字。"}
+            if comment.get('original_context', {}).get('matches_current') is False else self.anchor_state(
             comment["target_object_id"], comment["target_revision_id"],
-            comment["anchor"], _source_cache=source_cache)} for comment in comments]
+            comment["anchor"], _source_cache=source_cache))} for comment in comments]
 
     def create_comment(self, value):
         import uuid
@@ -674,6 +690,13 @@ class Store:
         if not obj:
             raise ValueError("unknown target object")
         revision_id = value.get("target_revision_id") or obj["current_revision"]
+        from .production_current import enabled, RECORD_KINDS
+        if value.get('id') and enabled(self) and obj['kind'] in RECORD_KINDS:
+            existing = self.comment(value['id'])
+            if existing:
+                if existing['target_object_id'] == object_id and existing['target_revision_id'] == revision_id and existing['anchor'] == anchor and existing['body'] == body:
+                    return existing
+                raise Conflict('comment id already used')
         target = self.validate_target(object_id, revision_id, anchor)
         if target["source"]:
             if source_id and source_id != object_id:
@@ -703,10 +726,21 @@ class Store:
                 if matches(existing):
                     return existing
                 raise Conflict('comment id already used')
+            from .production_current import enabled, RECORD_KINDS, remember_comment
+            if enabled(self) and obj['kind'] in RECORD_KINDS:
+                # Validate again under the write transaction: the current draft
+                # may have changed after the initial read.
+                actual = self.db.execute('SELECT version FROM objects WHERE id=?', (object_id,)).fetchone()[0]
+                if value.get('expected_edit_token') != actual:
+                    raise Conflict('制作内容已变化；请核对原意见摘录后重新提交，草稿未保存到新内容')
+                self.validate_target(object_id, revision_id, anchor)
             self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
             from .business_codes import allocate_comments
             allocate_comments(self)
             self.db.execute("INSERT INTO comment_events(comment_id,action,body,at) VALUES (?,?,?,?)", (comment_id, "CREATE", body, stamp))
+            if enabled(self) and obj['kind'] in RECORD_KINDS:
+                remember_comment(self, self.comment(comment_id))
+                return self.comment(comment_id)
             context = value.get('material_context')
             if isinstance(context, dict) and context.get('model') == 'plan-v1':
                 from .material_plans import comment_scope

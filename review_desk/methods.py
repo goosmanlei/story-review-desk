@@ -303,6 +303,12 @@ def prepare(store, request):
         text(request.get(key), key, 300)
     inputs = request.get('inputs')
     require(isinstance(inputs, dict), '准确输入必须为对象')
+    raw_inputs = inputs
+    from .production_current import enabled
+    from .production_current_methods import WORK_TYPES
+    if request['work_type'] in WORK_TYPES and enabled(store):
+        from .production_current_methods import compact_inputs
+        inputs = compact_inputs(inputs)
     identity = {k: request[k] for k in ('work_type', 'run_id', 'step_id', 'target')}
     object_id = 'method.execution.' + checksum(identity)
     existing = store.db.execute('SELECT 1 FROM objects WHERE id=?', (object_id,)).fetchone()
@@ -315,7 +321,7 @@ def prepare(store, request):
         require(resolve(store, request['work_type'], execution['payload']['conditions'], execution['payload']['package']['binding']) == execution['payload']['package'], '冻结方法或共用资料不可用；请恢复准确资源包')
         return execution
     package = resolve(store, request['work_type'], request.get('conditions'), request.get('binding'))
-    missing = [key for key in package['required_inputs'] if inputs.get(key) in (None, '', [], {})]
+    missing = [key for key in package['required_inputs'] if raw_inputs.get(key) in (None, '', [], {})]
     require(not missing, '缺少必要输入：' + '、'.join(missing))
     payload = {'format': FORMATS['execution'], **identity, 'inputs': inputs, 'inputs_sha256': checksum(inputs),
                'conditions': request.get('conditions', {}), 'package': package, 'private': request.get('private') is True}
@@ -332,6 +338,9 @@ def verify_execution(store, ref, identity, inputs=None):
         {k: value[k] for k in ('work_type', 'run_id', 'step_id', 'target')}), '方法执行身份损坏')
     require(all(value.get(k) == v for k, v in identity.items()), '方法依据属于其他工作类型、目标、运行或步骤；请取得本步骤方法')
     if inputs is not None:
+        from .production_current_methods import INPUTS, compact_inputs
+        if value['inputs'].get('format') == INPUTS:
+            inputs = compact_inputs(inputs)
         require(value['inputs'] == inputs and value['inputs_sha256'] == checksum(inputs), '准确工作输入与方法依据不一致')
     package = copy.deepcopy(value['package'])
     sha = package.pop('sha256')
@@ -373,6 +382,13 @@ def artifact(store, value):
     require(stage in stages, '不是该方法的必要步骤')
     output = value['output']
     require(isinstance(output, (dict, str)) and bool(output), '步骤产物不能为空')
+    from .production_current_methods import INPUTS, OUTPUT, compact_output
+    compact = execution['payload']['inputs'].get('format') == INPUTS
+    if compact and not (isinstance(output, dict) and output.get('format') == OUTPUT):
+        if identity['work_type'] == 'media-plan':
+            from .method_media import validate_stage
+            validate_stage(store, execution, stage, output)
+        output = compact_output(output, identity['target'], stage)
     prior = []
     for previous in stages[:stages.index(stage)]:
         row = read(store, 'method.artifact.' + checksum({'execution': reference(execution), 'stage': previous}))
@@ -384,7 +400,9 @@ def artifact(store, value):
         old = read(store, oid)
         require(old['payload'] == payload, '步骤产物已经冻结；修订须创建新步骤及依据')
         return old
-    if identity['work_type'] == 'media-plan':
+    if compact:
+        require(not (isinstance(value['output'], dict) and value['output'].get('format') == OUTPUT), '不能用摘要伪造新的方法产物；提交实际草稿及检查结果')
+    elif identity['work_type'] == 'media-plan':
         from .method_media import validate_stage
         validate_stage(store, execution, stage, output)
     return _save(store, oid, payload, 0, prior + [{'revision_id': execution['revision_id'], 'role': 'artifact-execution'}])

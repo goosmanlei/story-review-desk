@@ -78,6 +78,17 @@ def record(store, object_id=None, revision_id=None):
         row = store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM objects o
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
+        from .production_current import enabled as current_enabled
+        if revision_id and current_enabled(store):
+            link = store.db.execute('SELECT * FROM production_legacy_links WHERE revision_id=?', (revision_id,)).fetchone()
+            if link and object_id and link['object_id'] != object_id:
+                raise ValueError('legacy reference belongs to another object')
+            if link and link['disposition'] in ('candidate', 'operation'):
+                result = record(store, link['target_object_id'], link['target_revision_id'])
+                result['legacy_reference'] = {'object_id': link['object_id'], 'revision_id': revision_id}
+                return result
+            if link:
+                raise ValueError('这份制作历史稿已退役；可另行打开当前对象，原意见保留当时摘录。')
         from .version_consolidation import deleted, missing_view
         receipt = deleted(store, revision_id) if revision_id else None
         if not revision_id and object_id:
@@ -90,6 +101,8 @@ def record(store, object_id=None, revision_id=None):
         raise KeyError("unknown production object or revision")
     if reads is not None:reads['records'][key] = row
     value = record_view(row)
+    from .production_current import annotate
+    value = annotate(store, value)
     if value["kind"]=="DELETED_STATE":
         from .state_cleanup import view
         value=view(value)
@@ -299,6 +312,19 @@ def _lineage(store, payload):
 
 
 def validate_payload(store, object_id, kind, payload, inspect=True, check_current=True):
+    from .production_current import enabled as current_enabled
+    if kind == 'CALL' and current_enabled(store) and store.db.execute('SELECT 1 FROM production_submissions WHERE operation_id=?', (object_id,)).fetchone():
+        from .generation import validate_call
+        validate_call(store, object_id, payload)
+        if payload.get('status') not in ('submitted', 'completed', 'failed', 'unknown'):
+            raise Conflict('a submitted call cannot return to preparation')
+        for output in payload.get('outputs', []):
+            candidate = ref_record(store, output, {'ASSET'})
+            if candidate['payload']['production']['object_id'] != object_id:
+                raise Conflict('output belongs to another submitted operation')
+        if payload.get('status') == 'completed' and not payload.get('outputs'):
+            raise ValueError('completed production requires actual output references')
+        return
     from .version_consolidation import preserved as consolidated
     if not check_current and consolidated(store, object_id, payload):
         return
@@ -406,16 +432,24 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         _refs(store, p, "states", {"STATE"})
         full_states.validate_asset_coverage(store, p)
         for candidate in p.get('candidate_requirements', []):
+            if current_enabled(store) and candidate.get('unavailable'):
+                old = store.db.execute('SELECT r.payload FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.id=?', (object_id,)).fetchone()
+                if old and candidate in json.loads(old[0]).get('candidate_requirements', []):
+                    continue
+                raise ValueError('不能为新候选补造已退役的需求归属')
             need = ref_record(store, candidate, {'REQUIREMENT'})
             if need['payload']['media_type'] != p['media_type'] or (ref_record(store, need['payload']['scope'])['kind'] == 'STATE' and not any(c['state'] == need['payload']['scope'] for c in p.get('state_coverage', []))):
                 raise ValueError('candidate requirement needs exact state and media coverage')
-        call = ref_record(store, p.get("production"), {"CALL"})
-        if call["payload"].get("status") not in ("submitted", "completed"):
+        external = current_enabled(store) and not p.get('production') and p.get('external_source')
+        if external and (external.get('kind') not in ('upload','external','historical') or not external.get('description')):
+            raise ValueError('external original requires its real source description')
+        call = None if external else ref_record(store, p.get("production"), {"CALL"})
+        if call and call["payload"].get("status") not in (("submitted", "completed", "unknown", "failed") if current_enabled(store) else ("submitted", "completed")):
             raise ValueError("an asset needs a real production record")
         _lineage(store, p)
         if p.get("media_type") == "image" and "i2i_depth" not in p.get("lineage", {}):
             raise ValueError("an image asset requires a traceable image lineage")
-        if p.get("media_type") == "image" and call["payload"].get("lineage") != p.get("lineage"):
+        if p.get("media_type") == "image" and call and call["payload"].get("lineage") != p.get("lineage"):
             raise ValueError("asset lineage differs from actual production input")
     elif kind == "CALL":
         if p.get("status") not in ("planned", "submitted", "completed", "failed", "unknown"):
@@ -492,6 +526,8 @@ def current_records(store, kinds=None):
             continue
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
             value=record_view(row)
+            from .production_current import annotate
+            value=annotate(store, value)
             if value["payload"].get("format") in FORMATS:
                 if value['kind']=='ASSET':
                     # Match the default detail card: associated material first,
@@ -532,6 +568,9 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
         if not isinstance(guards, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in guards.items()):
             raise ValueError('expected_heads must map object ids to exact revision ids')
         for object_id, revision_id in guards.items():
+            from .production_current import enabled, guard
+            if enabled(store) and store.db.execute('SELECT 1 FROM production_current_records WHERE object_id=?', (object_id,)).fetchone():
+                guard(store, object_id, document.get('expected_content', {}).get(object_id))
             current = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
             if not current or current['current_revision'] != revision_id:
                 raise Conflict('production planning input changed: ' + object_id)
@@ -557,7 +596,8 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
             result = store._put_object(object_id, kind, p, source.get("expected_version"), dependencies)
             results.append(result)
             resolved[object_id] = result["revision"]
-            if check_current:
+            from .production_current import enabled as current_enabled
+            if check_current and not current_enabled(store):
                 from .material_plans import register
                 register(store, record(store, revision_id=result['revision']))
         for result in results:
@@ -643,7 +683,9 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         if selected['kind']=='REQUIREMENT':
             selected['review_input_records'] = [ref_record(store, v['reference']) for v in selected['payload'].get('generation', {}).get('inputs', [])]
         elif selected['kind']=='CALL':
-            selected['review_input_records'] = [ref_record(store, v.get('reference', v)) for v in selected['payload'].get('inputs', [])]
+            from .production_current import enabled, candidate_context
+            selected['review_input_records'] = (candidate_context(store, {'payload': {'production': {'object_id': selected['object_id']}}})['inputs']
+                                                if enabled(store) else [ref_record(store, v.get('reference', v)) for v in selected['payload'].get('inputs', [])])
         # Names belong to the referenced revision, not the current object head.
         # SOURCE titles live in their documents; require its content fingerprint
         # to match the exact SOURCE revision before using that title.
@@ -672,7 +714,8 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             result['review_contexts']={a['id']:context(store,a) for a in candidates}
         from .material_versions import for_record as legacy_versions
         from .material_plans import for_record
-        result['legacy_material_versions'] = legacy_versions(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
+        from .production_current import enabled as current_enabled
+        result['legacy_material_versions'] = legacy_versions(store, selected) if not current_enabled(store) and selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         if not result['material_versions']:
             result['material_versions'] = result['legacy_material_versions']

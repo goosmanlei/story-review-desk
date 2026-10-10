@@ -88,8 +88,9 @@ function initializeStoryReaders(url){
   chooseSource(url.searchParams.get('source')||state.sources[0]?.id,true,false,url.searchParams.has('source'));
   chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
 }
-const commentTarget=()=>state.reviewReferenceContext?{target_object_id:state.reviewReferenceContext.record.object_id,target_revision_id:state.reviewReferenceContext.record.id}:isProduction()?{target_object_id:state.productionSelected?.object_id,target_revision_id:state.productionSelected?.id}:isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
-const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?state.productionSelected?.id:isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const productionCommentTarget=row=>({target_object_id:row?.object_id,target_revision_id:row?.id,...(row?.edit_token?{expected_edit_token:row.edit_token}:{})});
+const commentTarget=()=>state.reviewReferenceContext?productionCommentTarget(state.reviewReferenceContext.record):isProduction()?productionCommentTarget(state.productionSelected):isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
+const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?[state.productionSelected?.id,state.productionSelected?.edit_token||'',...(!state.editing?[commentPageId]:[])].join(':'):isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 // Reload keeps this page's drafts. A new/duplicated/reopened document starts a
 // separate editor; other saved local drafts are available through explicit recovery.
 const commentPageId=(()=>{if(!globalThis.crypto?.randomUUID||!sessionStorage)return null;const idKey='review-comment-page';let id;try{if(['reload','back_forward'].includes(globalThis.performance?.getEntriesByType?.('navigation')?.[0]?.type))id=sessionStorage.getItem(idKey);id ||= crypto.randomUUID();sessionStorage.setItem(idKey,id)}catch{id=crypto.randomUUID()}return id})();
@@ -922,7 +923,7 @@ function toggleCommentsFromReader(){
   }
 }
 let commentAction=0,commentRefreshEpoch=0;
-function startDraft(anchor,comment=null){cancelSourceReadingRestore();cancelSourceChapterRestore();try{rememberLiveCommentEdit()}catch{rememberCommentDraftFailure()}++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;if(comment)beginCommentEdit(comment);state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();$('#comment-editor-text')?.focus()}
+function startDraft(anchor,comment=null){cancelSourceReadingRestore();cancelSourceChapterRestore();try{rememberLiveCommentEdit()}catch{rememberCommentDraftFailure()}++commentAction;if(typeof cancelMaterialCommentLocation==='function')cancelMaterialCommentLocation();state.anchor=anchor;state.editing=comment?.id||null;state.selected=comment?.id||null;if(comment)beginCommentEdit(comment);state.suggestion=null;state.preview=null;state.previewExpanded=false;if(isScript())rememberScriptDraft();rememberStoryDraft();getSelection()?.removeAllRanges();hideSelectionAction();openPanel();renderActiveReader();renderComments();if(typeof rememberProductionDraft==='function')rememberProductionDraft();$('#comment-editor-text')?.focus()}
 function abandonDraft(message){
   ++commentAction;
   const key=draftKey();
@@ -1011,6 +1012,7 @@ function renderComments({replaceDraft=false}={}){
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
   if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   appendStoredCommentEdits(body);
+  if(typeof appendStaleProductionDrafts==='function')appendStaleProductionDrafts(body);
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);appendAnchorQuote(editor,state.anchor);if(isProduction()&&state.productionSelected?.payload){
       const row=state.productionSelected,component=row.payload.components?.find(c=>c.id===(state.anchor.component_id||state.anchor.visual_id)&&c.file===state.anchor.asset_file);
       const label=component?({original:'原件',preview:'预览',thumbnail:'缩略图'})[component.role]||'媒体':'';
@@ -1018,7 +1020,7 @@ function renderComments({replaceDraft=false}={}){
     }
     const label=nodeText('label',null,'修改意见',editor);label.htmlFor='comment-editor-text';const textarea=el('textarea');textarea.id='comment-editor-text';textarea.value=retained?.value??readCommentDraftStorage(draftKey())??(state.editing?state.comments.find(c=>c.id===state.editing)?.body||'':'');
     if(Number.isInteger(retained?.start))textarea.setSelectionRange?.(retained.start,retained.end,retained.direction);
-    textarea.addEventListener('input',()=>{try{localStorage.setItem(draftKey(),textarea.value);if(state.editing)rememberEditBasis(editDraftBasis());if(commentDraftFallbacks.has(commentDraftIdentity()))rememberCommentDraftFailure()}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，当前输入仍保留，请复制留存后重试。')}state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
+    textarea.addEventListener('input',()=>{try{localStorage.setItem(draftKey(),textarea.value);if(typeof rememberProductionDraft==='function')rememberProductionDraft();if(state.editing)rememberEditBasis(editDraftBasis());if(commentDraftFallbacks.has(commentDraftIdentity()))rememberCommentDraftFailure()}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，当前输入仍保留，请复制留存后重试。')}state.preview=null;state.previewExpanded=false;state.suggestion=null;updateCommentEditorControls()});editor.append(textarea);
     const help=nodeText('p','comment-help','输入框内：⌘+Enter 提交／保存；Esc 取消并放弃未提交内容；Enter 换行。',editor);help.id='comment-editor-shortcuts';textarea.setAttribute('aria-describedby',help.id);
     appendLegacyMaterialDraft(editor,draftKey());
     appendCommentSubmissionNotice(editor,draftKey());

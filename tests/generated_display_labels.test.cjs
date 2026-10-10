@@ -35,6 +35,15 @@ test('reference image and its lightbox share the normalized label and exact old 
  await c.openMaterialReference({object_id:'asset',revision_id:'asset-old',component_id:'original'},null,false);
  const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.alt,'E02 / SH004 参考图');assert.equal(img.attrs['aria-label'],'放大查看：E02 / SH004 参考图');img.onclick();assert.equal(lightboxes[0].visual.title,'E02 / SH004 参考图');assert.equal(lightboxes[0].visual.alt,img.alt);assert.equal(lightboxes[0].visual.file,'old.png');assert.equal(new URL(requests[0],'http://fixture').searchParams.get('revision_id'),'asset-old');assert.ok(!body.all().some(n=>n.textContent==='原文 E2-004 第2集'));assert.equal(JSON.stringify(record),before);
 });
+
+test('submitted reference preview uses its frozen original when the former upstream record is unavailable',async()=>{
+ const c=fixture(),dialog=new Element('dialog'),body=new Element('section'),title=new Element('h2');
+ const record={object_id:'asset',id:'retired-upstream',kind:'ASSET',submission_only:true,component_snapshot:true,payload:{title:'提交时原图',components:[{id:'original',role:'original',mime:'image/png',file:'submitted.png'}]}};
+ c.openReviewDialog=()=>({dialog,body,title});c.api=async()=>{throw Error('must not read a mutable upstream')};c.paintReviewCommentCounts=()=>{};
+ await c.openMaterialReference({object_id:'asset',revision_id:'retired-upstream',component_id:'original',snapshot_record:record},null,false);
+ const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.src,'/api/production/files/submitted.png');
+ assert.ok(title.textContent.includes('准确候选原件'));
+});
 test('legacy image projections and review renderer share display codes without mutating components',()=>{
  const c=fixture(),root=new Element('section'),visuals=[],component={id:'original',role:'original',mime:'image/png',file:'exact.png',width:160,height:90,bytes:4,sha256:'exact'};
  c.state.productionSelected={payload:{title:'E2-004 河街素材',components:[component]}};const before=JSON.stringify(c.state.productionSelected);c.renderStructureVisual=v=>{visuals.push(v);return new Element('figure')};
