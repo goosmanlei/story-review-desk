@@ -149,6 +149,13 @@ test('one exact player cannot clamp a comment into a shorter placement',()=>{
  let located=false;f.ctx.state.unifiedCardRoot={querySelectorAll:()=>[{dataset:{reviewFrom:1.5,reviewTo:3},reviewLocate:()=>{located=true}}]};
  assert.equal(f.ctx.locateProductionComment(c,true),false);assert.equal(located,false);assert.match(f.messages.at(-1),/范围当前无法显示/);
 });
+test('a migrated candidate opinion selects its material instead of the previously read card',()=>{
+ const f=setup(),data=f.entity(),c=f.comment(f.newAsset);delete c.material_scopes;
+ data.unifiedMaterialId='unrelated';f.ctx.state.materialCommentCard={data,material_id:'unrelated',number:1};
+ assert.equal(f.ctx.locateEntityReviewComment(c),true);
+ assert.equal(data.unifiedMaterialId,'need');assert.equal(f.ctx.state.materialCommentCard.material_id,'need');
+ assert.equal(f.ctx.state.productionSelected.id,f.newAsset.id);
+});
 test('legacy round traversal returns to the exact plan model used by a saved draft',()=>{
  const f=setup(),data=f.ctx.state.materialReview,plans=data.material_versions;
  data.legacy_material_versions={need:f.rounds.map(round=>({...round,model:'legacy'}))};
