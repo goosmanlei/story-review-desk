@@ -184,6 +184,7 @@ async function renderApproach() {
   // Hash navigation must keep the mounted text and its browser reading position.
   if (host.dataset.tab === selected) { restoreApproachAnchor(); return; }
   delete host.dataset.tab;
+  host.classList.remove('approach-cycle');
   approachIndexObserver?.disconnect();
   const index = $('#approach-index'), sidebar = $('#approach-sidebar');
   index.replaceChildren(); sidebar.hidden = true;
@@ -200,7 +201,7 @@ async function renderApproach() {
     const tab = approachSelectedTab();
     if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
     host.setAttribute('aria-labelledby', `approach-tab-${tab.id}`);
-    nodeText('h2', null, tab.title, host);
+    if (!tab.layout) nodeText('h2', null, tab.title, host);
     nodeText('p', 'approach-lead', tab.lead, host);
     $('#approach-index-title').textContent = tab.label;
     index.setAttribute('aria-label', `${tab.label}阅读目录`);
@@ -208,11 +209,23 @@ async function renderApproach() {
       const a = nodeText('a', 'source-chapter-button', section.title, index); a.href = `#approach-${tab.id}-${section.id}`;
       bindApproachNavigation(a);
     }
-    sidebar.hidden = !tab.sections.length;
+    sidebar.hidden = !!tab.layout || !tab.sections.length;
+    host.classList.toggle('approach-cycle', tab.layout?.type === 'cycle');
+    let content = host;
+    if (tab.layout?.type === 'cycle') {
+      content = el('div', 'approach-cycle-rows');
+      const back = el('div', 'approach-cycle-return');
+      nodeText('span', null, tab.layout.return_label, back);
+      content.append(back); host.append(content);
+    }
     for (const section of tab.sections) {
       const article = el('section', 'approach-section'); article.id = `approach-${tab.id}-${section.id}`;
-      nodeText('h3', null, section.title, article);
-      if (section.blocks) renderApproachBlocks(article, section.blocks, section.title, tab.id);
+      if (tab.layout?.type === 'cycle') {
+        const frame = el('div', 'approach-cycle-node');
+        nodeText('h3', null, section.title, frame); article.append(frame);
+      } else nodeText('h3', null, section.title, article);
+      const prose = tab.layout?.type === 'cycle' ? el('div', 'approach-cycle-prose') : article;
+      if (section.blocks) renderApproachBlocks(prose, section.blocks, section.title, tab.id);
       for (const text of section.paragraphs || []) nodeText('p', null, text, article);
       if (section.flow) {
         const flow = el('ol', 'approach-flow'); flow.setAttribute('aria-label', section.title + '：顺序流程');
@@ -237,7 +250,8 @@ async function renderApproach() {
         }
         article.append(links);
       }
-      host.append(article);
+      if (prose !== article) article.append(prose);
+      content.append(article);
     }
     host.dataset.tab = tab.id;
     approachIndexObserver = new ResizeObserver(scheduleApproachIndex);

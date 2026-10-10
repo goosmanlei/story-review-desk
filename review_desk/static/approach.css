@@ -71,3 +71,26 @@
   .approach-table td::before { content: attr(data-label); display: block; color: var(--desk-muted); font-size: 12px; font-weight: 600; }
   .approach-table tr > :last-child { border-bottom: 0; }
 }
+
+/* A cycle pairs each wireframe node with its own directly readable prose. */
+.approach-cycle { border-left: 0; }
+.approach-cycle > .approach-lead { max-width: 64em; margin-bottom: 30px; }
+.approach-cycle-rows { position: relative; padding-left: 58px; }
+.approach-cycle .approach-section { display: grid; grid-template-columns: minmax(190px, .8fr) minmax(0, 1.6fr); gap: 36px; align-items: center; position: relative; margin: 0; padding: 0 0 34px; }
+.approach-cycle .approach-section:last-child { padding-bottom: 0; }
+.approach-cycle-node { position: relative; border: 1px solid #66716a; padding: 20px 16px; text-align: center; background: var(--desk-reader); }
+.approach-cycle-node h3 { margin: 0; font-size: 18px; }
+.approach-cycle .approach-section:not(:last-child) .approach-cycle-node::after { content: "↓"; position: absolute; top: 100%; left: 50%; height: 34px; line-height: 34px; transform: translateX(-50%); color: #66716a; }
+.approach-cycle-prose p { margin: 0; }
+.approach-cycle-return { position: absolute; top: 30px; bottom: 30px; left: 28px; width: 30px; border: 1px solid #66716a; border-right: 0; }
+.approach-cycle-return::before { content: "→"; position: absolute; right: -2px; top: -16px; color: #66716a; }
+.approach-cycle-return span { position: absolute; top: 50%; left: -26px; transform: translateY(-50%); writing-mode: vertical-rl; font-size: 13px; letter-spacing: .1em; background: var(--desk-reader); padding-block: 10px; }
+@media (max-width: 700px) {
+  .approach-cycle-rows { padding-left: 40px; }
+  .approach-cycle .approach-section { grid-template-columns: minmax(0,1fr); gap: 12px; padding-bottom: 42px; }
+  .approach-cycle-node { padding: 14px 12px; }
+  .approach-cycle .approach-section:not(:last-child) .approach-cycle-node::after { display: none; }
+  .approach-cycle .approach-section:not(:last-child)::after { content: "↓"; position: absolute; bottom: 3px; left: 50%; color: #66716a; }
+  .approach-cycle-return { left: 20px; width: 20px; top: 25px; bottom: 25px; }
+  .approach-cycle-return span { left: -23px; }
+}
