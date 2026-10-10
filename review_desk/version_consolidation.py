@@ -435,7 +435,7 @@ def plan(store):
                 # not its discarded later draft or an invented historical plan.
                 keys = ('format','title','scope','states','entities','slot','media_type','required','usage')
                 payload = {k: row['payload'][k] for k in keys if k in row['payload']}
-                payload.update(blocks=[{'id':'missing-original-plan','text':'保留产物的此需求原始方案未登记；原件与真实调用仍可审阅，补全并重新认可后才能继续生成。'}],
+                payload.update(blocks=[{'id':'missing-original-plan','text':'保留产物的此需求原始方案未登记；原件与真实调用仍可审阅，补全准确输入后才能继续生成。'}],
                                purpose='原始需求方案未登记', specification={}, consolidation_identity_only=True)
                 identity_only.append({'object_id':mid,'source_revision':row['id'],'payload':payload})
         aliases = []

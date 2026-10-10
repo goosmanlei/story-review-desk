@@ -256,6 +256,9 @@ def restore(store, export_dir):
     if any(row['kind'] in RETIRED_KINDS for row in (framework or {}).get('objects', [])):
         raise ValueError('retired production structures cannot be restored; use a clean audiovisual export')
     policy_path = store.db_path.parent.parent/'config/instance.json'
+    review_policy = json.loads(policy_path.read_text()).get('comment_review_policy') if policy_path.exists() else None
+    if review_policy and (schema < 12 or not any(row['id'] == review_policy['retirement_id'] for row in (framework or {}).get('consolidation_runs', []))):
+        raise ValueError('this instance requires its exact comment-led review retirement receipt')
     policy = json.loads(policy_path.read_text()).get('audiovisual_policy') if policy_path.exists() else None
     if policy and (schema < 9 or not any(row['id'] == policy['cutover_id'] for row in (framework or {}).get('consolidation_runs', []))):
         raise ValueError('this instance requires its exact audiovisual cutover receipt')

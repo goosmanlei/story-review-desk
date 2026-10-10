@@ -196,7 +196,12 @@ def _snapshot(store, entity_id, revision_id=None):
     if revision_id:
         scope['entity'] = ref(target)
     data=contents(store,scope)
-    base={'comment_records': []}
+    base={'comment_records': [], 'usages': {}}
+    for form in data['states']:
+        base['usages'][form['id']] = [
+            {'kind':row['kind'], 'title':row['payload']['title'],
+             'sources':row['payload'].get('sources', []), **ref(row)}
+            for row in rows if row['kind']=='AV_SHOT' and ref(form) in row['payload'].get('states', [])]
     owned_ids={entity_id, *(r['object_id'] for r in rows if r['kind']=='STATE' and r['payload']['entity']['object_id']==entity_id)}
     for comment in store.comments():
         row=p.record(store,comment['target_object_id'],comment['target_revision_id'])

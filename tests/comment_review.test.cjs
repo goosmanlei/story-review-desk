@@ -62,3 +62,9 @@ test('current read failure is visible and exact URL never requests latest',async
  assert.match(f.pending[0].url,/revision_id=old/);assert.doesNotMatch(f.pending[0].url,/latest/);f.pending[0].reject(Error('Exact target unavailable'));await opening;
  assert.match(f.body.children.at(-1).textContent,/Exact target unavailable/);
 });
+
+test('legacy production text anchors highlight the exact original quotation without changing the stored anchor',()=>{
+ const f=setup(),root=new Node('div'),anchor={block_id:'p',end_block_id:'p',start:2,end:4,quote:'范围'};
+ f.ctx.renderCommentReviewContent(root,{kind:'REQUIREMENT',payload:{format:'production-requirement-v1',components:[]},review_blocks:[{id:'p',text:'起止范围说明'}]},anchor);
+ assert.equal(root.querySelector('mark').textContent,'范围');assert.equal(anchor.type,undefined);
+});

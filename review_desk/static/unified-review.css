@@ -26,12 +26,7 @@
 .unified-card-dialog>.review-dialog-header{grid-column:1/-1;grid-row:1}
 .unified-card-dialog>.review-dialog-body{grid-column:1;grid-row:2;min-width:0;min-height:0;padding:0;max-height:80dvh;overflow:auto}
 .unified-card-dialog .unified-card-material{top:0;max-height:80dvh}
-.unified-card-dialog>.comment-panel{grid-column:1;grid-row:2;position:relative;inset:auto;z-index:3;min-width:0;min-height:0;width:auto;max-width:none;max-height:80dvh;box-shadow:none}
-@media(min-width:1200px){
-  .unified-card-dialog:has(> .comment-panel:not([hidden])){width:min(1780px,96vw);grid-template-columns:minmax(0,1fr) 360px}
-  .unified-card-dialog>.comment-panel{grid-column:2;border-left:1px solid var(--desk-line)}
-}
-@media(max-width:1199px){.unified-card-dialog:has(> .comment-panel:not([hidden]))>.review-dialog-body{visibility:hidden}}
+.unified-card-dialog>.comment-panel{position:fixed;inset:80px 18px 70px auto;z-index:3;width:min(360px,calc(100vw - 36px));min-width:0;min-height:0;max-height:calc(100dvh - 150px);box-shadow:0 14px 48px #17241f33}
 @media(max-width:1800px){.unified-card-dialog .unified-card-material .entity-review-local-heading>h3{flex-basis:100%}}
 .breakdown-episode-tabs{margin:16px 0}.breakdown-episode-tabs .source-button:not(.screenplay-episode){flex:0 0 155px;min-height:64px;margin:0;white-space:normal}
 .breakdown-scene-layout{display:grid;grid-template-columns:245px minmax(0,1fr);gap:0;border:1px solid var(--desk-line);height:calc(100dvh - 90px);min-height:400px;position:sticky;top:70px}
