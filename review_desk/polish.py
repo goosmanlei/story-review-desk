@@ -73,6 +73,14 @@ def _excerpt(blocks, draft, anchor=None, radius=450):
 
 
 def _append_document(context, document, draft, limit, anchor=None, allowance=1200):
+    if anchor and "segments" in anchor:
+        # Selected passages remain together in the required quote/anchor. Optional
+        # context is gathered near each passage, never across an unselected gap.
+        added = False
+        for part in anchor["segments"]:
+            added = _append_document(context, document, draft, limit, part,
+                                     max(200, allowance // len(anchor["segments"]))) or added
+        return added
     blocks = document["blocks"]
     doc = {k: v for k, v in document.items() if k != "blocks" and v != ""}
     excerpt, start, end, total = _excerpt(blocks, draft, anchor)

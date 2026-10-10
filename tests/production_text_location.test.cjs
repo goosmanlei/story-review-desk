@@ -36,6 +36,13 @@ test('continuous paragraphs paint both ends; valid single-block legacy ranges om
  const f=fixture([{id:'a',text:'甲🐍乙'},{id:'b',text:'丙丁戊'}]),host=f.surface(),c=f.comment({block_id:'a',end_block_id:'b',start:1,end:2});f.ctx.paintProductionCommentText(c);
  assert.deepEqual(host.querySelectorAll('.comment-mark').map(n=>n.textContent),['🐍乙','丙丁']);assert.equal(host.textContent,'甲🐍乙丙丁戊');
 });
+test('segmented opinions paint only their exact passages, including reordered same-block ranges',()=>{
+ const f=fixture([{id:'a',text:'甲🐍乙'},{id:'gap',text:'未选拆镜'},{id:'b',text:'丙丁戊'}]),host=f.surface();
+ const segments=[{block_id:'b',end_block_id:'b',start:0,end:2,quote:'丙丁'},{block_id:'a',end_block_id:'a',start:1,end:2,quote:'🐍'}];
+ const c=f.comment({block_id:'b',end_block_id:'a',start:0,end:2,quote:'丙丁\n🐍',segments});
+ f.ctx.paintProductionCommentText(c);assert.deepEqual(host.querySelectorAll('.comment-mark').map(n=>n.textContent),['🐍','丙丁']);
+ assert.equal(host.children[1].querySelector('.comment-mark'),null);
+});
 test('continuous segmented Prompt highlights actual paragraphs; omitted gaps require full Prompt',()=>{
  const f=fixture([{id:'prompt',text:'甲乙\n丙丁\n隐藏\n戊己'}]),excerpt=f.surface('exact',[{id:'prompt',text:'甲乙',offset:0},{id:'prompt',text:'丙丁',offset:3}]),full=f.surface();
  const c=f.comment({start:1,end:5});assert.equal(f.ctx.productionCommentTextSurface(c),excerpt);f.ctx.paintProductionCommentText(c);assert.deepEqual(excerpt.querySelectorAll('.comment-mark').map(n=>n.textContent),['乙','丙丁']);

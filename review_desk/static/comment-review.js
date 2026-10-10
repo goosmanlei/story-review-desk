@@ -121,16 +121,18 @@ function renderCommentReviewContent(root,record,anchor){
     if(!visual){nodeText('p','structure-alert','准确原图已不可用；未替换为新图。',focus);return}
     appendReviewVisual(focus,visual,anchor);
   }else{
-    const start=anchor?.block_id?blocks.findIndex(b=>b.id===anchor.block_id):0;
-    const end=anchor?.block_id?blocks.findIndex(b=>b.id===(anchor.end_block_id||anchor.block_id)):blocks.length-1;
+    for(const part of anchor?.segments||[anchor]){
+    const start=part?.block_id?blocks.findIndex(b=>b.id===part.block_id):0;
+    const end=part?.block_id?blocks.findIndex(b=>b.id===(part.end_block_id||part.block_id)):blocks.length-1;
     if(start<0||end<start){nodeText('p','structure-alert','准确正文位置已不可用；未查找相似句替代。',focus);return}
     for(let i=start;i<=end;i++){
       const block=blocks[i],p=nodeText('p',null,'',focus);p.dataset.reviewBlock=block.id;
-      const text=Array.from(block.text),from=anchor?.type==='text'?(i===start?anchor.start:0):0,to=anchor?.type==='text'?(i===end?anchor.end:text.length):0;
+      const text=Array.from(block.text),from=anchor?.type==='text'?(i===start?part.start:0):0,to=anchor?.type==='text'?(i===end?part.end:text.length):0;
       const left=anchor?.type==='text'?Math.max(0,from-200):0,right=anchor?.type==='text'?Math.min(text.length,to+200):text.length;
       p.append(document.createTextNode((left?'…':'')+text.slice(left,from).join('')));
       if(to>from)nodeText('mark',null,text.slice(from,to).join(''),p);
       p.append(document.createTextNode(text.slice(to||from,right).join('')+(right<text.length?'…':'')));
+    }
     }
   }
   const full=el('details','comment-review-full');nodeText('summary',null,'阅读这份准确稿件的完整图文',full);

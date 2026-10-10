@@ -430,6 +430,11 @@ function renderProductionRecord(root,detail,entityCard=false){
 function productionCommentTextRange(comment){
   const row=state.productionSelected,a=comment?.anchor;
   if(!a||comment.anchor_state?.valid===false||(a.type||'text')!=='text'||row?.object_id!==comment.target_object_id||row.id!==comment.target_revision_id)return null;
+  if(a.segments){
+    const segments=a.segments.map(anchor=>productionCommentTextRange({...comment,anchor}));
+    if(segments.some(range=>!range))return null;
+    return {segments,valid:segments.every(range=>range.valid),blocks:segments[0].blocks,anchor:a};
+  }
   const blocks=productionTextBlocks(row),first=blocks.findIndex(b=>b.id===a.block_id),last=blocks.findIndex(b=>b.id===(a.end_block_id||a.block_id));
   if(first<0||last<first)return null;
   const valid=Number.isInteger(a.start)&&Number.isInteger(a.end)&&a.start>=0&&a.end>=0&&a.start<=Array.from(blocks[first].text).length&&a.end<=Array.from(blocks[last].text).length&&(first!==last||a.start<a.end);
@@ -451,6 +456,7 @@ function productionCommentTextSurface(comment){
   return surfaces.find(host=>host.getClientRects?.().length)||surfaces[0]||null;
 }
 function productionTextSurfaceContainsRange(range,surface){
+  if(range.segments)return range.segments.every(part=>productionTextSurfaceContainsRange(part,surface));
   const nodes=productionCommentTextNodes(range,surface);if(!range.valid)return !!nodes.length;
   for(let index=range.first;index<=range.last;index++){
     const text=Array.from(range.blocks[index].text),start=index===range.first?range.anchor.start:0,end=index===range.last?range.anchor.end:text.length;
@@ -462,6 +468,7 @@ function productionTextSurfaceContainsRange(range,surface){
   return true;
 }
 function productionCommentTextNodes(range,surface){
+  if(range.segments)return [...new Set(range.segments.flatMap(part=>productionCommentTextNodes(part,surface)))];
   return [...surface.querySelectorAll('[data-block-id]')].filter(node=>{
     if(productionTextHidden(node))return false;
     const index=range.blocks.findIndex(b=>b.id===node.dataset.blockId);if(index<range.first||index>range.last)return false;
@@ -485,14 +492,13 @@ function paintProductionCommentText(comment){
   for(const node of document.querySelectorAll('#production-blocks .comment-flash'))node.classList.remove('comment-flash');
   const range=productionCommentTextRange(comment),surface=productionCommentTextSurface(comment);if(!range||!surface)return;
   if(surface.closest('.material-use-details'))return; // Already uses the shared full comment renderer.
-  const nodes=productionCommentTextNodes(range,surface);
-  for(const node of nodes){
-    const index=range.blocks.findIndex(b=>b.id===node.dataset.blockId),block=range.blocks[index],base=Number(node.dataset.anchorOffset||0),text=node.textContent,length=Array.from(text).length;
+  for(const part of range.segments||[range])for(const node of productionCommentTextNodes(part,surface)){
+    const index=part.blocks.findIndex(b=>b.id===node.dataset.blockId),block=part.blocks[index],base=Number(node.dataset.anchorOffset||0),text=node.textContent,length=Array.from(text).length;
     // Excerpts carry Unicode offsets into the original block. Preserve their
     // exact text and labels; missing/invalid legacy ranges get only a block cue.
     node.dataset.productionCommentText='';
-    if(!range.valid||Array.from(block.text).slice(base,base+length).join('')!==text){node.classList.add('comment-flash');continue}
-    const start=Math.max(0,(index===range.first?range.anchor.start:0)-base),end=Math.min(length,(index===range.last?range.anchor.end:Array.from(block.text).length)-base);
+    if(!part.valid||Array.from(block.text).slice(base,base+length).join('')!==text){node.classList.add('comment-flash');continue}
+    const start=Math.max(0,(index===part.first?part.anchor.start:0)-base),end=Math.min(length,(index===part.last?part.anchor.end:Array.from(block.text).length)-base);
     paintProductionTextMark(node,start,end,comment);
   }
 }
@@ -535,7 +541,7 @@ function locateProductionComment(comment,local=false){
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
   if(!local&&typeof isMaterialReview==='function'&&isMaterialReview())return locateMaterialComment(comment);
   const issue=productionCommentLocationIssue(comment,state.productionSelected);if(issue){toast(issue);return false}
-  if(comment.anchor.type==='text'&&!productionCommentTextSurface(comment))return openProductionCommentOriginal(state.productionSelected,comment);
+  if((comment.anchor.type||'text')==='text'&&!productionCommentTextSurface(comment))return openProductionCommentOriginal(state.productionSelected,comment);
   state.selected=comment.id;const a=comment.anchor,select=$('#production-component'),component=a.component_id||a.visual_id;
   // A merged display never migrates the original field. Reveal its exact text
   // in the same immutable shot before the shared locator and paint run.
