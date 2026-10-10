@@ -528,11 +528,16 @@ function selectCommentMaterialRound(data,row,comment,materialId=null){
   }else{
     // Legacy opinions lack an exact round: retain a compatible current view,
     // otherwise use the existing revision-based fallback without writing history.
+    const choices=[];
     for(const [mid,rounds] of Object.entries(versions)){
       const matches=rounds.filter(round=>materialVersionCommentRows(round).some(member=>member.id===row.id));
       const round=matches.find(round=>round.number===data.selectedMaterialRounds?.[mid])||matches[0];
-      if(round){data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number}
+      if(round)choices.push({material_id:mid,number:round.number});
     }
+    const preferred=materialId||(state.materialCommentCard?.data===data?state.materialCommentCard.material_id:null)||data.unifiedMaterialId;
+    const selected=choices.find(choice=>choice.material_id===preferred)||(choices.length===1?choices[0]:null);
+    if(choices.length&&!selected){toast('这条评论关联多个素材，请先选择对应素材卡再定位。');return false}
+    if(selected){data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.number;state.materialCommentCard={data,...selected}}
   }
   return true;
 }
