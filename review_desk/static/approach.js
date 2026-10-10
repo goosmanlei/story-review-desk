@@ -175,6 +175,33 @@ function restoreApproachAnchor() {
   }));
 }
 
+function renderApproachCollaboration(diagram) {
+  const host = el('div', 'approach-collaboration');
+  const roles = el('div', 'approach-collaboration-roles');
+  for (const [index, role] of diagram.roles.entries()) {
+    const node = el('div', 'approach-collaboration-role');
+    nodeText('b', null, role.title, node);
+    nodeText('span', null, role.value, node);
+    roles.append(node);
+    if (index < diagram.exchanges.length) {
+      const exchange = diagram.exchanges[index];
+      const link = el('div', 'approach-collaboration-exchange');
+      const arrow = nodeText('span', 'approach-collaboration-arrow', '↔', link);
+      arrow.setAttribute('aria-hidden', 'true');
+      nodeText('span', null, exchange.label, link);
+      link.setAttribute('aria-label', `${role.title}与${diagram.roles[index + 1].title}：${exchange.label}，双向`);
+      roles.append(link);
+    }
+  }
+  host.append(roles);
+  nodeText('p', 'approach-collaboration-constraint', diagram.constraint, host);
+  nodeText('p', 'approach-collaboration-label', diagram.workflow.label, host);
+  const flow = el('ol', 'approach-collaboration-workflow');
+  for (const stage of diagram.workflow.stages) nodeText('li', null, stage, flow);
+  host.append(flow);
+  return host;
+}
+
 async function renderApproach() {
   const host = $('#approach-body');
   const requested = new URL(location.href).searchParams.get('tab') || 'story';
@@ -251,6 +278,10 @@ async function renderApproach() {
         article.append(links);
       }
       if (prose !== article) article.append(prose);
+      if (section.diagram) {
+        article.classList.add('approach-section-expanded');
+        article.append(renderApproachCollaboration(section.diagram));
+      }
       content.append(article);
     }
     host.dataset.tab = tab.id;
