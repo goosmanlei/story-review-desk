@@ -141,7 +141,7 @@
 /* A shared foundation supports the whole collaboration, never one pillar per
    participant. Keep type readable on narrow screens instead of shrinking art. */
 .approach-layout:has(.approach-foundation) { border-color: #dcded2; border-radius: 12px; box-shadow: none; overflow: hidden; }
-.approach-body:has(.approach-foundation) { background: var(--desk-surface, #fffdf7); padding: clamp(24px, 4vw, 56px); container: approach-figure / inline-size; }
+.approach-body:has(.approach-foundation) { padding: clamp(24px, 4vw, 56px); container: approach-figure / inline-size; }
 .approach-foundation {
   --foundation-ink: #496752;
   --foundation-line: #91a68a;
@@ -163,7 +163,7 @@
 .approach-foundation-exchange i::after { content: ''; position: absolute; width: 6px; height: 6px; top: -4px; border-top: 1.5px solid; border-right: 1.5px solid; }
 .approach-foundation-forward::after { right: 0; transform: rotate(45deg); }
 .approach-foundation-return::after { left: 0; transform: rotate(-135deg); }
-.approach-foundation-exchange > svg { position: absolute; left: calc(50% - 12px); top: 35px; width: 24px; height: 24px; color: var(--collaboration-ai); background: var(--desk-surface, #fffdf7); }
+.approach-foundation-exchange > svg { position: absolute; left: calc(50% - 12px); top: 35px; width: 24px; height: 24px; color: var(--collaboration-ai); background: var(--desk-reader); }
 .approach-foundation-support { position: relative; height: 92px; margin: 24px 80px 0; color: var(--foundation-ink); }
 .approach-foundation-support::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 18px; border: 1.5px solid var(--foundation-line); border-top: 0; border-radius: 0 0 12px 12px; }
 .approach-foundation-lift { position: absolute; left: 50%; top: 18px; bottom: 0; border-left: 1.5px solid var(--foundation-line); }
