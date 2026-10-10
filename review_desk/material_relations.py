@@ -207,14 +207,23 @@ def choose_route(store, request):
     op = request.get('id')
     if not isinstance(op,str) or not p.ID.fullmatch(op):raise ValueError('需要选择操作编号')
     fingerprint = digest(canonical({k:v for k,v in request.items() if k!='id'}).encode())
+    from .production_current import enabled, guard
+    from .production_operations import prior, remember
     store.db.execute('BEGIN IMMEDIATE')
     try:
+        if enabled(store):
+            existing = prior(store, op, fingerprint)
+            if existing:
+                store.db.commit()
+                return existing
         old = store.db.execute("SELECT id FROM revisions WHERE json_extract(payload,'$.shot_reference_operation.id')=?",(op,)).fetchone()
         if old:
             row=p.record(store,revision_id=old['id'])
             if row['payload']['shot_reference_operation']['fingerprint']!=fingerprint:raise Conflict('选择编号已被另一操作使用')
         else:
             need=p.record(store,request['requirement_id'])
+            if enabled(store):
+                guard(store, need['object_id'], request.get('expected_content'))
             if need['kind']!='REQUIREMENT' or need['id']!=request['expected_revision']:raise Conflict('素材方案已变化，请重新读取')
             payload=copy.deepcopy(need['payload']);plan=payload.get('generation')
             if not plan:raise ValueError('尚无完整生成方案')
@@ -237,8 +246,10 @@ def choose_route(store, request):
             result=store._put_object(need['object_id'],'REQUIREMENT',payload,need['version'],
                 [{'revision_id':ref['revision_id'],'role':path} for path,ref in p.references(payload)])
             row=p.record(store,revision_id=result['revision']);mp.register(store,row)
-        store.db.commit()
         from .shot_references import response
-        return response(store,row,bool(old))
+        result = response(store,row,bool(old))
+        if enabled(store): remember(store, op, fingerprint, result)
+        store.db.commit()
+        return result
     except BaseException:
         store.db.rollback();raise

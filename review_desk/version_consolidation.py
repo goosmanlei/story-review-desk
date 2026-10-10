@@ -95,6 +95,9 @@ def row_hash(object_id, version, payload):
 
 
 def new_identity(store, object_id, version, payload):
+    from .production_current import enabled, address
+    if enabled(store) and payload.get('format', '').startswith('production-'):
+        return address(object_id)
     epoch = None
     if available(store):
         row = store.db.execute('SELECT plan_id FROM consolidation_revisions WHERE object_id=? AND new_number IS NOT NULL LIMIT 1', (object_id,)).fetchone()
@@ -106,6 +109,11 @@ def new_identity(store, object_id, version, payload):
 
 
 def valid_identity(store, object_id, version, payload, revision_id):
+    from .production_current import valid_record, enabled, RECORD_KINDS
+    if enabled(store):
+        obj=store.db.execute('SELECT kind FROM objects WHERE id=?',(object_id,)).fetchone()
+        if obj and obj[0] in RECORD_KINDS:
+            return valid_record(store, object_id, version, payload, revision_id)
     if available(store):
         row = store.db.execute('SELECT object_id,new_number,after_sha256 FROM consolidation_revisions WHERE revision_id=?', (revision_id,)).fetchone()
         if row:
@@ -511,7 +519,9 @@ def collect_content(store):
         elif isinstance(value,list):
             for v in value:yield from keys(v)
         elif isinstance(value,str) and value in nodes:yield value
-    store.db.execute('DELETE FROM material_definitions WHERE id NOT IN (SELECT definition_id FROM material_definition_versions)')
+    from .production_current import enabled
+    if not enabled(store):
+        store.db.execute('DELETE FROM material_definitions WHERE id NOT IN (SELECT definition_id FROM material_definition_versions)')
     roots = {r[0] for r in store.db.execute('SELECT id FROM material_definitions')}
     for r in store.db.execute('SELECT payload AS stored_payload FROM revisions'):
         roots.update(keys(json.loads(r[0])))

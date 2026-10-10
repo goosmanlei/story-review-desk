@@ -207,7 +207,7 @@ function workspacePageDescriptor(workspace,params){
   return ({
     breakdown:['STORY → PRODUCTION','视听制作','按视听集、场、镜阅读设计，审阅各项素材方案与准确候选。'],
     entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、实体状态和关系，阅读内容并提出意见。'],
-    materials:['MATERIAL LIBRARY','素材管理','按集场查看素材方案、版本与真实候选，预览原件并审阅准确内容。']
+    materials:['MATERIAL LIBRARY','素材管理','按集场查看当前方案与真实候选，预览原件并审阅准确内容。']
   })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
 }
 function renderPageHeading(){

@@ -363,7 +363,7 @@ function materialDraftFixture(){
   const draftSource=fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8');
   vm.runInContext(draftSource.slice(draftSource.indexOf('function productionDraftKey()')),c);
   c.isProduction=()=>true;c.isEntityReview=()=>false;c.location.href='http://fixture/?workspace=materials.workspace';
-  const drafts=new Map();c.localStorage={getItem:key=>drafts.get(key)??null};
+  const drafts=new Map();c.commentPageId="isolated-page";c.localStorage={getItem:key=>drafts.get(key)??null,setItem:(key,value)=>drafts.set(key,value),removeItem:key=>drafts.delete(key)};c.readCommentDraftStorage=key=>c.localStorage.getItem(key);c.openPanel=()=>{};
   // Use the actual body key: changing material context can turn it into the
   // legacy key even while productionSelected still refers to the previous card.
   const appSource=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8');
@@ -391,6 +391,22 @@ test('C08 returning to a normal material card restores its exact asset draft foc
   c.activateUnifiedCard(create('first'));
   assert.equal(c.state.productionSelected.id,asset.id);
   assert.equal(JSON.stringify(c.state.anchor),JSON.stringify(anchor));
+});
+
+test('production draft location survives reload while another page has a separate new-comment body',()=>{
+  const {c,create,asset,anchor,drafts}=materialDraftFixture();
+  c.state.productionDraftContexts=null;
+  c.activateUnifiedCard(create('first'));
+  assert.equal(c.state.productionSelected.id,asset.id);
+  assert.equal(JSON.stringify(c.state.anchor),JSON.stringify(anchor));
+  const firstKey=vm.runInContext('draftKey()',c);
+  assert.equal(drafts.get(firstKey),'保留这处图像草稿');
+  c.commentPageId='parallel-page';c.state.productionDraftContexts=null;
+  const secondKey=vm.runInContext('draftKey()',c);
+  assert.notEqual(secondKey,firstKey);
+  drafts.set(secondKey,'另一页自己的意见');
+  assert.equal(drafts.get(firstKey),'保留这处图像草稿');
+  assert.equal(Object.keys(c.productionDraftContexts()).length,0);
 });
 
 test('C08 saved asset draft focus never overrides explicit requirement or material-version links',()=>{

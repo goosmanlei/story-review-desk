@@ -546,6 +546,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path in ('/api/production/submit', '/api/production/reuse-candidate', '/api/production/result'):
+            try:
+                from .production_operations import submit, reuse, finish
+                action = {'submit': submit, 'reuse-candidate': reuse, 'result': finish}[self.path.rsplit('/',1)[1]]
+                return self._json(action(self.server.store, self._input(2_000_000)), 201)
+            except Conflict as exc:
+                return self._json({'error': str(exc)}, 409)
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if self.path in ('/api/methods/save', '/api/methods/prepare', '/api/methods/artifact', '/api/methods/media-prepare'):
             try:
                 from . import methods

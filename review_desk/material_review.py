@@ -3,6 +3,9 @@ from . import production as p
 
 
 def context(store, asset):
+    from .production_current import enabled, candidate_context
+    if enabled(store):
+        return candidate_context(store, asset)
     call_ref = asset['payload'].get('production')
     call = p.ref_record(store, call_ref, {'CALL'}) if call_ref else None
     if call:

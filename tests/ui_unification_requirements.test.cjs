@@ -200,7 +200,7 @@ test('historical candidate opens exactly without changing the current page cards
 
 test('history result summaries explain D3 once while preserving an exact historical open',async()=>{
   const {host,opened}=await materialListFixture('historical-candidate');
-  const statusGroups=host.all().filter(n=>n.attributes.role==='group'&&n.attributes['aria-label']?.includes('含历史版本'));
+  const statusGroups=host.all().filter(n=>n.attributes.role==='group'&&n.attributes['aria-label']==='生成结果');
   assert.equal(statusGroups.length,1);
   const card=host.querySelectorAll('[data-material-id]')[0];
   assert.match(card.textContent,/版本 2 个 · 候选 1 个/);

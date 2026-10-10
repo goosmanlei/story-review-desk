@@ -29,7 +29,10 @@ def exact_revision(store, object_id, revision_id):
 
 def reference(store, value):
     record = exact_revision(store, value.get('object_id'), value.get('revision_id'))
-    return {**value, 'title': record['title'], 'version': record['version'], 'kind': record['kind']}
+    from .production_current import enabled, RECORD_KINDS
+    current = enabled(store) and record['kind'] in RECORD_KINDS
+    return {**value, 'title': record['title'], 'version': None if current else record['version'],
+            'kind': record['kind'], 'current_content': current}
 
 
 def readable_reference(store, value):
@@ -42,6 +45,10 @@ def readable_reference(store, value):
 def import_evidence(store, documents, validate_only=False):
     if not isinstance(documents, list) or not documents:
         raise ValueError('需要完整的作者处理依据列表')
+    from .production_current import enabled
+    if enabled(store) and any((store.comment(item.get('comment_id')) or {}).get('original_context') for item in documents):
+        from .production_current_comments import import_current
+        return import_current(store, documents, validate_only)
     records, seen = [], set()
     for item in documents:
         if not isinstance(item, dict) or item.get('format') != FORMAT:
@@ -103,6 +110,9 @@ def snapshot(store, object_id, revision_id):
     current = exact_revision(store, object_id, revision_id)
     supplements = evidence_records(store)
     responses, relevant = {}, set()
+    from .production_current import enabled, RECORD_KINDS
+    if enabled(store) and current['kind'] in RECORD_KINDS:
+        relevant.update(c['id'] for c in store.comments(target_object_id=object_id) if c.get('original_context'))
     if object_id == STRUCTURE_ID:
         revisions = {r['id']: r for r in object_revisions(store, STRUCTURE_ID)}
         ancestors, cursor = set(), revision_id
@@ -119,8 +129,12 @@ def snapshot(store, object_id, revision_id):
         relevant.update(c['id'] for c in store.comments(target_object_id=object_id)
                         if c['target_revision_id'] in ancestors and c['target_revision_id'] != revision_id)
     for item in supplements:
+        from .production_current import enabled, RECORD_KINDS
+        current_mode = enabled(store) and current['kind'] in RECORD_KINDS
         in_context = any(ref['object_id'] == object_id and ref['revision_id'] == revision_id
                          for ref in [item['original'], item['response'], *item['evidence']])
+        if current_mode:
+            in_context = any(ref['object_id'] == object_id for ref in [item['original'],item['response'],*item['evidence']])
         if not in_context and item['comment_id'] not in relevant:
             continue
         relevant.add(item['comment_id'])
@@ -137,16 +151,23 @@ def snapshot(store, object_id, revision_id):
             continue
         replies = []
         for response in responses.get(cid, []):
-            refs = [{**readable_reference(store, ref), 'anchor_state': store.anchor_state(
-                ref['object_id'], ref['revision_id'], ref['anchor'])} for ref in response.get('evidence', [])]
-            replies.append({**response, 'response': readable_reference(store, response['response']), 'evidence': refs})
+            from .production_current_comments import read as saved_excerpt
+            from .production_current import enabled
+            refs = [(saved_excerpt(store,response,'evidence:'+str(index),ref) if enabled(store) else None) or {**readable_reference(store, ref), 'anchor_state': store.anchor_state(
+                ref['object_id'], ref['revision_id'], ref['anchor'])} for index, ref in enumerate(response.get('evidence', []))]
+            replies.append({**response, 'response': (saved_excerpt(store,response,'response',response['response']) if enabled(store) else None) or readable_reference(store, response['response']), 'evidence': refs,
+                            'original_excerpt': saved_excerpt(store,response,'original',response.get('original',{})) if enabled(store) else None})
         replies.sort(key=lambda r: (r['response']['version'] or 0, r['response']['revision_id']))
         comment = store.comment_anchor_states([comment])[0]
         original = readable_reference(store, {'object_id': comment['target_object_id'],
                                      'revision_id': comment['target_revision_id']})
+        if comment.get('original_context'):
+            original = {**original, 'production_excerpt': comment['original_context']['excerpt'],
+                        'version': None, 'matches_current': comment['original_context']['matches_current'],
+                        'current_reference': {'object_id': object_id, 'revision_id': revision_id}}
         reviews.append({'comment': comment, 'original': original, 'responses': replies,
                         'current_evidence': [ref for reply in replies for ref in reply['evidence']
-                                             if ref['object_id'] == object_id and ref['revision_id'] == revision_id]})
+                                             if ref['object_id'] == object_id and ref['revision_id'] == revision_id and ref.get('matches_current',True)]})
     reviews.sort(key=lambda row: (row['comment']['created_at'], row['comment']['id']))
     return {'context': reference(store, {'object_id': object_id, 'revision_id': current['id']}),
             'reviews': reviews}

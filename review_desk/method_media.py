@@ -99,8 +99,10 @@ def validate_stage(store, execution, stage, value):
         methods.require(isinstance(value, dict) and isinstance(value.get('assessment'), str)
                         and bool(value['assessment'].strip()), '媒体回读需要实际检查记录')
         return
-    methods.require(stage in ('draft', 'result') and isinstance(value, dict)
-                    and value.get('requirement') == execution['payload']['inputs']['context'],
+    from .production_current_methods import INPUTS
+    expected = execution['payload']['inputs']
+    matches = methods.checksum(value.get('requirement')) == expected['context']['sha256'] if expected.get('format') == INPUTS else value.get('requirement') == expected['context']
+    methods.require(stage in ('draft', 'result') and isinstance(value, dict) and matches,
                     '媒体步骤产物与准确需求不一致')
     from .generation import validate_plan
     validate_plan(store, execution['payload']['target'],
@@ -120,6 +122,9 @@ def prepare(store, value):
     request = {'work_type': 'media-plan', 'run_id': value['run_id'], 'step_id': value['step_id'],
                'target': value['object_id'], 'conditions': {**conditions, 'media_type': payload['media_type']},
                'inputs': inputs(store, payload, baseline, value.get('supporting_references'), target_id=value['object_id'])}
+    from .production_current import enabled, marker
+    if enabled(store) and current:
+        request['inputs']['baseline_marker'] = marker(p.record(store, value['object_id']))
     execution = methods.prepare(store, request)
     methods.require(execution['payload']['package']['steps'] == ['draft', 'review', 'result'],
                     '媒体制作方法需按 draft、review、result 交付；请修正环节绑定')
@@ -175,6 +180,26 @@ def check_adjustment(store, object_id, payload):
     parent = p.ref_record(store, receipt['parent'], {'REQUIREMENT'})
     methods.require(parent['object_id'] == object_id, '制作选择依据属于其他素材')
     old = parent['payload']
+    if receipt['operation'] == 'candidate-copy':
+        from .production_current import guard, submission
+        request = receipt['request']
+        guard(store, object_id, request.get('expected_content'))
+        candidate = store.db.execute('SELECT operation_id FROM production_candidates WHERE id=?', (request['candidate_id'],)).fetchone()
+        methods.require(candidate and store.db.execute('SELECT 1 FROM production_candidate_targets WHERE candidate_id=? AND material_id=?',
+                        (request['candidate_id'], object_id)).fetchone(), '复用候选与需求没有准确归属')
+        snap = submission(store, candidate[0])['snapshot']
+        source = next((r for r in snap['requirements'] if r['object_id'] == object_id), None)
+        methods.require(source is not None, '候选缺少原方案')
+        expected = copy.deepcopy(source['payload']['generation'])
+        for key in ('method','model','parameters','prompt','output','randomization','execution'):
+            if key in snap['request']: expected[key] = copy.deepcopy(snap['request'][key])
+        for item in expected['inputs']:
+            actual = p.ref_record(store, item['reference'])
+            item['reference'] = {'object_id': actual['object_id'], 'revision_id': actual['id']}
+        ignored = {'generation', 'method_adjustment'}
+        methods.require(expected == payload['generation'] and {k:v for k,v in old.items() if k not in ignored} ==
+                        {k:v for k,v in payload.items() if k not in ignored}, '复用只能复制该候选的完整方案作为当前起点')
+        return parent
     if receipt['operation'] == 'relation-contract':
         from .business_relations import CHOICES, exact_input_relation, is_business, legacy_endpoints, pair
         from .material_relations import rules
@@ -253,7 +278,8 @@ def check_adjustment(store, object_id, payload):
             from .material_storage import canonical_id
             methods.require(origin['material_id'] and chosen['material_id'] and canonical_id(store, origin['material_id']) == canonical_id(store, chosen['material_id']), '参考选择不能更换素材身份')
             if i == index:
-                methods.require(chosen['material_id'] == request['material_id'] and chosen['number'] == request['number'] and
+                from .production_current import enabled
+                methods.require(chosen['material_id'] == request['material_id'] and (enabled(store) or chosen['number'] == request['number']) and
                                 chosen['candidate'] == request.get('candidate') and
                                 all(after.get(k) == request.get(k) for k in ('crop', 'range')), '参考选择与提交内容不一致')
             else:
@@ -266,6 +292,10 @@ def check_adjustment(store, object_id, payload):
 
 
 def verify(store, object_id, payload, revision_id=None):
+    from .production_current import enabled
+    if enabled(store):
+        from .production_current_methods import verify as verify_current
+        return verify_current(store, object_id, payload)
     adjustments, seen = [], set()
     while payload.get('method_adjustment'):
         parent = check_adjustment(store, object_id, payload)

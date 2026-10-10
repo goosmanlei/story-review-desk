@@ -300,6 +300,14 @@ def migrate(store,document,validate_only=False,system_head=None,apply_archives=T
 
 
 def verify(store):
+    from .production_current import enabled
+    if enabled(store):
+        from .production_current_bundle import validate
+        validate(store)
+        return {'production_model': 'production-current-candidates-v1',
+                'revision_count': store.db.execute('SELECT count(*) FROM revisions').fetchone()[0],
+                'content_nodes': store.db.execute('SELECT count(*) FROM material_content').fetchone()[0],
+                'candidates': store.db.execute('SELECT count(*) FROM production_candidates').fetchone()[0]}
     from .production import read_scope
     with read_scope(store):return _verify(store)
 

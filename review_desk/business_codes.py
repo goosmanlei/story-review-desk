@@ -73,6 +73,9 @@ def allocate_comments(store):
 
 
 def allocate_candidates(store, revision_id=None):
+    from .production_current import enabled
+    if enabled(store):
+        return
     query = '''SELECT m.material_id,m.number,c.candidate_id,min(r.created_at) AS stamp
         FROM material_plan_members m JOIN material_candidate_members c ON c.revision_id=m.revision_id
         JOIN revisions r ON r.id=m.revision_id WHERE m.role='result' '''
@@ -193,6 +196,9 @@ def annotate(store, value, *, share_records=False):
                 if original == v:
                     return dict(annotated) if share_records else _clone_json_tree(annotated)
         result = {k:walk(i) for k,i in v.items()}
+        from .production_current import enabled, annotate as annotate_current
+        if record_key and 'version' in v and not v.get('submission_only'):
+            result = annotate_current(store, result)
         if v.get('kind') == 'RELATION' and v.get('payload', {}).get('relation_type') == 'business':
             from .business_relations import code as relation_code
             result['business_code'] = relation_code(store, v, codes)
@@ -212,7 +218,7 @@ def annotate(store, value, *, share_records=False):
                 cid = identity(v['payload'])
                 result['candidate_codes'] = [
                     {'material_id':mid,'version':version,'number':number,
-                     'code':codes.get(aliases.get(mid,mid),mid)+' / MV'+str(version).zfill(3)+' / MC'+str(number).zfill(3)}
+                     'code':codes.get(aliases.get(mid,mid),mid)+('' if enabled(store) else ' / MV'+str(version).zfill(3))+' / MC'+str(number).zfill(3)}
                     for (mid,version,candidate),number in candidates.items() if candidate == cid]
         if isinstance(oid, str) and codes.get(oid, '').startswith('E') and codes[oid][1:].isdigit():
             target = result.get('payload', result)

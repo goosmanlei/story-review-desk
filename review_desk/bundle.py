@@ -92,6 +92,10 @@ def _write_content(store, path):
 
 
 def export(store, export_dir):
+    from .production_current import enabled
+    if enabled(store):
+        from .production_current_bundle import export as export_current
+        return export_current(store, export_dir)
     if store.db.execute("SELECT 1 FROM objects WHERE kind IN ('JUDGMENT','REPRESENTATION') LIMIT 1").fetchone():
         raise ValueError('历史审批须先按准确迁移包退役，再生成有效完整导出')
     target=Path(export_dir);target.mkdir(parents=True,exist_ok=True)
@@ -230,6 +234,14 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
+    from .production_current import enabled
+    policy_path = store.db_path.parent.parent/'config/instance.json'
+    current_required = enabled(store) or (policy_path.exists() and json.loads(policy_path.read_text()).get('production_current_policy'))
+    if current_required and schema != 13:
+        raise ValueError('旧制作版本模型已退役；此实例只接受当前模型恢复包')
+    if schema == 13:
+        from .production_current_bundle import restore as restore_current
+        return restore_current(store, export_dir)
     if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}

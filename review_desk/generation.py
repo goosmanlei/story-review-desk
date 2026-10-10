@@ -183,6 +183,8 @@ def _snapshot(store, entity_id, revision_id=None):
     from .business_relations import archived_ids
     archived = archived_ids(store)
     rows=[r for r in rows if r['payload'].get('format') in p.FORMATS and r['object_id'] not in archived]
+    from .production_current import annotate as annotate_current, enabled as current_enabled
+    rows = [annotate_current(store, r) for r in rows]
     # Match the complete record projection used by current_records for assets.
     for row in rows:
         if row['kind']=='ASSET':
@@ -272,7 +274,7 @@ def _snapshot(store, entity_id, revision_id=None):
                         if related:targets[related['id']] = related
     from .material_versions import memberships as legacy_memberships, snapshot as legacy_snapshot
     legacy_versions={}
-    for row in [*data['requirements'],*[item['record'] for item in data['media']]]:
+    for row in ([] if current_enabled(store) else [*data['requirements'],*[item['record'] for item in data['media']]]):
         ids=[row['object_id']] if row['kind']=='REQUIREMENT' else sorted({m['material_id'] for m in legacy_memberships(store,row['id'])},key=lambda mid:(mid==row['object_id'],mid))
         for mid in ids:
             if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
@@ -384,7 +386,13 @@ def package(store, requirement_id):
     if (ready.get('method_basis') or {}).get('execution'):
         from .methods import read
         method_snapshot = read(store, **ready['method_basis']['execution'])['payload']
-    return {'format':'generation-package-v1','requirement':ref(ready['requirement']),
+    from .production_current import enabled, marker, checksum
+    current_fields = {}
+    if enabled(store):
+        basis = {r['object_id']: r for _, r in p.references(ready['requirement']['payload'])}
+        current_fields = {'current_marker': marker(ready['requirement']),
+                          'current_basis': [{**r, 'content_sha256': checksum(p.ref_record(store,r)['payload'])} for r in basis.values()]}
+    return {'format':'generation-package-v1','requirement':ref(ready['requirement']), **current_fields,
             **({'method_basis': ready['method_basis']} if ready.get('method_basis') else {}),
             **({'method_snapshot': method_snapshot} if method_snapshot else {}),
             'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
@@ -415,6 +423,17 @@ def validate_call(store, object_id, payload):
         if old['payload'].get('actual_seed') is not None and payload.get('actual_seed')!=old['payload']['actual_seed']:raise Conflict('cannot rewrite actual random seed')
         for key in ('generation_requirement','generation_acceptances','prepared_plan','material_definition_id','method','tool','model','parameters','prompt','inputs','output','randomization','execution','method_basis'):
             if payload.get(key)!=old['payload'].get(key):raise Conflict('调用状态登记不能改写已经执行的输入')
+        from .production_current import enabled, submission
+        if enabled(store):
+            if old['payload']['status'] == 'completed' and payload['status'] != 'completed':
+                raise Conflict('已完成的真实调用不能被迟到状态撤回')
+            for field in ('response', 'cost', 'request_id'):
+                if field in old['payload'] and payload.get(field) != old['payload'][field]:
+                    raise Conflict('不能改写原调用回执：'+field)
+            request = submission(store,object_id)['snapshot']['request']
+            for key, value in request.items():
+                if payload.get(key) != value:
+                    raise Conflict('提交快照不可改写：'+key)
         return
     if 'generation_acceptances' in payload:
         raise ValueError('新调用不接受已退役的审批字段')

@@ -74,6 +74,8 @@ def scheme(payload, kind):
 
 
 def identity(payload):
+    if payload.get('candidate_identity'):
+        return payload['candidate_identity']
     originals = sorted({c['sha256'] for c in payload.get('components', []) if c['role'] == 'original'})
     if not originals or payload.get('placeholder'):
         return None
@@ -166,6 +168,9 @@ def call_version(store, mid, row):
 
 
 def register(store, row):
+    from .production_current import enabled
+    if enabled(store):
+        return
     value = row['payload']
     if row['kind'] == 'REQUIREMENT':
         if memberships(store, row['id']):
@@ -213,6 +218,11 @@ def comment_scope(store, comment, context):
 
 
 def card_counts(store, material_ids=None):
+    from .production_current import enabled
+    if enabled(store):
+        rows = {r['material_id']: r['n'] for r in store.db.execute('SELECT material_id,count(*) n FROM production_candidate_targets GROUP BY material_id')}
+        ids = material_ids if material_ids is not None else rows
+        return {mid: {'current_content': True, 'candidate_count': rows.get(mid, 0)} for mid in ids}
     """Registered versions and distinct real candidates across those versions.
 
     Missing registration stays unknown; neither files nor failed calls create
@@ -242,6 +252,9 @@ def card_counts(store, material_ids=None):
 
 
 def snapshot(store, mid):
+    from .production_current import enabled, material_snapshot
+    if enabled(store):
+        return material_snapshot(store, mid)
     from .version_consolidation import version_route
     result = []
     for v in store.db.execute('SELECT * FROM material_plan_versions WHERE material_id=? ORDER BY number DESC', (mid,)):
