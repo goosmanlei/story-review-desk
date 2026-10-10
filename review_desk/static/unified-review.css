@@ -241,3 +241,8 @@
 .material-plan pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.7}
 
 .av-product-tabs button{font:inherit;font-size:14px;line-height:1.5;border:1px solid transparent;border-radius:4px 4px 0 0;background:transparent;color:var(--desk-ink);padding:8px 16px;cursor:pointer}.av-product-tabs button:hover{background:#eef0e5}.av-product-tabs button[aria-selected=true]{background:#e4ecdd;border-color:#81987a;box-shadow:inset 0 -2px #81987a}.av-product-tabs button:focus-visible,.av-three-part .review-reference-button:focus-visible{outline:2px solid #81987a;outline-offset:2px}.av-three-part .shot-reference-slot{padding:6px 0}.av-three-part .shot-reference-slot .production-meta{display:block;margin-top:4px}
+
+.relation-summary-caption{border:0!important;border-radius:0!important;box-shadow:none!important;padding:5px 9px!important;background:var(--desk-paper,#fffef9)}
+.relation-summary-caption p{margin:3px 0;font-size:14px;line-height:1.55}
+.relation-summary-popover{position:fixed;z-index:10020;max-width:min(380px,calc(100vw - 24px));max-height:70vh;overflow:auto;padding:13px 16px;background:var(--desk-paper,#fffef9);color:var(--desk-text,#30352e);border:1px solid #aaba9d;border-radius:7px;box-shadow:0 7px 24px #22301821;line-height:1.65}
+.relation-summary-popover p{margin:5px 0 9px;font-size:14px}.relation-summary-popover .business-code{overflow-wrap:anywhere}.relation-summary-popover button{margin-right:8px}

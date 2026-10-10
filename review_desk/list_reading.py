@@ -92,4 +92,6 @@ def ref_record(store, reference):
 def rows(store, kind, condition='', params=()):
     sql = ('SELECT r.id,r.object_id,r.version,r.payload AS stored_payload,r.created_at,'
            'o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind=?')
-    return [project(store, row) for row in store.db.execute(sql + (' AND ' + condition if condition else '') + ' ORDER BY o.id', (kind, *params))]
+    from .business_relations import archived_ids
+    archived = archived_ids(store)
+    return [project(store, row) for row in store.db.execute(sql + (' AND ' + condition if condition else '') + ' ORDER BY o.id', (kind, *params)) if row['object_id'] not in archived]

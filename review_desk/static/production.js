@@ -1,7 +1,7 @@
 /* Production readers share app.js comments, drafts, keyboard handling and API. */
 const productionKinds={ENTITY:'实体',STATE:'实体状态',REPRESENTATION:'制作设定',INPUT_LOCK:'剧本依据',AV_EPISODE:'视听集',AV_SCENE:'视听场',AV_SHOT:'视听镜头',MATERIAL_RELATION:'素材关系',REQUIREMENT:'素材需求',ASSET:'实际素材',CALL:'实际制作',RELATION:'明确采用',JUDGMENT:'审阅结论'};
 const productionGroups={'settings.workspace':['ENTITY','STATE','REPRESENTATION','AV_SCENE','AV_SHOT'],'materials.workspace':['REQUIREMENT','ASSET']};
-const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='settings.workspace'&&r.kind==='RELATION'&&r.payload.relation_type==='entity';
+const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='settings.workspace'&&r.kind==='RELATION'&&['entity','business'].includes(r.payload.relation_type);
 const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',review_reference:'独立审阅参考',pending:'待审',passed:'通过',changes_requested:'需修改',rejected:'未通过',accepted:'用户接受',impact_resolved:'影响已处理'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';

@@ -378,6 +378,18 @@ class ReviewHandler(BaseHTTPRequestHandler):
                         reference['scene_id'] = param('scene_id')
                     with production.read_scope(store):
                         return self._json(related(store, reference))
+                if path == '/api/production/relations':
+                    from . import business_relations as relations
+                    with production.read_scope(store):
+                        if param('code'):
+                            return self._json(relations.resolve_code(store, param('code')))
+                        if param('requirement_id'):
+                            need = production.record(store, param('requirement_id'), param('revision_id'))
+                            if need['kind'] != 'REQUIREMENT':
+                                raise ValueError('关系摘要需要准确生成方案')
+                            return self._json({'record': {'object_id': need['object_id'], 'revision_id': need['id']},
+                                'inputs': [relations.input_context(store, need['object_id'], item) for item in need['payload'].get('generation', {}).get('inputs', [])]})
+                        return self._json({'relations': relations.current(store, param('endpoint'))})
                 if path == '/api/production/material-relations':
                     from .material_relations import review_context
                     with production.read_scope(store):

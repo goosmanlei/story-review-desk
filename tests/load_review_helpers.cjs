@@ -10,6 +10,11 @@ const breakdown=fs.readFileSync(path.join(root,'production-breakdown.js'),'utf8'
 const titles=['breakdownSceneTitle','breakdownShotTitle'].map(name=>{const start=breakdown.indexOf('function '+name+'(');return [name,breakdown.slice(start,breakdown.indexOf('\nfunction ',start+1))]});
 const presentation=['productionButton','reviewChoiceButtons','materialModelCode'].map(name=>{const source=fs.readFileSync(path.join(root,name==='productionButton'?'production.js':'material-review.js'),'utf8'),start=source.indexOf('function '+name+'(');return [name,source.slice(start,source.indexOf('\nfunction ',start+1))]});
 module.exports=context=>{
+  if(context.document&&!context.document.createTextNode)context.document.createTextNode=text=>{const node=context.document.createElement?context.document.createElement('#text'):context.el('#text');node.textContent=text;return node};
+  for(const name of ['renderLinkedPrompt','bindRelationSummary'])if(typeof context[name]!=='function'){
+    const source=name==='renderLinkedPrompt'?breakdown:fs.readFileSync(path.join(root,'entity-relations.js'),'utf8');
+    const start=source.indexOf('function '+name+'(');vm.runInContext(source.slice(start,source.indexOf('\nfunction ',start+1)),context);
+  }
   const boundary=fs.readFileSync(path.join(root,'app.js'),'utf8');
   for(const name of ['reviewURL','reviewPublicationChanged','reviewFetch'])if(typeof context[name]!=='function'){const start=boundary.indexOf((name==='reviewFetch'?'async ':'')+'function '+name+'('),end=boundary.indexOf('\n}',start)+2;vm.runInContext(boundary.slice(start,end),context);}
   // These unrelated async panels are covered by browser and dedicated tests.

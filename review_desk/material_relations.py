@@ -46,6 +46,10 @@ def validate(store, payload):
 
 def rules(store, value, requirement_id=None):
     if value.get('relation'):
+        from .business_relations import input_rules
+        selected = input_rules(store, requirement_id, value)
+        if selected is not None:
+            return selected
         relation = p.ref_record(store, value['relation'], {'MATERIAL_RELATION'})['payload']
         if requirement_id and relation['downstream_id'] != requirement_id:
             raise ValueError('方案关系不属于当前下游需求')
@@ -136,6 +140,17 @@ def cycle_issues(store, need):
 def for_material(store, material_id, revision_id=None):
     """Read named uses of the displayed revision, never invent old lineage."""
     selected = p.record(store, material_id, revision_id)
+    from . import business_relations as unified
+    if unified.enabled(store):
+        rows = {r['object_id']: r for r in unified.current(store, material_id)} if selected['id'] == selected['current_revision'] else {}
+        for item in selected['payload'].get('generation', {}).get('inputs', []):
+            exact = unified.exact_input_relation(store, material_id, item)
+            if exact:
+                rows[exact['object_id']] = exact
+        for row in rows.values():
+            if unified.is_business(row):
+                row['endpoint_records'] = [p.record(store, oid) for oid in row['payload']['endpoints']]
+        return list(rows.values())
     declared = {i['relation']['revision_id'] for i in selected['payload'].get('generation', {}).get('inputs', []) if i.get('relation')}
     current = selected['id'] == selected['current_revision']
     result = {r['id']: r for r in p.current_records(store, {'MATERIAL_RELATION'})

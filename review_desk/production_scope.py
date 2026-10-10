@@ -80,6 +80,10 @@ def projection(store, entries, episode=None, revision=None, scene=None):
     contextual = defaultdict(list)
     for row in light.rows(store, 'MATERIAL_RELATION'):
         contextual[row['payload']['context']['revision_id']].append(row)
+    from .business_relations import material_bindings
+    unified_contextual = defaultdict(list)
+    for relation, subject, context in material_bindings(store):
+        unified_contextual[context['revision_id']].append((relation, subject))
 
     for position, loc in positions:
         evidence = {'position': b.ref(position), 'title': position['payload']['title'], 'kind': 'production_use'}
@@ -106,6 +110,8 @@ def projection(store, entries, episode=None, revision=None, scene=None):
                     visit(light.ref_record(store, value.get('reference', value)),
                           {'kind': 'actual_input', 'call': b.ref(call), 'input': value}, False)
         def at_scope(reference):
+            for relation, subject in unified_contextual[reference['revision_id']]:
+                visit(light.ref_record(store, subject), {'kind': 'business_relation', 'relation_record': b.ref(relation)}, False)
             for edge in contextual[reference['revision_id']]:
                 visit(light.ref_record(store, edge['payload']['upstream']),
                       {'kind': 'alternative' if edge['payload']['semantics']=='alternative' else 'material_relation', 'relation_record': b.ref(edge)}, False)

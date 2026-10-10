@@ -321,11 +321,13 @@ def _snapshot(store, entity_id, revision_id=None):
     rows=[p.record_view(r) for r in store.db.execute("""SELECT r.*,o.kind,o.current_revision
         FROM objects o JOIN revisions r ON r.id=o.current_revision
         WHERE o.kind IN ('STATE','ASSET','REPRESENTATION','AV_SCENE','AV_SHOT')
-        OR (o.kind='RELATION' AND json_extract(r.payload,'$.relation_type')='entity')
+        OR (o.kind='RELATION' AND json_extract(r.payload,'$.relation_type') IN ('entity','business'))
         OR (o.kind='REQUIREMENT' AND json_extract(r.payload,'$.scope.object_id') IN
             (SELECT s.id FROM objects s JOIN revisions sr ON sr.id=s.current_revision
              WHERE s.kind='STATE' AND json_extract(sr.payload,'$.entity.object_id')=?)) ORDER BY o.id""", (entity_id,))]
-    rows=[r for r in rows if r['payload'].get('format') in p.FORMATS]
+    from .business_relations import archived_ids
+    archived = archived_ids(store)
+    rows=[r for r in rows if r['payload'].get('format') in p.FORMATS and r['object_id'] not in archived]
     # Match the complete record projection used by current_records for assets.
     for row in rows:
         if row['kind']=='ASSET':

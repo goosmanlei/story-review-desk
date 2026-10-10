@@ -12,7 +12,8 @@ def brief(payload):
             if k not in ('generation', 'method_basis', 'status', 'withdrawal_reason', 'required', 'blocks', 'method_adjustment', 'shot_reference_operation')}
 
 
-def inputs(store, payload, baseline=None, supporting=None):
+def inputs(store, payload, baseline=None, supporting=None, include_relations=True,
+           target_id=None, relation_contexts=None):
     context = brief(payload)
     # Keep each distinct range. Two references to the same source revision
     # can carry different block selections; neither may replace the other.
@@ -30,6 +31,37 @@ def inputs(store, payload, baseline=None, supporting=None):
                 content = {**content, 'blocks': [b for b in content['blocks'] if b['id'] in ref['block_ids']]}
         records.append({'object_id': row['object_id'], 'revision_id': row['id'], 'kind': row['kind'], 'payload': content})
     result = {'context': context, 'records': records}
+    if include_relations:
+        # Freeze the actual planned choices and the full exact relationship
+        # readings. A later relationship revision cannot rewrite this method run.
+        choices = copy.deepcopy(payload.get('generation', {}).get('inputs', []))
+        result['generation_inputs'] = choices
+        readings = {}
+        for item in choices:
+            for _, reference in p.references(item):
+                p.source_check(store, reference)
+                row = p.ref_record(store, reference)
+                reading = {'object_id': row['object_id'], 'revision_id': row['id'], 'kind': row['kind']}
+                if row['kind'] in ('ASSET', 'CALL'):
+                    # The selected original is a live exact reference. Its
+                    # historical candidate list is a document, not new inputs:
+                    # it can legitimately retain retired/unavailable ancestors.
+                    reading['content_json'] = json.dumps(row['payload'], ensure_ascii=False, sort_keys=True)
+                else:
+                    reading['payload'] = copy.deepcopy(row['payload'])
+                readings[row['id']] = reading
+        result['relation_readings'] = sorted(readings.values(), key=lambda r: r['revision_id'])
+        if relation_contexts is None:
+            from .business_relations import current
+            related = {r['id']: r for oid in (target_id, payload.get('scope', {}).get('object_id')) if oid
+                       for r in current(store, oid) if r['payload'].get('status') != 'withdrawn'}
+            relation_contexts = [{'object_id': r['object_id'], 'revision_id': r['id']} for r in related.values()]
+        result['contextual_relation_references'] = copy.deepcopy(relation_contexts)
+        result['contextual_relations'] = []
+        for reference in relation_contexts:
+            row = p.ref_record(store, reference)
+            result['contextual_relations'].append({'object_id': row['object_id'], 'revision_id': row['id'],
+                                                  'kind': row['kind'], 'payload': copy.deepcopy(row['payload'])})
     if baseline:
         old = p.ref_record(store, baseline, {'REQUIREMENT'})
         result['baseline'] = {'reference': baseline, 'generation': old['payload'].get('generation')}
@@ -87,7 +119,7 @@ def prepare(store, value):
                     '方法选择条件不能改变素材媒体类型')
     request = {'work_type': 'media-plan', 'run_id': value['run_id'], 'step_id': value['step_id'],
                'target': value['object_id'], 'conditions': {**conditions, 'media_type': payload['media_type']},
-               'inputs': inputs(store, payload, baseline, value.get('supporting_references'))}
+               'inputs': inputs(store, payload, baseline, value.get('supporting_references'), target_id=value['object_id'])}
     execution = methods.prepare(store, request)
     methods.require(execution['payload']['package']['steps'] == ['draft', 'review', 'result'],
                     '媒体制作方法需按 draft、review、result 交付；请修正环节绑定')
@@ -143,6 +175,29 @@ def check_adjustment(store, object_id, payload):
     parent = p.ref_record(store, receipt['parent'], {'REQUIREMENT'})
     methods.require(parent['object_id'] == object_id, '制作选择依据属于其他素材')
     old = parent['payload']
+    if receipt['operation'] == 'relation-contract':
+        from .business_relations import CHOICES, exact_input_relation, is_business, legacy_endpoints, pair
+        from .material_relations import rules
+        before, after = copy.deepcopy(old), copy.deepcopy(payload)
+        before.pop('method_adjustment', None); after.pop('method_adjustment', None)
+        aa, bb = before['generation']['inputs'], after['generation']['inputs']
+        methods.require(len(aa) == len(bb), '统一关系不能增减或重排准确输入')
+        for index, (a, b) in enumerate(zip(aa, bb)):
+            if not a.get('relation'):
+                methods.require(a == b, '统一关系不能改变没有关系的输入')
+                continue
+            original = p.ref_record(store, a['relation'])
+            current = exact_input_relation(store, object_id, b)
+            methods.require(current and is_business(current) and pair(legacy_endpoints(original)) == pair(current['payload']['endpoints']), '统一关系端点不匹配')
+            expected = copy.deepcopy(a)
+            expected['relation'] = copy.deepcopy(b['relation'])
+            for key, value in rules(store, a, object_id).items():
+                if key in CHOICES:
+                    expected[key] = value
+            methods.require(expected == b, '统一关系不能改变原选择、必要性、候选或范围')
+            aa[index] = copy.deepcopy(b)
+        methods.require(before == after, '关系契约迁移不能夹带创作修订')
+        return parent
     if receipt['operation'] == 'administrative':
         ignored = {'method_adjustment', 'status', 'required', 'withdrawal_reason'}
         methods.require({k:v for k,v in old.items() if k not in ignored} == {k:v for k,v in payload.items() if k not in ignored}, '撤回或必需性调整不能改写方案')
@@ -242,7 +297,9 @@ def verify_authored(store, object_id, payload, revision_id=None):
     baseline = execution['payload']['inputs'].get('baseline', {}).get('reference')
     methods.require(not baseline or baseline['object_id'] == object_id, '方法起稿依据属于其他制作对象')
     methods.verify_execution(store, basis['execution'], identity,
-                             inputs(store, payload, baseline, execution['payload']['inputs'].get('supporting_references')))
+                             inputs(store, payload, baseline, execution['payload']['inputs'].get('supporting_references'),
+                                    include_relations='relation_readings' in execution['payload']['inputs'],
+                                    relation_contexts=execution['payload']['inputs'].get('contextual_relation_references', [])))
     artifact = methods.read(store, **basis['artifact'])
     value = artifact['payload']
     methods.require(value['format'] == methods.FORMATS['artifact'] and value['execution'] == basis['execution']

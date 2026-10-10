@@ -63,6 +63,11 @@ def main():
     source.add_argument('file', type=Path)
     source.add_argument('--source-root', type=Path, required=True)
     subs.add_parser("objects")
+    relations_get = subs.add_parser('production-relations')
+    relations_get.add_argument('--endpoint')
+    relations_get.add_argument('--code')
+    relations_migrate = subs.add_parser('production-relations-migrate')
+    relations_migrate.add_argument('file', type=Path)
     production_get = subs.add_parser("production-get")
     production_get.add_argument("--kind", choices=production.KINDS)
     production_get.add_argument("--object", dest="object_id")
@@ -174,6 +179,12 @@ def main():
         elif args.command == 'material-model-verify':
             from .material_model import verify
             result=verify(store)
+        elif args.command == 'production-relations':
+            from . import business_relations as relations
+            result = relations.resolve_code(store, args.code) if args.code else relations.current(store, args.endpoint)
+        elif args.command == 'production-relations-migrate':
+            from .business_relations import apply_migration
+            result = apply_migration(store, json.loads(args.file.read_text()))
         elif args.command == "production-get":
             result = production.snapshot(store, args.kind, args.object_id, args.revision_id)
         elif args.command == 'production-entity-review':

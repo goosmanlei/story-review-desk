@@ -118,6 +118,8 @@ def _export(store, export_dir, content_file):
         framework['audiovisual_notes'] = dump_av_notes(store)
         from .audiovisual_cleanup import dump as dump_av_cleanup
         framework.update(dump_av_cleanup(store))
+        from .business_relations import dump as dump_business_relations
+        framework.update(dump_business_relations(store))
         from .version_consolidation import dump as dump_consolidation
         framework.update(dump_consolidation(store))
         framework["relation_redacted_comments"] = [dict(row) for row in store.db.execute("SELECT * FROM relation_redacted_comments ORDER BY comment_id")]
@@ -210,7 +212,7 @@ def _export(store, export_dir, content_file):
         hashes["assets/" + name] = digest(archive_files[name]) if name in archive_files else physical_file_hash(target / "assets" / name)
     audiovisual_baseline = any(json.loads(row['receipt']).get('format') == 'production-cutover-result-v1'
                               for row in framework.get('consolidation_runs', []))
-    manifest = {"schema_version": 10 if framework.get('audiovisual_cleanup_runs') else 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
+    manifest = {"schema_version": 11 if framework.get('business_relations') or framework.get('business_relation_runs') else 10 if framework.get('audiovisual_cleanup_runs') else 9 if audiovisual_baseline else 8 if framework.get('consolidation_runs') else 7 if complete_model else 5, "sources": len(materials), "comments": len(comments["comments"]),
                 "events": len(comments["events"]), "objects": len(framework["objects"]),
                 "revisions": len(framework["revisions"]), "configurations": len(configurations["records"]), "files": hashes}
     # All validation and hashing precede writes. Publish the manifest last;
@@ -226,7 +228,7 @@ def restore(store, export_dir):
     target = Path(export_dir)
     manifest = json.loads((target / "manifest.json").read_text())
     schema = manifest.get("schema_version")
-    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
+    if schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
         raise ValueError("unsupported export schema")
     required = {'materials.json', 'comments.json'}
     if schema >= 2:
@@ -245,6 +247,9 @@ def restore(store, export_dir):
     materials = json.loads((target / "materials.json").read_text())
     comments = json.loads((target / "comments.json").read_text())
     framework = json.loads((target / "objects.json").read_text()) if schema >= 2 else None
+    from .business_relations import TABLES as RELATION_TABLES
+    if schema >= 11 and not set(RELATION_TABLES) <= set(framework):
+        raise ValueError('统一关系身份、别名与迁移凭据缺失')
     from .production_cutover import RETIRED_KINDS
     if any(row['kind'] in RETIRED_KINDS for row in (framework or {}).get('objects', [])):
         raise ValueError('retired production structures cannot be restored; use a clean audiovisual export')
@@ -445,6 +450,8 @@ def restore(store, export_dir):
             restore_av_notes(store, framework.get('audiovisual_notes', []) if framework else [])
             from .audiovisual_cleanup import restore as restore_av_cleanup
             restore_av_cleanup(store, framework or {})
+            from .business_relations import restore as restore_business_relations
+            restore_business_relations(store, framework or {})
             from .state_cleanup import receipt_payload
             for table,keys in (("state_cleanup_receipts",("revision_id","object_id","entity_ref","original_sha256","receipt_sha256","reason")),("state_cleanup_preserved",("revision_id","payload_sha256")),("state_cleanup_comments",("comment_id","object_id","revision_id","anchor_sha256"))):
                 for row in framework.get(table,[]) if framework else []:

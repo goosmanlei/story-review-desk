@@ -495,6 +495,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                     raise ValueError("state title review requires only a title change and the exact new state target")
         from .production_changes import validate as validate_change
         validate_change(store, object_id, p, check_current)
+    elif kind == "RELATION" and p.get("relation_type") == "business":
+        from .business_relations import validate
+        validate(store, object_id, p, check_current=check_current)
     elif kind == "RELATION" and p.get("relation_type") in ("applicability", "occurrence"):
         from .production_breakdown import validate_relation
         validate_relation(store, p)
@@ -519,6 +522,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
 
 def current_records(store, kinds=None):
     result = []
+    from .business_relations import archived_ids
+    archived = archived_ids(store)
     reads = getattr(store, '_production_reads', None)
     key = tuple(sorted(kinds)) if kinds else ()
     cache = reads['current'] if reads is not None else {}
@@ -531,6 +536,8 @@ def current_records(store, kinds=None):
         rows = store.db.execute(query+" ORDER BY o.id",values).fetchall()
         if reads is not None:cache[key] = rows
     for row in rows:
+        if row['object_id'] in archived:
+            continue
         if row["kind"] in KINDS and (not kinds or row["kind"] in kinds):
             value=record_view(row)
             if value["payload"].get("format") in FORMATS:
@@ -584,6 +591,9 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
             if object_id in resolved:
                 raise ValueError("an object may occur only once per batch")
             p = copy.deepcopy(source.get("payload"))
+            if kind == 'RELATION' and p.get('relation_type') == 'business':
+                from .business_relations import normalize
+                p = normalize(p)
             for _, ref in references(p):
                 if isinstance(ref["revision_id"], str) and ref["revision_id"].startswith("@"):
                     alias = ref["revision_id"][1:]

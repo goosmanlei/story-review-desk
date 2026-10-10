@@ -1,4 +1,62 @@
-/* Direct relationships stay in context; labels are exact commentable text. */
+/* Summaries are reading aids, never character anchors into the original. */
+let relationSummaryView=null,relationSummaryTimer=null,relationSummaryRestoringFocus=false;
+function closeRelationSummary(){
+  clearTimeout(relationSummaryTimer);relationSummaryTimer=null;
+  if(!relationSummaryView)return;
+  relationSummaryView.trigger.removeAttribute('aria-describedby');
+  relationSummaryView.observer?.disconnect();relationSummaryView.node.remove();relationSummaryView=null;
+}
+function openRelationOriginal(row,trigger){
+  closeRelationSummary();rememberMaterialRelations([row]);
+  const {dialog,body}=openReviewDialog('关系原文 · '+businessTitle(row),trigger,'material-reference-dialog');
+  const session=referenceReviewSession(dialog,{record:row,history:[row],uses:[]});dialog.reviewFocus=session.focus;
+  renderOriginalReviewText(body,row);entitySources(body,row);session.focus();paintProductionReview();renderComments();
+}
+function showRelationSummary(trigger,context){
+  if(!trigger.isConnected||!context?.summary)return;
+  closeRelationSummary();
+  const row=context.record,node=el('div','relation-summary-popover');node.id='relation-summary-'+(++relationGraphSerial);
+  node.setAttribute('role','dialog');node.setAttribute('aria-label','关系摘要');
+  nodeText('small','business-code',context.code||businessCode(row),node);
+  const summary=nodeText('p',null,context.summary,node);summary.id=node.id+'-text';trigger.setAttribute('aria-describedby',summary.id);
+  const action=productionButton(node,'原文与意见',()=>openRelationOriginal(row,trigger));action.className='review-reference-button';
+  for(const ref of row.payload.sources||[]){
+    const story=!!(ref.scene_id||ref.block_ids?.length||state.screenplays?.some(s=>s.episodes?.some(e=>e.id===ref.revision_id)));
+    const label=story?relationSceneLabel(ref):businessCode(ref);
+    if(label)materialReferenceLink(node,ref,label,story);
+  }
+  // A native modal makes its outside DOM inert and paints above it. Keep the
+  // reading surface inside the owning modal so it remains visible/focusable.
+  (trigger.closest('dialog')||document.body).append(node);
+  const position=()=>{if(!trigger.isConnected){closeRelationSummary();return}const r=trigger.getBoundingClientRect(),b=node.getBoundingClientRect();node.style.left=Math.max(12,Math.min(r.left,innerWidth-b.width-12))+'px';node.style.top=Math.max(12,r.bottom+8+b.height<innerHeight-12?r.bottom+8:r.top-b.height-8)+'px'};
+  const observer=new MutationObserver(()=>{if(!trigger.isConnected)closeRelationSummary()});observer.observe(document.body,{childList:true,subtree:true});
+  relationSummaryView={trigger,node,observer,position};position();
+  node.onpointerenter=()=>clearTimeout(relationSummaryTimer);
+  node.onpointerleave=()=>scheduleRelationSummaryClose(trigger);
+  node.onfocusout=()=>scheduleRelationSummaryClose(trigger);
+}
+function scheduleRelationSummaryClose(trigger){
+  clearTimeout(relationSummaryTimer);relationSummaryTimer=setTimeout(()=>{const view=relationSummaryView;if(view?.trigger===trigger&&!view.node.matches(':hover')&&!view.node.contains(document.activeElement)&&document.activeElement!==trigger)closeRelationSummary()},180);
+}
+function bindRelationSummary(trigger,context){
+  if(!trigger||!context?.summary)return;
+  trigger.dataset.relationRevision=context.record.id;
+  trigger.addEventListener('pointerenter',()=>{clearTimeout(relationSummaryTimer);relationSummaryTimer=setTimeout(()=>showRelationSummary(trigger,context),240)});
+  trigger.addEventListener('pointerleave',()=>scheduleRelationSummaryClose(trigger));
+  trigger.addEventListener('focus',()=>{if(!relationSummaryRestoringFocus)showRelationSummary(trigger,context)});
+  trigger.addEventListener('blur',()=>scheduleRelationSummaryClose(trigger));
+  trigger.addEventListener('keydown',event=>{if(event.key==='ArrowDown'){event.preventDefault();showRelationSummary(trigger,context);relationSummaryView?.node.querySelector('button')?.focus()}});
+  trigger.addEventListener('click',()=>closeRelationSummary());
+}
+function relationEndpointRefs(row,data=null){
+  if(row.payload.entities)return row.payload.entities;
+  return (row.payload.endpoints||[]).map(oid=>{const record=[data?.entity,...(data?.related_entities||[])].find(r=>r?.object_id===oid);return {object_id:oid,...(record?{revision_id:record.id}:{})}});
+}
+if(typeof document!=='undefined'){
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&relationSummaryView){event.preventDefault();event.stopImmediatePropagation();const trigger=relationSummaryView.trigger;const within=relationSummaryView.node.contains(document.activeElement);closeRelationSummary();if(within){relationSummaryRestoringFocus=true;try{trigger.focus({preventScroll:true})}finally{relationSummaryRestoringFocus=false}}}},true);
+  window.addEventListener('resize',()=>relationSummaryView?.position());
+  document.addEventListener('scroll',()=>relationSummaryView?.position(),true);
+}
 let relationGraphSerial=0;
 function relationGraphPosition(center,width,height,scale,offset={x:0,y:0}){
   return {x:center.x*scale+offset.x-width/2,y:center.y*scale+offset.y-height/2};
@@ -19,7 +77,7 @@ function relationCurve(start,captionLeft,captionRight,end,forward=true){
 }
 function relationSelection(rows,entityId,selection){
   if(!selection)return [];
-  return rows.filter(r=>selection.kind==='edge'?r.object_id===selection.id:r.payload.entities.some(e=>e.object_id===selection.id)&&r.payload.entities.some(e=>e.object_id===entityId)).map(r=>r.object_id);
+  return rows.filter(r=>selection.kind==='edge'?r.object_id===selection.id:relationEndpointRefs(r).some(e=>e.object_id===selection.id)&&relationEndpointRefs(r).some(e=>e.object_id===entityId)).map(r=>r.object_id);
 }
 function renderEntityRelationGraph(root,data){
   const section=el('section','entity-relations'),heading=el('div','relation-heading');section.setAttribute('aria-label','实体关系');nodeText('h3',null,'关系',heading);section.append(heading);root.append(section);
@@ -46,19 +104,19 @@ function renderEntityRelationGraph(root,data){
   }
   const edgeLayer=make('g'),central=node(entity,true);
   for(const group of relationGroups(data,rows))for(const row of group.rows){
-    const other=row.payload.entities.find(r=>r.object_id!==entity.object_id),record=by.get(other?.object_id);if(!record)continue;
+    const other=relationEndpointRefs(row,data).find(r=>r.object_id!==entity.object_id),record=by.get(other?.object_id);if(!record)continue;
     if(!groups.has(other.object_id))groups.set(other.object_id,{node:node(record,false,other),items:[]});
-    const edge=make('path',{class:'relation-edge'+(group.main?' primary':''),'data-relation-id':row.object_id,'marker-end':`url(#${markerId})`},null,edgeLayer),hit=make('path',{class:'relation-edge-hit','data-relation-id':row.object_id,role:'button',tabindex:0,'aria-label':'选择关系：'+businessCode(row)+' · '+row.payload.label,'aria-pressed':'false'},null,edgeLayer);
-    const foreign=make('foreignObject',{width:captionWidth,'data-relation-caption':row.object_id}),host=materialTextSurface(foreign,row);host.classList.add('relation-text');host.dataset.relationId=row.object_id;host.tabIndex=0;host.setAttribute('aria-label','选择关系说明：'+businessCode(row)+' · '+row.payload.label);host.setAttribute('aria-keyshortcuts','Enter Space');
+    const summary=row.payload.summary||row.payload.label||'历史关系说明未保留';
+    const edge=make('path',{class:'relation-edge'+(group.main?' primary':''),'data-relation-id':row.object_id},null,edgeLayer),hit=make('path',{class:'relation-edge-hit','data-relation-id':row.object_id,role:'button',tabindex:0,'aria-label':'选择关系：'+businessCode(row)+' · '+summary,'aria-pressed':'false'},null,edgeLayer);
+    const foreign=make('foreignObject',{width:captionWidth,'data-relation-caption':row.object_id}),host=el('div','relation-text relation-summary-caption');foreign.append(host);host.dataset.relationId=row.object_id;host.tabIndex=0;host.setAttribute('aria-label','选择关系摘要：'+businessCode(row)+' · '+summary);host.setAttribute('aria-keyshortcuts','Enter Space ArrowDown');
     const select=e=>{if(canSelect(e)){e.stopPropagation();choose({kind:'edge',id:row.object_id})}};hit.onclick=host.onclick=select;
     const keys=e=>{if(e.target===e.currentTarget&&['Enter',' '].includes(e.key)){e.preventDefault();e.stopPropagation();choose({kind:'edge',id:row.object_id})}};hit.onkeydown=host.onkeydown=keys;
-    nodeText('small','business-code',businessCode(row),host);for(const block of productionTextBlocks(row)){const label=nodeText('p','relation-caption',block.text,host);label.dataset.blockId=block.id}
-    if(row.payload.basis==='production')nodeText('small','production-meta','制作选择',host);
-    const references=row.payload.applies_to?.length?row.payload.applies_to:row.payload.sources||[],sources=el('div','relation-sources');nodeText('span','production-meta','剧情依据 · '+references.length,sources);for(const source of references)materialReferenceLink(sources,source,relationSceneLabel(source),true);host.append(sources);
+    nodeText('small','business-code',businessCode(row),host);nodeText('p','relation-caption',summary,host);
+    bindRelationSummary(hit,{record:row,summary});bindRelationSummary(host,{record:row,summary});
     const item={row,edge,hit,foreign,host,other:other.object_id};items.push(item);groups.get(other.object_id).items.push(item);
   }
   function paintSelection(){
-    const selected=new Set(relationSelection(rows,entity.object_id,data.graphSelection)),ends=new Set();for(const item of items){const on=selected.has(item.row.object_id);if(on)for(const e of item.row.payload.entities)ends.add(e.object_id);item.edge.classList.toggle('selected',on);item.host.classList.toggle('selected',on);item.hit.setAttribute('aria-pressed',String(on));item.host.dataset.selected=String(on);const marker=`url(#${markerId+(on?'-selected':'')})`;item.edge.setAttribute('marker-end',marker);if(item.row.payload.direction==='mutual')item.edge.setAttribute('marker-start',marker)}
+    const selected=new Set(relationSelection(rows,entity.object_id,data.graphSelection)),ends=new Set();for(const item of items){const on=selected.has(item.row.object_id);if(on)for(const e of relationEndpointRefs(item.row,data))ends.add(e.object_id);item.edge.classList.toggle('selected',on);item.host.classList.toggle('selected',on);item.hit.setAttribute('aria-pressed',String(on));item.host.dataset.selected=String(on);const marker=`url(#${markerId+(on?'-selected':'')})`;item.edge.removeAttribute('marker-end');item.edge.removeAttribute('marker-start');if(item.row.payload.relation_type==='business'&&item.row.payload.direction!=='related')item.edge.setAttribute(item.row.payload.direction==='forward'?'marker-end':'marker-start',marker)}
     for(const n of [central,...[...groups.values()].map(g=>g.node)]){const on=ends.has(n.g.dataset.entityId);n.g.classList.toggle('selected',on);if(n.g.hasAttribute('aria-pressed'))n.g.setAttribute('aria-pressed',String(on))}
   }
   const controls=el('div','relation-controls');heading.append(controls);let scale=data.graphView?.scale||1,height=720,ready=false,mode=data.graphView?.mode||'original';
@@ -79,8 +137,8 @@ function renderEntityRelationGraph(root,data){
   const place=(n,x,y,h)=>{n.g.setAttribute('transform',`translate(${x} ${y})`);n.box.setAttribute('height',h);n.foreign.setAttribute('height',h)};
   function layout(){
     if(!viewport.isConnected)return;const saved=data.graphView;let y=30;
-    for(const group of groups.values()){const begin=y,nh=Math.max(72,group.node.host.scrollHeight);for(const item of group.items){const ch=Math.max(100,item.host.scrollHeight+12);item.y=y+ch/2;item.foreign.setAttribute('x',captionX);item.foreign.setAttribute('y',y);item.foreign.setAttribute('height',ch);y+=ch+28}const groupHeight=Math.max(nh,y-begin-28);group.y=begin+groupHeight/2;place(group.node,targetX,group.y-nh/2,nh);y=begin+groupHeight+42}
-    height=Math.max(240,y);const cy=height/2,ch=Math.max(72,central.host.scrollHeight);place(central,30,cy-ch/2,ch);for(const group of groups.values())for(const item of group.items){const d=relationCurve([230,cy],[captionX,item.y],[captionX+captionWidth,item.y],[targetX,group.y],item.row.payload.entities[0].object_id===entity.object_id);item.edge.setAttribute('d',d);item.hit.setAttribute('d',d)}
+    for(const group of groups.values()){const begin=y,nh=Math.max(72,group.node.host.scrollHeight);for(const item of group.items){const ch=Math.max(64,item.host.scrollHeight+8);item.y=y+ch/2;item.foreign.setAttribute('x',captionX);item.foreign.setAttribute('y',y);item.foreign.setAttribute('height',ch);y+=ch+28}const groupHeight=Math.max(nh,y-begin-28);group.y=begin+groupHeight/2;place(group.node,targetX,group.y-nh/2,nh);y=begin+groupHeight+42}
+    height=Math.max(240,y);const cy=height/2,ch=Math.max(72,central.host.scrollHeight);place(central,30,cy-ch/2,ch);for(const group of groups.values())for(const item of group.items){const d=relationCurve([230,cy],[captionX,item.y],[captionX+captionWidth,item.y],[targetX,group.y],relationEndpointRefs(item.row,data)[0].object_id===entity.object_id);item.edge.setAttribute('d',d);item.hit.setAttribute('d',d)}
     svg.setAttribute('viewBox',`0 0 ${width} ${height}`);ready=true;if(mode==='fit')scale=fit();resize(saved);paintSelection();
   }
   viewport.onscroll=remember;
@@ -99,9 +157,6 @@ function relationSceneLabel(source){
 }
 
 function renderEntityRelations(root,data){
-  const rows=(data.relationships||[]).map(r=>data.localVersions?.[r.object_id]||r).filter(r=>reviewWorkMatches(r));if(!rows.length)return;
-  const section=el('section','entity-relationships-reading');nodeText('h3',null,'人物与故事关系',section);
-  for(const row of rows){const line=el('article');renderOriginalReviewText(line,row);for(const ref of row.payload.entities||[])if(ref.object_id!==data.entity.object_id)productionRefLink(line,{...ref,kind:'ENTITY'},productionName(ref,(data.related_entities||[]).map(r=>({object_id:r.object_id,revision_id:r.id,title:r.payload.title}))));entitySources(line,row);section.append(line)}
-  const graph=productionButton(section,'用关系图查看',()=>{const {body}=openReviewDialog('人物关系',graph,'material-reference-dialog');renderEntityRelationGraph(body,data)});
-  root.append(section);
+  if(!(data.relationships||[]).length)return;
+  renderEntityRelationGraph(root,data);
 }

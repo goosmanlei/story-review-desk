@@ -32,7 +32,9 @@ def validate_relation(store, value):
 
 def rows(store, kind, condition='', params=()):
     sql = 'SELECT r.*,o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind=?'
-    return [p.record_view(r) for r in store.db.execute(sql+(' AND '+condition if condition else '')+' ORDER BY o.id', (kind, *params))]
+    from .business_relations import archived_ids
+    archived = archived_ids(store)
+    return [p.record_view(r) for r in store.db.execute(sql+(' AND '+condition if condition else '')+' ORDER BY o.id', (kind, *params)) if r['object_id'] not in archived]
 
 
 def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None):
@@ -42,7 +44,7 @@ def index(store, view, object_id=None, scope=None, scope_episode=None, scope_rev
     if object_id and not any(r['object_id']==object_id for r in values):
         selected=p.record(store,object_id)
         allowed={'ASSET','REQUIREMENT','CALL','JUDGMENT'}
-        if selected['kind'] in allowed or (view=='settings' and selected['kind']=='RELATION' and selected['payload'].get('relation_type')=='entity'):
+        if selected['kind'] in allowed or (view=='settings' and selected['kind']=='RELATION' and selected['payload'].get('relation_type') in ('entity','business')):
             values.append(selected)
     result={'records':values,'material_assets':{}}
     if view=='settings':
@@ -104,10 +106,18 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     if selected['payload'].get('reading_contract') == 'audiovisual-three-part-v1':
         direct = [read_ref(store, item['requirement']) for item in selected['payload'].get('products', [])]
     links = [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type'] in ('applicability','occurrence')]
+    from .business_relations import archived_ids, scope_links
+    unified = scope_links(store, ref(selected)) if selected['id'] == selected['current_revision'] else []
+    if selected['id'] == selected['current_revision']:
+        archived = archived_ids(store)
+        links = [r for r in links if r['object_id'] not in archived]
     entities = list(selected['payload'].get('entities', []))
     states = list(selected['payload'].get('states', []))
     occurrences = list(selected['payload'].get('occurrences', []))
     needs = {r['object_id']: r for r in direct if r['payload'].get('status') != 'withdrawn'}
+    for link, subject in unified:
+        if subject['kind'] == 'REQUIREMENT':
+            needs.setdefault(subject['object_id'], subject)
     for link in links:
         subject = read_ref(store, link['payload']['subject'])
         if subject['kind'] == 'REQUIREMENT':
@@ -127,7 +137,7 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     return {'record': selected, 'ancestors': ancestors(store, selected),
             'entities': [p.ref_record(store, r) for r in entities], 'states': [p.ref_record(store, r) for r in states],
             'continuity_states': [p.ref_record(store, r) for r in selected['payload'].get('continuity_context', [])],
-            'occurrences': occurrences, 'relations': links, 'requirements': list(needs.values()),
+            'occurrences': occurrences, 'relations': links, 'business_relations': [r for r, _ in unified], 'requirements': list(needs.values()),
             'adoptions': [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type']=='adoption']}
 
 
@@ -208,6 +218,9 @@ def materials(store, episode=None, scene=None, media=None, search='', status=Non
     links={};cache={}
     for link in rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='applicability'"):
         links.setdefault(link['payload']['subject']['revision_id'],[]).append(link['payload']['scope'])
+    from .business_relations import material_bindings
+    for _, subject, scope in material_bindings(store):
+        links.setdefault(subject['revision_id'], []).append(scope)
     result=[]
     for row in values:
         value=row['payload']

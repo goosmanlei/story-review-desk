@@ -153,6 +153,8 @@ class Store:
             self.db.executescript(AV_NOTES_SCHEMA)
             from .audiovisual_cleanup import SCHEMA as AV_CLEANUP_SCHEMA
             self.db.executescript(AV_CLEANUP_SCHEMA)
+            from .business_relations import SCHEMA as BUSINESS_RELATION_SCHEMA
+            self.db.executescript(BUSINESS_RELATION_SCHEMA)
             from .version_consolidation import initialize as initialize_consolidation
             initialize_consolidation(self)
         except BaseException:
@@ -222,6 +224,8 @@ class Store:
             return [self._put_object(**record) for record in records]
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .business_relations import guard_write as guard_relation
+        guard_relation(self, object_id, kind, payload)
         from .audiovisual_cleanup import guard_write as guard_av
         guard_av(self, object_id, kind, payload)
         from .methods import guard_write as guard_method
@@ -264,6 +268,9 @@ class Store:
             self.db.execute("INSERT INTO objects VALUES (?,?,?,?,?,?)", (object_id, kind, revision_id, new_version, stamp, stamp))
         self.db.execute("INSERT INTO revisions VALUES (?,?,?,?,?)", (revision_id, object_id, new_version, self._encode_material(payload), stamp))
         self.db.executemany("INSERT INTO dependencies VALUES (?,?,?)", refs)
+        if kind == 'RELATION' and payload.get('relation_type') == 'business':
+            from .business_relations import register
+            register(self, object_id, payload)
         if kind == 'RELATION' and payload.get('relation_type') == 'entity':
             from .relation_explanations import supersede
             supersede(self, object_id, current['current_revision'] if current else None)
