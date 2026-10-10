@@ -40,6 +40,27 @@ class ApproachTest(unittest.TestCase):
         with urlopen(self.base + path) as response:
             return json.load(response)
 
+    def test_cycle_layout_is_explicit_and_rejects_unsupported_content(self):
+        value = {"schema_version": 2, "tabs": [
+            {"id": name, "label": name, "title": name, "lead": "lead", "sections": []}
+            for name in ('vision', 'story', 'materials')]}
+        tab = value['tabs'][0]
+        tab['layout'] = {'type': 'cycle', 'return_label': '继续实践'}
+        tab['sections'] = [{'id': name, 'title': name, 'blocks': [{'type': 'paragraph', 'text': '说明'}]} for name in ('practice', 'delivery')]
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        for change in ('unknown', 'empty-label', 'one-node', 'media'):
+            invalid = copy.deepcopy(value)
+            target = invalid['tabs'][0]
+            if change == 'unknown': target['layout']['type'] = 'arbitrary'
+            if change == 'empty-label': target['layout']['return_label'] = ' '
+            if change == 'one-node': target['sections'].pop()
+            if change == 'media': target['sections'][0]['blocks'][0]['type'] = 'code'
+            self.path.write_text(json.dumps(invalid))
+            with self.assertRaises(HTTPError) as caught:
+                self.get('/api/production-approach')
+            self.assertEqual(caught.exception.code, 503)
+
     def test_optional_document_and_no_ledger(self):
         self.assertIsNone(self.get("/api/production-approach"))
         self.assertEqual(self.get("/api/sources"), [])
