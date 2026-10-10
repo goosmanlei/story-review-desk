@@ -58,6 +58,7 @@ PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
 故事采编与故事结构使用同一 `comments` 表、`comment_events` 表、`POST /api/comments`、`PATCH /api/comments/{id}` 和侧边评论面板。编辑、关闭、重新打开、草稿、本机定位和 AI 润色行为一致。结构稿评论提交 `{target_object_id:"story-structure",target_revision_id:"修订 ID",anchor,body,id?}`；资料评论继续提交 `{source_id,anchor,body,id?}`。
 
 - 文字：`anchor={"type":"text","block_id":"...","end_block_id":"...","start":0,"end":5,"quote":"准确引用"}`。跨段按章内及跨章顺序引用，每段之间用 `\n`。服务端对原修订全文、范围、引用逐一核验。旧资料文字锚点不带 `type` 仍可读取。
+- 组合阅读中不连续的文字选择：沿 [共用分段范围](comment-checklist.md#组合阅读中的准确文字范围) 用 `anchor.segments` 保存同一对象／修订内的准确选段和共同意见；历史连续锚点保持原义。
 - 整体：`{"type":"global"}`，仅结构稿使用。
 - 整图：`{"type":"visual","visual_id":"图 ID","asset_file":"文件名"}`。
 - 圈图：`{"type":"region","visual_id":"图 ID","asset_file":"文件名","points":[{"x":0.1,"y":0.2},...]}`。`x/y` 相对原图边界归一化到 0–1，至少三点且有面积。页面随图像缩放绘制原多边形；拖动短直线自动转为矩形。图片与图示均可用，采编资料图片也使用这一格式。

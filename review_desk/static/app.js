@@ -680,18 +680,11 @@ function renderConfigurations({preserve=false}={}){
 function blockMarks(source,block,index){
   const out=[];
   for(const comment of state.comments.filter(c=>source.target_revision_id?c.target_object_id===source.id&&c.target_revision_id===source.target_revision_id:c.source_id===source.id)){
-    const a=comment.anchor,first=source.blocks.findIndex(b=>b.id===a.block_id),last=source.blocks.findIndex(b=>b.id===a.end_block_id);
-    if(first<0||last<first||index<first||index>last)continue;
-    const start=index===first?a.start:0,end=index===last?a.end:chars(block.text).length;
-    if(start<end)out.push({start,end,comment});
+    for(const {start,end} of textAnchorBlockRanges(comment.anchor,source.blocks,index))if(start<end)out.push({start,end,comment});
   }
   const draft=newDraftAnchor();
   if(draft&&draft.block_id){
-    const first=source.blocks.findIndex(b=>b.id===draft.block_id),last=source.blocks.findIndex(b=>b.id===draft.end_block_id);
-    if(first>=0&&last>=first&&index>=first&&index<=last){
-      const start=index===first?draft.start:0,end=index===last?draft.end:chars(block.text).length;
-      if(start<end)out.push({start,end,draft:true});
-    }
+    for(const {start,end} of textAnchorBlockRanges(draft,source.blocks,index))if(start<end)out.push({start,end,draft:true});
   }
   return out;
 }
@@ -761,6 +754,41 @@ function chooseSource(id,keepScroll=false,updateUrl=true,expandGroup=true){
 }
 
 function offsetIn(block,node,offset){const range=document.createRange();range.selectNodeContents(block);range.setEnd(node,offset);return chars(range.toString()).length}
+// A single opinion can refer to several exact passages in reading order.
+// Envelope endpoints are navigation hints only; segments define its coverage.
+function textAnchorSegments(anchor){return anchor?.segments||[anchor]}
+function appendAnchorQuote(parent,anchor){
+  const quote=nodeText('q',null,anchorLabel(anchor),parent);
+  if(anchor.segments){quote.style.whiteSpace='pre-wrap';nodeText('small',null,`这 ${anchor.segments.length} 段圈选共同对应一条意见。`,parent)}
+  return quote;
+}
+function textAnchorBlockRanges(anchor,blocks,index){
+  if(!anchor||!['text',undefined].includes(anchor.type))return [];
+  return textAnchorSegments(anchor).flatMap(a=>{
+    const first=blocks.findIndex(b=>b.id===a.block_id),last=blocks.findIndex(b=>b.id===(a.end_block_id||a.block_id));
+    return first>=0&&last>=first&&index>=first&&index<=last?[{start:index===first?a.start:0,end:index===last?a.end:chars(blocks[index].text).length}]:[];
+  });
+}
+function anchorFromPassages(passages,blocks){
+  const segments=[];
+  for(const part of passages){
+    const index=blocks.findIndex(b=>b.id===part.id),letters=index>=0&&chars(blocks[index].text);
+    if(!letters||!Number.isInteger(part.start)||!Number.isInteger(part.end)||part.start<0||part.end>letters.length||part.end<=part.start||letters.slice(part.start,part.end).join('')!==part.text)return null;
+    const previous=segments.at(-1),last=previous&&blocks.findIndex(b=>b.id===previous.end_block_id);
+    const newline=last===index&&part.start===previous.end+1&&letters[previous.end]==='\n';
+    if(previous&&(last===index&&(part.start===previous.end||newline)||index===last+1&&previous.end===chars(blocks[last].text).length&&part.start===0)){
+      previous.quote+=(last===index?(newline?'\n':''):'\n')+part.text;previous.end_block_id=part.id;previous.end=part.end;
+    }else segments.push({block_id:part.id,end_block_id:part.id,start:part.start,end:part.end,quote:part.text});
+  }
+  if(!segments.length||!segments.some(s=>s.quote.trim()))return null;
+  // Refuse overlapping/duplicate references; reordering disjoint passages is valid.
+  const occupied=new Map();
+  for(const segment of segments)for(let i=0;i<blocks.length;i++)for(const range of textAnchorBlockRanges(segment,blocks,i)){
+    const ranges=occupied.get(i)||[];if(ranges.some(r=>range.start<r.end&&r.start<range.end))return null;ranges.push(range);occupied.set(i,ranges);
+  }
+  if(segments.length===1)return segments[0];
+  return {block_id:segments[0].block_id,end_block_id:segments.at(-1).end_block_id,start:segments[0].start,end:segments.at(-1).end,quote:segments.map(s=>s.quote).join('\n'),segments};
+}
 function textSelectionRange(host,range){
   if(!host||!range)return null;
   const contents=document.createRange();contents.selectNodeContents(host);
@@ -786,6 +814,7 @@ function textSelectionAnchor(host,blocks,attribute){
   // Intersect each block before measuring offsets, so markup and surrogate pairs stay exact.
   const touched=[];
   for(const node of host.querySelectorAll(`[${attribute}]`)){
+    if(typeof productionTextHidden==='function'&&productionTextHidden(node))continue;
     if(!range.intersectsNode(node))continue;
     const contents=document.createRange();contents.selectNodeContents(node);
     const part=range.cloneRange();
@@ -793,18 +822,10 @@ function textSelectionAnchor(host,blocks,attribute){
     if(part.compareBoundaryPoints(Range.END_TO_END,contents)>0)part.setEnd(contents.endContainer,contents.endOffset);
     if(!part.toString())continue;
     const base=Number(node.dataset.anchorOffset||0);
-    touched.push({id:node.getAttribute(attribute),start:base+offsetIn(node,part.startContainer,part.startOffset),end:base+offsetIn(node,part.endContainer,part.endOffset),segmented:node.hasAttribute('data-anchor-offset')});
+    touched.push({id:node.getAttribute(attribute),start:base+offsetIn(node,part.startContainer,part.startOffset),end:base+offsetIn(node,part.endContainer,part.endOffset),text:part.toString()});
   }
   if(!touched.length)return null;
-  // Rearranged/collapsed review excerpts must never fabricate a cross-gap quote.
-  if(touched.some(t=>t.segmented)&&touched.slice(1).some((t,i)=>t.id===touched[i].id&&t.start!==touched[i].end+1))return null;
-  const first=blocks.findIndex(b=>b.id===touched[0].id),last=blocks.findIndex(b=>b.id===touched.at(-1).id);
-  if(first<0||last<first)return null;
-  const start=touched[0].start,end=touched.at(-1).end;
-  if(first===last&&end<=start)return null;
-  const pieces=blocks.slice(first,last+1).map(b=>chars(b.text));pieces[0]=pieces[0].slice(start);pieces[pieces.length-1]=pieces.length===1?chars(blocks[first].text).slice(start,end):pieces[pieces.length-1].slice(0,end);
-  const quote=pieces.map(p=>p.join('')).join('\n');if(!quote.trim())return null;
-  return {block_id:blocks[first].id,end_block_id:blocks[last].id,start,end,quote};
+  return anchorFromPassages(touched,blocks);
 }
 function selectedAnchor(){
   if(isProduction()){
@@ -987,7 +1008,7 @@ async function editComment(comment){
 function commentCard(comment){
   const card=el('article','comment-card'+(state.selected===comment.id?' selected':''));card.id=`comment-${comment.id}`;
   nodeText('small',null,(comment.business_code?comment.business_code+' · ':'')+(comment.status==='OPEN'?'待处理':'已关闭')+` · ${new Date(comment.updated_at).toLocaleString('zh-CN')}`,card);
-  nodeText('q',null,anchorLabel(comment.anchor),card);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
+  appendAnchorQuote(card,comment.anchor);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
   const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=async()=>{++commentAction;try{await locateComment(comment)}catch(error){toast(error.message)}};
@@ -1020,7 +1041,7 @@ function renderComments({replaceDraft=false}={}){
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
   if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   appendStoredCommentEdits(body);
-  if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);nodeText('q',null,anchorLabel(state.anchor),editor);if(isProduction()&&state.productionSelected?.payload){
+  if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);appendAnchorQuote(editor,state.anchor);if(isProduction()&&state.productionSelected?.payload){
       const row=state.productionSelected,component=row.payload.components?.find(c=>c.id===(state.anchor.component_id||state.anchor.visual_id)&&c.file===state.anchor.asset_file);
       const label=component?({original:'原件',preview:'预览',thumbnail:'缩略图'})[component.role]||'媒体':'';
       nodeText('small',null,'评论对象：'+(row.kind==='REPRESENTATION'?'整个实体':row.payload.title)+(label?' · '+label:''),editor);
