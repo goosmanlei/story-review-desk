@@ -155,6 +155,46 @@ function sharedMaterialFixture(){
   return {c,data,shared,alias,a,b,items};
 }
 
+test('entity material selection stays inside the displayed ownership and leaves an empty scope empty',()=>{
+  const {c,data}=sharedMaterialFixture(),stateModel={material_id:'state-need'},ownModel={material_id:'identity'};
+  data.unifiedMaterialId='identity';c.state.materialCommentCard={data,material_id:'identity',number:1};
+  assert.equal(c.unifiedModelSelection([stateModel],data),stateModel);
+  assert.equal(c.unifiedModelSelection([],data),undefined);
+  data.unifiedMaterialId='state-need';assert.equal(c.unifiedModelSelection([ownModel],data),ownModel);
+});
+
+test('switching ownership restores its exact reader and URL rather than the other tab target',()=>{
+  const {c,data,a,b}=sharedMaterialFixture();data.materialTab='states';data.unifiedMaterialId='shared';data.tabMaterialViews={entity:'identity'};
+  data.material_versions.identity=[{number:1,members:[a],results:[a]}];data.materialReaders={identity:{productionSelected:a}};
+  data.unifiedGroups=[{material_id:'identity',identity:a,round:data.material_versions.identity[0],candidates:[{record:a}]}];
+  c.state.productionSelected=b;c.renderProductionReader=()=>{c.renderUnifiedSelected(data)};c.renderMaterialCard=()=>{};
+  data.unifiedRight=new Element('aside');c.selectEntityMaterialTab(data,'entity');
+  assert.equal(data.unifiedMaterialId,'identity');assert.equal(c.state.productionSelected.id,a.id);
+  assert.equal(new URL(c.location.href).searchParams.get('production_revision'),a.id);
+  assert.equal(new URL(c.location.href).searchParams.get('entity_material_tab'),'entity');
+});
+
+test('a reader remembered on another material version cannot restore its candidate or anchor',()=>{
+  const {c,data,a,b}=sharedMaterialFixture();data.materialReaders={shared:{productionSelected:a,anchor:{type:'time',start_seconds:1,end_seconds:2}}};
+  data.material_versions.shared[0].members=[b];c.state.materialCommentCard={data,material_id:'shared',number:2};
+  c.restoreUnifiedMaterialReader(data,'shared',b);assert.equal(c.state.productionSelected,b);assert.equal(c.state.anchor,null);
+});
+
+test('version return restores the viewed candidate together with its draft target',()=>{
+  const {c,data,shared,a,b}=sharedMaterialFixture();data.material_versions.shared.push({...data.material_versions.shared[0],number:1});
+  data.selectedMaterialRounds={shared:2};data.selectedCandidates={shared:a.id};c.state.productionSelected=a;c.state.anchor={type:'time',start_seconds:1,end_seconds:2};
+  c.switchMaterialRound(data,'shared',1);assert.equal(data.selectedCandidates.shared,b.id);
+  c.switchMaterialRound(data,'shared',2);assert.equal(data.selectedCandidates.shared,a.id);assert.equal(c.state.productionSelected,a);assert.equal(c.state.anchor.start_seconds,1);
+});
+
+test('candidate generation reads its actual call and never borrows a current plan when history is absent',()=>{
+  const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);c.materialTextSurface=parent=>parent;
+  const need={id:'need-current',object_id:'need',payload:{blocks:[],generation:{prompt:'CURRENT PLAN',inputs:[],parameters:{},output:{}}}},record={id:'asset-old',payload:{blocks:[]}},call={id:'call-old',object_id:'call',payload:{format:'production-call-v1',blocks:[],model:'old-model',parameters:{seed:7},prompt:'EXACT OLD CALL',inputs:[]}};
+  const text=root=>root.all().map(n=>n.textContent||'').join('\n');
+  const actual=new Element('main');c.renderSelectedGenerationRecipe(actual,need,{record,review_context:{call,inputs:[]}});assert.match(text(actual),/EXACT OLD CALL/);assert.doesNotMatch(text(actual),/CURRENT PLAN/);
+  const missing=new Element('main');c.renderSelectedGenerationRecipe(missing,need,{record});assert.match(text(missing),/历史生成依据/);assert.doesNotMatch(text(missing),/CURRENT PLAN/);
+});
+
 test('D01/C06 state aliases browse the same canonical material without changing their adoption scope',()=>{
   const {c,data,shared,alias,items}=sharedMaterialFixture();
   const first=c.entityReviewMaterialModels([shared],items,data)[0],second=c.entityReviewMaterialModels([alias],items,data)[0];

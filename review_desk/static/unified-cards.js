@@ -40,6 +40,7 @@ function modelSmallItem(model){
   return {...model.cardCounts,business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
 }
 function unifiedModelSelection(models,data){
+  if(data===state.entityReview)return models.find(m=>materialModelKey(m)===data.unifiedMaterialId)||models[0];
   const target=state.productionSelected,card=state.materialCommentCard;
   const explicit=models.find(m=>card?.data===data&&materialModelKey(m)===card.material_id&&materialVersionCommentRows(m.round).some(r=>r.id===target?.id))||models.find(m=>data.localVersions&&m.round?.members.some(r=>data.localVersions[r.object_id]?.id===r.id));
   const current=models.find(m=>materialModelKey(m)===data.unifiedMaterialId);
@@ -51,7 +52,8 @@ function saveUnifiedMaterialReader(data,key){
   data.materialReaders[key]=Object.fromEntries(['productionSelected','anchor','editing','selected','reviewCommentScope','drawMode'].map(field=>[field,state[field]]));
 }
 function restoreUnifiedMaterialReader(data,key,row){
-  const saved=data.materialReaders?.[key];
+  const memory=data.materialReaders?.[key],card=state.materialCommentCard,round=card?.data===data&&data.material_versions?.[key]?.find(r=>r.number===card.number);
+  const saved=memory&&(!round||materialVersionCommentRows(round).some(r=>r.id===memory.productionSelected?.id))?memory:null;
   focusProductionReview(entityReviewDetail(saved?.productionSelected||row),false);
   if(saved)for(const field of ['anchor','editing','selected','reviewCommentScope','drawMode'])state[field]=saved[field];
   restoreProductionDraft();
@@ -69,7 +71,13 @@ function renderUnifiedModels(parent,models,data){
   if(!data.unifiedCollecting)renderUnifiedSelected(data);
 }
 function renderUnifiedSelected(data){
-  const selected=unifiedModelSelection(data.unifiedGroups||[],data);if(!selected)return;
+  const selected=unifiedModelSelection(data.unifiedGroups||[],data);if(!selected){
+    data.unifiedMaterialId=null;state.materialCommentCard=null;
+    const row=data.materialTab==='entity'?state.productionEntityDetail?.record:state.productionChildDetail?.record;
+    if(row&&data.materialSwitchPending)focusProductionReview(entityReviewDetail(row),false);
+    data.materialSwitchPending=false;return;
+  }
+  const changed=data.unifiedMaterialId!==materialModelKey(selected);
   data.unifiedMaterialId=materialModelKey(selected);
   for(const button of data.unifiedLeft?.querySelectorAll('[data-material-id]')||[])button.setAttribute('aria-pressed',String(button.dataset.materialId===data.unifiedMaterialId));
   const right=data.unifiedRight;if(!right)return;right.replaceChildren();
@@ -79,13 +87,14 @@ function renderUnifiedSelected(data){
   if(!selected.candidates.some(i=>i.record.id===data.selectedCandidates[key]))data.selectedCandidates[key]=materialDefaultCandidate(selected,data);
   if(selected.round)state.materialCommentCard={data,material_id:key,number:selected.round.number};
   const chosen=materialCandidateChoice(selected.candidates,data.selectedCandidates[key]);
+  if(changed||data.materialSwitchPending)restoreUnifiedMaterialReader(data,key,chosen?.record||selected.need||selected.identity);
+  data.materialSwitchPending=false;
   const options=entityMaterialCandidateOptions(data,selected);
   renderMaterialCard(right,selected,{...options,renderResult:(host,item)=>renderMaterialResultReview(host,item.record,item.review_context||data.materialContexts?.[item.record.id]||{}),roundChange:number=>{
-    rememberProductionDraft();switchMaterialRound(data,key,number);delete data.selectedCandidates[key];renderProductionReader();renderComments();focusMaterialRoundControl(key);
+    rememberProductionDraft();switchMaterialRound(data,key,number);renderProductionReader();renderComments();focusMaterialRoundControl(key);
   },planVersion:(h,row)=>entityVersionControl(h,row,next=>{data.localVersions||={};data.localVersions[next.object_id]=next}),assetVersion:(h,item)=>entityVersionControl(h,item.record,next=>{data.localVersions||={};data.localVersions[next.object_id]=next})});
 
 
-  if(chosen)renderMaterialUses(right,chosen.record,data.reference_titles||[]);
 }
 function renderUnifiedCard(root){
   root.classList.add('unified-card-host');root.replaceChildren();
@@ -98,7 +107,7 @@ function renderUnifiedCard(root){
     if(row.kind==='AV_SCENE'){nodeText('h2',null,breakdownSceneTitle(row),left);renderAudiovisualSources(left,row)}
     for(const item of data.shots)renderBreakdownShot(left,item);
   }
-  else if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta','此状态尚无素材需求或原件',right)}
+  else if(state.entityReview){const data=state.entityReview;data.unifiedRight=right;data.unifiedLeft=left;data.unifiedGroups=[];data.unifiedCollecting=true;renderEntityReview(left);data.unifiedCollecting=false;renderUnifiedSelected(data);if(!right.childNodes.length)nodeText('p','production-meta',data.materialTab==='entity'?'此实体版本尚无素材需求或原件':'此状态版本尚无素材需求或原件',right)}
   else if(state.materialReview){
     const scope=state.unifiedScope,title=scope?.kind==='AV_SCENE'?breakdownSceneTitle(scope):scope?.kind==='AV_SHOT'?breakdownShotTitle(scope):scope?.kind==='EPISODE'?breakdownEpisodeTitle(scope):reviewPositionText(scope?.payload.title||'素材');nodeText('h2',null,title,left);
     if(scope){nodeText('p','production-meta',({INPUT_LOCK:'全剧',STORY:'全剧',EPISODE:'集',AV_SCENE:'场',AV_SHOT:'镜',STATE:'实体状态'})[scope.kind]||productionKinds[scope.kind],left);reviewTextBlocks(left,scope);if(scope.payload.source)materialReferenceLink(left,scope.payload.source,'剧情依据',true);for(const source of scope.payload.sources||[])materialReferenceLink(left,source,'剧情依据',true)}
@@ -170,7 +179,7 @@ function activateUnifiedCard(result){
     const data=state.entityReview;if(result.explicit&&!result.defaultSelection&&['ENTITY','STATE'].includes(row.kind)){data.localVersions||={};data.localVersions[row.object_id]=row;}if(params.get('production_entity')&&params.get('production_entity')!==data.entity.object_id)throw Error('准确实体不属于此素材');data.states.sort(productionStateOrder);state.productionEntityDetail=entityReviewDetail(result.explicit&&!result.defaultSelection&&row.kind==='ENTITY'?row:data.entity);
     const wanted=params.get('entity_state'),ownedStates=[...data.states,...(data.retained_states||[])],wantedForm=ownedStates.find(r=>r.object_id===wanted);if(wanted&&!wantedForm&&result.form?.object_id!==wanted)throw Error('准确状态不属于此实体');const currentForm=state.reviewWork&&['ASSET','REQUIREMENT'].includes(result.detail.record.kind)?data.states.find(r=>reviewWorkMatches(r)):null;const form=(wanted?(result.form?.object_id===wanted?result.form:wantedForm):currentForm||result.form)||data.states[0];state.productionChildDetail=form?entityReviewDetail(form):null;
     if(['ASSET','REQUIREMENT','CALL'].includes(row.kind)){const route=entityMaterialRoute(data,row,params,{defaultSelection:result.defaultSelection});const target=params.get('material_target');if(target){const exact=materialVersionCommentRows(route.selected?.round).find(r=>r.id===target);if(!exact)throw Error('准确候选不属于所选素材版本');route.row=exact}restoreEntityMaterialRoute(data,route);if((wanted||currentForm)&&form&&route.row.kind!=='CALL')state.productionChildDetail=entityReviewDetail(form);data.unifiedMaterialId=route.selected?.material_id||row.object_id}
-    else focusProductionReview(entityReviewDetail(row.kind==='STATE'?row:form||row),false);
+    else {data.materialTab=row.kind==='STATE'?'states':params.get('entity_material_tab')==='entity'?'entity':'states';focusProductionReview(entityReviewDetail(row.kind==='STATE'?row:form||row),false)}
   }else{
     // This card owns its version route; a caller or parent card may still have
     // another material's exact version in the shared page URL.

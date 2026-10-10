@@ -120,7 +120,7 @@ function navigateWorkspace(id){
   }else{
     if(['settings.workspace','production.workspace'].includes(id)){
       id='settings.workspace';const url=new URL(location.href);url.searchParams.set('workspace',id);url.searchParams.set('production_tab','breakdown');
-      for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+      for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
       url.hash='';history.pushState(null,'',url);switchWorkspace(id,false);
     }else switchWorkspace(id);
   }
@@ -141,7 +141,7 @@ function selectProductionTab(tab){
     const value=source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
-  if(!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+  if(!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
   if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
     const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('breakdown_episode_revision')===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
     if(!same){url.searchParams.set('breakdown_episode_revision',source.searchParams.get('production_scope_revision')||'');url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
