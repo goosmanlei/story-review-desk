@@ -28,6 +28,9 @@ def initialize(store):
     with store.db:
         store.db.execute('CREATE TABLE IF NOT EXISTS read_generations (name TEXT PRIMARY KEY, token TEXT NOT NULL)')
         tables = [r[0] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='read_generations' ORDER BY name")]
+        # DROP TABLE removes its triggers but not its disposable journal token.
+        # Reconcile retired table names without changing any live token.
+        store.db.execute("DELETE FROM read_generations WHERE name NOT IN (SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='read_generations')")
         for table in tables:
             store.db.execute('INSERT OR IGNORE INTO read_generations VALUES (?,lower(hex(randomblob(16))))', (table,))
             quoted = '"'+table.replace('"', '""')+'"'
