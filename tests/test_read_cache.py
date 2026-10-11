@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from review_desk import production, read_cache, json_transport
 from review_desk.store import Store
@@ -28,6 +29,20 @@ class CachedEntityReadScopeTest(scope_tests.EntityReadScopeTest):
 
 
 class CacheTest(unittest.TestCase):
+    def test_failed_snapshot_initialization_releases_transaction_for_retry(self):
+        # A transient database read failure must not leave a half-built scope
+        # attached to the reusable HTTP worker connection.
+        with patch.object(read_cache, 'token', side_effect=sqlite3.OperationalError('disk I/O error')):
+            with self.assertRaises(sqlite3.OperationalError):
+                with production.read_scope(self.store):
+                    self.fail('snapshot initialization should have failed')
+        self.assertFalse(hasattr(self.store, '_production_reads'))
+        self.assertFalse(self.store.db.in_transaction)
+        with production.read_scope(self.store):
+            self.assertEqual(self.store._production_reads['generation'], read_cache.token(self.store))
+            self.assertEqual(read_cache.read_json(self.store, 'retry', lambda: 'recovered'), 'recovered')
+        self.assertFalse(self.store.db.in_transaction)
+
     def test_retired_table_tokens_are_removed_without_resetting_live_tokens(self):
         self.store.db.execute('CREATE TABLE retired_cache_fixture (id INTEGER)')
         self.store.db.commit()
