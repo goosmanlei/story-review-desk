@@ -84,11 +84,12 @@ function normalizeProductionWorkspace(id){
   }
   return id;
 }
+function productionScopeKey(params){return JSON.stringify(['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot'].map(key=>params.get(key)||''))}
 function rememberWorkspaceRoute(){
   const url=new URL(location.href),id=url.searchParams.get('workspace')||'production.approach';
   if(typeof state==='undefined'||id!==state.workspace)return;
   workspaceRoutes.set(workspaceGroup(id),url.href);
-  if(['settings.workspace','materials.workspace','production.workspace'].includes(id)&&typeof productionTab==='function')workspaceSubRoutes.set(workspaceGroup(id)+':'+productionTab(),url.href);
+  if(['settings.workspace','materials.workspace','production.workspace'].includes(id)&&typeof productionTab==='function'){const key=workspaceGroup(id)+':'+productionTab();workspaceSubRoutes.set(key,url.href);workspaceSubRoutes.set(key+':'+productionScopeKey(url.searchParams),url.href);}
   saveWorkspaceNavigation();
 }
 function rememberWorkspacePosition(){
@@ -136,18 +137,24 @@ function selectProductionTab(tab){
   const source=new URL(location.href);
   rememberWorkspacePosition();rememberWorkspaceRoute();
   const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
-  const saved=workspaceSubRoutes.get(workspaceGroup(workspace)+':'+tab),url=new URL(saved||location.href),savedScopeRevision=url.searchParams.get('production_scope_revision'),sameScope=['production_scope_episode','production_scope_revision','production_scope_scene'].every(key=>url.searchParams.get(key)===source.searchParams.get(key));
-  for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene']){
+  const routeKey=workspaceGroup(workspace)+':'+tab;
+  const saved=workspaceSubRoutes.get(routeKey+':'+productionScopeKey(source.searchParams))||workspaceSubRoutes.get(routeKey);
+  const url=new URL(saved||location.href),sameScope=!!saved&&productionScopeKey(url.searchParams)===productionScopeKey(source.searchParams);
+  for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot']){
     const value=source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
-  const shot=source.searchParams.get('production_scope_shot');if(shot)url.searchParams.set('production_scope_shot',shot);else url.searchParams.delete('production_scope_shot');
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
-  if(tab==='entities'||!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+  if(!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
   if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
-    const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('breakdown_episode_revision')===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
-    if(!same){url.searchParams.set('breakdown_episode_revision',source.searchParams.get('production_scope_revision')||'');url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
+    const p=source.searchParams,shot=p.get('production_scope_shot');
+    const same=sameScope&&url.searchParams.get('breakdown_episode_revision')===p.get('production_scope_revision')&&url.searchParams.get('breakdown_scene')===p.get('production_scope_scene')&&url.searchParams.get('breakdown_episode')===p.get('production_scope_episode')&&(!shot||url.searchParams.get('breakdown_object')===shot);
+    if(!same){
+      for(const key of ['shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
+      url.searchParams.set('breakdown_episode_revision',p.get('production_scope_revision')||'');url.searchParams.set('breakdown_episode',p.get('production_scope_episode'));url.searchParams.set('breakdown_scene',p.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',shot||p.get('production_scope_episode'));
+      if(shot)url.searchParams.delete('breakdown_revision');else url.searchParams.set('breakdown_revision',p.get('production_scope_revision')||'');
+    }
   }
-  url.hash='';if(url.href!==location.href)history.pushState(null,'',url);switchWorkspace(workspace,false);
+  url.hash='';if(url.href!==location.href)pushWorkspaceNavigation(url);switchWorkspace(workspace,false);
 }
 function workspaceTabItems(){
   const workspace=state.workspace;

@@ -272,7 +272,7 @@ function validateUnifiedReference(result){
 // Selection belongs to this shot, so another shot cannot inherit its material.
 function writeShotWorkspaceRoute(data){
   const mid=data.unifiedMaterialId,candidate=data.selectedCandidates?.[mid];
-  breakdownRoute({shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
+  breakdownRoute({production_scope_shot:data.entity.object_id,shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
     shot_component:candidate&&candidate!=='current'?data.selectedComponents?.[candidate]||null:null});
 }
 // One detail request at a time per reader. Visible cards enqueue automatically;

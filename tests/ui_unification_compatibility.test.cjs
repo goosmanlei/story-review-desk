@@ -153,10 +153,10 @@ test('ordinary legacy asset entry chooses the current plan while exact candidate
     assert.equal(f.data.selectedCandidates.need,ordinary?'current':f.older.id);
   }
   const ctx=setup(),source=fs.readFileSync(path.join(__dirname,'../review_desk/static/management-cards.js'),'utf8');let refs;
-  ctx.openManagementReferences=value=>refs=value;
+  ctx.openUnifiedMaterial=value=>refs=value;
   vm.runInContext(source.slice(source.indexOf('async function openManagementMaterial('),source.indexOf('async function loadMaterialManagement(')),ctx);
   ctx.openManagementMaterial({object_id:'asset',scope_references:[{object_id:'asset',revision_id:'exact'}]},null);
-  assert.equal(refs[0].revision_id,'exact');assert.equal(refs[0].defaultSelection,true);
+  assert.equal(refs.object_id,'asset');assert.equal(refs.revision_id,undefined);assert.equal(refs.defaultSelection,true);
 });
 test('same-entity version responses cannot replace a newer choice when they arrive out of order',async()=>{
   const ctx=setup(),f=fixture(ctx),requests=[],shown=[];
