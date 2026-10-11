@@ -155,8 +155,56 @@ def _material_av_catalog(store, episode, revision, compact):
         for item in value['entries']]}
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False):
+def _material_filter_facets(values, chosen, search):
+    """Count each matching material once, without rescanning all its uses.
+
+    Each facet relaxes only its own selected condition. Exact episode/scene
+    pairs stay together; having the scene in another episode is insufficient.
+    """
     from .navigation_search import matches as search_matches
+    located = [(item, {(loc.get('episode'), loc.get('scene')) for loc in item['locations']})
+               for item in values]
+    episode, scene = chosen['episode'], chosen['scene']
+    options = {'media': sorted({item['media_type'] for item in values}),
+               'status': ['generated', 'ungenerated'],
+               'episode': sorted({ep for _, pairs in located for ep, _ in pairs if ep}),
+               'scene': sorted({sc for _, pairs in located for ep, sc in pairs
+                                if sc and (not episode or ep == episode)})}
+    facets = {key: dict.fromkeys(['', *opts], 0) for key, opts in options.items()}
+    result = []
+    for item, pairs in located:
+        if not search_matches(search, item['search_fields']):
+            continue
+        episodes = {ep for ep, sc in pairs if not scene or sc == scene}
+        scenes = {sc for ep, sc in pairs if not episode or ep == episode}
+        in_episode = not episode or any(ep == episode for ep, _ in pairs)
+        in_scene = not scene or any(sc == scene for _, sc in pairs)
+        in_location = ((episode, scene) in pairs if episode and scene
+                       else in_episode and in_scene)
+        in_media = not chosen['media'] or item['media_type'] == chosen['media']
+        item_status = 'generated' if item['generated'] else 'ungenerated'
+        in_status = not chosen['status'] or item_status == chosen['status']
+        if in_location and in_status:
+            facets['media'][''] += 1
+            facets['media'][item['media_type']] += 1
+        if in_location and in_media:
+            facets['status'][''] += 1
+            facets['status'][item_status] += 1
+        if in_media and in_status:
+            facets['episode'][''] += int(in_scene)
+            for ep in episodes:
+                if ep in facets['episode'] and ep:
+                    facets['episode'][ep] += 1
+            facets['scene'][''] += int(in_episode)
+            for sc in scenes:
+                if sc in facets['scene'] and sc:
+                    facets['scene'][sc] += 1
+        if in_location and in_media and in_status:
+            result.append(item)
+    return facets, result
+
+
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False):
     if scope and scope != 'av':raise ValueError('unknown production scope')
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
@@ -175,18 +223,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
     else:
         values=material_entries(store);catalog=management_episodes(store)
     chosen={'episode':episode,'scene':scene,'media':media,'status':status}
-    def matches(item,filters):
-        if not search_matches(search,item['search_fields']):return False
-        if filters.get('media') and item['media_type']!=filters['media']:return False
-        if filters.get('status') and item['generated']!=(filters['status']=='generated'):return False
-        return not (filters.get('episode') or filters.get('scene')) or any(
-            (not filters.get('episode') or loc['episode']==filters['episode']) and
-            (not filters.get('scene') or loc['scene']==filters['scene']) for loc in item['locations'])
-    options={'media':sorted({i['media_type'] for i in values}),'status':['generated','ungenerated'],
-             'episode':sorted({l['episode'] for i in values for l in i['locations'] if l.get('episode')}),
-             'scene':sorted({l['scene'] for i in values for l in i['locations'] if l.get('scene') and (not episode or l['episode']==episode)})}
-    facets={key:{value:sum(matches(i,{**chosen,key:value}) for i in values) for value in ['',*opts]} for key,opts in options.items()}
-    result=[item for item in values if matches(item,chosen)]
+    facets,result=_material_filter_facets(values,chosen,search)
     if scope == 'av' and (episode or scene):
         enriched=[]
         for item in result:
