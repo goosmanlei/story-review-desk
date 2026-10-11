@@ -29,6 +29,8 @@ HTTP 编辑器的 `GET /api/methods` 另返回 `condition_texts`，以修订号�
 
 `GET /api/methods/record` 按对象和修订读取。CLI 与 HTTP 共用同一逻辑：在系统目录执行 `python3 -m review_desk --instance <实例> methods`、`method-save <JSON>`、`method-prepare <JSON>`、`method-artifact <JSON>`、`method-get <对象> --revision <修订>`。`method-export <执行对象> <执行修订> --output <新目录>` 导出文件、章节、准确输入和恢复登记包。
 
+`GET /api/methods/stage?execution_object_id=…&execution_revision_id=…&stage=…` 只读核对冻结执行、真实方法阶段、产物身份、服务输出摘要及全部前置依赖，返回 `artifact` 和有序 `previous` 准确引用。`artifact: null` 表示服务尚无该阶段确认，不表示完成；此入口不创建执行或产物。旧完整产物仍返回完整值；当前制作摘要中的 `output.sha256` 是原提交 JSON 值的摘要，`output_sha256` 是压缩输出外层摘要，不能互换。媒体草稿/定稿另核对 requirement 与 generation 的各自摘要。作者端保存本机原值并据此核验回读，服务不恢复制作草稿全文。
+
 ## 已接入的边界
 
 | 环节 | 实际交付和校验 |
