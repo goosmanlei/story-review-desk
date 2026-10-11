@@ -3,19 +3,50 @@ import gzip
 import fcntl
 import hashlib
 import json
+from http.client import RemoteDisconnected
 from pathlib import Path
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
-from review_desk.server import ReviewServer
+from review_desk.server import ReviewServer, ReviewHandler
 from review_desk.store import Store
 from test_comment_source_reuse import document, source_row
 
 
 class ConcurrentHttpTest(unittest.TestCase):
+    def test_interrupted_requests_do_not_poison_following_cached_readers(self):
+        with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1', 0), root, {}) as server:
+            base = 'http://127.0.0.1:' + str(server.server_port)
+            barrier = threading.Barrier(4)
+            original = ReviewHandler._get
+            def interrupted(handler):
+                if handler.path == '/api/instance?interrupt-test=1':
+                    handler.server.store.db.execute('BEGIN')
+                    barrier.wait(timeout=5)
+                    raise ConnectionResetError('interrupted before transaction completion')
+                return original(handler)
+            def request(path):
+                opener = build_opener(ProxyHandler({}))
+                with opener.open(base + path, timeout=10) as response:
+                    return response.status, json.load(response), response.headers
+            thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01})
+            thread.start()
+            try:
+                with patch.object(ReviewHandler, '_get', interrupted), ThreadPoolExecutor(max_workers=4) as pool:
+                    faults = [pool.submit(request, '/api/instance?interrupt-test=1') for _ in range(4)]
+                    for fault in faults:
+                        with self.assertRaises((RemoteDisconnected, ConnectionResetError)):
+                            fault.result()
+                    reads = list(pool.map(lambda _: request('/api/sources?metadata=1'), range(12)))
+                self.assertTrue(all(row[0] == 200 and row[1] == [] for row in reads))
+                self.assertTrue(any(row[2]['X-Review-Cache'] == 'hit' for row in reads))
+            finally:
+                server.shutdown(); thread.join(timeout=10)
+
     def test_write_window_blocks_all_mutations_and_preserves_reads(self):
         with tempfile.TemporaryDirectory() as root, ReviewServer(('127.0.0.1', 0), root, {'id': 'isolated', 'title': 'isolated'}) as server:
             base = 'http://127.0.0.1:' + str(server.server_port)
