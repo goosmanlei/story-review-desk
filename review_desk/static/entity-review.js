@@ -331,22 +331,7 @@ function entityReviewMaterialModels(needs,items,data){
 }
 function entityMaterialCandidateOptions(data,model){
   const key=model.material_id||model.need?.object_id||model.candidates[0]?.record.object_id;
-  const selectCandidate=id=>{
-    const row=id==='current'?model.need:model.round?.results.find(r=>r.id===id)||model.candidates.find(i=>i.record.id===id)?.record;
-    if(!row)return;
-    rememberProductionDraft();data.selectedCandidates||={};data.selectedCandidates[key]=id;state.selected=null;
-    // An exact comment or reference may narrow the displayed original. A
-    // deliberate candidate choice leaves that original without borrowing it.
-    const members=new Set((model.round?.results||model.candidates.map(i=>i.record)).map(r=>r.object_id));
-    data.localVersions||={};for(const [objectId,value] of Object.entries(data.localVersions))if(value.kind==='ASSET'&&members.has(objectId))delete data.localVersions[objectId];
-    if(row.kind==='ASSET')data.localVersions[row.object_id]=row;
-    if(data.historicalTarget?.kind==='ASSET'&&members.has(data.historicalTarget.object_id))data.historicalTarget=null;
-    if(data.historicalMedia?.record&&members.has(data.historicalMedia.record.object_id))data.historicalMedia=null;
-    focusProductionReview(entityReviewDetail(row),false);
-    const url=new URL(location.href);url.searchParams.set('material_target',id);url.searchParams.set('material_id',key);history.replaceState(history.state,'',url);
-    restoreProductionDraft();renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] [aria-label="候选"] [aria-pressed="true"]`)?.focus({preventScroll:true});
-  };
-  return {multipleCards:true,selectedComponents:data.selectedComponents,selectComponent:id=>{const chosen=materialCandidateChoice(model.candidates,data.selectedCandidates?.[key]);if(!chosen)return;data.selectedComponents||={};data.selectedComponents[chosen.record.id]=id;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="原件与预览组成"]`)?.focus({preventScroll:true})},selectedCandidateId:data.selectedCandidates?.[key],selectCandidate};
+  return {multipleCards:true,selectedComponents:data.selectedComponents,selectComponent:id=>{const chosen=materialCandidateChoice(model.candidates,data.selectedCandidates?.[key]);if(!chosen)return;data.selectedComponents||={};data.selectedComponents[chosen.record.id]=id;renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="原件与预览组成"]`)?.focus({preventScroll:true})},selectedCandidateId:data.selectedCandidates?.[key],selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates||={};data.selectedCandidates[key]=id;state.selected=null;const item=model.candidates.find(i=>i.record.id===id);const row=id==='current'?model.need:item?.record;if(row)focusProductionReview(entityReviewDetail(row),false);const url=new URL(location.href);url.searchParams.set('material_target',id);url.searchParams.set('material_id',key);history.replaceState(history.state,'',url);restoreProductionDraft();renderProductionReader();renderComments();document.querySelector(`[data-material-key="${CSS.escape(key)}"] select[aria-label="本轮候选"]`)?.focus({preventScroll:true})}};
 }
 function entityStateNeeds(data,form){
   const mids=data.state_material_ids?.[form.object_id];
