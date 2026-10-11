@@ -10,6 +10,7 @@ import json
 import os
 from pathlib import Path
 import sqlite3
+import threading
 import time
 import uuid
 
@@ -19,6 +20,62 @@ MAX_ENTRY = 32 * 1024 * 1024
 MAX_ENTRIES = 2048
 L1_BYTES = 16 * 1024 * 1024
 MAX_JSON = 64 * 1024 * 1024
+
+_fill_condition = threading.Condition()
+_fills = {}
+_fill_bytes = 0
+
+
+def _shared_projection(key, fill, check):
+    """Share only an in-flight exact result, including when cache writes fail.
+
+    Four HTTP workers can otherwise all take the disk-cache failure fallback.
+    Participants get independent JSON values; compressed results are bounded
+    globally and discarded when the last participant leaves.
+    """
+    import zlib
+    global _fill_bytes
+    with _fill_condition:
+        if key not in _fills and len(_fills) >= MAX_ENTRIES:
+            flight = None
+        else:
+            flight = _fills.setdefault(key, {'participants':0, 'running':False, 'raw':None})
+            flight['participants'] += 1
+    if flight is None:
+        return fill()[0]
+    deadline = time.monotonic()+15
+    try:
+        while True:
+            check()
+            with _fill_condition:
+                raw = flight['raw']
+                owned = raw is None and not flight['running']
+                if owned:
+                    flight['running'] = True
+                elif raw is None and time.monotonic() < deadline:
+                    _fill_condition.wait(.005)
+                    continue
+            if raw is not None:
+                return json.loads(zlib.decompress(raw))
+            if not owned:
+                return fill()[0]
+            try:
+                value, raw = fill()
+                with _fill_condition:
+                    if raw is not None and _fill_bytes+len(raw) <= L1_BYTES:
+                        flight['raw'] = raw
+                        _fill_bytes += len(raw)
+                return value
+            finally:
+                with _fill_condition:
+                    flight['running'] = False
+                    _fill_condition.notify_all()
+    finally:
+        with _fill_condition:
+            flight['participants'] -= 1
+            if not flight['participants']:
+                del _fills[key]
+                _fill_bytes -= len(flight['raw'] or b'')
 
 
 def initialize(store):
@@ -222,31 +279,35 @@ def read_json(store, identity, reader):
                 decoder = zlib.decompressobj()
                 expanded = decoder.decompress(raw, MAX_JSON+1)
                 if len(expanded) <= MAX_JSON and decoder.eof:
-                    return True, json.loads(expanded)
+                    return True, json.loads(expanded), raw
             except (ValueError, zlib.error):
                 pass
-        return False, None
+        return False, None, None
 
     # Different words/filters have different HTTP keys but share this exact
     # projection. Coalesce their fills too, with the same bounded crash/failure
     # recovery as the HTTP cache. Waiting readers remain cancellable.
     from .production import check_read
-    deadline = time.monotonic()+15
-    while True:
-        check_read(store)
-        found, value = cached()
-        if found:
-            return value
-        with cache.lease(key) as owned:
-            found, value = cached()
+    def fill():
+        deadline = time.monotonic()+15
+        while True:
+            check_read(store)
+            found, value, raw = cached()
             if found:
-                return value
-            if owned or time.monotonic() >= deadline:
-                changes = store.db.total_changes
-                value = reader()
-                if store.db.total_changes == changes:
-                    raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
-                    if len(raw) <= MAX_JSON:
-                        cache.put(key, zlib.compress(raw, 1))
-                return value
-        time.sleep(.005)
+                return value, raw
+            with cache.lease(key) as owned:
+                found, value, raw = cached()
+                if found:
+                    return value, raw
+                if owned or time.monotonic() >= deadline:
+                    changes = store.db.total_changes
+                    value = reader()
+                    shared = None
+                    if store.db.total_changes == changes:
+                        raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+                        if len(raw) <= MAX_JSON:
+                            shared = zlib.compress(raw, 1)
+                            cache.put(key, shared)
+                    return value, shared
+            time.sleep(.005)
+    return _shared_projection(key, fill, lambda: check_read(store))

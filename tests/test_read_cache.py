@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import threading
 import unittest
 from unittest.mock import patch
 
@@ -29,6 +30,50 @@ class CachedEntityReadScopeTest(scope_tests.EntityReadScopeTest):
 
 
 class CacheTest(unittest.TestCase):
+    def test_concurrent_projection_survives_unavailable_disk_cache(self):
+        ready, release = threading.Event(), threading.Event()
+        results, errors, calls = [], [], []
+        def worker():
+            store = Store.open_existing(self.store.db_path)
+            try:
+                read_cache.attach(store, initialize_schema=False)
+                store.read_cache.db.close()
+                store.read_cache.db = None
+                def fill():
+                    calls.append(True)
+                    ready.set()
+                    if not release.wait(5): raise RuntimeError('test filler was not released')
+                    return {'items':['exact']}
+                with production.read_scope(store):
+                    results.append(read_cache.read_json(store, 'in-flight-fallback', fill))
+            except BaseException as error:
+                errors.append(error)
+            finally:
+                store.close()
+        workers = [threading.Thread(target=worker) for _ in range(2)]
+        workers[0].start()
+        try:
+            self.assertTrue(ready.wait(5))
+            workers[1].start()
+            deadline = time.monotonic()+5
+            while time.monotonic()<deadline:
+                with read_cache._fill_condition:
+                    if any(f['participants']==2 for f in read_cache._fills.values()): break
+                time.sleep(.005)
+            else: self.fail('second reader did not join the shared projection')
+        finally:
+            release.set()
+            for worker in workers:
+                if worker.ident is not None: worker.join(5)
+        self.assertFalse(errors, errors)
+        self.assertTrue(all(not w.is_alive() for w in workers))
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(results, [{'items':['exact']}, {'items':['exact']}])
+        results[0]['items'][0] = 'changed'
+        self.assertEqual(results[1], {'items':['exact']})
+        self.assertEqual(read_cache._fills, {})
+        self.assertEqual(read_cache._fill_bytes, 0)
+
     def test_shared_projection_is_filled_once_across_processes(self):
         ready = self.root/'projection-filling'
         program = '''
