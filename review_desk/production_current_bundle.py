@@ -15,11 +15,24 @@ def required_assets(store):
     from .version_consolidation import file_references
     names = {a['file'] for source in store.sources() for a in source['assets']}
     names.update(source['media']['file'] for source in store.sources() if (source.get('media') or {}).get('file'))
-    for row in store.revisions():
+    revisions = store.revisions()
+    retired_outputs = {}
+    for row in revisions:
+        value = json.loads(row['payload'])
+        if value.get('format')=='production-retirement-v1' and value.get('former_components'):
+            retired_outputs[row['object_id']]={c['former_file'] for c in value['former_components']}
+    for row in revisions:
         payload = json.loads(row['payload'])
         if payload.get('private') is True:
             continue
-        names.update(file_references(payload))
+        references = set(file_references(payload))
+        # Returned output paths remain truthful call metadata even after an
+        # explicitly retired, unused result is removed. Input snapshots below
+        # and all other records continue to retain their exact original files.
+        if payload.get('format')=='production-call-v1':
+            for output in payload.get('outputs', []):
+                references -= retired_outputs.get(output['object_id'], set())
+        names.update(references)
         names.update(c['file'] for c in payload.get('components', []))
         if row['object_id'] == 'story-structure':
             names.update(v['file'] for section in payload['sections'] for v in section.get('visuals', []))
@@ -150,6 +163,8 @@ def validate(store):
         raise ValueError('retired business objects cannot be recovered')
     if store.db.execute('PRAGMA foreign_key_check').fetchone():
         raise ValueError('current recovery foreign key mismatch')
+    from .semantic_consolidation import validate as validate_consolidation
+    validate_consolidation(store)
     for obj in store.objects():
         rows = list(store.db.execute('SELECT * FROM revisions WHERE object_id=?', (obj['id'],)))
         heads = [r for r in rows if r['id'] == obj['current_revision'] and r['version'] == obj['version']]

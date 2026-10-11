@@ -61,7 +61,16 @@ def material_uses(store, entries):
     cache = {}
 
     def add(reference, scope, evidence):
-        target = light.ref_record(store, reference)
+        try:
+            target = light.ref_record(store, reference)
+        except KeyError:
+            if evidence['kind']=='actual_input':
+                # A real old call may predate retained object envelopes. Its
+                # immutable submission still exposes that gap on the candidate;
+                # it is not a current preparation dependency or list owner.
+                return
+            raise
+        if target.get('unavailable') or target['payload'].get('status')=='withdrawn':return
         if target['kind'] not in ('ASSET', 'REQUIREMENT'):
             return
         mid = canonical_id(store, target['object_id'])

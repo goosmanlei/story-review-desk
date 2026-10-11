@@ -144,9 +144,12 @@ def validate_reference_requirement(store, p):
         return
     if role not in ("overall", "detail") or not complete(scope):
         raise ValueError("state reference requirements need a complete state scope and role")
-    if (p["states"] != [p["scope"]] or len(p["entities"]) != 1 or
-            p["entities"][0]["object_id"] != scope["payload"]["entity"]["object_id"]):
+    owners = {ref['object_id'] for ref in p['entities']}
+    if (p["scope"] not in p["states"] or scope["payload"]["entity"]["object_id"] not in owners):
         raise ValueError("state reference requirement must bind its exact state and owner")
+    if any(ref_record(store, ref, {'STATE'})['payload']['entity']['object_id'] not in owners
+           for ref in p['states']):
+        raise ValueError('shared state references must declare every owner')
     optional_review = scope['payload'].get('reference_mode') == 'description' and p['usage'] == 'review_reference'
     if role == "overall" and (p["slot"] != "overall" or (p["required"] is not True and p.get('status') != 'withdrawn' and not optional_review) or
             p["media_type"] != scope["payload"]["reference_media"]):
@@ -207,9 +210,12 @@ def scope_coverage(store, subjects, heads):
                 if complete(state) and state["payload"]["reference_media"] != "none" and state["payload"].get("reference_mode") != "description":
                     used[exact(ref)] = ref
     for key, ref in used.items():
-        matches = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and exact(r["payload"]["scope"]) == key and
-                   r["payload"]["slot"] == "overall" and r["payload"]["required"] is True and
-                   r["payload"]["specification"].get("reference_role") == "overall"]
+        state = ref_record(store, ref, {'STATE'})
+        matches = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and
+                   (exact(r['payload']['scope']) == key or key in {exact(s) for s in r['payload'].get('states', [])}) and
+                   r['payload']['required'] is True and r['payload']['media_type'] == state['payload']['reference_media'] and
+                   (r['payload']['specification'].get('reference_role') == 'overall' or
+                    ref_record(store,r['payload']['scope'])['kind'] == 'ENTITY')]
         if not matches:
             issues.append({"code": "missing_overall_reference_requirement", "state": ref})
     return {"checked_count": checked, "states": list(used.values()), "issues": issues}

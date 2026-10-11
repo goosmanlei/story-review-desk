@@ -89,6 +89,15 @@ def ref_record(store, reference):
     return record(store, reference['object_id'], reference['revision_id'])
 
 
+def historical_ref_record(store, reference):
+    """A retained call can honestly name an unavailable pre-migration input."""
+    try:
+        row = ref_record(store, reference)
+        return None if row.get('unavailable') or row['payload'].get('status')=='withdrawn' else row
+    except KeyError:
+        return None
+
+
 def rows(store, kind, condition='', params=()):
     sql = ('SELECT r.id,r.object_id,r.version,r.payload AS stored_payload,r.created_at,'
            'o.kind,o.current_revision FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind=?')

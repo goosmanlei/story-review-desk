@@ -33,9 +33,14 @@ def validate(kind, payload):
 def direct_materials(store, row):
     """All directly owned needs, including cameras omitted from products."""
     from . import list_reading as light
-    return [p.record(store, item['object_id']) for item in light.rows(
+    found = {item['object_id']:p.record(store, item['object_id']) for item in light.rows(
         store, 'REQUIREMENT', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=? "
-        "AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (row['object_id'], row['id']))]
+        "AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (row['object_id'], row['id']))}
+    from .business_relations import scope_links
+    for _, item in scope_links(store, {'object_id':row['object_id'],'revision_id':row['id']}):
+        if item['kind']=='REQUIREMENT' and item['payload'].get('status')!='withdrawn':
+            found[item['object_id']] = item
+    return list(found.values())
 
 
 def source_labels(store, row):

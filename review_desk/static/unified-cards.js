@@ -99,6 +99,7 @@ function renderUnifiedSelected(data){
 }
 function renderUnifiedCard(root){
   root.classList.add('unified-card-host');root.replaceChildren();
+  if(state.materialReview?.record?.payload.format==='production-retirement-v1'){renderProductionRecord(root,state.materialReview);paintProductionReview();return}
   if(state.entityReview?.entity?.kind==='AV_SHOT'){renderShotEntityWorkspace(root,state.entityReview);paintProductionReview();return}
   const card=el('section','unified-card'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
   if(state.positionReview){
@@ -178,6 +179,7 @@ function activateUnifiedCard(result){
   state.reviewWork=result.review_work||null;
   state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
   state.productionEntityId=state.entityReview?.entity.object_id||null;state.productionChildDetail=null;state.productionEntityDetail=null;
+  if(row.payload.format==='production-retirement-v1'){focusProductionReview(detail,false);return}
   if(state.entityReview){
     const data=state.entityReview;if(result.explicit&&!result.defaultSelection&&['ENTITY','STATE'].includes(row.kind)){data.localVersions||={};data.localVersions[row.object_id]=row;}if(params.get('production_entity')&&params.get('production_entity')!==data.entity.object_id)throw Error('准确实体不属于此素材');data.currentStates=data.states;data.states=[...new Map([...data.states,...(data.retained_states||[])].map(r=>[r.id,r])).values()];data.states.sort(productionStateOrder);state.productionEntityDetail=entityReviewDetail(result.explicit&&!result.defaultSelection&&row.kind==='ENTITY'?row:data.entity);
     const wanted=params.get('entity_state'),ownedStates=[...data.states,...(data.retained_states||[])],wantedForm=ownedStates.find(r=>r.object_id===wanted);if(wanted&&!wantedForm&&result.form?.object_id!==wanted)throw Error('准确状态不属于此实体');const currentForm=!result.form&&state.reviewWork&&['ASSET','REQUIREMENT'].includes(result.detail.record.kind)?data.states.find(r=>reviewWorkMatches(r)):null;const form=(wanted?(result.form?.object_id===wanted?result.form:wantedForm):currentForm||result.form)||data.states[0];state.productionChildDetail=form?entityReviewDetail(form):null;
@@ -253,6 +255,8 @@ async function openUnifiedMaterial(ref,trigger){
 }
 
 function validateUnifiedReference(result){
+  // An old exact URL opens its retirement receipt, never another candidate.
+  if(result.detail.record.payload.format==='production-retirement-v1')return;
   const params=result.params,detail=result.detail,data=result.entity_review||detail;
   const versions=params.has('material_round')?data.legacy_material_versions:data.material_versions;
   normalizeConsolidatedMaterialRoute(params,versions);

@@ -208,7 +208,7 @@ def annotate(store, value, *, share_records=False):
         oid = v.get('object_id') or v.get('id')
         if isinstance(oid,str) and (oid in codes or aliases.get(oid) in codes) and ('payload' in v or 'title' in v):
             result['business_code'] = codes.get(oid,codes.get(aliases.get(oid)))
-            if oid in aliases:
+            if oid in aliases and v.get('payload', {}).get('format') != 'production-retirement-v1':
                 result['material_code'] = codes.get(aliases[oid],result['business_code'])
             if v.get('kind') == 'REQUIREMENT' and 'payload' in v:
                 scene = scene_for(v['payload'].get('scope'))

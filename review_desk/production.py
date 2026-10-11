@@ -313,6 +313,10 @@ def _lineage(store, payload):
 
 
 def validate_payload(store, object_id, kind, payload, inspect=True, check_current=True):
+    from .semantic_consolidation import is_retired, validate_retirement
+    if is_retired(payload):
+        validate_retirement(store, object_id, kind, payload)
+        return
     from .production_current import enabled as current_enabled
     if kind == 'CALL' and current_enabled(store) and store.db.execute('SELECT 1 FROM production_submissions WHERE operation_id=?', (object_id,)).fetchone():
         from .generation import validate_call
@@ -676,6 +680,10 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         raise ValueError("unknown production kind")
     if object_id or revision_id:
         selected = record(store, object_id, revision_id)
+        from .semantic_consolidation import is_retired
+        if is_retired(selected['payload']):
+            return {'record':selected, 'history':[selected], 'uses':[], 'reference_titles':[],
+                    'retired':True, 'material_versions':{}, 'legacy_material_versions':{}}
         if selected.get('unavailable'):
             if selected.get('retired_review'):
                 return {'record':selected, 'history':[], 'comments':selected['history_comments'], 'uses':[], 'reference_titles':[]}

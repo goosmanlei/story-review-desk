@@ -6,16 +6,17 @@ from . import list_reading as light
 
 def material_entries(store):
     from .read_cache import read_json
-    return read_json(store, 'material-entries-v6', lambda: _material_entries(store))
+    return read_json(store, 'material-entries-v7', lambda: _material_entries(store))
 
 
 def _material_entries(store):
     needs=light.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
-    assets=light.rows(store,'ASSET');results={};used=set()
+    assets=light.rows(store,'ASSET',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'");results={};used=set()
     for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
         row=p.record_view(raw);results.setdefault(raw['material_id'],[]).append(row)
         if raw['material_id']!=row['object_id']:used.add(row['object_id'])
-    for asset in assets:
+    from .production_current import enabled as current_enabled
+    for asset in ([] if current_enabled(store) else assets):
         for ref in asset['payload'].get('candidate_requirements',[]):
             if light.ref_record(store,ref).get('unavailable'):continue
             results.setdefault(ref['object_id'],[]).append(asset);used.add(asset['object_id'])
@@ -26,14 +27,19 @@ def _material_entries(store):
     for _, subject, scope in material_bindings(store):
         links.setdefault(subject['revision_id'], []).append(scope)
     for row in [*needs,*(a for a in assets if a['object_id'] not in used)]:
-        value=row['payload'];scope=value.get('scope');owners={};locations=[]
+        value=row['payload'];scope=value.get('scope');owners={};locations=[];state_ids=set();visited=set()
         def add_scope(reference,relation):
+            key=(reference.get('object_id'),reference.get('revision_id'))
+            if key in visited:return
+            visited.add(key)
             scoped=light.ref_record(store,reference)
             locations.extend({**loc,'relation':relation,'title':scoped['payload']['title']} for loc in b.locations(store,reference,cache))
             if scoped.get('unavailable'):
                 if scoped.get('owner_object_id'):owners[scoped['owner_object_id']]=None
                 return
             if scoped['kind']=='STATE':
+                if scoped['payload'].get('status')=='withdrawn':return
+                state_ids.add(scoped['object_id'])
                 owners[scoped['payload']['entity']['object_id']]=scoped['payload']['entity']
                 for source in scoped['payload'].get('sources',[]):
                     episode=light.ref_record(store,source)
@@ -42,7 +48,12 @@ def _material_entries(store):
                                       'source_scene_name':source_scene.get('heading') or source_scene.get('title') or source_scene.get('location'),
                                       'source_version':episode.get('version'),'relation':'source'})
             elif scoped['kind'] in ('ENTITY','AV_SHOT'):owners[scoped['object_id']]=b.ref(scoped)
+            elif scoped['kind']=='ASSET':
+                for coverage in scoped['payload'].get('state_coverage',[]):add_scope(coverage['state'],'coverage')
+                for subject in scoped['payload'].get('subjects',[]):add_scope(subject,'subject')
         if scope:add_scope(scope,'mounted')
+        if scope and light.ref_record(store,scope)['kind'] in ('ENTITY','STATE'):
+            for reference in value.get('states',[]):add_scope(reference,'applicable')
         for reference in links.get(row['id'],[]):add_scope(reference,'applicable')
         if row['kind']=='ASSET':
             for coverage in value.get('state_coverage',[]):add_scope(coverage['state'],'coverage')
@@ -53,7 +64,7 @@ def _material_entries(store):
         entries.append({'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],
                         'media_type':value['media_type'],'generated':bool(real),'preview':preview,
                         'generation_scope':'history' if row['kind']=='REQUIREMENT' else 'exact',
-                        'slot':value.get('slot'),'scope':scope,'locations':locations,'entity_ids':list(owners)})
+                        'slot':value.get('slot'),'scope':scope,'locations':locations,'entity_ids':list(owners),'state_ids':sorted(state_ids)})
     from .material_storage import canonical_id, identity
     merged={}
     for item in entries:
@@ -64,11 +75,13 @@ def _material_entries(store):
             if previous:
                 merged[mid]['locations']+=previous['locations']
                 merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+previous['entity_ids']))
+                merged[mid]['state_ids']=sorted(set(merged[mid]['state_ids']+previous['state_ids']))
                 merged[mid]['generated']|=previous['generated']
                 merged[mid]['preview']=merged[mid]['preview'] or previous['preview']
         else:
             merged[mid]['locations']+=item['locations']
             merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+item['entity_ids']))
+            merged[mid]['state_ids']=sorted(set(merged[mid]['state_ids']+item['state_ids']))
             merged[mid]['generated']|=item['generated']
             merged[mid]['preview']=merged[mid]['preview'] or item['preview']
     from .material_plans import card_counts
@@ -186,6 +199,9 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
 def card(store, object_id, revision_id=None, entity_id=None):
     from . import entity_review
     detail=p.snapshot(store,object_id=object_id,revision_id=revision_id);row=detail['record'];scope=row['payload'].get('scope');form=None;owner=None
+    if detail.get('retired'):
+        return {'detail':detail,'entity_review':None,'form':None,'scope':None,
+                'source_materials':[],'adoption_context':None,'position_review':None}
     if row['kind'] in ('ENTITY','AV_SHOT'):owner=row
     elif row['kind']=='STATE':form=row
     elif row['kind']=='ASSET' or row['payload'].get('current_plan_for'):
@@ -317,8 +333,10 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
                     call=(light.record if metadata else p.record)(store,revision_id=call_ref[0])
                     for value in call['payload'].get('inputs',[]):
                         exact=value.get('reference',value)
-                        add(read_ref(store,exact),'actual_input',
-                            {'kind':'actual_input','record':b.ref(call),'reference':value})
+                        historic=light.historical_ref_record(store,exact)
+                        if historic:
+                            add(historic if metadata else p.record(store,historic['object_id'],historic['id']),'actual_input',
+                                {'kind':'actual_input','record':b.ref(call),'reference':value})
         for link in context['relations']:
             if link['payload']['relation_type']=='applicability':
                 subject=read_ref(store,link['payload']['subject'])

@@ -47,6 +47,22 @@ test('shared entity card retains an exact older revision even without legacy his
   assert.equal(new URL(ctx.location.href).searchParams.get('production_revision'),null);
 });
 
+test('changing entity material focus replaces the prior candidate route before refresh',()=>{
+  const ctx=setup([]);ctx.isEntityReview=()=>true;
+  ctx.state.entityReview={material_versions:{wet:[{number:1,current_content:true}]}};
+  ctx.location.href='http://localhost/?material_id=woodcutter&material_target=woodcutter-candidate';
+  ctx.materialCommentContext=()=>({material_id:'wet',number:1});
+  ctx.writeMaterialVersionRoute=(params,id)=>params.set('material_id',id);
+  const wet={...row('wet','REQUIREMENT'),current_content:true};
+  ctx.focusProductionReview({record:wet},false);
+  assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),'current');
+  const candidate=row('wet-candidate','ASSET');
+  ctx.focusProductionReview({record:candidate},false);
+  assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),candidate.id);
+  ctx.focusProductionReview({record:row('another-state','STATE')},false);
+  assert.equal(new URL(ctx.location.href).searchParams.has('material_target'),false);
+});
+
 
 
 test('legacy fragments do not count as current complete forms but keep their owner',()=>{

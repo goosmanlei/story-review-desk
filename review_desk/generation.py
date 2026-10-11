@@ -27,7 +27,7 @@ def validate_plan(store, object_id, payload):
     if not isinstance(plan, dict) or plan.get('format') != PLAN or plan.get('method') not in ('generate', 'reuse', 'external-edit'):
         raise ValueError('unsupported generation plan')
     for key in ('model', 'prompt'):
-        if plan['method'] != 'external-edit' and not payload.get('current_plan_for'):
+        if plan['method'] == 'generate' and not payload.get('current_plan_for'):
             p._text(plan.get(key), 'generation ' + key)
         elif plan.get(key) is not None and not isinstance(plan[key], str):
             raise ValueError('invalid generation '+key)
@@ -91,8 +91,11 @@ def validate_plan(store, object_id, payload):
 
 def requirements_for(rows, states):
     refs = {canonical(ref(s)) for s in states}
+    kinds = {r['object_id']:r['kind'] for r in rows}
     return sorted((r for r in rows if r['kind'] == 'REQUIREMENT' and r['payload'].get('status') != 'withdrawn'
-                   and canonical(r['payload']['scope']) in refs), key=lambda r: r['object_id'])
+                   and (canonical(r['payload']['scope']) in refs or
+                        kinds.get(r['payload']['scope']['object_id']) in ('ENTITY','STATE') and
+                        any(canonical(s) in refs for s in r['payload'].get('states', [])))), key=lambda r: r['object_id'])
 
 
 def current_scope(store, entity_id, rows=None):
@@ -147,7 +150,7 @@ def preparation(store, scope):
     if not data['states']:
         issues.append({'object_id':data['entity']['object_id'], 'code':'states_missing', 'message':'尚无完整状态'})
     for form in data['states']:
-        needs = [r for r in data['requirements'] if r['payload']['scope']==ref(form)]
+        needs = [r for r in data['requirements'] if r['payload']['scope']==ref(form) or ref(form) in r['payload'].get('states', [])]
         if form['payload']['reference_media']!='none' and form['payload'].get('reference_mode')!='description' and not any(r['payload']['required'] for r in needs):
             issues.append({'object_id':form['object_id'], 'code':'materials_missing', 'message':form['payload']['title']+'：预期素材待明确'})
     for need in data['requirements']:
@@ -173,7 +176,7 @@ def snapshot(store, entity_id, revision_id=None):
     # Write validation and caller-owned transactions always read their own data.
     with p.read_scope(store):
         from .read_cache import read_json
-        return read_json(store, ['entity-review-v3', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
+        return read_json(store, ['entity-review-v4', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
 
 
 def _snapshot(store, entity_id, revision_id=None):
@@ -259,6 +262,15 @@ def _snapshot(store, entity_id, revision_id=None):
                         if r['payload'].get('status') != 'withdrawn']
         data['requirements'] = list({r['id']: r for r in [*data['requirements'], *entity_needs]}.values())
         for need in entity_needs:targets[need['id']] = need
+        # The same ownership projection drives the graph, detail lists and
+        # every state count. Input consumers do not become owners of a material.
+        from .ui_projection import material_entries
+        entries = [entry for entry in material_entries(store) if entity_id in entry['entity_ids']]
+        owned_needs = [p.record(store,entry['object_id']) for entry in entries if entry['kind']=='REQUIREMENT']
+        data['requirements'] = list({r['id']:r for r in [*data['requirements'],*owned_needs]}.values())
+        data['state_material_ids'] = {form['object_id']:[entry['canonical_material_id'] for entry in entries
+            if form['object_id'] in entry.get('state_ids',[])] for form in data['states']}
+        for need in owned_needs:targets[need['id']] = need
     versions={r['object_id']:[{'id':v[0],'version':v[1]} for v in store.db.execute('SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC',(r['object_id'],))]
               for r in [data['entity'],*data['states'],*retained_states,*data['requirements'],*data['relationships'],*(m['record'] for m in data['media'])]}
     from .material_plans import snapshot as material_snapshot, memberships as plan_memberships
