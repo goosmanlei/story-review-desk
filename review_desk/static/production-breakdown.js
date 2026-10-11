@@ -499,7 +499,7 @@ async function loadProductionBreakdown({refresh=false}={}){
   const materialTarget=params.get('production_object');
   if(!resolved.error&&epoch===breakdownEpoch&&workspace===state.workspace&&materialTarget&&params.has('material_id')&&!data.scenes.some(r=>r.object_id===materialTarget)&&!data.shots.some(r=>r.object_id===materialTarget)){
     breakdownRoute({material_id:null,material_version:null,material_round:null,material_target:null,production_entity:null,entity_state:null});
-    await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params},null);
+    await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params,restoreRoute:true},null);
   }
   }catch(error){
     if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
