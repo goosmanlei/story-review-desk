@@ -135,3 +135,24 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .methods-page .method-rules .config-field { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .methods-page .method-rules input,.methods-page .method-rules select { flex: 1 1 240px; }
 @media(max-width:700px) { .methods-page .method-resource-row { grid-template-columns: minmax(0,1fr); margin-bottom: 18px; } }
+.method-reading-layout { display:grid; grid-template-columns:minmax(170px,230px) minmax(0,1fr); gap:28px; margin-top:24px; }
+.method-directory { align-self:start; position:sticky; top:110px; display:flex; flex-direction:column; max-height:65vh; overflow:auto; gap:4px; }
+.methods-page button { font:inherit; border:1px solid var(--desk-line); background:#fffdfa; border-radius:4px; padding:7px 10px; cursor:pointer; }
+.method-directory button { text-align:left; overflow-wrap:anywhere; }
+.method-directory button.active { background:var(--desk-selected); }
+.method-prose { min-width:0; line-height:1.85; overflow-wrap:anywhere; }
+.method-prose h2,.method-prose h3,.method-prose h4 { margin:24px 0 12px; scroll-margin-top:120px; }
+.method-prose p { margin:0 0 18px; white-space:pre-wrap; }
+.method-prose pre { overflow:auto; font-size:13px; white-space:pre-wrap; }
+.method-prose img { max-width:100%; }
+.method-list-item { padding-left:20px; position:relative; }
+.method-list-item::before { content:'•'; position:absolute; left:2px; }
+.method-tools { display:flex; gap:8px; flex-wrap:wrap; margin:18px 0; }
+.method-shared { display:flex; flex-direction:column; gap:8px; margin-top:30px; }
+.method-shared button { text-align:left; }
+.method-shared small { display:block; color:var(--desk-muted); }
+.method-source,.method-use { font-size:13px; color:var(--desk-muted); }
+.method-body-editor { width:100%; min-height:55vh; font:14px/1.8 monospace; }
+.method-apply-scopes { margin-top:20px; }
+.method-apply-scopes label { display:block; margin:10px; }
+@media(max-width:750px) { .method-reading-layout { grid-template-columns:1fr; gap:16px; } .method-directory { position:static; flex-direction:row; flex-wrap:wrap; max-height:160px; } }

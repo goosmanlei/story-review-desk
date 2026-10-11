@@ -154,6 +154,19 @@ def validate(store, payload):
         require(isinstance(companions, dict) and not (set(companions) - set(sections)), '附属文件的章节不存在')
         for section, names in companions.items():
             require(isinstance(names, list) and all(isinstance(n, str) and n in files for n in names), '附属文件不存在')
+        media = payload.get('media', {})
+        require(isinstance(media, dict), '媒体原件清单必须为对象')
+        for filename, entries in media.items():
+            require(filename in files and isinstance(entries, dict), '媒体所属正文不存在')
+            from .method_document import project
+            links = {part.get('href') for b in project(payload, filename) for part in b['parts']}
+            for href, spec in entries.items():
+                require(href in links, '媒体未被准确正文引用')
+                require(isinstance(spec, dict), '媒体原件元数据必须为对象')
+                file_path(spec['path'])
+                require(isinstance(spec.get('sha256'), str) and re.fullmatch(r'[0-9a-f]{64}', spec['sha256']) and
+                        type(spec.get('bytes')) is int and spec['bytes'] >= 0 and
+                        isinstance(spec.get('mime'), str) and spec['mime'].startswith(('image/', 'audio/', 'video/')), '媒体原件元数据无效')
         source = payload.get('source')
         if source:
             require(source.get('kind') == 'project-markdown' and set(source.get('files', {})) == set(payload['files']), 'Markdown 投影的来源清单不完整')
@@ -505,6 +518,32 @@ def sync_source(store, root, value):
                 require(name not in payload['files'] or payload['files'][name] == body, '附属文件不能替换章节切片')
                 payload['files'][name] = body
                 payload['source']['files'][name] = {'path': name, 'sha256': digest(body.encode()), 'content_sha256': digest(body.encode())}
+    # Relative binary links remain original files; immutable metadata binds the
+    # readable projection to the same bytes without copying a second library.
+    import hashlib
+    import mimetypes
+    from .method_document import project
+    media = {}
+    for block in project(payload):
+        for part in block['parts']:
+            href = part.get('href', '')
+            if re.match(r'^[a-z]+:', href) or Path(href).suffix.lower() not in ('.png', '.jpg', '.jpeg', '.webp', '.mp4', '.webm', '.mp3', '.wav'):
+                continue
+            filename = block['file']
+            if href in media.get(filename, {}):
+                continue
+            spec = payload['source']['files'][filename]
+            path = (root / Path(spec['path']).parent / href).resolve(strict=True)
+            require(root in path.parents and path.is_file(), '媒体必须属于项目源目录')
+            sha = hashlib.sha256()
+            with path.open('rb') as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                    sha.update(chunk)
+            media.setdefault(filename, {})[href] = {'path': path.relative_to(root).as_posix(),
+                'sha256': sha.hexdigest(), 'bytes': path.stat().st_size,
+                'mime': mimetypes.guess_type(path.name)[0] or 'application/octet-stream'}
+    if media:
+        payload['media'] = media
     oid = 'method.resource.' + identifier(value['name'])
     if store.db.execute('SELECT 1 FROM objects WHERE id=?', (oid,)).fetchone():
         old = read(store, oid)
@@ -596,3 +635,90 @@ def restore_registry(store, archive, *, transaction=True):
                 # row; every imported artifact already exists here.
                 artifact(store, {**payload, 'inputs': execution['payload']['inputs']})
     return {'sha256': sha, 'inserted': inserted, 'revisions': len(rows)}
+
+
+def edit(store, value):
+    """Save ordinary prose, then apply only selected existing binding branches.
+
+    No new workflow records: exact old/new revisions are the retry receipt.
+    A binding conflict is reported separately after the prose has been saved.
+    """
+    base = read(store, value['object_id'], value['base_revision'])
+    require(base['payload']['format'] in (FORMATS['skill'], FORMATS['resource']), '仅编辑方法或资料正文')
+    require(not base['payload'].get('source'), '正文由项目源维护，请沿 method-source 同步')
+    payload = copy.deepcopy(base['payload'])
+    changes = value.get('changes', {})
+    require(isinstance(changes, dict) and not (set(changes) - {'files', 'title', 'purpose'}), '普通编辑只能修改正文、名称与用途')
+    payload.update(copy.deepcopy(changes))
+    category = 'skill' if payload['format'] == FORMATS['skill'] else 'resource'
+    validate(store, payload)
+    scopes = value.get('scopes', [])
+    require(isinstance(scopes, list) and len(scopes) <= 100, '使用范围无效')
+    grouped, applied, failed = {}, [], []
+    for scope in scopes:
+        require(isinstance(scope, dict) and set(scope) == {'object_id', 'revision_id', 'index'}, '范围必须指向准确绑定及条件分支')
+        require(type(scope['index']) is int and scope['index'] >= 0, '条件分支无效')
+        grouped.setdefault((scope['object_id'], scope['revision_id']), set()).add(scope['index'])
+    current = read(store, base['object_id'])
+    saved_ref = value.get('saved_revision')
+    if saved_ref:
+        saved = read(store, base['object_id'], saved_ref)
+        require(saved['payload'] == payload and saved['version'] in (base['version'], base['version'] + 1), '保存回执不属于本次改稿')
+    elif current['revision_id'] == base['revision_id']:
+        saved = base if payload == base['payload'] else save(store, {'category': category,
+            'name': base['object_id'].split('.', 2)[2], 'expected_version': base['version'], 'payload': payload})
+    elif current['version'] == base['version'] + 1 and current['payload'] == payload:
+        # A successful save whose response was lost is recovered by exact bytes.
+        saved = current
+    else:
+        raise Conflict('正文已有新版本；当前改稿保留，请核对最新正文后合并')
+    for (oid, rid), indices in grouped.items():
+        label = {'object_id': oid, 'revision_id': rid, 'indices': sorted(indices)}
+        try:
+            old = read(store, oid, rid)
+            require(old['payload']['format'] == FORMATS['binding'], '使用范围不是工作绑定')
+            require(category == 'skill' and old['payload']['work_type'] in payload['work_types'], '方法不适用此工作类型')
+            require(all(i < len(old['payload']['rules']) for i in indices), '所选条件分支不存在，请重新核对范围')
+            active = read(store, oid)
+            intended = copy.deepcopy(old['payload'])
+            for i in indices:
+                intended['rules'][i].update(reference(saved))
+            if active['payload'] == intended:
+                result = active
+            elif active['revision_id'] != rid:
+                raise Conflict('使用范围已更新；请核对当前分支后继续，未覆盖别人的选择')
+            else:
+                result = save(store, {'category': 'binding', 'name': old['payload']['work_type'],
+                    'expected_version': old['version'], 'payload': intended})
+            applied.append({**label, 'current_revision': result['revision_id'], 'work_type': old['payload']['work_type']})
+        except (Conflict, ValueError, KeyError, TypeError) as exc:
+            failed.append({**label, 'error': str(exc)})
+    return {'saved': saved, 'applied': applied, 'unapplied': failed}
+
+
+def respond(store, value):
+    """Use the existing comment-handling evidence, with an exact current excerpt."""
+    from .method_document import project
+    from .comment_review import import_evidence
+    comment = store.comment(value['comment_id'])
+    require(comment is not None, '原意见不存在')
+    original = read(store, comment['target_object_id'], comment['target_revision_id'])
+    current = read(store, comment['target_object_id'], value['revision_id'])
+    require(current['payload']['format'] in (FORMATS['skill'], FORMATS['resource']), '回应对象不是方法或共用资料')
+    text(value.get('explanation'), '回应', 12000)
+    filename = comment['anchor']['file']
+    old = project(original['payload'], filename)
+    blocks = project(current['payload'], filename)
+    old_texts = {b['text'] for b in old}
+    changed = [b for b in blocks if b['text'] not in old_texts and b['type'] not in ('heading', 'table-cell')]
+    selected = changed or [b for b in blocks if b['id'] == comment['anchor']['block_id']] or blocks[:1]
+    require(bool(selected), '准确正文缺失，不能登记回应')
+    evidence = [{'object_id': current['object_id'], 'revision_id': current['revision_id'], 'label': '当前正文'+('改动' if changed else '核对'),
+                 'anchor': {'file': filename, 'block_id': b['id'], 'end_block_id': b['id'], 'start': 0,
+                            'end': len(b['text']), 'quote': b['text']}} for b in selected]
+    identity = checksum({'comment': comment['id'], 'revision': current['revision_id'], 'explanation': value['explanation']})
+    item = {'format': 'comment-handling-v1', 'id': 'comment-handling-method-' + identity, 'comment_id': comment['id'],
+            'original': {'object_id': original['object_id'], 'revision_id': original['revision_id'], 'anchor_sha256': checksum(comment['anchor'])},
+            'response': reference(current), 'decision': '已核对', 'explanation': value['explanation'], 'evidence': evidence,
+            'provenance': {'file': 'api/methods/respond', 'sha256': checksum(value)}}
+    return import_evidence(store, [item])
