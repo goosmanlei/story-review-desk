@@ -252,7 +252,7 @@
 .entity-review-lyrics p { white-space:pre-line; }
 .shot-entity-workspace { margin:18px 0 30px; border:1px solid var(--line,#d5d3c4); border-radius:8px; padding:18px; }
 .management-graph-viewport { height:72vh; min-height:420px; background:#f7f8f0; }
-.management-graph-node .entity-small-card { width:280px; min-height:110px; height:auto; }
+.management-graph-node .entity-small-card { width:230px; min-height:110px; height:auto; }
 .management-graph-node .small-card-title { white-space:normal; }
 .management-graph-node .small-card-title strong { white-space:normal; overflow:visible; display:block; }
 .management-graph-node .material-small-preview { max-width:60px; }
