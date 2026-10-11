@@ -272,8 +272,9 @@ def card(store, object_id, revision_id=None, entity_id=None):
             'source_materials':source_materials,'adoption_context':context,'position_review':position_review}
 
 
-def scene(store, object_id, revision_id=None, shot_revision=None, view=None, episode=None, episode_revision=None):
-    if view not in (None, 'breakdown', 'shots'):
+def scene(store, object_id, revision_id=None, shot_revision=None, view=None, episode=None, episode_revision=None,
+          material_id=None, candidate_revision=None):
+    if view not in (None, 'breakdown', 'shots', 'reader'):
         raise ValueError('unknown scene view')
     # Full video definitions are read below for this scene's shots only. Other
     # materials and ancestor contexts retain the lightweight list projection.
@@ -291,6 +292,22 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
         chain=[b.ref(selected),b.ref(edition),*b.ancestors(store,p.ref_record(store,edition['payload']['input_lock']))]
     else:
         chain=b.ancestors(store,selected)
+    if view == 'reader':
+        from .entity_contract import shot_workspace
+        target = shot_revision or (shots[0]['id'] if shots else None)
+        items = []
+        for row in shots:
+            p.check_read(store)
+            focused = row['id'] == target
+            workspace = shot_workspace(store, row['object_id'], row['id'], deferred=True,
+                material_id=material_id if focused else None,
+                candidate_revision=candidate_revision if focused else None, load_selected=focused)
+            items.append({'record': row, 'entity_workspace': workspace})
+        from .audiovisual import episode_comment_targets
+        return {'scene': selected, 'shots': items, 'shared': [], 'source_scenes': [],
+                'comment_index': b.comment_index(store),
+                'episode_comment_targets': {'object_id': edition['object_id'], 'revision_id': edition['id'],
+                    'targets': episode_comment_targets(store, edition)} if episode_revision else None}
     contexts=[]
     for index,reference in enumerate(chain):
         row=p.ref_record(store,reference)

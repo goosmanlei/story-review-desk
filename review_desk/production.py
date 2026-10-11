@@ -65,6 +65,16 @@ def read_scope(store):
             store.db.rollback()
 
 
+class ReadCancelled(ConnectionAbortedError):
+    """A disconnected reader, stopped only at safe read boundaries."""
+
+
+def check_read(store):
+    scope = getattr(store, '_production_reads', None)
+    if scope and scope.get('cancel_check'):
+        scope['cancel_check']()
+
+
 def record(store, object_id=None, revision_id=None):
     reads = getattr(store, '_production_reads', None)
     key = (object_id, revision_id)

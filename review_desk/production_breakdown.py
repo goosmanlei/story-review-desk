@@ -185,6 +185,85 @@ def material_comment_targets(store, revision):
     return targets
 
 
+def material_comment_targets_many(store, positions):
+    """Current plan/candidate comment identities in one bounded directory pass.
+
+    No Prompt, submitted snapshot or media bytes are needed to count comments.
+    Legacy edition reads keep their original exact version membership contract.
+    """
+    from .production_current import enabled
+    if not enabled(store):
+        return {row['id']: material_comment_targets(store, row['id']) for row in positions}
+    scopes = {row['id']: row for row in positions}
+    needs = {rid: {} for rid in scopes}
+    raw_scopes = json.dumps(list(scopes))
+    for row in store.db.execute('''SELECT r.id,r.object_id,r.payload FROM revisions r
+        JOIN objects o ON o.id=r.object_id
+        WHERE o.kind='REQUIREMENT'
+        AND json_extract(r.payload,'$.scope.revision_id') IN (SELECT value FROM json_each(?))
+        AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'
+        AND NOT EXISTS(SELECT 1 FROM revisions newer WHERE newer.object_id=r.object_id
+            AND newer.version>r.version AND json_extract(newer.payload,'$.scope.revision_id')=json_extract(r.payload,'$.scope.revision_id'))''', (raw_scopes,)):
+        scope = json.loads(row['payload'])['scope']['revision_id']
+        needs[scope][row['object_id']] = {'object_id': row['object_id'], 'id': row['id']}
+    for row in positions:
+        for item in row['payload'].get('products', []):
+            reference = item['requirement']
+            needs[row['id']][reference['object_id']] = {'object_id': reference['object_id'], 'id': reference['revision_id']}
+    # A reviewed shared camera can be directly owned by several shots through
+    # one business relation per scope, while keeping its original stable need.
+    from . import list_reading as light
+    positions_by_id = {row['object_id']: row for row in positions}
+    ids = json.dumps(list(positions_by_id))
+    for raw in store.db.execute('''SELECT r.payload FROM business_relations b
+        JOIN objects o ON o.id=b.object_id JOIN revisions r ON r.id=o.current_revision
+        WHERE (b.endpoint_a IN (SELECT value FROM json_each(?))
+            OR b.endpoint_b IN (SELECT value FROM json_each(?)))
+        AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn' ''', (ids, ids)):
+        value = json.loads(raw[0])
+        for endpoint in value['endpoints']:
+            position = positions_by_id.get(endpoint)
+            if position is None or ref(position) not in value.get('contexts', []):
+                continue
+            other = next(e for e in value['endpoints'] if e != endpoint)
+            subject = light.record(store, other)
+            if subject['kind']=='REQUIREMENT' and subject['payload'].get('status')!='withdrawn':
+                needs[position['id']][other] = {'object_id':other,'id':subject['id']}
+    # These are only direct applicability/occurrence needs. Shared upstream
+    # inputs are intentionally outside the episode-comment counting boundary.
+    from . import list_reading as light
+    for row in store.db.execute('''SELECT r.payload FROM revisions r JOIN objects o ON o.id=r.object_id
+        WHERE o.kind='RELATION' AND json_extract(r.payload,'$.relation_type') IN ('applicability','occurrence')
+        AND json_extract(r.payload,'$.scope.revision_id') IN (SELECT value FROM json_each(?))
+        AND NOT EXISTS(SELECT 1 FROM revisions newer WHERE newer.object_id=r.object_id AND newer.version>r.version
+            AND json_extract(newer.payload,'$.scope.revision_id')=json_extract(r.payload,'$.scope.revision_id'))''', (raw_scopes,)):
+        value = json.loads(row[0]); subject = light.ref_record(store, value['subject'])
+        if subject['kind'] == 'REQUIREMENT':
+            needs[value['scope']['revision_id']].setdefault(subject['object_id'], {'object_id': subject['object_id'], 'id': subject['id']})
+    aliases = dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
+    mids = {aliases.get(mid, mid) for values in needs.values() for mid in values}
+    candidates = {}
+    for row in store.db.execute('''SELECT t.material_id,a.id,a.object_id,c.operation_id,call.current_revision AS call_revision
+        FROM production_candidate_targets t JOIN production_candidates c ON c.id=t.candidate_id
+        JOIN objects o ON o.id=c.asset_object_id JOIN revisions a ON a.id=o.current_revision
+        LEFT JOIN objects call ON call.id=c.operation_id
+        WHERE t.material_id IN (SELECT value FROM json_each(?)) ORDER BY t.number''', (json.dumps(list(mids)),)):
+        targets = candidates.setdefault(row['material_id'], [])
+        targets.append({'object_id': row['object_id'], 'id': row['id']})
+        # External candidates have no invented model call.
+        if row['call_revision']:
+            targets.append({'object_id': row['operation_id'], 'id': row['call_revision']})
+    return {rid: list({r['id']: r for mid, need in values.items()
+                      for r in [need, *candidates.get(aliases.get(mid, mid), [])]}.values())
+            for rid, values in needs.items()}
+
+
+def comment_index(store):
+    """Fresh counting identities only, including deletes and closed comments."""
+    return [dict(r) for r in store.db.execute('''SELECT id,target_object_id,target_revision_id,status,version
+        FROM comments ORDER BY id''')]
+
+
 def exact_scoped(store, kind, revision, metadata=False):
     # Historical reading uses the latest revision *bound to that exact scope*,
     # even when a current object moved elsewhere. Current heads never rebind it.
