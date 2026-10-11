@@ -236,8 +236,10 @@ function drawMethodEditor(root,record,recovery=null){
 
 function appendMethodResponseAction(actions,comment,onSaved=null){
   methodButton(actions,'回应原意见',async()=>{
+    const target=JSON.stringify(commentTarget());
     let current;
-    try{current=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id}))}catch(error){toast('回应稿读取失败：'+error.message);return}
+    try{current=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id}))}catch(error){if(actions.isConnected&&JSON.stringify(commentTarget())===target)toast('回应稿读取失败：'+error.message);return}
+    if(!actions.isConnected||JSON.stringify(commentTarget())!==target)return;
     const modal=openReviewDialog('回应方法原意见',actions,'method-response'),dialog=modal.body;
     nodeText('blockquote',null,comment.body,dialog);nodeText('p',null,'回应将关联原圈选和第 '+current.version+' 版当前正文；关闭评论仍由你决定。',dialog);
     let file=comment.anchor.file;
