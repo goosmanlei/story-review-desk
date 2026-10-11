@@ -4,7 +4,7 @@ const fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8');
 const code=source.slice(source.indexOf('function scrollBreakdownTarget('),source.indexOf('function breakdownSelectionKey('));
 test('explicit shot navigation reveals its material heading while a superseded request cannot move another reader',async()=>{
-  const reader={scrollTop:500},context={URL,CSS:{escape:x=>x},location:{href:'http://local/'},rememberProductionDraft(){},document:{querySelector:()=>reader},toast(){}};
+  const reader={scrollTop:500},context={state:{},URL,CSS:{escape:x=>x},location:{href:'http://local/'},rememberProductionDraft(){},document:{querySelector:()=>reader},toast(){}};
   context.history={pushState:(_a,_b,url)=>context.location.href=String(url)};context.loadProductionBreakdown=async()=>{};
   vm.createContext(context);vm.runInContext(source.slice(source.indexOf('function breakdownNavigate('),source.indexOf('function breakdownSelect(')),context);
   await context.breakdownNavigate({breakdown_object:'shot'});assert.equal(reader.scrollTop,0);

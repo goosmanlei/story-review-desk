@@ -61,7 +61,8 @@ function entityManagementScopeParams(params=new URL(location.href).searchParams)
   return {...managementScopeParams(params),scope:'shot',scope_shot:params.get('production_scope_shot')||''};
 }
 function entityScopeRoute(filters,{push=false}={}){
-  const url=new URL(location.href);
+  const url=new URL(location.href),changed=['episode','scope_revision','scene','shot'].some((key,index)=>url.searchParams.get(['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot'][index])!==(filters[key]||null));
+  if(changed)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
   for(const [key,value] of Object.entries({production_scope_episode:filters.episode,production_scope_revision:filters.scope_revision,production_scope_scene:filters.scene,production_scope_shot:filters.shot})){
     if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
@@ -148,7 +149,7 @@ async function openManagementReferences(refs,trigger,title,fallback){
   return openUnifiedMaterial(refs[0]||fallback,trigger);
 }
 async function openManagementMaterial(item,trigger){
-  return openManagementReferences((item.scope_references||[]).map(ref=>({...ref,defaultSelection:true})),trigger,'选择此范围的准确素材版本',{object_id:item.object_id,defaultSelection:true});
+  return openUnifiedMaterial({object_id:item.canonical_material_id||item.object_id,defaultSelection:true},trigger);
 }
 async function loadMaterialManagement(){
   state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const workspace=state.workspace,epoch=++productionLoadEpoch,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('materials',params,'material_');++productionReadEpoch;state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);

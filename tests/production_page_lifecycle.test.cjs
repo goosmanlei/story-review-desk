@@ -18,6 +18,7 @@ function fixture(){
   vm.createContext(c);
   for(const file of ['production.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),c);
   c.breakdownHeading=()=>{};
+  c.productionButton=(parent,text,action)=>{const n=new Node();n.text=text;n.action=action;parent.append(n);return n};
   c.rememberProductionDraft=()=>{};c.breakdownSceneTitle=row=>row.object_id;
   c.loadEntityManagement=result=>{c.state.productionSelected=result.records[0];host.replaceChildren({text:'entity list'});return result};
   return {c,host};
@@ -62,7 +63,8 @@ test('current directory failure remains visible and a new navigation can recover
   const {c,host}=fixture();c.api=async()=>{throw Error('current failure')};
   await assert.rejects(c.loadProductionBreakdown(),/current failure/);
   assert.match(host.children[0].text,/current failure/);
-  c.api=async()=>catalog('recovered');await c.loadProductionBreakdown();
+  assert.equal(host.children[1].text,'重试');
+  c.api=async()=>catalog('recovered');await host.children[1].action();
   assert.equal(c.state.breakdownData.episode,'recovered');assert.doesNotMatch(host.children.map(n=>n.text).join(''),/current failure/);
 });
 
