@@ -63,17 +63,19 @@ s.close()
                 child.terminate()
                 child.communicate(timeout=5)
 
-    def test_snapshot_token_failure_releases_scope_and_transaction(self):
-        before = read_cache.token(self.store)
-        with patch('review_desk.read_cache.token', side_effect=sqlite3.OperationalError('disk I/O error')):
+    def test_failed_snapshot_initialization_releases_transaction_for_retry(self):
+        # A transient database read failure must not leave a half-built scope
+        # attached to the reusable HTTP worker connection.
+        with patch.object(read_cache, 'token', side_effect=sqlite3.OperationalError('disk I/O error')):
             with self.assertRaises(sqlite3.OperationalError):
                 with production.read_scope(self.store):
-                    self.fail('an incomplete snapshot must not reach its reader')
-        self.assertFalse(self.store.db.in_transaction)
+                    self.fail('snapshot initialization should have failed')
         self.assertFalse(hasattr(self.store, '_production_reads'))
+        self.assertFalse(self.store.db.in_transaction)
         with production.read_scope(self.store):
-            self.assertEqual(self.store._production_reads['generation'], before)
-            self.assertEqual(read_cache.read_json(self.store, 'after-token-failure', self.store.objects), [])
+            self.assertEqual(self.store._production_reads['generation'], read_cache.token(self.store))
+            self.assertEqual(read_cache.read_json(self.store, 'retry', lambda: 'recovered'), 'recovered')
+        self.assertFalse(self.store.db.in_transaction)
 
     def test_retired_table_tokens_are_removed_without_resetting_live_tokens(self):
         self.store.db.execute('CREATE TABLE retired_cache_fixture (id INTEGER)')
