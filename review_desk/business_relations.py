@@ -149,13 +149,14 @@ def material_bindings(store):
                 yield row, {'object_id': endpoint, 'revision_id': target['id']}, context
 
 
-def scope_links(store, reference):
+def scope_links(store, reference, *, metadata=False):
+    from . import list_reading as light
     result = []
     for row in current(store, reference['object_id']):
         if row['payload'].get('status') == 'withdrawn' or reference not in row['payload']['contexts']:
             continue
         other = next(e for e in row['payload']['endpoints'] if e != reference['object_id'])
-        result.append((row, p.record(store, other)))
+        result.append((row, (light.record if metadata else p.record)(store, other)))
     return result
 
 
@@ -164,7 +165,12 @@ def code(store, row, codes=None):
         return None
     if codes is None:
         from .business_codes import code as render, visible_codes
-        codes = {r['object_id']: render(r) for r in visible_codes(store)}
+        scope = getattr(store, '_production_reads', None)
+        codes = scope.get('relation_codes') if scope is not None else None
+        if codes is None:
+            codes = {r['object_id']: render(r) for r in visible_codes(store)}
+            if scope is not None:
+                scope['relation_codes'] = codes
     a, b = row['payload']['endpoints']
     connector = {'related': '-', 'forward': '->', 'reverse': '<-'}[row['payload']['direction']]
     return 'R-' + codes.get(a, a) + connector + codes.get(b, b)

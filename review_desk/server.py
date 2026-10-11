@@ -4,6 +4,8 @@ import re
 import hashlib
 import time
 import queue
+import select
+import socket
 import threading
 import os
 import fcntl
@@ -98,6 +100,8 @@ class ReviewServer(HTTPServer):
                 request, address = item
                 try:
                     self.finish_request(request, address)
+                except (production.ReadCancelled, BrokenPipeError, ConnectionResetError):
+                    pass
                 except Exception:
                     self.handle_error(request, address)
                 finally:
@@ -170,7 +174,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         return True
 
     cache_paths = frozenset(('/api/production/index', '/api/production/breakdown',
-        '/api/production/card', '/api/production/scene', '/api/production/materials',
+        '/api/production/card', '/api/production/scene', '/api/production/shot-materials', '/api/production/materials',
         '/api/sources', '/api/screenplays', '/api/business-codes'))
 
     def _representation(self):
@@ -180,6 +184,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
         return graph, compressed
 
     def _json(self, value, status=200):
+        if self.command == 'GET':
+            production.check_read(self.server.store)
         from .business_codes import annotate
         if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach'):
             value = annotate(self.server.store, value, share_records=True)
@@ -288,6 +294,15 @@ class ReviewHandler(BaseHTTPRequestHandler):
             raise ValueError("request too large")
         return json.loads(self.rfile.read(length))
 
+    def _check_read_connection(self):
+        if select.select([self.connection], [], [], 0)[0]:
+            try:
+                closed = not self.connection.recv(1, socket.MSG_PEEK)
+            except OSError:
+                closed = True
+            if closed:
+                raise production.ReadCancelled('reader disconnected')
+
     def do_GET(self):
         request_path = urlsplit(self.path).path
         if not request_path.startswith('/api/') or request_path.startswith('/api/production/files/'):
@@ -295,6 +310,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
         cache = getattr(self.server.store, 'read_cache', None)
         if not cache or urlsplit(self.path).path not in self.cache_paths:
             with production.read_scope(self.server.store):
+                self.server.store._production_reads['cancel_check'] = self._check_read_connection
+                production.check_read(self.server.store)
                 return self._get()
         from .read_cache import token
         store = self.server.store
@@ -304,6 +321,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         request_key = [parsed.path, sorted(parse_qs(parsed.query).items())]
         deadline = time.monotonic()+15
         while True:
+            self._check_read_connection()
             generation = token(store)
             key = cache.key(generation, ['http', request_key, self._representation(), layout_key])
             data = cache.get(key)
@@ -317,6 +335,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                         self._cache_state = 'hit'
                         return self._json_bytes(data)
                     with production.read_scope(store):
+                        store._production_reads['cancel_check'] = self._check_read_connection
+                        production.check_read(store)
                         # A writer may commit between the first token read and
                         # opening this snapshot. Never publish under its old key.
                         if store._production_reads['generation'] != generation:
@@ -394,11 +414,25 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     from .production_breakdown import index
                     with production.read_scope(store):
                         return self._json(index(store,param('view'),param('object_id'),scope=param('scope'),scope_episode=param('scope_episode'),scope_revision=param('scope_revision'),scope_scene=param('scope_scene'),scope_shot=param('scope_shot')))
+                if path == '/api/production/shot-materials':
+                    from .entity_contract import shot_workspace
+                    with production.read_scope(store):
+                        items = json.loads(param('items') or '[]')
+                        if not isinstance(items, list) or not 1 <= len(items) <= 3 or any(
+                                not isinstance(item, dict) or set(item)-{'object_id','revision_id','material_id','candidate_revision'}
+                                or not all(isinstance(item.get(k), str) and item[k] for k in ('object_id','revision_id','material_id'))
+                                or 'candidate_revision' in item and not (isinstance(item['candidate_revision'], str) and item['candidate_revision']) for item in items):
+                            raise ValueError('镜头素材读取需要1至3个准确目标')
+                        result = [shot_workspace(store, item['object_id'], item['revision_id'], deferred=True,
+                            material_id=item['material_id'], candidate_revision=item.get('candidate_revision')) for item in items]
+                        from .prompt_reading import attach
+                        attach(result, self.server.config.get('scene_reading'))
+                        return self._json(result)
                 if path in ('/api/production/card','/api/production/scene'):
                     from . import ui_projection
                     with production.read_scope(store):
                         reader=ui_projection.card if path.endswith('/card') else ui_projection.scene
-                        options={'shot_revision':param('shot_revision'),'view':param('view'),'episode':param('episode'),'episode_revision':param('episode_revision')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
+                        options={'shot_revision':param('shot_revision'),'view':param('view'),'episode':param('episode'),'episode_revision':param('episode_revision'), 'material_id':param('material_id'), 'candidate_revision':param('candidate_revision')} if path.endswith('/scene') else {'entity_id':param('entity_id')}
                         result = reader(store,param('object_id'),param('revision_id'),**options)
                         if path.endswith('/card'):
                             from .review_work import context as work_context

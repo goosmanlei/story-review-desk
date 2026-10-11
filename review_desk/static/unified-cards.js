@@ -275,6 +275,52 @@ function writeShotWorkspaceRoute(data){
   breakdownRoute({shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
     shot_component:candidate&&candidate!=='current'?data.selectedComponents?.[candidate]||null:null});
 }
+// One detail request at a time per reader. Visible cards enqueue automatically;
+// explicit tab/candidate choices move ahead of speculative visible neighbours.
+const shotDetailQueue=[];let shotDetailBusy=false;
+function queueShotDetail(data,mid,candidate,card,priority=false){
+  data.detailReads||=new Map();const key=mid+':'+(candidate||'current');
+  if(data.detailReads.has(key))return data.detailReads.get(key);
+  const epoch=breakdownDetailEpoch;
+  const promise=new Promise((resolve,reject)=>{
+    const job={data,mid,candidate,card,epoch,resolve,reject};
+    if(priority)shotDetailQueue.unshift(job);else shotDetailQueue.push(job);
+    drainShotDetails();
+  }).finally(()=>data.detailReads.delete(key));
+  data.detailReads.set(key,promise);return promise;
+}
+async function drainShotDetails(){
+  if(shotDetailBusy)return;shotDetailBusy=true;
+  try{while(shotDetailQueue.length){
+    const jobs=[];
+    while(shotDetailQueue.length&&jobs.length<3){
+      const job=shotDetailQueue.shift();
+      if(job.epoch!==breakdownDetailEpoch||!job.card.isConnected)job.reject(new DOMException('过时读取','AbortError'));
+      else jobs.push(job);
+    }
+    if(!jobs.length)continue;
+    let results;
+    try{results=await readBreakdownAPI('/api/production/shot-materials?'+new URLSearchParams({items:JSON.stringify(jobs.map(({data,mid,candidate})=>({object_id:data.entity.object_id,revision_id:data.entity.id,material_id:mid,...(candidate?{candidate_revision:candidate}:{})})))}))}
+    catch(error){for(const job of jobs)job.reject(error);continue}
+    for(const [index,job] of jobs.entries()){
+      const {data,mid,candidate,card,epoch}=job,result=results[index];
+      try{
+      if(epoch!==breakdownDetailEpoch||!card.isConnected)throw new DOMException('过时读取','AbortError');
+      if(result.entity.id!==data.entity.id||result.entity.edit_token!==data.entity.edit_token)throw Error('本镜设计已更新，请重新打开当前场');
+      const before=data.requirements.find(n=>n.object_id===mid),after=result.requirements.find(n=>n.object_id===mid);
+      if(!after||before.version!==after.version)throw Error('此素材方案已更新，请重新打开当前场');
+      data.requirements=data.requirements.map(n=>n.object_id===mid?after:n);
+      data.material_versions[mid]=result.material_versions[mid];
+      Object.assign(data.materialContexts,result.materialContexts);
+      data.deferred_materials=data.deferred_materials.filter(id=>id!==mid);
+      if(candidate)data.deferred_candidates=data.deferred_candidates.filter(id=>id!==candidate);
+      data.comment_records=[...new Map([...data.comment_records,...result.comment_records].map(r=>[r.id,r])).values()];
+      data.comment_targets=[...new Map([...data.comment_targets,...result.comment_targets].map(r=>[r.revision_id,r])).values()];
+      job.resolve(result);
+    }catch(error){job.reject(error)}
+    }
+  }}finally{shotDetailBusy=false}
+}
 function renderShotEntityWorkspace(root,data){
   const shot=data.entity,card=el('section','unified-card shot-entity-workspace'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
   card.dataset.shotId=shot.object_id;card.dataset.shotRevision=shot.id;
@@ -286,20 +332,39 @@ function renderShotEntityWorkspace(root,data){
   data.shotSelections||={};data.selectedCandidates||={};
   if(!groups.some(g=>g.key===data.shotTab))data.shotTab=groups.find(g=>g.material_ids.includes(data.unifiedMaterialId))?.key||groups[0]?.key;
   const focus=(row,restore=false)=>{if(!row)return;const model=by.get(data.unifiedMaterialId);state.materialCommentCard={data,material_id:data.unifiedMaterialId,number:model?.round?.number||1};if(restore)restoreUnifiedMaterialReader(data,data.unifiedMaterialId,row);else{focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft()}if(root.closest?.('.breakdown-scene')){breakdownRoute({breakdown_object:shot.object_id,breakdown_revision:shot.id});writeShotWorkspaceRoute(data)}renderComments()};
-  const models=entityReviewMaterialModels(data.requirements,[],data),by=new Map(models.map(m=>[materialModelKey(m),m]));
-  function draw(){
+  let by=new Map(),observer=null,drawEpoch=0;
+  function draw(priority=false){
+    observer?.disconnect();const selection=++drawEpoch;
+    by=new Map(entityReviewMaterialModels(data.requirements,[],data).map(m=>[materialModelKey(m),m]));
     pauseReviewMedia?.(right);panel.replaceChildren();right.replaceChildren();
     const group=groups.find(g=>g.key===data.shotTab);for(const button of tabs.children){button.setAttribute('aria-selected',String(button.dataset.group===data.shotTab));button.tabIndex=button.dataset.group===data.shotTab?0:-1}
     if(!group){nodeText('p','production-meta','本镜尚无素材',panel);return}
     const available=group.material_ids.filter(id=>by.has(id));let selected=data.shotSelections[group.key]||data.unifiedMaterialId;if(!available.includes(selected))selected=available[0];data.shotSelections[group.key]=selected;data.unifiedMaterialId=selected;
     for(const keyState of group.key_states||[]){const index=shot.payload.key_states.findIndex(s=>s.id===keyState.id),section=materialTextSurface(panel,shot);materialField(section,shot,`key_states.${index}.description`,'关键状态')}
     const list=el('div','material-small-list');list.setAttribute('aria-label',group.label+'素材');panel.append(list);
-    const select=id=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotSelections[group.key]=id;data.unifiedMaterialId=id;const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record||model.need,true);draw();paintProductionReview()};
+    const select=id=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotSelections[group.key]=id;data.unifiedMaterialId=id;const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record||model.need,true);draw(true);paintProductionReview()};
     for(const id of available){const model=by.get(id);materialSmallCard(list,modelSmallItem(model),()=>select(id),selected===id)}
     const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
     if(!data.selectedCandidates[selected]||data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected]))data.selectedCandidates[selected]='current';
-    renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);draw();paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;draw();paintProductionReview()}}});
+    const candidate=data.selectedCandidates[selected];
+    if(data.deferred_materials?.includes(selected)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){
+      const status=nodeText('p','production-meta','正在读取素材方案…',right);status.setAttribute('role','status');
+      const load=()=>{observer?.disconnect();queueShotDetail(data,selected,candidate==='current'?null:candidate,card,priority).then(()=>{
+        if(selection!==drawEpoch||!card.isConnected)return;
+        const body=card.closest('.breakdown-body'),anchor=body&&breakdownVisibleRow(body.querySelector('.breakdown-scene'),body,body.querySelector('.breakdown-scene-head'));
+        const top=anchor?.getBoundingClientRect().top,x=right.scrollLeft,y=right.scrollTop;
+        draw();right.scrollLeft=x;right.scrollTop=y;
+        if(anchor&&top!==undefined){const delta=anchor.getBoundingClientRect().top-top;if(['auto','scroll'].includes(getComputedStyle(body).overflowY))body.scrollTop+=delta;else window.scrollTo(window.scrollX,window.scrollY+delta)}
+        const current=data.requirements.find(n=>n.object_id===selected);
+        if(state.productionSelected?.object_id===selected)focusProductionReview(entityReviewDetail(current),false);
+        paintProductionReview();
+      }).catch(error=>{if(selection!==drawEpoch||!card.isConnected||error.name==='AbortError')return;right.replaceChildren();nodeText('p','production-issue','素材方案读取失败：'+error.message,right);productionButton(right,'重试',()=>draw(true))})};
+      if(priority||typeof IntersectionObserver==='undefined')load();
+      else {observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load()},{root:['auto','scroll'].includes(getComputedStyle(root.closest('.breakdown-body')).overflowY)?root.closest('.breakdown-body'):null,rootMargin:'500px'});observer.observe(card)}
+      return;
+    }
+    renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);draw(true);paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;draw();paintProductionReview()}}});
   }
-  for(const [index,group] of groups.entries()){const button=productionButton(tabs,group.label,()=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotTab=group.key;draw();const model=by.get(data.unifiedMaterialId);focus(model?.candidates.find(i=>i.record.id===data.selectedCandidates[data.unifiedMaterialId])?.record||model?.need,true);paintProductionReview()});button.dataset.group=group.key;button.setAttribute('role','tab');button.onkeydown=e=>{const d={ArrowRight:1,ArrowLeft:-1,Home:-index,End:groups.length-index-1}[e.key];if(d!==undefined){e.preventDefault();const target=tabs.children[(index+d+groups.length)%groups.length];target.click();target.focus()}}}
+  for(const [index,group] of groups.entries()){const button=productionButton(tabs,group.label,()=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotTab=group.key;draw(true);const model=by.get(data.unifiedMaterialId);focus(model?.candidates.find(i=>i.record.id===data.selectedCandidates[data.unifiedMaterialId])?.record||model?.need,true);paintProductionReview()});button.dataset.group=group.key;button.setAttribute('role','tab');button.onkeydown=e=>{const d={ArrowRight:1,ArrowLeft:-1,Home:-index,End:groups.length-index-1}[e.key];if(d!==undefined){e.preventDefault();const target=tabs.children[(index+d+groups.length)%groups.length];target.click();target.focus()}}}
   draw();return card;
 }

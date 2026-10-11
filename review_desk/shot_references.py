@@ -101,7 +101,11 @@ def enrich_detail(store, detail):
             targets.extend([version.get('plan'), *version.get('definition_records', {}).values()])
     for actual in detail.get('review_contexts', {}).values():
         targets.append(actual.get('call'))
+    seen = set()
     for row in targets:
+        if not row or id(row) in seen:
+            continue
+        seen.add(id(row))
         if row and row['kind'] in ('REQUIREMENT', 'CALL'):
             from .production_current import enabled
             if enabled(store) and row['kind'] == 'CALL':
