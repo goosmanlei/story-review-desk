@@ -698,7 +698,7 @@ async function openMaterialReference(ref,trigger,source=false){
     }
     for(const subject of identity?.subjects||[])nodeText('p','production-meta','作品出处：'+[subject.code,subject.title].filter(Boolean).join(' · '),body);
     if(identity?.source_range)nodeText('p','production-meta',`从当时源录音截取 ${identity.source_range.start_seconds}–${identity.source_range.end_seconds} 秒；当前播放器播放截取后的原片段。`,body);
-    if(identity?.retirement_reason)nodeText('p','production-meta','退出当前制作的原因：'+identity.retirement_reason,body);
+    if(identity?.retirement_reason&&identity.retirement_reason!==identity.reason)nodeText('p','production-meta','退出当前制作的原因：'+identity.retirement_reason,body);
     if(row.unavailable||identity?.disposition==='missing'){if(!identity?.reason)nodeText('p','production-issue','此准确输入不可用；未替换为其他素材。',body);return}
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
@@ -707,7 +707,9 @@ async function openMaterialReference(ref,trigger,source=false){
 
       for(const c of components){
         const url='/api/production/files/'+encodeURIComponent(c.file);
-        if(c.mime.startsWith('image/')){const img=el('img');img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
+        if(c.mime.startsWith('image/')){const img=el('img');let failure=null;
+          img.onerror=()=>{if(!dialog.isConnected)return;img.hidden=true;if(failure)return;failure=el('div','reference-media-error');nodeText('p','error','此准确原图读取失败，请重试。',failure);productionButton(failure,'重试原图',()=>{img.removeAttribute('src');img.src=reviewURL(url)});body.append(failure)};
+          img.onload=()=>{img.hidden=false;failure?.remove();failure=null};img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
         else if(/^(audio|video)\//.test(c.mime)){
           reviewMediaPlayer(body,c,row,ref,!row.submission_only,session||{});
           nodeText('p','production-meta',(c.role==='original'?'原件':'预览')+(ref.range?` · ${ref.range.start_seconds}–${ref.range.end_seconds} 秒`:''),body);

@@ -299,8 +299,8 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
     const input=refs.find(item=>item.referenceKeys?.includes(link.reference_key));
     if(input&&points.slice(link.start,link.end).join('')===link.quote)spans.push({start:points.slice(0,link.start).join('').length,end:points.slice(0,link.end).join('').length,text:link.quote,input,entity:true});
   }
-  for(const match of block.text.matchAll(/@?(?:参考图|图片|图像|音频|声音|视频|输入)\s*\d+/gu)){
-    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^(?:图像|参考图)/,'图片').replace(/^声音/,'音频');
+  for(const match of block.text.matchAll(/@?(?:参考图|图片|图像|音频|声音|视频|输入|图)\s*\d+/gu)){
+    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^(?:图像|参考图|图(?=\d))/,'图片').replace(/^声音/,'音频');
     const input=byLabel.get(label)||(/^输入\d+$/.test(label)?refs.find(i=>i.index===Number(label.slice(2))-1&&i.slot?.direct!==false):null);
     if(!spans.some(s=>s.start<match.index+match[0].length&&s.end>match.index))spans.push({start:match.index,end:match.index+match[0].length,text:match[0],input});
   }
