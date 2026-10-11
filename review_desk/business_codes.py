@@ -139,8 +139,10 @@ def edition_codes(store):
     objects have no edition code until a complete screenplay references them.
     """
     result={}
+    # Start with screenplay objects so the existing revision identity index
+    # avoids examining every material/production revision before first entry.
     editions=store.db.execute("""SELECT r.object_id,r.id,r.payload FROM revisions r
-        JOIN objects o ON o.id=r.object_id WHERE o.kind='STORY'
+        WHERE r.object_id IN (SELECT id FROM objects WHERE kind='STORY')
         AND json_extract(r.payload,'$.format')='screenplay-edition-v1'
         ORDER BY r.created_at,r.object_id,r.version""")
     for edition in editions:
