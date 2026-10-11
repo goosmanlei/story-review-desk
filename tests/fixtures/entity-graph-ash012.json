@@ -1,0 +1,185 @@
+{
+  "source": "task-20261012-0005 ASH012 exact graph; adjacent caption exits shared a run",
+  "card_height": 110,
+  "rows": [
+    {
+      "object_id": "av-e01-a03-s02",
+      "business_code": "ASH012",
+      "payload": {
+        "title": "01 · A03 · 02 擦净接本后蹲下招狗"
+      }
+    },
+    {
+      "object_id": "entity-a-heng",
+      "business_code": "EN002",
+      "payload": {
+        "title": "阿蘅"
+      }
+    },
+    {
+      "object_id": "entity-cloth",
+      "business_code": "EN055",
+      "payload": {
+        "title": "擦手布巾"
+      }
+    },
+    {
+      "object_id": "entity-li-ji",
+      "business_code": "EN012",
+      "payload": {
+        "title": "李寄"
+      }
+    },
+    {
+      "object_id": "entity-mo-er",
+      "business_code": "EN016",
+      "payload": {
+        "title": "墨耳"
+      }
+    },
+    {
+      "object_id": "entity-paste-wool",
+      "business_code": "EN093",
+      "payload": {
+        "title": "干浆糊与羊毛"
+      }
+    },
+    {
+      "object_id": "entity-rice-bag",
+      "business_code": "EN099",
+      "payload": {
+        "title": "阿蘅米袋"
+      }
+    },
+    {
+      "object_id": "entity-river-street",
+      "business_code": "EN104",
+      "payload": {
+        "title": "河街"
+      }
+    },
+    {
+      "object_id": "entity-songbook",
+      "business_code": "EN112",
+      "payload": {
+        "title": "阿蘅歌本"
+      }
+    },
+    {
+      "object_id": "entity-street-laundry",
+      "business_code": "EN116",
+      "payload": {
+        "title": "河街晾衣"
+      }
+    },
+    {
+      "object_id": "entity-water-flask",
+      "business_code": "EN128",
+      "payload": {
+        "title": "阿蘅水壶"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "relation-006ad2b810aac3a23d3a1688495a9d87",
+      "endpoints": [
+        "entity-li-ji",
+        "entity-mo-er"
+      ],
+      "summary": "照顾并喂食",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-0429cc4b0086cb4478dced219bcae9fe",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-songbook"
+      ],
+      "summary": "抄写并持有",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-1655d6bafdcc971b29a0be7c41bc0c53",
+      "endpoints": [
+        "entity-cloth",
+        "entity-li-ji"
+      ],
+      "summary": "擦净手上浆糊",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-68ec9730b7e4a2c9228d1eddf3a7bfaf",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-water-flask"
+      ],
+      "summary": "倒水蘸湿布巾",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-69ce48324cb4fa9f043ff387684ff007",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-li-ji"
+      ],
+      "summary": "从一起撑布到换手抄词，相互照应并保留各自决定。",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-822c31c061e53a03929a93c0b2d6d2b8",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-mo-er"
+      ],
+      "summary": "掰饼喂食",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-8399c2b591640f89637e61f5c931a11d",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-rice-bag"
+      ],
+      "summary": "携带唱曲所得米",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-88e084d899c9c004b35f64b97a054833",
+      "endpoints": [
+        "entity-river-street",
+        "entity-street-laundry"
+      ],
+      "summary": "沿街民居晾衣",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-c833f329293bd7f1460ed49789796f49",
+      "endpoints": [
+        "entity-cloth",
+        "entity-water-flask"
+      ],
+      "summary": "倒水蘸湿",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-db6b7c0defc1ff09e38ad63ab3379b0d",
+      "endpoints": [
+        "entity-li-ji",
+        "entity-paste-wool"
+      ],
+      "summary": "劳作后手上附着",
+      "direction": "related",
+      "derived": false
+    }
+  ]
+}
