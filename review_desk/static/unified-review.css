@@ -262,8 +262,11 @@
 .management-relation-graph .relation-edge.selected { stroke:#a34c21; stroke-width:3; }
 dialog #toast { position:fixed; z-index:50; }
 
-.material-content-navigation{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin:10px 0 18px}
-.material-candidate-navigation{display:flex;align-items:center;gap:8px;border-left:1px solid #bac3b1;padding-left:18px;flex-wrap:wrap}
+.material-content-navigation{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:10px 0 18px}
+.material-candidate-navigation{display:flex;align-items:center;gap:8px;border-left:1px solid #bac3b1;padding-left:12px;flex:1 1 160px;min-width:0}
+.material-candidate-navigation>span{flex:0 0 auto}
+.material-card .material-candidate-navigation>.review-choice-buttons{flex:1;flex-wrap:wrap;overflow:visible;padding:0;width:auto}
+.material-content-navigation button,.material-content-navigation .review-choice-buttons>button:first-child{margin:0;min-height:38px;font-size:14px;padding:7px 12px}
 .material-content-navigation button[aria-pressed=true]{background:#e2ecd9;border-color:#799570}
 .material-reference-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 20px}
 .material-reference-grid .material-input{margin:0;min-width:0}

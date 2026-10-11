@@ -265,6 +265,11 @@ function validateUnifiedReference(result){
 
 // The same reader is mounted in a modal or directly in an audiovisual scene.
 // Selection belongs to this shot, so another shot cannot inherit its material.
+function writeShotWorkspaceRoute(data){
+  const mid=data.unifiedMaterialId,candidate=data.selectedCandidates?.[mid];
+  breakdownRoute({shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
+    shot_component:candidate&&candidate!=='current'?data.selectedComponents?.[candidate]||null:null});
+}
 function renderShotEntityWorkspace(root,data){
   const shot=data.entity,card=el('section','unified-card shot-entity-workspace'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
   card.dataset.shotId=shot.object_id;card.dataset.shotRevision=shot.id;
@@ -275,7 +280,7 @@ function renderShotEntityWorkspace(root,data){
   const groups=data.material_groups||[],tabs=el('div','entity-material-tabs'),panel=el('section','entity-material-tabpanel');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','镜头素材');panel.setAttribute('role','tabpanel');left.append(tabs,panel);
   data.shotSelections||={};data.selectedCandidates||={};
   if(!groups.some(g=>g.key===data.shotTab))data.shotTab=groups.find(g=>g.material_ids.includes(data.unifiedMaterialId))?.key||groups[0]?.key;
-  const focus=(row,restore=false)=>{if(!row)return;const model=by.get(data.unifiedMaterialId);state.materialCommentCard={data,material_id:data.unifiedMaterialId,number:model?.round?.number||1};if(restore)restoreUnifiedMaterialReader(data,data.unifiedMaterialId,row);else{focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft()}renderComments()};
+  const focus=(row,restore=false)=>{if(!row)return;const model=by.get(data.unifiedMaterialId);state.materialCommentCard={data,material_id:data.unifiedMaterialId,number:model?.round?.number||1};if(restore)restoreUnifiedMaterialReader(data,data.unifiedMaterialId,row);else{focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft()}if(root.closest?.('.breakdown-scene')){breakdownRoute({breakdown_object:shot.object_id,breakdown_revision:shot.id});writeShotWorkspaceRoute(data)}renderComments()};
   const models=entityReviewMaterialModels(data.requirements,[],data),by=new Map(models.map(m=>[materialModelKey(m),m]));
   function draw(){
     pauseReviewMedia?.(right);panel.replaceChildren();right.replaceChildren();

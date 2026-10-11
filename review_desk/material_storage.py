@@ -257,20 +257,21 @@ def canonical_id(store, material_id):
     scope=getattr(store,'_production_reads',None)
     if scope is not None:
         if 'material_alias_ids' not in scope:
-            scope['material_alias_ids']=dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
+            scope['material_alias_ids']=dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
         return scope['material_alias_ids'].get(material_id,material_id)
-    row=store.db.execute('SELECT material_id FROM material_aliases WHERE alias_id=?',(material_id,)).fetchone()
+    row=store.db.execute("SELECT COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases WHERE alias_id=?",(material_id,)).fetchone()
     return row[0] if row else material_id
 
 
 def identity(store, material_id):
     from . import list_reading
     mid=canonical_id(store,material_id)
-    rows=list(store.db.execute('SELECT * FROM material_aliases WHERE material_id=? ORDER BY alias_id',(mid,)))
+    rows=list(store.db.execute("SELECT * FROM material_aliases WHERE COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id)=? ORDER BY alias_id",(mid,)))
     aliases=sorted({mid,*[r['alias_id'] for r in rows]})
     evidence={r['alias_id']:json.loads(r['evidence']) for r in rows}
     associations=[]
     for alias in aliases:
+        if not store.db.execute('SELECT 1 FROM objects WHERE id=?',(alias,)).fetchone():continue
         record=list_reading.record(store,alias)
         if record['kind']=='REQUIREMENT':
             associations.append({'requirement':{'object_id':alias,'revision_id':record['id']},

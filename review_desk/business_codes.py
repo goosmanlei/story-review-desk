@@ -175,7 +175,7 @@ def visible_codes(store):
 def annotate(store, value, *, share_records=False):
     from .material_storage import _clone_json_tree
     codes = {r['object_id']:code(r) for r in visible_codes(store)}
-    aliases = {r['alias_id']:r['material_id'] for r in store.db.execute('SELECT alias_id,material_id FROM material_aliases')}
+    aliases = dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
     candidates = {(r['material_id'],r['version'],r['candidate_id']):r['number'] for r in store.db.execute('SELECT * FROM business_candidates')}
     comment_codes={r['comment_id']:'C'+str(r['number']).zfill(3) for r in store.db.execute('SELECT * FROM business_comments')}
     scenes = {}
@@ -206,10 +206,10 @@ def annotate(store, value, *, share_records=False):
             result['business_code'] = relation_code(store, v, codes)
         if v.get('id') in comment_codes and 'anchor' in v and 'body' in v:result['business_code']=comment_codes[v['id']]
         oid = v.get('object_id') or v.get('id')
-        if isinstance(oid,str) and oid in codes and ('payload' in v or 'title' in v):
-            result['business_code'] = codes[oid]
+        if isinstance(oid,str) and (oid in codes or aliases.get(oid) in codes) and ('payload' in v or 'title' in v):
+            result['business_code'] = codes.get(oid,codes.get(aliases.get(oid)))
             if oid in aliases:
-                result['material_code'] = codes.get(aliases[oid],codes[oid])
+                result['material_code'] = codes.get(aliases[oid],result['business_code'])
             if v.get('kind') == 'REQUIREMENT' and 'payload' in v:
                 scene = scene_for(v['payload'].get('scope'))
                 if scene:
@@ -248,7 +248,7 @@ def annotate(store, value, *, share_records=False):
 
 def display_dump(store):
     rows=visible_codes(store);mapping={r['object_id']:code(r) for r in rows}
-    aliases={r['alias_id']:r['material_id'] for r in store.db.execute('SELECT * FROM material_aliases')}
+    aliases=dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
     result = [{**r,'display_code':mapping.get(aliases.get(r['object_id'],r['object_id']))} for r in rows]
     from .business_relations import available, current, code as relationship_code
     if available(store):

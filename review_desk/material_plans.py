@@ -222,7 +222,7 @@ def card_counts(store, material_ids=None):
     if enabled(store):
         rows = {r['material_id']: r['n'] for r in store.db.execute('SELECT material_id,count(*) n FROM production_candidate_targets GROUP BY material_id')}
         ids = material_ids if material_ids is not None else rows
-        aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
+        aliases = dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
         return {mid: {'current_content': True, 'candidate_count': rows.get(aliases.get(mid,mid), 0)} for mid in ids}
     """Registered versions and distinct real candidates across those versions.
 
@@ -236,7 +236,7 @@ def card_counts(store, material_ids=None):
         aliases, counts = cached
         ids = counts if material_ids is None else material_ids
         return {mid: dict(counts.get(aliases.get(mid, mid), {'version_count': None, 'candidate_count': None})) for mid in ids}
-    aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
+    aliases = dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
     canonical_id = lambda mid: aliases.get(mid, mid)
     versions = {}; candidates = {}
     for row in store.db.execute('SELECT material_id,number FROM material_plan_versions'):
