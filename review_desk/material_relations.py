@@ -44,17 +44,24 @@ def validate(store, payload):
     p._list(payload, 'sources')
 
 
-def rules(store, value, requirement_id=None):
+def rules(store, value, requirement_id=None, *, metadata=False):
+    reader = p.ref_record
+    if metadata:
+        from .list_reading import ref_record
+        reader = ref_record
     if value.get('relation'):
         from .business_relations import input_rules
-        selected = input_rules(store, requirement_id, value)
+        selected = input_rules(store, requirement_id, value, metadata=metadata)
         if selected is not None:
             return selected
-        relation = p.ref_record(store, value['relation'], {'MATERIAL_RELATION'})['payload']
+        relation_record = reader(store, value['relation'])
+        if relation_record['kind'] != 'MATERIAL_RELATION':
+            raise ValueError('incorrect reference kind: ' + relation_record['kind'])
+        relation = relation_record['payload']
         if requirement_id and relation['downstream_id'] != requirement_id:
             raise ValueError('方案关系不属于当前下游需求')
-        target = p.ref_record(store, value['reference'])
-        upstream = p.ref_record(store, relation['upstream'])
+        target = reader(store, value['reference'])
+        upstream = reader(store, relation['upstream'])
         if upstream['kind'] == 'ASSET':
             if target['id'] != upstream['id']:
                 raise ValueError('准确参考与关系指定原件不同')
@@ -73,7 +80,7 @@ def rules(store, value, requirement_id=None):
             **{k: value[k] for k in ('group', 'route', 'condition') if k in value}}
 
 
-def active_inputs(store, plan, requirement_id=None):
+def active_inputs(store, plan, requirement_id=None, *, metadata=False):
     """Indices stay original so UI selection and submitted input order agree."""
     active, issues, groups = [], [], {}
     routes = plan.get('selected_routes', {})
@@ -81,7 +88,7 @@ def active_inputs(store, plan, requirement_id=None):
     if not isinstance(routes, dict) or not isinstance(conditions, dict) or any(type(v) is not bool for v in conditions.values()):
         raise ValueError('路线选择和条件判断格式无效')
     for index, item in enumerate(plan.get('inputs', [])):
-        rule = rules(store, item, requirement_id)
+        rule = rules(store, item, requirement_id, metadata=metadata)
         semantic, necessity = rule.get('semantics'), rule.get('necessity')
         if semantic not in SEMANTICS or necessity not in NECESSITIES:
             raise ValueError('输入关系语义或必要性无效')
@@ -106,8 +113,12 @@ def active_inputs(store, plan, requirement_id=None):
             if not conditions[condition]:
                 continue
         if necessity == 'optional':
+            reader = p.ref_record
+            if metadata:
+                from .list_reading import ref_record
+                reader = ref_record
             selected = item.get('enabled', item.get('selection_state') != 'unselected' and
-                                p.ref_record(store, item['reference'])['kind'] == 'ASSET')
+                                reader(store, item['reference'])['kind'] == 'ASSET')
             if not selected: continue
         active.append((index, item))
     for group, choices in groups.items():
