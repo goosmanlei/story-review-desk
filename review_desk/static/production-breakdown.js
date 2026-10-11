@@ -576,6 +576,17 @@ async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPositio
   state.breakdownRenderedSelection=breakdownSelectionKey(restore||new URLSearchParams());
   activateBreakdownScene(data,body,nav,epoch,restore,savedPosition,{page,header});
 }
+function breakdownVisibleRow(page,body,header){
+  const bounds=body.getBoundingClientRect(),scene=header.getBoundingClientRect();
+  const nested=['auto','scroll'].includes(getComputedStyle(body).overflowY);
+  const edge=nested?Math.max(bounds.top+(body.clientTop||0),scene.bottom):Math.max(0,document.querySelector('.workspace-topbar')?.getBoundingClientRect().bottom||0);
+  // At the scene's start its own heading is the reading target. Otherwise a
+  // fully visible shot heading wins over the short tail of the previous card,
+  // including a browser-restored position after a material tab changed height.
+  if(nested?body.scrollTop===0:scene.top>=edge)return null;
+  const end=Math.min(bounds.bottom,innerHeight),rows=[...page.querySelectorAll('[data-shot-id]')];
+  return rows.find(row=>{const heading=row.querySelector('h3')?.getBoundingClientRect();return heading&&heading.top>=edge&&heading.bottom<=end})||rows.filter(row=>row.getBoundingClientRect().top<=edge).at(-1)||null;
+}
 function activateBreakdownScene(data,body,nav,epoch,restore=null,savedPosition=null,rendered=null){
   const targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),page=rendered?.page||body.querySelector('.breakdown-scene'),header=rendered?.header||body.querySelector('.breakdown-scene-head');
   const chosen=data.shots.find(s=>s.record.object_id===targetId&&(!targetRevision||s.record.id===targetRevision))?.record||data.scene;
@@ -591,8 +602,7 @@ function activateBreakdownScene(data,body,nav,epoch,restore=null,savedPosition=n
   if(memory){body.scrollTop=memory.scrollTop;window.scrollTo(0,memory.windowY)}else scrollBreakdownTarget(body,target);
   let frame=null;
   const track=()=>{if(frame!==null)return;frame=requestAnimationFrame(()=>{frame=null;if(epoch!==breakdownEpoch||!body.isConnected||document.querySelector('dialog[open]'))return;
-    const edge=body.getBoundingClientRect(),limit=matchMedia('(max-width:700px)').matches?Math.max(0,document.querySelector('.workspace-topbar')?.getBoundingClientRect().bottom||0)+20:Math.max(edge.top,parseFloat(getComputedStyle(header).top)||0)+header.getBoundingClientRect().height+20;
-    const rows=[...page.querySelectorAll('[data-shot-id]')],visible=rows.filter(r=>r.getBoundingClientRect().top<=limit).at(-1);
+    const visible=breakdownVisibleRow(page,body,header);
     const current=visible?data.shots.find(s=>s.record.id===visible.dataset.shotRevision)?.record:data.scene;if(current)breakdownSelect(current,nav,false);rememberBreakdownPosition(body);
   })};body.onscroll=track;
   // The narrow reader scrolls with the window. Old listeners remove themselves.
