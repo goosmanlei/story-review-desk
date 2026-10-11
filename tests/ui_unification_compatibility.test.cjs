@@ -145,6 +145,19 @@ test('a material requirement URL restores its requested older candidate inside t
   f.data.unifiedRight=new Element('aside');ctx.renderUnifiedModels(new Element('main'),[f.model],f.data);
   assert.equal(shown,f.older.id);
 });
+test('ordinary legacy asset entry chooses the current plan while exact candidate entry stays exact',()=>{
+  for(const ordinary of [true,false]){
+    const ctx=setup(),f=fixture(ctx);f.round.current_content=true;
+    const params=new URLSearchParams();
+    ctx.activateUnifiedCard({detail:{record:f.older,history:[f.older],material_versions:f.data.material_versions},entity_review:f.data,form:f.form,params,explicit:true,defaultSelection:ordinary});
+    assert.equal(f.data.selectedCandidates.need,ordinary?'current':f.older.id);
+  }
+  const ctx=setup(),source=fs.readFileSync(path.join(__dirname,'../review_desk/static/management-cards.js'),'utf8');let refs;
+  ctx.openManagementReferences=value=>refs=value;
+  vm.runInContext(source.slice(source.indexOf('async function openManagementMaterial('),source.indexOf('async function loadMaterialManagement(')),ctx);
+  ctx.openManagementMaterial({object_id:'asset',scope_references:[{object_id:'asset',revision_id:'exact'}]},null);
+  assert.equal(refs[0].revision_id,'exact');assert.equal(refs[0].defaultSelection,true);
+});
 test('same-entity version responses cannot replace a newer choice when they arrive out of order',async()=>{
   const ctx=setup(),f=fixture(ctx),requests=[],shown=[];
   f.data.versions={[f.entity.object_id]:[{id:'old',version:1},{id:f.entity.id,version:2}]};
