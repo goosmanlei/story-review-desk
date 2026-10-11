@@ -346,7 +346,13 @@ function breakdownNavigate(values){
   rememberProductionDraft();const url=new URL(location.href);
   for(const key of ['production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
   for(const [key,value] of Object.entries(values)){if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}
-  history.pushState(null,'',url);return loadProductionBreakdown().catch(e=>toast(e.message));
+  history.pushState(null,'',url);return loadProductionBreakdown().then(()=>{
+    const id=values.breakdown_object;
+    if(id&&new URL(location.href).searchParams.get('breakdown_object')===id){
+      const reader=document.querySelector('.breakdown-body [data-shot-id="'+CSS.escape(id)+'"] .unified-card-material');
+      if(reader)reader.scrollTop=0;
+    }
+  }).catch(e=>toast(e.message));
 }
 function breakdownSelect(row,nav,updateRoute=true){
   state.breakdownCurrent=row;
