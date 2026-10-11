@@ -399,7 +399,7 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 raise Conflict("entity identity/alias already assigned: " + other["object_id"])
     elif kind == "STATE":
         ref_record(store, p.get("entity"), {"ENTITY"})
-        if not isinstance(p.get("dimensions"), dict) or not p["dimensions"]:
+        if not isinstance(p.get("dimensions", {}), dict) or (p.get('state_model') != 'complete-v1' and not p.get('dimensions')):
             raise ValueError("state dimensions are required")
         for key in ("sources", "facts", "choices", "unknowns"):
             _list(p, key)

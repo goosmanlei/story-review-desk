@@ -36,6 +36,8 @@ def production_text_blocks(payload):
             blocks.append({'id': f'{prefix}{field}/{index}', 'text': text,
                            'field': field, 'index': index})
     extra = [('production_description', payload.get('production_description'))]
+    if payload.get('format') == 'production-state-v1':
+        extra += [(f'dimensions.{key}', value) for key, value in sorted(payload.get('dimensions', {}).items())]
     if payload.get('format') == 'production-av-shot-v1':
         extra += [(field,payload.get(field)) for field in ('purpose','framing','spatial','axis','movement','action_start','action_end','motion','performance','lighting','color','editing','continuity')]
         extra += [(f'key_states.{i}.description', state.get('description'))

@@ -113,13 +113,50 @@ class CompleteStatesTest(unittest.TestCase):
     def test_complete_dimensions_and_required_overall_contract(self):
         self.setup_full()
         wrong=self.full('missing-dimension');del wrong['payload']['dimensions']['contents']
-        with self.assertRaisesRegex(ValueError,'complete state dimension'):self.put(wrong)
+        with self.assertRaisesRegex(ValueError,'production description'):self.put(wrong)
         for field,value in [('slot','detail'),('required',False),('media_type','image')]:
             row=self.need();row['payload'][field]=value
             with self.assertRaisesRegex(ValueError,'overall'):self.put(row)
         legacy=self.full('legacy');del legacy['payload']['state_model'];self.put(legacy)
         legacy_shot=self.shot([self.ref('legacy')]);del legacy_shot['payload']['state_model'];self.put(legacy_shot)
         self.assertIn('legacy_partial_state',{i['code'] for i in p.readiness(self.store,'shot')['state_coverage']['issues']})
+
+    def test_prose_with_optional_attributes_all_types_and_recovery(self):
+        from review_desk.bundle import export, restore
+        from review_desk.store import Store
+        from review_desk.production_description import description
+        from review_desk.review_text import production_text_blocks
+        self.put(self.entity())
+        for kind in ('prop', 'character', 'space', 'song', 'custom'):
+            entity = self.entity('entity-'+kind)
+            entity['payload']['entity_type'] = kind
+            if kind == 'custom':
+                entity['payload'].update(entity_type_label='自定义', attribute_definitions={'surface':'表面'}, attributes={})
+            self.put(entity)
+            row = self.full('state-'+kind, production_description='此刻完整形态与阶段差异。')
+            row['payload']['entity'] = self.ref('entity-'+kind)
+            row['payload']['dimensions'] = {'voice':'前两日唱哑；未确定是否完全恢复。'} if kind == 'character' else {}
+            self.put(row)
+            saved = p.record(self.store, row['object_id'])
+            self.assertEqual(description(saved['payload'], kind), '此刻完整形态与阶段差异。')
+            if kind == 'character':
+                self.assertTrue(any(b.get('field') == 'dimensions.voice' for b in production_text_blocks(saved['payload'])))
+            updated = copy.deepcopy(row); updated['expected_version'] = saved['version']
+            updated['payload'].pop('dimensions'); updated['payload']['production_description'] = '阶段更新后的完整形态。'
+            self.put(updated)
+            invalid = copy.deepcopy(updated); invalid['expected_version'] += 1
+            for changes in ({'production_description':''}, {'dimensions':{'unknown':'未定义'}},
+                            {'dimensions':{'voice':None}}, {'sources':[]}, {'entity':self.ref('episode')}):
+                bad = copy.deepcopy(invalid); bad['payload'].update(changes)
+                with self.assertRaises(ValueError): self.put(bad)
+        export(self.store, self.root/'export')
+        recovered = Store(self.root/'recovered/.runtime/review.sqlite3')
+        try:
+            restore(recovered, self.root/'export')
+            for kind in ('prop','character','space','song','custom'):
+                self.assertEqual(p.record(recovered, 'state-'+kind)['payload'], p.record(self.store,'state-'+kind)['payload'])
+        finally:
+            recovered.close()
 
     def test_guarded_import_detects_changed_read_dependencies(self):
         self.setup_full()

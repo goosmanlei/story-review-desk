@@ -206,6 +206,7 @@ function reviewTextBlocks(parent,row,alreadyRead=[]){
   host.onpointerdown=()=>entityReviewFocus(row);host.onfocusin=()=>entityReviewFocus(row);
   for(const block of row.payload.blocks){if(alreadyRead.includes(block.text)&&state.productionSelected?.id!==row.id)continue;let offset=0;for(const line of block.text.split('\n')){const para=nodeText('p',null,line,host);para.dataset.blockId=block.id;para.dataset.anchorOffset=offset;offset+=Array.from(line).length+1}}
   const description=productionTextBlocks(row).find(b=>b.field==='production_description');if(description){const para=nodeText('p',null,description.text,host);para.dataset.blockId=description.id}
+  for(const block of productionTextBlocks(row).filter(b=>b.field?.startsWith('dimensions.'))){const para=nodeText('p',null,block.text,host);para.dataset.blockId=block.id}
   reviewNotes(host,row);parent.append(host);return host;
 }
 function reviewNotes(parent,row){
