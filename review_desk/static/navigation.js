@@ -85,6 +85,10 @@ function normalizeProductionWorkspace(id){
   return id;
 }
 function productionScopeKey(params){return JSON.stringify(['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot'].map(key=>params.get(key)||''))}
+function productionWorkingScopeKey(params){
+  if(params.get('production_scope_episode')||params.get('workspace')!=='materials.workspace')return productionScopeKey(params);
+  return JSON.stringify(['breakdown_episode','breakdown_episode_revision','breakdown_scene','breakdown_object'].map(key=>params.get(key)||''));
+}
 function rememberWorkspaceRoute(){
   const url=new URL(location.href),id=url.searchParams.get('workspace')||'production.approach';
   if(typeof state==='undefined'||id!==state.workspace)return;
@@ -136,13 +140,25 @@ function selectProductionTab(tab){
   if(tab===productionTab())return;
   const source=new URL(location.href);
   rememberWorkspacePosition();rememberWorkspaceRoute();
+  // The all-materials range has no filter scope. Its last working shot still
+  // lives in the existing breakdown route and may continue in the other pages.
+  if(productionTab()==='materials'&&!source.searchParams.get('production_scope_episode')){
+    for(const [scope,working] of [['production_scope_episode','breakdown_episode'],['production_scope_revision','breakdown_episode_revision'],['production_scope_scene','breakdown_scene'],['production_scope_shot','breakdown_object']]){
+      const value=source.searchParams.get(working);if(value)source.searchParams.set(scope,value);
+    }
+  }
   const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
   const routeKey=workspaceGroup(workspace)+':'+tab;
   const saved=workspaceSubRoutes.get(routeKey+':'+productionScopeKey(source.searchParams))||workspaceSubRoutes.get(routeKey);
-  const url=new URL(saved||location.href),sameScope=!!saved&&productionScopeKey(url.searchParams)===productionScopeKey(source.searchParams);
+  const url=new URL(saved||location.href),sameScope=!!saved&&productionWorkingScopeKey(url.searchParams)===productionWorkingScopeKey(source.searchParams);
+  const allMaterials=tab==='materials'&&!!saved&&!url.searchParams.get('production_scope_episode')&&!url.searchParams.get('production_scope_scene');
   for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot']){
-    const value=source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
+    const value=source.searchParams.get(key);if(value&&!allMaterials)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
+  if(allMaterials)for(const [scope,working] of [['production_scope_episode','breakdown_episode'],['production_scope_revision','breakdown_episode_revision'],['production_scope_scene','breakdown_scene'],['production_scope_shot','breakdown_object']]){
+    const value=source.searchParams.get(scope);if(value)url.searchParams.set(working,value);else url.searchParams.delete(working);
+  }
+  if(allMaterials&&!sameScope)url.searchParams.delete('breakdown_revision');
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
   if(!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
   if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
