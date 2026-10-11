@@ -176,5 +176,23 @@ class SemanticConsolidationTest(unittest.TestCase):
         self.assertFalse(self.store.comment(comment['id'])['original_context']['matches_current'])
         merge.validate(self.store)
 
+    def test_publication_alias_requires_complete_reviewed_chain(self):
+        before = {'alias_id':'legacy-reference', 'relation_id':'original-pair'}
+        receipts = [{'format':merge.FORMAT, 'relations':{'original-pair':'merged-pair'}},
+                    {'format':merge.FORMAT, 'relations':{'merged-pair':'reviewed-pair'}}]
+        allowed = lambda after: merge.allows_publication_change(
+            'business_relation_aliases', before, after, receipts)
+        self.assertTrue(allowed({**before, 'relation_id':'reviewed-pair'}))
+        self.assertFalse(allowed({**before, 'relation_id':'merged-pair'}))
+        self.assertFalse(allowed({**before, 'relation_id':'unreviewed-pair'}))
+        self.assertFalse(allowed({'alias_id':'different-history', 'relation_id':'reviewed-pair'}))
+        self.assertFalse(allowed(None))
+        receipts.append({'format':merge.FORMAT, 'relations':{'reviewed-pair':None}})
+        self.assertTrue(allowed(None))
+        self.assertFalse(allowed({**before, 'relation_id':'reviewed-pair'}))
+        receipts[-1]['relations']['reviewed-pair'] = 'original-pair'
+        self.assertFalse(allowed(None))
+        self.assertFalse(allowed({**before, 'relation_id':'original-pair'}))
+
 
 if __name__ == '__main__':unittest.main()

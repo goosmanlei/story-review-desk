@@ -519,7 +519,14 @@ def allows_publication_change(table, before, after, receipts):
     if table == 'business_relations':
         return bool(before and after is None and before['object_id'] in relations_map)
     if table == 'business_relation_aliases':
-        return bool(before and before['relation_id'] in relations_map and
-                    (after is None and relations_map[before['relation_id']] is None or
-                     after and after['alias_id']==before['alias_id'] and after['relation_id']==relations_map[before['relation_id']]))
+        if not before or before['relation_id'] not in relations_map:
+            return False
+        target, seen = before['relation_id'], set()
+        while target in relations_map:
+            if target in seen:
+                return False
+            seen.add(target)
+            target = relations_map[target]
+        return (after is None if target is None else
+                bool(after and after == {**before, 'relation_id': target}))
     return False
