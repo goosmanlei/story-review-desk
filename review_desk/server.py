@@ -187,7 +187,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.command == 'GET':
             production.check_read(self.server.store)
         from .business_codes import annotate
-        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach', '/api/methods/record', '/api/methods/stage'):
+        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach', '/api/methods/record', '/api/methods/stage', '/api/methods/document'):
             value = annotate(self.server.store, value, share_records=True)
         if self.command == 'GET' and status == 200 and urlsplit(self.path).path.startswith('/api/production') and urlsplit(self.path).path != '/api/production/package':
             from .review_composition import attach as compose

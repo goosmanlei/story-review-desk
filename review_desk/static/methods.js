@@ -16,12 +16,12 @@ function drawMethodConfiguration(root){
   const tabs=el('div','config-choice-row method-tabs');page.append(tabs);
   for(const [key,label] of [['skill','方法'],['resource','共用资料'],['binding','工作环节']]){
     const button=el('button',key===methodView.category?'active':'',label);button.type='button';button.setAttribute('aria-pressed',key===methodView.category?'true':'false');
-    button.onclick=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？'))return;methodView={...methodView,category:key,selected:null,draft:null};drawMethods(root)};tabs.append(button);
+    button.onclick=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？'))return;methodView={...methodView,category:key,selected:null,revision:null,file:null,draft:null};drawMethods(root)};tabs.append(button);
   }
   const category=methodView.category,records=methodView.data[category],picker=el('select');picker.setAttribute('aria-label','选择'+({skill:'方法',resource:'共用资料',binding:'工作环节'}[category]));
   picker.append(new Option('新建'+({skill:'方法',resource:'共用资料',binding:'工作环节'}[category]),''));
   for(const row of records)picker.append(new Option(`${row.payload.title||methodWorkLabels[row.payload.work_type]||row.payload.work_type} · 第 ${row.version} 版`,row.object_id));
-  picker.value=methodView.selected||'';picker.onchange=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？')){picker.value=methodView.selected||'';return}methodView.selected=picker.value||null;methodView.draft=null;drawMethods(root)};page.append(picker);
+  picker.value=methodView.selected||'';picker.onchange=()=>{if(methodView.draft&&!confirm('放弃当前未保存修改？')){picker.value=methodView.selected||'';return}methodView.selected=picker.value||null;methodView.revision=null;methodView.file=null;methodView.draft=null;drawMethods(root)};page.append(picker);
   const record=records.find(r=>r.object_id===methodView.selected),p=record?.payload||{};
   const form=el('form','config-form');page.append(form);const fields={};
   function field(key,label,value='',multiline=false){const row=el('label','config-field');row.append(el('span',null,label));const input=el(multiline?'textarea':'input');input.value=value;input.name=key;if(multiline)input.rows=key==='body'?16:3;row.append(input);form.append(row);fields[key]=input;return input}
@@ -100,7 +100,7 @@ function drawMethodConfiguration(root){
     }
     const result=await api('/api/methods/save',{method:'POST',body:JSON.stringify({category,name:name.value.trim(),expected_version:record?.version||0,payload,...(condition_texts!==undefined?{condition_texts}:{})})});
     if(methodView.page!==page)return;
-    methodView.selected=result.object_id;methodView.draft=null;methodView.data=await api('/api/methods');
+    methodView.selected=result.object_id;methodView.revision=result.revision_id;methodView.file=payload.files?.[methodView.file]?methodView.file:null;methodView.draft=null;methodView.data=await api('/api/methods');
     if(methodView.page!==page||state.workspace!=='project.configuration'||state.configSection!=='METHODS')return;
     drawMethods(root);nodeText('p','config-save-status',`已保存第 ${result.version} 版。工作环节选择此版后，新执行会取得对应正文与共用章节。`,root);
   }catch(error){notice.textContent=error.message+'；当前输入保留。可在新页面核对已保存版本后合并修改。'}finally{submit.disabled=false}};
@@ -120,10 +120,11 @@ function methodOpen(root,category,oid,rid,file,back=false){
 }
 function methodScopeLabel(binding,index){const r=binding.payload.rules[index],values=r.when||{},keys=Object.keys(values),raw=methodView.data?.condition_texts?.[binding.revision_id]?.[index];const label=!keys.length?'默认':keys.length===1&&keys[0]==='media_type'?({image:'图像',audio:'音频',video:'视频'}[values.media_type]||values.media_type):(raw||JSON.stringify(values));return (methodWorkLabels[binding.payload.work_type]||binding.payload.work_type)+' · '+label;}
 function methodScopes(oid){return methodView.data.binding.flatMap(b=>b.payload.rules.flatMap((r,index)=>r.object_id===oid?[{binding:b,index,label:methodScopeLabel(b,index)}]:[]));}
+function methodEligibleScopes(record){return methodView.data.binding.flatMap(b=>(record.payload.work_types||[]).includes(b.payload.work_type)?b.payload.rules.map((r,index)=>({binding:b,index,label:methodScopeLabel(b,index)})):[]);}
 async function drawMethods(root){
   if(methodView.mode==='configuration'||methodView.category==='binding'){
     drawMethodConfiguration(root);
-    methodButton(methodView.page,'返回正文阅读',()=>{methodView.draft=null;methodView.mode='read';if(methodView.category==='binding')methodView.category='skill';drawMethods(root)});return;
+    methodButton(methodView.page,'返回正文阅读',()=>{methodView.draft=null;methodView.mode='read';if(methodView.category==='binding'){const mem=methodView.memories.skill||{};methodOpen(root,'skill',mem.selected||null,mem.revision||null,mem.file||null)}else drawMethods(root)});return;
   }
   const epoch=++methodReadEpoch;
   if(!methodView.restored){methodView.restored=true;try{const saved=JSON.parse(sessionStorage.getItem('method-reading')||'null');if(saved)Object.assign(methodView,saved)}catch{}const route=new URL(location.href).searchParams;if(route.has('method_object')){methodView.category=route.get('method_category')||'skill';methodView.selected=route.get('method_object');methodView.revision=route.get('method_revision');methodView.file=route.get('method_file');}}
@@ -211,7 +212,7 @@ function drawMethodEditor(root,record,recovery=null){
   const file=methodView.file||Object.keys(values.files)[0];
   const textarea=el('textarea','method-body-editor');textarea.value=values.files[file];textarea.rows=25;textarea.setAttribute('aria-label','正文 '+file);page.append(textarea);
   const choices=el('fieldset','method-apply-scopes');nodeText('legend',null,'用于哪些后续工作',choices);page.append(choices);const checkboxes=[];
-  for(const scope of methodScopes(record.object_id)){const label=el('label'),input=el('input');input.type='checkbox';input.checked=recovery?.scopes?.some(s=>s.object_id===scope.binding.object_id&&s.index===scope.index)||false;label.append(input,document.createTextNode(scope.label));choices.append(label);checkboxes.push({input,scope})}
+  for(const scope of methodEligibleScopes(record)){const label=el('label'),input=el('input');input.type='checkbox';input.checked=recovery?.scopes?.some(s=>s.object_id===scope.binding.object_id&&s.index===scope.index)||false;label.append(input,document.createTextNode(scope.label));choices.append(label);checkboxes.push({input,scope})}
   const notice=nodeText('p','config-save-status','',page);notice.setAttribute('role','status');
   let request=recovery,saving=false,finished=false;
   const build=apply=>({object_id:record.object_id,base_revision:base,changes:{...values,files:{...values.files,[file]:textarea.value}},...(request?.saved_revision?{saved_revision:request.saved_revision}:{}),scopes:apply?checkboxes.filter(c=>c.input.checked).map(c=>({object_id:c.scope.binding.object_id,revision_id:c.scope.binding.revision_id,index:c.scope.index})):[]});
@@ -219,11 +220,11 @@ function drawMethodEditor(root,record,recovery=null){
   const save=async apply=>{if(saving)return;if(request?.saved_revision&&textarea.value!==request.changes.files[file]){notice.textContent='已保存的改稿须先完成应用，正文已保留。';return}saving=true;for(const b of actions.querySelectorAll('button'))b.disabled=true;
     try{request=build(apply);localStorage.setItem(pendingKey,JSON.stringify(request));const result=await api('/api/methods/edit',{method:'POST',body:JSON.stringify(request)});request.saved_revision=result.saved.revision_id;localStorage.setItem(pendingKey,JSON.stringify(request));
       notice.textContent='方法已保存第 '+result.saved.version+' 版。'+(apply?'已用于：'+(result.applied.flatMap(a=>a.indices.map(i=>checkboxes.find(c=>c.scope.binding.object_id===a.object_id&&c.scope.index===i)?.scope.label||methodWorkLabels[a.work_type]||a.work_type)).join('；')||'无')+'。未应用：'+(result.unapplied.map(a=>(methodWorkLabels[a.object_id.split('.').slice(2).join('.')]||a.object_id)+'：'+a.error).join('；')||'无'):'仅保存待用，后续工作保持原选择。');
-      if(result.unapplied.length){methodButton(page,'核对当前使用范围',async()=>{methodView.data=await api('/api/methods');const before=request;drawMethodEditor(root,record,before);const info=nodeText('p','config-save-status','当前使用范围已读回，请检查条件分支与当前方法版本，再选择继续应用。',methodView.page);for(const c of methodScopes(record.object_id)){const r=c.binding.payload.rules[c.index],m=methodView.data.referenced[r.revision_id];nodeText('p',null,c.label+'：当前第 '+m?.version+' 版',methodView.page)}})}else{finished=true;textarea.readOnly=true;for(const c of checkboxes)c.input.disabled=true;localStorage.removeItem(pendingKey);methodView.draft=null;methodButton(page,'阅读已保存正文',async()=>{methodView.data=await api('/api/methods');methodOpen(root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,result.saved.revision_id,file)})}
+      if(result.unapplied.length){methodButton(page,'核对当前使用范围',async()=>{methodView.data=await api('/api/methods');const before=request;drawMethodEditor(root,record,before);const info=nodeText('p','config-save-status','当前使用范围已读回，请检查条件分支与当前方法版本，再选择继续应用。',methodView.page);for(const c of methodEligibleScopes(record)){const r=c.binding.payload.rules[c.index],m=methodView.data.referenced[r.revision_id];nodeText('p',null,c.label+'：当前第 '+m?.version+' 版',methodView.page)}})}else{finished=true;textarea.readOnly=true;for(const c of checkboxes)c.input.disabled=true;localStorage.removeItem(pendingKey);methodView.draft=null;methodButton(page,'阅读已保存正文',async()=>{methodView.data=await api('/api/methods');methodOpen(root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,result.saved.revision_id,file)})}
     }catch(error){notice.textContent=error.message+'；当前改稿保留。';methodButton(page,'核对最新正文',async()=>{const current=await api('/api/methods/record?'+new URLSearchParams({object_id:record.object_id}));const modal=openReviewDialog('核对最新正文',textarea,'method-conflict'),dialog=modal.body;nodeText('pre',null,current.payload.files[file],dialog);methodButton(dialog,'按此版本继续合并当前改稿',()=>{const next={...request,base_revision:current.revision_id,changes:{files:{...current.payload.files,[file]:textarea.value}}};delete next.saved_revision;modal.dialog.close();drawMethodEditor(root,current,next)})})}
     finally{saving=false;for(const [i,b] of [...actions.querySelectorAll('button')].entries())b.disabled=finished&&i<2}
   };
-  const actions=el('div','method-tools');page.append(actions);methodButton(actions,'保存并用于所选后续工作',()=>{if(!checkboxes.some(c=>c.input.checked)){notice.textContent='请选择需要采用此版的后续工作。';return}save(true)});methodButton(actions,'仅保存待用',()=>save(false));methodButton(actions,'返回阅读，保留改稿',()=>{if(!finished)persist();methodView.draft=null;methodView.mode='read';drawMethods(root)});
+  const actions=el('div','method-tools');page.append(actions);methodButton(actions,'保存并用于所选后续工作',()=>{if(!checkboxes.some(c=>c.input.checked)){notice.textContent='请选择需要采用此版的后续工作。';return}save(true)});methodButton(actions,'仅保存待用',()=>save(false));methodButton(actions,'返回阅读，保留改稿',()=>{if(!finished&&(request||textarea.value!==values.files[file]||checkboxes.some(c=>c.input.checked)))persist();methodView.draft=null;methodView.mode='read';drawMethods(root)});
 }
 
 function appendMethodResponseAction(actions,comment){

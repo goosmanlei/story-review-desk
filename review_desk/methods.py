@@ -154,16 +154,19 @@ def validate(store, payload):
         require(isinstance(companions, dict) and not (set(companions) - set(sections)), '附属文件的章节不存在')
         for section, names in companions.items():
             require(isinstance(names, list) and all(isinstance(n, str) and n in files for n in names), '附属文件不存在')
-        for filename, entries in payload.get('media', {}).items():
+        media = payload.get('media', {})
+        require(isinstance(media, dict), '媒体原件清单必须为对象')
+        for filename, entries in media.items():
             require(filename in files and isinstance(entries, dict), '媒体所属正文不存在')
             from .method_document import project
             links = {part.get('href') for b in project(payload, filename) for part in b['parts']}
             for href, spec in entries.items():
                 require(href in links, '媒体未被准确正文引用')
+                require(isinstance(spec, dict), '媒体原件元数据必须为对象')
                 file_path(spec['path'])
                 require(isinstance(spec.get('sha256'), str) and re.fullmatch(r'[0-9a-f]{64}', spec['sha256']) and
                         type(spec.get('bytes')) is int and spec['bytes'] >= 0 and
-                        spec.get('mime', '').startswith(('image/', 'audio/', 'video/')), '媒体原件元数据无效')
+                        isinstance(spec.get('mime'), str) and spec['mime'].startswith(('image/', 'audio/', 'video/')), '媒体原件元数据无效')
         source = payload.get('source')
         if source:
             require(source.get('kind') == 'project-markdown' and set(source.get('files', {})) == set(payload['files']), 'Markdown 投影的来源清单不完整')
@@ -675,11 +678,11 @@ def edit(store, value):
             old = read(store, oid, rid)
             require(old['payload']['format'] == FORMATS['binding'], '使用范围不是工作绑定')
             require(category == 'skill' and old['payload']['work_type'] in payload['work_types'], '方法不适用此工作类型')
-            require(all(i < len(old['payload']['rules']) and old['payload']['rules'][i]['object_id'] == base['object_id'] for i in indices), '所选分支已不使用此方法，请重新核对范围')
+            require(all(i < len(old['payload']['rules']) for i in indices), '所选条件分支不存在，请重新核对范围')
             active = read(store, oid)
             intended = copy.deepcopy(old['payload'])
             for i in indices:
-                intended['rules'][i]['revision_id'] = saved['revision_id']
+                intended['rules'][i].update(reference(saved))
             if active['payload'] == intended:
                 result = active
             elif active['revision_id'] != rid:
