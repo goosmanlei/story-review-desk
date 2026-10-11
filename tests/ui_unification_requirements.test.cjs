@@ -68,6 +68,25 @@ function material(){
   return {need,asset,round};
 }
 
+test('current plan remains reachable with zero or many correctly numbered candidates',async()=>{
+  const {c}=fixture(),{need,asset,round}=material();round.current_content=true;
+  const candidates=Array.from({length:24},(_,i)=>({record:{...asset,id:'fixture-candidate-'+i,candidate_number:i+1},component:asset.payload.components[0],components:asset.payload.components}));
+  const model={need,identity:need,round,rounds:[round],material_id:need.object_id,candidates};
+  c.materialCompareControl=()=>{};c.renderShotReferenceChoice=()=>{};
+  let selected='current',recipe;
+  c.renderSelectedGenerationRecipe=(_box,plan,item)=>recipe=item?.record.id||plan.id;
+  const render=()=>{const root=new Element('main');c.renderMaterialCard(root,model,{selectedCandidateId:selected,selectCandidate:id=>selected=id});return root};
+  let root=render();assert.equal(recipe,need.id);assert.doesNotMatch(root.textContent,/历史候选|尚无候选/);
+  for(const candidate of candidates){
+    await root.all().find(n=>n.dataset.choiceId===candidate.record.id).onclick();root=render();
+    assert.equal(recipe,candidate.record.id);
+    assert.ok(root.all().find(n=>n.tag==='button'&&n.textContent==='当前方案'));
+  }
+  await root.all().find(n=>n.tag==='button'&&n.textContent==='当前方案').onclick();render();assert.equal(recipe,need.id);
+  model.candidates=[];c.renderMaterialPlaceholder=()=>{};root=render();
+  assert.equal(root.all().filter(n=>n.className==='material-content-navigation')[0].textContent,'当前方案候选');
+});
+
 test('5.3/5.8 expanding a second left group retains one selected material and paints the right once',()=>{
   const {c,reader}=fixture(),{need,asset,round}=material();
   const legacy=row('legacy','ASSET',{media_type:'audio',components:[{id:'original',role:'original',mime:'audio/wav'}]});
