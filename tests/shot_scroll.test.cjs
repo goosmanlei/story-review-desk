@@ -29,6 +29,20 @@ test('page-scrolling narrow layout measures the visible topbar instead of deskto
   assert.equal(target.getBoundingClientRect().top,138);
 });
 
+test('browser-restored selection follows the visible shot heading instead of the previous card tail',()=>{
+  const make=(id,top,heading)=>({id,getBoundingClientRect:()=>({top}),querySelector:()=>({getBoundingClientRect:()=>({top:heading,bottom:heading+28})})});
+  const previous=make('first',-890,-835),selected=make('second',338,393),next=make('third',1665,1720);
+  const page={querySelectorAll:()=>[previous,selected,next]},body={scrollTop:1000,clientTop:1,getBoundingClientRect:()=>({top:217,bottom:1130})};
+  const header={getBoundingClientRect:()=>({top:217,bottom:296})};
+  const context={innerHeight:1359,getComputedStyle:()=>({overflowY:'auto'}),document:{querySelector:()=>({getBoundingClientRect:()=>({bottom:122})})}};
+  vm.createContext(context);vm.runInContext(source.slice(source.indexOf('function breakdownVisibleRow('),source.indexOf('function activateBreakdownScene(')),context);
+  assert.equal(context.breakdownVisibleRow(page,body,header),selected);
+  body.scrollTop=0;assert.equal(context.breakdownVisibleRow(page,body,header),null);
+  body.scrollTop=1000;context.getComputedStyle=()=>({overflowY:'visible'});
+  header.getBoundingClientRect=()=>({top:-100,bottom:122});assert.equal(context.breakdownVisibleRow(page,body,header),selected);
+  header.getBoundingClientRect=()=>({top:122,bottom:296});assert.equal(context.breakdownVisibleRow(page,body,header),null);
+});
+
 test('shot selection address restores its group, material, candidate and component after refresh',()=>{
   const shared=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/unified-cards.js'),'utf8');
   const route=shared.slice(shared.indexOf('function writeShotWorkspaceRoute('),shared.indexOf('function renderShotEntityWorkspace('));
