@@ -130,6 +130,61 @@ class MethodsTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.store.put_object('forged', 'NOTE', execution['payload'])
 
+    def test_stage_read_is_noncreating_and_checks_exact_lineage_and_output(self):
+        execution = methods.prepare(self.store, self.request)
+        ref = methods.reference(execution)
+        self.assertEqual(methods.stage_record(self.store, ref, 'result'), {'artifact': None, 'previous': []})
+        rows = []
+        for stage in ['draft', 'review', 'result']:
+            rows.append(methods.artifact(self.store, {**self.request, 'execution': ref, 'stage': stage,
+                                                    'output': '原正文🧵\n' + stage}))
+        result = methods.stage_record(self.store, ref, 'result')
+        self.assertEqual(result, {'artifact': rows[-1], 'previous': [methods.reference(r) for r in rows[:2]]})
+        self.store.db.execute('DELETE FROM dependencies WHERE from_revision=? AND role=?', (rows[-1]['revision_id'], 'previous-step'))
+        with self.assertRaisesRegex(ValueError, '步骤依赖'):
+            methods.stage_record(self.store, ref, 'result')
+        payload = copy.deepcopy(rows[0]['payload']); payload['output'] = '篡改'
+        self.store.db.execute('UPDATE revisions SET payload=? WHERE id=?', (json.dumps(payload), rows[0]['revision_id']))
+        with self.assertRaisesRegex(ValueError, '输出摘要'):
+            methods.stage_record(self.store, ref, 'draft')
+
+    def test_stage_read_compact_hashes_and_assessment_keep_old_export_boundary(self):
+        from review_desk import production_current_migration as migration
+        migration.apply(self.store, migration.plan(self.store))
+        payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['audiovisual-design']
+        method = methods.save(self.store, {'category': 'skill', 'name': 'design', 'expected_version': 0, 'payload': payload})
+        methods.save(self.store, {'category': 'binding', 'name': 'audiovisual-design', 'expected_version': 0,
+            'payload': {'work_type': 'audiovisual-design', 'rules': [{**methods.reference(method), 'when': {}}]}})
+        request = {**self.request, 'work_type': 'audiovisual-design', 'private': True}
+        execution = methods.prepare(self.store, request)
+        for stage, value in [('draft', '私有正文\n'), ('review', {'assessment': '原评价'}), ('result', {'design': '定稿'})]:
+            row = methods.artifact(self.store, {**request, 'execution': methods.reference(execution), 'stage': stage, 'output': value})
+            read = methods.stage_record(self.store, methods.reference(execution), stage)['artifact']
+            self.assertEqual(read, row)
+            self.assertEqual(read['payload']['output']['sha256'], methods.checksum(value))
+            self.assertEqual(read['payload']['output_sha256'], methods.checksum(read['payload']['output']))
+            self.assertNotIn('私有正文', json.dumps(read, ensure_ascii=False))
+        from review_desk.bundle import export
+        folder = Path(self.tmp.name) / 'public-stage'
+        export(self.store, folder)
+        self.assertNotIn(execution['object_id'], (folder / 'objects.json').read_text())
+
+    def test_full_production_execution_resumes_after_current_content_cutover(self):
+        from review_desk import production_current_migration as migration
+        payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['audiovisual-design']
+        method = methods.save(self.store, {'category': 'skill', 'name': 'design', 'expected_version': 0, 'payload': payload})
+        methods.save(self.store, {'category': 'binding', 'name': 'audiovisual-design', 'expected_version': 0,
+            'payload': {'work_type': 'audiovisual-design', 'rules': [{**methods.reference(method), 'when': {}}]}})
+        request = {**self.request, 'work_type': 'audiovisual-design'}
+        old = methods.prepare(self.store, request)
+        for stage in ['draft', 'review', 'result']:
+            methods.artifact(self.store, {**request, 'execution': methods.reference(old), 'stage': stage, 'output': '旧完整稿'})
+        migration.apply(self.store, migration.plan(self.store))
+        self.assertEqual(methods.prepare(self.store, request), old)
+        self.assertEqual(methods.stage_record(self.store, methods.reference(old), 'result')['artifact']['payload']['output'], '旧完整稿')
+        fresh = methods.prepare(self.store, {**request, 'step_id': 'new'})
+        self.assertEqual(fresh['payload']['inputs']['format'], 'production-method-inputs-v1')
+
     def test_condition_specificity_and_ambiguity(self):
         rules = [{**methods.reference(self.method), 'when': {'mode': 'video'}},
                  {**methods.reference(self.method), 'when': {'medium': 'video'}}]
