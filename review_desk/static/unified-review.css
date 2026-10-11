@@ -258,7 +258,7 @@
 .management-graph-node .material-small-preview { max-width:60px; }
 .management-edge-caption { width:100%; height:100%; padding:4px 8px; font-size:13px;line-height:1.35; white-space:normal; overflow:auto; border:1px solid #d6dfd2; background:#fffdf4; border-radius:5px; }
 .management-relation-graph [data-entity-id].related-highlight .entity-small-card { outline:3px solid #a34c21; outline-offset:-3px; }
-.management-relation-graph .relation-edge { stroke-width:1.5; fill:none; }
+.management-relation-graph .relation-edge { stroke:#7f9580; stroke-width:2; fill:none; }
 .management-relation-graph .relation-edge.selected { stroke:#a34c21; stroke-width:3; }
 dialog #toast { position:fixed; z-index:50; }
 
@@ -279,3 +279,8 @@ dialog #toast { position:fixed; z-index:50; }
 .management-edge-caption.relation-text{min-height:0;padding:4px 8px!important;font-size:13px!important;line-height:1.4;overflow:visible}
 .management-relation-graph{overflow:visible}
 .management-edge-caption:focus-visible{outline:3px solid #a34c21}
+
+.management-relation-graph .graph-muted{opacity:.28}
+.management-relation-graph .graph-center .entity-small-card{outline:3px solid #a34c21;outline-offset:-3px;background:#f6e8d8;box-shadow:0 0 0 2px #a34c2128}
+.management-relation-graph .entity-small-card:focus-visible{outline:3px solid #345d4a;outline-offset:-3px}
+.management-relation-graph .management-edge-caption.selected{border-color:#a34c21;background:#f6e8d8}

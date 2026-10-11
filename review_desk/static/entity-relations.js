@@ -177,84 +177,160 @@ function managementGraphLayout(rows,edges){
     components.push(members);
   }
   components.sort((a,b)=>b.length-a.length);
+  const isolated=[];
   for(const members of components){
+    if(members.length===1&&!weak.get(members[0]).length){isolated.push(sorted.find(r=>r.object_id===members[0]));continue;}
     const ordered=sorted.filter(row=>members.includes(row.object_id)),directed=members.some(id=>adj.get(id).length),levels=new Map();
     if(directed){for(const row of ordered){const level=rank(owner.get(row.object_id));if(!levels.has(level))levels.set(level,[]);levels.get(level).push(row);}}
-    else ordered.forEach((row,i)=>{const level=i%3;if(!levels.has(level))levels.set(level,[]);levels.get(level).push(row);});
-    let count=0;for(const [level,group] of levels){count=Math.max(count,group.length);group.forEach((row,i)=>nodes.push({id:row.object_id,row,x:40+level*500,y:top+i*250,w:230,h:120,component,rank:directed?level:null}));}
-    top+=count*250+40;component++;
+    else {
+      // Breadth from the strongest hub expresses adjacency, without inventing direction.
+      const hub=[...ordered].sort((a,b)=>weak.get(b.object_id).length-weak.get(a.object_id).length||sorted.indexOf(a)-sorted.indexOf(b))[0];
+      const depths=new Map([[hub.object_id,0]]),queue=[hub.object_id],order=[];
+      while(queue.length){const id=queue.shift();order.push(id);for(const next of weak.get(id))if(!depths.has(next)){depths.set(next,depths.get(id)+1);queue.push(next);}}
+      for(const id of order){const level=depths.get(id);if(!levels.has(level))levels.set(level,[]);levels.get(level).push(ordered.find(row=>row.object_id===id));}
+    }
+    const count=Math.max(...[...levels.values()].map(group=>group.length));
+    for(const [level,group] of levels)group.forEach((row,i)=>nodes.push({id:row.object_id,row,x:40+level*490,y:top+(i+(count-group.length)/2)*180,w:230,h:120,component,rank:directed?level:null}));
+    top+=count*180+30;component++;
+  }
+  const columns=Math.max(3,...nodes.map(n=>Math.round((n.x-40)/490)+1));
+  isolated.forEach((row,i)=>nodes.push({id:row.object_id,row,x:40+(i%columns)*280,y:top+Math.floor(i/columns)*160,w:230,h:120,component:component+i,rank:null}));
+  // Pack smaller connected groups and valid isolated cards into a compact shelf.
+  const main=nodes.filter(n=>n.component===0),limit=Math.max(1200,...main.map(n=>n.x+n.w));
+  let shelfX=40,shelfY=Math.max(40,...main.map(n=>n.y+n.h))+60,shelfHeight=0;
+  for(const c of [...new Set(nodes.map(n=>n.component))].filter(c=>c!==0)){
+    const group=nodes.filter(n=>n.component===c),left=Math.min(...group.map(n=>n.x)),top=Math.min(...group.map(n=>n.y)),w=Math.max(...group.map(n=>n.x+n.w))-left,h=Math.max(...group.map(n=>n.y+n.h))-top;
+    if(shelfX+w>limit){shelfX=40;shelfY+=shelfHeight+50;shelfHeight=0;}
+    for(const n of group){n.x+=shelfX-left;n.y+=shelfY-top;}shelfX+=w+60;shelfHeight=Math.max(shelfHeight,h);
   }
   return nodes;
 }
 function managementOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
 function managementEdgeGeometry(nodes,edges){
-  const by=new Map(nodes.map(n=>[n.id,n])),boxes=nodes.map(n=>({x:n.x-16,y:n.y-16,w:n.w+32,h:n.h+32}));let width=Math.max(480,...nodes.map(n=>n.x+n.w+60)),height=Math.max(300,...nodes.map(n=>n.y+n.h+60));
+  const by=new Map(nodes.map(n=>[n.id,n])),boxes=nodes.map(n=>({x:n.x-12,y:n.y-12,w:n.w+24,h:n.h+24}));let width=Math.max(480,...nodes.map(n=>n.x+n.w+60)),height=Math.max(300,...nodes.map(n=>n.y+n.h+60));
   const views=[];
   for(const edge of edges){let [a,b]=edge.endpoints.map(id=>by.get(id));if(!a||!b||edge.derived)continue;if(edge.direction==='reverse')[a,b]=[b,a];
-    const w=230,h=Math.max(48,Math.ceil(Array.from(edge.summary||'').length/14)*20+18),mx=(a.x+b.x+a.w)/2-w/2,my=(a.y+b.y+a.h)/2-h/2;let label=null;
+    const w=180,h=Math.max(48,Math.ceil(Array.from(edge.summary||'').length/14)*20+18),mx=(a.x+b.x+a.w)/2-w/2,my=(a.y+b.y+a.h)/2-h/2;let label=null;
     // Search existing whitespace first; the finite fallback extends the canvas.
     for(let ring=0;ring<40&&!label;ring++)for(let dx=-ring;dx<=ring&&!label;dx++)for(let dy=-ring;dy<=ring;dy++){
-      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const candidate={x:Math.max(20,Math.round(mx/20)*20+dx*40),y:Math.max(20,Math.round(my/20)*20+dy*40),w,h};
-      if(!boxes.some(box=>managementOverlap({x:candidate.x-32,y:candidate.y-32,w:candidate.w+64,h:candidate.h+64},box))){label=candidate;break;}
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const candidate={x:Math.max(20,Math.round(mx/10)*10+dx*40),y:Math.max(20,Math.round(my/10)*10+dy*40),w,h};
+      if(!boxes.some(box=>managementOverlap({x:candidate.x-24,y:candidate.y-24,w:candidate.w+48,h:candidate.h+48},box))){label=candidate;break;}
     }
-    if(!label)label={x:width+40,y:40,w,h};boxes.push({x:label.x-12,y:label.y-12,w:w+24,h:h+24});width=Math.max(width,label.x+w+60);height=Math.max(height,label.y+h+60);views.push({edge,a,b,label});
+    if(!label)label={x:width+40,y:40,w,h};boxes.push({x:label.x-8,y:label.y-8,w:w+16,h:h+16});width=Math.max(width,label.x+w+60);height=Math.max(height,label.y+h+60);views.push({edge,a,b,label});
   }
-  function port(box,target){const dx=target.x+target.w/2-box.x-box.w/2,dy=target.y+target.h/2-box.y-box.h/2;if(Math.abs(dx)/box.w>=Math.abs(dy)/box.h){const sign=dx>=0?1:-1,x=box.x+(sign>0?box.w:0),y=box.y+box.h/2;return {point:[x,y],outer:[x+sign*18,y]};}const sign=dy>=0?1:-1,x=box.x+box.w/2,y=box.y+(sign>0?box.h:0);return {point:[x,y],outer:[x,y+sign*18]};}
-  const segments=[];
-  for(const view of views){const ap=port(view.a,view.label),al=port(view.label,view.a),bl=port(view.label,view.b),bp=port(view.b,view.label);
-    const one=managementOrthogonalRoute(ap.outer,al.outer,boxes,width,height),two=managementOrthogonalRoute(bl.outer,bp.outer,boxes,width,height);
-    view.points=[ap.point,...one,al.point,[bl.point[0],al.point[1]],bl.point,...two,bp.point];view.path=view.points.map((p,i)=>(i?'L':'M')+p.join(' ')).join(' ');segments.push(view);
+  function side(box,target){const dx=target.x+target.w/2-box.x-box.w/2,dy=target.y+target.h/2-box.y-box.h/2;return Math.abs(dx)/box.w>=Math.abs(dy)/box.h?(dx>=0?'right':'left'):(dy>=0?'bottom':'top');}
+  const ports=new Map();
+  function register(box,target){const key=box.id+':'+side(box,target);if(!ports.has(key))ports.set(key,[]);const entry={box,target,side:side(box,target)};ports.get(key).push(entry);return entry;}
+  for(const [i,v] of views.entries()){v.label.id='caption:'+i;v.ap=register(v.a,v.label);v.bp=register(v.b,v.label);v.al=register(v.label,v.a);v.bl=register(v.label,v.b);}
+  for(const entries of ports.values()){
+    entries.sort((a,b)=>a.side==='left'||a.side==='right'?a.target.y-b.target.y:a.target.x-b.target.x);
+    entries.forEach((p,i)=>{const {box,side}=p,f=(i+1)/(entries.length+1),horizontal=side==='left'||side==='right',sign=side==='left'||side==='top'?-1:1;
+      p.point=horizontal?[box.x+(sign>0?box.w:0),box.y+16+(box.h-32)*f]:[box.x+16+(box.w-32)*f,box.y+(sign>0?box.h:0)];
+      p.outer=[p.point[0]+(horizontal?sign*(14+(i%3)*4):0),p.point[1]+(horizontal?0:sign*(14+(i%3)*4))];
+    });
   }
-  return {views:segments,width,height};
+  const occupied=[];
+  for(const [index,view] of views.entries()){
+    const {ap,al,bl,bp}=view;
+    const direct=(start,end)=>managementDirectCurve(start,end,nodes,views.map(v=>v.label));
+    const d1=direct(ap,al),d2=direct(bl,bp);
+    if(d1&&d2){view.routes=[d1.points,d2.points];view.points=[...d1.points,...d2.points];view.path=d1.path+' '+d2.path;continue;}
+    const one=managementOrthogonalRoute(ap.outer,al.outer,boxes,width,height,occupied,index*2),two=managementOrthogonalRoute(bl.outer,bp.outer,boxes,width,height,occupied,index*2+1);
+    // The caption interrupts its own edge. No line is painted through text.
+    const first=[ap.point,...one,al.point],last=[bl.point,...two,bp.point];
+    view.routes=[first,last];view.points=[...first,...last];view.path=managementSmoothRoute(first)+' '+managementSmoothRoute(last);
+    for(const route of view.routes)for(let i=1;i<route.length;i++)occupied.push([route[i-1],route[i]]);
+  }
+  return {views,width,height};
+}
+function managementDirectCurve(start,end,nodes,labels){
+  const a=start.point,b=end.point,d=Math.min(220,Math.max(40,Math.hypot(a[0]-b[0],a[1]-b[1])*.45));
+  const control=p=>{const dx=p.outer[0]-p.point[0],dy=p.outer[1]-p.point[1],length=Math.hypot(dx,dy);return [p.point[0]+dx/length*d,p.point[1]+dy/length*d];};
+  const c=control(start),e=control(end),points=[];
+  for(let i=0;i<=64;i++){const t=i/64,u=1-t,p=[u*u*u*a[0]+3*u*u*t*c[0]+3*u*t*t*e[0]+t*t*t*b[0],u*u*u*a[1]+3*u*u*t*c[1]+3*u*t*t*e[1]+t*t*t*b[1]];
+    if(p[0]<1||p[1]<1)return null;
+    if(i>0&&i<64&&[...nodes,...labels].some(box=>p[0]>box.x&&p[0]<box.x+box.w&&p[1]>box.y&&p[1]<box.y+box.h))return null;points.push(p);
+  }
+  return {points,path:'M'+a.join(' ')+' C'+[...c,...e,...b].join(' ')};
+}
+function managementSmoothRoute(points){
+  const p=[];for(const point of points){if(p.length&&point[0]===p[p.length-1][0]&&point[1]===p[p.length-1][1])continue;p.push(point);while(p.length>2){const [a,b,c]=p.slice(-3);if((a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1]))p.splice(p.length-2,1);else break;}}
+  let path='M'+p[0].join(' ');
+  if(p.length===2){const [a,b]=p,dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy)||1;return path+' C'+[a[0]+dx/3-dy/length*5,a[1]+dy/3+dx/length*5,a[0]+dx*2/3-dy/length*5,a[1]+dy*2/3+dx/length*5,...b].join(' ');}
+  for(let i=1;i<p.length-1;i++){const [a,b,c]=[p[i-1],p[i],p[i+1]],ab=Math.hypot(b[0]-a[0],b[1]-a[1]),bc=Math.hypot(c[0]-b[0],c[1]-b[1]),r=Math.min(16,ab/2,bc/2),before=[b[0]+(a[0]-b[0])*r/ab,b[1]+(a[1]-b[1])*r/ab],after=[b[0]+(c[0]-b[0])*r/bc,b[1]+(c[1]-b[1])*r/bc];
+    path+=' L'+before.join(' ')+' C'+[before[0]+(b[0]-before[0])*.65,before[1]+(b[1]-before[1])*.65,b[0]+(after[0]-b[0])*.35,b[1]+(after[1]-b[1])*.35,...after].join(' ');
+  }
+  return path+' L'+p[p.length-1].join(' ');
 }
 // A visibility grid follows rectangle borders. No straight-line fallback is
 // allowed through cards when a route needs to travel around another entity.
-function managementOrthogonalRoute(start,end,boxes,width,height){
-  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x,b.x+b.w])])].sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y,b.y+b.h])])].sort((a,b)=>a-b),nx=xs.length;
+function managementOrthogonalRoute(start,end,boxes,width,height,occupied=[],lane=0){
+  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x-12-(lane%11)*6,b.x+b.w+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[0]-8,a[0]+8,b[0]-8,b[0]+8])])].filter(x=>x>=0&&x<=width).sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y-12-(lane%11)*6,b.y+b.h+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[1]-8,a[1]+8,b[1]-8,b[1]+8])])].filter(y=>y>=0&&y<=height).sort((a,b)=>a-b),nx=xs.length;
   const origin=ys.indexOf(start[1])*nx+xs.indexOf(start[0]),goal=ys.indexOf(end[1])*nx+xs.indexOf(end[0]);
   const blocked=(a,b)=>boxes.some(box=>a[0]===b[0]?a[0]>box.x&&a[0]<box.x+box.w&&Math.max(a[1],b[1])>box.y&&Math.min(a[1],b[1])<box.y+box.h:a[1]>box.y&&a[1]<box.y+box.h&&Math.max(a[0],b[0])>box.x&&Math.min(a[0],b[0])<box.x+box.w);
+  const overlap=(a,b,c,d)=>a[0]===b[0]&&c[0]===d[0]?Math.abs(a[0]-c[0])<.01&&Math.min(Math.max(a[1],b[1]),Math.max(c[1],d[1]))-Math.max(Math.min(a[1],b[1]),Math.min(c[1],d[1]))>1:a[1]===b[1]&&c[1]===d[1]?Math.abs(a[1]-c[1])<.01&&Math.min(Math.max(a[0],b[0]),Math.max(c[0],d[0]))-Math.max(Math.min(a[0],b[0]),Math.min(c[0],d[0]))>1:false;
   const point=id=>[xs[id%nx],ys[Math.floor(id/nx)]],distance=new Map([[origin,0]]),previous=new Map(),done=new Set(),heap=[];
   function push(item){heap.push(item);let i=heap.length-1;while(i){const parent=(i-1)>>1;if(heap[parent].cost<=item.cost)break;heap[i]=heap[parent];i=parent;}heap[i]=item;}
   function pop(){const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].cost<heap[c].cost)c++;if(heap[c].cost>=last.cost)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;}
   const heuristic=p=>Math.abs(p[0]-end[0])+Math.abs(p[1]-end[1]);push({id:origin,cost:heuristic(start)});
   while(heap.length){const {id}=pop();if(done.has(id))continue;if(id===goal){const result=[end];let cursor=goal;while(cursor!==origin){cursor=previous.get(cursor);result.push(point(cursor));}return result.reverse();}done.add(id);const x=id%nx,y=Math.floor(id/nx),a=point(id);
-    for(const [xx,yy] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(xx<0||xx>=nx||yy<0||yy>=ys.length)continue;const next=yy*nx+xx,b=point(next);if(done.has(next)||blocked(a,b))continue;const cost=distance.get(id)+Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);if(cost<(distance.get(next)??Infinity)){distance.set(next,cost);previous.set(next,id);push({id:next,cost:cost+heuristic(b)});}}
+    for(const [xx,yy] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(xx<0||xx>=nx||yy<0||yy>=ys.length)continue;const next=yy*nx+xx,b=point(next);if(done.has(next)||blocked(a,b)||occupied.some(([c,d])=>overlap(a,b,c,d)))continue;const cost=distance.get(id)+Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);if(cost<(distance.get(next)??Infinity)){distance.set(next,cost);previous.set(next,id);push({id:next,cost:cost+heuristic(b)});}}
   }
   throw new Error('实体关系连线路径不可用');
 }
 function renderManagementEntityGraph(root,rows,result,memory){
   if(!rows.length){nodeText('p','production-meta','此范围没有实体',root);return}
   const ids=new Set(rows.map(r=>r.object_id)),edges=(result.entity_graph?.edges||[]).filter(e=>!e.derived&&e.endpoints.every(id=>ids.has(id)));
-  const signature=JSON.stringify([rows.map(r=>[r.object_id,r.id]),edges]);if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature}
+  const signature=JSON.stringify([rows.map(r=>[r.object_id,r.id]),edges]);if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature;memory.selection=null;memory.scale=null;memory.mode='fit';memory.left=0;memory.top=0;}
   const nodes=memory.nodes,by=new Map(nodes.map(n=>[n.id,n])),controls=el('div','relation-controls'),viewport=el('div','relation-graph-viewport management-graph-viewport'),canvas=el('div','relation-graph-canvas');
   root.append(controls,viewport);viewport.append(canvas);viewport.tabIndex=0;viewport.setAttribute('aria-label','实体关系图，可拖动和缩放');
   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('relation-graph','management-relation-graph');svg.setAttribute('role','group');svg.setAttribute('aria-label','实体与关系');canvas.append(svg);
   const make=(tag,attrs={},parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
   const marker='entity-map-arrow-'+(++relationGraphSerial),defs=make('defs'),arrow=make('marker',{id:marker,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},arrow);
   const edgeLayer=make('g'),captionLayer=make('g'),edgeViews=[];let width=Math.max(800,...nodes.map(n=>n.x+360)),height=Math.max(450,...nodes.map(n=>n.y+220));
-  const nodeHosts=[];
-  for(const node of nodes){const foreign=make('foreignObject',{x:node.x,y:node.y,width:node.w,height:node.h,'data-entity-id':node.id}),host=el('div','management-graph-node');foreign.append(host);entitySmallCard(host,node.row,{stateCount:result.entity_state_counts?.[node.id]||0,materialCount:Object.values(result.entity_material_counts?.[node.id]||{}).reduce((a,b)=>a+b,0),preview:result.entity_previews?.[node.id],references:[{object_id:node.id,revision_id:node.row.id}]});nodeHosts.push({node,foreign,host});}
+  const nodeHosts=[];let moved=false,pan=null,opening=false;
+  function choose(selection){memory.selection=selection;paintSelection();}
+  function paintSelection(){
+    const selection=memory.selection,selected=managementGraphSelection(edges,selection),ends=new Set(selection?.kind==='node'?[selection.id]:[]);
+    for(const edge of edges)if(selected.has(edge.id))for(const id of edge.endpoints)ends.add(id);
+    for(const {node,foreign,button} of nodeHosts){foreign.classList.toggle('graph-muted',!!selection&&!ends.has(node.id));foreign.classList.toggle('related-highlight',ends.has(node.id));foreign.classList.toggle('graph-center',selection?.kind==='node'&&selection.id===node.id);button.setAttribute('aria-pressed',String(selection?.kind==='node'&&selection.id===node.id));}
+    for(const v of edgeViews){const on=selected.has(v.edge.id);v.path.classList.toggle('selected',on);v.label.classList.toggle('selected',on);v.path.classList.toggle('graph-muted',!!selection&&!on);v.foreign.classList.toggle('graph-muted',!!selection&&!on);}
+  }
+  for(const node of nodes){const foreign=make('foreignObject',{x:node.x,y:node.y,width:node.w,height:node.h,'data-entity-id':node.id}),host=el('div','management-graph-node');foreign.append(host);const button=entitySmallCard(host,node.row,{stateCount:result.entity_state_counts?.[node.id]||0,materialCount:Object.values(result.entity_material_counts?.[node.id]||{}).reduce((a,b)=>a+b,0),preview:result.entity_previews?.[node.id],references:[{object_id:node.id,revision_id:node.row.id}]});button.setAttribute('aria-keyshortcuts','Space Enter');
+    button.onclick=e=>{e.stopPropagation();if(!moved&&e.detail<2)choose(memory.selection?.kind==='node'&&memory.selection.id===node.id?null:{kind:'node',id:node.id});};
+    const open=()=>{if(moved||opening)return;choose({kind:'node',id:node.id});opening=true;Promise.resolve(openUnifiedMaterial({object_id:node.id,revision_id:node.row.id},button)).finally(()=>{opening=false;});};
+    button.ondblclick=e=>{e.preventDefault();e.stopPropagation();open();};
+    button.onkeydown=e=>{if(e.isComposing||e.repeat)return;if(e.key===' '){e.preventDefault();e.stopPropagation();choose(memory.selection?.kind==='node'&&memory.selection.id===node.id?null:{kind:'node',id:node.id});}else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();moved=false;open();}};
+    nodeHosts.push({node,foreign,host,button});}
+
   function drawEdges(){
-    for(const {node,foreign,host} of nodeHosts){node.h=Math.max(120,host.scrollHeight);foreign.setAttribute('height',node.h);}
+    for(const {node,foreign,host} of nodeHosts){node.h=Math.max(110,host.scrollHeight);foreign.setAttribute('height',node.h);}
     edgeLayer.replaceChildren();captionLayer.replaceChildren();edgeViews.length=0;
     const geometry=managementEdgeGeometry(nodes,edges);width=geometry.width;height=geometry.height;
     for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},edgeLayer);
       if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute('marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
       const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},captionLayer),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
-      label.onclick=()=>{for(const v of edgeViews){const active=v.edge.id===edge.id;v.path.classList.toggle('selected',active);v.label.classList.toggle('selected',active)}for(const node of svg.querySelectorAll('[data-entity-id]'))node.classList.toggle('related-highlight',edge.endpoints.includes(node.dataset.entityId))};edgeViews.push({edge,path,label});
+      label.onclick=e=>{e.stopPropagation();if(!moved)choose({kind:'edge',id:edge.id});};edgeViews.push({edge,path,label,foreign});
     }
-    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);paintSelection();
   }
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
   let scale=memory.scale||1,ready=false;const status=nodeText('output','relation-scale','',controls);
   const remember=()=>{if(ready){memory.scale=scale;memory.left=viewport.scrollLeft;memory.top=viewport.scrollTop}};
   function resize(center){svg.style.width=width*scale+'px';svg.style.height=height*scale+'px';canvas.style.width=Math.max(viewport.clientWidth,width*scale)+'px';canvas.style.height=Math.max(viewport.clientHeight,height*scale)+'px';if(center){const pos=relationGraphPosition(center,viewport.clientWidth,viewport.clientHeight,scale);viewport.scrollLeft=pos.x;viewport.scrollTop=pos.y}status.textContent=Math.round(scale*100)+'%';remember()}
   const fit=()=>Math.min(1,(viewport.clientWidth-20)/width,(viewport.clientHeight-20)/height);
-  const zoom=key=>{const center={x:(viewport.scrollLeft+viewport.clientWidth/2)/scale,y:(viewport.scrollTop+viewport.clientHeight/2)/scale};scale=key==='fit'?fit():key==='original'?1:Math.max(Math.min(.05,fit()),Math.min(2,scale*(key==='in'?1.25:.8)));resize(key==='fit'?{x:width/2,y:height/2}:center)};
+  const zoom=key=>{memory.mode=key==='fit'?'fit':key==='original'?'original':'custom';const center={x:(viewport.scrollLeft+viewport.clientWidth/2)/scale,y:(viewport.scrollTop+viewport.clientHeight/2)/scale};scale=key==='fit'?fit():key==='original'?1:Math.max(Math.min(.05,fit()),Math.min(2,scale*(key==='in'?1.25:.8)));resize(key==='fit'?{x:width/2,y:height/2}:center)};
   for(const [key,label] of [['out','缩小'],['in','放大'],['fit','适应全图'],['original','原始大小']])productionButton(controls,label,()=>zoom(key));
-  viewport.onscroll=remember;let pan=null;
-  viewport.onpointerdown=e=>{if(e.button!==0||e.target.closest('button,a,input'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId)};
-  viewport.onpointermove=e=>{if(pan){viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY}};viewport.onpointerup=viewport.onpointercancel=()=>{pan=null};
-  viewport.onkeydown=e=>{if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key)}};
-  requestAnimationFrame(()=>{if(!viewport.isConnected)return;drawEdges();resize();viewport.scrollLeft=memory.left??0;viewport.scrollTop=memory.top??0;ready=true;remember()});
+  viewport.onscroll=remember;
+  viewport.onpointerdown=e=>{moved=false;if(e.button!==0||e.target.closest('a,input,textarea,select,.management-edge-caption'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};};
+  viewport.onpointermove=e=>{if(!pan)return;if(Math.hypot(pan.x-e.clientX,pan.y-e.clientY)>5){moved=true;viewport.setPointerCapture(e.pointerId);}if(moved){viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY;}};
+  viewport.onpointerup=()=>{pan=null;};viewport.onpointercancel=()=>{moved=true;pan=null;};
+  viewport.onclick=e=>{if(!moved&&!e.target.closest('[data-entity-id],[data-relation-id]'))choose(null);};
+  viewport.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();choose(null);return;}if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key);}};
+  function layout(){if(!viewport.isConnected)return;const left=memory.left,top=memory.top;drawEdges();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
+  requestAnimationFrame(layout);
+  if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return;}layout();});observer.observe(viewport);for(const {host} of nodeHosts)observer.observe(host);}
+}
+function managementGraphSelection(edges,selection){
+  return new Set(!selection?[]:edges.filter(e=>selection.kind==='edge'?e.id===selection.id:e.endpoints.includes(selection.id)).map(e=>e.id));
 }
