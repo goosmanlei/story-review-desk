@@ -16,10 +16,10 @@ test('empty locations do not erase a valid selected scene or hide future directo
  const c=fixture('http://fixture/'),filters={episode:'ep',scene:'scene',scope_revision:'old'},catalog={episodes:[{object_id:'ep',id:'old',kind:'AV_EPISODE',scenes:[{id:'scene',title:'测试场',kind:'AV_SCENE'},{id:'future',title:'新场',kind:'AV_SCENE'}]}]};
  c.managementScopeFilters({},filters,catalog,[],()=>{});assert.equal(filters.scene,'scene');assert.deepEqual(Array.from(c.groups[1].options,x=>x[0]),['','scene','future']);
 });
-test('normal entity navigation opens the full graph; explicit scopes still return to their exact edition',()=>{
+test('entity navigation carries the exact scope; explicit scopes still return to their edition',()=>{
  const c=fixture('http://fixture/?workspace=materials.workspace&production_tab=materials&production_scope_episode=ep&production_scope_revision=old&production_scope_scene=scene');c.state.workspace='materials.workspace';
  vm.runInContext("workspaceSubRoutes.set('settings.workspace:entities','http://fixture/?workspace=settings.workspace&production_tab=entities&entity_search=kept&production_scope_episode=ep&production_scope_revision=new&production_scope_scene=scene')",c);
- c.selectProductionTab('entities');let p=new URL(c.location.href).searchParams;assert.equal(p.get('entity_search'),'kept');assert.equal(p.get('production_scope_revision'),null);
+ c.selectProductionTab('entities');let p=new URL(c.location.href).searchParams;assert.equal(p.get('entity_search'),'kept');assert.equal(p.get('production_scope_revision'),'old');
  c.location.href='http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=old&production_scope_scene=scene';
  c.state.workspace='settings.workspace';vm.runInContext("workspaceSubRoutes.set('settings.workspace:breakdown','http://fixture/?workspace=settings.workspace&production_tab=breakdown&production_scope_episode=ep&production_scope_revision=new&production_scope_scene=scene&breakdown_episode=ep&breakdown_scene=scene&breakdown_object=new-shot&breakdown_revision=new-shot-revision')",c);
  c.selectProductionTab('breakdown');p=new URL(c.location.href).searchParams;assert.equal(p.get('breakdown_object'),'ep');assert.equal(p.get('breakdown_revision'),'old');assert.equal(p.get('breakdown_episode_revision'),'old');const target=c.breakdownEditionTarget({design:{object_id:'ep',id:p.get('breakdown_episode_revision')},scenes:[{object_id:'scene'}]},p);assert.equal(target.error,undefined);assert.equal(target.scene.object_id,'scene');
@@ -35,4 +35,10 @@ test('a scene shared by two current editions uses an explicit parent choice',()=
 
 test('reopening a historical manager URL cannot return through a stale current shot',()=>{
  const c=fixture('http://fixture/?workspace=materials.workspace&production_tab=materials&production_scope_episode=ep&production_scope_revision=old&production_scope_scene=scene&breakdown_episode=ep&breakdown_episode_revision=current-edition&breakdown_scene=scene&breakdown_object=current-shot&breakdown_revision=current');c.state.workspace='materials.workspace';c.selectProductionTab('breakdown');const p=new URL(c.location.href).searchParams;assert.equal(p.get('breakdown_object'),'ep');assert.equal(p.get('breakdown_revision'),'old');assert.equal(p.get('breakdown_episode_revision'),'old');const target=c.breakdownEditionTarget({design:{object_id:'ep',id:p.get('breakdown_episode_revision')},scenes:[{object_id:'scene'}]},p);assert.equal(target.error,undefined);assert.equal(target.scene.object_id,'scene');
+});
+
+test('material range changes clear a stale entity shot without changing material filters',()=>{
+ const c=fixture('http://fixture/?production_scope_episode=ep&production_scope_scene=scene&production_scope_revision=old&production_scope_shot=first&material_search=kept');
+ c.managementScopeRoute({episode:'ep',scene:'scene',scope_revision:'old'});assert.equal(new URL(c.location.href).searchParams.get('production_scope_shot'),'first');
+ c.managementScopeRoute({episode:'ep',scene:'other',scope_revision:'old'});const p=new URL(c.location.href).searchParams;assert.equal(p.get('production_scope_shot'),null);assert.equal(p.get('material_search'),'kept');
 });
