@@ -161,62 +161,90 @@ function renderEntityRelations(root,data){
   renderEntityRelationGraph(root,data);
 }
 
-// Deterministic force layout includes every component and isolated node. The
-// saved positions belong to this exact management scope, never to entity data.
+// Only declared directions create ranks. SCCs keep cycles in one rank;
+// weak components also include undirected edges and isolated entities.
 function managementGraphLayout(rows,edges){
-  const sorted=[...rows].sort((a,b)=>businessCode(a).localeCompare(businessCode(b),undefined,{numeric:true})),n=sorted.length,cols=Math.max(2,Math.ceil(Math.sqrt(n)));
-  const nodes=sorted.map((row,i)=>({id:row.object_id,row,x:(i%cols)*420,y:Math.floor(i/cols)*280})),by=new Map(nodes.map(v=>[v.id,v]));
-  for(let step=0;step<90;step++){
-    const force=nodes.map(()=>({x:0,y:0}));
-    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
-      let dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y;if(!dx&&!dy)dx=1;
-      const d=Math.max(30,Math.hypot(dx,dy)),k=Math.min(80,100000/d/d);force[i].x+=dx/d*k;force[i].y+=dy/d*k;force[j].x-=dx/d*k;force[j].y-=dy/d*k;
-    }
-    const index=new Map(nodes.map((v,i)=>[v.id,i]));
-    for(const edge of edges){const a=by.get(edge.endpoints[0]),b=by.get(edge.endpoints[1]);if(!a||!b)continue;const dx=b.x-a.x,dy=b.y-a.y,d=Math.max(1,Math.hypot(dx,dy)),k=(d-650)*.012;force[index.get(a.id)].x+=dx/d*k;force[index.get(a.id)].y+=dy/d*k;force[index.get(b.id)].x-=dx/d*k;force[index.get(b.id)].y-=dy/d*k}
-    nodes.forEach((v,i)=>{v.x+=Math.max(-60,Math.min(60,force[i].x));v.y+=Math.max(-60,Math.min(60,force[i].y))});
+  const sorted=[...rows].sort((a,b)=>businessCode(a).localeCompare(businessCode(b),undefined,{numeric:true})),ids=new Set(sorted.map(r=>r.object_id));
+  const valid=edges.filter(e=>!e.derived&&e.endpoints.length===2&&e.endpoints.every(id=>ids.has(id))),adj=new Map(sorted.map(r=>[r.object_id,[]])),weak=new Map(sorted.map(r=>[r.object_id,[]]));
+  for(const edge of valid){let [a,b]=edge.endpoints;weak.get(a).push(b);weak.get(b).push(a);if(edge.direction==='reverse')[a,b]=[b,a];if(['forward','reverse','mutual'].includes(edge.direction))adj.get(a).push(b);if(edge.direction==='mutual')adj.get(b).push(a);}
+  let serial=0;const indexes=new Map(),low=new Map(),stack=[],active=new Set(),scc=[],owner=new Map();
+  function visit(id){indexes.set(id,serial);low.set(id,serial++);stack.push(id);active.add(id);for(const next of adj.get(id)){if(!indexes.has(next)){visit(next);low.set(id,Math.min(low.get(id),low.get(next)));}else if(active.has(next))low.set(id,Math.min(low.get(id),indexes.get(next)));}if(low.get(id)===indexes.get(id)){const group=[];let member;do{member=stack.pop();active.delete(member);owner.set(member,scc.length);group.push(member);}while(member!==id);scc.push(group);}}
+  for(const row of sorted)if(!indexes.has(row.object_id))visit(row.object_id);
+  const parents=scc.map(()=>new Set());for(const [id,targets] of adj)for(const next of targets)if(owner.get(id)!==owner.get(next))parents[owner.get(next)].add(owner.get(id));
+  const ranks=new Map();function rank(group){if(!ranks.has(group))ranks.set(group,parents[group].size?1+Math.max(...[...parents[group]].map(rank)):0);return ranks.get(group);}
+  const seen=new Set(),components=[],nodes=[];let top=40,component=0;
+  for(const first of sorted){if(seen.has(first.object_id))continue;const members=[],pending=[first.object_id];seen.add(first.object_id);while(pending.length){const id=pending.shift();members.push(id);for(const next of weak.get(id))if(!seen.has(next)){seen.add(next);pending.push(next);}}
+    components.push(members);
   }
-  // Pack the relaxed centers into distinct cells. Unlike iterative collision
-  // nudges, this guarantees separation even in the full, high-degree graph.
-  const occupied=new Set();
-  for(const node of nodes){const gx=Math.round(node.x/380),gy=Math.round(node.y/220);let selected=null;
-    for(let ring=0;!selected;ring++)for(let dx=-ring;dx<=ring&&!selected;dx++)for(let dy=-ring;dy<=ring;dy++){
-      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const key=(gx+dx)+','+(gy+dy);if(!occupied.has(key)){occupied.add(key);selected=[gx+dx,gy+dy];break}
-    }
-    node.x=selected[0]*380;node.y=selected[1]*220;
+  components.sort((a,b)=>b.length-a.length);
+  for(const members of components){
+    const ordered=sorted.filter(row=>members.includes(row.object_id)),directed=members.some(id=>adj.get(id).length),levels=new Map();
+    if(directed){for(const row of ordered){const level=rank(owner.get(row.object_id));if(!levels.has(level))levels.set(level,[]);levels.get(level).push(row);}}
+    else ordered.forEach((row,i)=>{const level=i%3;if(!levels.has(level))levels.set(level,[]);levels.get(level).push(row);});
+    let count=0;for(const [level,group] of levels){count=Math.max(count,group.length);group.forEach((row,i)=>nodes.push({id:row.object_id,row,x:40+level*500,y:top+i*250,w:230,h:120,component,rank:directed?level:null}));}
+    top+=count*250+40;component++;
   }
-  const minX=Math.min(0,...nodes.map(v=>v.x))-80,minY=Math.min(0,...nodes.map(v=>v.y))-80;for(const v of nodes){v.x-=minX;v.y-=minY}return nodes;
+  return nodes;
+}
+function managementOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
+function managementEdgeGeometry(nodes,edges){
+  const by=new Map(nodes.map(n=>[n.id,n])),boxes=nodes.map(n=>({x:n.x-16,y:n.y-16,w:n.w+32,h:n.h+32}));let width=Math.max(480,...nodes.map(n=>n.x+n.w+60)),height=Math.max(300,...nodes.map(n=>n.y+n.h+60));
+  const views=[];
+  for(const edge of edges){let [a,b]=edge.endpoints.map(id=>by.get(id));if(!a||!b||edge.derived)continue;if(edge.direction==='reverse')[a,b]=[b,a];
+    const w=230,h=Math.max(48,Math.ceil(Array.from(edge.summary||'').length/14)*20+18),mx=(a.x+b.x+a.w)/2-w/2,my=(a.y+b.y+a.h)/2-h/2;let label=null;
+    // Search existing whitespace first; the finite fallback extends the canvas.
+    for(let ring=0;ring<40&&!label;ring++)for(let dx=-ring;dx<=ring&&!label;dx++)for(let dy=-ring;dy<=ring;dy++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const candidate={x:Math.max(20,Math.round(mx/20)*20+dx*40),y:Math.max(20,Math.round(my/20)*20+dy*40),w,h};
+      if(!boxes.some(box=>managementOverlap({x:candidate.x-32,y:candidate.y-32,w:candidate.w+64,h:candidate.h+64},box))){label=candidate;break;}
+    }
+    if(!label)label={x:width+40,y:40,w,h};boxes.push({x:label.x-12,y:label.y-12,w:w+24,h:h+24});width=Math.max(width,label.x+w+60);height=Math.max(height,label.y+h+60);views.push({edge,a,b,label});
+  }
+  function port(box,target){const dx=target.x+target.w/2-box.x-box.w/2,dy=target.y+target.h/2-box.y-box.h/2;if(Math.abs(dx)/box.w>=Math.abs(dy)/box.h){const sign=dx>=0?1:-1,x=box.x+(sign>0?box.w:0),y=box.y+box.h/2;return {point:[x,y],outer:[x+sign*18,y]};}const sign=dy>=0?1:-1,x=box.x+box.w/2,y=box.y+(sign>0?box.h:0);return {point:[x,y],outer:[x,y+sign*18]};}
+  const segments=[];
+  for(const view of views){const ap=port(view.a,view.label),al=port(view.label,view.a),bl=port(view.label,view.b),bp=port(view.b,view.label);
+    const one=managementOrthogonalRoute(ap.outer,al.outer,boxes,width,height),two=managementOrthogonalRoute(bl.outer,bp.outer,boxes,width,height);
+    view.points=[ap.point,...one,al.point,[bl.point[0],al.point[1]],bl.point,...two,bp.point];view.path=view.points.map((p,i)=>(i?'L':'M')+p.join(' ')).join(' ');segments.push(view);
+  }
+  return {views:segments,width,height};
+}
+// A visibility grid follows rectangle borders. No straight-line fallback is
+// allowed through cards when a route needs to travel around another entity.
+function managementOrthogonalRoute(start,end,boxes,width,height){
+  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x,b.x+b.w])])].sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y,b.y+b.h])])].sort((a,b)=>a-b),nx=xs.length;
+  const origin=ys.indexOf(start[1])*nx+xs.indexOf(start[0]),goal=ys.indexOf(end[1])*nx+xs.indexOf(end[0]);
+  const blocked=(a,b)=>boxes.some(box=>a[0]===b[0]?a[0]>box.x&&a[0]<box.x+box.w&&Math.max(a[1],b[1])>box.y&&Math.min(a[1],b[1])<box.y+box.h:a[1]>box.y&&a[1]<box.y+box.h&&Math.max(a[0],b[0])>box.x&&Math.min(a[0],b[0])<box.x+box.w);
+  const point=id=>[xs[id%nx],ys[Math.floor(id/nx)]],distance=new Map([[origin,0]]),previous=new Map(),done=new Set(),heap=[];
+  function push(item){heap.push(item);let i=heap.length-1;while(i){const parent=(i-1)>>1;if(heap[parent].cost<=item.cost)break;heap[i]=heap[parent];i=parent;}heap[i]=item;}
+  function pop(){const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].cost<heap[c].cost)c++;if(heap[c].cost>=last.cost)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;}
+  const heuristic=p=>Math.abs(p[0]-end[0])+Math.abs(p[1]-end[1]);push({id:origin,cost:heuristic(start)});
+  while(heap.length){const {id}=pop();if(done.has(id))continue;if(id===goal){const result=[end];let cursor=goal;while(cursor!==origin){cursor=previous.get(cursor);result.push(point(cursor));}return result.reverse();}done.add(id);const x=id%nx,y=Math.floor(id/nx),a=point(id);
+    for(const [xx,yy] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(xx<0||xx>=nx||yy<0||yy>=ys.length)continue;const next=yy*nx+xx,b=point(next);if(done.has(next)||blocked(a,b))continue;const cost=distance.get(id)+Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);if(cost<(distance.get(next)??Infinity)){distance.set(next,cost);previous.set(next,id);push({id:next,cost:cost+heuristic(b)});}}
+  }
+  throw new Error('实体关系连线路径不可用');
 }
 function renderManagementEntityGraph(root,rows,result,memory){
   if(!rows.length){nodeText('p','production-meta','此范围没有实体',root);return}
-  const ids=new Set(rows.map(r=>r.object_id)),edges=(result.entity_graph?.edges||[]).filter(e=>e.endpoints.every(id=>ids.has(id)));
-  const signature=rows.map(r=>r.object_id).sort().join('|');if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature}
+  const ids=new Set(rows.map(r=>r.object_id)),edges=(result.entity_graph?.edges||[]).filter(e=>!e.derived&&e.endpoints.every(id=>ids.has(id)));
+  const signature=JSON.stringify([rows.map(r=>[r.object_id,r.id]),edges]);if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature}
   const nodes=memory.nodes,by=new Map(nodes.map(n=>[n.id,n])),controls=el('div','relation-controls'),viewport=el('div','relation-graph-viewport management-graph-viewport'),canvas=el('div','relation-graph-canvas');
   root.append(controls,viewport);viewport.append(canvas);viewport.tabIndex=0;viewport.setAttribute('aria-label','实体关系图，可拖动和缩放');
   const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('relation-graph','management-relation-graph');svg.setAttribute('role','group');svg.setAttribute('aria-label','实体与关系');canvas.append(svg);
   const make=(tag,attrs={},parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
   const marker='entity-map-arrow-'+(++relationGraphSerial),defs=make('defs'),arrow=make('marker',{id:marker,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},arrow);
   const edgeLayer=make('g'),captionLayer=make('g'),edgeViews=[];let width=Math.max(800,...nodes.map(n=>n.x+360)),height=Math.max(450,...nodes.map(n=>n.y+220));
-  const bins=new Map(),overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
-  const cells=box=>{const keys=[];for(let x=Math.floor(box.x/200);x<=Math.floor((box.x+box.w)/200);x++)for(let y=Math.floor(box.y/150);y<=Math.floor((box.y+box.h)/150);y++)keys.push(x+','+y);return keys};
-  const reserve=box=>{for(const key of cells(box)){if(!bins.has(key))bins.set(key,[]);bins.get(key).push(box)}};
-  const collides=box=>cells(box).some(key=>(bins.get(key)||[]).some(v=>overlap(box,v)));
-  nodes.forEach(n=>reserve({x:n.x-12,y:n.y-12,w:304,h:164}));
-  const boundary=(node,target)=>{const cx=node.x+140,cy=node.y+65,dx=target[0]-cx,dy=target[1]-cy,k=1/Math.max(Math.abs(dx)/145,Math.abs(dy)/70,1e-9);return [cx+dx*k,cy+dy*k]};
-  for(const [index,edge] of edges.entries()){
-    const a=by.get(edge.endpoints[0]),b=by.get(edge.endpoints[1]),start=boundary(a,[b.x+140,b.y+65]),end=boundary(b,[a.x+140,a.y+65]);
-    const w=edge.derived?90:250,h=edge.derived?36:Math.max(58,Math.ceil(Array.from(edge.summary).length/16)*19+16),mx=(start[0]+end[0])/2-w/2,my=(start[1]+end[1])/2-h/2;
-    let box={x:Math.max(8,mx),y:Math.max(8,my),w,h};for(let attempt=0;collides(box);attempt++){const ring=1+Math.floor(attempt/16),angle=(attempt%16)*Math.PI/8;box={x:Math.max(8,mx+Math.cos(angle)*ring*100),y:Math.max(8,my+Math.sin(angle)*ring*75),w,h};if(attempt>=1000)box={x:width+20,y:8,w,h}}
-    reserve({...box,x:box.x-5,y:box.y-4,w:w+10,h:h+8});width=Math.max(width,box.x+w+60);height=Math.max(height,box.y+h+60);
-    const cx=box.x+w/2,cy=box.y+h/2,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:`M${start.join(' ')} Q${cx} ${cy} ${cx} ${cy} T${end.join(' ')}`},edgeLayer);
-    if(edge.derived)path.setAttribute('stroke-dasharray','5 4');
-    if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute(edge.direction==='reverse'?'marker-start':'marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
-    const foreign=make('foreignObject',{x:box.x,y:box.y,width:w,height:h},captionLayer),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+' → '+b.row.payload.title+'：'+edge.summary);foreign.append(label);
-    label.onclick=()=>{for(const v of edgeViews){const active=v.edge.id===edge.id;v.path.classList.toggle('selected',active);v.label.classList.toggle('selected',active)}for(const node of svg.querySelectorAll('[data-entity-id]'))node.classList.toggle('related-highlight',edge.endpoints.includes(node.dataset.entityId))};edgeViews.push({edge,path,label});
-    label.onpointerenter=()=>{path.classList.add('selected');for(const n of svg.querySelectorAll('[data-entity-id]'))n.classList.toggle('related-highlight',edge.endpoints.includes(n.dataset.entityId))};
-    label.onpointerleave=()=>{if(!label.classList.contains('selected'))path.classList.remove('selected')};
+  const nodeHosts=[];
+  for(const node of nodes){const foreign=make('foreignObject',{x:node.x,y:node.y,width:node.w,height:node.h,'data-entity-id':node.id}),host=el('div','management-graph-node');foreign.append(host);entitySmallCard(host,node.row,{stateCount:result.entity_state_counts?.[node.id]||0,materialCount:Object.values(result.entity_material_counts?.[node.id]||{}).reduce((a,b)=>a+b,0),preview:result.entity_previews?.[node.id],references:[{object_id:node.id,revision_id:node.row.id}]});nodeHosts.push({node,foreign,host});}
+  function drawEdges(){
+    for(const {node,foreign,host} of nodeHosts){node.h=Math.max(120,host.scrollHeight);foreign.setAttribute('height',node.h);}
+    edgeLayer.replaceChildren();captionLayer.replaceChildren();edgeViews.length=0;
+    const geometry=managementEdgeGeometry(nodes,edges);width=geometry.width;height=geometry.height;
+    for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},edgeLayer);
+      if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute('marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
+      const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},captionLayer),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
+      label.onclick=()=>{for(const v of edgeViews){const active=v.edge.id===edge.id;v.path.classList.toggle('selected',active);v.label.classList.toggle('selected',active)}for(const node of svg.querySelectorAll('[data-entity-id]'))node.classList.toggle('related-highlight',edge.endpoints.includes(node.dataset.entityId))};edgeViews.push({edge,path,label});
+    }
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
   }
-  for(const node of nodes){const foreign=make('foreignObject',{x:node.x,y:node.y,width:280,height:145,'data-entity-id':node.id}),host=el('div','management-graph-node');foreign.append(host);const row=rows.find(r=>r.object_id===node.id);entitySmallCard(host,row,{stateCount:result.entity_state_counts?.[node.id]||0,materialCount:Object.values(result.entity_material_counts?.[node.id]||{}).reduce((a,b)=>a+b,0),preview:result.entity_previews?.[node.id]});}
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
   let scale=memory.scale||1,ready=false;const status=nodeText('output','relation-scale','',controls);
   const remember=()=>{if(ready){memory.scale=scale;memory.left=viewport.scrollLeft;memory.top=viewport.scrollTop}};
@@ -228,5 +256,5 @@ function renderManagementEntityGraph(root,rows,result,memory){
   viewport.onpointerdown=e=>{if(e.button!==0||e.target.closest('button,a,input'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId)};
   viewport.onpointermove=e=>{if(pan){viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY}};viewport.onpointerup=viewport.onpointercancel=()=>{pan=null};
   viewport.onkeydown=e=>{if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key)}};
-  requestAnimationFrame(()=>{if(!viewport.isConnected)return;resize();viewport.scrollLeft=memory.left??Math.max(0,(width*scale-viewport.clientWidth)/2);viewport.scrollTop=memory.top??Math.max(0,(height*scale-viewport.clientHeight)/2);ready=true;remember()});
+  requestAnimationFrame(()=>{if(!viewport.isConnected)return;drawEdges();resize();viewport.scrollLeft=memory.left??0;viewport.scrollTop=memory.top??0;ready=true;remember()});
 }
