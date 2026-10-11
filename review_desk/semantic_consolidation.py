@@ -191,7 +191,7 @@ def prepare(store, choices):
             shared_scopes.append((target, scope, reasons.get(source, '已审定共用同一素材需求')))
     relation_mapping, relation_groups = {}, {}
     for oid, row in rows.items():
-        value = row['payload']
+        value = patches.get(oid, row['payload'])
         if not relations.is_business(row) or value.get('status') == 'withdrawn':
             continue
         if any(e in retired and (e not in mapping or e in exact_assets) for e in value['endpoints']):
@@ -199,14 +199,16 @@ def prepare(store, choices):
             retired[oid] = '当前素材用途已撤回，原关系仅保留准确回查。'
             continue
         endpoints = [mapping.get(e, e) if e not in exact_assets else e for e in value['endpoints']]
-        if endpoints != value['endpoints']:
+        if endpoints != row['payload']['endpoints']:
             if endpoints[0] == endpoints[1]:
                 relation_mapping[oid] = None
                 retired[oid] = '两个端点已归并为同一素材，原自指关系不再需要。'
                 continue
             target = relations.identity(endpoints)
             relation_mapping[oid] = target
-            retired[oid] = '素材归并后关系由同一对当前对象承接。'
+            retired[oid] = next((v['reason'] for v in choices.get('updates', [])
+                                if v['object_id'] == oid and v.get('reason')),
+                               '素材归并后关系由同一对当前对象承接。')
             updated = _rewrite(value, mapping, {}, exact_assets)
             updated['endpoints'] = endpoints
             relation_groups.setdefault(target, []).append(relations.normalize(updated))
@@ -219,7 +221,7 @@ def prepare(store, choices):
         relation_groups.setdefault(oid, []).append(relations.normalize(value))
     for target, group in relation_groups.items():
         if target in rows and target not in retired:
-            group.insert(0, rows[target]['payload'])
+            group.insert(0, patches.get(target, rows[target]['payload']))
         direction = {v['direction'] for v in group} - {'related'}
         if len(direction) > 1:
             raise Conflict('review opposite relationship directions before merging: '+target)

@@ -142,5 +142,39 @@ class SemanticConsolidationTest(unittest.TestCase):
         self.assertTrue(merge.is_retired(p.record(self.store,relation_id)['payload']))
         self.assertFalse(relations.current(self.store,'voice'))
 
+    def test_reviewed_reference_change_creates_correct_pair_and_keeps_old_comment(self):
+        self.migrate()
+        from review_desk import business_relations as relations
+        old_id = relations.identity(['voice', 'need-wet-overall'])
+        original = relations.normalize({'format':'production-relation-v1','title':'原参考',
+            'relation_type':'business','endpoints':['voice','need-wet-overall'],
+            'direction':'related','summary':'原适用范围','sources':[],'contexts':[],
+            'blocks':[{'id':'summary','text':'原适用范围'}]})
+        self.put({'object_id':old_id,'kind':'RELATION','expected_version':0,'payload':original})
+        old = p.record(self.store, old_id)
+        comment = self.store.create_comment({'target_object_id':old_id,'target_revision_id':old['id'],
+            'expected_edit_token':old['edit_token'],'anchor':{'type':'global'},'body':'原参考的意见'})
+        proposed = copy.deepcopy(original)
+        proposed.update(endpoints=['voice','need-full-overall'],summary='完整参考才符合此用途',
+                        blocks=[{'id':'summary','text':'完整参考才符合此用途'}])
+        plan = merge.prepare(self.store, {'updates':[{'object_id':old_id,'payload':proposed,
+                              'reason':'已审阅当前用途改用完整参考'}]})
+        new_id = relations.identity(proposed['endpoints'])
+        self.assertEqual(plan['relations'][old_id], new_id)
+        with self.assertRaisesRegex(RuntimeError, 'interruption'):
+            merge.apply(self.store, plan, fault='after-rewrite')
+        self.assertEqual(p.record(self.store, old_id)['payload'],original)
+        self.assertIsNone(relations.lookup(self.store,proposed['endpoints']))
+        merge.apply(self.store, plan)
+        self.assertTrue(merge.apply(self.store,plan)['already_applied'])
+        self.assertEqual(relations.lookup(self.store,proposed['endpoints'])['object_id'],new_id)
+        self.assertIsNone(relations.lookup(self.store,original['endpoints']))
+        retired = p.record(self.store,old_id)['payload']
+        self.assertEqual(retired['merged_into']['object_id'],new_id)
+        self.assertEqual(retired['reason'],'已审阅当前用途改用完整参考')
+        self.assertEqual(self.store.comment(comment['id'])['target_object_id'],old_id)
+        self.assertFalse(self.store.comment(comment['id'])['original_context']['matches_current'])
+        merge.validate(self.store)
+
 
 if __name__ == '__main__':unittest.main()
