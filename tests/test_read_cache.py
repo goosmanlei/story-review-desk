@@ -7,6 +7,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 from review_desk import production, read_cache, json_transport
 from review_desk.store import Store
@@ -28,6 +29,18 @@ class CachedEntityReadScopeTest(scope_tests.EntityReadScopeTest):
 
 
 class CacheTest(unittest.TestCase):
+    def test_snapshot_token_failure_releases_scope_and_transaction(self):
+        before = read_cache.token(self.store)
+        with patch('review_desk.read_cache.token', side_effect=sqlite3.OperationalError('disk I/O error')):
+            with self.assertRaises(sqlite3.OperationalError):
+                with production.read_scope(self.store):
+                    self.fail('an incomplete snapshot must not reach its reader')
+        self.assertFalse(self.store.db.in_transaction)
+        self.assertFalse(hasattr(self.store, '_production_reads'))
+        with production.read_scope(self.store):
+            self.assertEqual(self.store._production_reads['generation'], before)
+            self.assertEqual(read_cache.read_json(self.store, 'after-token-failure', self.store.objects), [])
+
     def test_retired_table_tokens_are_removed_without_resetting_live_tokens(self):
         self.store.db.execute('CREATE TABLE retired_cache_fixture (id INTEGER)')
         self.store.db.commit()
