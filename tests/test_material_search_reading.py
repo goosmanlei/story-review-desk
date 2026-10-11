@@ -10,6 +10,35 @@ from review_desk import production as p, ui_projection as ui, list_reading as li
 from review_desk import material_storage, read_cache, material_relations
 
 
+class MaterialFacetTest(unittest.TestCase):
+    def test_facets_relax_one_filter_and_count_exact_location_pairs_once(self):
+        values = [dict(id=name, search_fields=[name], media_type=media,
+                       generated=generated, locations=[dict(episode=ep, scene=sc) for ep, sc in pairs])
+                  for name, media, generated, pairs in [
+                      ('a', 'image', True, [('e1', 's1'), ('e2', 's2'), ('e2', 's2')]),
+                      ('b', 'audio', False, [('e1', 's2')]),
+                      ('c', 'image', False, [('e1', 's1')]),
+                      ('d', 'image', True, [])]]
+        facets, result = ui._material_filter_facets(
+            values, dict(episode=None, scene=None, media=None, status=None), '')
+        self.assertEqual(len(result), 4)
+        self.assertEqual(facets, {'media': {'': 4, 'audio': 1, 'image': 3},
+                                 'status': {'': 4, 'generated': 2, 'ungenerated': 2},
+                                 'episode': {'': 4, 'e1': 3, 'e2': 1},
+                                 'scene': {'': 4, 's1': 2, 's2': 2}})
+        facets, result = ui._material_filter_facets(
+            values, dict(episode='e1', scene='s2', media='image', status='generated'), '')
+        self.assertEqual(result, [])  # a has s2 only in e2.
+        self.assertEqual(facets['episode'], {'': 1, 'e1': 0, 'e2': 1})
+        self.assertEqual(facets['scene'], {'': 1, 's1': 1, 's2': 0})
+        self.assertEqual(facets['media'], {'': 0, 'audio': 0, 'image': 0})
+        self.assertEqual(facets['status'], {'': 0, 'generated': 0, 'ungenerated': 0})
+        facets, result = ui._material_filter_facets(
+            values, dict(episode=None, scene=None, media=None, status=None), 'absent')
+        self.assertEqual(result, [])
+        self.assertTrue(all(count == 0 for options in facets.values() for count in options.values()))
+
+
 class MaterialCatalogTest(unittest.TestCase):
     for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'setup_story',
                  'shot', 'composition', 'need', 'split'):
