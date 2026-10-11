@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs');
-const c={businessCode:r=>r.object_id};vm.createContext(c);vm.runInContext(fs.readFileSync('review_desk/static/entity-relations.js','utf8'),c);
+const c={businessCode:r=>r.business_code||r.object_id};vm.createContext(c);vm.runInContext(fs.readFileSync('review_desk/static/entity-relations.js','utf8'),c);
 const rows='ABCDEFGHIZ'.split('').map(object_id=>({object_id,payload:{title:object_id}}));
 const edge=(a,b,direction='forward')=>({id:a+b,endpoints:[a,b],direction,summary:a+' 与 '+b+' 的真实关系'});
 const edges=[edge('A','B'),edge('B','C'),edge('D','C'),edge('C','E','reverse'),edge('F','G'),edge('G','H'),edge('H','F'),edge('C','I','related')];
@@ -23,8 +23,23 @@ function inspect(nodes,edges){const geometry=c.managementEdgeGeometry(nodes,edge
   for(const port of [v.ap,v.bp]){const key=port.point.join(',');assert.ok(!ports.has(key),'separate endpoint ports');ports.add(key);}
   for(const p of sample(v.path).filter(Boolean))for(const b of [...nodes,...geometry.views.map(v=>v.label)])assert.equal(p[0]>b.x+.01&&p[0]<b.x+b.w-.01&&p[1]>b.y+.01&&p[1]<b.y+b.h-.01,false,v.edge.id+' crosses card or caption');
  }
+ const runs=v=>v.routes.flatMap(route=>route.slice(1).map((b,i)=>[route[i],b]).filter(([a,b])=>a[0]===b[0]||a[1]===b[1]));
+ for(let i=0;i<geometry.views.length;i++)for(let j=0;j<i;j++)for(const [a,b] of runs(geometry.views[i]))for(const [d,e] of runs(geometry.views[j])){
+  const shared=a[0]===b[0]&&d[0]===e[0]&&Math.abs(a[0]-d[0])<.01?Math.min(Math.max(a[1],b[1]),Math.max(d[1],e[1]))-Math.max(Math.min(a[1],b[1]),Math.min(d[1],e[1])):a[1]===b[1]&&d[1]===e[1]&&Math.abs(a[1]-d[1])<.01?Math.min(Math.max(a[0],b[0]),Math.max(d[0],e[0]))-Math.max(Math.min(a[0],b[0]),Math.min(d[0],e[0])):0;
+  assert.ok(shared<=1,'distinct edges cannot share a run, including port exits');
+ }
  return geometry;
 }
+test('ASH012 adjacent caption exits stay separate from earlier full routes',()=>{
+ const f=JSON.parse(fs.readFileSync('tests/fixtures/entity-graph-ash012.json','utf8')),nodes=c.managementGraphLayout(f.rows,f.edges);nodes.forEach(n=>n.h=f.card_height);inspect(nodes,f.edges);
+});
+test('ASH242 measured input keeps every exact relationship, including the stranded blade route',()=>{
+ const f=JSON.parse(fs.readFileSync('tests/fixtures/entity-graph-ash242.json','utf8')),nodes=c.managementGraphLayout(f.rows,f.edges);nodes.forEach(n=>n.h=f.card_height);
+ const g=inspect(nodes,f.edges);
+ assert.deepEqual(Array.from(g.views,v=>v.edge.id),f.edges.map(e=>e.id));
+ for(const v of g.views){assert.deepEqual(Array.from([v.a.id,v.b.id]),v.edge.direction==='reverse'?[...v.edge.endpoints].reverse():v.edge.endpoints);assert.ok(v.path.startsWith('M'+v.ap.point.join(' ')));assert.ok(v.path.endsWith(v.bp.point.join(' ')));}
+ assert.ok(g.views.some(v=>v.edge.id==='relation-7f655d38ec2be91c7e458555b3dc1fb0'));
+});
 test('smooth separated routes do not cross cards or captions',()=>inspect(c.managementGraphLayout(rows,edges),edges));
 test('dense undirected, long captions and enlarged cards keep every real edge',()=>{
  const dense=[];for(let i=0;i<8;i++)for(let j=i+1;j<8;j++)dense.push({...edge(rows[i].object_id,rows[j].object_id,'related'),summary:'保留完整简短摘要，不能被别的卡片遮盖'});
@@ -37,10 +52,5 @@ test('node focus includes only incident edges, never edges between neighbours or
  assert.deepEqual(Array.from(c.managementGraphSelection(graph,{kind:'edge',id:'BC'})),['BC']);
 });
 test('shared endpoint multi-edges have distinct ports and no shared straight section',()=>{
- const graph=[{...edge('A','B','related'),id:'first'},{...edge('A','B','related'),id:'second'},{...edge('B','A','related'),id:'third'}],g=inspect(c.managementGraphLayout(rows.slice(0,2),graph),graph);
- const runs=v=>v.routes.flatMap(route=>route.slice(1).map((b,i)=>[route[i],b]).filter(([a,b])=>a[0]===b[0]||a[1]===b[1]));
- for(let i=0;i<g.views.length;i++)for(let j=0;j<i;j++)for(const [a,b] of runs(g.views[i]))for(const [d,e] of runs(g.views[j])){
-  const shared=a[0]===b[0]&&d[0]===e[0]&&a[0]===d[0]?Math.min(Math.max(a[1],b[1]),Math.max(d[1],e[1]))-Math.max(Math.min(a[1],b[1]),Math.min(d[1],e[1])):a[1]===b[1]&&d[1]===e[1]&&a[1]===d[1]?Math.min(Math.max(a[0],b[0]),Math.max(d[0],e[0]))-Math.max(Math.min(a[0],b[0]),Math.min(d[0],e[0])):0;
-  assert.ok(shared<=1,'distinct edges cannot share a run');
- }
+ const graph=[{...edge('A','B','related'),id:'first'},{...edge('A','B','related'),id:'second'},{...edge('B','A','related'),id:'third'}];inspect(c.managementGraphLayout(rows.slice(0,2),graph),graph);
 });
