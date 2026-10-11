@@ -2,7 +2,7 @@
 import unittest
 import test_audiovisual as fixtures
 from review_desk import production as p, ui_projection as ui
-from review_desk.production_scope import projection, graph
+from review_desk.production_scope import projection, graph, entity_focus
 
 
 class ProductionScopeTest(unittest.TestCase):
@@ -95,3 +95,11 @@ class ProductionScopeTest(unittest.TestCase):
         self.assertEqual(uses['product'],{'av-scene'})
         self.assertEqual(uses['original-input'],{'av-scene'})
         self.assertEqual(uses['later-input'],set())
+
+    def test_optional_mismatched_shot_keeps_valid_episode_and_scene(self):
+        self.split()
+        catalog, focus=entity_focus(self.store,'av-episode',self.ref('av-episode')['revision_id'],'other-scene','av-shot')
+        self.assertEqual(focus['episode'],'av-episode')
+        self.assertEqual(focus['scene'],'other-scene')
+        self.assertEqual(focus['shot'],'other-shot')
+        self.assertTrue(catalog)

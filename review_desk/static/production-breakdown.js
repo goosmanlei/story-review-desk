@@ -299,8 +299,8 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
     const input=refs.find(item=>item.referenceKeys?.includes(link.reference_key));
     if(input&&points.slice(link.start,link.end).join('')===link.quote)spans.push({start:points.slice(0,link.start).join('').length,end:points.slice(0,link.end).join('').length,text:link.quote,input,entity:true});
   }
-  for(const match of block.text.matchAll(/@?(?:图片|图像|音频|声音|视频|输入)\s*\d+/gu)){
-    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^图像/,'图片').replace(/^声音/,'音频');
+  for(const match of block.text.matchAll(/@?(?:参考图|图片|图像|音频|声音|视频|输入)\s*\d+/gu)){
+    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^(?:图像|参考图)/,'图片').replace(/^声音/,'音频');
     const input=byLabel.get(label)||(/^输入\d+$/.test(label)?refs.find(i=>i.index===Number(label.slice(2))-1&&i.slot?.direct!==false):null);
     if(!spans.some(s=>s.start<match.index+match[0].length&&s.end>match.index))spans.push({start:match.index,end:match.index+match[0].length,text:match[0],input});
   }
@@ -356,7 +356,9 @@ function renderBreakdownCommentCounts(){
 function breakdownNavigate(values){
   rememberProductionDraft();const url=new URL(location.href);
   for(const key of ['production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
-  for(const [key,value] of Object.entries(values)){if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}
+  const shot=state.breakdownData?.shots?.find(row=>row.object_id===values.breakdown_object&&row.id===values.breakdown_revision);
+  const scope={production_scope_episode:values.breakdown_episode||null,production_scope_revision:values.breakdown_episode_revision||null,production_scope_scene:values.breakdown_scene||null,production_scope_shot:shot?.object_id||null};
+  for(const [key,value] of Object.entries({...scope,...values})){if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}
   history.pushState(null,'',url);return loadProductionBreakdown().then(()=>{
     const id=values.breakdown_object;
     if(id&&new URL(location.href).searchParams.get('breakdown_object')===id){
@@ -369,7 +371,15 @@ function breakdownSelect(row,nav,updateRoute=true){
   state.breakdownCurrent=row;
   for(const button of nav.querySelectorAll('[data-object-id]')){const active=button.dataset.objectId===row.object_id&&button.dataset.revisionId===row.id;button.classList.toggle('active',active);button.setAttribute('aria-current',active?'location':'false')}
   if(updateRoute){const active=nav.querySelector('[aria-current="location"]');if(active?.getBoundingClientRect&&nav.getBoundingClientRect){const r=active.getBoundingClientRect(),edge=nav.getBoundingClientRect();if(r.bottom>edge.bottom)nav.scrollTop+=r.bottom-edge.bottom;if(r.top<edge.top)nav.scrollTop+=r.top-edge.top}}
-  if(updateRoute)breakdownRoute({breakdown_object:row.object_id,breakdown_revision:row.id});
+  const changed=new URL(location.href).searchParams.get('breakdown_object')!==row.object_id;
+  if(changed&&typeof rememberProductionDraft==='function')rememberProductionDraft();
+  const shot=row.kind==='AV_SHOT'?row:state.breakdownSceneData?.shots?.[0]?.record;
+  breakdownRoute({breakdown_object:row.object_id,breakdown_revision:row.id,production_scope_shot:shot?.object_id||null,
+    ...(changed?{production_object:null,production_revision:null,material_id:null,material_version:null,material_round:null,material_target:null,material_baseline:null,production_entity:null,entity_state:null,shot_material_id:null,shot_plan:null,shot_candidate:null,shot_baseline:null,shot_component:null}:{})});
+  if(changed&&row.kind==='AV_SHOT'){
+    const memory=state.shotWorkspaceMemory?.[row.id+':'+(row.edit_token||row.version)];
+    if(memory)writeShotWorkspaceRoute(memory);
+  }
 }
 function breakdownPosition(body){
   return {key:body.dataset.readingKey,scrollTop:body.scrollTop,windowY:window.scrollY};
@@ -476,15 +486,27 @@ async function loadProductionBreakdown({refresh=false}={}){
   const commit=()=>{host.replaceChildren(...staged.children);host.dataset.breakdownWorkspace=workspace;host.dataset.breakdownTab=productionTab();sceneList.scrollTop=sidebarTop;episodes.scrollLeft=episodeLeft;
     const chosen=episodes.querySelector('.active');if(chosen?.getBoundingClientRect){const r=chosen.getBoundingClientRect(),edge=episodes.getBoundingClientRect();if(r.right>edge.right)episodes.scrollLeft+=r.right-edge.right;if(r.left<edge.left)episodes.scrollLeft+=r.left-edge.left}};
   if(resolved.error){nodeText('p','production-issue',resolved.error,body);state.breakdownCurrent=null;state.breakdownSceneData=null;breakdownRoute({breakdown_episode_revision:data.design.id,breakdown_scene:null,production_object:null,production_revision:null});commit();renderComments()}
-  else if(selected)await showBreakdownScene(selected,body,sceneList,epoch,params,savedPosition,commit);else{nodeText('p',null,'本集尚无场次设计',body);commit()}
+  else if(selected){
+    try{await showBreakdownScene(selected,body,sceneList,epoch,params,savedPosition,commit)}
+    catch(error){
+      if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+      state.breakdownCurrent=null;state.breakdownSceneData=null;body.replaceChildren();
+      nodeText('p','production-issue','准确制作位置不可用：'+error.message,body);
+      productionButton(body,'重试',()=>loadProductionBreakdown({refresh:true}).catch(e=>toast(e.message)));
+      commit();renderComments();
+    }
+  }else{nodeText('p',null,'本集尚无场次设计',body);commit()}
   const materialTarget=params.get('production_object');
   if(!resolved.error&&epoch===breakdownEpoch&&workspace===state.workspace&&materialTarget&&params.has('material_id')&&!data.scenes.some(r=>r.object_id===materialTarget)&&!data.shots.some(r=>r.object_id===materialTarget)){
     breakdownRoute({material_id:null,material_version:null,material_round:null,material_target:null,production_entity:null,entity_state:null});
-    await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params},null);
+    await openUnifiedMaterial({object_id:materialTarget,revision_id:params.get('production_revision'),params,restoreRoute:true},null);
   }
   }catch(error){
     if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
-    host.replaceChildren();nodeText('p','production-issue','准确制作位置不可用：'+error.message,host);
+    const body=host.querySelector('.breakdown-body');
+    const errorHost=body||host;
+    errorHost.replaceChildren();nodeText('p','production-issue','准确制作位置不可用：'+error.message,errorHost);
+    productionButton(errorHost,'重试',()=>loadProductionBreakdown({refresh:true}).catch(e=>toast(e.message)));
     throw error;
   }finally{loading.remove()}
 }
@@ -522,7 +544,7 @@ function attachAudiovisualNote(button,note){
   nodeText('p',null,note.body,pop);let timer=null,closing=null;
   const close=()=>{clearTimeout(timer);clearTimeout(closing);pop.hidden=true;button.removeAttribute('aria-describedby')};
   const open=()=>{clearTimeout(closing);clearTimeout(timer);timer=setTimeout(()=>{if(!button.isConnected)return;document.querySelectorAll('.av-working-note').forEach(node=>node.hidden=true);const box=button.getBoundingClientRect();pop.style.left=Math.max(8,Math.min(box.left,innerWidth-432))+'px';pop.style.top=Math.min(box.bottom+6,innerHeight-240)+'px';pop.hidden=false;button.setAttribute('aria-describedby',pop.id)},1000)};
-  const leave=()=>{clearTimeout(timer);closing=setTimeout(()=>{if(!pop.matches(':hover')&&!button.matches(':hover')&&document.activeElement!==button&&!pop.contains(document.activeElement))close()},150)};
+  const leave=()=>{clearTimeout(timer);closing=setTimeout(()=>{if(!button.matches(':hover')&&document.activeElement!==button)close()},150)};
   button.addEventListener('pointerenter',open);button.addEventListener('pointerleave',leave);button.addEventListener('focus',open);button.addEventListener('blur',leave);button.addEventListener('click',close);
   button.addEventListener('keydown',e=>{if(e.key==='Escape')close()});pop.addEventListener('pointerenter',()=>clearTimeout(closing));pop.addEventListener('pointerleave',leave);pop.addEventListener('focusout',leave);pop.addEventListener('keydown',e=>{if(e.key==='Escape'){close();button.focus({preventScroll:true});clearTimeout(timer)}});pop.tabIndex=0;
   // The note leaves with its navigation item, so a late timer cannot show a

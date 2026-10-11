@@ -63,6 +63,19 @@ test('changing entity material focus replaces the prior candidate route before r
   assert.equal(new URL(ctx.location.href).searchParams.has('material_target'),false);
 });
 
+for(const entityCard of [false,true])test(`call comment focus retains its parent candidate in ${entityCard?'entity':'material'} workspace`,()=>{
+  const candidate=row('original','ASSET'),call=row('generation','CALL'),ctx=setup([]);
+  ctx.isEntityReview=()=>entityCard;ctx.isMaterialReview=()=>!entityCard;
+  ctx.materialCommentContext=()=>({material_id:'material',number:1,candidateTarget:candidate.id});
+  ctx.state.entityReview={material_versions:{material:[{number:1,current_content:true,results:[candidate]}]}};
+  ctx.state.materialReview={record:row('material','REQUIREMENT')};
+  ctx.writeMaterialVersionRoute=(params,id)=>params.set('material_id',id);
+  ctx.focusProductionReview({record:call},false);
+  assert.equal(ctx.state.productionSelected.id,call.id);
+  assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),candidate.id);
+  assert.equal(new URL(ctx.location.href).searchParams.get('production_object'),entityCard?candidate.object_id:'material');
+});
+
 
 
 test('legacy fragments do not count as current complete forms but keep their owner',()=>{
