@@ -1,6 +1,16 @@
 /* Episode / scene navigation and all-shot rows share one exact context reader. */
-let breakdownEpoch=0,breakdownSelectionEpoch=0;
-function invalidateBreakdownReads(){++breakdownEpoch;++breakdownSelectionEpoch}
+let breakdownEpoch=0,breakdownSelectionEpoch=0,breakdownDetailEpoch=0;
+const breakdownPendingReads=new Map();
+function cancelBreakdownReads(keep=null){
+  for(const [key,read] of breakdownPendingReads)if(key!==keep){read.controller.abort();breakdownPendingReads.delete(key)}
+}
+function readBreakdownAPI(path){
+  const existing=breakdownPendingReads.get(path);if(existing)return existing.promise;
+  const controller=new AbortController(),read={controller};
+  read.promise=api(path,{signal:controller.signal}).finally(()=>{if(breakdownPendingReads.get(path)===read)breakdownPendingReads.delete(path)});
+  breakdownPendingReads.set(path,read);return read.promise;
+}
+function invalidateBreakdownReads(){++breakdownEpoch;++breakdownSelectionEpoch;++breakdownDetailEpoch;cancelBreakdownReads()}
 function renderAudiovisualSources(host,row){
   const sources=row.payload.sources||[];
   for(const [index,source] of sources.entries())materialReferenceLink(host,source,'故事依据'+(sources.length>1?' '+(index+1):''),'full_scene');
@@ -336,7 +346,9 @@ function breakdownPromptSelection(need,context){
 }
 function breakdownEpisodeCount(ep){
   const targets=new Set((ep.comment_targets||[]).map(r=>r.object_id+':'+r.revision_id));
-  return new Set((state.comments||[]).filter(c=>c.status!=='DELETED'&&targets.has(c.target_object_id+':'+c.target_revision_id)).map(c=>c.id)).size;
+  const comments=new Map();
+  for(const row of [...state.breakdownCommentIndex||[],...state.comments||[]])if(!comments.has(row.id)||(row.version||0)>=(comments.get(row.id).version||0))comments.set(row.id,row);
+  return [...comments.values()].filter(c=>c.status!=='DELETED'&&targets.has(c.target_object_id+':'+c.target_revision_id)).length;
 }
 function renderBreakdownCommentCounts(){
   for(const ep of state.breakdownData?.episodes||[]){const button=document.querySelector('.breakdown-episode-tabs [data-episode-id="'+CSS.escape(ep.object_id)+'"]');const count=button?.querySelector('.screenplay-episode-count');if(count)count.textContent='评论 '+breakdownEpisodeCount(ep)}
@@ -418,9 +430,11 @@ async function loadProductionBreakdown({refresh=false}={}){
   if(!refresh&&(!edition||state.breakdownData?.design?.id===edition)&&oldBody&&existingNav&&host.dataset.breakdownWorkspace===workspace&&host.dataset.breakdownTab===productionTab()&&state.breakdownRenderedSelection===breakdownSelectionKey(params)&&exact&&oldBody.dataset.sceneId===existing.scene.object_id){
     activateBreakdownScene(existing,oldBody,existingNav,epoch,params,savedPosition);return;
   }
+  ++breakdownDetailEpoch;
   // Keep the mounted reader and its geometry while requests are pending. The
   // replacement is assembled off-screen and committed once, before positioning.
   if(!oldBody)host.replaceChildren();
+  host.querySelectorAll('.breakdown-loading').forEach(node=>node.remove());
   const staged=el('div'),loading=nodeText('p','breakdown-loading','正在读取本集镜头…',host);loading.setAttribute('role','status');
   const sidebarTop=existingNav?.scrollTop||0,episodeLeft=host.querySelector('.breakdown-episode-tabs')?.scrollLeft||0;
   try{breakdownHeading(host);
@@ -433,8 +447,10 @@ async function loadProductionBreakdown({refresh=false}={}){
   const cached=state.breakdownCatalog,known=cached?.data;
   const reuse=!refresh&&cached?.workspace===workspace&&cached?.tab===productionTab()&&(!edition||known.design?.id===edition)&&known.episode===(params.get('breakdown_episode')||known.episode)&&targetId&&
     [...known.scenes,...known.shots].some(r=>r.object_id===targetId&&r.id===targetRevision);
-  const data=reuse?known:await api('/api/production/breakdown?'+query);if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+  const catalogPath='/api/production/breakdown?'+query;cancelBreakdownReads(reuse?null:catalogPath);
+  const data=reuse?known:await readBreakdownAPI(catalogPath);if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
   state.breakdownCatalog={workspace,tab:productionTab(),data};
+  if(!reuse)state.breakdownCommentIndex=data.comment_index||null;
   state.breakdownData=data;state.productionRecords=[data.lock,data.design,...data.scenes,...data.shots].filter(Boolean);
   const episodes=el('nav','screenplay-episodes breakdown-episode-tabs');episodes.setAttribute('aria-label','分集导航');staged.append(episodes);
   {const scope='视听制作评论：本集准确集场镜及直接关联素材的当前方案与真实候选；含已关闭评论，按评论去重，不含故事正文和共享上游素材。';episodes.title=scope;episodes.setAttribute('aria-description',scope)}
@@ -570,13 +586,18 @@ function renderShotProductPlan(parent,need,context){
 async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
   const request=++breakdownSelectionEpoch,workspace=state.workspace,targetId=restore?.get('breakdown_object'),targetRevision=restore?.get('breakdown_revision'),shot=(state.breakdownData.shots||[]).find(r=>r.object_id===targetId&&r.id===targetRevision);
   const design=state.breakdownData.design;
-  const data=await api('/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'breakdown',...(design?{episode:design.object_id,episode_revision:design.id}:{}),...(shot?{shot_revision:shot.id}:{})}));if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
+  const path='/api/production/scene?'+new URLSearchParams({object_id:scene.object_id,revision_id:scene.id,view:'reader',...(design?{episode:design.object_id,episode_revision:design.id}:{}),...(shot?{shot_revision:shot.id}:{}),...(restore?.get('shot_material_id')?{material_id:restore.get('shot_material_id')}:{}),...(restore?.get('shot_candidate')?{candidate_revision:restore.get('shot_candidate')}:{})});
+  cancelBreakdownReads(path);
+  const data=await readBreakdownAPI(path);if(epoch!==breakdownEpoch||request!==breakdownSelectionEpoch||workspace!==state.workspace)return;
   body.replaceChildren();state.breakdownSceneData=data;body.dataset.sceneId=scene.object_id;body.dataset.readingKey=scene.id+':'+(shot?.id||'');
+  if(data.comment_index)state.breakdownCommentIndex=data.comment_index;
+  const counts=data.episode_comment_targets,editionCounts=counts&&state.breakdownData.episodes.find(ep=>ep.object_id===counts.object_id&&ep.id===counts.revision_id);
+  if(editionCounts)editionCounts.comment_targets=counts.targets;
   breakdownRoute({breakdown_episode:state.breakdownData.episode,breakdown_episode_revision:state.breakdownData.design?.id||null,breakdown_scene:scene.object_id,production_tab:'breakdown',...(state.breakdownData.design?{production_scope_episode:state.breakdownData.design.object_id,production_scope_revision:state.breakdownData.design.id,production_scope_scene:scene.object_id}:{})});
   const page=el('section','breakdown-scene');body.append(page);
   const header=el('header','text-reader-head breakdown-scene-head'),heading=el('div','breakdown-scene-heading');nodeText('h2',null,breakdownSceneTitle(data.scene),heading);renderAudiovisualSources(heading,data.scene); header.append(heading);page.append(header);
   for(const item of data.shots)renderBreakdownShot(page,item);
-  state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.context.requirements)];
+  state.productionRecords=[...state.productionRecords,...data.shots.map(s=>s.record),data.scene,...(data.shared||[]).flatMap(c=>[c.record,...c.requirements,...c.entities,...c.states]),...data.shots.flatMap(s=>s.entity_workspace?.requirements||s.context?.requirements||[])];
   if(commit)commit();
   state.breakdownRenderedSelection=breakdownSelectionKey(restore||new URLSearchParams());
   activateBreakdownScene(data,body,nav,epoch,restore,savedPosition,{page,header});

@@ -155,6 +155,20 @@ def path(store, row):
     return list(reversed(result))
 
 
+def episode_comment_targets(store, edition, values=None, material_targets=None):
+    from .production_breakdown import material_comment_targets_many
+    if values is None:
+        scenes = children(store, edition)
+        values = [edition, *scenes, *(s for scene in scenes for s in children(store, scene))]
+    if material_targets is None:
+        material_targets = material_comment_targets_many(store, values)
+    targets = {r['id']: ref(r) for r in values}
+    for row in values:
+        for material in material_targets[row['id']]:
+            targets[material['id']] = ref(material)
+    return list(targets.values())
+
+
 def catalog(store, episode=None, object_id=None, revision_id=None, view=None, episode_revision=None):
     from .audiovisual_notes import get as working_note
     editions = sorted(p.current_records(store, {'AV_EPISODE'}), key=lambda r: r['payload']['number'])
@@ -184,15 +198,15 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None, ep
     shots = [child for scene in scenes for child in children(store, scene)]
     if target and target['id'] not in {r['id'] for r in [selected, *scenes, *shots]}:
         raise ValueError('准确设计未编入这版视听集')
+    compositions = {}
+    for edition in editions:
+        p.check_read(store)
+        scene_rows = children(store, edition)
+        compositions[edition['id']] = [edition, *scene_rows, *(s for scene in scene_rows for s in children(store, scene))]
+    from .production_breakdown import material_comment_targets_many, comment_index
+    material_targets = material_comment_targets_many(store, list({r['id']: r for values in compositions.values() for r in values}.values()))
     def comment_targets(edition):
-        from .production_breakdown import material_comment_targets
-        values = [edition, *children(store, edition)]
-        values.extend(s for scene in children(store, edition) for s in children(store, scene))
-        targets = {r['id']: ref(r) for r in values}
-        for row in values:
-            for material in material_comment_targets(store, row['id']):
-                targets[material['id']] = ref(material)
-        return list(targets.values())
+        return episode_comment_targets(store, edition, compositions[edition['id']], material_targets)
     return {'episodes': [{'object_id': r['object_id'], 'id': r['id'],
                          'number': r['payload']['number'], 'title': r['payload']['title'],
                          'working_note': working_note(store, r['object_id']),
@@ -202,6 +216,7 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None, ep
             'versions': [{'id': r['id'], 'version': r['version']} for r in store.db.execute(
                 'SELECT id,version FROM revisions WHERE object_id=? ORDER BY version DESC', (selected['object_id'],))],
             'scenes': scenes, 'shots': shots, 'target': ref(target) if target else None,
+            'comment_index': comment_index(store),
             'lock': p.ref_record(store, selected['payload']['input_lock'])}
 
 
