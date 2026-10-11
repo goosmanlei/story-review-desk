@@ -68,3 +68,39 @@ test('legacy production text anchors highlight the exact original quotation with
  f.ctx.renderCommentReviewContent(root,{kind:'REQUIREMENT',payload:{format:'production-requirement-v1',components:[]},review_blocks:[{id:'p',text:'起止范围说明'}]},anchor);
  assert.equal(root.querySelector('mark').textContent,'范围');assert.equal(anchor.type,undefined);
 });
+
+
+test('method unanswered original has an exact file, current manuscript, and retry retains the same target',async()=>{
+ const f=setup();f.ctx.isMethodsReading=()=>true;f.ctx.methodView={document:{file:'new.md',record:{object_id:'method.skill.one',revision_id:'current'}}};
+ const r={...row('unanswered'),original:{object_id:'method.skill.one',revision_id:'old',file:'old.md',version:1},responses:[],current_evidence:[]};
+ r.comment.anchor={type:'text',file:'old.md',block_id:'b',end_block_id:'b',start:0,end:3,quote:'Old'};
+ const opening=f.ctx.openCommentReview(r,{object_id:'method.skill.one',revision_id:'current',kind:'GUIDANCE',version:3},new Node('button'));
+ const oldUrl=f.pending[0].url;assert.match(oldUrl,/revision_id=old/);assert.match(oldUrl,/file=old.md/);
+ f.pending[0].reject(Error('Old exact file unavailable'));await opening;
+ const dialog=f.body.children.at(-1);assert.match(dialog.textContent,/尚未回应/);
+ button(dialog,'重试准确稿件').click();assert.equal(f.pending[1].url,oldUrl);
+ f.pending[1].resolve({record:{kind:'GUIDANCE',payload:{format:'managed-method-skill-v1',files:{'old.md':'Old file','other.md':'Other file'}},review_file:'old.md',review_blocks:[{id:'b',file:'old.md',text:'Old file'}]}});await tick();
+ assert.match(dialog.textContent,/Old file/);assert.doesNotMatch(dialog.textContent,/Other file/);
+ button(dialog,'当前稿').click();assert.match(f.pending[2].url,/revision_id=current/);assert.match(f.pending[2].url,/file=old.md/);
+ f.pending[2].reject(Error('Current manuscript has no old.md'));await tick();
+ button(dialog,'阅读当前稿的全部文件').click();assert.doesNotMatch(f.pending[3].url,/file=/);assert.match(f.pending[3].url,/revision_id=current/);
+});
+
+test('method exact read ignores a late result after a file switch within the same revision',async()=>{
+ const f=setup();f.ctx.isMethodsReading=()=>true;f.ctx.methodView={document:{file:'one.md',record:{object_id:'method.skill.one',revision_id:'current'}}};
+ const opening=f.ctx.openCommentReview(row('late'),{kind:'GUIDANCE',version:3},new Node('button'));
+ f.ctx.methodView.document.file='two.md';f.pending[0].reject(Error('late file error'));await opening;
+ assert.doesNotMatch(f.body.children.at(-1).textContent,/late file error/);
+});
+
+
+test('ordinary method queue counts unique opinions across versions and files without crossing objects',()=>{
+ const f=setup();f.ctx.isMethodsReading=()=>true;f.ctx.methodView={document:{file:'SKILL.md',record:{object_id:'method.skill.one',revision_id:'current'}}};
+ const opinion=(id,object,revision,file,status='OPEN')=>({id,target_object_id:object,target_revision_id:revision,anchor:{file},status});
+ const old=opinion('old','method.skill.one','old','deleted.md');
+ f.ctx.state.comments=[old,opinion('new','method.skill.one','current','SKILL.md'),opinion('closed','method.skill.one','older','renamed.md','CLOSED'),opinion('foreign','method.skill.other','current','SKILL.md'),old];
+ const source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/app.js'),'utf8');
+ vm.runInContext(source.slice(source.indexOf('const unscopedComments='),source.indexOf('const newDraftAnchor='))+'; queue=activeComments();',f.ctx);
+ assert.equal(f.ctx.queue.length,3);assert.equal(f.ctx.queue.filter(c=>c.status==='OPEN').length,2);
+ assert.equal(f.ctx.queue.find(c=>c.id==='old').target_revision_id,'old');assert.equal(f.ctx.queue.find(c=>c.id==='old').anchor.file,'deleted.md');
+});

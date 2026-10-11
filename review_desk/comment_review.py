@@ -108,8 +108,11 @@ def evidence_records(store):
 
 def snapshot(store, object_id, revision_id):
     current = exact_revision(store, object_id, revision_id)
+    method = current['kind'] == 'GUIDANCE'
     supplements = evidence_records(store)
     responses, relevant = {}, set()
+    if method:
+        relevant.update(c['id'] for c in store.comments(target_object_id=object_id))
     from .production_current import enabled, RECORD_KINDS
     if enabled(store) and current['kind'] in RECORD_KINDS:
         relevant.update(c['id'] for c in store.comments(target_object_id=object_id) if c.get('original_context'))
@@ -129,6 +132,11 @@ def snapshot(store, object_id, revision_id):
         relevant.update(c['id'] for c in store.comments(target_object_id=object_id)
                         if c['target_revision_id'] in ancestors and c['target_revision_id'] != revision_id)
     for item in supplements:
+        if method:
+            # An evidence reference to this method does not make another
+            # object's opinion part of its review queue.
+            if item['comment_id'] not in relevant:
+                continue
         from .production_current import enabled, RECORD_KINDS
         current_mode = enabled(store) and current['kind'] in RECORD_KINDS
         in_context = any(ref['object_id'] == object_id and ref['revision_id'] == revision_id
@@ -160,7 +168,8 @@ def snapshot(store, object_id, revision_id):
         replies.sort(key=lambda r: (r['response']['version'] or 0, r['response']['revision_id']))
         comment = store.comment_anchor_states([comment])[0]
         original = readable_reference(store, {'object_id': comment['target_object_id'],
-                                     'revision_id': comment['target_revision_id']})
+                                     'revision_id': comment['target_revision_id'],
+                                     **({'file': comment['anchor']['file']} if method else {})})
         if comment.get('original_context'):
             original = {**original, 'production_excerpt': comment['original_context']['excerpt'],
                         'version': None, 'matches_current': comment['original_context']['matches_current'],
@@ -173,12 +182,16 @@ def snapshot(store, object_id, revision_id):
             'reviews': reviews}
 
 
-def content(store, object_id, revision_id):
+def content(store, object_id, revision_id, file=None):
     record = exact_revision(store, object_id, revision_id)
     if record['kind'] in KINDS:
         from .review_text import production_text_blocks
         record['review_blocks'] = production_text_blocks(record['payload'])
     if record['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1'):
         from .method_document import project
-        record['review_blocks'] = project(record['payload'])
+        if file is not None and file not in record['payload']['files']:
+            raise ValueError('这份准确稿件没有文件 ' + file + '；未替换为其他文件或最新稿')
+        record['review_blocks'] = project(record['payload'], file)
+        if file is not None:
+            record['review_file'] = file
     return {'record': record}

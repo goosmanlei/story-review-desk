@@ -706,7 +706,10 @@ def respond(store, value):
     current = read(store, comment['target_object_id'], value['revision_id'])
     require(current['payload']['format'] in (FORMATS['skill'], FORMATS['resource']), '回应对象不是方法或共用资料')
     text(value.get('explanation'), '回应', 12000)
-    filename = comment['anchor']['file']
+    filename = value.get('file', comment['anchor']['file'])
+    require(isinstance(filename, str) and filename in current['payload']['files'], '请选择回应实际对应的当前文件；原意见仍保留原文件锚点')
+    if filename == comment['anchor']['file'] and 'file' in value:
+        value = {k: v for k, v in value.items() if k != 'file'}
     old = project(original['payload'], filename)
     blocks = project(current['payload'], filename)
     old_texts = {b['text'] for b in old}
@@ -716,7 +719,8 @@ def respond(store, value):
     evidence = [{'object_id': current['object_id'], 'revision_id': current['revision_id'], 'label': '当前正文'+('改动' if changed else '核对'),
                  'anchor': {'file': filename, 'block_id': b['id'], 'end_block_id': b['id'], 'start': 0,
                             'end': len(b['text']), 'quote': b['text']}} for b in selected]
-    identity = checksum({'comment': comment['id'], 'revision': current['revision_id'], 'explanation': value['explanation']})
+    identity = checksum({'comment': comment['id'], 'revision': current['revision_id'], 'explanation': value['explanation'],
+                         **({'file': filename} if filename != comment['anchor']['file'] else {})})
     item = {'format': 'comment-handling-v1', 'id': 'comment-handling-method-' + identity, 'comment_id': comment['id'],
             'original': {'object_id': original['object_id'], 'revision_id': original['revision_id'], 'anchor_sha256': checksum(comment['anchor'])},
             'response': reference(current), 'decision': '已核对', 'explanation': value['explanation'], 'evidence': evidence,
