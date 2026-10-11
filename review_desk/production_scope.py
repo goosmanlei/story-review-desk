@@ -167,7 +167,8 @@ def entity_focus(store, episode=None, revision=None, scene=None, shot=None):
     if selected and scene and not any(sc['id'] == scene for sc in selected['scenes']): invalid = True
     if scene and not selected: invalid = True
     sc = next((sc for sc in selected['scenes'] if sc['id'] == scene), None) if selected else None
-    if shot and (not sc or not any(row['object_id'] == shot for row in sc['shots'])): invalid = True
+    # An optional stale shot cannot invalidate its valid episode and scene.
+    # graph() still validates the composition's exact child references.
     if invalid: selected = sc = None
     selected = selected or next(iter(catalog), None)
     if selected: sc = sc or next(iter(selected['scenes']), None)
