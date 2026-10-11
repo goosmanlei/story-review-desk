@@ -2,6 +2,7 @@
 const commentReviewReads=new Map();
 let commentReviewDialog=null;
 function commentReviewTarget(){
+  if(typeof isMethodsReading==='function'&&isMethodsReading())return {object_id:methodView.document.record.object_id,revision_id:methodView.document.record.revision_id};
   if(state.unifiedCardRoot&&state.productionSelected)return productionRef(state.productionSelected);
   return isStructure()?{object_id:'story-structure',revision_id:state.structureRevision}:
     state.workspace==='story.sources'&&state.current?{object_id:state.current.id,revision_id:state.current.target_revision_id}:
@@ -122,8 +123,8 @@ async function openCommentReview(row,context,trigger){
 function renderCommentReviewContent(root,record,anchor){
   const doc=record.payload;
   const production=String(doc.format||'').startsWith('production-');
-  const blocks=record.kind==='SOURCE'?doc.blocks:production?(record.review_blocks||productionTextBlocks(record)):record.kind==='EPISODE'?doc.blocks:structureBlocks(doc);
-  const visuals=record.kind==='SOURCE'?(doc.assets||[]).map(a=>({...a,id:a.file})):record.kind==='EPISODE'?[]:production?(doc.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:doc.title})):structureVisuals(doc);
+  const blocks=record.review_blocks|| (record.kind==='SOURCE'?doc.blocks:production?(record.review_blocks||productionTextBlocks(record)):record.kind==='EPISODE'?doc.blocks:structureBlocks(doc));
+  const visuals=doc.format?.startsWith('managed-method-')?[]:record.kind==='SOURCE'?(doc.assets||[]).map(a=>({...a,id:a.file})):record.kind==='EPISODE'?[]:production?(doc.components||[]).filter(c=>c.mime.startsWith('image/')).map(c=>({...c,title:doc.title})):structureVisuals(doc);
   const focus=el('section','comment-review-exact');root.append(focus);
   if(!anchor){appendReviewManuscript(focus,record);return}
   if(anchor?.type==='time'){
@@ -169,6 +170,8 @@ function appendReviewManuscript(root,record){
   }else if(record.kind==='SOURCE'){
     for(const block of doc.blocks)nodeText('p',null,block.text,root);
     for(const asset of doc.assets||[])appendReviewVisual(root,{...asset,id:asset.file});
+  }else if(doc.format?.startsWith('managed-method-')){
+    for(const file of Object.keys(doc.files)){nodeText('h4',null,file,root);for(const block of record.review_blocks.filter(b=>b.file===file))nodeText('p',null,block.text,root)}
   }else{
     for(const section of doc.sections){
       nodeText('h4',null,section.title,root);

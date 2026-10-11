@@ -16,7 +16,7 @@ def exact_revision(store, object_id, revision_id):
     revision = revision_record(store, revision_id)
     obj = store.db.execute('SELECT kind FROM objects WHERE id=?', (object_id,)).fetchone()
     if not revision or revision['object_id'] != object_id or not obj or (
-            obj['kind'] not in {'SOURCE', 'EPISODE', *KINDS} and object_id != STRUCTURE_ID):
+            obj['kind'] not in {'SOURCE', 'EPISODE', *KINDS} and not (obj['kind'] == 'GUIDANCE' and revision['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1')) and object_id != STRUCTURE_ID):
         raise ValueError('准确内容修订不存在或不匹配；未替换为最新稿')
     if obj['kind'] == 'SOURCE':
         source = store.source(object_id)
@@ -178,4 +178,7 @@ def content(store, object_id, revision_id):
     if record['kind'] in KINDS:
         from .review_text import production_text_blocks
         record['review_blocks'] = production_text_blocks(record['payload'])
+    if record['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1'):
+        from .method_document import project
+        record['review_blocks'] = project(record['payload'])
     return {'record': record}
