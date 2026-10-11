@@ -141,7 +141,7 @@ def validate(store, payload):
         require(isinstance(files, dict) and 0 < len(files) <= 100, '请提供必要的包内文件')
         for name, content in files.items():
             file_path(name)
-            require(PurePosixPath(name).parts[0] not in ('shared', 'materials', 'RESOURCES.md', 'execution.json', 'request.json', 'registry.json', 'delivery.json', 'record.json') and not PurePosixPath(name).parts[0].startswith('stage-'), '包内文件名与执行交付文件冲突')
+            require(PurePosixPath(name).parts[0] not in ('shared', 'materials', 'RESOURCES.md', 'execution.json', 'request.json', 'registry.json', 'delivery.json', 'record.json', 'begin-request.json', 'result-import.json') and not PurePosixPath(name).parts[0].startswith('stage-'), '包内文件名与执行交付文件冲突')
             text(content, name)
         require(sum(len(v) for v in files.values()) <= 1000000, '方法包正文过大；请拆分按需资源')
     if kind == 'resource':
@@ -314,6 +314,11 @@ def prepare(store, request):
     existing = store.db.execute('SELECT 1 FROM objects WHERE id=?', (object_id,)).fetchone()
     if existing:
         execution = read(store, object_id)
+        # The current-content cutover must not compact a legacy execution's
+        # full frozen inputs on resume. Only new work adopts the new contract.
+        from .production_current_methods import INPUTS
+        if execution['payload']['inputs'].get('format') != INPUTS:
+            inputs = raw_inputs
         if execution['payload']['inputs'] != inputs or execution['payload'].get('private', False) != (request.get('private') is True) or execution['payload']['conditions'] != request.get('conditions', {}) or (request.get('binding') is not None and execution['payload']['package']['binding'] != request['binding']):
             raise Conflict('恢复输入与冻结执行冲突；沿原输入恢复，换法或换输入须新建步骤')
         verify_execution(store, reference(execution), identity, inputs)
@@ -406,6 +411,36 @@ def artifact(store, value):
         from .method_media import validate_stage
         validate_stage(store, execution, stage, output)
     return _save(store, oid, payload, 0, prior + [{'revision_id': execution['revision_id'], 'role': 'artifact-execution'}])
+
+
+def stage_record(store, execution_ref, stage):
+    """Read an accepted stage and its exact predecessors without creating work."""
+    execution = read(store, **execution_ref)
+    identity = {k: execution['payload'][k] for k in ('work_type', 'run_id', 'step_id', 'target')}
+    verify_execution(store, execution_ref, identity)
+    verify_dependencies(store, execution)
+    steps = execution['payload']['package']['steps']
+    require(stage in steps, '不是该方法的必要步骤')
+    oid = 'method.artifact.' + checksum({'execution': execution_ref, 'stage': stage})
+    if not store.db.execute('SELECT 1 FROM objects WHERE id=?', (oid,)).fetchone():
+        return {'artifact': None, 'previous': []}
+    previous = []
+    for name in steps[:steps.index(stage) + 1]:
+        row = read(store, 'method.artifact.' + checksum({'execution': execution_ref, 'stage': name}))
+        payload = row['payload']
+        require(payload.get('format') == FORMATS['artifact'] and payload.get('execution') == execution_ref
+                and payload.get('stage') == name and all(payload.get(k) == v for k, v in identity.items()),
+                '阶段产物或方法归属不一致')
+        output = payload['output']
+        require(payload.get('output_sha256') == checksum(output), '阶段服务输出摘要不符：' + name)
+        from .production_current_methods import OUTPUT
+        if isinstance(output, dict) and output.get('format') == OUTPUT:
+            require(output.get('target') == identity['target'] and output.get('stage') == name,
+                    '压缩产物目标或阶段不一致：' + name)
+        verify_dependencies(store, row)
+        if name != stage:
+            previous.append(reference(row))
+    return {'artifact': row, 'previous': previous}
 
 
 def export_execution(store, ref, destination):
