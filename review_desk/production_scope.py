@@ -72,7 +72,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
         elif row['kind'] == 'STATE': owner(row['payload']['entity'], loc, evidence)
 
     def add(row, loc, evidence):
-        if row.get('unavailable') or row['kind'] not in ('REQUIREMENT', 'ASSET'): return
+        if row.get('unavailable') or row['payload'].get('status')=='withdrawn' or row['kind'] not in ('REQUIREMENT', 'ASSET'): return
         mid = canonical_id(store, row['object_id'])
         if row['kind']=='REQUIREMENT' and mid not in identities:
             value=row['payload'];additional[mid]={'canonical_material_id':mid,'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],'media_type':value['media_type'],'generated':False,'preview':None,'search_fields':[value['title']],'scope':value.get('scope'),'entity_ids':[]}
@@ -95,7 +95,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
         evidence = {'position': b.ref(position), 'title': position['payload']['title'], 'kind': 'production_use'}
         seen = set()
         def visit(row, reason, descend=True):
-            if row.get('unavailable'): return
+            if row.get('unavailable') or row['payload'].get('status')=='withdrawn': return
             add(row, loc, {**evidence, **reason, 'record': b.ref(row)})
             if row['id'] in seen: return
             if not descend and reason.get('kind') != 'actual_input': return
@@ -114,8 +114,9 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
                 call = light.record(store, revision_id=raw[0]); need = call['payload'].get('generation_requirement')
                 if need and light.ref_record(store, need)['payload'].get('scope') != row['payload'].get('scope'): continue
                 for value in call['payload'].get('inputs', []):
-                    visit(light.ref_record(store, value.get('reference', value)),
-                          {'kind': 'actual_input', 'call': b.ref(call), 'input': value}, False)
+                    historic = light.historical_ref_record(store, value.get('reference', value))
+                    if historic:
+                        visit(historic, {'kind': 'actual_input', 'call': b.ref(call), 'input': value}, False)
         def at_scope(reference):
             for relation, subject in unified_contextual[reference['revision_id']]:
                 visit(light.ref_record(store, subject), {'kind': 'business_relation', 'relation_record': b.ref(relation)}, False)

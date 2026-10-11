@@ -228,8 +228,14 @@ def write_record(store, object_id, kind, payload, current, dependencies):
     from .business_codes import allocate
     if kind not in RECORD_KINDS:
         raise ValueError('not a current production record')
-    if kind == 'REQUIREMENT' and current:
+    if current and not getattr(store, '_semantic_consolidating', False):
         previous = json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?', (current['current_revision'],)).fetchone()[0])
+        if previous.get('format') == 'production-retirement-v1':
+            raise Conflict('已退役对象只保留准确回查，不能作为当前内容重新写入')
+    if kind == 'REQUIREMENT' and current and not getattr(store, '_semantic_consolidating', False):
+        previous = json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?', (current['current_revision'],)).fetchone()[0])
+        if previous.get('format') == 'production-retirement-v1':
+            raise Conflict('已退役的素材只保留准确回查；请打开归并后的当前需求')
         if previous.get('current_plan_for') != payload.get('current_plan_for'):
             raise Conflict('working material identity cannot be removed or changed')
         if previous.get('current_plan_for') and previous.get('initial_plan_source') != payload.get('initial_plan_source'):
@@ -242,7 +248,10 @@ def write_record(store, object_id, kind, payload, current, dependencies):
             if payload.get('status') != 'submitted':
                 raise Conflict('a new call must persist submitted inputs before results or failure')
             save_submission(store, object_id, capture_submission(store, object_id, payload))
-    if kind == 'ASSET':
+    retiring = payload.get('format') == 'production-retirement-v1'
+    if retiring and not getattr(store, '_semantic_consolidating', False):
+        raise Conflict('retirement requires an exact reviewed consolidation plan')
+    if kind == 'ASSET' and not retiring:
         validate_candidate_update(store, object_id, payload, current)
         operation = payload.get('production', {}).get('object_id') or 'source:'+object_id
         payload = {**payload, 'candidate_identity': 'candidate-'+digest(canonical({'operation': operation}).encode())}
@@ -276,7 +285,7 @@ def write_record(store, object_id, kind, payload, current, dependencies):
     if kind == 'RELATION' and payload.get('relation_type') == 'business':
         from .business_relations import register
         register(store, object_id, payload)
-    if kind == 'ASSET':
+    if kind == 'ASSET' and not retiring:
         register_candidate(store, object_id, payload)
     return {'id': object_id, 'kind': kind, 'revision': rid, 'version': token,
             'edit_token': token, 'content_sha256': sha}
@@ -318,6 +327,8 @@ def register_candidate(store, oid, payload):
     targets = {r['object_id'] for r in refs} | {r['object_id'] for r in snap.get('requirements', [])}
     if not targets:
         targets = {oid}
+    from .semantic_consolidation import resolve
+    targets = {resolve(store, mid) for mid in targets}
     for mid in sorted(targets):
         if store.db.execute('SELECT 1 FROM production_candidate_targets WHERE candidate_id=? AND material_id=?', (cid, mid)).fetchone():
             continue
@@ -382,7 +393,8 @@ def read_adapters(store):
         return
     views = {
         'material_plan_members': '''SELECT coalesce(json_extract(a.evidence,'$.canonical_material_id'),a.material_id,o.id) material_id,1 number,o.current_revision revision_id,'plan' role
-            FROM objects o LEFT JOIN material_aliases a ON a.alias_id=o.id WHERE o.kind='REQUIREMENT'
+            FROM objects o JOIN revisions r ON r.id=o.current_revision LEFT JOIN material_aliases a ON a.alias_id=o.id
+            WHERE o.kind='REQUIREMENT' AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'
             UNION SELECT t.material_id,1,o.current_revision,'result'
             FROM production_candidate_targets t JOIN production_candidates c ON c.id=t.candidate_id
             JOIN objects o ON o.id=c.asset_object_id
@@ -415,9 +427,16 @@ def material_snapshot(store, mid):
     except KeyError:
         target = None
     canonical_mid = canonical_id(store, mid)
-    plan = target if target and target['kind'] == 'REQUIREMENT' else None
+    plan = target if target and target['kind'] == 'REQUIREMENT' and target['payload'].get('status') != 'withdrawn' else None
+    if canonical_mid != mid:
+        try:
+            canonical_target = p.record(store, canonical_mid)
+            if canonical_target['kind'] == 'REQUIREMENT' and canonical_target['payload'].get('status') != 'withdrawn':
+                plan = canonical_target
+        except KeyError:
+            pass
     if plan is None:
-        backing = store.db.execute("SELECT o.id FROM material_aliases a JOIN objects o ON o.id=a.alias_id WHERE COALESCE(json_extract(a.evidence,'$.canonical_material_id'),a.material_id)=? AND o.kind='REQUIREMENT' ORDER BY o.id", (canonical_mid,)).fetchone()
+        backing = store.db.execute("SELECT o.id FROM material_aliases a JOIN objects o ON o.id=a.alias_id JOIN revisions r ON r.id=o.current_revision WHERE COALESCE(json_extract(a.evidence,'$.canonical_material_id'),a.material_id)=? AND o.kind='REQUIREMENT' AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn' ORDER BY o.id", (canonical_mid,)).fetchone()
         if backing:plan = p.record(store, backing[0])
     if plan:
         plan['review_input_records'] = [p.ref_record(store, item['reference'])

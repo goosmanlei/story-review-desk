@@ -254,13 +254,14 @@ def restore_indices(store,data):
 
 
 def canonical_id(store, material_id):
+    from .semantic_consolidation import resolve
     scope=getattr(store,'_production_reads',None)
     if scope is not None:
         if 'material_alias_ids' not in scope:
             scope['material_alias_ids']=dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
-        return scope['material_alias_ids'].get(material_id,material_id)
+        return resolve(store, scope['material_alias_ids'].get(material_id,material_id))
     row=store.db.execute("SELECT COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases WHERE alias_id=?",(material_id,)).fetchone()
-    return row[0] if row else material_id
+    return resolve(store, row[0] if row else material_id)
 
 
 def identity(store, material_id):
@@ -273,7 +274,7 @@ def identity(store, material_id):
     for alias in aliases:
         if not store.db.execute('SELECT 1 FROM objects WHERE id=?',(alias,)).fetchone():continue
         record=list_reading.record(store,alias)
-        if record['kind']=='REQUIREMENT':
+        if record['kind']=='REQUIREMENT' and record['payload'].get('status') != 'withdrawn':
             associations.append({'requirement':{'object_id':alias,'revision_id':record['id']},
                 'title':record['payload']['title'],'scope':record['payload']['scope'],
                 'states':record['payload'].get('states',[]),'evidence':evidence.get(alias,{'kind':'original_requirement'}),

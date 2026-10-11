@@ -341,8 +341,8 @@ function focusProductionReview(detail,paint=true){
   if(typeof isEntityReview==='function'&&isEntityReview()){
     if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&r.id===r.current_revision&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
     const context=['ASSET','REQUIREMENT','CALL'].includes(r.kind)?materialCommentContext():null;
-    if(context){const round=state.entityReview.material_versions?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialVersionRoute(url.searchParams,context.material_id,round||context)}
-    else{url.searchParams.delete('material_id');url.searchParams.delete('material_round');url.searchParams.delete('material_version');url.searchParams.delete('material_baseline')}
+    if(context){const round=state.entityReview.material_versions?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialVersionRoute(url.searchParams,context.material_id,round||context);url.searchParams.set('material_target',r.kind==='REQUIREMENT'&&r.current_content?'current':r.id)}
+    else{for(const key of ['material_id','material_round','material_version','material_baseline','material_target'])url.searchParams.delete(key)}
   }
   if((state.workspace==='settings.workspace'||state.unifiedCardRoot&&state.entityReview)&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
   if(typeof isMaterialReview==='function'&&isMaterialReview()){url.searchParams.set('production_object',state.materialReview.record.object_id);url.searchParams.set('production_revision',state.materialReview.record.id);url.searchParams.set('material_target',r.id)}
@@ -383,6 +383,13 @@ function renderProductionReaderContent(){
 }
 function renderProductionRecord(root,detail,entityCard=false){
   const r=detail.record,p=r.payload,activate=action=>()=>{focusProductionReview(detail);return action()},referenceTitles=detail.reference_titles||[];
+  if(p.format==='production-retirement-v1'){
+    nodeText('h2',null,businessTitle(r,p.title),root);nodeText('p',null,p.reason,root);
+    if(p.merged_into){const button=productionButton(root,'打开归并后的当前内容',()=>openUnifiedMaterial({...p.merged_into,params:new URLSearchParams(),defaultSelection:true},button));button.setAttribute('aria-haspopup','dialog')}
+    if(p.production)productionRefLink(root,p.production,'查看实际制作来源');
+    for(const component of p.components||[])productionMedia(root,component);
+    productionButton(root,'查看原评论',activate(openPanel));return;
+  }
   const review=entityCard?el('section','production-entity-review'):root;
 
   nodeText('small','production-pill',entityCard?'实体基础信息 · '+productionLabels[p.entity_type]:p.relation_type==='entity'?'实体关系':productionKinds[r.kind],root);nodeText('h2',null,businessTitle(r,p.title),root);
