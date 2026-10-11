@@ -71,7 +71,7 @@ class AvReaderTest(unittest.TestCase):
                 with self.assertRaises(p.ReadCancelled):ui_projection.scene(self.store,'scene',view='reader')
                 reader.assert_not_called()
 
-    def test_shared_camera_keeps_lazy_reader_after_semantic_merge(self):
+    def test_shared_camera_keeps_one_owner_after_semantic_merge(self):
         self.setup_reader()
         from audiovisual_fixture import shot
         from review_desk import semantic_consolidation as sem
@@ -85,10 +85,15 @@ class AvReaderTest(unittest.TestCase):
         other={'object_id':'other-shot','id':self.ref('other-shot')['revision_id']}
         with p.read_scope(self.store), patch('review_desk.entity_contract.p.record',side_effect=AssertionError('full record')):
             needs=entity_contract.direct_materials(self.store,other,metadata=True)
-        self.assertEqual([n['object_id'] for n in needs],['camera'])
+        self.assertEqual(needs, [])
         with p.read_scope(self.store):
-            data=entity_contract.shot_workspace(self.store,'other-shot',deferred=True,material_id='camera')
+            with self.assertRaises(ValueError):
+                entity_contract.shot_workspace(self.store,'other-shot',deferred=True,material_id='camera')
+            from review_desk.business_relations import scope_links
+            uses=scope_links(self.store,self.ref('other-shot'))
+            self.assertEqual([n['object_id'] for _,n in uses],['camera'])
+            data=entity_contract.shot_workspace(self.store,'shot',deferred=True,material_id='camera')
             targets=material_comment_targets_many(self.store,[p.record(self.store,'other-shot')])[other['id']]
-        self.assertEqual(data['requirements'][0]['object_id'],'camera')
-        self.assertIn('prompt',data['requirements'][0]['payload']['generation'])
-        self.assertEqual({row['object_id'] for row in targets},{'camera'})
+        selected=next(n for n in data['requirements'] if n['object_id']=='camera')
+        self.assertIn('prompt',selected['payload']['generation'])
+        self.assertEqual(targets, [])

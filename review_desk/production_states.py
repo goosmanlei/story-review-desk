@@ -43,6 +43,7 @@ def validate_state(store, p):
 def usage_issues(store, entities, states, transitions, source, allow_none=False):
     """Check each identity's ordered full forms and in-scene transition evidence."""
     from .production import ref_record, source_check
+    from .production_current import enabled
     source_ranges = source if isinstance(source, list) else [source]
     issues, grouped = [], {e["object_id"]: [] for e in entities}
     for ref in states:
@@ -63,7 +64,7 @@ def usage_issues(store, entities, states, transitions, source, allow_none=False)
             issues.append({"code": "mention_state_used_for_presentation", "entity": owner, "state": ref})
     expected = []
     for owner, values in grouped.items():
-        if not values:
+        if not values and not enabled(store):
             issues.append({"code": "missing_complete_state", "entity": owner})
         expected.extend((exact(a), exact(b)) for a, b in zip(values, values[1:]))
     actual = []

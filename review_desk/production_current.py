@@ -441,6 +441,8 @@ def material_snapshot(store, mid):
     if plan:
         plan['review_input_records'] = [p.ref_record(store, item['reference'])
                                       for item in plan['payload'].get('generation', {}).get('inputs', [])]
+        from .shot_references import enrich_detail
+        enrich_detail(store, {'record':plan})
     rows = list(store.db.execute('''SELECT c.*,t.number FROM production_candidate_targets t
         JOIN production_candidates c ON c.id=t.candidate_id WHERE t.material_id=? ORDER BY t.number''', (canonical_mid,)))
     results = []
@@ -487,6 +489,19 @@ def candidate_context(store, asset):
     call['review_input_records'] = inputs
     from .shot_references import slots
     call['input_slots'] = slots(store, call['payload'].get('inputs', []))
+    call['review_shot_slots'] = call['input_slots']
+    # Keep an unavailable input in its real position, with its known identity.
+    # It must not silently renumber later Prompt references.
+    for slot in call['input_slots']:
+        ref = slot['value'].get('reference', slot['value'])
+        if slot.get('nonmedia') or any(r['id'] == ref['revision_id'] for r in inputs):
+            continue
+        if slot.get('record', {}).get('recovered_original'):
+            inputs.append(slot['record'])
+            continue
+        inputs.append({'object_id':ref['object_id'], 'id':ref['revision_id'], 'kind':'ASSET',
+                       'submission_only':True, 'unavailable':True,
+                       'payload':{'title':slot['title'], 'media_type':slot.get('media_type'), 'components':[]}})
     return {'call': call, 'requirements': plans, 'associated_requirements': [],
             'inputs': inputs, 'submission': saved}
 
@@ -495,9 +510,16 @@ def input_slot(store, value, index):
     from . import production as p
     from .shot_references import input_key, with_identity
     from .production_media import validate_component
+    from .material_reference import describe, recovered_record
     result = {'index': index, 'input_key': input_key(value), 'material_id': None, 'number': None,
               'candidate': None, 'candidate_number': None, 'issues': [], 'value': value,
               'model': CONTRACT}
+    ref = value.get('reference', value)
+    legacy = store.db.execute('SELECT kind FROM production_legacy_links WHERE revision_id=? AND object_id=?',
+                               (ref['revision_id'], ref['object_id'])).fetchone()
+    if legacy and legacy[0] not in ('ASSET', 'REQUIREMENT'):
+        result['nonmedia'] = True
+        return result
     try:
         target = p.ref_record(store, value.get('reference', value))
         result['record'] = target
@@ -508,10 +530,23 @@ def input_slot(store, value, index):
         if target['kind'] == 'REQUIREMENT':
             result['material_id'] = target['object_id']
             result['issues'].append('尚未选定候选')
-            return with_identity(store, result)
+            return describe(store, with_identity(store, result))
         candidate = store.db.execute('SELECT id FROM production_candidates WHERE asset_object_id=?', (target['object_id'],)).fetchone()
         if not candidate:
-            raise ValueError('此引用没有真实候选')
+            # Retained originals are readable without inventing a current home.
+            recovered = recovered_record(store, ref) if target.get('unavailable') else None
+            if recovered:
+                target = result['record'] = recovered
+            if not target.get('unavailable'):
+                component = next((c for c in target['payload'].get('components', []) if c['id']==value.get('component_id',ref.get('component_id','original'))), None)
+                if not component or component['role'] != 'original':
+                    raise ValueError('准确历史原件组成不存在')
+                validate_component(p.root_of(store), component, inspect=False)
+                if value.get('sha256', component['sha256']) != component['sha256']:
+                    raise ValueError('历史参考原件哈希不匹配')
+                p.validate_selection(component, value)
+                result['component'] = component
+            return describe(store, result)
         targets = list(store.db.execute('SELECT * FROM production_candidate_targets WHERE candidate_id=?', (candidate[0],)))
         mid = selection.get('material_id')
         if not mid and len(targets) == 1:
@@ -533,4 +568,4 @@ def input_slot(store, value, index):
         result['component'] = component
     except (KeyError, ValueError, OSError) as exc:
         result['issues'].append(str(exc))
-    return with_identity(store, result)
+    return describe(store, with_identity(store, result))
