@@ -269,8 +269,8 @@ dialog #toast { position:fixed; z-index:50; }
 .material-content-navigation button,.material-content-navigation .review-choice-buttons>button:first-child{margin:0;min-height:38px;font-size:14px;padding:7px 12px}
 .material-content-navigation button[aria-pressed=true]{background:#e2ecd9;border-color:#799570}
 .material-reference-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 20px}
-.material-reference-grid .material-input{margin:0;min-width:0}
-.material-reference-grid .material-small-card{width:100%;height:100%}
+.material-reference-grid .material-input{margin:0;min-width:0;display:flex;flex-direction:column}
+.material-reference-grid .material-small-card{width:100%;height:auto;flex:1}
 .material-reference-grid .small-card-metrics{display:none}
 @container (max-width:480px){.material-reference-grid{grid-template-columns:1fr}}
 .unified-card-material{container-type:inline-size}
