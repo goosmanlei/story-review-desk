@@ -124,7 +124,14 @@ function navigateWorkspace(id){
     switchWorkspace(url.searchParams.get('workspace')||id,false);
   }else{
     if(['settings.workspace','production.workspace'].includes(id)){
-      id='settings.workspace';const url=new URL(location.href);url.searchParams.set('workspace',id);url.searchParams.set('production_tab','breakdown');
+      const url=new URL(location.href),p=url.searchParams,tab=p.get('production_tab');
+      const scoped=p.get('production_scope_episode')&&p.get('production_scope_revision');
+      const allMaterials=tab==='materials'&&p.get('breakdown_episode')&&p.get('breakdown_episode_revision');
+      if(['entities','materials','breakdown'].includes(tab)&&(scoped||allMaterials)){
+        id=tab==='materials'?'materials.workspace':'settings.workspace';p.set('workspace',id);
+        pushWorkspaceNavigation(url);switchWorkspace(id,false);return;
+      }
+      id='settings.workspace';url.searchParams.set('workspace',id);url.searchParams.set('production_tab','breakdown');
       for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
       url.hash='';history.pushState(null,'',url);switchWorkspace(id,false);
     }else switchWorkspace(id);
