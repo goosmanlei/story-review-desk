@@ -22,7 +22,7 @@ function fixture(){
   const c={URL,URLSearchParams,CSS:{escape:x=>x},console,location:{href:'http://fixture/?workspace=settings.workspace&production_tab=breakdown&breakdown_episode=episode&breakdown_scene=scene-a&breakdown_object=old-shot&breakdown_revision=old-shot-r1&production_object=old-shot&production_revision=old-shot-r1&material_id=old-need&material_version=2&material_target=old-result'},state:{workspace:'settings.workspace',productionRecords:[],breakdownData:{episode:'episode'}}};
   c.el=(tag,classes)=>{const n=new Element(tag);n.className=classes||'';return n};
   c.nodeText=(tag,classes,text,parent)=>{const n=c.el(tag,classes);n.textContent=text;parent.append(n);return n};
-  c.$=()=>host;c.document={querySelectorAll:()=>[]};
+  c.$=()=>host;c.document={querySelector:()=>null,querySelectorAll:()=>[]};
   c.history={replaceState(_state,_title,url){c.location.href=String(url)}};
   vm.createContext(c);require('./load_review_helpers.cjs')(c);
   for(const name of ['production.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
