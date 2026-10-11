@@ -4,12 +4,13 @@ from . import production_breakdown as b
 from . import list_reading as light
 
 
-def material_entries(store):
+def material_entries(store, *, uses=True, identities=True):
     from .read_cache import read_json
-    return read_json(store, 'material-entries-v8', lambda: _material_entries(store))
+    return read_json(store, ['material-entries-v9', uses, identities],
+                     lambda: _material_entries(store, uses=uses, identities=identities))
 
 
-def _material_entries(store):
+def _material_entries(store, *, uses=True, identities=True):
     needs=light.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
     assets=light.rows(store,'ASSET',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'");results={};used=set()
     for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
@@ -23,8 +24,7 @@ def _material_entries(store):
     links={};cache={};entries=[]
     for link in b.rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='applicability'"):
         links.setdefault(link['payload']['subject']['revision_id'],[]).append(link['payload']['scope'])
-    from .business_relations import material_bindings
-    for _, subject, scope in material_bindings(store):
+    for _, subject, scope in light.material_bindings(store):
         links.setdefault(subject['revision_id'], []).append(scope)
     for row in [*needs,*(a for a in assets if a['object_id'] not in used)]:
         value=row['payload'];scope=value.get('scope');owners={};locations=[];state_ids=set();visited=set()
@@ -33,7 +33,8 @@ def _material_entries(store):
             if key in visited:return
             visited.add(key)
             scoped=light.ref_record(store,reference)
-            locations.extend({**loc,'relation':relation,'title':scoped['payload']['title']} for loc in b.locations(store,reference,cache))
+            if uses:
+                locations.extend({**loc,'relation':relation,'title':scoped['payload']['title']} for loc in b.locations(store,reference,cache))
             if scoped.get('unavailable'):
                 if scoped.get('owner_object_id'):owners[scoped['owner_object_id']]=None
                 return
@@ -41,7 +42,7 @@ def _material_entries(store):
                 if scoped['payload'].get('status')=='withdrawn':return
                 state_ids.add(scoped['object_id'])
                 owners[scoped['payload']['entity']['object_id']]=scoped['payload']['entity']
-                for source in scoped['payload'].get('sources',[]):
+                for source in (scoped['payload'].get('sources',[]) if uses else []):
                     episode=light.ref_record(store,source)
                     source_scene=next((s for s in episode['payload'].get('scenes',[]) if s['id']==source.get('scene_id')), {})
                     locations.append({'episode':source['object_id'],'scene':source.get('scene_id'),'kind':'STATE','scope':reference,'source':source,'title':scoped['payload']['title'],
@@ -78,7 +79,8 @@ def _material_entries(store):
         mid=canonical_id(store,item['object_id'])
         if mid not in merged or item['object_id']==mid:
             previous=merged.get(mid)
-            merged[mid]={**item,'canonical_material_id':mid,'material_identity':identity(store,mid)}
+            merged[mid]={**item,'canonical_material_id':mid,
+                         **({'material_identity':identity(store,mid)} if identities else {})}
             if previous:
                 merged[mid]['locations']+=previous['locations']
                 merged[mid]['entity_ids']=sorted(set(merged[mid]['entity_ids']+previous['entity_ids']))
@@ -98,7 +100,10 @@ def _material_entries(store):
     mapping = codes(store)
     for item in merged.values():item['search_fields'] = material_fields(store, item, mapping)
     from .list_associations import material_uses
-    return material_uses(store, list(merged.values()))
+    values = list(merged.values())
+    # AV projection derives exact composition/planned/actual uses itself and
+    # replaces locations. Building the legacy locations first is redundant.
+    return material_uses(store, values) if uses else values
 
 
 def management_episodes(store):
@@ -134,17 +139,41 @@ def entity_summaries(store, entities, entries):
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None):
+def _material_av_catalog(store, episode, revision, compact):
+    from .production_scope import projection
+    value = projection(store, material_entries(store, uses=False, identities=not compact), episode, revision)
+    if not compact:
+        return value
+    # Compact responses never expose input bodies or entity associations here.
+    # Keep every exact location and its record for scope selection, plus all
+    # fields of the actual card; details still resolve the full authority.
+    keys = {'scope','source','source_scene_name','source_version','episode','scene','kind','relation','title'}
+    return {'management_episodes':value['management_episodes'], 'entries':[
+        {**{k:v for k,v in item.items() if k not in ('entity_ids','material_identity','locations')},
+         'locations':[{**{k:v for k,v in loc.items() if k in keys},
+                       'evidence':{'record':loc.get('evidence',{}).get('record')}} for loc in item['locations']]}
+        for item in value['entries']]}
+
+
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False):
     from .navigation_search import matches as search_matches
     if scope and scope != 'av':raise ValueError('unknown production scope')
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
-    values=material_entries(store)
-    catalog=management_episodes(store)
+    if cards and not (grouped and compact):raise ValueError('cards requires a grouped compact list')
     if scope == 'av':
-        from .production_scope import projection
-        projected=projection(store,values,episode,scope_revision,scene)
+        from .read_cache import read_json
+        # Scene, word and media/status only filter this exact catalog. Reuse
+        # its locations across queries; every committed write changes the key.
+        projected=read_json(store, ['material-av-catalog-v3', episode, scope_revision, compact],
+                            lambda: _material_av_catalog(store, episode, scope_revision, compact))
+        if scene and not episode:
+            raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
+        if scene and not any(e['object_id'] == episode and any(s['id'] == scene for s in e['scenes']) for e in projected['management_episodes']):
+            raise ValueError('视听场不属于本版视听集，请重新选择制作范围')
         values=projected['entries'];catalog=projected['management_episodes']
+    else:
+        values=material_entries(store);catalog=management_episodes(store)
     chosen={'episode':episode,'scene':scene,'media':media,'status':status}
     def matches(item,filters):
         if not search_matches(search,item['search_fields']):return False
@@ -182,9 +211,11 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
             # All card identities and grouping rows stay available for instant
             # local pagination. Full association evidence is read on card open.
             result=[{**{k:v for k,v in item.items() if k not in ('material_identity','entity_ids','locations')},
-                     'locations':[{k:v for k,v in loc.items() if k in ('scope','source','source_scene_name','source_version','episode','scene','kind','relation','title')}
-                                  for loc in item['locations']]}
+                     **({} if cards else {'locations':[{k:v for k,v in loc.items() if k in ('scope','source','source_scene_name','source_version','episode','scene','kind','relation','title')}
+                                  for loc in item['locations']]})}
                     for item in result]
+            if cards:
+                result=[{k:v for k,v in item.items() if k!='search_fields'} for item in result]
         return {'management_episodes':catalog,'items':result,'total':len(result),'groups':groups,
                 'management_locations':list({(loc.get('episode'),loc.get('scene')):
                     {'episode':loc.get('episode'),'scene':loc.get('scene')} for item in values for loc in item['locations']

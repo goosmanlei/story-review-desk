@@ -32,6 +32,10 @@ def field(store, key, path):
 
 
 def project(store, raw):
+    scope = getattr(store, '_production_reads', None)
+    cached = scope.get('list_records', {}).get((raw['object_id'], raw['id'])) if scope is not None else None
+    if cached is not None and cached['version'] == raw['version']:
+        return cached
     row = dict(raw)
     value = json.loads(row.pop('stored_payload'))
     key = value.pop(material_storage.MARKER, None)
@@ -91,11 +95,18 @@ def ref_record(store, reference):
 
 def historical_ref_record(store, reference):
     """A retained call can honestly name an unavailable pre-migration input."""
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('historical_list_records', {}) if scope is not None else {}
+    key = (reference.get('object_id'), reference.get('revision_id')) if isinstance(reference, dict) else None
+    if key in cache:
+        return cache[key]
     try:
         row = ref_record(store, reference)
-        return None if row.get('unavailable') or row['payload'].get('status')=='withdrawn' else row
+        result = None if row.get('unavailable') or row['payload'].get('status')=='withdrawn' else row
     except KeyError:
-        return None
+        result = None
+    cache[key] = result
+    return result
 
 
 def rows(store, kind, condition='', params=()):
@@ -104,3 +115,42 @@ def rows(store, kind, condition='', params=()):
     from .business_relations import archived_ids
     archived = archived_ids(store)
     return [project(store, row) for row in store.db.execute(sql + (' AND ' + condition if condition else '') + ' ORDER BY o.id', (kind, *params)) if row['object_id'] not in archived]
+
+
+def active_indices(store, row):
+    """Validate exact rules once per revision in this read snapshot.
+
+    Metadata has the same inputs, routes and conditions as the full reader;
+    it does not need prompts, content checksums or candidate submissions.
+    """
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('list_active_indices', {}) if scope is not None else {}
+    key = (row['id'], store.db.total_changes)
+    if key not in cache:
+        from .material_relations import active_inputs
+        cache[key] = {index for index, _ in active_inputs(
+            store, row['payload'].get('generation', {}), row['object_id'], metadata=True)[0]}
+    return cache[key]
+
+
+def material_bindings(store):
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('list_material_bindings', {}) if scope is not None else {}
+    key = store.db.total_changes
+    if key not in cache:
+        from .business_relations import material_bindings as bindings
+        cache[key] = list(bindings(store, metadata=True))
+    return cache[key]
+
+
+def material_calls(store, material_id):
+    """Batch exact call membership instead of scanning its view per consumer."""
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('list_material_calls', {}) if scope is not None else {}
+    key = store.db.total_changes
+    if key not in cache:
+        grouped = {}
+        for row in store.db.execute("SELECT DISTINCT m.material_id,r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='call'"):
+            grouped.setdefault(row['material_id'], []).append(row['id'])
+        cache[key] = grouped
+    return [record(store, revision_id=rid) for rid in cache[key].get(material_id, [])]

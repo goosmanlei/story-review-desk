@@ -153,10 +153,10 @@ test('ordinary legacy asset entry chooses the current plan while exact candidate
     assert.equal(f.data.selectedCandidates.need,ordinary?'current':f.older.id);
   }
   const ctx=setup(),source=fs.readFileSync(path.join(__dirname,'../review_desk/static/management-cards.js'),'utf8');let refs;
-  ctx.openManagementReferences=value=>refs=value;
+  ctx.openUnifiedMaterial=value=>refs=value;
   vm.runInContext(source.slice(source.indexOf('async function openManagementMaterial('),source.indexOf('async function loadMaterialManagement(')),ctx);
   ctx.openManagementMaterial({object_id:'asset',scope_references:[{object_id:'asset',revision_id:'exact'}]},null);
-  assert.equal(refs[0].revision_id,'exact');assert.equal(refs[0].defaultSelection,true);
+  assert.equal(refs.object_id,'asset');assert.equal(refs.revision_id,undefined);assert.equal(refs.defaultSelection,true);
 });
 test('same-entity version responses cannot replace a newer choice when they arrive out of order',async()=>{
   const ctx=setup(),f=fixture(ctx),requests=[],shown=[];
@@ -195,6 +195,19 @@ function modalFixture(ctx,f){
   const result={detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},entity_review:f.data,form:f.form};
   return {panel,outer,dialog,body,result,triggers:triggers.map(([,button])=>button)};
 }
+for(const failure of [false,true])test(`refreshed exact card ${failure?'failure':'success'} keeps its target but closes to the scoped list`,async()=>{
+  const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f);
+  const params=new URLSearchParams({workspace:'materials.workspace',production_scope_episode:'ep',production_scope_scene:'scene',material_search:'kept',production_object:f.need.object_id,production_revision:f.need.id,material_id:'need',material_target:'current'});
+  ctx.location.href='http://isolated/?'+params;let parentURL;
+  ctx.openReviewDialog=()=>{parentURL=ctx.location.href;return {dialog:m.dialog,body:m.body}};
+  ctx.fetch=async()=>{if(failure)throw Error('temporary card failure');return {ok:true,json:async()=>m.result}};
+  await ctx.openUnifiedMaterial({...ref(f.need),params,restoreRoute:true},null);
+  const parent=new URL(parentURL).searchParams;
+  assert.equal(parent.get('production_scope_scene'),'scene');assert.equal(parent.get('material_search'),'kept');assert.equal(parent.has('production_object'),false);assert.equal(parent.has('material_target'),false);
+  assert.equal(new URL(ctx.location.href).searchParams.get('material_id'),'need');
+  m.dialog.isConnected=false;m.dialog.listeners.close();
+  assert.equal(ctx.location.href,parentURL);
+});
 test('a pending modal read cannot reactivate its card after browser navigation changes workspace',async()=>{
   const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f);let release;
   ctx.fetch=()=>new Promise(resolve=>{release=()=>resolve({ok:true,json:async()=>m.result})});

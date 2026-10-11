@@ -25,7 +25,7 @@ test('entity navigation carries the exact scope; explicit scopes still return to
  c.selectProductionTab('breakdown');p=new URL(c.location.href).searchParams;assert.equal(p.get('breakdown_object'),'ep');assert.equal(p.get('breakdown_revision'),'old');assert.equal(p.get('breakdown_episode_revision'),'old');const target=c.breakdownEditionTarget({design:{object_id:'ep',id:p.get('breakdown_episode_revision')},scenes:[{object_id:'scene'}]},p);assert.equal(target.error,undefined);assert.equal(target.scene.object_id,'scene');
 });
 test('a scoped material preserves its accurate identity and opens the current plan',async()=>{
- const c=fixture('http://fixture/');let ref;c.openUnifiedMaterial=async value=>{ref=value};await c.openManagementMaterial({object_id:'material',scope_references:[{object_id:'material',revision_id:'old'}]},null);assert.equal(ref.revision_id,'old');assert.equal(ref.defaultSelection,true);
+ const c=fixture('http://fixture/');let ref;c.openUnifiedMaterial=async value=>{ref=value};await c.openManagementMaterial({object_id:'material',scope_references:[{object_id:'material',revision_id:'old'}]},null);assert.equal(ref.object_id,'material');assert.equal(ref.revision_id,undefined);assert.equal(ref.defaultSelection,true);
 });
 
 test('a scene shared by two current editions uses an explicit parent choice',()=>{
@@ -41,4 +41,43 @@ test('material range changes clear a stale entity shot without changing material
  const c=fixture('http://fixture/?production_scope_episode=ep&production_scope_scene=scene&production_scope_revision=old&production_scope_shot=first&material_search=kept');
  c.managementScopeRoute({episode:'ep',scene:'scene',scope_revision:'old'});assert.equal(new URL(c.location.href).searchParams.get('production_scope_shot'),'first');
  c.managementScopeRoute({episode:'ep',scene:'other',scope_revision:'old'});const p=new URL(c.location.href).searchParams;assert.equal(p.get('production_scope_shot'),null);assert.equal(p.get('material_search'),'kept');
+});
+
+
+test('changing the main shot clears stale material children and reaches that shot across pages',()=>{
+ const c=fixture('http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=new-shot');
+ vm.runInContext("workspaceSubRoutes.set('settings.workspace:breakdown','http://fixture/?workspace=settings.workspace&production_tab=breakdown&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=old-shot&breakdown_episode=ep&breakdown_episode_revision=exact&breakdown_scene=scene&breakdown_object=old-shot&breakdown_revision=old-exact&shot_material_id=old-material&shot_candidate=old-candidate&shot_component=preview')",c);
+ c.selectProductionTab('breakdown');const p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('breakdown_object'),'new-shot');assert.equal(p.get('production_scope_shot'),'new-shot');assert.equal(p.get('breakdown_revision'),null);
+ for(const key of ['shot_material_id','shot_candidate','shot_component'])assert.equal(p.has(key),false);
+});
+test('the same exact shot restores its own candidate and component without borrowing another shot',()=>{
+ const c=fixture('http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=shot');
+ vm.runInContext("workspaceSubRoutes.set('settings.workspace:breakdown','http://fixture/?workspace=settings.workspace&production_tab=breakdown&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=shot&breakdown_episode=ep&breakdown_episode_revision=exact&breakdown_scene=scene&breakdown_object=shot&breakdown_revision=shot-exact&shot_material_id=material&shot_candidate=candidate&shot_component=preview')",c);
+ c.selectProductionTab('breakdown');const p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('breakdown_revision'),'shot-exact');assert.equal(p.get('shot_material_id'),'material');assert.equal(p.get('shot_candidate'),'candidate');assert.equal(p.get('shot_component'),'preview');
+});
+test('ordinary scoped cards open one material even when uses point at current plan and a historical original',async()=>{
+ const c=fixture('http://fixture/');let opened;c.openUnifiedMaterial=async ref=>opened=ref;
+ await c.openManagementMaterial({object_id:'canonical',scope_references:[{object_id:'canonical',revision_id:'current'},{object_id:'old-original',revision_id:'historical'}]},null);
+ assert.equal(opened.object_id,'canonical');assert.equal(opened.defaultSelection,true);assert.equal(opened.revision_id,undefined);
+});
+
+test('all-materials media and page survive entity return while the working shot continues',()=>{
+ const all='http://fixture/?workspace=materials.workspace&production_tab=materials&material_page=2&material_media=image&material_search=kept&breakdown_episode=ep&breakdown_episode_revision=exact&breakdown_scene=scene&breakdown_object=shot';
+ const c=fixture(all);c.state.workspace='materials.workspace';
+ vm.runInContext(`workspaceSubRoutes.set('settings.workspace:materials',${JSON.stringify(all)})`,c);
+ c.selectProductionTab('entities');let p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('production_scope_shot'),'shot');assert.equal(p.get('production_scope_scene'),'scene');
+ c.state.workspace='settings.workspace';c.location.href='http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=other-scene&production_scope_shot=other-shot';
+ c.selectProductionTab('materials');p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('production_scope_episode'),null);assert.equal(p.get('material_page'),'2');assert.equal(p.get('material_media'),'image');assert.equal(p.get('material_search'),'kept');assert.equal(p.get('breakdown_object'),'other-shot');
+ c.state.workspace='materials.workspace';c.selectProductionTab('breakdown');p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('production_scope_shot'),'other-shot');assert.equal(p.get('breakdown_scene'),'other-scene');
+});
+test('returning to the all-materials range in the same working shot retains its exact candidate',()=>{
+ const c=fixture('http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=shot');
+ vm.runInContext("workspaceSubRoutes.set('settings.workspace:materials','http://fixture/?workspace=materials.workspace&production_tab=materials&material_page=2&material_media=image&material_id=material&material_target=candidate&breakdown_episode=ep&breakdown_episode_revision=exact&breakdown_scene=scene&breakdown_object=shot')",c);
+ c.selectProductionTab('materials');const p=new URL(c.location.href).searchParams;
+ assert.equal(p.get('material_target'),'candidate');assert.equal(p.get('material_page'),'2');assert.equal(p.get('production_scope_episode'),null);
 });

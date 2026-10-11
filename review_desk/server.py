@@ -187,7 +187,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.command == 'GET':
             production.check_read(self.server.store)
         from .business_codes import annotate
-        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach'):
+        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach', '/api/methods/record', '/api/methods/stage'):
             value = annotate(self.server.store, value, share_records=True)
         if self.command == 'GET' and status == 200 and urlsplit(self.path).path.startswith('/api/production') and urlsplit(self.path).path != '/api/production/package':
             from .review_composition import attach as compose
@@ -367,6 +367,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(resolve(store, query.get('work_type', [''])[0], json.loads(query.get('conditions', ['{}'])[0])))
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
+        if path == '/api/methods/stage':
+            try:
+                from .methods import stage_record
+                return self._json(stage_record(store, {
+                    'object_id': query.get('execution_object_id', [''])[0],
+                    'revision_id': query.get('execution_revision_id', [''])[0]}, query.get('stage', [''])[0]))
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/record':
             try:
                 from .methods import read
@@ -447,7 +455,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/materials":
                     from .ui_projection import material_list as materials
                     with production.read_scope(store):
-                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1", scope=param('scope'), scope_revision=param('scope_revision')))
+                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1", scope=param('scope'), scope_revision=param('scope_revision'), cards=param('cards')=='1'))
                 if path == "/api/production":
                     return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
                 if path == "/api/production/impact":

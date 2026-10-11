@@ -135,14 +135,18 @@ def lookup(store, endpoints):
     return p.record(store, row[0]) if row else None
 
 
-def material_bindings(store):
+def material_bindings(store, *, metadata=False):
     """Read suitability for navigation; this never selects/uploads an input."""
     for row in current(store):
         value = row['payload']
         if value.get('status') == 'withdrawn':
             continue
         for endpoint in value['endpoints']:
-            target = p.record(store, endpoint)
+            if metadata:
+                from .list_reading import record
+                target = record(store, endpoint)
+            else:
+                target = p.record(store, endpoint)
             if target['kind'] not in ('REQUIREMENT', 'ASSET'):
                 continue
             for context in value.get('contexts', []):
@@ -190,14 +194,18 @@ def resolve_code(store, value):
     return row
 
 
-def exact_input_relation(store, requirement_id, item):
+def exact_input_relation(store, requirement_id, item, *, metadata=False):
     """Read only the relation pinned by this exact plan, never today's text."""
     if not item.get('relation'):
         return None
-    row = p.ref_record(store, item['relation'])
+    reader = p.ref_record
+    if metadata:
+        from .list_reading import ref_record
+        reader = ref_record
+    row = reader(store, item['relation'])
     if not is_business(row):
         return row  # Frozen input compatibility, including redacted text.
-    target = p.ref_record(store, item['reference'])
+    target = reader(store, item['reference'])
     upstream = item.get('material_selection', {}).get('material_id') or target['object_id']
     from .material_storage import canonical_id
     possible = {target['object_id'], upstream, canonical_id(store, upstream)}
@@ -207,8 +215,8 @@ def exact_input_relation(store, requirement_id, item):
     return row
 
 
-def input_rules(store, requirement_id, item):
-    row = exact_input_relation(store, requirement_id, item)
+def input_rules(store, requirement_id, item, *, metadata=False):
+    row = exact_input_relation(store, requirement_id, item, metadata=metadata)
     if row is None or not is_business(row):
         return None
     # A related graph edge can be an explicitly chosen directed input here.
