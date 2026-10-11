@@ -148,7 +148,7 @@ async function openManagementReferences(refs,trigger,title,fallback){
   return openUnifiedMaterial(refs[0]||fallback,trigger);
 }
 async function openManagementMaterial(item,trigger){
-  return openManagementReferences(item.scope_references||[],trigger,'选择此范围的准确素材版本',{object_id:item.object_id,defaultSelection:true});
+  return openManagementReferences((item.scope_references||[]).map(ref=>({...ref,defaultSelection:true})),trigger,'选择此范围的准确素材版本',{object_id:item.object_id,defaultSelection:true});
 }
 async function loadMaterialManagement(){
   state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const workspace=state.workspace,epoch=++productionLoadEpoch,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('materials',params,'material_');++productionReadEpoch;state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
