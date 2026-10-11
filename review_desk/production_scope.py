@@ -86,9 +86,8 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
     contextual = defaultdict(list)
     for row in light.rows(store, 'MATERIAL_RELATION'):
         contextual[row['payload']['context']['revision_id']].append(row)
-    from .business_relations import material_bindings
     unified_contextual = defaultdict(list)
-    for relation, subject, context in material_bindings(store):
+    for relation, subject, context in light.material_bindings(store):
         unified_contextual[context['revision_id']].append((relation, subject))
 
     for position, loc in positions:
@@ -104,14 +103,13 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
             if row['payload'].get('scope'):owner(row['payload']['scope'],loc,evidence)
             if not descend or row['kind'] != 'REQUIREMENT': return
             plan = row['payload'].get('generation', {})
-            from .material_relations import active_inputs
-            active = {index for index, _ in active_inputs(store, plan, row['object_id'])[0]}
+            active = light.active_indices(store, row)
             for index, value in enumerate(plan.get('inputs', [])):
                 target = light.ref_record(store, value['reference'])
                 visit(target, {'kind': 'planned_input' if index in active else 'alternative',
                                'consumer': b.ref(row), 'input': value}, index in active)
-            for raw in store.db.execute("SELECT DISTINCT r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='call'", (row['object_id'],)):
-                call = light.record(store, revision_id=raw[0]); need = call['payload'].get('generation_requirement')
+            for call in light.material_calls(store, row['object_id']):
+                need = call['payload'].get('generation_requirement')
                 if need and light.ref_record(store, need)['payload'].get('scope') != row['payload'].get('scope'): continue
                 for value in call['payload'].get('inputs', []):
                     historic = light.historical_ref_record(store, value.get('reference', value))
