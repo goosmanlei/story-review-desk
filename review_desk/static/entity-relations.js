@@ -222,19 +222,35 @@ function managementEdgeGeometry(nodes,edges){
   const ports=new Map();
   function register(box,target){const key=box.id+':'+side(box,target);if(!ports.has(key))ports.set(key,[]);const entry={box,target,side:side(box,target)};ports.get(key).push(entry);return entry;}
   for(const [i,v] of views.entries()){v.label.id='caption:'+i;v.ap=register(v.a,v.label);v.bp=register(v.b,v.label);v.al=register(v.label,v.a);v.bl=register(v.label,v.b);}
+  const verticalPorts=[],horizontalPorts=[];
+  function coordinate(value,min,max,used){
+    const options=[value,...used.flatMap(v=>[v-6,v+6])].filter(v=>v>=min&&v<=max).sort((a,b)=>Math.abs(a-value)-Math.abs(b-value));
+    let chosen=options.find(v=>used.every(other=>Math.abs(v-other)>=3));
+    if(chosen===undefined){const bounds=[min,...used.filter(v=>v>min&&v<max),max].sort((a,b)=>a-b),gaps=bounds.slice(1).map((v,i)=>[bounds[i],v]).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));chosen=(gaps[0][0]+gaps[0][1])/2;}
+    used.push(chosen);return chosen;
+  }
   for(const entries of ports.values()){
     entries.sort((a,b)=>a.side==='left'||a.side==='right'?a.target.y-b.target.y:a.target.x-b.target.x);
     entries.forEach((p,i)=>{const {box,side}=p,f=(i+1)/(entries.length+1),horizontal=side==='left'||side==='right',sign=side==='left'||side==='top'?-1:1;
       p.point=horizontal?[box.x+(sign>0?box.w:0),box.y+16+(box.h-32)*f]:[box.x+16+(box.w-32)*f,box.y+(sign>0?box.h:0)];
+      // Captions in the same column/row also need distinct exit axes. Local
+      // per-card port ordering alone does not separate their short connectors.
+      if(horizontal)p.point[1]=coordinate(p.point[1],box.y+16,box.y+box.h-16,horizontalPorts);
+      else p.point[0]=coordinate(p.point[0],box.x+16,box.x+box.w-16,verticalPorts);
       p.outer=[p.point[0]+(horizontal?sign*(14+(i%3)*4):0),p.point[1]+(horizontal?0:sign*(14+(i%3)*4))];
     });
   }
-  const occupied=[];
+  // Reserve every exit before routing. A later connector must not be laid on
+  // an earlier route; searching only between the outer ports misses that case.
+  const connectors=[...ports.values()].flat().map(p=>[p.point,p.outer]),occupied=[...connectors];
+  const overlap=(a,b,c,d)=>a[0]===b[0]&&c[0]===d[0]?Math.abs(a[0]-c[0])<.01&&Math.min(Math.max(a[1],b[1]),Math.max(c[1],d[1]))-Math.max(Math.min(a[1],b[1]),Math.min(c[1],d[1]))>1:a[1]===b[1]&&c[1]===d[1]?Math.abs(a[1]-c[1])<.01&&Math.min(Math.max(a[0],b[0]),Math.max(c[0],d[0]))-Math.max(Math.min(a[0],b[0]),Math.min(c[0],d[0]))>1:false;
+  const straight=route=>route.slice(1).map((b,i)=>[route[i],b]).filter(([a,b])=>a[0]===b[0]||a[1]===b[1]);
   for(const [index,view] of views.entries()){
     const {ap,al,bl,bp}=view;
     const direct=(start,end)=>managementDirectCurve(start,end,nodes,views.map(v=>v.label));
     const d1=direct(ap,al),d2=direct(bl,bp);
-    if(d1&&d2){view.routes=[d1.points,d2.points];view.points=[...d1.points,...d2.points];view.path=d1.path+' '+d2.path;continue;}
+    const otherRuns=occupied.filter(([a])=>![ap,al,bl,bp].some(p=>p.point===a));
+    if(d1&&d2&&![...straight(d1.points),...straight(d2.points)].some(([a,b])=>otherRuns.some(([c,d])=>overlap(a,b,c,d)))){view.routes=[d1.points,d2.points];view.points=[...d1.points,...d2.points];view.path=d1.path+' '+d2.path;for(const route of view.routes)occupied.push(...straight(route));continue;}
     const one=managementOrthogonalRoute(ap.outer,al.outer,boxes,width,height,occupied,index*2),two=managementOrthogonalRoute(bl.outer,bp.outer,boxes,width,height,occupied,index*2+1);
     // The caption interrupts its own edge. No line is painted through text.
     const first=[ap.point,...one,al.point],last=[bl.point,...two,bp.point];
@@ -265,7 +281,10 @@ function managementSmoothRoute(points){
 // A visibility grid follows rectangle borders. No straight-line fallback is
 // allowed through cards when a route needs to travel around another entity.
 function managementOrthogonalRoute(start,end,boxes,width,height,occupied=[],lane=0){
-  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x-12-(lane%11)*6,b.x+b.w+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[0]-8,a[0]+8,b[0]-8,b[0]+8])])].filter(x=>x>=0&&x<=width).sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y-12-(lane%11)*6,b.y+b.h+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[1]-8,a[1]+8,b[1]-8,b[1]+8])])].filter(y=>y>=0&&y<=height).sort((a,b)=>a-b),nx=xs.length;
+  // Distant lanes can skip an entire narrow corridor and strand a valid port.
+  // Always retain the near borders of every padded obstacle as well as the
+  // separated lanes. The obstacle padding still protects rounded corners.
+  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x-2,b.x+b.w+2,b.x-12-(lane%11)*6,b.x+b.w+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[0]-8,a[0]+8,b[0]-8,b[0]+8])])].filter(x=>x>=0&&x<=width).sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y-2,b.y+b.h+2,b.y-12-(lane%11)*6,b.y+b.h+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[1]-8,a[1]+8,b[1]-8,b[1]+8])])].filter(y=>y>=0&&y<=height).sort((a,b)=>a-b),nx=xs.length;
   const origin=ys.indexOf(start[1])*nx+xs.indexOf(start[0]),goal=ys.indexOf(end[1])*nx+xs.indexOf(end[0]);
   const blocked=(a,b)=>boxes.some(box=>a[0]===b[0]?a[0]>box.x&&a[0]<box.x+box.w&&Math.max(a[1],b[1])>box.y&&Math.min(a[1],b[1])<box.y+box.h:a[1]>box.y&&a[1]<box.y+box.h&&Math.max(a[0],b[0])>box.x&&Math.min(a[0],b[0])<box.x+box.w);
   const overlap=(a,b,c,d)=>a[0]===b[0]&&c[0]===d[0]?Math.abs(a[0]-c[0])<.01&&Math.min(Math.max(a[1],b[1]),Math.max(c[1],d[1]))-Math.max(Math.min(a[1],b[1]),Math.min(c[1],d[1]))>1:a[1]===b[1]&&c[1]===d[1]?Math.abs(a[1]-c[1])<.01&&Math.min(Math.max(a[0],b[0]),Math.max(c[0],d[0]))-Math.max(Math.min(a[0],b[0]),Math.min(c[0],d[0]))>1:false;
@@ -304,14 +323,18 @@ function renderManagementEntityGraph(root,rows,result,memory){
     nodeHosts.push({node,foreign,host,button});}
 
   function drawEdges(){
-    for(const {node,foreign,host} of nodeHosts){node.h=Math.max(110,host.scrollHeight);foreign.setAttribute('height',node.h);}
-    edgeLayer.replaceChildren();captionLayer.replaceChildren();edgeViews.length=0;
-    const geometry=managementEdgeGeometry(nodes,edges);width=geometry.width;height=geometry.height;
-    for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},edgeLayer);
+    // Calculate and build the complete replacement offscreen before changing
+    // the visible graph, including card bounds and viewBox. One failed route
+    // must not erase a complete drawing or leave a partially committed layer.
+    const measured=nodeHosts.map(({node,host})=>({...node,h:Math.max(110,host.scrollHeight)}));
+    const geometry=managementEdgeGeometry(measured,edges),nextEdges=document.createElementNS(ns,'g'),nextCaptions=document.createElementNS(ns,'g'),nextViews=[];
+    for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},nextEdges);
       if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute('marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
-      const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},captionLayer),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
-      label.onclick=e=>{e.stopPropagation();if(!moved)choose({kind:'edge',id:edge.id});};edgeViews.push({edge,path,label,foreign});
+      const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},nextCaptions),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
+      label.onclick=e=>{e.stopPropagation();if(!moved)choose({kind:'edge',id:edge.id});};nextViews.push({edge,path,label,foreign});
     }
+    for(const [i,{node,foreign}] of nodeHosts.entries()){node.h=measured[i].h;foreign.setAttribute('height',node.h);}
+    edgeLayer.replaceChildren(...nextEdges.childNodes);captionLayer.replaceChildren(...nextCaptions.childNodes);edgeViews.splice(0,edgeViews.length,...nextViews);width=geometry.width;height=geometry.height;
     svg.setAttribute('viewBox',`0 0 ${width} ${height}`);paintSelection();
   }
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
@@ -327,7 +350,12 @@ function renderManagementEntityGraph(root,rows,result,memory){
   viewport.onpointerup=()=>{pan=null;};viewport.onpointercancel=()=>{moved=true;pan=null;};
   viewport.onclick=e=>{if(!moved&&!e.target.closest('[data-entity-id],[data-relation-id]'))choose(null);};
   viewport.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();choose(null);return;}if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key);}};
-  function layout(){if(!viewport.isConnected)return;const left=memory.left,top=memory.top;drawEdges();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
+  const issue=el('div','production-issue');issue.hidden=true;issue.setAttribute('role','alert');root.append(issue);
+  function layout(){
+    if(!viewport.isConnected)return;const left=memory.left,top=memory.top;
+    try{drawEdges();issue.hidden=true;issue.replaceChildren();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
+    catch(error){issue.hidden=false;issue.replaceChildren();nodeText('p',null,(ready?'关系图未能重新绘制，仍保留上一次完整结果。':'关系图绘制失败。')+error.message,issue);productionButton(issue,'重新绘制关系图',layout);}
+  }
   requestAnimationFrame(layout);
   if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return;}layout();});observer.observe(viewport);for(const {host} of nodeHosts)observer.observe(host);}
 }

@@ -1,0 +1,381 @@
+{
+  "source": "task-20261012-0005 ASH242 exact graph; measured card size 230 x 110; no content edits",
+  "card_height": 110,
+  "rows": [
+    {
+      "object_id": "entity-a-heng",
+      "business_code": "EN002",
+      "payload": {
+        "title": "阿蘅"
+      }
+    },
+    {
+      "object_id": "entity-bait-basin",
+      "business_code": "EN040",
+      "payload": {
+        "title": "蛇饵盆"
+      }
+    },
+    {
+      "object_id": "entity-cave-gate",
+      "business_code": "EN052",
+      "payload": {
+        "title": "北端洞闸"
+      }
+    },
+    {
+      "object_id": "entity-crossbeam",
+      "business_code": "EN058",
+      "payload": {
+        "title": "压闸长横杠"
+      }
+    },
+    {
+      "object_id": "entity-feeding-channel",
+      "business_code": "EN068",
+      "payload": {
+        "title": "短石道与盖石"
+      }
+    },
+    {
+      "object_id": "entity-feeding-door",
+      "business_code": "EN069",
+      "payload": {
+        "title": "南端投食木门"
+      }
+    },
+    {
+      "object_id": "entity-gate-pin",
+      "business_code": "EN071",
+      "payload": {
+        "title": "洞闸木栓"
+      }
+    },
+    {
+      "object_id": "entity-heavy-blade",
+      "business_code": "EN077",
+      "payload": {
+        "title": "县库厚背刀"
+      }
+    },
+    {
+      "object_id": "entity-helpers-four",
+      "business_code": "EN009",
+      "payload": {
+        "title": "四名压杠乡亲"
+      }
+    },
+    {
+      "object_id": "entity-hemp-rope",
+      "business_code": "EN078",
+      "payload": {
+        "title": "陶伯麻绳与护垫"
+      }
+    },
+    {
+      "object_id": "entity-li-dan",
+      "business_code": "EN011",
+      "payload": {
+        "title": "李诞"
+      }
+    },
+    {
+      "object_id": "entity-li-ji",
+      "business_code": "EN012",
+      "payload": {
+        "title": "李寄"
+      }
+    },
+    {
+      "object_id": "entity-li-xiao",
+      "business_code": "EN014",
+      "payload": {
+        "title": "李绡"
+      }
+    },
+    {
+      "object_id": "entity-officer-cheng",
+      "business_code": "EN019",
+      "payload": {
+        "title": "程差役"
+      }
+    },
+    {
+      "object_id": "entity-old-lantern",
+      "business_code": "EN089",
+      "payload": {
+        "title": "李家旧灯"
+      }
+    },
+    {
+      "object_id": "entity-snake",
+      "business_code": "EN110",
+      "payload": {
+        "title": "大蛇"
+      }
+    },
+    {
+      "object_id": "entity-sun-liu",
+      "business_code": "EN027",
+      "payload": {
+        "title": "孙六"
+      }
+    },
+    {
+      "object_id": "entity-temple-back",
+      "business_code": "EN117",
+      "payload": {
+        "title": "庙后封闭小院"
+      }
+    },
+    {
+      "object_id": "av-e13-a01-s01",
+      "business_code": "ASH242",
+      "payload": {
+        "title": "13 · A01 · 01 父亲喊落，七人降杠闸停半途反顶"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "relation-00ed8be6a02533e0979ed1d02195e4b6",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-sun-liu"
+      ],
+      "summary": "教过她数拍",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-14c531ea81347102ae18d6a040a884f0",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-officer-cheng"
+      ],
+      "summary": "东侧压杠",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-22c01948af91ae7592d609ad8eb24bb1",
+      "endpoints": [
+        "entity-li-dan",
+        "entity-sun-liu"
+      ],
+      "summary": "共同做工的旧交",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-3e83d546b229a7cf25cc1aa8704830f1",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-li-xiao"
+      ],
+      "summary": "西侧压杠",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-4d89286155ed5137736e04dd036056c9",
+      "endpoints": [
+        "entity-bait-basin",
+        "entity-feeding-channel"
+      ],
+      "summary": "推入南门至刀缝以南",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-69ce48324cb4fa9f043ff387684ff007",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-li-ji"
+      ],
+      "summary": "从一起撑布到换手抄词，相互照应并保留各自决定。",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-730be618d577de3a78483948cbe310c2",
+      "endpoints": [
+        "entity-heavy-blade",
+        "entity-li-dan"
+      ],
+      "summary": "示范沿缝落刀",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-73f9f07117ec5bc8b52110822dfcb926",
+      "endpoints": [
+        "entity-li-ji",
+        "entity-old-lantern"
+      ],
+      "summary": "携灯并照归家路",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-7742748d70a86cafec48274dd803f47a",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-helpers-four"
+      ],
+      "summary": "四名乡亲合力压杠",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-7a37f2d33efc606bb3043e085a8d2ecf",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-hemp-rope"
+      ],
+      "summary": "捆扎压杠并护角",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-7f655d38ec2be91c7e458555b3dc1fb0",
+      "endpoints": [
+        "entity-heavy-blade",
+        "entity-li-ji"
+      ],
+      "summary": "持厚背刀斩蛇",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-87a3481819566d7e5bf0464c46b6d1dd",
+      "endpoints": [
+        "entity-cave-gate",
+        "entity-crossbeam"
+      ],
+      "summary": "绑接后持续压闸",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-bb40f7a69adaf578e613b0ac2bf1ca29",
+      "endpoints": [
+        "entity-feeding-channel",
+        "entity-feeding-door"
+      ],
+      "summary": "南端投食入口",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-ca9ededa1fd51ac7de8f0f7c228e9900",
+      "endpoints": [
+        "entity-li-ji",
+        "entity-snake"
+      ],
+      "summary": "在闸与刀缝限制内斩蛇",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-d45f638c415a4a46b35febdf43c5adb7",
+      "endpoints": [
+        "entity-li-dan",
+        "entity-li-ji"
+      ],
+      "summary": "父亲与女儿",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-d4ed46ba6ba6151ff386411c0acca988",
+      "endpoints": [
+        "entity-li-dan",
+        "entity-li-xiao"
+      ],
+      "summary": "父亲与女儿",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-d64cf6d6f5b0e1c1e66a5582cb8e78e1",
+      "endpoints": [
+        "entity-hemp-rope",
+        "entity-sun-liu"
+      ],
+      "summary": "加旧布护垫",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-d9915aa55319c8129015a3913eadffbb",
+      "endpoints": [
+        "entity-feeding-channel",
+        "entity-temple-back"
+      ],
+      "summary": "院内封闭石道",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-e028726e1865ec438219d631dd4c7c08",
+      "endpoints": [
+        "entity-li-ji",
+        "entity-li-xiao"
+      ],
+      "summary": "五姐与妹妹",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-e2942c46491ca822db1b54b63a9c51a7",
+      "endpoints": [
+        "entity-cave-gate",
+        "entity-feeding-channel"
+      ],
+      "summary": "北端通山洞",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-e33ea044974df96c482bc3ada8502662",
+      "endpoints": [
+        "entity-cave-gate",
+        "entity-gate-pin"
+      ],
+      "summary": "闸落底后穿栓固定",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-e608badde2cd7ed42a2b9827570f06b6",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-sun-liu"
+      ],
+      "summary": "西侧压杠",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-e92a07cb1d79cb9ee47ed6be2d93b473",
+      "endpoints": [
+        "entity-a-heng",
+        "entity-li-xiao"
+      ],
+      "summary": "安排洗幕布工作",
+      "direction": "related",
+      "derived": false
+    },
+    {
+      "id": "relation-f4ed6ae4c9977e429a074d19c308f938",
+      "endpoints": [
+        "entity-crossbeam",
+        "entity-li-dan"
+      ],
+      "summary": "临危加入东侧压杠",
+      "direction": "related",
+      "derived": false
+    }
+  ]
+}

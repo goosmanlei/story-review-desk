@@ -267,19 +267,32 @@ def canonical_id(store, material_id):
 def identity(store, material_id):
     from . import list_reading
     mid=canonical_id(store,material_id)
-    rows=list(store.db.execute("SELECT * FROM material_aliases WHERE COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id)=? ORDER BY alias_id",(mid,)))
+    scope=getattr(store,'_production_reads',None)
+    if scope is not None:
+        if 'material_identity_index' not in scope:
+            indexed={}
+            for row in store.db.execute("SELECT *,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) canonical_id FROM material_aliases ORDER BY alias_id"):
+                indexed.setdefault(row['canonical_id'],[]).append(row)
+            memberships={}
+            for row in store.db.execute('SELECT revision_id,material_id,number FROM material_plan_members ORDER BY material_id,number'):
+                memberships.setdefault(row['revision_id'],[]).append({'material_id':row['material_id'],'number':row['number']})
+            scope['material_identity_index']=(indexed,memberships,{row[0] for row in store.db.execute('SELECT id FROM objects')})
+        indexed,memberships,object_ids=scope['material_identity_index']
+        rows=indexed.get(mid,[])
+    else:
+        rows=list(store.db.execute("SELECT * FROM material_aliases WHERE COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id)=? ORDER BY alias_id",(mid,)))
     aliases=sorted({mid,*[r['alias_id'] for r in rows]})
     evidence={r['alias_id']:json.loads(r['evidence']) for r in rows}
     associations=[]
     for alias in aliases:
-        if not store.db.execute('SELECT 1 FROM objects WHERE id=?',(alias,)).fetchone():continue
+        if (alias not in object_ids if scope is not None else not store.db.execute('SELECT 1 FROM objects WHERE id=?',(alias,)).fetchone()):continue
         record=list_reading.record(store,alias)
         if record['kind']=='REQUIREMENT' and record['payload'].get('status') != 'withdrawn':
             associations.append({'requirement':{'object_id':alias,'revision_id':record['id']},
                 'title':record['payload']['title'],'scope':record['payload']['scope'],
                 'states':record['payload'].get('states',[]),'evidence':evidence.get(alias,{'kind':'original_requirement'}),
                 'source_requirements':[v['reference'] for v in record['payload'].get('generation',{}).get('inputs',[]) if record['payload'].get('generation',{}).get('method')=='reuse'],
-                'versions':[dict(v) for v in store.db.execute('SELECT material_id,number FROM material_plan_members WHERE revision_id=? ORDER BY material_id,number',(record['id'],))]})
+                'versions':memberships.get(record['id'],[]) if scope is not None else [dict(v) for v in store.db.execute('SELECT material_id,number FROM material_plan_members WHERE revision_id=? ORDER BY material_id,number',(record['id'],))]})
     return {'id':mid,'aliases':aliases,'associations':associations}
 
 

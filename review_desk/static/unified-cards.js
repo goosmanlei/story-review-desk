@@ -239,9 +239,12 @@ async function openUnifiedMaterial(ref,trigger){
   rememberProductionDraft();if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   const workspace=state.workspace,epoch=productionLoadEpoch,owns=()=>state.workspace===workspace&&productionLoadEpoch===epoch;
   const fields=['reviewWork','reviewPermission','shotReferenceContext','productionDraftScope','productionSelected','productionDetail','productionEntityDetail','productionChildDetail','productionEntityId','entityReview','positionReview','materialReview','unifiedScope','unifiedCardRoot','anchor','editing','selected','reviewCommentScope','pending','drawMode','suggestion','preview','previewExpanded','materialCommentCard','reviewReferenceContext','historyOpen','historyLimit'];
-  const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),url=location.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
+  const saved=Object.fromEntries(fields.map(k=>[k,state[k]])),requestURL=location.href,returnURL=new URL(requestURL);
+  if(ref.restoreRoute){for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])returnURL.searchParams.delete(key);history.replaceState(history.state,'',returnURL)}
+  const url=returnURL.href,panel=$('#comment-panel'),parent=panel.parentNode,next=panel.nextSibling,hidden=panel.hidden;
   const toggle=$('#comments-toggle'),toggleParent=toggle?.parentNode,toggleNext=toggle?.nextSibling;
   const {dialog,title,body}=openReviewDialog('实体与素材详情',trigger,'unified-card-dialog');nodeText('p',null,'正在读取…',body);
+  if(ref.restoreRoute)history.replaceState(history.state,'',requestURL);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(toggleParent)toggleParent.insertBefore(toggle,toggleNext?.parentNode===toggleParent?toggleNext:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   try{const result=await readUnifiedCard(ref.object_id,ref.revision_id||ref.id,ref.params,Object.hasOwn(ref,'work')?ref.work:currentReviewWork());if(!dialog.isConnected||!owns())return;
@@ -272,7 +275,7 @@ function validateUnifiedReference(result){
 // Selection belongs to this shot, so another shot cannot inherit its material.
 function writeShotWorkspaceRoute(data){
   const mid=data.unifiedMaterialId,candidate=data.selectedCandidates?.[mid];
-  breakdownRoute({shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
+  breakdownRoute({production_scope_shot:data.entity.object_id,shot_material_id:mid||null,shot_candidate:candidate&&candidate!=='current'?candidate:null,
     shot_component:candidate&&candidate!=='current'?data.selectedComponents?.[candidate]||null:null});
 }
 // One detail request at a time per reader. Visible cards enqueue automatically;
