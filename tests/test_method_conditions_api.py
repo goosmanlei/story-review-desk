@@ -146,3 +146,23 @@ class MethodConditionsApiTest(unittest.TestCase):
         self.save('binding', 'media-plan', 1, b['payload'], ['media_type=image', 'media_type=audio', 'media_type=video'])
         for medium in ('image', 'audio', 'video'):
             self.assertEqual(self.resolve({'media_type': medium}, 'media-plan')['title'], medium)
+
+    def test_exact_record_and_stage_http_reads_do_not_annotate_frozen_nested_inputs(self):
+        from review_desk import methods
+        row = self.server.store.put_object('coded-input', 'NOTE', {'title': '准确原文', 'text': '原值🧵'})
+        self.server.store.db.execute('INSERT INTO business_codes VALUES (?,?,?)', ('coded-input', 'EN', 1))
+        self.server.store.db.commit()
+        method = self.save('skill', 'design', 0, self.payload)
+        self.select(method)
+        request = {'work_type': 'audiovisual-design', 'run_id': 'exact-read', 'step_id': 'one',
+                   'target': 'coded-input', 'inputs': {'context': {'record': row}}, 'private': True}
+        execution = self.api('/api/methods/prepare', request, 201)
+        ref = methods.reference(execution)
+        read = self.api('/api/methods/record?' + urllib.parse.urlencode(ref))
+        self.assertEqual(read, execution)
+        self.assertEqual(methods.checksum(read['payload']['inputs']), execution['payload']['inputs_sha256'])
+        artifact = self.api('/api/methods/artifact', {**request, 'execution': ref, 'stage': 'result', 'output': {'record': row}}, 201)
+        response = self.api('/api/methods/stage?' + urllib.parse.urlencode({
+            'execution_object_id': ref['object_id'], 'execution_revision_id': ref['revision_id'], 'stage': 'result'}))
+        self.assertEqual(response, {'artifact': artifact, 'previous': []})
+        self.assertEqual(response['artifact']['payload']['output'], {'record': row})
