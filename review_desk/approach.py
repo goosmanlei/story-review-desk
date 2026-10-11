@@ -6,7 +6,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlsplit, parse_qs
 
 
-def validate_workflow(diagram):
+def validate_workflow(diagram, tab_ids=None):
     """A bounded reading graph: local navigation and text, no arbitrary markup."""
     def require(condition):
         if not condition:
@@ -33,6 +33,7 @@ def validate_workflow(diagram):
             require(query.get('production_tab', [''])[0] in ('breakdown', 'entities', 'materials'))
         if workspace == 'production.approach':
             require(identifier(query.get('tab', [''])[0]))
+            require(tab_ids is None or query['tab'][0] in tab_ids)
         require(not url.fragment or re.fullmatch(r'approach-[a-z0-9]+(?:-[a-z0-9]+)*', url.fragment))
 
     require(isinstance(diagram, dict) and set(diagram) == {
@@ -286,7 +287,7 @@ def read_document(root):
                     diagram = tab['sections'][0]['diagram']
                     targets = {tab['sections'][0]['id']}
                     if isinstance(diagram, dict) and diagram.get('type') == 'workflow':
-                        validate_workflow(diagram)
+                        validate_workflow(diagram, tab_ids)
                         node_ids = {node['id'] for node in diagram['nodes']}
                         require(tab['sections'][0]['id'] not in node_ids)
                         targets.update(node_ids)
@@ -307,6 +308,9 @@ def read_document(root):
                 require(isinstance(section["title"], str))
                 if "diagram" in section:
                     require(tab.get("layout", {}).get("type") in ("cycle", "diagram"))
+                    if isinstance(section['diagram'], dict) and section['diagram'].get('type') == 'workflow':
+                        require(tab.get('layout', {}).get('type') == 'diagram')
+                        validate_workflow(section['diagram'], tab_ids)
                     validate_collaboration(section["diagram"])
                 if "blocks" in section:
                     require(value["schema_version"] == 2)

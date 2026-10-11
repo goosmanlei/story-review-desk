@@ -91,7 +91,7 @@ class ApproachTest(unittest.TestCase):
         self.assertEqual(self.get('/api/production-approach'), value)
         for change in ('missing-target', 'unknown-type', 'illegal-navigation', 'duplicate-node',
                        'duplicate-placement', 'unknown-shape', 'feedback-target', 'reversed-edge',
-                       'unknown-field', 'bad-alias', 'duplicate-param', 'fragment-navigation'):
+                       'unknown-field', 'bad-alias', 'duplicate-param', 'fragment-navigation', 'unknown-method-page'):
             invalid = copy.deepcopy(value)
             target = invalid['tabs'][0]['sections'][0]['diagram']
             if change == 'missing-target': target['connections'][0]['to'] = 'missing'
@@ -106,6 +106,7 @@ class ApproachTest(unittest.TestCase):
             if change == 'bad-alias': invalid['tabs'][0]['layout']['anchors']['old'] = 'missing'
             if change == 'duplicate-param': target['nodes'][0]['href'] = '/?workspace=story.outline&workspace=story.sources'
             if change == 'fragment-navigation': target['nodes'][0]['href'] = '/?workspace=story.outline#unknown'
+            if change == 'unknown-method-page': target['nodes'][0]['href'] = '/?workspace=production.approach&tab=missing'
             self.path.write_text(json.dumps(invalid))
             with self.subTest(change=change), self.assertRaises(HTTPError) as caught:
                 self.get('/api/production-approach')
