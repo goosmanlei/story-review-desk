@@ -11,12 +11,11 @@ test('displayed code search is exact and normalized, Chinese aliases remain sear
  const c=context();for(const query of ['m2624','Ｍ２６２４','旧渡头'])assert.equal(c.readableSearchMatches(query,['M2624','渡口 · 旧渡头']),true);
  assert.equal(c.readableSearchMatches('M262',['M2624']),false);
 });
-test('identity lookup shows one material with every real use; location browsing preserves groups',()=>{
- const c=context(),result={items:[{object_id:'material',canonical_material_id:'material'}],groups:[1,2,3].map(i=>({key:'g'+i,level:'scene',episode:'e17',scene:'s'+i,material_ids:['material']}))};
- const catalog={episodes:[{object_id:'e17',number:17}]};
- const lookup=plain(c.managementMaterialGroups(result,{search:'voice'},catalog));assert.equal(lookup.length,1);assert.equal(lookup[0].items.length,1);assert.equal(lookup[0].items[0].usageGroups.length,3);
- assert.equal(c.managementMaterialGroups(result,{search:'voice',episode:'e17'},catalog).length,3);
- assert.equal(c.managementMaterialGroups(result,{search:''},catalog).length,3);
+test('lookup and scoped browsing both show a shared material once in its media group',()=>{
+ const c=context(),item={object_id:'material',canonical_material_id:'material',media_type:'audio'},result={items:[item],groups:[1,2,3].map(i=>({key:'g'+i,level:'scene',episode:'e17',scene:'s'+i,material_ids:['material']}))};
+ for(const filters of [{search:'voice'},{search:'voice',episode:'e17'},{search:''}]){
+  const groups=plain(c.managementMaterialGroups(result,filters));assert.equal(groups.length,1);assert.equal(groups[0].key,'audio');assert.equal(groups[0].items.length,1);
+ }
 });
 function positionFixture(read){
  let renders=0;const root={isConnected:true,closest:()=>null},original={record:{id:'old'}};

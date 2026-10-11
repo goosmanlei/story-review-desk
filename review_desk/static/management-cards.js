@@ -1,9 +1,9 @@
-/* Shared four-column row pagination; viewport changes only change CSS layout. */
-function groupedCardPage(groups,page=1,rowsPerPage=10){
-  const rows=Math.max(1,Math.trunc(rowsPerPage)||10),totalRows=groups.reduce((n,g)=>n+Math.ceil(g.items.length/4),0),pages=Math.max(1,Math.ceil(totalRows/rows));
+/* Fixed baseline rows; viewport changes only change CSS layout. */
+function groupedCardPage(groups,page=1,rowsPerPage=10,columns=4){
+  const rows=Math.max(1,Math.trunc(rowsPerPage)||10),totalRows=groups.reduce((n,g)=>n+Math.ceil(g.items.length/columns),0),pages=Math.max(1,Math.ceil(totalRows/rows));
   page=Math.min(pages,Math.max(1,Math.trunc(page)||1));const start=(page-1)*rows,end=start+rows;let offset=0;const visible=[];
-  for(const group of groups){const size=Math.ceil(group.items.length/4),from=Math.max(0,start-offset),to=Math.min(size,end-offset);if(to>from)visible.push({...group,continued:from>0,items:group.items.slice(from*4,to*4)});offset+=size}
-  return {groups:visible,page,pages,totalRows,rowsPerPage:rows};
+  for(const group of groups){const size=Math.ceil(group.items.length/columns),from=Math.max(0,start-offset),to=Math.min(size,end-offset);if(to>from)visible.push({...group,continued:from>0,items:group.items.slice(from*columns,to*columns)});offset+=size}
+  return {groups:visible,page,pages,totalRows,rowsPerPage:rows,columns};
 }
 function reviewPagination(parent,model,change){
   const nav=el('nav','review-pagination');nav.setAttribute('aria-label','列表分页');
@@ -11,7 +11,7 @@ function reviewPagination(parent,model,change){
   const status=nodeText('span',null,`第 ${model.page} / ${model.pages} 页`,nav);status.setAttribute('aria-live','polite');
   for(const [label,page,disabled] of [['下一页',model.page+1,model.page===model.pages],['末页',model.pages,model.page===model.pages]])productionButton(nav,label,()=>change(page,model.rowsPerPage)).disabled=disabled;
   const label=el('label');nodeText('span',null,'每页行数',label);const select=el('select');select.setAttribute('aria-label','每页行数');for(const count of [5,10,20,50])select.append(new Option(String(count),String(count)));select.value=String(model.rowsPerPage);select.onchange=()=>change(1,Number(select.value));label.append(select);nav.append(label);
-  nodeText('small','pagination-basis','行数按四列计算；窄屏仅重排',nav);parent.append(nav);return nav;
+  nodeText('small','pagination-basis',`行数按${model.columns===5?'五':'四'}列计算；窄屏仅重排`,nav);parent.append(nav);return nav;
 }
 function managementMemory(key,params,prefix){
   state.managementLists||={};if(!state.managementLists[key])state.managementLists[key]={page:Number(params.get(prefix+'page'))||1,rows:Number(params.get(prefix+'rows'))||10,filters:{}};
@@ -101,29 +101,22 @@ function readableSearchMatches(query,terms){
   const normalized=value=>String(value||'').normalize('NFKC').toLowerCase().trim().replace(/\s+/gu,' '),needle=normalized(query);
   return !needle||( /^(?:m|en|st|ash|as|ae)\d+$/u.test(needle)?terms.some(term=>normalized(term)===needle):terms.some(term=>normalized(term).includes(needle)));
 }
-function managementMaterialGroups(result,filters,catalog){
-  const byId=new Map(result.items.map(i=>[i.canonical_material_id||i.object_id,i]));
-  const groups=result.groups.map(g=>({...g,title:g.level==='scene'?`${reviewPositionLabel('episode',catalog.episodes.find(e=>e.object_id===g.episode)||g.episode_number)} / ${managementSceneLabel(g.scene,g.episode,catalog)}`:g.level==='episode'?`${reviewPositionLabel('episode',catalog.episodes.find(e=>e.object_id===g.episode)||g.episode_number)} · 集素材`:g.level==='story'?'全剧素材':'未关联集场',items:g.material_ids.map(id=>byId.get(id))}));
-  if(!filters.search||filters.episode||filters.scene)return groups;
-  return [{key:'identities',title:'查找结果',items:result.items.map(item=>({...item,usageGroups:groups.filter(group=>group.material_ids.includes(item.canonical_material_id||item.object_id))}))}];
-}
-function managementMaterialUses(parent,item,memory){
-  if(!item.usageGroups?.length)return;
-  const details=el('section','management-material-uses');
-  for(const group of item.usageGroups){
-    const references=(item.locations||[]).filter(loc=>loc.episode===group.episode&&loc.scene===group.scene&&loc.scope);
-    const exact=new Map();
-    for(const loc of references){
-      if(!loc.source&&references.some(other=>other.source&&other.scope.object_id===loc.scope.object_id&&other.scope.revision_id===loc.scope.revision_id))continue;
-      const ref=loc.source||loc.scope,key=JSON.stringify([ref.object_id,ref.revision_id,ref.scene_id||'',loc.kind]),previous=exact.get(key);
-      if(previous?.source)previous.source={...previous.source,block_ids:[...new Set([...(previous.source.block_ids||[]),...(ref.block_ids||[])])]};else exact.set(key,{...loc});
-    }
-    const unique=[...exact.values()],sourceLabel=loc=>group.title.replace(/ · .*$/u,'')+(loc.source_scene_name?' · '+String(loc.source_scene_name).replace(/^\d+-\d+\s*/u,''):'');
-    const line=el('div','management-use-line');details.append(line);
-    if(unique.length===1&&unique[0].source)productionRefLink(line,unique[0].source,sourceLabel(unique[0]));
-    else {nodeText('p',null,group.title,line);for(const loc of unique)productionRefLink(line,loc.source||{...loc.scope,kind:loc.kind},loc.source?sourceLabel(loc)+' · 修订 '+loc.source_version:loc.title||group.title)}
+function managementMaterialGroups(result){
+  const unique=new Map();
+  for(const item of result.items){
+    const id=item.canonical_material_id||item.object_id;
+    if(!unique.has(id))unique.set(id,item);
   }
-  parent.append(details);
+  const types=['image','audio','video','project','document'];
+  const groups=new Map(types.map(type=>[type,{key:type,title:({image:'图像',audio:'声音',video:'视频',project:'工程',document:'文档'})[type],items:[]}]));
+  for(const item of unique.values()){
+    const type=types.includes(item.media_type)?item.media_type:'unknown';
+    if(!groups.has(type))groups.set(type,{key:type,title:'其他素材（类型未明确）',items:[]});
+    groups.get(type).items.push(item);
+  }
+  const code=item=>item.business_code||businessCode(item);
+  for(const group of groups.values())group.items.sort((a,b)=>Number(!!b.generated)-Number(!!a.generated)||code(a).localeCompare(code(b),undefined,{numeric:true})||(a.canonical_material_id||a.object_id).localeCompare(b.canonical_material_id||b.object_id));
+  return [...groups.values()].filter(group=>group.items.length);
 }
 function entitySmallCard(parent,row,{stateCount=0,materialCount=0,preview=null,references=[]}={}){
   const button=reviewSmallCard(parent,{title:row.payload.title,business_code:businessCode(row),icon:row.payload.entity_type,preview,subtitle:`状态 ${stateCount} 个 · 素材 ${materialCount} 个`},trigger=>openManagementReferences(references,trigger,'选择此范围的准确实体版本',{object_id:row.object_id,defaultSelection:true}));button.classList.add('entity-small-card');button.dataset.objectId=row.object_id;button.dataset.entityType=row.payload.entity_type;button.setAttribute('aria-haspopup','dialog');return button;
@@ -138,16 +131,15 @@ async function openManagementMaterial(item,trigger){
 async function loadMaterialManagement(){
   state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const workspace=state.workspace,epoch=++productionLoadEpoch,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('materials',params,'material_');++productionReadEpoch;state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
   const keys=['episode','scene','media','status','search'];for(const key of keys)memory.filters[key]=params.get('material_'+key)||'';managementScopeMemory(memory,params,'material_');const filters=memory.filters,catalog={episodes:[]};if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;state.productionRecords=[];
-  const panel=el('section','production-filters');panel.setAttribute('aria-label','素材管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(scope,facets);managementLegacyNotice(panel,memory);host.append(panel);const summary=nodeText('p','production-filter-summary','',host);summary.setAttribute('role','status');const content=el('div','management-card-list');content.setAttribute('aria-label','素材列表');host.append(content);const bottom=el('div');host.append(bottom);let request=0,result=null,timer;
-  const clear=productionButton(controls,'清除筛选',()=>{for(const key of [...keys,'scope_revision'])filters[key]='';search.value='';refresh()});search.oninput=()=>{clearTimeout(timer);timer=setTimeout(()=>{filters.search=search.value.trim();refresh()},150)};
+  const panel=el('section','production-filters');panel.setAttribute('aria-label','素材管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(scope,facets);managementLegacyNotice(panel,memory);host.append(panel);const summary=nodeText('p','production-filter-summary','',host);summary.setAttribute('role','status');const content=el('div','management-card-list');content.setAttribute('aria-label','素材列表');content.classList.add('material-management-list');host.append(content);const bottom=el('div');host.append(bottom);let request=0,result=null,timer;
+  const clear=productionButton(controls,'清除筛选',()=>{for(const key of [...keys,'scope_revision'])filters[key]='';search.value='';refresh()});search.oninput=()=>{++request;clearTimeout(timer);timer=setTimeout(()=>{filters.search=search.value.trim();refresh()},150)};
   function draw(){
-    const sourceGroups=managementMaterialGroups(result,filters,catalog),groups=[...sourceGroups.map(g=>({...g,key:g.key+':results',title:g.title+' · 已有原件',items:g.items.filter(i=>i.generated)})),...sourceGroups.map(g=>({...g,key:g.key+':preparing',title:g.title+' · 尚无结果',items:g.items.filter(i=>!i.generated)}))].filter(g=>g.items.length),page=groupedCardPage(groups,memory.page,memory.rows);memory.page=page.page;content.replaceChildren();
-    managementSections(content,page.groups,(list,item)=>{const wrapper=el('div');list.append(wrapper);const button=materialSmallCard(wrapper,item,trigger=>openManagementMaterial(item,trigger),false,{includesHistory:true});button.setAttribute('aria-haspopup','dialog');managementMaterialUses(wrapper,item,memory)});
-    if(!result.total)nodeText('p','production-meta','没有符合筛选条件的素材；可清除搜索或调整集场、媒体与结果条件。',content);
-    const identityView=!!filters.search&&!filters.episode&&!filters.scene;
-    summary.textContent=`${result.items.filter(i=>i.generated).length} 项已有原件可比较；${result.items.filter(i=>!i.generated).length} 项尚无结果。制作准备不要求逐项审阅。`;summary.title=identityView?'按独立素材展示；用途保留在各素材下方':'素材数按唯一素材身份计数；同一素材在不同真实关联分组各展示一次';
+    const groups=managementMaterialGroups(result),items=groups.flatMap(group=>group.items),page=groupedCardPage(groups,memory.page,memory.rows,5);memory.page=page.page;content.replaceChildren();
+    managementSections(content,page.groups,(list,item)=>{const button=materialSmallCard(list,item,trigger=>openManagementMaterial(item,trigger),false,{includesHistory:true});button.setAttribute('aria-haspopup','dialog')});
+    if(!items.length)nodeText('p','production-meta','没有符合筛选条件的素材；可清除搜索或调整集场、媒体与结果条件。',content);
+    summary.textContent=`${items.length} 项素材；${items.filter(i=>i.generated).length} 项有结果，${items.filter(i=>!i.generated).length} 项无结果。`;summary.title='按唯一素材身份计数；有结果依据真实候选或原件，不表示人工认可';
     bottom.replaceChildren();reviewPagination(bottom,page,(p,rows)=>{memory.page=p;memory.rows=rows;draw();content.scrollIntoView({block:'start'});bottom.querySelector('[aria-label="每页行数"]')?.focus({preventScroll:true})});managementRoute('material_',memory);
   }
-  async function refresh(reset=true){if(reset)memory.page=1;const token=++request;clear.disabled=!Object.values(filters).some(Boolean);try{const data=await api('/api/production/materials?'+new URLSearchParams({...filters,scope:'av',grouped:1,compact:1}));if(token!==request||epoch!==productionLoadEpoch||workspace!==state.workspace)return;result=data;catalog.episodes=result.management_episodes||catalog.episodes;facets.replaceChildren();for(const key of ['media','status']){const options=Object.keys(result.facets[key]).map(value=>[value,value?(key==='media'?productionMediaLabels[value]:value==='generated'?'有结果':'无结果'):'全部']);flatFilterGroup(facets,key,key==='media'?'媒体类型':'生成结果',options,filters[key],result.facets[key],value=>{filters[key]=value;refresh()})}scope.replaceChildren();const locations=result.management_locations||[];managementScopeFilters(scope,filters,catalog,locations,()=>refresh());draw()}catch(error){if(token===request&&epoch===productionLoadEpoch){content.replaceChildren();nodeText('p','production-issue',error.message,content);if(filters.episode||filters.scene||filters.scope_revision)productionButton(content,'重新选择制作范围',()=>{filters.episode='';filters.scene='';filters.scope_revision='';managementScopeRoute(filters);refresh()})}}}
+  async function refresh(reset=true){if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;if(reset)memory.page=1;const token=++request;managementRoute('material_',memory);summary.textContent='正在读取素材…';bottom.replaceChildren();content.replaceChildren();clear.disabled=!Object.values(filters).some(Boolean);try{const data=await api('/api/production/materials?'+new URLSearchParams({...filters,scope:'av',grouped:1,compact:1}));if(token!==request||epoch!==productionLoadEpoch||workspace!==state.workspace)return;result=data;catalog.episodes=result.management_episodes||catalog.episodes;facets.replaceChildren();for(const key of ['media','status']){const options=Object.keys(result.facets[key]).map(value=>[value,value?(key==='media'?(productionMediaLabels[value]||'其他素材（类型未明确）'):value==='generated'?'有结果':'无结果'):'全部']);flatFilterGroup(facets,key,key==='media'?'媒体类型':'生成结果',options,filters[key],result.facets[key],value=>{filters[key]=value;refresh()})}scope.replaceChildren();const locations=result.management_locations||[];managementScopeFilters(scope,filters,catalog,locations,()=>refresh());draw()}catch(error){if(token===request&&epoch===productionLoadEpoch&&workspace===state.workspace){summary.textContent='素材读取失败';content.replaceChildren();nodeText('p','production-issue',error.message,content);productionButton(content,'重新读取列表',()=>refresh(false));if(filters.episode||filters.scene||filters.scope_revision)productionButton(content,'重新选择制作范围',()=>{filters.episode='';filters.scene='';filters.scope_revision='';managementScopeRoute(filters);refresh()})}}}
   await refresh(false);if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;const target=params.get('production_object');if(target)await openUnifiedMaterial({object_id:target,revision_id:params.get('production_revision'),params},null);
 }
