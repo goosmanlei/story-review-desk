@@ -344,7 +344,7 @@ function renderBreakdownCommentCounts(){
 }
 function breakdownNavigate(values){
   rememberProductionDraft();const url=new URL(location.href);
-  for(const key of ['production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state','shot_material_id','shot_plan','shot_candidate','shot_baseline'])url.searchParams.delete(key);
+  for(const key of ['production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state','shot_material_id','shot_plan','shot_candidate','shot_baseline','shot_component'])url.searchParams.delete(key);
   for(const [key,value] of Object.entries(values)){if(value===null)url.searchParams.delete(key);else url.searchParams.set(key,value)}
   history.pushState(null,'',url);return loadProductionBreakdown().catch(e=>toast(e.message));
 }
@@ -362,13 +362,30 @@ function rememberBreakdownPosition(body){
   history.replaceState({...history.state,breakdownPosition:position},'',location.href);
 }
 function scrollBreakdownTarget(body,target){
-  const header=body.querySelector('.breakdown-scene-head'),offset=header?.getBoundingClientRect().height||0;
-  body.style.setProperty('--breakdown-header-height',offset+'px');
-  if(target===header){body.scrollTop=0;if(matchMedia('(max-width:700px)').matches)header.scrollIntoView({block:'start'});return}
-  target.scrollIntoView({block:'start'});
+  if(!target)return;
+  const header=body.querySelector('.breakdown-scene-head');
+  const pane=getComputedStyle(body),head=header&&getComputedStyle(header);
+  if(/auto|scroll/.test(pane.overflowY)){
+    const view=body.closest('#production-view'),topbar=document.querySelector('.workspace-topbar');
+    if(view&&topbar){
+      let outer=view.parentElement;
+      while(outer&&!(/auto|scroll/.test(getComputedStyle(outer).overflowY)&&outer.scrollHeight>outer.clientHeight))outer=outer.parentElement;
+      const distance=view.getBoundingClientRect().top-topbar.getBoundingClientRect().bottom;
+      if(outer)outer.scrollTop+=distance;else window.scrollTo(window.scrollX,window.scrollY+distance);
+    }
+    if(target===header){body.scrollTop=0;return}
+    const edge=body.getBoundingClientRect(),offset=head?.position==='sticky'?header.getBoundingClientRect().height:0;
+    body.scrollTop+=target.getBoundingClientRect().top-edge.top-body.clientTop-offset;
+  }else{
+    // Mobile uses page scrolling. Measure the fixed topbar after layout rather
+    // than carrying desktop's sticky scene height into the page offset.
+    const topbar=document.querySelector('.workspace-topbar'),style=topbar&&getComputedStyle(topbar);
+    const edge=style&&['fixed','sticky'].includes(style.position)?topbar.getBoundingClientRect().bottom:0;
+    window.scrollTo(window.scrollX,window.scrollY+target.getBoundingClientRect().top-edge);
+  }
 }
 function breakdownSelectionKey(params){
-  return ['breakdown_episode_revision','shot_material_id','shot_plan','shot_candidate','production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state'].map(key=>params.get(key)||'').join('\n');
+  return ['breakdown_episode_revision','shot_material_id','shot_plan','shot_candidate','shot_component','production_object','production_revision','material_id','material_version','material_round','material_target','production_entity','entity_state'].map(key=>params.get(key)||'').join('\n');
 }
 function breakdownEditionTarget(data,params){
   const id=params.get('breakdown_object'),revision=params.get('breakdown_revision');
@@ -460,6 +477,20 @@ function renderBreakdownShot(parent,item,common={fields:{},sounds:[]},references
   state.shotWorkspaceMemory||={};const key=item.record.id+':'+(item.record.edit_token||item.record.version);
   const previous=state.shotWorkspaceMemory[key],data=item.entity_workspace;
   for(const field of ['shotSelections','shotTab','selectedCandidates','selectedComponents','unifiedMaterialId','materialReaders'])if(previous?.[field]!==undefined)data[field]=previous[field];
+  const params=new URL(location.href).searchParams,mid=params.get('shot_material_id');
+  if(mid&&params.get('breakdown_object')===item.record.object_id){
+    const group=data.material_groups.find(g=>g.material_ids.includes(mid));
+    if(!group)throw Error('准确镜头素材不属于此镜头；未替换为首项');
+    data.shotTab=group.key;data.unifiedMaterialId=mid;data.shotSelections||={};data.shotSelections[group.key]=mid;
+    const candidate=params.get('shot_candidate'),rows=(data.material_versions?.[mid]||[]).flatMap(r=>r.results||[]);
+    if(candidate&&!rows.some(r=>r.id===candidate))throw Error('准确镜头候选不存在；未替换为最新结果');
+    data.selectedCandidates||={};data.selectedCandidates[mid]=candidate||'current';
+    if(candidate&&params.has('shot_component')){
+      const component=params.get('shot_component');
+      if(!rows.find(r=>r.id===candidate).payload?.components?.some(c=>c.id===component))throw Error('准确镜头文件组成不存在；未替换为原件');
+      data.selectedComponents||={};data.selectedComponents[candidate]=component;
+    }
+  }
   state.shotWorkspaceMemory[key]=data;
   return renderShotEntityWorkspace(parent,data);
 }
@@ -551,7 +582,11 @@ function activateBreakdownScene(data,body,nav,epoch,restore=null,savedPosition=n
   body.dataset.readingKey=data.scene.id+':'+(chosen.kind==='AV_SHOT'?chosen.id:'');
   focusProductionReview(entityReviewDetail(chosen),false);restoreProductionDraft();breakdownSelect(chosen,nav);paintReviewCommentCounts();renderComments();
   const target=chosen.kind==='AV_SHOT'?page.querySelector('[data-shot-id="'+CSS.escape(chosen.object_id)+'"]'):header;
-  if(chosen.kind==='AV_SHOT')restoreBreakdownPromptDraft(target);
+  if(chosen.kind==='AV_SHOT'){
+    restoreBreakdownPromptDraft(target);
+    const workspace=state.shotWorkspaceMemory?.[chosen.id+':'+(chosen.edit_token||chosen.version)];
+    if(workspace)writeShotWorkspaceRoute(workspace);
+  }
   const memory=savedPosition?.key===body.dataset.readingKey?savedPosition:!targetId?state.breakdownMemory?.[body.dataset.readingKey]:null;
   if(memory){body.scrollTop=memory.scrollTop;window.scrollTo(0,memory.windowY)}else scrollBreakdownTarget(body,target);
   let frame=null;

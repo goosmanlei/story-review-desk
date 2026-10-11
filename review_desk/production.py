@@ -396,10 +396,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                 raise ValueError("state transition crosses identities")
     elif kind == "REQUIREMENT":
         if p.get('current_plan_for'):
-            from .legacy_material_plans import plan_id
+            from .legacy_material_plans import validate_identity
             ref_record(store, p['current_plan_for'], {'ASSET'})
-            if object_id != plan_id(p['current_plan_for']['object_id']) or p['scope'] != p['current_plan_for']:
-                raise ValueError('working plan must keep its original material identity')
+            validate_identity(store, object_id, p)
         ref_record(store, p.get("scope"))
         for key in ("slot", "purpose", "media_type"):
             _text(p.get(key), key)
