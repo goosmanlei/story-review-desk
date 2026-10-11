@@ -455,7 +455,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/materials":
                     from .ui_projection import material_list as materials
                     with production.read_scope(store):
-                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1", scope=param('scope'), scope_revision=param('scope_revision')))
+                        return self._json(materials(store, param("episode"), param("scene"), param("media"), param("search") or "", param("status"), max(0,int(param("offset") or 0)), focus=param("focus"), grouped=param("grouped")=="1", compact=param("compact")=="1", scope=param('scope'), scope_revision=param('scope_revision'), cards=param('cards')=='1'))
                 if path == "/api/production":
                     return self._json(production.snapshot(store, param("kind"), param("object_id"), param("revision_id")))
                 if path == "/api/production/impact":
