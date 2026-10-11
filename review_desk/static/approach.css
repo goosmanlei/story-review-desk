@@ -195,3 +195,55 @@
   .approach-foundation-pillar { font-size: 16px; gap: 6px; }
   .approach-foundation-pillar svg { width: 30px; height: 30px; }
 }
+
+/* Passive work graphs use native text and reroute arrows after container reflow. */
+.approach-layout:has(.approach-workflow) { border-color: #dcded2; border-radius: 12px; box-shadow: none; }
+.approach-body:has(.approach-workflow) { container: approach-work / inline-size; }
+.approach-workflow { --workflow-line: #8c9d86; margin: 8px auto; max-width: 1160px; line-height: 1.5; }
+.approach-workflow-graph { position: relative; display: grid; grid-template-columns: repeat(var(--workflow-groups), minmax(0,1fr)); gap: 72px; padding: 8px 0; }
+.approach-workflow-group { display: flex; flex-direction: column; gap: 48px; min-width: 0; }
+.approach-workflow-group-title { font-size: 15px; color: #496752; text-align: center; margin-bottom: -24px; }
+.approach-workflow-row { display: grid; grid-template-columns: repeat(var(--workflow-columns),minmax(0,1fr)); gap: 16px; align-items: stretch; }
+.approach-workflow-node { position: relative; z-index: 1; border: 1px solid #c5cfbf; border-radius: 8px; padding: 20px 18px; min-width: 0; background: #f4f5ec; }
+.approach-workflow-node-title { display: flex; align-items: center; gap: 12px; }
+.approach-workflow-node-title svg { flex: 0 0 30px; width: 30px; height: 30px; color: #6f8b71; }
+.approach-workflow-node-title strong,.approach-workflow-node-title a { font-size: 19px; font-weight: 650; color: var(--desk-ink); }
+.approach-workflow-node-title a { text-decoration-color: #8a9d80; }
+.approach-workflow-node p { font-size: 16px; margin: 10px 0 0; color: #56604f; }
+.approach-workflow-node.is-paper { border-radius: 3px 20px 3px 3px; background: #fffdf6; box-shadow: 4px 4px 0 #e5e9db; }
+.approach-workflow-node.is-snapshot { background: #fffdf6; border-radius: 3px; padding: 16px 12px; }
+.approach-workflow-node.is-snapshot .approach-workflow-node-title { flex-direction: column; align-items: start; gap: 6px; }
+.approach-workflow-node.is-snapshot .approach-workflow-node-title strong { font-size: 17px; }
+.approach-workflow-items { display: flex; flex-wrap: wrap; gap: 7px; list-style: none; padding: 0; margin: 12px 0 0; font-size: 15px; color: #496752; }
+.approach-workflow-items li { padding: 2px 7px; border: 1px solid #d5dccb; border-radius: 4px; }
+.approach-workflow-cycle { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: 15px; color: #496752; margin-top: 16px; padding: 10px 6px 18px; border: 1px solid #c5cfbf; border-radius: 20px; justify-content: center; }
+.approach-workflow-cycle-back { position: absolute; bottom: -8px; left: 45%; padding-inline: 5px; background: #f4f5ec; font-size: 24px; line-height: 1; }
+.approach-workflow-lines { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.approach-workflow-lines path { fill: none; stroke: var(--workflow-line); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+.approach-workflow-edge-label { position: absolute; transform: translate(-50%,-50%); z-index: 2; background: var(--desk-reader); color: #496752; padding: 4px 7px; white-space: nowrap; font-size: 14px; line-height: 1.4; }
+.approach-workflow-feedback { border: 1px dashed #a8b89d; border-radius: 8px; padding: 16px 20px; margin-top: 36px; background: #edf1e5; }
+.approach-workflow-feedback-steps,.approach-workflow-feedback-targets { display: flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 8px 14px; }
+.approach-workflow-feedback-steps strong { font-size: 16px; font-weight: 600; }
+.approach-workflow-feedback-targets { margin-top: 10px; font-size: 15px; color: #496752; }
+.approach-workflow-feedback-targets a { color: #496752; }
+.approach-workflow-note { text-align: center; color: #56604f; font-size: 15px; }
+.approach-workflow-methods { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px 24px; margin-top: 24px; font-size: 15px; }
+.approach-workflow a:focus-visible { outline: 2px solid #496752; outline-offset: 4px; }
+@container approach-work (max-width: 800px) {
+  .approach-workflow-graph { grid-template-columns: minmax(0,1fr); gap: 48px; max-width: 540px; margin-inline: auto; }
+  .approach-workflow-group { gap: 48px; }
+  .approach-workflow-group-title { text-align: left; }
+  .approach-workflow-node { padding: 18px; }
+  .approach-workflow-feedback { padding: 16px 12px; }
+}
+.approach-workflow-graph.is-long-flow { gap: 34px; }
+.approach-workflow-graph.is-long-flow .approach-workflow-node { padding: 18px 14px; }
+.approach-workflow-graph.is-long-flow .approach-workflow-node-title { gap: 8px; }
+.approach-workflow-graph.is-long-flow .approach-workflow-node-title svg { flex-basis: 26px; width: 26px; height: 26px; }
+@container approach-work (max-width: 800px) {
+  .approach-workflow-graph.is-long-flow { grid-template-columns: minmax(0,1fr); gap: 48px; max-width: 540px; }
+}
+.approach-workflow { position: relative; }
+.approach-workflow-graph { padding-inline: 14px; }
+.approach-workflow-feedback { position: relative; z-index: 1; }
+.approach-workflow-return-lines path { stroke-dasharray: 4 5; stroke-width: 1.2; opacity: .8; }
