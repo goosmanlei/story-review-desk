@@ -16,7 +16,7 @@
 | --- | --- |
 | input-lock | `screenplay` 精确引用、`episodes` 全部分集引用、历史确认事实（如已有）、`specification`。不得凭是否存在剧本自动填接受。 |
 | entity | `entity_type:character/space/prop/song`、`subtype`、`aliases`、`facts`、`choices`、`unknowns`、`sources`。同一类型中的别名冲突必须显式解决。仅提及对象仍可登记，无自动制作要求。 |
-| state | `state_model:complete-v1`、`entity`、`dimensions`、`reference_media:image/audio/none`、`sources`、`facts`、`choices`、`unknowns`。完整快照可跨场复用，不把局部伤势或普通动作独立当作状态。 |
+| state | `state_model:complete-v1`、`entity`、独立可读的 `production_description`（或 description 正文块）、按需 `dimensions`、`reference_media:image/audio/none`、`sources`、`facts`、`choices`、`unknowns`。属性只填实际有用的非空文本，不按类型填满；未提供属性可省略或为空对象，提供的键须属于类型约定或自定义实体的属性定义。完整旧维度仍可作为历史描述读取。完整状态可跨场复用，不把局部伤势或普通动作独立当作状态。 |
 | av-episode / av-scene | `reading_contract:audiovisual-three-part-v1`、`input_lock`、`sources`；集另有 `story_episode,number,scenes`，场有 `shots`。准确子项锁与范围须一致，集场说明存于当前工作稿。 |
 | av-shot | `reading_contract:audiovisual-three-part-v1`、`input_lock,sources,purpose,key_states,products,duration_frames,fps,entities,states`。镜内状态及产物绑定已有准确需求，详见 [视听制作](production-breakdown.md)。 |
 | requirement | `scope`、`slot`、`required`、`purpose`、`media_type`、`usage:generation_input/post_audio/editorial`、`entities`、`states`、`specification`，可选 `generation` 逐素材生成方案。缺项以槽位为单位显示。 |

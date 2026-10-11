@@ -16,6 +16,7 @@ function productionTextBlocks(record){
   }
   const sorted=value=>Array.isArray(value)?value.map(sorted):value&&typeof value==='object'?Object.fromEntries(Object.keys(value).sort().map(k=>[k,sorted(value[k])])):value;
   const extra=[['production_description',p.production_description]],plan=p.generation;
+  if(p.format==='production-state-v1')for(const key of Object.keys(p.dimensions||{}).sort())extra.push([`dimensions.${key}`,p.dimensions[key]]);
   if(p.format==='production-av-shot-v1')for(const field of ['purpose','framing','spatial','axis','movement','action_start','action_end','motion','performance','lighting','color','editing','continuity'])extra.push([field,p[field]]);
   if(p.format==='production-av-shot-v1')for(const [i,value] of (p.key_states||[]).entries())extra.push([`key_states.${i}.description`,value.description]);
   if(['AV_EPISODE','AV_SCENE','MATERIAL_RELATION'].includes(record.kind))for(const field of ['purpose','structure','rhythm','continuity','preserve','change','check'])extra.push([field,p[field]]);

@@ -29,6 +29,14 @@ test('generation parameters retain server numeric spelling for exact comment off
  const record={payload:{blocks:[],generation:{parameters:{epsilon:1e-7,pitch:1}}},review_parameter_text:text};
  assert.equal(ctx.productionTextBlocks(record).find(b=>b.field==='generation.parameters').text,text);
 });
+test('state attributes preserve unique text and stable field anchors without repeating the description',()=>{
+ const {ctx}=setup(),payload={format:'production-state-v1',blocks:[{id:'description',text:'湿袖、湿下摆。'}],production_description:'湿袖、湿下摆。',dimensions:{voice:'前两日唱哑；是否恢复未明。',clothing:'湿袖、湿下摆。'}},before=JSON.stringify(payload);
+ const blocks=ctx.productionTextBlocks({payload});
+ assert.equal(blocks.filter(b=>b.text==='湿袖、湿下摆。').length,1);
+ assert.equal(blocks.find(b=>b.field==='dimensions.voice').id,'@review/dimensions/voice');
+ assert.equal(blocks.find(b=>b.field==='dimensions.voice').text,'前两日唱哑；是否恢复未明。');
+ assert.equal(JSON.stringify(payload),before);
+});
 test('switching one version back to current cannot accept another still historical section',()=>{
  const {ctx,data}=setup();
  const oldEntity={...entity,id:'person-old'},oldState={...form,id:'form-old'};

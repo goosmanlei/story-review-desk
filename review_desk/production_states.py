@@ -24,14 +24,22 @@ def validate_state(store, p):
     if p["state_model"] != MODEL:
         raise ValueError("unsupported state model")
     entity = ref_record(store, p["entity"], {"ENTITY"})
-    for name in DIMENSIONS.get(entity["payload"]["entity_type"], tuple(entity["payload"].get("attribute_definitions", {}))):
-        _text(p["dimensions"].get(name), "complete state dimension: " + name)
+    dimensions = p.get("dimensions", {})
+    if not isinstance(dimensions, dict):
+        raise ValueError("state dimensions must be an object")
+    fields = DIMENSIONS.get(entity["payload"]["entity_type"], tuple(entity["payload"].get("attribute_definitions", {})))
+    for name, value in dimensions.items():
+        if name not in fields:
+            raise ValueError("undefined state dimension: " + str(name))
+        _text(value, "complete state dimension: " + name)
+    from .production_description import description
+    _text(description(p, entity['payload']['entity_type'], entity['payload'].get('attribute_definitions', {})),
+          "complete state needs production description")
     if p.get("reference_media") not in ("image", "audio", "none"):
         raise ValueError("complete state requires reference_media")
     if p.get("reference_mode", "material") not in ("material", "description"):
         raise ValueError("unsupported state reference mode")
     if p.get("reference_mode") == "description":
-        from .production_description import description
         _text(description(p, entity['payload']['entity_type'], entity['payload'].get('attribute_definitions', {})),
               "description-only state needs production description")
         if p["reference_media"] == "none":
