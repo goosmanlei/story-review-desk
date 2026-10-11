@@ -138,6 +138,14 @@ for(const submitted of [false,true])test(`P05/C06 empty frozen video version ${s
   assert.ok(submitted?text.includes('EXACT FAILED CALL'):text.includes('未保留准确生成方案'));
 });
 
+test('a current reuse plan still labels a retained model candidate by its actual generation',()=>{
+  const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+  c.materialTextSurface=parent=>parent;c.renderMaterialInputs=()=>{};c.renderLinkedPrompt=(parent,call)=>c.nodeText('p',null,call.payload.prompt,parent);
+  const need={payload:{media_type:'audio',generation:{method:'reuse'}}},call={id:'exact-call',payload:{model:'seed-audio-1.0',parameters:{sample_rate:48000},prompt:'EXACT OLD TAKE',inputs:[]}};
+  const parent=new Element('section');c.renderSelectedGenerationRecipe(parent,need,{review_context:{call}}, {current_content:true});
+  const text=parent.all().map(n=>n.textContent||'').join('\n');assert.match(text,/生成方案/);assert.match(text,/seed-audio-1.0/);assert.match(text,/EXACT OLD TAKE/);assert.doesNotMatch(text,/制作内容/);
+});
+
 function sharedMaterialFixture(){
   const {c}=fixture();
   for(const name of ['material-review.js','entity-review.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),c);
