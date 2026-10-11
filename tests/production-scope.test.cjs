@@ -24,8 +24,8 @@ test('entity navigation carries the exact scope; explicit scopes still return to
  c.state.workspace='settings.workspace';vm.runInContext("workspaceSubRoutes.set('settings.workspace:breakdown','http://fixture/?workspace=settings.workspace&production_tab=breakdown&production_scope_episode=ep&production_scope_revision=new&production_scope_scene=scene&breakdown_episode=ep&breakdown_scene=scene&breakdown_object=new-shot&breakdown_revision=new-shot-revision')",c);
  c.selectProductionTab('breakdown');p=new URL(c.location.href).searchParams;assert.equal(p.get('breakdown_object'),'ep');assert.equal(p.get('breakdown_revision'),'old');assert.equal(p.get('breakdown_episode_revision'),'old');const target=c.breakdownEditionTarget({design:{object_id:'ep',id:p.get('breakdown_episode_revision')},scenes:[{object_id:'scene'}]},p);assert.equal(target.error,undefined);assert.equal(target.scene.object_id,'scene');
 });
-test('a scoped material opens its unique accurate reference instead of its head',async()=>{
- const c=fixture('http://fixture/');let ref;c.openUnifiedMaterial=async value=>{ref=value};await c.openManagementMaterial({object_id:'material',scope_references:[{object_id:'material',revision_id:'old'}]},null);assert.equal(ref.revision_id,'old');assert.equal(ref.defaultSelection,undefined);
+test('a scoped material preserves its accurate identity and opens the current plan',async()=>{
+ const c=fixture('http://fixture/');let ref;c.openUnifiedMaterial=async value=>{ref=value};await c.openManagementMaterial({object_id:'material',scope_references:[{object_id:'material',revision_id:'old'}]},null);assert.equal(ref.revision_id,'old');assert.equal(ref.defaultSelection,true);
 });
 
 test('a scene shared by two current editions uses an explicit parent choice',()=>{
