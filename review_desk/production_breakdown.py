@@ -37,7 +37,7 @@ def rows(store, kind, condition='', params=()):
     return [p.record_view(r) for r in store.db.execute(sql+(' AND '+condition if condition else '')+' ORDER BY o.id', (kind, *params)) if r['object_id'] not in archived]
 
 
-def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None):
+def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None, scope_shot=None):
     kinds={'settings':('ENTITY','AV_SHOT','STATE')}.get(view)
     if not kinds:raise ValueError('unknown production index')
     values=[r for kind in kinds for r in rows(store,kind)]
@@ -52,7 +52,18 @@ def index(store, view, object_id=None, scope=None, scope_episode=None, scope_rev
         entries=material_entries(store)
         from .entity_contract import is_entity, graph
         entities = [r for r in values if is_entity(r)]
+        if scope == 'shot':
+            from .production_scope import entity_focus, projection
+            catalog, focus = entity_focus(store, scope_episode, scope_revision, scope_scene, scope_shot)
+            projected = projection(store, entries, focus=focus)
+            ids = set(projected['entity_locations'])
+            entities = [row for row in entities if row['object_id'] in ids and row['payload'].get('status') != 'withdrawn']
+            result['records'] = entities
+            result.update(management_episodes=catalog, entity_scope=focus,
+                          entity_locations=projected['entity_locations'])
         result.update(entity_summaries(store, entities, entries))
+        if scope == 'shot':
+            result.update(management_episodes=catalog, entity_locations=projected['entity_locations'])
         result['entity_graph'] = graph(store, entities)
         if scope == 'av':
             from .production_scope import projection

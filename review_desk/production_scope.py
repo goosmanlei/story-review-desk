@@ -26,7 +26,9 @@ def graph(store, episode=None, revision=None, scene=None):
         catalog.append({'object_id': edition['object_id'], 'id': edition['id'], 'kind': 'AV_EPISODE',
                         'number': edition['payload']['number'], 'title': edition['payload']['title'],
                         'version': edition['version'], 'scenes': [
-                            {'id': row['object_id'], 'revision_id': row['id'], 'kind': 'AV_SCENE', 'title': row['payload']['title']}
+                            {'id': row['object_id'], 'revision_id': row['id'], 'kind': 'AV_SCENE', 'title': row['payload']['title'],
+                             'shots': [{'object_id': shot['object_id'], 'id': shot['id'], 'kind': 'AV_SHOT', 'title': shot['payload']['title']}
+                                       for shot in (light.ref_record(store, ref) for ref in row['payload']['shots'])]}
                             for row in scenes]})
         base = {'episode': edition['object_id'], 'episode_revision': edition['id']}
         positions.append((edition, {**base, 'scene': None}))
@@ -36,14 +38,18 @@ def graph(store, episode=None, revision=None, scene=None):
             for ref in sc['payload']['shots']:
                 shot = light.ref_record(store, ref)
                 if shot.get('unavailable') or shot['kind'] != 'AV_SHOT': raise ValueError('本版视听场的准确子镜不可用')
-                positions.append((shot, loc))
+                positions.append((shot, {**loc, 'shot': shot['object_id'], 'shot_revision': shot['id']}))
     if scene and not any(loc.get('scene') == scene and (not episode or loc['episode'] == episode) for _, loc in positions):
         raise ValueError('视听场不属于本版视听集，请重新选择制作范围')
     return catalog, positions
 
 
-def projection(store, entries, episode=None, revision=None, scene=None):
+def projection(store, entries, episode=None, revision=None, scene=None, *, focus=None):
     catalog, positions = graph(store, episode, revision, scene)
+    if focus is not None:
+        positions = [(row, loc) for row, loc in positions if row['kind'] == 'AV_SHOT'
+                     and loc['episode'] == focus['episode'] and loc['scene'] == focus['scene']
+                     and row['object_id'] == focus['shot']]
     materials, entities = defaultdict(list), defaultdict(list)
     candidate_owners = defaultdict(set)
     for row in store.db.execute("SELECT DISTINCT m.material_id,r.object_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result'"):
@@ -91,11 +97,12 @@ def projection(store, entries, episode=None, revision=None, scene=None):
         def visit(row, reason, descend=True):
             if row.get('unavailable'): return
             add(row, loc, {**evidence, **reason, 'record': b.ref(row)})
-            if not descend or row['id'] in seen: return
+            if row['id'] in seen: return
+            if not descend and reason.get('kind') != 'actual_input': return
             seen.add(row['id'])
             for reference in [*row['payload'].get('entities', []),*row['payload'].get('states', []),*row['payload'].get('subjects', [])]: owner(reference, loc, evidence)
             if row['payload'].get('scope'):owner(row['payload']['scope'],loc,evidence)
-            if row['kind'] != 'REQUIREMENT': return
+            if not descend or row['kind'] != 'REQUIREMENT': return
             plan = row['payload'].get('generation', {})
             from .material_relations import active_inputs
             active = {index for index, _ in active_inputs(store, plan, row['object_id'])[0]}
@@ -151,3 +158,22 @@ def projection(store, entries, episode=None, revision=None, scene=None):
                 if not asset.get('placeholder') and any(c['role']=='original' for c in asset.get('components',[])):item['generated']=True
     projected = [{**item, 'locations': materials[item['canonical_material_id']]} for item in [*entries,*additional.values()]]
     return {'management_episodes': catalog, 'entity_locations': dict(entities), 'entries': projected}
+
+
+def entity_focus(store, episode=None, revision=None, scene=None, shot=None):
+    """Normalize only routing choices. Broken accurate child references still fail."""
+    catalog, _ = graph(store)
+    selected = next((ep for ep in catalog if ep['object_id'] == episode), None)
+    invalid = bool((episode and not selected) or (revision and (not selected or selected['id'] != revision)))
+    if selected and scene and not any(sc['id'] == scene for sc in selected['scenes']): invalid = True
+    if scene and not selected: invalid = True
+    sc = next((sc for sc in selected['scenes'] if sc['id'] == scene), None) if selected else None
+    if shot and (not sc or not any(row['object_id'] == shot for row in sc['shots'])): invalid = True
+    if invalid: selected = sc = None
+    selected = selected or next(iter(catalog), None)
+    if selected: sc = sc or next(iter(selected['scenes']), None)
+    target = next((row for row in sc['shots'] if row['object_id'] == shot), None) if sc and not invalid else None
+    if sc: target = target or next(iter(sc['shots']), None)
+    return catalog, {'episode': selected['object_id'] if selected else '',
+                     'scope_revision': selected['id'] if selected else '', 'scene': sc['id'] if sc else '',
+                     'shot': target['object_id'] if target else ''}

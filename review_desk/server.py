@@ -393,7 +393,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == '/api/production/index':
                     from .production_breakdown import index
                     with production.read_scope(store):
-                        return self._json(index(store,param('view'),param('object_id'),scope=param('scope'),scope_episode=param('scope_episode'),scope_revision=param('scope_revision'),scope_scene=param('scope_scene')))
+                        return self._json(index(store,param('view'),param('object_id'),scope=param('scope'),scope_episode=param('scope_episode'),scope_revision=param('scope_revision'),scope_scene=param('scope_scene'),scope_shot=param('scope_shot')))
                 if path in ('/api/production/card','/api/production/scene'):
                     from . import ui_projection
                     with production.read_scope(store):
