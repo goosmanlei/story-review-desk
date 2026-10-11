@@ -140,7 +140,7 @@ function renderProductionEntityNavigation(root,r){
     for(const current of rows){
       const selected=current.object_id===r?.object_id,row=selected?r:current;
       const title=row.payload.title.startsWith(entity.payload.title)?row.payload.title.slice(entity.payload.title.length).replace(/^[\s·：:—-]+/u,'')||row.payload.title:row.payload.title;
-      const button=productionButton(choices,kind==='STATE'&&current===rows[0]?'基础状态 · '+title:title,()=>openProductionRecord(row.object_id,row.id,false,entity.object_id));
+      const button=productionButton(choices,title,()=>openProductionRecord(row.object_id,row.id,false,entity.object_id));
       button.setAttribute('aria-pressed',String(selected));button.dataset.objectId=row.object_id;button.title=`${row.payload.title} · 版本 ${row.version}`;
     }
     section.append(group);

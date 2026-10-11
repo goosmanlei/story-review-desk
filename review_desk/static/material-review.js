@@ -127,28 +127,29 @@ function materialInputRole(value){
 }
 function materialInputs(inputs,records=[],slots=[]){
   const counts={};return inputs.flatMap((value,index)=>{
-    const ref=value.reference||value,row=records.find(r=>r.id===ref.revision_id)||(state.productionRecords||[]).find(r=>r.id===ref.revision_id);
+    const ref=value.reference||value,slot=slots.find(s=>s.index===index),row=records.find(r=>r.id===ref.revision_id||r.legacy_reference?.revision_id===ref.revision_id)||slot?.record||(state.productionRecords||[]).find(r=>r.id===ref.revision_id);
     // Keep the complete ordered inputs, including exact entity/script records.
     if(!row)return [{value,index,row:null,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
     if(!['ASSET','REQUIREMENT'].includes(row.kind))return [];
     const component=value.component_id?row.payload.components?.find(c=>c.id===value.component_id):row.payload.components?.find(c=>c.role==='original');
-    if(row.kind==='ASSET'&&(!value.component_id||!component))return [{value,index,row,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
-    const type=component?.mime.split('/')[0]||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];if(!label)return [];
+    const type=component?.mime.split('/')[0]||slot?.media_type||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];
+    if(row.kind==='ASSET'&&(!value.component_id||!component)){if(label)counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label?label+counts[type]:'输入'+(index+1),ref:{...ref,...value},missing:true}]}
+    if(!label)return [];
     if(slots.find(s=>s.index===index)?.active===false)return [{value,index,row,label:'备选 '+(slots.find(s=>s.index===index)?.rule?.route||index+1),ref:{...ref,...value}}];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
-  }).map(item=>item.row?.submission_only?{...item,ref:{...item.ref,snapshot_record:item.row}}:item);
+  }).map(item=>{const slot=slots.find(s=>s.index===item.index);return {...item,slot,ref:{...item.ref,...(slot?{reference_identity:slot}:{}),...(item.row?.submission_only||item.row?.unavailable?{snapshot_record:item.row}:{})}}});
 }
 function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false}={}){
-  const effective=materialInputs(inputs,records);if(!effective.length)return;
+  const effective=materialInputs(inputs,records,need?.review_shot_slots||need?.input_slots||[]);if(!effective.length)return;
   nodeText('h4',null,actual?'实际使用的参考':'参考素材',host);
   const grid=el('div','material-reference-grid');host.append(grid);
   for(const item of effective){
     const line=el('div','material-input');grid.append(line);
-    if(!item.row||item.missing){nodeText('p','production-issue',item.label+' · 准确参考不可用',line);continue}
-    const row=item.row,component=row.payload.components?.find(c=>c.id===item.value.component_id)||row.payload.components?.find(c=>c.role==='original');
+    const identity=item.slot,row=item.row,component=row?.payload.components?.find(c=>c.id===item.value.component_id)||row?.payload.components?.find(c=>c.role==='original');
     const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
-    const subtitle=(row.kind==='REQUIREMENT'?'参考方案 · 尚未选定原件':actual?'实际原件':'已指定原件')+range;
-    const button=materialSmallCard(line,{...row,object_id:row.object_id,title:row.payload.title,media_type:row.payload.media_type,preview:component?.mime?.startsWith('image/')?component:null,current_content:true,candidate_count:row.candidate_number?1:0},trigger=>openMaterialReference(item.ref,trigger),false,{subtitle});
+    const subtitle=(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?'尚未选定原件':identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件')+range;
+    const button=reviewSmallCard(line,{title:identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
+    if(identity?.reason)nodeText('p',item.missing?'production-issue':'production-meta',identity.reason,line);
     button.dataset.reviewDialogTrigger='';
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
   }
@@ -157,10 +158,10 @@ function renderActualGeneration(parent,context){
   const call=context?.call,external=['external-edit','editing'].includes(call?.payload.method)&&!call.payload.model,box=el('section','material-actual-inputs');nodeText('h3',null,external?'制作记录':'生成内容',box);
   if(!call){nodeText('p','production-meta','未登记真实调用，无法还原生成内容',box);parent.append(box);return}
   const host=materialTextSurface(box,call);
-  if(external){nodeText('p','production-meta',call.payload.tool,host);renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[],null,true);materialField(host,call,'call.prompt','制作说明','pre');parent.append(box);return}
+  if(external){nodeText('p','production-meta',call.payload.tool,host);renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[],call,true);materialField(host,call,'call.prompt','制作说明','pre');parent.append(box);return}
   materialExecution(host,call.payload);
   if(call.payload.model)materialParameters(host,call,'call',call.payload.model);else materialField(host,call,'call.parameters','制作参数','pre');
-  renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[],null,true);
+  renderMaterialInputs(host,call.payload.inputs||[],context.inputs||[],call,true);
   materialField(host,call,'call.prompt','提示词','pre');parent.append(box);
 }
 function materialGenerationDetails(parent,item){
@@ -684,7 +685,21 @@ async function openMaterialReference(ref,trigger,source=false){
       // reader. A new modal must not retain the detached reader as its parent.
       dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openUnifiedMaterial(ref,trigger)),{once:true});dialog.close();return
     }
-    const row=detail.record,p=row.payload;body.replaceChildren();title.textContent=businessTitle(row)+' · '+materialVersionLabel(row);body.dataset.referenceRevision=row.id;
+    const row=detail.record,p=row.payload,identity=ref.reference_identity;body.replaceChildren();title.textContent=identity?.label||businessTitle(row)+' · '+materialVersionLabel(row);body.dataset.referenceRevision=ref.revision_id;
+    if(identity?.disposition==='current'){
+      title.replaceChildren();const params=new URLSearchParams({material_id:identity.canonical_material_id,...(identity.candidate?{material_target:identity.candidate.revision_id}:{})});
+      productionButton(title,identity.label,()=>openUnifiedMaterial({... (identity.candidate||productionRef(row)),params,component_id:ref.component_id},document.activeElement));
+      if(identity.original_code&&identity.original_code!==identity.material_code)nodeText('p','production-meta','原输入编号 '+identity.original_code,body);
+    }
+    if(identity?.reason)nodeText('p',identity.disposition==='missing'?'production-issue':'production-meta',identity.reason,body);
+    for(const need of identity?.historical_requirements||[]){
+      nodeText('p','production-meta','当时的制作需求：'+[need.code,need.title].filter(Boolean).join(' · '),body);
+      if(need.scope?.title)nodeText('p','production-meta','当时的制作出处：'+[need.scope.code,need.scope.title].filter(Boolean).join(' · '),body);
+    }
+    for(const subject of identity?.subjects||[])nodeText('p','production-meta','作品出处：'+[subject.code,subject.title].filter(Boolean).join(' · '),body);
+    if(identity?.source_range)nodeText('p','production-meta',`从当时源录音截取 ${identity.source_range.start_seconds}–${identity.source_range.end_seconds} 秒；当前播放器播放截取后的原片段。`,body);
+    if(identity?.retirement_reason&&!identity.reason?.includes(identity.retirement_reason))nodeText('p','production-meta','退出当前制作的原因：'+identity.retirement_reason,body);
+    if(row.unavailable||identity?.disposition==='missing'){if(!identity?.reason)nodeText('p','production-issue','此准确输入不可用；未替换为其他素材。',body);return}
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
       const session=!row.submission_only&&components.some(c=>/^(audio|video)\//.test(c.mime))?referenceReviewSession(dialog,detail):null;
@@ -692,7 +707,9 @@ async function openMaterialReference(ref,trigger,source=false){
 
       for(const c of components){
         const url='/api/production/files/'+encodeURIComponent(c.file);
-        if(c.mime.startsWith('image/')){const img=el('img');img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
+        if(c.mime.startsWith('image/')){const img=el('img');let failure=null;
+          img.onerror=()=>{if(!dialog.isConnected)return;img.hidden=true;if(failure)return;failure=el('div','reference-media-error');nodeText('p','error','此准确原图读取失败，请重试。',failure);productionButton(failure,'重试原图',()=>{img.removeAttribute('src');img.src=reviewURL(url)});body.append(failure)};
+          img.onload=()=>{img.hidden=false;failure?.remove();failure=null};img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
         else if(/^(audio|video)\//.test(c.mime)){
           reviewMediaPlayer(body,c,row,ref,!row.submission_only,session||{});
           nodeText('p','production-meta',(c.role==='original'?'原件':'预览')+(ref.range?` · ${ref.range.start_seconds}–${ref.range.end_seconds} 秒`:''),body);
@@ -712,7 +729,7 @@ async function openMaterialReference(ref,trigger,source=false){
     if(row.kind==='REQUIREMENT')nodeText('p','production-issue','此引用是尚未产出准确原件的素材需求',body);
     if(p.generation){nodeText('h3',null,'参数 · '+(p.generation.model||'模型未知'),body);nodeText('pre',null,row.review_parameter_text||JSON.stringify(p.generation.parameters,null,2),body);renderMaterialInputs(body,p.generation.inputs||[],row.review_input_records||[],row);nodeText('h3',null,'提示词',body);nodeText('pre',null,p.generation.prompt,body)}
     paintReviewCommentCounts();
-  }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','error',error.message,body)}}
+  }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','error',error.message,body);productionButton(body,'重试准确引用',()=>{dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openMaterialReference(ref,trigger,source)),{once:true});dialog.close()})}}
 }
 
 // A demand is a real REQUIREMENT, never a fabricated ASSET. Round data comes

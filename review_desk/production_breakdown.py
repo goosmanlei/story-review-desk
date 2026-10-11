@@ -113,11 +113,13 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None, ep
 
 def context(store, object_id, revision_id=None, *, metadata=False):
     from . import list_reading as light
+    from .production_current import enabled
+    current_mode = enabled(store)
     read_ref = light.ref_record if metadata else p.ref_record
     selected = p.record(store, object_id, revision_id)
     scope_revision = selected['id']
     direct = exact_scoped(store, 'REQUIREMENT', scope_revision, metadata=metadata)
-    if selected['payload'].get('reading_contract') == 'audiovisual-three-part-v1':
+    if not current_mode and selected['payload'].get('reading_contract') == 'audiovisual-three-part-v1':
         direct = [read_ref(store, item['requirement']) for item in selected['payload'].get('products', [])]
     links = [r for r in exact_scoped(store, 'RELATION', scope_revision) if r['payload']['relation_type'] in ('applicability','occurrence')]
     from .business_relations import archived_ids, scope_links
@@ -130,11 +132,11 @@ def context(store, object_id, revision_id=None, *, metadata=False):
     occurrences = list(selected['payload'].get('occurrences', []))
     needs = {r['object_id']: r for r in direct if r['payload'].get('status') != 'withdrawn'}
     for link, subject in unified:
-        if subject['kind'] == 'REQUIREMENT':
+        if not current_mode and subject['kind'] == 'REQUIREMENT':
             needs.setdefault(subject['object_id'], subject)
     for link in links:
         subject = read_ref(store, link['payload']['subject'])
-        if subject['kind'] == 'REQUIREMENT':
+        if not current_mode and subject['kind'] == 'REQUIREMENT':
             needs.setdefault(subject['object_id'], subject)
         if link['payload']['relation_type']=='occurrence':
             entity=subject if subject['kind']=='ENTITY' else p.ref_record(store,subject['payload']['entity'])
@@ -206,40 +208,8 @@ def material_comment_targets_many(store, positions):
             AND newer.version>r.version AND json_extract(newer.payload,'$.scope.revision_id')=json_extract(r.payload,'$.scope.revision_id'))''', (raw_scopes,)):
         scope = json.loads(row['payload'])['scope']['revision_id']
         needs[scope][row['object_id']] = {'object_id': row['object_id'], 'id': row['id']}
-    for row in positions:
-        for item in row['payload'].get('products', []):
-            reference = item['requirement']
-            needs[row['id']][reference['object_id']] = {'object_id': reference['object_id'], 'id': reference['revision_id']}
-    # A reviewed shared camera can be directly owned by several shots through
-    # one business relation per scope, while keeping its original stable need.
-    from . import list_reading as light
-    positions_by_id = {row['object_id']: row for row in positions}
-    ids = json.dumps(list(positions_by_id))
-    for raw in store.db.execute('''SELECT r.payload FROM business_relations b
-        JOIN objects o ON o.id=b.object_id JOIN revisions r ON r.id=o.current_revision
-        WHERE (b.endpoint_a IN (SELECT value FROM json_each(?))
-            OR b.endpoint_b IN (SELECT value FROM json_each(?)))
-        AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn' ''', (ids, ids)):
-        value = json.loads(raw[0])
-        for endpoint in value['endpoints']:
-            position = positions_by_id.get(endpoint)
-            if position is None or ref(position) not in value.get('contexts', []):
-                continue
-            other = next(e for e in value['endpoints'] if e != endpoint)
-            subject = light.record(store, other)
-            if subject['kind']=='REQUIREMENT' and subject['payload'].get('status')!='withdrawn':
-                needs[position['id']][other] = {'object_id':other,'id':subject['id']}
-    # These are only direct applicability/occurrence needs. Shared upstream
-    # inputs are intentionally outside the episode-comment counting boundary.
-    from . import list_reading as light
-    for row in store.db.execute('''SELECT r.payload FROM revisions r JOIN objects o ON o.id=r.object_id
-        WHERE o.kind='RELATION' AND json_extract(r.payload,'$.relation_type') IN ('applicability','occurrence')
-        AND json_extract(r.payload,'$.scope.revision_id') IN (SELECT value FROM json_each(?))
-        AND NOT EXISTS(SELECT 1 FROM revisions newer WHERE newer.object_id=r.object_id AND newer.version>r.version
-            AND json_extract(newer.payload,'$.scope.revision_id')=json_extract(r.payload,'$.scope.revision_id'))''', (raw_scopes,)):
-        value = json.loads(row[0]); subject = light.ref_record(store, value['subject'])
-        if subject['kind'] == 'REQUIREMENT':
-            needs[value['scope']['revision_id']].setdefault(subject['object_id'], {'object_id': subject['object_id'], 'id': subject['id']})
+    # Comments shown with this owner follow the same direct scope contract as
+    # its material list. Usage relations remain available in the relation reader.
     aliases = dict(store.db.execute("SELECT alias_id,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) FROM material_aliases"))
     mids = {aliases.get(mid, mid) for values in needs.values() for mid in values}
     candidates = {}

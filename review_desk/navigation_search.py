@@ -30,6 +30,10 @@ def codes(store):
 def material_fields(store, item, mapping):
     row = light.record(store, item['object_id'], item['id'])
     terms = [mapping.get(item['canonical_material_id'], ''), *fields(row['payload'])]
+    from .production_current import enabled
+    if enabled(store):
+        from .material_reference import candidate_codes
+        terms.extend(candidate_codes(store, item['canonical_material_id']))
     scope = row['payload'].get('scope')
     if scope:
         owner = light.ref_record(store, scope)

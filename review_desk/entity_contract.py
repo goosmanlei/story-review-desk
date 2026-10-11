@@ -36,10 +36,6 @@ def direct_materials(store, row, *, metadata=False):
     found = {item['object_id']:item for item in light.rows(
         store, 'REQUIREMENT', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=? "
         "AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (row['object_id'], row['id']))}
-    from .business_relations import scope_links
-    for _, item in scope_links(store, {'object_id':row['object_id'],'revision_id':row['id']}, metadata=True):
-        if item['kind']=='REQUIREMENT' and item['payload'].get('status')!='withdrawn':
-            found[item['object_id']] = item
     return list(found.values()) if metadata else [p.record(store, oid) for oid in found]
 
 

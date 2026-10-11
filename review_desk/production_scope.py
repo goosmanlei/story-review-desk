@@ -69,7 +69,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
         row = light.ref_record(store, reference)
         if row.get('unavailable'): return
         if row['kind'] == 'ENTITY': entities[row['object_id']].append({**loc, 'reference':{**b.ref(row),'version':row['version'],'title':row['payload']['title']}, 'evidence': evidence})
-        elif row['kind'] == 'STATE': owner(row['payload']['entity'], loc, evidence)
+        elif row['kind'] == 'STATE' and row['payload'].get('status') != 'withdrawn': owner(row['payload']['entity'], loc, evidence)
 
     def add(row, loc, evidence):
         if row.get('unavailable') or row['payload'].get('status')=='withdrawn' or row['kind'] not in ('REQUIREMENT', 'ASSET'): return

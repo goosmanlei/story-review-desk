@@ -12,6 +12,7 @@ def entity_locations(store, entities, rows):
         row = light.ref_record(store, reference)
         if row.get('unavailable'):
             return [row['owner_object_id']] if row.get('owner_object_id') else []
+        if row['payload'].get('status') == 'withdrawn':return []
         if row['kind'] == 'ENTITY':
             return [row['object_id']]
         if row['kind'] == 'STATE':
@@ -27,6 +28,7 @@ def entity_locations(store, entities, rows):
 
     for row in rows:
         value = row['payload']
+        if value.get('status') == 'withdrawn':continue
         if row['kind'] in ('ENTITY', 'STATE'):
             eids = [row['object_id']] if row['kind'] == 'ENTITY' else [value['entity']['object_id']]
             for source in value.get('sources', []):
