@@ -306,7 +306,6 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
       a.title=a.textContent+' · '+(input.row?businessCode(input.row):'')+'；'+a.title;
       a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
-      bindRelationSummary(a,input.slot?.relation_context||row.review_shot_slots?.find(slot=>slot.index===input.index)?.relation_context);
     }else pre.append(document.createTextNode(span.text));offset=span.end;
   }
   pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);
