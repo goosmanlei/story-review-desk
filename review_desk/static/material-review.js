@@ -698,7 +698,7 @@ async function openMaterialReference(ref,trigger,source=false){
     }
     for(const subject of identity?.subjects||[])nodeText('p','production-meta','作品出处：'+[subject.code,subject.title].filter(Boolean).join(' · '),body);
     if(identity?.source_range)nodeText('p','production-meta',`从当时源录音截取 ${identity.source_range.start_seconds}–${identity.source_range.end_seconds} 秒；当前播放器播放截取后的原片段。`,body);
-    if(identity?.retirement_reason&&identity.retirement_reason!==identity.reason)nodeText('p','production-meta','退出当前制作的原因：'+identity.retirement_reason,body);
+    if(identity?.retirement_reason&&!identity.reason?.includes(identity.retirement_reason))nodeText('p','production-meta','退出当前制作的原因：'+identity.retirement_reason,body);
     if(row.unavailable||identity?.disposition==='missing'){if(!identity?.reason)nodeText('p','production-issue','此准确输入不可用；未替换为其他素材。',body);return}
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');
