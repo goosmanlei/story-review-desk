@@ -294,14 +294,17 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
     const input=byLabel.get(label)||(/^输入\d+$/.test(label)?refs.find(i=>i.index===Number(label.slice(2))-1&&i.slot?.direct!==false):null);
     if(!spans.some(s=>s.start<match.index+match[0].length&&s.end>match.index))spans.push({start:match.index,end:match.index+match[0].length,text:match[0],input});
   }
-  let offset=0;
+  let offset=0;pre.reviewSourceText=block.text;pre.reviewTextMap=[];
   for(const span of spans.sort((a,b)=>a.start-b.start)){
     if(span.start<offset)continue;
     pre.append(document.createTextNode(block.text.slice(offset,span.start)));const input=span.input;
     if(input?.ref&&(!input.missing||input.slot?.record)){
-      const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=reviewURL(materialReferenceRequest(input.ref,false).url);a.textContent=span.text;
+      const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=reviewURL(materialReferenceRequest(input.ref,false).url);const named=input.row||input.slot?.record,title=named&&(typeof materialPositionText==='function'?materialPositionText({record:named,object_id:named.object_id,title:named.payload.title}):named.payload.title),same=named&&refs.filter(r=>(r.row||r.slot?.record)?.payload.title===named.payload.title);a.textContent=named?'@'+title+(same.length>1?' · '+(businessCode(named)||`参考${input.index+1}`):''):span.text;
+      const displayStart=Array.from(pre.textContent).length,sourceStart=Array.from(block.text.slice(0,span.start)).length,sourceEnd=Array.from(block.text.slice(0,span.end)).length;
+      pre.reviewTextMap.push({sourceStart,sourceEnd,displayStart,displayEnd:displayStart+Array.from(a.textContent).length});
+      a.setAttribute('aria-label',a.textContent);
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
-      if(span.entity)a.setAttribute('aria-label','@'+span.text+'；'+a.title);
+      a.title=a.textContent+' · '+(input.row?businessCode(input.row):'')+'；'+a.title;
       a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
       bindRelationSummary(a,input.slot?.relation_context||row.review_shot_slots?.find(slot=>slot.index===input.index)?.relation_context);
     }else pre.append(document.createTextNode(span.text));offset=span.end;
@@ -453,7 +456,12 @@ function groupedShotMaterials(items){
   const media=['image','audio','video','project','document'];return [...groups.values()].sort((a,b)=>media.indexOf(a.key.split(':')[0])-media.indexOf(b.key.split(':')[0])||a.label.localeCompare(b.label,'zh-CN'));
 }
 function renderBreakdownShot(parent,item,common={fields:{},sounds:[]},referencesParent=null){
-  return renderThreePartShot(parent,item);
+  if(!item.entity_workspace)return renderThreePartShot(parent,item);
+  state.shotWorkspaceMemory||={};const key=item.record.id+':'+(item.record.edit_token||item.record.version);
+  const previous=state.shotWorkspaceMemory[key],data=item.entity_workspace;
+  for(const field of ['shotSelections','shotTab','selectedCandidates','selectedComponents','unifiedMaterialId','materialReaders'])if(previous?.[field]!==undefined)data[field]=previous[field];
+  state.shotWorkspaceMemory[key]=data;
+  return renderShotEntityWorkspace(parent,data);
 }
 
 function attachAudiovisualNote(button,note){

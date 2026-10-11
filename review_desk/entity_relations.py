@@ -22,7 +22,7 @@ def validate(store, payload):
     if len(entities) != 2:
         raise ValueError('entity relationship requires two distinct entities')
     for ref in entities:
-        p.ref_record(store, ref, {'ENTITY'})
+        p.ref_record(store, ref, {'ENTITY', 'AV_SHOT'})
     if entities[0]['object_id'] == entities[1]['object_id']:
         raise ValueError('entity relationship requires two distinct entities')
     p._text(payload.get('label'), 'relationship label')

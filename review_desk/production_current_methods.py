@@ -68,6 +68,9 @@ def verify(store, object_id, payload):
         return basis
     basis = payload.get('method_basis')
     if not basis:
+        if payload.get('current_plan_for'):
+            from .legacy_material_plans import verify_initial
+            return verify_initial(store, object_id, payload)
         if not activation(store):
             return None
         raise ValueError('新制作方案缺少本步骤方法依据；先完成方法准备、草稿、回读与定稿')

@@ -99,6 +99,7 @@ function renderUnifiedSelected(data){
 }
 function renderUnifiedCard(root){
   root.classList.add('unified-card-host');root.replaceChildren();
+  if(state.entityReview?.entity?.kind==='AV_SHOT'){renderShotEntityWorkspace(root,state.entityReview);paintProductionReview();return}
   const card=el('section','unified-card'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
   if(state.positionReview){
     card.classList.add('unified-position-card');right.remove();left.classList.add('breakdown-scene');
@@ -260,4 +261,35 @@ function validateUnifiedReference(result){
   const sets=Object.entries(versions||{}).filter(([id])=>!mid||id===mid),rounds=sets.flatMap(([,rs])=>rs);
   if(number&&!rounds.some(r=>r.number===number))throw Error('准确素材版本不存在；未替换为最新版本');
   const target=params.get('material_target');if(target&&target!=='current'&&!(number?rounds.filter(r=>r.number===number).flatMap(materialVersionCommentRows):materialRows(detail)).some(r=>r.id===target))throw Error('准确候选不存在；未替换为最新结果');
+}
+
+// The same reader is mounted in a modal or directly in an audiovisual scene.
+// Selection belongs to this shot, so another shot cannot inherit its material.
+function renderShotEntityWorkspace(root,data){
+  const shot=data.entity,card=el('section','unified-card shot-entity-workspace'),left=el('section','unified-card-context'),right=el('section','unified-card-material');card.append(left,right);root.append(card);
+  card.dataset.shotId=shot.object_id;card.dataset.shotRevision=shot.id;
+  nodeText('h3',null,breakdownShotTitle(shot),left);
+  const location=(data.position||[]).filter(p=>p.kind!=='AV_SHOT').map(p=>businessCode(p)+' · '+reviewPositionText(p.title)).join(' / ');if(location)nodeText('p','production-meta',location,left);
+  const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','镜头基础信息');left.append(basics);
+  const surface=materialTextSurface(basics,shot);materialField(surface,shot,'purpose','叙事目的');entitySources(basics,shot);
+  const groups=data.material_groups||[],tabs=el('div','entity-material-tabs'),panel=el('section','entity-material-tabpanel');tabs.setAttribute('role','tablist');tabs.setAttribute('aria-label','镜头素材');panel.setAttribute('role','tabpanel');left.append(tabs,panel);
+  data.shotSelections||={};data.selectedCandidates||={};
+  if(!groups.some(g=>g.key===data.shotTab))data.shotTab=groups.find(g=>g.material_ids.includes(data.unifiedMaterialId))?.key||groups[0]?.key;
+  const focus=(row,restore=false)=>{if(!row)return;const model=by.get(data.unifiedMaterialId);state.materialCommentCard={data,material_id:data.unifiedMaterialId,number:model?.round?.number||1};if(restore)restoreUnifiedMaterialReader(data,data.unifiedMaterialId,row);else{focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft()}renderComments()};
+  const models=entityReviewMaterialModels(data.requirements,[],data),by=new Map(models.map(m=>[materialModelKey(m),m]));
+  function draw(){
+    pauseReviewMedia?.(right);panel.replaceChildren();right.replaceChildren();
+    const group=groups.find(g=>g.key===data.shotTab);for(const button of tabs.children){button.setAttribute('aria-selected',String(button.dataset.group===data.shotTab));button.tabIndex=button.dataset.group===data.shotTab?0:-1}
+    if(!group){nodeText('p','production-meta','本镜尚无素材',panel);return}
+    const available=group.material_ids.filter(id=>by.has(id));let selected=data.shotSelections[group.key]||data.unifiedMaterialId;if(!available.includes(selected))selected=available[0];data.shotSelections[group.key]=selected;data.unifiedMaterialId=selected;
+    for(const keyState of group.key_states||[]){const index=shot.payload.key_states.findIndex(s=>s.id===keyState.id),section=materialTextSurface(panel,shot);materialField(section,shot,`key_states.${index}.description`,'关键状态')}
+    const list=el('div','material-small-list');list.setAttribute('aria-label',group.label+'素材');panel.append(list);
+    const select=id=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotSelections[group.key]=id;data.unifiedMaterialId=id;const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record||model.need,true);draw();paintProductionReview()};
+    for(const id of available){const model=by.get(id);materialSmallCard(list,modelSmallItem(model),()=>select(id),selected===id)}
+    const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
+    if(!data.selectedCandidates[selected]||data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected]))data.selectedCandidates[selected]='current';
+    renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);draw();paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;draw();paintProductionReview()}}});
+  }
+  for(const [index,group] of groups.entries()){const button=productionButton(tabs,group.label,()=>{rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.shotTab=group.key;draw();const model=by.get(data.unifiedMaterialId);focus(model?.candidates.find(i=>i.record.id===data.selectedCandidates[data.unifiedMaterialId])?.record||model?.need,true);paintProductionReview()});button.dataset.group=group.key;button.setAttribute('role','tab');button.onkeydown=e=>{const d={ArrowRight:1,ArrowLeft:-1,Home:-index,End:groups.length-index-1}[e.key];if(d!==undefined){e.preventDefault();const target=tabs.children[(index+d+groups.length)%groups.length];target.click();target.focus()}}}
+  draw();return card;
 }

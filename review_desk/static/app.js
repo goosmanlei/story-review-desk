@@ -61,7 +61,11 @@ function unpackReviewGraph(graph){
 }
 const api=async(path,options={})=>{const response=await reviewFetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
-const toast=message=>{const node=$('#toast');node.textContent=message;node.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.classList.remove('show'),3500)};
+const toast=message=>{const node=$('#toast');if(!node)return;toast.clear?.();
+  const modal=[...(document.querySelectorAll?.('dialog[open]')||[])].filter(d=>d.matches(':modal')).at(-1);
+  (modal||document.body)?.append(node);node.textContent=message;node.classList.add('show');
+  const clear=()=>{clearTimeout(toast.timer);modal?.removeEventListener('close',clear);node.classList.remove('show');node.textContent='';document.body?.append(node);if(toast.clear===clear)toast.clear=null};
+  toast.clear=clear;toast.timer=setTimeout(clear,3500);modal?.addEventListener('close',clear,{once:true});};
 const isStructure=()=>state.workspace==='story.outline'&&!state.unifiedCardRoot;
 const isScript=()=>state.workspace==='story.script'&&!state.unifiedCardRoot;
 const isProductionWorkspace=()=>['settings.workspace','materials.workspace','production.workspace'].includes(state.workspace);
@@ -481,7 +485,7 @@ function switchWorkspace(id,updateUrl=true,restorePosition=true){
   if(state.workspace!==id){state.reviewCommentScope=null;getSelection()?.removeAllRanges();state.anchor=null;state.editing=null;state.selected=null;state.suggestion=null;state.preview=null}
   if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute();
   state.workspace=id;
-  if(updateUrl){const url=new URL(location.href);url.searchParams.set('workspace',id);if(id==='story.outline'){const revision=resolveStructureRevision(state.structureRevision);if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision')}url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
+  if(updateUrl){const url=new URL(location.href);if(id==='settings.workspace'&&previous!==id)for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene','production_object','production_revision','production_entity'])url.searchParams.delete(key);url.searchParams.set('workspace',id);if(id==='story.outline'){const revision=resolveStructureRevision(state.structureRevision);if(revision)url.searchParams.set('structure_revision',revision);else url.searchParams.delete('structure_revision')}url.hash='';if(url.href!==location.href)history.pushState(null,'',url)}
   if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   renderWorkspaceNav();const source=id==='story.sources';
   $('#story-creation-shell').hidden=!storyChild;
@@ -808,6 +812,22 @@ function textSelectionRange(host,range){
   }
   return part.toString().trim()?part:null;
 }
+// Named Prompt references are a display projection. Comments still address
+// Unicode offsets in the exact submitted/current source, including full slots.
+function reviewSourceText(node){return node.reviewSourceText??node.textContent}
+function reviewMappedOffset(node,offset,end=false,inverse=false){
+  let delta=0;
+  for(const span of node.reviewTextMap||[]){
+    const a=inverse?span.sourceStart:span.displayStart,b=inverse?span.sourceEnd:span.displayEnd;
+    const c=inverse?span.displayStart:span.sourceStart,d=inverse?span.displayEnd:span.sourceEnd;
+    if(offset<a)return offset+delta;
+    if(offset===a)return c;
+    if(offset<b)return end?d:c;
+    if(offset===b)return d;
+    delta=d-b;
+  }
+  return offset+delta;
+}
 function textSelectionAnchor(host,blocks,attribute){
   const selection=getSelection();if(!selection||selection.isCollapsed||!selection.rangeCount)return null;
   const range=textSelectionRange(host,selection.getRangeAt(0));if(!range)return null;
@@ -823,7 +843,8 @@ function textSelectionAnchor(host,blocks,attribute){
     if(part.compareBoundaryPoints(Range.END_TO_END,contents)>0)part.setEnd(contents.endContainer,contents.endOffset);
     if(!part.toString())continue;
     const base=Number(node.dataset.anchorOffset||0);
-    touched.push({id:node.getAttribute(attribute),start:base+offsetIn(node,part.startContainer,part.startOffset),end:base+offsetIn(node,part.endContainer,part.endOffset),text:part.toString()});
+    const start=reviewMappedOffset(node,offsetIn(node,part.startContainer,part.startOffset)),end=reviewMappedOffset(node,offsetIn(node,part.endContainer,part.endOffset),true);
+    touched.push({id:node.getAttribute(attribute),start:base+start,end:base+end,text:node.reviewTextMap?Array.from(reviewSourceText(node)).slice(start,end).join(''):part.toString()});
   }
   if(!touched.length)return null;
   return anchorFromPassages(touched,blocks);

@@ -138,10 +138,10 @@ function selectProductionTab(tab){
   const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
   const saved=workspaceSubRoutes.get(workspaceGroup(workspace)+':'+tab),url=new URL(saved||location.href),savedScopeRevision=url.searchParams.get('production_scope_revision'),sameScope=['production_scope_episode','production_scope_revision','production_scope_scene'].every(key=>url.searchParams.get(key)===source.searchParams.get(key));
   for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene']){
-    const value=source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
+    const value=tab==='entities'?null:source.searchParams.get(key);if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
   url.searchParams.set('workspace',workspace);url.searchParams.set('production_tab',tab);
-  if(!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
+  if(tab==='entities'||!saved||!sameScope)for(const key of ['production_object','production_revision','production_entity','entity_state','entity_material_tab','material_id','material_version','material_round','material_target','material_baseline'])url.searchParams.delete(key);
   if(tab==='breakdown'&&source.searchParams.get('production_scope_episode')){
     const same=!!saved&&savedScopeRevision===source.searchParams.get('production_scope_revision')&&url.searchParams.get('breakdown_episode_revision')===source.searchParams.get('production_scope_revision')&&url.searchParams.get('production_scope_scene')===url.searchParams.get('breakdown_scene')&&url.searchParams.get('production_scope_episode')===url.searchParams.get('breakdown_episode');
     if(!same){url.searchParams.set('breakdown_episode_revision',source.searchParams.get('production_scope_revision')||'');url.searchParams.set('breakdown_episode',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_scene',source.searchParams.get('production_scope_scene')||'');url.searchParams.set('breakdown_object',source.searchParams.get('production_scope_episode'));url.searchParams.set('breakdown_revision',source.searchParams.get('production_scope_revision')||'')}
@@ -206,7 +206,7 @@ function workspacePageDescriptor(workspace,params){
   const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'||params.get('production_tab')==='shots'?'breakdown':(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
   return ({
     breakdown:['STORY → PRODUCTION','视听制作','按视听集、场、镜阅读设计，审阅各项素材方案与准确候选。'],
-    entities:['ENTITIES & STATES','实体管理','按类型与集场审阅实体、实体状态和关系，阅读内容并提出意见。'],
+    entities:['ENTITIES & STATES','实体管理','按集场查看实体关系，打开实体与镜头审阅其素材。'],
     materials:['MATERIAL LIBRARY','素材管理','按集场查看当前方案与真实候选，预览原件并审阅准确内容。']
   })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
 }

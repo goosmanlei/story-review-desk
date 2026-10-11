@@ -18,7 +18,7 @@ class Node{
 }
 function fixture(blocks=[{id:'prompt',text:'前文🐍，No hanging rope, no post bindings. 后文'}]){
  const root=new Node('main'),record={id:'exact',object_id:'call',kind:'CALL',payload:{blocks}},ctx={state:{productionSelected:record,comments:[]},CSS:{escape:s=>s},$:s=>s==='#production-reader'?root:null,isProduction:()=>true,renderComments(){},paintStructureRegions(){},el:(tag,cls,text)=>{const n=new Node(tag);if(cls)for(const c of cls.split(' '))n.classes.add(c);if(text)n.append(new Node('#text',text));return n},document:{querySelector:()=>root,querySelectorAll:s=>root.querySelectorAll(s),createTextNode:s=>new Node('#text',s),createTreeWalker:n=>{const leaves=n.all().filter(x=>x.tagName==='#TEXT');let i=0;return {nextNode:()=>leaves[i++]||null}}}};
- vm.createContext(ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production.js'),'utf8'),ctx);
+ vm.createContext(ctx);const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8');vm.runInContext(app.slice(app.indexOf('function reviewSourceText('),app.indexOf('function textSelectionAnchor(')),ctx);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production.js'),'utf8'),ctx);
  const surface=(revision='exact',values=blocks)=>{const host=new Node('div');host.dataset.productionBlocks=revision;for(const b of values){const p=new Node('pre');p.dataset.blockId=b.id;if(b.offset!==undefined)p.dataset.anchorOffset=b.offset;p.append(new Node('#text',b.text));host.append(p)}root.append(host);return host};
  const comment=(a={})=>({id:'opinion',target_object_id:'call',target_revision_id:'exact',body:'review',status:'OPEN',anchor:{type:'text',block_id:'prompt',start:4,end:38,...a}});
  return {ctx,root,record,surface,comment};

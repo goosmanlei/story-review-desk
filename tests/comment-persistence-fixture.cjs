@@ -6,7 +6,7 @@ function fixture({storage=new Map(),fetch:transport,pageStorage=null,navigationT
   const nodes={'#comment-editor-text':textarea,'.comment-editor':editor,'#toast':{classList:{add(){},remove(){}},set textContent(v){messages.push(v)}}};
   class Element{constructor(tag){this.tag=tag;this.children=[];this.dataset={}}append(...children){this.children.push(...children)}setAttribute(){} }
   const context={crypto,URL,console,setTimeout:()=>1,clearTimeout(){},intent,
-    document:{addEventListener(){},querySelector:s=>s==='#material-revision-intent'?context.intent:nodes[s],createElement:tag=>new Element(tag)},
+    document:{body:{append(){}},querySelectorAll:()=>[],addEventListener(){},querySelector:s=>s==='#material-revision-intent'?context.intent:nodes[s],createElement:tag=>new Element(tag)},
     localStorage:{getItem:k=>storage.has(k)?storage.get(k):null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k),get length(){return storage.size},key:i=>[...storage.keys()][i]},
     fetch:async(url,options)=>{requests.push({url,...options});return transport?transport(url,options):{ok:true,json:async()=>({})}},
     location:{href:'http://127.0.0.1/'},history:{replaceState(){}},

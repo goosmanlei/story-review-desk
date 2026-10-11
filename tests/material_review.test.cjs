@@ -176,10 +176,10 @@ test('whole-original historical opinions stay visible on media but never cross e
  }
 });
 
-test('effective inputs retain source order and type numbering, include exact storyline context',()=>{
+test('effective inputs retain source order and type numbering, omit nonmedia context without renumbering slots',()=>{
  const refs=[{kind:'ENTITY',id:'person',object_id:'person',payload:{}},{kind:'ASSET',id:'i',object_id:'i',payload:{components:[{id:'original',mime:'image/png'}]}},{kind:'ASSET',id:'a',object_id:'a',payload:{components:[{id:'original',mime:'audio/wav'}]}},{kind:'ASSET',id:'j',object_id:'j',payload:{components:[{id:'original',mime:'image/png'}]}}];
  const inputs=refs.map(r=>({object_id:r.object_id,revision_id:r.id,component_id:r.kind==='ASSET'?'original':undefined}));
- const items=ctx.materialInputs(inputs,refs);assert.deepEqual(Array.from(items,i=>i.label),['实体','图片1','音频1','图片2']);assert.deepEqual(Array.from(items,i=>i.index),[0,1,2,3]);assert.equal(ctx.materialInputs([],refs).length,0);
+ const items=ctx.materialInputs(inputs,refs);assert.deepEqual(Array.from(items,i=>i.label),['图片1','音频1','图片2']);assert.deepEqual(Array.from(items,i=>i.index),[1,2,3]);assert.equal(ctx.materialInputs([],refs).length,0);
 });
 
 test('carried text revisions keep comments inside the selected material round',()=>{
@@ -278,7 +278,7 @@ test('shared material cards display the exact definition and candidate without r
  ];
  for(const s of scenarios)await t.test(s.name,()=>{
   const c={state:{},URLSearchParams};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
-  const node=()=>({dataset:{},append(){},addEventListener(){}}),requests=[];
+  const node=()=>({dataset:{},append(){},addEventListener(){},setAttribute(){}}),requests=[];
   c.el=node;c.nodeText=()=>{};c.businessTitle=r=>r.object_id;c.materialModelCode=()=>'';c.reviewPositionText=x=>x;
   c.renderHistoricalProductionDefinition=()=>{};c.materialCompareControl=()=>{};c.renderProductionAcceptance=()=>{};
   c.renderMaterialRelations=()=>assert.fail('relations do not belong in this card');c.renderSelectedGenerationRecipe=(_box,record,candidate)=>requests.push({record,candidate});c.materialRoundControl=()=>{};c.reviewChoiceButtons=()=>{};

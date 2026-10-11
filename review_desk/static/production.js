@@ -2,7 +2,7 @@
 const productionKinds={ENTITY:'实体',STATE:'实体状态',INPUT_LOCK:'剧本依据',AV_EPISODE:'视听集',AV_SCENE:'视听场',AV_SHOT:'视听镜头',MATERIAL_RELATION:'素材关系',REQUIREMENT:'素材需求',ASSET:'实际素材',CALL:'实际制作',RELATION:'明确采用'};
 const productionGroups={'settings.workspace':['ENTITY','STATE','AV_SCENE','AV_SHOT'],'materials.workspace':['REQUIREMENT','ASSET']};
 const productionWorkspaceCanRead=(workspace,r)=>workspace==='materials.workspace'||productionGroups[workspace]?.includes(r.kind)||workspace==='settings.workspace'&&r.kind==='RELATION'&&['entity','business'].includes(r.payload.relation_type);
-const productionLabels={character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',review_reference:'独立审阅参考'};
+const productionLabels={shot:'镜头',character:'角色',space:'场景',prop:'道具',song:'歌曲',visual:'画面',voice:'声音',visual_voice:'画面与声音',mention:'仅提及',generation_input:'生成输入',post_audio:'后期声音',editorial:'剪辑参考',review_reference:'独立审阅参考'};
 const productionRef=r=>({object_id:r.object_id,revision_id:r.id});
 const productionCompleteState=r=>r.kind==='STATE'&&r.payload.state_model==='complete-v1';
 // This read-only projection also runs in review_text.py for exact anchor validation.
@@ -32,6 +32,7 @@ function productionTextBlocks(record){
   return blocks;
 }
 const productionEntitySymbols={
+  shot:['M3 7h18v14H3Z','M3 7V3h18v4','m4 3 3 4m4-4 3 4m4-4 3 4'],
   character:['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M4.5 21v-2a7.5 7.5 0 0 1 15 0v2'],
   space:['M3 4h18v16H3Z','M3 17l5-5 4 4 4-7 5 8','M8 8h.01'],
   prop:['m12 3 9 5v9l-9 5-9-5V8Z','m3 8 9 5 9-5','M12 13v9','m7.5 5.5 9 5V15'],
@@ -58,7 +59,7 @@ function productionMaterialEntries(records,memberships={}){
 }
 function productionWorkspaceRows(records,workspace,memberships={}){
   if(workspace==='materials.workspace')return productionMaterialEntries(records,memberships);
-  return records.filter(r=>workspace==='settings.workspace'?r.kind==='ENTITY'&&r.payload.status!=='withdrawn':productionGroups[workspace].includes(r.kind)&&r.payload.status!=='withdrawn');
+  return records.filter(r=>workspace==='settings.workspace'?['ENTITY','AV_SHOT'].includes(r.kind)&&r.payload.status!=='withdrawn':productionGroups[workspace].includes(r.kind)&&r.payload.status!=='withdrawn');
 }
 function productionEntityIcon(type){
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
@@ -451,7 +452,7 @@ function productionTextSurfaceContainsRange(range,surface){
   for(let index=range.first;index<=range.last;index++){
     const text=Array.from(range.blocks[index].text),start=index===range.first?range.anchor.start:0,end=index===range.last?range.anchor.end:text.length;
     let cursor=start;
-    const parts=nodes.filter(n=>n.dataset.blockId===range.blocks[index].id).map(n=>({start:Number(n.dataset.anchorOffset||0),end:Number(n.dataset.anchorOffset||0)+Array.from(n.textContent).length})).sort((a,b)=>a.start-b.start);
+    const parts=nodes.filter(n=>n.dataset.blockId===range.blocks[index].id).map(n=>({start:Number(n.dataset.anchorOffset||0),end:Number(n.dataset.anchorOffset||0)+Array.from(reviewSourceText(n)).length})).sort((a,b)=>a.start-b.start);
     for(const part of parts){if(part.start>cursor&&!(part.start===cursor+1&&text[cursor]==='\n'))return false;cursor=Math.max(cursor,part.end);if(cursor>=end)break}
     if(cursor<end)return false;
   }
@@ -464,7 +465,7 @@ function productionCommentTextNodes(range,surface){
     const index=range.blocks.findIndex(b=>b.id===node.dataset.blockId);if(index<range.first||index>range.last)return false;
     if(!range.valid)return index===range.first;
     const start=index===range.first?range.anchor.start:0,end=index===range.last?range.anchor.end:Array.from(range.blocks[index].text).length;
-    const base=Number(node.dataset.anchorOffset||0),length=Array.from(node.textContent).length;
+    const base=Number(node.dataset.anchorOffset||0),length=Array.from(reviewSourceText(node)).length;
     return base<end&&start<base+length;
   });
 }
@@ -483,13 +484,13 @@ function paintProductionCommentText(comment){
   const range=productionCommentTextRange(comment),surface=productionCommentTextSurface(comment);if(!range||!surface)return;
   if(surface.closest('.material-use-details'))return; // Already uses the shared full comment renderer.
   for(const part of range.segments||[range])for(const node of productionCommentTextNodes(part,surface)){
-    const index=part.blocks.findIndex(b=>b.id===node.dataset.blockId),block=part.blocks[index],base=Number(node.dataset.anchorOffset||0),text=node.textContent,length=Array.from(text).length;
+    const index=part.blocks.findIndex(b=>b.id===node.dataset.blockId),block=part.blocks[index],base=Number(node.dataset.anchorOffset||0),text=reviewSourceText(node),length=Array.from(text).length;
     // Excerpts carry Unicode offsets into the original block. Preserve their
     // exact text and labels; missing/invalid legacy ranges get only a block cue.
     node.dataset.productionCommentText='';
     if(!part.valid||Array.from(block.text).slice(base,base+length).join('')!==text){node.classList.add('comment-flash');continue}
     const start=Math.max(0,(index===part.first?part.anchor.start:0)-base),end=Math.min(length,(index===part.last?part.anchor.end:Array.from(block.text).length)-base);
-    paintProductionTextMark(node,start,end,comment);
+    paintProductionTextMark(node,reviewMappedOffset(node,start,false,true),reviewMappedOffset(node,end,true,true),comment);
   }
 }
 function paintProductionTextMark(node,start,end,comment){

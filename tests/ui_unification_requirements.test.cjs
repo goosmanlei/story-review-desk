@@ -142,7 +142,7 @@ test('product Prompt links preserve exact source text, Unicode offsets and deplo
   c.reviewURL=url=>'/lijizhanshe'+url;c.renderReviewHelp=()=>{};
   const before=JSON.stringify(need);c.renderShotProductPlan(reader,need,context);
   const pre=reader.all().find(n=>n.className==='shot-generation-prompt');
-  assert.equal(pre.textContent,call.payload.prompt);assert.equal(JSON.stringify(need),before);
+  assert.equal(pre.reviewSourceText,call.payload.prompt);assert.equal(pre.textContent,call.payload.prompt.replace('@图片1','@input-old'));assert.equal(pre.reviewTextMap.length,1);assert.equal(JSON.stringify(need),before);
   assert.equal(pre.all().find(n=>n.tag==='a').href,'/lijizhanshe/?revision='+input.id);
 });
 for(const workspace of ['settings.workspace','production.workspace'])test(`three sections keep real states and product order in ${workspace}`,async()=>{

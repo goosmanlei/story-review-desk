@@ -189,11 +189,13 @@ function entitySources(parent,row){
   if(!unique.size)return;
   const sources=el('nav','entity-review-sources');sources.setAttribute('aria-label','故事出处');
   for(const source of unique.values())source.block_ids=[...new Set(source.block_ids)].sort();
-  if(unique.size>6){
-    const select=el('select');select.setAttribute('aria-label','选择故事出处');select.append(new Option('故事出处 · '+unique.size+' 场',''));
-    const records=[...unique.values()];for(const [i,source] of records.entries())select.append(new Option(source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'故事原文',String(i)));
-    select.onchange=()=>{if(select.value!=='')openMaterialReference(records[Number(select.value)],select,true)};sources.append(select);
-  }else for(const source of unique.values())productionRefLink(sources,source,source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'故事原文');
+  for(const source of unique.values()){
+    const named=row.review_sources?.find(s=>s.revision_id===source.revision_id&&s.scene_id===source.scene_id);
+    const episode=(state.screenplays||[]).flatMap(s=>s.episodes||[]).find(e=>e.id===source.revision_id);
+    const scene=episode?.payload?.scenes?.find(s=>s.id===source.scene_id);
+    const label=(source.scene_id?reviewPositionLabel('scene',source.scene_id,source.object_id):'故事原文')+(named?.title||scene?' · '+String(named?.title||scene.heading||scene.title||scene.location||'').replace(/^\d+-\d+\s*/u,''):'');
+    const button=productionButton(sources,label,()=>openMaterialReference(source,button,'full_scene'));button.className='review-reference-button';button.dataset.reviewDialogTrigger='';
+  }
   parent.append(sources);
 }
 
@@ -251,7 +253,7 @@ function renderEntityReview(root){
   if(state.reviewWork)nodeText('p','production-meta','用于当前作品：'+reviewPositionText(state.reviewWork.title),identity);
   identity.classList.add('entity-review-identity');entityVersionControl(identity,entity,row=>{state.productionEntityDetail=entityReviewDetail(row);data.historicalTarget=row.id===row.current_revision?null:row});root.append(header);renderEntityWithdrawals(root,withdrawals);
   const basics=el('section','entity-review-basics');basics.setAttribute('aria-label','实体基础信息');const basicHeading=el('div','entity-review-local-heading');nodeText('h3',null,'基础信息',basicHeading);basics.append(basicHeading);
-  if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);root.append(basics);
+  if(entity.payload.aliases?.length)nodeText('p','production-meta','别名：'+entity.payload.aliases.join('、'),basics);reviewTextBlocks(basics,entity);entitySources(basics,entity);if(entity.payload.lyrics?.length){const lyrics=el('section','entity-review-lyrics');nodeText('h4',null,'剧中演唱选段',lyrics);for(const lyric of entity.payload.lyrics){nodeText('h5',null,lyric.section,lyrics);nodeText('p',null,lyric.text,lyrics);const button=productionButton(lyrics,'查看歌词出处',()=>openMaterialReference(lyric.source,button,'full_scene'));button.dataset.reviewDialogTrigger=''}basics.append(lyrics)}root.append(basics);
   const ownNeeds=(data.requirements||[]).filter(r=>r.payload.scope?.object_id===entity.object_id&&r.payload.scope.revision_id===entity.id);
 
 
@@ -269,7 +271,7 @@ function renderEntityReview(root){
     const needs=(data.requirements||[]).filter(r=>r.payload.scope.revision_id===row.id),materialCount=entityReviewMaterialModels(needs,entityReviewMaterialItems(data,entityReviewStateMedia(data,row)),data).length,button=productionButton(choices,'',()=>selectEntityReviewState(row));nodeText('span',null,((data.retained_states||[]).some(r=>r.id===row.id)?'历史保留 · ':row.object_id===currentStates[0]?.object_id?'基础状态 · ':'')+businessTitle(row,entityReviewShort(row,entity)),button);button.title=entityReviewShort(row,entity)+' · '+entityReviewScope(row);if(materialCount)nodeText('small',null,materialCount+' 项素材',button);button.setAttribute('aria-pressed',String(row.id===form?.id));button.dataset.stateId=row.object_id;
   }nav.append(choices);
   const otherStates=data.states.filter(row=>!scopedStates.includes(row));
-  if(otherStates.length){const select=el('select');select.setAttribute('aria-label','查看其他状态');select.append(new Option('查看其他状态',''));for(const row of otherStates)select.append(new Option(businessTitle(row),row.id));select.onchange=()=>{const row=otherStates.find(r=>r.id===select.value);if(row)openUnifiedMaterial({...productionRef(row),work:null},select);select.value=''};nav.append(select)}
+  for(const row of otherStates){const button=productionButton(choices,businessTitle(row),()=>openUnifiedMaterial({...productionRef(row),work:null},button));button.dataset.stateId=row.object_id;button.setAttribute('aria-pressed','false')}
   if(data.materialTab==='states'&&(data.states.length||!withdrawnEntity))root.append(nav);
   if(data.materialTab==='states'&&form){
     const selectedState=el('section','entity-review-selected-state');selectedState.setAttribute('aria-label','选定状态');root.append(selectedState);
@@ -284,8 +286,7 @@ function renderEntityReview(root){
     const models=entityReviewMaterialModels(ownNeeds,entityReviewMaterialItems(data,unassigned),data);
     if(models.length)renderUnifiedModels(materials,models,data);else nodeText('p','production-meta','此实体尚无素材需求或原件',materials);
   }
-  if(entity.payload.lyrics?.length){const lyrics=el('section','entity-review-lyrics');nodeText('h3',null,'歌词原文与段落',lyrics);for(const lyric of entity.payload.lyrics){nodeText('h4',null,lyric.section,lyrics);nodeText('p',null,lyric.text,lyrics);productionRefLink(lyrics,lyric.source,'查看歌词依据')}root.append(lyrics)}
-  renderEntityRelations(root,data);
+
 }
 
 function renderMaterialPlaceholder(parent,need,hasCandidates=false){

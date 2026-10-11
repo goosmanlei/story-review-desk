@@ -32,7 +32,7 @@ function setup(){
 for(const explicit of [false,true])test(`${explicit?'exact link':'asset index'} opens B in its own older round, with B media, call, text and comment target`,async()=>{
  const f=setup();await f.ctx.openProductionRecord(f.b.object_id,explicit?f.b.id:null);
  assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.b.id]);assert.deepEqual(f.nodes('call'),[]);assert.equal(f.detail.review_contexts[f.b.id].call.id,'call-b-v1');assert.deepEqual(f.nodes('text'),[]);
- const choice=f.root.all().find(n=>n.attributes['aria-label']==='本轮候选');assert.equal(selected(choice),f.b.id);
+ const choice=f.root.all().find(n=>n.attributes['aria-label']==='历史候选');assert.equal(selected(choice),f.b.id);
  f.nodes('media')[0].onfocus();assert.equal(f.ctx.state.productionSelected.id,f.b.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.b.id);assert.equal(f.requests.filter(url=>!url.includes('/acceptance?')&&!url.includes('/material-relations?')&&!url.includes('/judgments?')).length,1);
 });
 test('the actual asset renderer defaults to its own exact candidate without relying on a URL target',()=>{
@@ -88,7 +88,7 @@ for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'a
  f.rounds.splice(0,f.rounds.length,{number:1,state:'produced',plan:f.plan,members:[f.plan,f.a,f.b],results:[f.b]});
  const before=JSON.stringify(f.rounds);await f.ctx.openProductionRecord(f.a.object_id,explicit?f.a.id:null);
  assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text'),[]);
- const candidates=f.root.all().find(n=>n.attributes['aria-label']==='本轮候选');assert.equal(candidates.children.length,1);assert.equal(candidates.children[0].textContent,'候选1');assert.equal(JSON.stringify(f.rounds),before);
+ const candidates=f.root.all().find(n=>n.attributes['aria-label']==='历史候选');assert.equal(candidates.children.length,1);assert.equal(candidates.children[0].textContent,'候选1');assert.equal(JSON.stringify(f.rounds),before);
  assert.ok(!f.nodes('button').some(n=>n.textContent==='记录本版本审阅结论'));
  assert.equal(f.ctx.state.productionSelected.id,f.a.id);
 });

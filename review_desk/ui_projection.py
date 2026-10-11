@@ -6,7 +6,7 @@ from . import list_reading as light
 
 def material_entries(store):
     from .read_cache import read_json
-    return read_json(store, 'material-entries-v5', lambda: _material_entries(store))
+    return read_json(store, 'material-entries-v6', lambda: _material_entries(store))
 
 
 def _material_entries(store):
@@ -41,7 +41,7 @@ def _material_entries(store):
                     locations.append({'episode':source['object_id'],'scene':source.get('scene_id'),'kind':'STATE','scope':reference,'source':source,'title':scoped['payload']['title'],
                                       'source_scene_name':source_scene.get('heading') or source_scene.get('title') or source_scene.get('location'),
                                       'source_version':episode.get('version'),'relation':'source'})
-            elif scoped['kind']=='ENTITY':owners[scoped['object_id']]=b.ref(scoped)
+            elif scoped['kind'] in ('ENTITY','AV_SHOT'):owners[scoped['object_id']]=b.ref(scoped)
         if scope:add_scope(scope,'mounted')
         for reference in links.get(row['id'],[]):add_scope(reference,'applicable')
         if row['kind']=='ASSET':
@@ -97,13 +97,19 @@ def entity_summaries(store, entities, entries):
             if key in seen:continue
             seen.add(key)
             if eid in counts:counts[eid][item['media_type']]=counts[eid].get(item['media_type'],0)+1
+    from .entity_contract import direct_materials
+    for entity in entities:
+        if entity['kind']=='AV_SHOT':
+            counts[entity['object_id']]={}
+            for need in direct_materials(store,entity):
+                media=need['payload']['media_type'];counts[entity['object_id']][media]=counts[entity['object_id']].get(media,0)+1
     from .entity_review import full_states
     from .navigation_search import entity_fields, codes
     from .list_associations import entity_locations
     rows = p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
     return {'management_episodes':management_episodes(store),'entity_material_counts':counts,
             'entity_search_fields':entity_fields(entities,[r for r in rows if r['kind']=='STATE'],codes(store)),
-            'entity_state_counts':{e['object_id']:len({r['object_id'] for r in full_states(rows,e['object_id'])}) for e in entities},
+            'entity_state_counts':{e['object_id']:(len(e['payload'].get('key_states', [])) if e['kind']=='AV_SHOT' else len({r['object_id'] for r in full_states(rows,e['object_id'])})) for e in entities},
             'entity_locations':entity_locations(store,entities,rows),
             'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
 
@@ -180,7 +186,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
 def card(store, object_id, revision_id=None, entity_id=None):
     from . import entity_review
     detail=p.snapshot(store,object_id=object_id,revision_id=revision_id);row=detail['record'];scope=row['payload'].get('scope');form=None;owner=None
-    if row['kind']=='ENTITY':owner=row
+    if row['kind'] in ('ENTITY','AV_SHOT'):owner=row
     elif row['kind']=='STATE':form=row
     elif row['kind']=='ASSET':
         needs=(detail.get('review_context') or {}).get('requirements',[])
@@ -198,13 +204,13 @@ def card(store, object_id, revision_id=None, entity_id=None):
                     not p.ref_record(store,reference).get('unavailable')),None)
     scoped=p.ref_record(store,scope) if scope else None
     if scoped and scoped['kind']=='STATE':form=scoped
-    elif scoped and scoped['kind']=='ENTITY':owner=scoped
+    elif scoped and scoped['kind'] in ('ENTITY','AV_SHOT'):owner=scoped
     if form:
         if form.get('unavailable'):
             owner=p.record(store,form['owner_object_id']) if form.get('owner_object_id') else None
             form=None
         else:owner=p.ref_record(store,form['payload']['entity'])
-    entity=entity_review.snapshot(store,entity_id or owner['object_id']) if entity_id or owner else None
+    entity=entity_review.snapshot(store,entity_id or owner['object_id'], owner['id'] if owner and owner['kind']=='AV_SHOT' else None) if entity_id or owner else None
     if entity_id:
         allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
         if row.get('cleaned_target') and row['payload']['entity']['object_id']==entity_id:
@@ -231,11 +237,10 @@ def card(store, object_id, revision_id=None, entity_id=None):
                 entity['retained_states'].append(form)
     context=b.context(store,scoped['object_id'],scoped['id']) if scoped and not scoped.get('unavailable') else None
     position_review=None
-    if row['kind'] in ('AV_SHOT','AV_SCENE'):
-        selected_scene=row if row['kind']=='AV_SCENE' else next((p.ref_record(store,ref) for ref in b.ancestors(store,row)[1:] if p.ref_record(store,ref)['kind']=='AV_SCENE'),None)
+    if row['kind']=='AV_SCENE':
+        selected_scene=row
         if selected_scene is None:raise ValueError('准确镜头未编入可用视听场；未替换为最新镜头')
-        position_review=scene(store,selected_scene['object_id'],selected_scene['id'],row['id'] if row['kind']=='AV_SHOT' else None,view='breakdown')
-        if row['kind']=='AV_SHOT':position_review['shots']=[item for item in position_review['shots'] if item['record']['id']==row['id']]
+        position_review=scene(store,selected_scene['object_id'],selected_scene['id'],None,view='breakdown')
         position_review.update(record=row,history=detail['history'])
     source_materials=[]
     if context and not entity:
@@ -346,7 +351,9 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
     for row in shots:
         context=b.context(store,row['object_id'],row['id'],metadata=metadata)
         if episode_revision:context['ancestors']=[b.ref(row),*chain]
-        shot_contexts.append({'record':row,'context':enrich(context)})
+        from .entity_contract import shot_workspace
+        shot_contexts.append({'record':row,'context':enrich(context),
+                              'entity_workspace':shot_workspace(store,row['object_id'],row['id'])})
     return {'scene':selected,'source_scenes':source_scenes,'shared':[enrich(c) for c in reversed(contexts)],
             'shots':shot_contexts}
 
