@@ -72,7 +72,8 @@ function restoreEntityMaterialRoute(data,route){
   if(!(data.comment_targets||[]).some(r=>r.object_id===row.object_id&&r.revision_id===row.id)){data.comment_targets||=[];data.comment_targets.push(productionRef(row))}
   if(selected){data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.round.number;state.materialCommentCard={data,material_id:selected.material_id,number:selected.round.number}}
   data.localVersions||={};if(['ASSET','REQUIREMENT'].includes(row.kind))data.localVersions[row.object_id]=row;
-  const scope=(row.kind==='REQUIREMENT'?row.payload.scope:null)||selected?.round.plan?.payload.scope;
+  const plan=row.kind==='REQUIREMENT'?row:selected?.round.plan;
+  const scope=plan?.payload.current_plan_for?null:plan?.payload.scope;
   data.materialTab=scope?.object_id===data.entity.object_id?'entity':'states';
   const form=scope&&data.states.find(r=>r.object_id===scope.object_id&&r.id===scope.revision_id);
   if(form)state.productionChildDetail=entityReviewDetail(form);

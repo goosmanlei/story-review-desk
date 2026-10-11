@@ -16,6 +16,7 @@ class LegacyPlanTest(unittest.TestCase):
 
     def test_same_identity_idempotence_edits_and_empty_recovery(self):
         self.setup_plans();self.media()
+        GenerationTest.change(self,'voice',subjects=[self.ref('songbook')])
         migration.apply(self.store,migration.plan(self.store))
         tables=('business_codes','production_submissions','production_candidates','production_candidate_targets')
         before={t:[tuple(r) for r in self.store.db.execute('SELECT * FROM '+t)] for t in tables}
@@ -24,6 +25,9 @@ class LegacyPlanTest(unittest.TestCase):
         self.assertEqual(legacy.initialize(self.store),{'created':[],'existing':['voice']})
         for table, rows in before.items():self.assertEqual([tuple(r) for r in self.store.db.execute('SELECT * FROM '+table)], rows)
         plan=p.record(self.store,legacy.plan_id('voice'))
+        from review_desk import ui_projection
+        card=ui_projection.card(self.store,plan['object_id'])
+        self.assertEqual(card['entity_review']['entity']['object_id'],'songbook')
         snapshot=c.material_snapshot(self.store,'voice')[0]
         self.assertEqual(snapshot['plan']['object_id'],plan['object_id'])
         self.assertEqual(material_plans.card_counts(self.store,[plan['object_id']])[plan['object_id']]['candidate_count'],1)

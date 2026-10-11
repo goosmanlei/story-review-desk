@@ -74,5 +74,5 @@ test('a withdrawn plan with an existing recipe and result retains its exact comm
 });
 test('an active material without a recipe or result keeps its actionable placeholder and preparation message',()=>{
  const f=setup(),need=row('need','REQUIREMENT',{media_type:'image'}),parent=new Element('main');f.context.renderMaterialCard(parent,{need,candidates:[]});
- assert.match(parent.textContent,/图像 · 未生成/);assert.match(parent.textContent,/未保留完整的生成方案/);assert.doesNotMatch(parent.textContent,/撤回|此版本未附生成方案/);
+ assert.match(parent.textContent,/图像 · 未生成/);assert.match(parent.textContent,/原文中的待审说明保留/);assert.doesNotMatch(parent.textContent,/撤回|此版本未附生成方案/);
 });

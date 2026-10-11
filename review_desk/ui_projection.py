@@ -188,16 +188,18 @@ def card(store, object_id, revision_id=None, entity_id=None):
     detail=p.snapshot(store,object_id=object_id,revision_id=revision_id);row=detail['record'];scope=row['payload'].get('scope');form=None;owner=None
     if row['kind'] in ('ENTITY','AV_SHOT'):owner=row
     elif row['kind']=='STATE':form=row
-    elif row['kind']=='ASSET':
-        needs=(detail.get('review_context') or {}).get('requirements',[])
-        actual=(detail.get('review_context') or {}).get('call')
+    elif row['kind']=='ASSET' or row['payload'].get('current_plan_for'):
+        asset=p.ref_record(store,row['payload']['current_plan_for']) if row['kind']=='REQUIREMENT' else row
+        evidence=p.snapshot(store,object_id=asset['object_id']) if row['kind']=='REQUIREMENT' else detail
+        needs=(evidence.get('review_context') or {}).get('requirements',[])
+        actual=(evidence.get('review_context') or {}).get('call')
         call_need=(actual or {}).get('payload',{}).get('generation_requirement')
         references=[need['payload'].get('scope') for need in needs if not need.get('unavailable')]
         if call_need:
             call_record=p.ref_record(store,call_need)
             if not call_record.get('unavailable'):references.append(call_record['payload'].get('scope'))
-        references.extend(item['state'] for item in row['payload'].get('state_coverage',[]))
-        references.extend(row['payload'].get('subjects',[]))
+        references.extend(item['state'] for item in asset['payload'].get('state_coverage',[]))
+        references.extend(asset['payload'].get('subjects',[]))
         # A retired placeholder is evidence of absence, not a source. Try the
         # remaining exact evidence without replacing any referenced revision.
         scope=next((reference for reference in references if reference and

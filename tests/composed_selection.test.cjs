@@ -4,6 +4,19 @@ for(const name of ['app.js','production.js','review-ui.js','material-review.js']
 const blocks=[{id:'a',text:'甲𪎊乙。\n隐藏字\n后段。'},{id:'gap',text:'不应引用的拆镜'},{id:'b',text:'米铺😀空间。'},{id:'c',text:'连续末段。'}];
 const part=(id,start,end)=>({id,start,end,text:Array.from(blocks.find(b=>b.id===id).text).slice(start,end).join('')});
 const anchor=parts=>ctx.anchorFromPassages(parts,blocks),plain=v=>JSON.parse(JSON.stringify(v));
+test('named Prompt references map Unicode display selections back to exact source slots',()=>{
+ const source='😀图片1与音频2末',node={reviewSourceText:source,reviewTextMap:[
+  {sourceStart:1,sourceEnd:4,displayStart:1,displayEnd:8},
+  {sourceStart:5,sourceEnd:8,displayStart:9,displayEnd:15}]};
+ assert.equal(ctx.reviewSourceText(node),source);
+ assert.equal(ctx.reviewMappedOffset(node,3),1);
+ assert.equal(ctx.reviewMappedOffset(node,3,true),4);
+ assert.equal(ctx.reviewMappedOffset(node,8),4);
+ assert.equal(ctx.reviewMappedOffset(node,16),9);
+ assert.equal(ctx.reviewMappedOffset(node,6,false,true),9);
+ assert.equal(ctx.reviewMappedOffset(node,6,true,true),15);
+ assert.equal(Array.from(source).slice(ctx.reviewMappedOffset(node,2),ctx.reviewMappedOffset(node,14,true)).join(''),'图片1与音频2');
+});
 test('different-block omission preserves both selected passages in one opinion',()=>{
  const a=anchor([part('a',0,4),part('b',0,6)]);
  assert.equal(a.quote,'甲𪎊乙。\n米铺😀空间。');assert.equal(a.segments.length,2);
