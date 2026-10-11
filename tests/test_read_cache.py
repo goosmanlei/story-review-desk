@@ -29,6 +29,40 @@ class CachedEntityReadScopeTest(scope_tests.EntityReadScopeTest):
 
 
 class CacheTest(unittest.TestCase):
+    def test_shared_projection_is_filled_once_across_processes(self):
+        ready = self.root/'projection-filling'
+        program = '''
+import sys,time
+from pathlib import Path
+from review_desk.store import Store
+from review_desk import production,read_cache
+s=Store.open_existing(sys.argv[1]);read_cache.attach(s,initialize_schema=False)
+def fill():
+ Path(sys.argv[2]).write_text('filling')
+ time.sleep(.2)
+ return {'exact':[1,None,'current']}
+with production.read_scope(s):
+ print(read_cache.read_json(s,'shared-projection',fill))
+s.close()
+'''
+        child = subprocess.Popen([sys.executable, '-c', program, str(self.store.db_path), str(ready)],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic()+5
+            while not ready.exists() and time.monotonic()<deadline:
+                time.sleep(.005)
+            self.assertTrue(ready.exists())
+            with production.read_scope(self.store):
+                actual = read_cache.read_json(self.store, 'shared-projection',
+                                             lambda: self.fail('duplicated an in-flight exact projection'))
+            self.assertEqual(actual, {'exact':[1,None,'current']})
+            stdout, stderr = child.communicate(timeout=5)
+            self.assertEqual(child.returncode, 0, stderr)
+        finally:
+            if child.poll() is None:
+                child.terminate()
+                child.communicate(timeout=5)
+
     def test_snapshot_token_failure_releases_scope_and_transaction(self):
         before = read_cache.token(self.store)
         with patch('review_desk.read_cache.token', side_effect=sqlite3.OperationalError('disk I/O error')):
