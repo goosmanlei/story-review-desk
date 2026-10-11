@@ -108,33 +108,15 @@ def shot_workspace(store, object_id, revision_id=None):
 
 
 def graph(store, entities):
-    """Current real relationships and deduplicated, derived shot involvement."""
+    """All real relationships between visible entities; never derive edges."""
     from . import entity_relations
     by_id = {row['object_id']: row for row in entities if row['payload'].get('status') != 'withdrawn'}
-    edges, pairs = {}, set()
+    edges = {}
     for row in p.current_records(store, {'RELATION'}):
         if not entity_relations.is_relationship(row) or row['payload'].get('status') == 'withdrawn': continue
         ends = entity_relations.endpoints(row)
         if len(ends) != 2 or not all(oid in by_id for oid in ends): continue
-        pairs.add(tuple(sorted(ends)))
         edges[row['object_id']] = {'id': row['object_id'], 'endpoints': ends,
             'summary': row['payload'].get('summary') or row['payload'].get('label') or row['payload']['title'],
             'direction': row['payload'].get('direction', 'related'), 'derived': False}
-    for shot in by_id.values():
-        if shot['kind'] != 'AV_SHOT': continue
-        value = shot['payload']
-        refs = [*value.get('entities', []), *value.get('states', []), *value.get('continuity_context', [])]
-        for item in value.get('occurrences', []): refs += [item['entity'], *item.get('states', [])]
-        for item in value.get('state_transitions', []): refs += [item['from'], item['to']]
-        for reference in refs:
-            target = p.ref_record(store, reference)
-            if target.get('unavailable'): continue
-            oid = target['payload']['entity']['object_id'] if target['kind'] == 'STATE' else target['object_id']
-            if oid not in by_id or oid == shot['object_id']: continue
-            ends = [shot['object_id'], oid]
-            pair=tuple(sorted(ends))
-            if pair in pairs:continue
-            pairs.add(pair)
-            key='involves:'+':'.join(ends)
-            edges[key]={'id':key,'endpoints':ends,'summary':'本镜涉及','direction':'forward','derived':True}
     return {'contract': CONTRACT, 'edges': list(edges.values())}

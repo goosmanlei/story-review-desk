@@ -42,7 +42,8 @@ function managementScopeMemory(memory,params,prefix){
   memory.legacyScope=params.has(prefix+'episode')||params.has(prefix+'scene');
 }
 function managementScopeRoute(filters){
-  breakdownRoute({production_scope_episode:filters.episode||null,production_scope_revision:filters.scope_revision||null,production_scope_scene:filters.scene||null});
+  const params=new URL(location.href).searchParams,changed=params.get('production_scope_episode')!==(filters.episode||null)||params.get('production_scope_scene')!==(filters.scene||null)||params.get('production_scope_revision')!==(filters.scope_revision||null);
+  breakdownRoute({production_scope_episode:filters.episode||null,production_scope_revision:filters.scope_revision||null,production_scope_scene:filters.scene||null,...(changed?{production_scope_shot:null}:{})});
 }
 function managementScopeFilters(parent,filters,catalog,locations,change){
   const episodes=[['','全部集'],...catalog.episodes.map(ep=>[ep.object_id,reviewPositionLabel('episode',ep)])];
@@ -56,27 +57,66 @@ function managementScopeFilters(parent,filters,catalog,locations,change){
 function managementLegacyNotice(parent,memory){
   if(memory.legacyScope)nodeText('p','production-issue','此旧链接按源剧本集场定位，可能对应多个视听场。请在上方重新选择视听制作范围。',parent);
 }
+function entityManagementScopeParams(params=new URL(location.href).searchParams){
+  return {...managementScopeParams(params),scope:'shot',scope_shot:params.get('production_scope_shot')||''};
+}
+function entityScopeRoute(filters,{push=false}={}){
+  const url=new URL(location.href);
+  for(const [key,value] of Object.entries({production_scope_episode:filters.episode,production_scope_revision:filters.scope_revision,production_scope_scene:filters.scene,production_scope_shot:filters.shot})){
+    if(value)url.searchParams.set(key,value);else url.searchParams.delete(key);
+  }
+  for(const key of ['entity_search','entity_category','entity_page','entity_rows','entity_episode','entity_scene'])url.searchParams.delete(key);
+  if(url.href!==location.href)history[push?'pushState':'replaceState'](push?null:history.state,'',url);
+}
+function entityScopeFilters(parent,filters,catalog,change){
+  const episode=catalog.episodes.find(ep=>ep.object_id===filters.episode),scenes=episode?.scenes||[],scene=scenes.find(sc=>sc.id===filters.scene),shots=scene?.shots||[];
+  flatFilterGroup(parent,'episode','视听集',catalog.episodes.map(ep=>[ep.object_id,reviewPositionLabel('episode',ep)]),filters.episode,null,value=>{
+    if(!value)return;const ep=catalog.episodes.find(ep=>ep.object_id===value),sc=ep?.scenes?.[0];Object.assign(filters,{episode:value,scope_revision:ep?.id||'',scene:sc?.id||'',shot:sc?.shots?.[0]?.object_id||''});change();
+  });
+  flatFilterGroup(parent,'scene','视听场',scenes.map(sc=>[sc.id,managementSceneLabel(sc.id,filters.episode,catalog)]),filters.scene,null,value=>{
+    if(!value)return;const sc=scenes.find(sc=>sc.id===value);Object.assign(filters,{scene:value,shot:sc?.shots?.[0]?.object_id||''});change();
+  });
+  flatFilterGroup(parent,'shot','镜头',shots.map(row=>[row.object_id,businessTitle(row)]),filters.shot,null,value=>{if(!value)return;filters.shot=value;change()});
+}
 async function loadEntityManagement(result,{epoch,onReadStart}={}){
   const workspace=state.workspace,host=$('#production-view'),params=new URL(location.href).searchParams;
-  const memory=managementMemory('entities',params,'entity_');memory.filters={};managementScopeMemory(memory,params,'entity_');
-  const filters=memory.filters,catalog={episodes:result.management_episodes||[]};
+  const memory=managementMemory('entities',params,'entity_');memory.filters={...result.entity_scope};
+  const filters=memory.filters,catalog={episodes:result.management_episodes||[]};let request=0;
   if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;
   rememberProductionDraft();state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
   const panel=el('section','production-filters');panel.setAttribute('aria-label','实体管理范围');host.append(panel);
   const summary=nodeText('p','production-filter-summary','',host),content=el('div','management-entity-graph');host.append(content);
-  function refresh(){
-    const entities=productionWorkspaceRows(result.records,workspace,result.material_assets);
-    const rows=entities.filter(row=>!(filters.episode||filters.scene)||(result.entity_locations[row.object_id]||[]).some(loc=>(!filters.episode||loc.episode===filters.episode)&&(!filters.scene||loc.scene===filters.scene)));
-    state.productionVisibleEntities=new Set(rows.map(row=>row.object_id));
-    panel.replaceChildren();managementScopeFilters(panel,filters,catalog,[],refresh);
+  const current=token=>token===request&&epoch===productionLoadEpoch&&workspace===state.workspace;
+  function draw(){
+    const rows=productionWorkspaceRows(result.records,workspace,result.material_assets);
+    state.productionRecords=result.records;state.productionVisibleEntities=new Set(rows.map(row=>row.object_id));
+    panel.replaceChildren();entityScopeFilters(panel,filters,catalog,()=>refresh(true));
     summary.textContent=rows.length+' 个实体';content.replaceChildren();
-    const key=JSON.stringify([filters.episode,filters.scene]);memory.graphs||={};memory.graphs[key]||={};
-    renderManagementEntityGraph(content,rows,result,memory.graphs[key]);
-    managementScopeRoute(filters);
-    breakdownRoute({entity_search:null,entity_category:null,entity_page:null,entity_rows:null,entity_episode:null,entity_scene:null});
+    if(!filters.episode)nodeText('p','production-meta','暂无视听集',content);
+    else if(!filters.scene)nodeText('p','production-meta','本集暂无视听场',content);
+    else if(!filters.shot)nodeText('p','production-meta','本场暂无镜头',content);
+    else{
+      const key=JSON.stringify([filters.episode,filters.scope_revision,filters.scene,filters.shot]);
+      // A user range change starts a readable view. History reloads may restore it.
+      if(memory.activeGraph!==key)memory.graphs={[key]:memory.graphs?.[key]||{}};
+      memory.activeGraph=key;memory.graphs||={};memory.graphs[key]||={};
+      renderManagementEntityGraph(content,rows,result,memory.graphs[key]);
+    }
+    entityScopeRoute(filters);
   }
-  state.refreshEntityIndex=async()=>{const fresh=await api('/api/production/index?'+new URLSearchParams({view:'settings',...managementScopeParams()}));if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;Object.assign(result,fresh);catalog.episodes=fresh.management_episodes||[];refresh()};
-  refresh();
+  async function refresh(push=false){
+    const token=++request;
+    if(push){rememberProductionDraft();memory.graphs={};entityScopeRoute(filters,{push:true});}
+    panel.replaceChildren();entityScopeFilters(panel,filters,catalog,()=>refresh(true));
+    state.productionVisibleEntities=new Set();summary.textContent='正在读取实体…';content.replaceChildren();
+    try{
+      const data=await api('/api/production/index?'+new URLSearchParams({view:'settings',...entityManagementScopeParams()}));
+      if(!current(token))return;result=data;catalog.episodes=data.management_episodes||[];Object.assign(filters,data.entity_scope);draw();
+    }catch(error){
+      if(!current(token))return;summary.textContent='实体读取失败';content.replaceChildren();nodeText('p','production-issue',error.message,content);productionButton(content,'重新读取列表',()=>refresh());
+    }
+  }
+  state.refreshEntityIndex=()=>refresh();draw();
   const target=params.get('production_object')||params.get('production_entity');if(target){onReadStart?.({workspace,loadEpoch:epoch,readEpoch:productionReadEpoch});await openUnifiedMaterial({object_id:target,revision_id:params.get('production_revision'),params},null)}
 }
 function readableSearchMatches(query,terms){
