@@ -160,3 +160,73 @@ function renderEntityRelations(root,data){
   if(!(data.relationships||[]).length)return;
   renderEntityRelationGraph(root,data);
 }
+
+// Deterministic force layout includes every component and isolated node. The
+// saved positions belong to this exact management scope, never to entity data.
+function managementGraphLayout(rows,edges){
+  const sorted=[...rows].sort((a,b)=>businessCode(a).localeCompare(businessCode(b),undefined,{numeric:true})),n=sorted.length,cols=Math.max(2,Math.ceil(Math.sqrt(n)));
+  const nodes=sorted.map((row,i)=>({id:row.object_id,row,x:(i%cols)*420,y:Math.floor(i/cols)*280})),by=new Map(nodes.map(v=>[v.id,v]));
+  for(let step=0;step<90;step++){
+    const force=nodes.map(()=>({x:0,y:0}));
+    for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
+      let dx=nodes[i].x-nodes[j].x,dy=nodes[i].y-nodes[j].y;if(!dx&&!dy)dx=1;
+      const d=Math.max(30,Math.hypot(dx,dy)),k=Math.min(80,100000/d/d);force[i].x+=dx/d*k;force[i].y+=dy/d*k;force[j].x-=dx/d*k;force[j].y-=dy/d*k;
+    }
+    const index=new Map(nodes.map((v,i)=>[v.id,i]));
+    for(const edge of edges){const a=by.get(edge.endpoints[0]),b=by.get(edge.endpoints[1]);if(!a||!b)continue;const dx=b.x-a.x,dy=b.y-a.y,d=Math.max(1,Math.hypot(dx,dy)),k=(d-650)*.012;force[index.get(a.id)].x+=dx/d*k;force[index.get(a.id)].y+=dy/d*k;force[index.get(b.id)].x-=dx/d*k;force[index.get(b.id)].y-=dy/d*k}
+    nodes.forEach((v,i)=>{v.x+=Math.max(-60,Math.min(60,force[i].x));v.y+=Math.max(-60,Math.min(60,force[i].y))});
+  }
+  // Pack the relaxed centers into distinct cells. Unlike iterative collision
+  // nudges, this guarantees separation even in the full, high-degree graph.
+  const occupied=new Set();
+  for(const node of nodes){const gx=Math.round(node.x/380),gy=Math.round(node.y/220);let selected=null;
+    for(let ring=0;!selected;ring++)for(let dx=-ring;dx<=ring&&!selected;dx++)for(let dy=-ring;dy<=ring;dy++){
+      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const key=(gx+dx)+','+(gy+dy);if(!occupied.has(key)){occupied.add(key);selected=[gx+dx,gy+dy];break}
+    }
+    node.x=selected[0]*380;node.y=selected[1]*220;
+  }
+  const minX=Math.min(0,...nodes.map(v=>v.x))-80,minY=Math.min(0,...nodes.map(v=>v.y))-80;for(const v of nodes){v.x-=minX;v.y-=minY}return nodes;
+}
+function renderManagementEntityGraph(root,rows,result,memory){
+  if(!rows.length){nodeText('p','production-meta','此范围没有实体',root);return}
+  const ids=new Set(rows.map(r=>r.object_id)),edges=(result.entity_graph?.edges||[]).filter(e=>e.endpoints.every(id=>ids.has(id)));
+  const signature=rows.map(r=>r.object_id).sort().join('|');if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature}
+  const nodes=memory.nodes,by=new Map(nodes.map(n=>[n.id,n])),controls=el('div','relation-controls'),viewport=el('div','relation-graph-viewport management-graph-viewport'),canvas=el('div','relation-graph-canvas');
+  root.append(controls,viewport);viewport.append(canvas);viewport.tabIndex=0;viewport.setAttribute('aria-label','实体关系图，可拖动和缩放');
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('relation-graph','management-relation-graph');svg.setAttribute('role','group');svg.setAttribute('aria-label','实体与关系');canvas.append(svg);
+  const make=(tag,attrs={},parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
+  const marker='entity-map-arrow-'+(++relationGraphSerial),defs=make('defs'),arrow=make('marker',{id:marker,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},arrow);
+  const edgeLayer=make('g'),captionLayer=make('g'),edgeViews=[];let width=Math.max(800,...nodes.map(n=>n.x+360)),height=Math.max(450,...nodes.map(n=>n.y+220));
+  const bins=new Map(),overlap=(a,b)=>a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;
+  const cells=box=>{const keys=[];for(let x=Math.floor(box.x/200);x<=Math.floor((box.x+box.w)/200);x++)for(let y=Math.floor(box.y/150);y<=Math.floor((box.y+box.h)/150);y++)keys.push(x+','+y);return keys};
+  const reserve=box=>{for(const key of cells(box)){if(!bins.has(key))bins.set(key,[]);bins.get(key).push(box)}};
+  const collides=box=>cells(box).some(key=>(bins.get(key)||[]).some(v=>overlap(box,v)));
+  nodes.forEach(n=>reserve({x:n.x-12,y:n.y-12,w:304,h:164}));
+  const boundary=(node,target)=>{const cx=node.x+140,cy=node.y+65,dx=target[0]-cx,dy=target[1]-cy,k=1/Math.max(Math.abs(dx)/145,Math.abs(dy)/70,1e-9);return [cx+dx*k,cy+dy*k]};
+  for(const [index,edge] of edges.entries()){
+    const a=by.get(edge.endpoints[0]),b=by.get(edge.endpoints[1]),start=boundary(a,[b.x+140,b.y+65]),end=boundary(b,[a.x+140,a.y+65]);
+    const w=edge.derived?90:250,h=edge.derived?36:Math.max(58,Math.ceil(Array.from(edge.summary).length/16)*19+16),mx=(start[0]+end[0])/2-w/2,my=(start[1]+end[1])/2-h/2;
+    let box={x:Math.max(8,mx),y:Math.max(8,my),w,h};for(let attempt=0;collides(box);attempt++){const ring=1+Math.floor(attempt/16),angle=(attempt%16)*Math.PI/8;box={x:Math.max(8,mx+Math.cos(angle)*ring*100),y:Math.max(8,my+Math.sin(angle)*ring*75),w,h};if(attempt>=1000)box={x:width+20,y:8,w,h}}
+    reserve({...box,x:box.x-5,y:box.y-4,w:w+10,h:h+8});width=Math.max(width,box.x+w+60);height=Math.max(height,box.y+h+60);
+    const cx=box.x+w/2,cy=box.y+h/2,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:`M${start.join(' ')} Q${cx} ${cy} ${cx} ${cy} T${end.join(' ')}`},edgeLayer);
+    if(edge.derived)path.setAttribute('stroke-dasharray','5 4');
+    if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute(edge.direction==='reverse'?'marker-start':'marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
+    const foreign=make('foreignObject',{x:box.x,y:box.y,width:w,height:h},captionLayer),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+' → '+b.row.payload.title+'：'+edge.summary);foreign.append(label);
+    label.onclick=()=>{for(const v of edgeViews){const active=v.edge.id===edge.id;v.path.classList.toggle('selected',active);v.label.classList.toggle('selected',active)}for(const node of svg.querySelectorAll('[data-entity-id]'))node.classList.toggle('related-highlight',edge.endpoints.includes(node.dataset.entityId))};edgeViews.push({edge,path,label});
+    label.onpointerenter=()=>{path.classList.add('selected');for(const n of svg.querySelectorAll('[data-entity-id]'))n.classList.toggle('related-highlight',edge.endpoints.includes(n.dataset.entityId))};
+    label.onpointerleave=()=>{if(!label.classList.contains('selected'))path.classList.remove('selected')};
+  }
+  for(const node of nodes){const foreign=make('foreignObject',{x:node.x,y:node.y,width:280,height:145,'data-entity-id':node.id}),host=el('div','management-graph-node');foreign.append(host);const row=rows.find(r=>r.object_id===node.id);entitySmallCard(host,row,{stateCount:result.entity_state_counts?.[node.id]||0,materialCount:Object.values(result.entity_material_counts?.[node.id]||{}).reduce((a,b)=>a+b,0),preview:result.entity_previews?.[node.id]});}
+  svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
+  let scale=memory.scale||1,ready=false;const status=nodeText('output','relation-scale','',controls);
+  const remember=()=>{if(ready){memory.scale=scale;memory.left=viewport.scrollLeft;memory.top=viewport.scrollTop}};
+  function resize(center){svg.style.width=width*scale+'px';svg.style.height=height*scale+'px';canvas.style.width=Math.max(viewport.clientWidth,width*scale)+'px';canvas.style.height=Math.max(viewport.clientHeight,height*scale)+'px';if(center){const pos=relationGraphPosition(center,viewport.clientWidth,viewport.clientHeight,scale);viewport.scrollLeft=pos.x;viewport.scrollTop=pos.y}status.textContent=Math.round(scale*100)+'%';remember()}
+  const fit=()=>Math.min(1,(viewport.clientWidth-20)/width,(viewport.clientHeight-20)/height);
+  const zoom=key=>{const center={x:(viewport.scrollLeft+viewport.clientWidth/2)/scale,y:(viewport.scrollTop+viewport.clientHeight/2)/scale};scale=key==='fit'?fit():key==='original'?1:Math.max(Math.min(.05,fit()),Math.min(2,scale*(key==='in'?1.25:.8)));resize(key==='fit'?{x:width/2,y:height/2}:center)};
+  for(const [key,label] of [['out','缩小'],['in','放大'],['fit','适应全图'],['original','原始大小']])productionButton(controls,label,()=>zoom(key));
+  viewport.onscroll=remember;let pan=null;
+  viewport.onpointerdown=e=>{if(e.button!==0||e.target.closest('button,a,input'))return;pan={x:e.clientX,y:e.clientY,left:viewport.scrollLeft,top:viewport.scrollTop};viewport.setPointerCapture(e.pointerId)};
+  viewport.onpointermove=e=>{if(pan){viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY}};viewport.onpointerup=viewport.onpointercancel=()=>{pan=null};
+  viewport.onkeydown=e=>{if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key)}};
+  requestAnimationFrame(()=>{if(!viewport.isConnected)return;resize();viewport.scrollLeft=memory.left??Math.max(0,(width*scale-viewport.clientWidth)/2);viewport.scrollTop=memory.top??Math.max(0,(height*scale-viewport.clientHeight)/2);ready=true;remember()});
+}

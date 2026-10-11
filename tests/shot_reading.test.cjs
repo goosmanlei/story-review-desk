@@ -12,7 +12,7 @@ class Node{
 }
 function fixture(){
  const ctx={state:{},URL,URLSearchParams,location:{href:'http://fixture/'},el:tag=>new Node(tag),reviewSurface:n=>n,nodeText:(tag,cls,text,parent)=>{const n=new Node(tag);n.ownText=text;parent.append(n);return n},document:{querySelectorAll:()=>[]}};
- vm.createContext(ctx);for(const file of ['production.js','material-review.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),ctx);return ctx;
+ vm.createContext(ctx);const app=fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8');vm.runInContext(app.slice(app.indexOf('function reviewSourceText('),app.indexOf('function textSelectionAnchor(')),ctx);for(const file of ['production.js','material-review.js','production-breakdown.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',file),'utf8'),ctx);return ctx;
 }
 const shot=(id,payload)=>({id,object_id:id,kind:'AV_SHOT',payload:{format:'production-av-shot-v1',purpose:'看清交接',performance:'看清交接',framing:'同框近景',movement:'同框近景',spatial:'桌旁',axis:'南侧',lighting:'暖光',color:'灰蓝',continuity:'本子在右手',editing:'收尾留气口',sound:['环境底声','收尾留气口','阿蘅说完才停'],...payload}});
 const render=(ctx,row,common)=>{const host=new Node('main');ctx.breakdownShotText(host,row,common);return host.children[0]};

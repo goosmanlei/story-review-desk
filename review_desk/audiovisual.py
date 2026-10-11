@@ -105,7 +105,7 @@ def validate_products(store, payload, object_id):
         if need['payload']['scope']['object_id'] != object_id:
             raise ValueError('产物必须属于本镜头，不能借用别镜方案')
         needs[need['object_id']] = need['id']
-    seen, used = set(), set()
+    seen = set()
     for state in p._list(payload, 'key_states'):
         p._text(state.get('id'), '镜头状态标识')
         p._text(state.get('description'), '镜头状态描述')
@@ -115,13 +115,14 @@ def validate_products(store, payload, object_id):
         refs = state.get('requirements')
         if not isinstance(refs, list) or not refs:
             raise ValueError('关键状态必须有独立准备的准确素材需求')
+        if len({(r.get('object_id'),r.get('revision_id')) for r in refs}) != len(refs):
+            raise ValueError('同一关键状态的素材引用须不重复')
         for reference in refs:
             need = p.ref_record(store, reference, {'REQUIREMENT'})
             if needs.get(need['object_id']) != need['id']:
                 raise ValueError('状态素材须属于本镜准确产物方案')
-            if need['id'] in used:
-                raise ValueError('同一素材需求不重复创建镜头状态')
-            used.add(need['id'])
+            # One material may serve several meaningful shot states; its
+            # identity is deduplicated by the shared workspace.
 
 
 def children(store, row):

@@ -245,14 +245,14 @@ class UIProjectionRequirementsTest(unittest.TestCase):
             self.put(need)
         for oid in ('shot-camera','shot-frame','shot-video'):
             card=ui.card(self.store,oid)
-            self.assertIsNone(card['entity_review'])
+            self.assertEqual(card['entity_review']['entity']['entity_type'],'shot')
             self.assertEqual(card['scope']['id'],self.ref('shot')['revision_id'])
-            self.assertEqual({i['object_id'] for i in card['source_materials']},{'shot-camera','shot-frame','shot-video'})
+            self.assertEqual({i['object_id'] for i in card['entity_review']['requirements']},{'shot-camera','shot-frame','shot-video'})
         # A state's application to a shot remains a reference to that state's
         # demand, never a demand originating in this shot.
         self.applicability('applied-state-demand','need-full-overall','shot')
         card=ui.card(self.store,'shot-camera')
-        self.assertNotIn('need-full-overall',{i['object_id'] for i in card['source_materials']})
+        self.assertNotIn('need-full-overall',{i['object_id'] for i in card['entity_review']['requirements']})
 
 
 if __name__ == '__main__':

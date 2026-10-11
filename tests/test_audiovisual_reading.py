@@ -33,6 +33,10 @@ class AudiovisualReadingTest(unittest.TestCase):
         self.assertEqual([r['object_id'] for r in context(self.store,'av-shot')['requirements']],['frame','text'])
         duplicate=copy.deepcopy(value);duplicate['expected_version']=2
         duplicate['payload']['key_states'].append({'id':'ending','description':'不应复制同一首帧','requirements':[self.ref('frame')]})
+        self.put(duplicate)
+        self.assertEqual(len(p.record(self.store,'av-shot')['payload']['key_states']),2)
+        duplicate['expected_version']=3
+        duplicate['payload']['key_states'][1]['requirements'].append(self.ref('frame'))
         with self.assertRaisesRegex(ValueError,'不重复'):self.put(duplicate)
         foreign=copy.deepcopy(value);foreign['object_id']='other-shot';foreign['expected_version']=0
         with self.assertRaisesRegex(ValueError,'属于本镜头'):self.put(foreign)

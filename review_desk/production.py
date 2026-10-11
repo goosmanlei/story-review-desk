@@ -40,7 +40,8 @@ def record_view(row):
         value['review_parameter_text'] = generation_parameter_text(value['payload'])
     if value["kind"] == "CALL":
         value["review_call_parameter_text"] = call_parameter_text(value['payload'])
-    return value
+    from .entity_contract import annotate as annotate_entity
+    return annotate_entity(value)
 
 
 @contextmanager
@@ -267,7 +268,7 @@ def validate_selection(component, selection):
         start, end = interval.get("start_seconds"), interval.get("end_seconds")
         _number(start, "range start")
         _number(end, "range end", True)
-        if not start < end <= component.get("duration_seconds", 0):
+        if not start < end <= component.get("duration_seconds", 0) + 0.0000005:
             raise ValueError("media time range exceeds component duration")
     if selection.get("crop") is not None:
         crop = selection["crop"]
@@ -346,6 +347,8 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
     if check_current:guard_write(store,object_id,payload)
     for _, ref in references(payload):
         source_check(store, ref)
+    from .entity_contract import validate as validate_entity
+    validate_entity(kind, payload)
     p = payload
     if kind in {"AV_EPISODE", "AV_SCENE", "AV_SHOT"}:
         from .audiovisual import validate
@@ -392,6 +395,11 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             if parent["payload"]["entity"]["object_id"] != p["entity"]["object_id"]:
                 raise ValueError("state transition crosses identities")
     elif kind == "REQUIREMENT":
+        if p.get('current_plan_for'):
+            from .legacy_material_plans import plan_id
+            ref_record(store, p['current_plan_for'], {'ASSET'})
+            if object_id != plan_id(p['current_plan_for']['object_id']) or p['scope'] != p['current_plan_for']:
+                raise ValueError('working plan must keep its original material identity')
         ref_record(store, p.get("scope"))
         for key in ("slot", "purpose", "media_type"):
             _text(p.get(key), key)

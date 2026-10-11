@@ -52,7 +52,7 @@ def scope_contents(store, scope):
         asset=p.ref_record(store,item['asset'],{'ASSET'})
         component=next(c for c in asset['payload']['components'] if c['id']==item['component_id'])
         media.append({**item,'record':asset,'component':component})
-    return {'entity':p.ref_record(store,scope['entity'],{'ENTITY'}),
+    return {'entity':p.ref_record(store,scope['entity'],{'ENTITY','AV_SHOT'}),
             'states':[p.ref_record(store,value,{'STATE'}) for value in scope['states']], 'media':media}
 
 

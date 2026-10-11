@@ -228,6 +228,10 @@ def write_record(store, object_id, kind, payload, current, dependencies):
     from .business_codes import allocate
     if kind not in RECORD_KINDS:
         raise ValueError('not a current production record')
+    if kind == 'REQUIREMENT' and current:
+        previous = json.loads(store.db.execute('SELECT payload FROM revisions WHERE id=?', (current['current_revision'],)).fetchone()[0])
+        if previous.get('current_plan_for') != payload.get('current_plan_for'):
+            raise Conflict('working material identity cannot be removed or changed')
     rid = address(object_id)
     token = (current['version'] if current else 0) + 1
     stamp = now()
@@ -259,6 +263,12 @@ def write_record(store, object_id, kind, payload, current, dependencies):
             store.db.execute('INSERT OR IGNORE INTO dependencies VALUES (?,?,?)', (rid, target[0], ref['role']))
         elif kind not in ('CALL', 'ASSET'):
             raise Conflict('current production reference is unavailable')
+    if kind == 'REQUIREMENT' and payload.get('current_plan_for'):
+        mid = payload['current_plan_for']['object_id']
+        old = store.db.execute('SELECT material_id FROM material_aliases WHERE alias_id=?',(object_id,)).fetchone()
+        if old and old[0] != mid:raise Conflict('working material identity cannot change')
+        store.db.execute('INSERT OR IGNORE INTO material_aliases VALUES (?,?,?)',
+            (object_id, mid, canonical({'kind':'legacy-current-plan','source':payload['initial_plan_source']})))
     allocate(store, object_id, kind, payload)
     if kind == 'RELATION' and payload.get('relation_type') == 'business':
         from .business_relations import register
@@ -368,8 +378,8 @@ def read_adapters(store):
     if not enabled(store):
         return
     views = {
-        'material_plan_members': '''SELECT o.id material_id,1 number,o.current_revision revision_id,'plan' role
-            FROM objects o WHERE o.kind='REQUIREMENT'
+        'material_plan_members': '''SELECT coalesce(a.material_id,o.id) material_id,1 number,o.current_revision revision_id,'plan' role
+            FROM objects o LEFT JOIN material_aliases a ON a.alias_id=o.id WHERE o.kind='REQUIREMENT'
             UNION SELECT t.material_id,1,o.current_revision,'result'
             FROM production_candidate_targets t JOIN production_candidates c ON c.id=t.candidate_id
             JOIN objects o ON o.id=c.asset_object_id
@@ -401,12 +411,16 @@ def material_snapshot(store, mid):
         target = p.record(store, mid)
     except KeyError:
         target = None
+    canonical_mid = canonical_id(store, mid)
     plan = target if target and target['kind'] == 'REQUIREMENT' else None
+    if plan is None:
+        backing = store.db.execute("SELECT o.id FROM material_aliases a JOIN objects o ON o.id=a.alias_id WHERE a.material_id=? AND o.kind='REQUIREMENT' ORDER BY o.id", (canonical_mid,)).fetchone()
+        if backing:plan = p.record(store, backing[0])
     if plan:
         plan['review_input_records'] = [p.ref_record(store, item['reference'])
                                       for item in plan['payload'].get('generation', {}).get('inputs', [])]
     rows = list(store.db.execute('''SELECT c.*,t.number FROM production_candidate_targets t
-        JOIN production_candidates c ON c.id=t.candidate_id WHERE t.material_id=? ORDER BY t.number''', (mid,)))
+        JOIN production_candidates c ON c.id=t.candidate_id WHERE t.material_id=? ORDER BY t.number''', (canonical_mid,)))
     results = []
     for item in rows:
         candidate = p.record(store, item['asset_object_id'])

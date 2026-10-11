@@ -222,7 +222,8 @@ def card_counts(store, material_ids=None):
     if enabled(store):
         rows = {r['material_id']: r['n'] for r in store.db.execute('SELECT material_id,count(*) n FROM production_candidate_targets GROUP BY material_id')}
         ids = material_ids if material_ids is not None else rows
-        return {mid: {'current_content': True, 'candidate_count': rows.get(mid, 0)} for mid in ids}
+        aliases = dict(store.db.execute('SELECT alias_id,material_id FROM material_aliases'))
+        return {mid: {'current_content': True, 'candidate_count': rows.get(aliases.get(mid,mid), 0)} for mid in ids}
     """Registered versions and distinct real candidates across those versions.
 
     Missing registration stays unknown; neither files nor failed calls create
@@ -276,7 +277,8 @@ def snapshot(store, mid):
 def for_record(store, row):
     ids = {r['material_id'] for r in memberships(store, row['id'])}
     if row['kind'] == 'REQUIREMENT':
-        ids.add(row['object_id'])
+        from .material_storage import canonical_id
+        ids.add(canonical_id(store, row['object_id']))
     return {mid: value for mid in sorted(ids) if (value := snapshot(store, mid))}
 
 

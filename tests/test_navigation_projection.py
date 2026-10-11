@@ -28,11 +28,10 @@ class NavigationProjectionTest(unittest.TestCase):
     def test_exact_historical_card_has_full_design_and_only_its_materials(self):
         self.composition();old=self.ref('av-shot');self.put(self.need('front'))
         new=self.shot();new['expected_version']=1;new['payload']['framing']='新版特写';self.put(new)
-        result=ui.card(self.store,'av-shot',old['revision_id'])['position_review']
-        self.assertEqual(result['record']['id'],old['revision_id'])
-        self.assertEqual(len(result['shots']),1)
-        item=result['shots'][0]
-        self.assertEqual(item['record']['payload']['framing'],'中景，人物双手与歌本同框')
-        self.assertEqual({i['object_id'] for i in item['context']['materials']},{'front'})
+        result=ui.card(self.store,'av-shot',old['revision_id'])['entity_review']
+        self.assertEqual(result['entity']['id'],old['revision_id'])
+        self.assertEqual(result['entity']['entity_type'],'shot')
+        self.assertEqual(result['entity']['payload']['framing'],'中景，人物双手与歌本同框')
+        self.assertEqual({i['object_id'] for i in result['requirements']},{'front'})
         with self.assertRaisesRegex(KeyError,'unknown production object or revision'):ui.card(self.store,'av-shot','unavailable-revision')
         with self.assertRaisesRegex(KeyError,'unknown production object or revision'):ui.card(self.store,'unavailable-object')

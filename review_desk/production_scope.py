@@ -123,6 +123,8 @@ def projection(store, entries, episode=None, revision=None, scene=None):
                     if ref and kind in ('occurrence', 'applicability', 'adoption'):
                         owner(ref, loc, {**evidence, 'kind': kind, 'record': b.ref(row)})
                         visit(light.ref_record(store, ref), {'kind': kind, 'relation_record': b.ref(row)})
+        if position['kind'] == 'AV_SHOT':
+            entities[position['object_id']].append({**loc, 'reference': {**b.ref(position), 'title': position['payload']['title'], 'version': position['version']}, 'evidence': evidence})
         at_scope(b.ref(position))
         # A revised shot explicitly pins its products and key-state materials.
         # Their own scope may correctly name an earlier shot revision; follow

@@ -50,6 +50,8 @@ def allocate_number(store, object_id, prefix):
 
 
 def allocate(store, object_id, kind, payload):
+    if kind == 'REQUIREMENT' and payload.get('current_plan_for'):
+        return  # Working content of an existing material, not a new M identity.
     if kind == 'EPISODE':
         return  # E/S come from the complete immutable edition, not this ledger.
     prefix = 'RL' if kind == 'RELATION' and payload.get('relation_type') == 'entity' else PREFIXES.get(kind)

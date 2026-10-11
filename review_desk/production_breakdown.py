@@ -38,7 +38,7 @@ def rows(store, kind, condition='', params=()):
 
 
 def index(store, view, object_id=None, scope=None, scope_episode=None, scope_revision=None, scope_scene=None):
-    kinds={'settings':('ENTITY','STATE')}.get(view)
+    kinds={'settings':('ENTITY','AV_SHOT','STATE')}.get(view)
     if not kinds:raise ValueError('unknown production index')
     values=[r for kind in kinds for r in rows(store,kind)]
     if object_id and not any(r['object_id']==object_id for r in values):
@@ -50,7 +50,10 @@ def index(store, view, object_id=None, scope=None, scope_episode=None, scope_rev
     if view=='settings':
         from .ui_projection import entity_summaries, material_entries
         entries=material_entries(store)
-        result.update(entity_summaries(store,[r for r in values if r['kind']=='ENTITY'],entries))
+        from .entity_contract import is_entity, graph
+        entities = [r for r in values if is_entity(r)]
+        result.update(entity_summaries(store, entities, entries))
+        result['entity_graph'] = graph(store, entities)
         if scope == 'av':
             from .production_scope import projection
             projected=projection(store,entries,scope_episode,scope_revision,scope_scene)

@@ -336,8 +336,8 @@ test('switching a non-entity demand to an empty version keeps its plan and never
 });
 test('selecting a non-entity candidate focuses its exact revision without changing the material comment version',async()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx),root=f.render();
-  const candidates=descendants(root).find(n=>n.attributes?.['aria-label']==='本轮候选');
-  await candidates.children.find(n=>n.dataset.choiceId===f.old2.id).onclick();await descendants(f.render()).find(n=>n.attributes?.['aria-label']==='本轮候选').children.find(n=>n.dataset.choiceId===f.new2.id).onclick();f.render();
+  const candidates=descendants(root).find(n=>n.attributes?.['aria-label']==='历史候选');
+  await candidates.children.find(n=>n.dataset.choiceId===f.old2.id).onclick();await descendants(f.render()).find(n=>n.attributes?.['aria-label']==='历史候选').children.find(n=>n.dataset.choiceId===f.new2.id).onclick();f.render();
   assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(ctx.state.productionSelected.id,f.new2.id);
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:2,model:'plan-v1'});
   assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),f.new2.id);

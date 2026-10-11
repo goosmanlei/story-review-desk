@@ -24,10 +24,13 @@ def validate_plan(store, object_id, payload):
     plan = payload.get('generation')
     if plan is None:
         return
-    if not isinstance(plan, dict) or plan.get('format') != PLAN or plan.get('method') not in ('generate', 'reuse'):
+    if not isinstance(plan, dict) or plan.get('format') != PLAN or plan.get('method') not in ('generate', 'reuse', 'external-edit'):
         raise ValueError('unsupported generation plan')
     for key in ('model', 'prompt'):
-        p._text(plan.get(key), 'generation ' + key)
+        if plan['method'] != 'external-edit' and not payload.get('current_plan_for'):
+            p._text(plan.get(key), 'generation ' + key)
+        elif plan.get(key) is not None and not isinstance(plan[key], str):
+            raise ValueError('invalid generation '+key)
     if not isinstance(plan.get('parameters'), dict) or not isinstance(plan.get('output'), dict):
         raise ValueError('generation parameters and output must be objects')
     for key in ('name', 'description'):
@@ -46,11 +49,11 @@ def validate_plan(store, object_id, payload):
             raise ValueError('generation plan requires a complete state')
         if payload['scope'] not in payload['states'] or scope['payload']['entity']['object_id'] not in {r['object_id'] for r in payload['entities']}:
             raise ValueError('generation plan must include its state and owning entity')
-    elif scope['kind'] not in ('ENTITY', 'INPUT_LOCK', 'STORY', 'EPISODE', 'AV_EPISODE', 'AV_SCENE', 'AV_SHOT'):
+    elif not (scope['kind'] == 'ASSET' and payload.get('current_plan_for') == payload['scope']) and scope['kind'] not in ('ENTITY', 'INPUT_LOCK', 'STORY', 'EPISODE', 'AV_EPISODE', 'AV_SCENE', 'AV_SHOT'):
         raise ValueError('generation scope must be a complete state or production position')
     from .material_plans import randomization
     from .input_contracts import check_parameters, check_declared
-    check_parameters(plan['model'],plan['parameters'])
+    check_parameters(plan.get('model') or '',plan['parameters'])
     strategy=randomization(plan)
     if strategy['mode']=='random' and 'seed' in plan['parameters']:raise ValueError('random plan cannot set a fixed parameter seed')
     if plan['method'] == 'reuse' and len(inputs) != 1:
@@ -79,7 +82,7 @@ def validate_plan(store, object_id, payload):
     from .material_relations import active_inputs
     selected_inputs, _ = active_inputs(store, plan, object_id)
     media_types = [p.ref_record(store, value['reference'])['payload']['media_type'] for _, value in selected_inputs]
-    contract_issues = check_declared(plan['model'],plan['prompt'],media_types)
+    contract_issues = check_declared(plan.get('model') or '',plan.get('prompt') or '',media_types)
     if contract_issues:raise ValueError('；'.join(contract_issues))
     if plan.get('reference_links') or plan.get('prompt_links'):
         from .reference_paths import validate
@@ -95,11 +98,12 @@ def requirements_for(rows, states):
 def current_scope(store, entity_id, rows=None):
     rows = rows if rows is not None else p.current_records(store)
     entity = p.record(store, entity_id)
-    if entity['kind'] != 'ENTITY':
+    from .entity_contract import is_entity
+    if not is_entity(entity):
         raise ValueError('generation scope requires an entity')
     states = sorted((r for r in rows if complete(r) and r['payload'].get('status') != 'withdrawn'
                      and r['payload']['entity']['object_id'] == entity_id), key=lambda r:r['object_id'])
-    requirements = requirements_for(rows, states)
+    requirements = requirements_for(rows, [entity, *states])
     dependencies = {}; todo = requirements[:]
     owned = {r['id'] for r in requirements}
     while todo:
@@ -121,7 +125,7 @@ def current_scope(store, entity_id, rows=None):
 
 
 def contents(store, scope):
-    return {'entity':p.ref_record(store, scope['entity'], {'ENTITY'}),
+    return {'entity':p.ref_record(store, scope['entity'], {'ENTITY', 'AV_SHOT'}),
             'states':[p.ref_record(store, r, {'STATE'}) for r in scope['states']],
             'requirements':[p.ref_record(store, r, {'REQUIREMENT'}) for r in scope.get('requirements', [])],
             'relationships':[p.ref_record(store, r, {'RELATION'}) for r in scope.get('relationships', [])]}
@@ -130,6 +134,10 @@ def contents(store, scope):
 def preparation(store, scope):
     data = contents(store, scope); issues=[]
     from .production_description import description
+    if data['entity']['kind'] == 'AV_SHOT':
+        return {'complete': bool(data['entity']['payload'].get('purpose')), 'issues': [],
+                'state_count': len(data['entity']['payload'].get('key_states', [])),
+                'material_count': len(data['requirements'])}
     for row in [data['entity'], *data['states']]:
         if not description(row['payload'], data['entity']['payload']['entity_type'],
                            data['entity']['payload'].get('attribute_definitions', {})):
@@ -165,10 +173,13 @@ def snapshot(store, entity_id, revision_id=None):
     # Write validation and caller-owned transactions always read their own data.
     with p.read_scope(store):
         from .read_cache import read_json
-        return read_json(store, ['entity-review', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
+        return read_json(store, ['entity-review-v3', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
 
 
 def _snapshot(store, entity_id, revision_id=None):
+    if p.record(store, entity_id, revision_id)['kind'] == 'AV_SHOT':
+        from .entity_contract import shot_workspace
+        return shot_workspace(store, entity_id, revision_id)
     from . import entity_review as er, entity_relations as rel, material_review as media_review
     # This reader needs state requirements, entity relations and exact usage
     # locations. Shot-output plans and applicability edges are read by the
@@ -198,6 +209,8 @@ def _snapshot(store, entity_id, revision_id=None):
     if revision_id:
         scope['entity'] = ref(target)
     data=contents(store,scope)
+    from .entity_contract import source_labels
+    for item in [data['entity'], *data['states']]:source_labels(store,item)
     base={'comment_records': [], 'usages': {}}
     for form in data['states']:
         base['usages'][form['id']] = [
