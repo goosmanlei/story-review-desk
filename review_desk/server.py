@@ -573,8 +573,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
             from . import comment_review
             try:
                 operation = comment_review.content if path.endswith('/content') else comment_review.snapshot
-                return self._json(operation(store, query.get('object_id', [None])[0],
-                                            query.get('revision_id', [None])[0]))
+                args = (store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0])
+                return self._json(operation(*args, file=query.get('file', [None])[0])
+                                  if path.endswith('/content') else operation(*args))
             except (ValueError, Conflict) as exc:
                 return self._json({'error': str(exc)}, 404)
         if path == "/api/screenplays":

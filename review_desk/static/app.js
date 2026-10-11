@@ -226,7 +226,7 @@ function appendLegacyMaterialDraft(editor,key){
   restore.onclick=()=>{if(draftKey()!==key||liveCommentDraft()?.value)return;try{if(recoverLegacyMaterialDraft(key,legacy)){commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})}}catch(error){toast(error.message)}};
   editor.append(details);
 }
-const unscopedComments=()=>typeof isMethodsReading==='function'&&isMethodsReading()?state.comments.filter(c=>c.target_object_id===methodView.document.record.object_id&&c.target_revision_id===methodView.document.record.revision_id):state.reviewReferenceContext?state.comments.filter(c=>c.target_revision_id===state.reviewReferenceContext.record.id):typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
+const unscopedComments=()=>typeof isMethodsReading==='function'&&isMethodsReading()?[...new Map(state.comments.filter(c=>c.target_object_id===methodView.document.record.object_id).map(c=>[c.id,c])).values()]:state.reviewReferenceContext?state.comments.filter(c=>c.target_revision_id===state.reviewReferenceContext.record.id):typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const activeComments=()=>state.reviewCommentScope?reviewBlockComments(state.comments,state.reviewCommentScope):unscopedComments();
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
@@ -987,6 +987,7 @@ async function editComment(comment){
   try{
     let located=true;
     if(state.reviewReferenceContext)located=state.reviewReferenceContext.record.id===comment.target_revision_id;
+    else if(typeof isMethodsReading==='function'&&isMethodsReading()&&(methodView.document.record.revision_id!==comment.target_revision_id||methodView.document.file!==comment.anchor.file)){located=await locateMethodComment(comment)}
     else if(typeof isEntityReview==='function'&&isEntityReview())located=await locateEntityReviewComment(comment);
     else if(typeof isMaterialReview==='function'&&isMaterialReview())located=await locateMaterialComment(comment);
     if(located===false||action!==commentAction||state.workspace!==workspace)return;
@@ -1004,7 +1005,7 @@ function commentCard(comment){
   appendAnchorQuote(card,comment.anchor);if(comment.anchor_state?.valid===false)nodeText('p','structure-alert',`原引用已失效：${comment.anchor_state.reason}`,card);nodeText('p',null,comment.body,card);
   if(isScript())appendScriptCommentScope(card,comment);
   const actions=el('div','card-actions');
-  const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=async()=>{++commentAction;try{await locateComment(comment)}catch(error){toast(error.message)}};
+  const locate=nodeText('button',null,'定位原圈选',actions);locate.onclick=async()=>{++commentAction;try{if(typeof isMethodsReading==='function'&&isMethodsReading())await openMethodCommentReview(comment,locate);else await locateComment(comment)}catch(error){toast(error.message)}};
   if(comment.status==='OPEN'){
     const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>editComment(comment);
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
@@ -1027,12 +1028,14 @@ function renderComments({replaceDraft=false}={}){
   const available=hasCommentTarget();$('#comments-toggle').hidden=!available;$('#screenplay-comments').hidden=!isScript()||!available;
   if(!available){closePanel();$('#comment-body').replaceChildren();$('#open-count').textContent='0';return;}const body=$('#comment-body');body.replaceChildren();
   const own=activeComments(),open=own.filter(c=>c.status==='OPEN'),closed=own.filter(c=>c.status==='CLOSED');
-  $('#open-count').textContent=`${open.length} 待处理`;
+  const methodReadFailure=typeof isMethodsReading==='function'&&isMethodsReading()&&state.commentReadError;
+  $('#open-count').textContent=methodReadFailure?'读取失败':`${open.length} 待处理`;
   const older=isStructure()?state.comments.filter(c=>c.target_object_id==='story-structure'&&c.target_revision_id!==state.structureRevision&&c.status==='OPEN').length:0;
-  $('#comments-toggle').textContent=isStructure()?`本稿评论 ${open.length} · 历史意见 ${older}`:`查看评论 · ${open.length}`;
-  if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
+  $('#comments-toggle').textContent=methodReadFailure?'查看评论 · 读取失败':isStructure()?`本稿评论 ${open.length} · 历史意见 ${older}`:`查看评论 · ${open.length}`;
+  if(typeof isMethodsReading==='function'&&isMethodsReading())appendMethodReviewStatus(body);else if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
+  if(methodReadFailure){nodeText('p','structure-alert','评论读取失败：'+state.commentReadError+'；保留上次已读意见和当前草稿。',body);const retry=nodeText('button',null,'重新读取评论',body);retry.onclick=()=>refreshComments().catch(()=>{})}
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
-  if(!state.reviewCommentScope)nodeText('p','comment-help',state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
+  if(!state.reviewCommentScope)nodeText('p','comment-help',typeof isMethodsReading==='function'&&isMethodsReading()?'本面板汇总此方法或资料所有版本、所有文件的未关闭意见；原圈选保持原版本。':state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   appendStoredCommentEdits(body);
   if(typeof appendStaleProductionDrafts==='function')appendStaleProductionDrafts(body);
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);appendAnchorQuote(editor,state.anchor);if(isProduction()&&state.productionSelected?.payload){
@@ -1066,7 +1069,7 @@ function renderComments({replaceDraft=false}={}){
       const back=nodeText('button',null,'回到意见',basis);back.onclick=()=>{state.previewExpanded=false;basis.open=false;textarea.focus({preventScroll:true});textarea.scrollIntoView({block:'nearest'})};editor.append(basis)}
     if(state.suggestion){const preview=el('section','suggestion');nodeText('strong',null,'AI 建议 · 尚未保存',preview);nodeText('p',null,state.suggestion,preview);nodeText('small',null,'请核对是否引入未证实的史实或额外任务；采用后仍需手动保存。',preview);
       const apply=nodeText('button','secondary','采用到草稿',preview);apply.disabled=commentSaves.has(draftKey());apply.onclick=()=>{try{localStorage.setItem(draftKey(),state.suggestion)}catch{rememberCommentDraftFailure();toast('本机草稿保存失败，原输入与润色建议仍保留，请复制留存后重试。');return}state.suggestion=null;state.preview=null;state.previewExpanded=false;commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})};editor.append(preview)}body.append(editor);updateCommentEditorControls()}
-  nodeText('h3',null,`未关闭评论 · ${open.length}`,body);if(!open.length)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
+  nodeText('h3',null,`${methodReadFailure?'上次已读未关闭评论':'未关闭评论'} · ${open.length}`,body);if(!open.length&&!methodReadFailure)nodeText('p','empty','暂无待处理评论。圈选原文即可添加。',body);
   if(typeof isEntityReview==='function'&&isEntityReview())appendEntityReviewComments(body,open);else if(typeof isMaterialReview==='function'&&isMaterialReview())appendMaterialReviewComments(body,open);else for(const comment of open)body.append(commentCard(comment));
   const head=el('div','history-head');nodeText('h3',null,`已关闭评论 · ${closed.length}`,head);
   const toggle=nodeText('button',null,state.historyOpen?'收起历史':'展开历史',head);toggle.onclick=()=>{state.historyOpen=!state.historyOpen;renderComments()};body.append(head);
@@ -1075,11 +1078,14 @@ function renderComments({replaceDraft=false}={}){
 
 async function refreshComments(){
   const epoch=++commentRefreshEpoch;
-  const comments=await api('/api/comments');
+  let comments;
+  try{comments=await api('/api/comments')}
+  catch(error){if(epoch===commentRefreshEpoch){state.commentReadError=error.message;renderComments()}throw error}
   if(epoch!==commentRefreshEpoch)return;
+  const recovered=!!state.commentReadError;state.commentReadError=null;
   // Refocusing the window fetches comments asynchronously. A no-op refresh must not
   // replace the text nodes underneath a selection gesture (or the current editor).
-  if(JSON.stringify(comments)===JSON.stringify(state.comments))return;
+  if(JSON.stringify(comments)===JSON.stringify(state.comments)){if(recovered)renderComments();return}
   state.comments=comments;renderSources();renderActiveReader();renderComments();
 }
 async function saveComment(){

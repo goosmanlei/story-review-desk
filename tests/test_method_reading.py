@@ -18,6 +18,83 @@ class ReadingTest(unittest.TestCase):
         files=copy.deepcopy(self.method['payload']['files']);files['SKILL.md']+='\n\n核对触发事实、持物与交接。'
         return {'object_id':self.method['object_id'],'base_revision':self.method['revision_id'],'changes':{'files':files},'scopes':[]}
 
+    def opinion(self, record, file, identity):
+        b=project(record['payload'],file)[-1]
+        return self.store.create_comment({'id':identity,'target_object_id':record['object_id'],
+            'target_revision_id':record['revision_id'],'body':'Check '+identity,
+            'anchor':{'file':file,'block_id':b['id'],'end_block_id':b['id'],'start':0,'end':len(b['text']),'quote':b['text']}})
+
+    def test_unanswered_queue_all_files_and_revisions_is_exact_and_object_local(self):
+        from review_desk.comment_review import snapshot, content, import_evidence
+        from review_desk.store import canonical, digest
+        p=copy.deepcopy(self.method['payload']);p['files']['references/old.md']='Old file 🙂'
+        old=methods.save(self.store,{'category':'skill','name':'review','expected_version':1,'payload':p})
+        a=self.opinion(old,'SKILL.md','original');b=self.opinion(old,'references/old.md','removed')
+        other=methods.save(self.store,{'category':'skill','name':'other','expected_version':0,'payload':p})
+        foreign=self.opinion(other,'SKILL.md','other-opinion')
+        files={**p['files'],'references/renamed.md':p['files']['references/old.md']};del files['references/old.md']
+        new=methods.edit(self.store,{'object_id':old['object_id'],'base_revision':old['revision_id'],'changes':{'files':files},'scopes':[]})['saved']
+        current=self.opinion(new,'references/renamed.md','current')
+        # Even a real response/evidence reference into this object cannot pull
+        # an opinion belonging to another method into the queue.
+        import_evidence(self.store,[{'format':'comment-handling-v1','id':'comment-handling-foreign','comment_id':foreign['id'],
+            'original':{**methods.reference(other),'anchor_sha256':digest(canonical(foreign['anchor']).encode())},
+            'response':methods.reference(new),'decision':'checked','explanation':'Cross-object reference',
+            'evidence':[{**methods.reference(new),'anchor':current['anchor'],'label':'Reference'}],
+            'provenance':{'file':'evidence.json','sha256':'a'*64}}])
+        rows=snapshot(self.store,new['object_id'],new['revision_id'])['reviews']
+        self.assertEqual({r['comment']['id'] for r in rows},{a['id'],b['id'],current['id']})
+        self.assertEqual(len(rows),3)
+        self.assertTrue(all(not r['responses'] for r in rows))
+        exact=content(self.store,old['object_id'],old['revision_id'],'references/old.md')['record']
+        self.assertEqual([v['text'] for v in exact['review_blocks']],['Old file 🙂'])
+        self.assertEqual(exact['payload']['files']['references/old.md'],p['files']['references/old.md'])
+        with self.assertRaisesRegex(ValueError,'没有文件'):
+            content(self.store,new['object_id'],new['revision_id'],'references/old.md')
+        methods.respond(self.store,{'comment_id':b['id'],'revision_id':new['revision_id'],'file':'references/renamed.md','explanation':'Moved the document to the explicit new file'})
+        reply=next(r for r in snapshot(self.store,new['object_id'],new['revision_id'])['reviews'] if r['comment']['id']==b['id'])
+        self.assertEqual(reply['original']['file'],'references/old.md')
+        self.assertEqual(reply['responses'][0]['evidence'][0]['anchor']['file'],'references/renamed.md')
+        self.assertEqual(self.store.comment(b['id'])['anchor'],b['anchor'])
+
+    def test_three_manuscripts_close_reopen_and_complete_restore_preserve_identity(self):
+        from review_desk.comment_review import snapshot, content
+        from review_desk.bundle import export, restore
+        original=self.opinion(self.method,'SKILL.md','three-manuscripts')
+        events=self.store.events()
+        response=methods.edit(self.store,self.request())['saved']
+        methods.respond(self.store,{'comment_id':original['id'],'revision_id':response['revision_id'],'explanation':'Actual modification'})
+        files={**response['payload']['files'],'SKILL.md':self.method['payload']['files']['SKILL.md']+'\nLater replacement'}
+        current=methods.edit(self.store,{'object_id':response['object_id'],'base_revision':response['revision_id'],'changes':{'files':files},'scopes':[]})['saved']
+        self.store.change_comment(original['id'],'CLOSE',original['version'])
+        closed=self.store.comment(original['id'])
+        self.store.change_comment(original['id'],'REOPEN',closed['version'])
+        folder=Path(self.tmp.name)/'export';export(self.store,folder)
+        other=Store(Path(self.tmp.name)/'empty.sqlite3');self.addCleanup(other.close);restore(other,folder)
+        self.assertEqual(other.comment(original['id']),self.store.comment(original['id']))
+        self.assertEqual(other.events(),self.store.events())
+        self.assertEqual(other.events()[:len(events)],events)
+        row=snapshot(other,current['object_id'],current['revision_id'])['reviews'][0]
+        self.assertEqual(row['original']['revision_id'],self.method['revision_id'])
+        self.assertEqual(row['responses'][0]['response']['revision_id'],response['revision_id'])
+        self.assertEqual(row['current_evidence'],[])
+        for record in (self.method,response,current):
+            self.assertEqual(content(other,record['object_id'],record['revision_id'],'SKILL.md')['record']['payload']['files'],record['payload']['files'])
+
+    def test_source_projection_update_discovers_original_opinion_without_editing_source(self):
+        from review_desk.comment_review import snapshot, content
+        root=Path(self.tmp.name);source=root/'chapter.md';source.write_text('# Chapter\nOriginal statement\n')
+        spec={'name':'source','title':'Source','expected_version':0,'sections':{'main':{'path':'chapter.md'}}}
+        old=methods.sync_source(self.store,root,spec);comment=self.opinion(old,'references/main.md','source-opinion')
+        source.write_text('# Chapter\nChanged statement\n')
+        new=methods.sync_source(self.store,root,{**spec,'expected_version':1})
+        rows=snapshot(self.store,new['object_id'],new['revision_id'])['reviews']
+        self.assertEqual([r['comment']['id'] for r in rows],[comment['id']])
+        self.assertEqual(rows[0]['original']['file'],'references/main.md')
+        self.assertEqual(content(self.store,old['object_id'],old['revision_id'],'references/main.md')['record']['review_blocks'][-1]['text'],'Original statement')
+        with self.assertRaisesRegex(ValueError,'项目源'):
+            methods.edit(self.store,{'object_id':new['object_id'],'base_revision':new['revision_id'],'changes':{'title':'changed'},'scopes':[]})
+
     def test_only_save_and_exact_retry_preserve_old_execution_and_conditions(self):
         execution=methods.prepare(self.store,{'work_type':'media-plan','run_id':'r','step_id':'s','target':'x','inputs':{'context':'source'}})
         p=copy.deepcopy(self.binding['payload']);p['rules'] += [{**methods.reference(self.method),'when':{'media_type':'image','typed':[False,9223372036854775809,{'n':None}]}},{**methods.reference(self.method),'when':{'media_type':'audio'}},{**methods.reference(self.method),'when':{'media_type':'video'}}]
@@ -72,7 +149,7 @@ class ReadingTest(unittest.TestCase):
         new=methods.edit(self.store,self.request())['saved']
         request={'comment_id':c['id'],'revision_id':new['revision_id'],'explanation':'Added accurate trigger checks'}
         methods.respond(self.store,request);count=self.store.db.execute('SELECT count(*) FROM revisions').fetchone()[0]
-        methods.respond(self.store,request);self.assertEqual(self.store.db.execute('SELECT count(*) FROM revisions').fetchone()[0],count)
+        methods.respond(self.store,{**request,'file':'SKILL.md'});self.assertEqual(self.store.db.execute('SELECT count(*) FROM revisions').fetchone()[0],count)
         folder=Path(self.tmp.name)/'export';export(self.store,folder)
         other=Store(Path(self.tmp.name)/'restored/db.sqlite3');self.addCleanup(other.close);restore(other,folder)
         self.assertEqual(other.comment(c['id'])['anchor'],c['anchor'])

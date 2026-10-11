@@ -203,7 +203,14 @@ function renderMethodBlocks(parent,doc,root){
 function paintMethodComments(){if(!isMethodsReading()||!methodView.prose)return;const doc=methodView.document;
   for(const node of methodView.prose.querySelectorAll('[data-block-id]')){for(const mark of node.querySelectorAll('.comment-mark'))mark.replaceWith(document.createTextNode(mark.textContent));node.normalize();const index=doc.blocks.findIndex(b=>b.id===node.dataset.blockId);for(const c of state.comments.filter(c=>c.target_revision_id===doc.record.revision_id&&c.anchor.file===doc.file))for(const r of textAnchorBlockRanges(c.anchor,doc.blocks,index))if(r.start<r.end)paintProductionTextMark(node,r.start,r.end,c)}paintReviewCommentCounts();
 }
-async function locateMethodComment(comment){const record=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id,revision_id:comment.target_revision_id}));await methodOpen(methodView.root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,record.revision_id,comment.anchor.file,methodView.selected!==record.object_id||methodView.revision!==record.revision_id||methodView.file!==comment.anchor.file);state.selected=comment.id;paintMethodComments();renderComments();methodView.prose?.querySelector('[data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]')?.scrollIntoView({block:'center'})}
+async function locateMethodComment(comment){
+  const key=methodKey(),root=methodView.root;
+  const record=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id,revision_id:comment.target_revision_id}));
+  if(methodKey()!==key||!isMethodsReading())return false;
+  await methodOpen(root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,record.revision_id,comment.anchor.file,methodView.selected!==record.object_id||methodView.revision!==record.revision_id||methodView.file!==comment.anchor.file);
+  if(!isMethodsReading()||methodView.document.record.revision_id!==comment.target_revision_id||methodView.document.file!==comment.anchor.file)return false;
+  state.selected=comment.id;paintMethodComments();renderComments();methodView.prose?.querySelector('[data-block-id="'+CSS.escape(comment.anchor.block_id)+'"]')?.scrollIntoView({block:'center'});return true;
+}
 function drawMethodEditor(root,record,recovery=null){
   rememberMethodPosition();methodView.mode='edit';methodView.draft=true;
   root.replaceChildren();const page=el('article','config-page methods-page');methodView.page=page;root.append(page);nodeText('h2',null,'编辑 '+record.payload.title,page);
@@ -227,12 +234,18 @@ function drawMethodEditor(root,record,recovery=null){
   const actions=el('div','method-tools');page.append(actions);methodButton(actions,'保存并用于所选后续工作',()=>{if(!checkboxes.some(c=>c.input.checked)){notice.textContent='请选择需要采用此版的后续工作。';return}save(true)});methodButton(actions,'仅保存待用',()=>save(false));methodButton(actions,'返回阅读，保留改稿',()=>{if(!finished&&(request||textarea.value!==values.files[file]||checkboxes.some(c=>c.input.checked)))persist();methodView.draft=null;methodView.mode='read';drawMethods(root)});
 }
 
-function appendMethodResponseAction(actions,comment){
+function appendMethodResponseAction(actions,comment,onSaved=null){
   methodButton(actions,'回应原意见',async()=>{
-    const current=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id}));
+    let current;
+    try{current=await api('/api/methods/record?'+new URLSearchParams({object_id:comment.target_object_id}))}catch(error){toast('回应稿读取失败：'+error.message);return}
     const modal=openReviewDialog('回应方法原意见',actions,'method-response'),dialog=modal.body;
     nodeText('blockquote',null,comment.body,dialog);nodeText('p',null,'回应将关联原圈选和第 '+current.version+' 版当前正文；关闭评论仍由你决定。',dialog);
+    let file=comment.anchor.file;
+    if(!Object.hasOwn(current.payload.files,file)){
+      nodeText('p','comment-help','当前稿已没有原文件 '+file+'。请选择回应实际对应的当前文件；原圈选仍保留原文件。',dialog);
+      const choice=el('select');choice.setAttribute('aria-label','回应所对应的当前文件');choice.append(new Option('请选择准确当前文件',''));for(const name of Object.keys(current.payload.files))choice.append(new Option(name,name));choice.onchange=()=>{file=choice.value};file='';dialog.append(choice);
+    }
     const input=el('textarea');input.rows=5;input.setAttribute('aria-label','回应说明');dialog.append(input);const notice=nodeText('p','config-save-status','',dialog);
-    const submit=methodButton(dialog,'保存回应',async()=>{submit.disabled=true;try{await api('/api/methods/respond',{method:'POST',body:JSON.stringify({comment_id:comment.id,revision_id:current.revision_id,explanation:input.value})});modal.dialog.close();renderComments();toast('回应已保存，可复核原文与改动')}catch(error){notice.textContent=error.message;submit.disabled=false}});
+    const submit=methodButton(dialog,'保存回应',async()=>{submit.disabled=true;try{if(!file)throw Error('请选择回应实际对应的当前文件；输入仍保留。');await api('/api/methods/respond',{method:'POST',body:JSON.stringify({comment_id:comment.id,revision_id:current.revision_id,file,explanation:input.value})});modal.dialog.close();afterReviewDialogReturn(()=>{renderComments();onSaved?.()});toast('回应已保存，可复核原文与改动')}catch(error){notice.textContent=error.message;submit.disabled=false}});
   });
 }
