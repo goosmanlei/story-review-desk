@@ -618,6 +618,9 @@ class Store:
                 from .review_text import production_text_blocks
                 blocks = production_text_blocks(payload)
                 visuals = [c for c in payload.get("components", []) if c.get("mime", "").startswith("image/")]
+        if obj["kind"] == "GUIDANCE" and payload.get("format") in ("managed-method-skill-v1", "managed-method-resource-v1"):
+            from .method_document import validate_file_anchor
+            blocks = validate_file_anchor(payload, anchor)
         if blocks is None and isinstance(payload.get("body"), str):
             blocks = [{"id": "body", "text": payload["body"]}]
         if not isinstance(anchor, dict):
