@@ -44,6 +44,14 @@ test('submitted reference preview uses its frozen original when the former upstr
  const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.src,'/api/production/files/submitted.png');
  assert.ok(title.textContent.includes('准确候选原件'));
 });
+test('replacing a temporary reference waits for modal cleanup and browser history return',async()=>{
+ const c=fixture(),dialog=new Element('dialog'),body=new Element('section'),title=new Element('h2'),events=[];let closed,returned;
+ dialog.addEventListener=(type,fn)=>{if(type==='close')closed=fn};dialog.close=()=>events.push('requested-close');
+ c.openReviewDialog=()=>({dialog,body,title});c.api=async()=>({record:{kind:'REQUIREMENT'}});
+ c.afterReviewDialogReturn=fn=>{returned=fn};c.openUnifiedMaterial=()=>events.push('opened');
+ await c.openMaterialReference({object_id:'need',revision_id:'exact'},null);assert.deepEqual(events,['requested-close']);
+ closed();assert.deepEqual(events,['requested-close']);returned();assert.deepEqual(events,['requested-close','opened']);
+});
 test('legacy image projections and review renderer share display codes without mutating components',()=>{
  const c=fixture(),root=new Element('section'),visuals=[],component={id:'original',role:'original',mime:'image/png',file:'exact.png',width:160,height:90,bytes:4,sha256:'exact'};
  c.state.productionSelected={payload:{title:'E2-004 河街素材',components:[component]}};const before=JSON.stringify(c.state.productionSelected);c.renderStructureVisual=v=>{visuals.push(v);return new Element('figure')};

@@ -202,7 +202,7 @@ function renderMaterialRequirements(parent,requirement){
   renderReviewHelp(info,requirement);
 }
 function renderSelectedGenerationRecipe(parent,requirement,item,round){
-  const box=el('section','material-plan');nodeText('h3',null,'生成方案',box);parent.append(box);
+  const box=el('section','material-plan');nodeText('h3',null,(requirement||round?.plan)?.payload.media_type==='project'?'制作内容':'生成方案',box);parent.append(box);
   const call=item?.review_context?.call||(!item&&round?.definition_records?.call);
   if(item&&!call){
     if(round?.current_content){nodeText('p','production-meta',item.review_context?.submission?.snapshot.source?.description||'此原件没有模型调用记录；未用当前方案补填。',box);return}
@@ -223,7 +223,11 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
     return;
   }
   const need=requirement||round?.definition_records?.requirement||round?.plan,plan=need?.payload.generation;
-  if(!plan){nodeText('p','production-meta',need?.payload.status==='withdrawn'?'此版本未附生成方案':'此素材版本未保留完整的生成方案。',box);return}
+  if(!plan){
+    if(need?.payload.status!=='withdrawn'&&need?.payload.blocks?.length){const host=materialTextSurface(box,need);for(const block of need.payload.blocks)nodeText('p',null,block.text,host).dataset.blockId=block.id;return}
+    nodeText('p','production-meta',round?.current_content?'当前方案尚未编写':need?.payload.status==='withdrawn'?'此版本未附生成方案':'此素材版本未保留完整的生成方案。',box);return
+  }
+  if(round?.current_content&&need.payload.current_plan_for&&!plan.prompt&&!plan.tool&&!plan.model&&!Object.keys(plan.parameters||{}).length&&!plan.inputs?.length){nodeText('p','production-meta','当前方案尚未编写',box);return}
   const host=materialTextSurface(box,need);box.dataset.requirementId=need.object_id;
   for(const block of need.payload.blocks||[])nodeText('p',null,block.text,host).dataset.blockId=block.id;
   materialField(host,need,'generation.output.description',null);
@@ -673,7 +677,11 @@ async function openMaterialReference(ref,trigger,source=false){
       renderSourceReference({dialog,title,body},detail,ref,source);
       return;
     }
-    if(!detail.record.submission_only&&['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'].includes(detail.record.kind)){dialog.close();return openUnifiedMaterial(ref,trigger)}
+    if(!detail.record.submission_only&&['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'].includes(detail.record.kind)){
+      // Restore the parent's selection control before replacing this temporary
+      // reader. A new modal must not retain the detached reader as its parent.
+      dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openUnifiedMaterial(ref,trigger)),{once:true});dialog.close();return
+    }
     const row=detail.record,p=row.payload;body.replaceChildren();title.textContent=businessTitle(row)+' · '+materialVersionLabel(row);body.dataset.referenceRevision=row.id;
     if(row.kind==='ASSET'){
       const components=ref.component_id?p.components.filter(c=>c.id===ref.component_id):p.components.filter(c=>c.role==='original');

@@ -195,6 +195,14 @@ test('candidate generation reads its actual call and never borrows a current pla
   const missing=new Element('main');c.renderSelectedGenerationRecipe(missing,need,{record});assert.match(text(missing),/历史生成依据/);assert.doesNotMatch(text(missing),/CURRENT PLAN/);
 });
 
+test('engineering plans show their complete working instructions without inventing model parameters',()=>{
+  const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);c.materialTextSurface=parent=>parent;
+  const root=new Element('main'),need={payload:{media_type:'project',blocks:[{id:'handoff',text:'准确字层及遮挡交接'}]}};
+  c.renderSelectedGenerationRecipe(root,need,null,{current_content:true,plan:need});
+  const text=root.all().map(n=>n.textContent||'').join('\n');assert.match(text,/制作内容/);assert.match(text,/准确字层及遮挡交接/);assert.doesNotMatch(text,/未保留|模型|Prompt/);
+  assert.equal(root.all().find(n=>n.dataset.blockId==='handoff').textContent,'准确字层及遮挡交接');
+});
+
 test('D01/C06 state aliases browse the same canonical material without changing their adoption scope',()=>{
   const {c,data,shared,alias,items}=sharedMaterialFixture();
   const first=c.entityReviewMaterialModels([shared],items,data)[0],second=c.entityReviewMaterialModels([alias],items,data)[0];
