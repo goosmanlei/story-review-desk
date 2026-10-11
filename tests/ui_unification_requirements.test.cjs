@@ -339,7 +339,7 @@ async function focusedMaterialListFixture({explicitMaterial=false,outside=false,
   const candidate={...asset,object_id:'historical-candidate',id:'historical-candidate-r1'};
   const currentNeed={...need,id:'need-r2',version:2};
   const target={canonical_material_id:need.object_id,object_id:need.object_id,id:currentNeed.id,title:'Linked material',media_type:'image',generated:true};
-  const firstPage=Array.from({length:40},(_,i)=>({object_id:'first-'+i,id:'first-'+i+'-r1',title:'First '+i,media_type:'image',generated:true}));
+  const firstPage=Array.from({length:50},(_,i)=>({object_id:'first-'+i,id:'first-'+i+'-r1',title:'First '+i,media_type:'image',generated:true}));
   const listed=[],opened=[];let nextRender=null;
   c.location.href+='&production_object='+candidate.object_id+'&production_revision='+candidate.id;
   if(explicitMaterial)c.location.href+='&material_id=need&material_version=1&material_target='+candidate.id;
@@ -366,7 +366,7 @@ async function focusedMaterialListFixture({explicitMaterial=false,outside=false,
 test('exact historical links beyond the first page open the old candidate without resetting pagination',async()=>{
   for(const explicitMaterial of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial});
     assert.equal(f.listed[0].grouped,'1');assert.equal(f.listed[0].focus,undefined);
-    assert.equal(f.host.querySelectorAll('[data-material-id]').length,40);
+    assert.equal(f.host.querySelectorAll('[data-material-id]').length,50);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);
     assert.deepEqual(f.opened,[{object_id:f.candidate.object_id,revision_id:f.candidate.id}]);
     if(explicitMaterial)assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
@@ -379,7 +379,7 @@ test('pagination changes only the group/card collection and does not automatical
 });
 test('a linked old candidate outside filters remains exact without changing unique or display counts',async()=>{
   for(const empty of [false,true]){const f=await focusedMaterialListFixture({explicitMaterial:true,outside:true,empty});
-    assert.equal(f.listed[0].search,'excluded');const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,`${empty?0:40} 项已有原件可比较；0 项尚无结果。制作准备不要求逐项审阅。`);
+    assert.equal(f.listed[0].search,'excluded');const summary=f.host.all().find(n=>n.className==='production-filter-summary');assert.equal(summary.textContent,`${empty?0:50} 项素材；${empty?0:50} 项有结果，0 项无结果。`);
     assert.equal(f.c.state.productionSelected.id,f.candidate.id);assert.equal(f.c.state.materialReview.selectedCandidateId,f.candidate.id);
   }
 });
@@ -468,4 +468,20 @@ test('material entry keeps its exact old state when the current work uses a newe
   assert.equal(f.c.state.productionChildDetail.record.id,old.id);
   assert.ok(data.states.some(r=>r.id===old.id));
   assert.ok(!data.currentStates.some(r=>r.id===old.id));
+});
+
+test('material read failure is retryable in the same range, and late filters cannot repaint newer media',async()=>{
+ const {c,host}=fixture();c.breakdownHeading=()=>{};c.managementRoute=()=>{};c.managementScopeFilters=()=>{};
+ const item=(id,media)=>({object_id:id,id:id+'-r1',title:id,media_type:media,generated:false});
+ const data=(id,media)=>({items:[item(id,media)],total:1,groups:[],facets:{media:{'':1,image:1,audio:1},status:{'':1,ungenerated:1}}});
+ const reads=[];let fail=true,pending;
+ c.api=async url=>{reads.push(url);if(fail)throw Error('simulated read failure');return data('new','audio')};
+ await c.loadMaterialManagement();assert.match(host.textContent,/素材读取失败/);assert.doesNotMatch(host.textContent,/没有符合/);
+ fail=false;await host.all().find(n=>n.textContent==='重新读取列表').onclick();assert.equal(reads[0],reads[1]);assert.match(host.textContent,/new/);
+ c.api=url=>{if(new URL(url,'http://fixture').searchParams.get('media')==='image')return new Promise(resolve=>pending=resolve);return Promise.resolve(data('newer','audio'))};
+ const buttons=()=>host.all().filter(n=>n.dataset.filterKey==='media');
+ buttons().find(n=>n.dataset.filterValue==='image').onclick();await new Promise(resolve=>setImmediate(resolve));const old=pending;
+ buttons().find(n=>n.dataset.filterValue==='audio').onclick();await new Promise(resolve=>setImmediate(resolve));
+ old(data('stale','image'));await new Promise(resolve=>setImmediate(resolve));
+ assert.match(host.textContent,/newer/);assert.doesNotMatch(host.textContent,/stale/);
 });
