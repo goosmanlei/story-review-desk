@@ -118,8 +118,8 @@ def prepare(store, choices):
     retired = dict(reasons)
     for choice in choices.get('retire', []):
         oid = choice['source']
-        if oid not in rows or rows[oid]['kind'] != 'REQUIREMENT' or not choice.get('reason') or oid in retired:
-            raise ValueError('invalid requirement retirement decision')
+        if oid not in rows or rows[oid]['kind'] not in ('REQUIREMENT', 'STATE') or not choice.get('reason') or oid in retired:
+            raise ValueError('invalid requirement/state retirement decision')
         retired[oid] = choice['reason']
     candidate_retirements = {}
     for choice in choices.get('retire_candidates', []):

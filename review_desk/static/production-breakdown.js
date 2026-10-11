@@ -183,7 +183,7 @@ async function refreshShotReference(context,slot,result){
   if(draft&&target&&state.workspace==='settings.workspace'){Object.assign(state,draft);renderComments()}
 }
 function openShotReference(item,context,trigger){
-  const slot=item.slot;if(!slot?.material_id||!slot.record){toast('准确素材身份缺失，需先修复此参考槽位');return}
+  const slot=item.slot;if(!slot?.material_id||!slot.record)return openMaterialReference(item.ref,trigger);
   const params=new URLSearchParams({material_id:slot.material_id,...(!slot.current_content&&slot.number?{material_version:slot.number}:{}),...(slot.baseline_id?{material_baseline:slot.baseline_id}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
   const ref=slot.candidate||productionRef(slot.record);
   const parentDialog=typeof reviewDialogStack==='undefined'?null:reviewDialogStack.at(-1)||null;
@@ -292,15 +292,15 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
   const block=productionTextBlocks(row).find(b=>b.field===field);if(!block)return;
   const pre=el('pre','shot-generation-prompt');pre.dataset.blockId=block.id;
   nodeText('h4',null,'Prompt',parent);
-  const refs=context?shotReferenceItems(row,inputs,records):materialInputs(inputs,records),byLabel=new Map(refs.map(item=>[item.label,item]));
+  const refs=context?shotReferenceItems(row,inputs,records):materialInputs(inputs,records,row.review_shot_slots||row.input_slots||[]),byLabel=new Map(refs.map(item=>[item.label,item]));
   const spans=[];
   const points=Array.from(block.text),links=row.review_prompt_links||row.payload.generation?.prompt_links||[];
   for(const link of links){
     const input=refs.find(item=>item.referenceKeys?.includes(link.reference_key));
     if(input&&points.slice(link.start,link.end).join('')===link.quote)spans.push({start:points.slice(0,link.start).join('').length,end:points.slice(0,link.end).join('').length,text:link.quote,input,entity:true});
   }
-  for(const match of block.text.matchAll(/@?(?:参考图|图片|图像|音频|声音|视频|输入)\s*\d+/gu)){
-    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^(?:图像|参考图)/,'图片').replace(/^声音/,'音频');
+  for(const match of block.text.matchAll(/@?(?:参考图|图片|图像|音频|声音|视频|输入|图)\s*\d+/gu)){
+    const label=match[0].replace(/^@/,'').replace(/\s/g,'').replace(/^(?:图像|参考图|图(?=\d))/,'图片').replace(/^声音/,'音频');
     const input=byLabel.get(label)||(/^输入\d+$/.test(label)?refs.find(i=>i.index===Number(label.slice(2))-1&&i.slot?.direct!==false):null);
     if(!spans.some(s=>s.start<match.index+match[0].length&&s.end>match.index))spans.push({start:match.index,end:match.index+match[0].length,text:match[0],input});
   }
@@ -310,12 +310,13 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
     pre.append(document.createTextNode(block.text.slice(offset,span.start)));const input=span.input;
     if(input?.ref&&(!input.missing||input.slot?.record)){
       const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=reviewURL(materialReferenceRequest(input.ref,false).url);const named=input.row||input.slot?.record,title=named&&(typeof materialPositionText==='function'?materialPositionText({record:named,object_id:named.object_id,title:named.payload.title,scope:named.payload.scope}):named.payload.title),same=named&&refs.filter(r=>(r.row||r.slot?.record)?.payload.title===named.payload.title),sameIdentity=same?.filter(r=>(r.row||r.slot?.record)?.object_id===named.object_id).length>1;a.textContent=named?'@'+title+(same.length>1?' · '+(sameIdentity?`参考${input.index+1}`:businessCode(named)||`参考${input.index+1}`):''):span.text;
+      if(input.slot?.reference_contract)a.textContent='@'+input.slot.label;
       const displayStart=Array.from(pre.textContent).length,sourceStart=Array.from(block.text.slice(0,span.start)).length,sourceEnd=Array.from(block.text.slice(0,span.end)).length;
       pre.reviewTextMap.push({sourceStart,sourceEnd,displayStart,displayEnd:displayStart+Array.from(a.textContent).length});
       a.setAttribute('aria-label',a.textContent);
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
       a.title=a.textContent+' · '+(input.row?businessCode(input.row):'')+'；'+a.title;
-      a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
+      a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia&&!input.slot?.reference_contract)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
     }else pre.append(document.createTextNode(span.text));offset=span.end;
   }
   pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);
