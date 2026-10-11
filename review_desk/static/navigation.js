@@ -186,6 +186,7 @@ function renderWorkspaceTabs(){
 function workspacePageDescriptor(workspace,params){
   if(workspace==='production.approach'){
     const tab=typeof approachSelectedTab==='function'?approachSelectedTab(params):null;
+    if(tab?.sections?.some(section=>section.diagram?.type==='workflow'))return ['制作思路',tab.label,''];
     if(tab&&!['story','materials'].includes(tab.id))return ['制作思路',tab.label,''];
     return (tab?.id||params.get('tab'))==='materials'
       ?['从故事到影像','生产制作方法','了解定稿、素材准备、镜头制作与组合交付之间的输入、产物和检查条件。']

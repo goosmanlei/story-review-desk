@@ -68,6 +68,52 @@ class ApproachTest(unittest.TestCase):
         self.assertIn("production.approach", [item["id"] for item in workspaces])
         self.assertNotIn("current", [item["id"] for item in workspaces])
 
+    def test_workflow_connections_local_navigation_aliases_and_recovery(self):
+        diagram = {
+            'type': 'workflow', 'description': 'A bounded work graph', 'note': 'Keep exact inputs',
+            'nodes': [
+                {'id': 'draft', 'title': 'Draft', 'text': 'Edit', 'icon': 'document', 'shape': 'paper',
+                 'href': '/?workspace=story.outline'},
+                {'id': 'submit', 'title': 'Submit', 'text': 'Keep inputs', 'icon': 'process'},
+                {'id': 'one', 'title': 'Result', 'text': 'Snapshot', 'icon': 'image'},
+                {'id': 'two', 'title': 'Result', 'text': 'Snapshot', 'icon': 'image'}],
+            'groups': [{'id': 'prepare', 'title': '', 'rows': [['draft']]},
+                       {'id': 'results', 'title': '', 'rows': [['submit'], ['one', 'two']]}],
+            'connections': [{'from': a, 'to': b, 'label': '', 'direction': 'forward'}
+                            for a, b in [('draft', 'submit'), ('submit', 'one'), ('submit', 'two')]],
+            'feedback': {'steps': ['Read', 'Revise', 'Read again'], 'targets': ['draft'], 'label': 'Return'},
+            'methods': [{'label': 'Method', 'href': '/?workspace=production.approach&tab=materials'}]}
+        value = {'schema_version': 2, 'tabs': [
+            {'id': id, 'label': id, 'title': id, 'lead': '', 'sections': []} for id in ('story', 'materials')]}
+        value['tabs'][0].update(layout={'type': 'diagram', 'anchors': {'old': 'draft'}},
+                               sections=[{'id': 'work', 'title': 'Work', 'blocks': [], 'diagram': diagram}])
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        for change in ('missing-target', 'unknown-type', 'illegal-navigation', 'duplicate-node',
+                       'duplicate-placement', 'unknown-shape', 'feedback-target', 'reversed-edge',
+                       'unknown-field', 'bad-alias', 'duplicate-param', 'fragment-navigation'):
+            invalid = copy.deepcopy(value)
+            target = invalid['tabs'][0]['sections'][0]['diagram']
+            if change == 'missing-target': target['connections'][0]['to'] = 'missing'
+            if change == 'unknown-type': target['type'] = 'editor'
+            if change == 'illegal-navigation': target['nodes'][0]['href'] = 'javascript:alert(1)'
+            if change == 'duplicate-node': target['nodes'][1]['id'] = 'draft'
+            if change == 'duplicate-placement': target['groups'][1]['rows'][0] = ['draft']
+            if change == 'unknown-shape': target['nodes'][0]['shape'] = 'html'
+            if change == 'feedback-target': target['feedback']['targets'] = ['missing']
+            if change == 'reversed-edge': target['connections'][0].update({'from': 'one', 'to': 'draft'})
+            if change == 'unknown-field': target['nodes'][0]['html'] = '<script>bad</script>'
+            if change == 'bad-alias': invalid['tabs'][0]['layout']['anchors']['old'] = 'missing'
+            if change == 'duplicate-param': target['nodes'][0]['href'] = '/?workspace=story.outline&workspace=story.sources'
+            if change == 'fragment-navigation': target['nodes'][0]['href'] = '/?workspace=story.outline#unknown'
+            self.path.write_text(json.dumps(invalid))
+            with self.subTest(change=change), self.assertRaises(HTTPError) as caught:
+                self.get('/api/production-approach')
+            self.assertEqual(caught.exception.code, 503)
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'), value)
+        self.assertEqual(self.get('/api/sources'), [])
+
     def test_supported_collaboration_rejects_ambiguous_nodes_and_recovers(self):
         diagram = {'type': 'supported-collaboration',
                    'roles': [{'title': '作者', 'icon': 'human'}, {'title': '助手', 'icon': 'ai'}],

@@ -44,3 +44,26 @@ test('legacy chapter-only links select their owner consistently while explicit t
     assert.equal(c.workspacePageDescriptor('production.approach',new URL(c.location.href).searchParams)[1],title);
   }
 });
+
+test('workflow node and old aliases select their owning tab',()=>{
+ const c={URL,location:{href:'http://isolated/?workspace=production.approach',hash:''},document:{addEventListener(){}},window:{addEventListener(){}}};
+ vm.createContext(c);vm.runInContext(script,c);
+ vm.runInContext(`approachContent={tabs:[{id:'vision',sections:[]},{id:'story',layout:{anchors:{structure:'draft'}},sections:[{id:'work',diagram:{nodes:[{id:'draft'}]}}]}]}`,c);
+ for(const hash of ['#approach-story-draft','#approach-story-structure']) {
+  c.location.hash=hash;assert.equal(c.approachSelectedTab().id,'story');
+ }
+});
+
+test('a failed slow read cannot overwrite a later tab or a workspace that was left',async()=>{
+ const pending=[];
+ const host={dataset:{},classList:{remove(){}},setAttribute(){},textContent:''},index={replaceChildren(){}},sidebar={};
+ const c={URL,location:{href:'http://isolated/?workspace=production.approach&tab=story',hash:''},api:()=>new Promise((resolve,reject)=>pending.push({resolve,reject})),document:{addEventListener(){}},window:{addEventListener(){}},$:s=>s==='#approach-body'?host:s==='#approach-index'?index:s==='#approach-sidebar'?sidebar:view};
+ const view={hidden:false};
+ vm.createContext(c);vm.runInContext(script,c);
+ const older=c.renderApproach();c.location.href='http://isolated/?workspace=production.approach&tab=materials';
+ const newer=c.renderApproach();pending[0].reject(new Error('slow read failed'));await Promise.all([older,newer]);
+ assert.match(host.textContent,/slow read failed/);
+ // Both readers shared one request; only the current reader reports its failure.
+ const leaving=c.renderApproach();view.hidden=true;pending[1].reject(new Error('late failure after leaving'));await leaving;
+ assert.doesNotMatch(host.textContent,/late failure/);
+});

@@ -3,6 +3,98 @@ import json
 import re
 import hashlib
 import xml.etree.ElementTree as ET
+from urllib.parse import urlsplit, parse_qs
+
+
+def validate_workflow(diagram):
+    """A bounded reading graph: local navigation and text, no arbitrary markup."""
+    def require(condition):
+        if not condition:
+            raise ValueError('invalid production approach workflow diagram')
+    def text(value):
+        return isinstance(value, str) and bool(value.strip())
+    def identifier(value):
+        return isinstance(value, str) and re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', value)
+    def navigation(value):
+        require(isinstance(value, str) and value.startswith('/?') and '\\' not in value)
+        url = urlsplit(value)
+        require(not url.scheme and not url.netloc and url.path == '/')
+        query = parse_qs(url.query, keep_blank_values=True)
+        require(all(len(values) == 1 and text(values[0]) for values in query.values()))
+        workspace = query.get('workspace', [''])[0]
+        allowed = {
+            'story.sources': {'source'}, 'story.outline': set(),
+            'story.script': {'script', 'episode', 'scene'},
+            'settings.workspace': {'production_tab'},
+            'production.approach': {'tab'},
+        }
+        require(workspace in allowed and set(query) <= allowed[workspace] | {'workspace'})
+        if workspace == 'settings.workspace':
+            require(query.get('production_tab', [''])[0] in ('breakdown', 'entities', 'materials'))
+        if workspace == 'production.approach':
+            require(identifier(query.get('tab', [''])[0]))
+        require(not url.fragment or re.fullmatch(r'approach-[a-z0-9]+(?:-[a-z0-9]+)*', url.fragment))
+
+    require(isinstance(diagram, dict) and set(diagram) == {
+        'type', 'description', 'nodes', 'groups', 'connections', 'feedback', 'note', 'methods'})
+    require(diagram['type'] == 'workflow' and text(diagram['description']) and text(diagram['note']))
+    nodes = diagram['nodes']
+    require(isinstance(nodes, list) and 2 <= len(nodes) <= 24)
+    for node in nodes:
+        require(isinstance(node, dict) and {'id', 'title', 'text', 'icon'} <= set(node)
+                and set(node) <= {'id', 'title', 'text', 'icon', 'href', 'items', 'cycle', 'shape'})
+        require(identifier(node['id']) and text(node['title']) and text(node['text']))
+        require(node['icon'] in ('document', 'direction', 'model', 'book', 'film', 'image', 'process'))
+        require(node.get('shape', 'card') in ('card', 'paper', 'snapshot'))
+        for key in ('items', 'cycle'):
+            if key in node:
+                require(isinstance(node[key], list) and 2 <= len(node[key]) <= 6 and all(text(v) for v in node[key]))
+        if 'href' in node:
+            navigation(node['href'])
+    ids = [node['id'] for node in nodes]
+    require(len(set(ids)) == len(ids))
+    groups = diagram['groups']
+    require(isinstance(groups, list) and 2 <= len(groups) <= 5)
+    placed = []
+    positions = {}
+    group_ids = []
+    for group_index, group in enumerate(groups):
+        require(isinstance(group, dict) and set(group) == {'id', 'title', 'rows'})
+        require(identifier(group['id']) and isinstance(group['title'], str))
+        group_ids.append(group['id'])
+        require(isinstance(group['rows'], list) and 1 <= len(group['rows']) <= 6)
+        for row_index, row in enumerate(group['rows']):
+            require(isinstance(row, list) and 1 <= len(row) <= 2)
+            require(all(isinstance(v, str) and v in ids for v in row))
+            placed.extend(row)
+            positions.update({id: (group_index, row_index) for id in row})
+    require(len(set(group_ids)) == len(group_ids) and not set(group_ids) & set(ids))
+    require(len(placed) == len(ids) and set(placed) == set(ids))
+    connections = diagram['connections']
+    require(isinstance(connections, list) and 1 <= len(connections) <= 36)
+    pairs = set()
+    for edge in connections:
+        require(isinstance(edge, dict) and set(edge) == {'from', 'to', 'label', 'direction'})
+        require(isinstance(edge['from'], str) and isinstance(edge['to'], str))
+        require(edge['from'] in ids and edge['to'] in ids and edge['from'] != edge['to'])
+        start, end = positions[edge['from']], positions[edge['to']]
+        require(end[0] == start[0] + 1 or (end[0] == start[0] and end[1] == start[1] + 1))
+        require(edge['direction'] in ('forward', 'both') and isinstance(edge['label'], str))
+        pair = (edge['from'], edge['to'])
+        require(pair not in pairs)
+        pairs.add(pair)
+    require(set(ids) == {v for pair in pairs for v in pair})
+    feedback = diagram['feedback']
+    require(isinstance(feedback, dict) and set(feedback) == {'steps', 'targets', 'label'})
+    require(text(feedback['label']) and isinstance(feedback['steps'], list) and 2 <= len(feedback['steps']) <= 4)
+    require(all(text(v) for v in feedback['steps']))
+    require(isinstance(feedback['targets'], list) and 1 <= len(feedback['targets']) <= 4)
+    require(all(isinstance(v, str) and v in ids for v in feedback['targets']))
+    require(len(set(feedback['targets'])) == len(feedback['targets']))
+    require(isinstance(diagram['methods'], list) and len(diagram['methods']) <= 3)
+    for link in diagram['methods']:
+        require(isinstance(link, dict) and set(link) == {'label', 'href'} and text(link['label']))
+        navigation(link['href'])
 
 MEDIA_TYPES = {'.png': ('image', 'image/png'), '.jpg': ('image', 'image/jpeg'),
                '.jpeg': ('image', 'image/jpeg'), '.webp': ('image', 'image/webp'),
@@ -81,6 +173,9 @@ def validate_collaboration(diagram):
     def text(value):
         return isinstance(value, str) and bool(value.strip())
     require(isinstance(diagram, dict))
+    if diagram.get('type') == 'workflow':
+        validate_workflow(diagram)
+        return
     if diagram.get('type') == 'supported-collaboration':
         require(set(diagram) == {'type', 'roles', 'outcome', 'foundation', 'support', 'description'})
         require(all(text(diagram[key]) for key in ('outcome', 'support', 'description')))
@@ -188,7 +283,14 @@ def read_document(root):
                 if layout.get('type') == 'diagram':
                     require(set(layout) == {'type', 'anchors'} and isinstance(layout['anchors'], dict))
                     require(len(tab['sections']) == 1 and tab['sections'][0].get('blocks') == [] and 'diagram' in tab['sections'][0])
-                    require(all(identifier(key) and target == tab['sections'][0]['id'] and key != target for key, target in layout['anchors'].items()))
+                    diagram = tab['sections'][0]['diagram']
+                    targets = {tab['sections'][0]['id']}
+                    if isinstance(diagram, dict) and diagram.get('type') == 'workflow':
+                        validate_workflow(diagram)
+                        node_ids = {node['id'] for node in diagram['nodes']}
+                        require(tab['sections'][0]['id'] not in node_ids)
+                        targets.update(node_ids)
+                    require(all(identifier(key) and target in targets and key != target and key not in targets for key, target in layout['anchors'].items()))
                 else:
                     require(set(layout) == {'type', 'return_label'} and layout['type'] == 'cycle')
                     require(isinstance(layout['return_label'], str) and bool(layout['return_label'].strip()))

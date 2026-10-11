@@ -101,3 +101,19 @@ Schema 2 的 cycle 节可提供 `diagram`，其 `type` 为 `collaboration`。它
 纯图阅读页可采用 `layout: {type: "diagram", anchors: {旧锚点: "实际节id"}}`，只接受一个blocks为空且提供diagram的节。aliases必须为合法id、不能与实际id相同，目标必须存在；页面直接展示图示，无内部目录、重复章节标题或空引言。旧锚点在阅读恢复时映射到准确内容，不添加空占位节点；其他子页及旧cycle布局保持兼容。
 
 两层支撑图可用 `diagram.type: "supported-collaboration"`：`roles` 为两个 `{title,icon}`，图标恰含 `human` 与 `ai`；`outcome` 为共同作品名称；`foundation` 含 `title` 与两个 `{title,icon}` 的 `pillars`，图标恰含 `model` 与 `process`；`support` 为共同支撑的连接短语，`description` 为完整关系的可访问说明。只接受上述字段及非空文字，缺失或重复角色／基础、未知图标均拒绝。实例提供全部文字，系统提供固定的静态 SVG 图标、双向交换和覆盖整个协作组的支撑线，不接受实例 SVG 或 HTML。上层使用轻线条，下层复用系统绿色纸面；窄屏保持原生字号及两层关系，不把整图按比例缩成小字。纯图页与旧链接沿用同一 `layout` 契约，旧协作和循环仍可读；没有业务对象或执行流程变更。
+
+## 工作关系图
+
+纯图页另支持 `diagram.type: "workflow"`，用于说明工作怎样推进、问题回哪里修。实例维护文字与入口，系统只负责有限的原生文字和静态形状；没有图形编辑、模拟提交或业务写入。
+
+图对象包含 `type`、非空 `description`、`nodes`、`groups`、`connections`、`feedback`、非空 `note` 和 `methods`，不接受其他字段：
+
+- `nodes` 为 2—24 个唯一节点；每个节点提供 `id,title,text,icon`。图标限定为 `document,direction,model,book,film,image,process`；可选 `shape` 为 `card,paper,snapshot`，可选 `items` 或 `cycle` 为 2—6 条短文本，可选 `href` 为既有本地入口。
+- `groups` 为 2—5 个 `{id,title,rows}` 图组，title 可空。每组 1—6 行，每行 1—2 个节点 ID；每个节点恰好放置一次。多节点行直接表达分叉，不把候选画成版本链。
+- `connections` 为 1—36 个 `{from,to,label,direction}` 连接，`direction` 为 `forward` 或 `both`。端点必须存在，连接不重复；连向同组下一行或下一个图组，每个节点必须参与连接。系统按真实节点边界重算箭头，窄容器展开后仍指向原端点。
+- `feedback` 提供 2—4 个非空 `steps`、1—4 个不重复的既有节点 `targets` 和非空 `label`。一条共用反馈带用虚线回连修改处；其中目标链接直接定位对应节点。
+- `methods` 为至多 3 个 `{label,href}` 既有专业方法入口。节点与方法链接只接受 `/?workspace=...`：故事采编／结构／剧本、生产制作子页或本方法页。参数按工作区白名单核对，重复参数、未知工作区、非法 fragment、任意外部或可执行 URL 均拒绝整个文档。
+
+节点的准确锚点为 `#approach-<tab>-<node-id>`，不得与所在节重名；纯图 `layout.anchors` 可将退出的章节映射到节点或实际节。实际节点名不用再声明同名别名。无 tab 的旧链接按节点／别名所属页解析；显式 tab 仍优先。图节点与方法入口共用现有浏览器历史和阅读恢复，键盘子页导航保持。
+
+图示读取失败时显示既有恢复提示，修正实例文件后刷新可恢复。连续切页只让最后一次有效读取更新当前页；离开方法页后迟到的成功或失败结果不能替换其他工作区。图示及导航校验、异步保护测试仅补充实际浏览器阅读和操作，不能替代箭头、字号、窄屏与链接的实测。

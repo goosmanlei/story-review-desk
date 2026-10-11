@@ -2,6 +2,7 @@
 let approachDocument = null;
 let approachContent = null;
 let approachIndexFrame = 0, approachIndexObserver = null;
+let approachRenderSequence = 0, approachWorkflowObserver = null;
 
 function approachTabs() {
   return approachContent?.tabs || [{id: 'story', label: '故事创作'}, {id: 'materials', label: '生产制作'}];
@@ -13,7 +14,7 @@ function approachSelectedTab(params = new URL(location.href).searchParams, hash 
   // anchor actually owned by the document; an explicit tab always takes priority.
   if (params.has('tab')) return tabs.find(tab => tab.id === params.get('tab')) || tabs[0];
   return tabs.find(tab => (tab.sections || []).some(section =>
-    hash === `#approach-${tab.id}-${section.id}` || Object.keys(tab.layout?.anchors || {}).some(alias => hash === `#approach-${tab.id}-${alias}`) || (section.blocks || []).some(block =>
+    hash === `#approach-${tab.id}-${section.id}` || (section.diagram?.nodes || []).some(node => hash === `#approach-${tab.id}-${node.id}`) || Object.keys(tab.layout?.anchors || {}).some(alias => hash === `#approach-${tab.id}-${alias}`) || (section.blocks || []).some(block =>
       block.type === 'heading' && block.id && hash === `#approach-${tab.id}-${block.id}`))) || tabs[0];
 }
 
@@ -198,6 +199,10 @@ function approachDiagramIcon(kind) {
     model: [['path', {d:'M21 32h9c8 0 2-17 13-17M30 32c8 0 2 17 13 17M30 32h13'}], ['rect', {x:8,y:25,width:13,height:14,rx:4}], ['rect', {x:43,y:9,width:13,height:12,rx:3}], ['rect', {x:43,y:26,width:13,height:12,rx:3}], ['rect', {x:43,y:43,width:13,height:12,rx:3}]],
     process: [['path', {d:'M15 35V23a9 9 0 019-9h21m-7-7 7 7-7 7M49 29v12a9 9 0 01-9 9H19m7-7-7 7 7 7'}]],
     clock: [['circle', {cx:32,cy:32,r:21}], ['path', {d:'M32 19v14l9 6'}]],
+    document: [['path', {d:'M17 8h22l10 10v38H17zM39 8v12h10M24 29h18M24 37h18M24 45h12'}]],
+    direction: [['path', {d:'M32 8v48M32 15H12l-7 8 7 8h20m0-2h20l7 8-7 8H32'}]],
+    book: [['path', {d:'M32 17c-8-5-17-5-25-2v35c8-3 17-3 25 2 8-5 17-5 25-2V15c-8-3-17-3-25 2zM32 17v35M14 24l10 2m-10 8 10 2m16-10 10-2m-10 12 10-2'}]],
+    image: [['rect', {x:8,y:10,width:48,height:44,rx:4}], ['circle', {cx:23,cy:24,r:5}], ['path', {d:'M8 45l15-13 11 8 9-13 13 18'}]],
   };
   for (const [tag, attributes] of shapes[kind]) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -242,6 +247,7 @@ function renderSupportedCollaboration(diagram) {
 }
 
 function renderApproachCollaboration(diagram) {
+  if (diagram.type === 'workflow') return renderApproachWorkflow(diagram);
   if (diagram.type === 'supported-collaboration') return renderSupportedCollaboration(diagram);
   const host = el('div', 'approach-collaboration');
   const roles = el('div', 'approach-collaboration-roles');
@@ -280,7 +286,130 @@ function renderApproachCollaboration(diagram) {
   return host;
 }
 
+function renderApproachWorkflow(diagram) {
+  const tabId = approachSelectedTab().id;
+  const figure = el('figure', 'approach-workflow');
+  nodeText('figcaption', 'visually-hidden', diagram.description, figure);
+  const graph = el('div', 'approach-workflow-graph');
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.classList.add('approach-workflow-lines'); svg.setAttribute('aria-hidden', 'true');
+  const defs = document.createElementNS(svg.namespaceURI, 'defs');
+  const marker = document.createElementNS(svg.namespaceURI, 'marker');
+  const markerId = `approach-${tabId}-arrow`;
+  for (const [name, value] of Object.entries({id:markerId, viewBox:'0 0 10 10', refX:9, refY:5, markerWidth:7, markerHeight:7, orient:'auto-start-reverse'})) marker.setAttribute(name, value);
+  const head = document.createElementNS(svg.namespaceURI, 'path'); head.setAttribute('d', 'M1 1L9 5L1 9');
+  marker.append(head); defs.append(marker); svg.append(defs); graph.append(svg);
+  const nodes = new Map(diagram.nodes.map(node => [node.id, node])), elements = new Map(), groups = new Map();
+  for (const group of diagram.groups) {
+    const panel = el('div', 'approach-workflow-group');
+    if (group.title) nodeText('strong', 'approach-workflow-group-title', group.title, panel);
+    for (const row of group.rows) {
+      const line = el('div', 'approach-workflow-row'); line.style.setProperty('--workflow-columns', row.length);
+      for (const id of row) {
+        const node = nodes.get(id), card = el('div', `approach-workflow-node is-${node.shape || 'card'}`);
+        card.id = `approach-${tabId}-${id}`; card.classList.add('approach-anchor');
+        const title = el('div', 'approach-workflow-node-title'); title.append(approachDiagramIcon(node.icon));
+        const label = nodeText(node.href ? 'a' : 'strong', null, node.title, title);
+        if (node.href) { label.href = reviewURL(node.href); bindApproachNavigation(label); }
+        card.append(title); nodeText('p', null, node.text, card);
+        if (node.items) {
+          const list = el('ul', 'approach-workflow-items');
+          for (const item of node.items) nodeText('li', null, item, list);
+          card.append(list);
+        }
+        if (node.cycle) {
+          const cycle = el('div', 'approach-workflow-cycle');
+          node.cycle.forEach((step, i) => { if (i) nodeText('span', 'approach-workflow-step-arrow', '→', cycle); nodeText('span', null, step, cycle); });
+          nodeText('span', 'approach-workflow-cycle-back', '↶', cycle); card.append(cycle);
+        }
+        elements.set(id, card); groups.set(id, group.id); line.append(card);
+      }
+      panel.append(line);
+    }
+    graph.append(panel);
+  }
+  graph.style.setProperty('--workflow-groups', diagram.groups.length);
+  graph.classList.toggle('is-long-flow', diagram.groups.length > 3);
+  const paths = diagram.connections.map(edge => {
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('marker-end', `url(#${markerId})`);
+    if (edge.direction === 'both') path.setAttribute('marker-start', `url(#${markerId})`);
+    svg.append(path);
+    const label = nodeText('span', 'approach-workflow-edge-label', edge.label, graph);
+    label.hidden = !edge.label;
+    return {edge, path, label};
+  });
+  figure.append(graph);
+  const feedback = el('div', 'approach-workflow-feedback');
+  const flow = el('div', 'approach-workflow-feedback-steps');
+  diagram.feedback.steps.forEach((step, i) => { if (i) nodeText('span', null, '→', flow); nodeText('strong', null, step, flow); });
+  feedback.append(flow);
+  const targets = el('div', 'approach-workflow-feedback-targets');
+  nodeText('span', null, '↶ ' + diagram.feedback.label, targets);
+  for (const id of diagram.feedback.targets) {
+    const link = nodeText('a', null, nodes.get(id).title, targets);
+    link.href = `#approach-${tabId}-${id}`; bindApproachNavigation(link);
+  }
+  feedback.append(targets); figure.append(feedback);
+  const returnLines = document.createElementNS(svg.namespaceURI, 'svg');
+  returnLines.classList.add('approach-workflow-lines', 'approach-workflow-return-lines');
+  returnLines.setAttribute('aria-hidden', 'true');
+  const returns = diagram.feedback.targets.map(id => {
+    const path = document.createElementNS(svg.namespaceURI, 'path');
+    path.setAttribute('marker-end', `url(#${markerId})`);
+    path.dataset.to = id; returnLines.append(path);
+    return {id, path};
+  });
+  figure.append(returnLines);
+  nodeText('p', 'approach-workflow-note', diagram.note, figure);
+  const methods = el('nav', 'approach-workflow-methods'); methods.setAttribute('aria-label', '专业方法');
+  for (const method of diagram.methods) {
+    const link = nodeText('a', null, method.label, methods);
+    link.href = reviewURL(method.href); bindApproachNavigation(link);
+  }
+  figure.append(methods);
+  const draw = () => {
+    if (!graph.isConnected) return;
+    const bounds = graph.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${bounds.width} ${bounds.height}`);
+    for (const {edge, path, label} of paths) {
+      const a = elements.get(edge.from).getBoundingClientRect(), b = elements.get(edge.to).getBoundingClientRect();
+      const horizontal = groups.get(edge.from) !== groups.get(edge.to) && b.left > a.right;
+      let x1, y1, x2, y2, d, lx, ly;
+      if (horizontal) {
+        x1 = a.right - bounds.left; y1 = (a.top + a.bottom) / 2 - bounds.top;
+        x2 = b.left - bounds.left; y2 = (b.top + b.bottom) / 2 - bounds.top;
+        const mid = (x1 + x2) / 2;
+        d = `M${x1} ${y1}H${mid}V${y2}H${x2}`;
+        lx = mid; ly = (y1 + y2) / 2;
+      } else {
+        x1 = (a.left + a.right) / 2 - bounds.left; y1 = a.bottom - bounds.top;
+        x2 = (b.left + b.right) / 2 - bounds.left; y2 = b.top - bounds.top;
+        const mid = (y1 + y2) / 2;
+        d = `M${x1} ${y1}V${mid}H${x2}V${y2}`;
+        lx = (x1 + x2) / 2; ly = mid;
+      }
+      path.setAttribute('d', d);
+      path.dataset.from = edge.from; path.dataset.to = edge.to;
+      label.style.left = `${lx}px`; label.style.top = `${ly}px`;
+    }
+    const frame = figure.getBoundingClientRect(), back = feedback.getBoundingClientRect();
+    returnLines.setAttribute('viewBox', `0 0 ${frame.width} ${frame.height}`);
+    for (const {id, path} of returns) {
+      const target = elements.get(id).getBoundingClientRect();
+      const x = target.left - frame.left - 12, y = (target.top + target.bottom) / 2 - frame.top;
+      path.setAttribute('d', `M${x} ${back.top - frame.top}V${y}H${target.left - frame.left}`);
+    }
+  };
+  approachWorkflowObserver = new ResizeObserver(draw);
+  approachWorkflowObserver.observe(graph);
+  approachWorkflowObserver.observe(figure);
+  for (const node of elements.values()) approachWorkflowObserver.observe(node);
+  return figure;
+}
+
 async function renderApproach() {
+  const sequence = ++approachRenderSequence;
   const host = $('#approach-body');
   const requested = new URL(location.href).searchParams.get('tab') || 'story';
   const selected = approachContent ? approachSelectedTab().id : requested;
@@ -291,16 +420,17 @@ async function renderApproach() {
   delete host.dataset.tab;
   host.classList.remove('approach-cycle', 'approach-diagram');
   approachIndexObserver?.disconnect();
+  approachWorkflowObserver?.disconnect();
   const index = $('#approach-index'), sidebar = $('#approach-sidebar');
   index.replaceChildren(); sidebar.hidden = true;
   host.textContent = '正在读取制作方法…';
   try {
     if (!approachDocument) approachDocument = api('/api/production-approach').catch(error => { approachDocument = null; throw error; });
     const guide = await approachDocument;
-    approachContent = guide;
     // A fast tab switch must not let the previous request replace the selected text.
     const current = new URL(location.href).searchParams.get('tab') || 'story';
-    if (current !== requested) return;
+    if (sequence !== approachRenderSequence || current !== requested || $('#approach-view').hidden) return;
+    approachContent = guide;
     host.replaceChildren();
     if (!guide) { nodeText('p', 'approach-note', '本实例尚未提供制作方法文档。已有故事与审阅功能可继续使用。', host); return; }
     const tab = approachSelectedTab();
@@ -370,7 +500,10 @@ async function renderApproach() {
     approachIndexObserver = new ResizeObserver(scheduleApproachIndex);
     for (const node of [host, sidebar, $('.workspace-topbar')]) approachIndexObserver.observe(node);
     restoreApproachAnchor();
-  } catch (error) { host.textContent = `制作方法加载失败：${error.message}。刷新可重试；已有故事与审阅数据不受影响。`; }
+  } catch (error) {
+    if (sequence === approachRenderSequence && !$('#approach-view').hidden)
+      host.textContent = `制作方法加载失败：${error.message}。刷新可重试；已有故事与审阅数据不受影响。`;
+  }
 }
 
 document.addEventListener('scroll', event => {
