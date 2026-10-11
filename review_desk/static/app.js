@@ -93,8 +93,8 @@ function initializeStoryReaders(url){
   chooseScript(url.searchParams.get('script'),url.searchParams.get('episode'),url.searchParams.get('scene'),false);
 }
 const productionCommentTarget=row=>({target_object_id:row?.object_id,target_revision_id:row?.id,...(row?.edit_token?{expected_edit_token:row.edit_token}:{})});
-const commentTarget=()=>state.reviewReferenceContext?productionCommentTarget(state.reviewReferenceContext.record):isProduction()?productionCommentTarget(state.productionSelected):isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
-const legacyDraftKey=()=>state.anchor?`review-draft:${isProduction()?[state.productionSelected?.id,state.productionSelected?.edit_token||'',...(!state.editing?[commentPageId]:[])].join(':'):isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
+const commentTarget=()=>typeof isMethodsReading==='function'&&isMethodsReading()?{target_object_id:methodView.document.record.object_id,target_revision_id:methodView.document.record.revision_id}:state.reviewReferenceContext?productionCommentTarget(state.reviewReferenceContext.record):isProduction()?productionCommentTarget(state.productionSelected):isStructure()?{target_object_id:'story-structure',target_revision_id:state.structureRevision}:isScript()?{target_object_id:scriptEpisode()?.object_id,target_revision_id:scriptEpisode()?.id}:{source_id:state.current?.id,target_revision_id:state.current?.target_revision_id};
+const legacyDraftKey=()=>state.anchor?`review-draft:${typeof isMethodsReading==='function'&&isMethodsReading()?methodView.document.record.revision_id:isProduction()?[state.productionSelected?.id,state.productionSelected?.edit_token||'',...(!state.editing?[commentPageId]:[])].join(':'):isStructure()?state.structureRevision:isScript()?scriptEpisode()?.id:state.current?.id}:${state.editing||'new'}:${JSON.stringify(state.anchor)}`:null;
 // Reload keeps this page's drafts. A new/duplicated/reopened document starts a
 // separate editor; other saved local drafts are available through explicit recovery.
 const commentPageId=(()=>{if(!globalThis.crypto?.randomUUID||!sessionStorage)return null;const idKey='review-comment-page';let id;try{if(['reload','back_forward'].includes(globalThis.performance?.getEntriesByType?.('navigation')?.[0]?.type))id=sessionStorage.getItem(idKey);id ||= crypto.randomUUID();sessionStorage.setItem(idKey,id)}catch{id=crypto.randomUUID()}return id})();
@@ -226,11 +226,11 @@ function appendLegacyMaterialDraft(editor,key){
   restore.onclick=()=>{if(draftKey()!==key||liveCommentDraft()?.value)return;try{if(recoverLegacyMaterialDraft(key,legacy)){commentDraftFallbacks.delete(commentDraftIdentity());renderComments({replaceDraft:true})}}catch(error){toast(error.message)}};
   editor.append(details);
 }
-const unscopedComments=()=>state.reviewReferenceContext?state.comments.filter(c=>c.target_revision_id===state.reviewReferenceContext.record.id):typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
+const unscopedComments=()=>typeof isMethodsReading==='function'&&isMethodsReading()?state.comments.filter(c=>c.target_object_id===methodView.document.record.object_id&&c.target_revision_id===methodView.document.record.revision_id):state.reviewReferenceContext?state.comments.filter(c=>c.target_revision_id===state.reviewReferenceContext.record.id):typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const activeComments=()=>state.reviewCommentScope?reviewBlockComments(state.comments,state.reviewCommentScope):unscopedComments();
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
 const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
-const renderActiveReader=()=>state.reviewReferenceContext?paintProductionReview():isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
+const renderActiveReader=()=>typeof isMethodsReading==='function'&&isMethodsReading()?paintMethodComments():state.reviewReferenceContext?paintProductionReview():isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
 const escapeSelector=value=>CSS.escape(value);
 
 function nodeText(tag,cls,text,parent){const node=el(tag,cls,text);parent.append(node);return node}
@@ -850,6 +850,7 @@ function textSelectionAnchor(host,blocks,attribute){
   return anchorFromPassages(touched,blocks);
 }
 function selectedAnchor(){
+  if(typeof isMethodsReading==='function'&&isMethodsReading()){const a=textSelectionAnchor(methodView.prose,methodView.document.blocks,'data-block-id');return a?{...a,file:methodView.document.file}:null;}
   if(isProduction()){
     if(!state.productionSelected)return null;
     const root=state.reviewReferenceContext?.dialog||state.unifiedCardRoot||document,selection=getSelection(),range=selection?.rangeCount?selection.getRangeAt(0):null;
@@ -877,7 +878,7 @@ function selectionBounds(host){
 function updateSelectionAction(){
   const anchor=selectionPointer===null&&!state.drawMode?selectedAnchor():null;
   if(!anchor){hideSelectionAction();return}
-  const selection=getSelection(),range=selection.getRangeAt(0),host=state.reviewReferenceContext?.dialog||(isProduction()&&state.unifiedCardRoot?state.unifiedCardRoot:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view')),bounds=selectionBounds(host);
+  const selection=getSelection(),range=selection.getRangeAt(0),host=(typeof isMethodsReading==='function'&&isMethodsReading()?methodView.prose:null)||state.reviewReferenceContext?.dialog||(isProduction()&&state.unifiedCardRoot?state.unifiedCardRoot:$(isProduction()?'#production-reader':isStructure()?'#structure-reader':isScript()?'#screenplay-reader':'#source-view')),bounds=selectionBounds(host);
   const rects=[...range.getClientRects()].filter(r=>r.width>0&&r.height>0&&r.right>bounds.left&&r.left<bounds.right&&r.bottom>bounds.top&&r.top<bounds.bottom);
   if(!rects.length){hideSelectionAction();return}
   // Stay by the visible end of the gesture, even when the beginning has scrolled away.
@@ -1008,11 +1009,11 @@ function commentCard(comment){
     const edit=nodeText('button',null,'编辑',actions);edit.onclick=()=>editComment(comment);
     const close=nodeText('button',null,'关闭评论',actions);close.onclick=()=>changeComment(comment,'CLOSE');
   }else{const reopen=nodeText('button',null,'重新打开',actions);reopen.onclick=()=>changeComment(comment,'REOPEN')}
-  card.append(actions);if(typeof appendCommentReviewAction==='function')appendCommentReviewAction(card,comment);return card;
+  card.append(actions);if(comment.target_object_id?.startsWith('method.')&&typeof appendMethodResponseAction==='function')appendMethodResponseAction(actions,comment);if(typeof appendCommentReviewAction==='function')appendCommentReviewAction(card,comment);return card;
 }
 
 function hasCommentTarget(){
-  if(!['story.sources','story.outline','story.script'].includes(state.workspace)&&!isProduction())return false;
+  if(!['story.sources','story.outline','story.script'].includes(state.workspace)&&!isProduction()&&!(typeof isMethodsReading==='function'&&isMethodsReading()))return false;
   if(isScript()&&state.screenplayRouteError)return false;
   const target=commentTarget();
   if(!(target.target_object_id||target.source_id)||!target.target_revision_id)return false;
@@ -1198,6 +1199,7 @@ function locateSourceComment(comment){
   target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return true;
 }
 function locateComment(comment){
+  if(comment.target_object_id?.startsWith('method.'))return locateMethodComment(comment);
   const panel=$('#comment-panel');
   if(window.innerWidth<1200&&panel.parentNode?.matches?.('.unified-card-dialog'))closePanel();
   if(state.reviewReferenceContext){const dialog=state.reviewReferenceContext.dialog;state.selected=comment.id;if(comment.anchor.type==='time')dialog.querySelector('.review-media-player')?.reviewLocate(comment.anchor);else dialog.querySelector(`[data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`)?.scrollIntoView({block:'center'});paintProductionReview();renderComments();return}if(isProduction())return locateProductionComment(comment);if(isScript())return locateScriptComment(comment);if(comment.anchor_state?.valid===false){toast(`原引用已失效：${comment.anchor_state.reason}`);return}if(comment.target_object_id==='story-structure'){if(!state.structure?.revisions.some(revision=>revision.id===comment.target_revision_id)){toast('原稿已不可用；评论仍保留');return}chooseStructureRevision(comment.target_revision_id,isStructure());if(!isStructure())switchWorkspace('story.outline');state.selected=comment.id;renderStructureReader();renderComments();const target=comment.anchor.type==='text'?document.querySelector(`[data-structure-block="${escapeSelector(comment.anchor.block_id)}"]`):comment.anchor.visual_id?document.querySelector(`[data-visual-id="${escapeSelector(comment.anchor.visual_id)}"]`):$('#structure-reader');if(!target){toast('原引用已失效；评论仍保留在原稿');return}revealLocatedComment();(target.querySelector('.comment-mark.selected')||target).scrollIntoView({behavior:'smooth',block:'center'});target.classList.add('comment-flash');setTimeout(()=>target.classList.remove('comment-flash'),1600);return}return locateSourceComment(comment)}

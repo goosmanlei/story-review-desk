@@ -367,6 +367,39 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(resolve(store, query.get('work_type', [''])[0], json.loads(query.get('conditions', ['{}'])[0])))
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
+        if path == '/api/methods/media':
+            try:
+                from .methods import read
+                row = read(store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0])
+                filename = query.get('file', [''])[0]
+                href = query.get('href', [''])[0]
+                spec = row['payload'].get('media', {}).get(filename, {}).get(href)
+                if not spec:
+                    raise ValueError('此准确版本没有原件摘要；未用当前媒体替代，请恢复准确资料')
+                media = (self.server.root / spec['path']).resolve(strict=True)
+                if self.server.root.resolve() not in media.parents:
+                    raise ValueError('准确媒体路径无效')
+                sha = hashlib.sha256()
+                with media.open('rb') as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        sha.update(chunk)
+                if media.stat().st_size != spec['bytes'] or sha.hexdigest() != spec['sha256']:
+                    raise ValueError('准确媒体原件已变化，未使用其他版本替代')
+                mime = spec['mime']
+                return self._file(media, mime)
+            except (ValueError, KeyError, TypeError, OSError) as exc:
+                return self._json({'error': str(exc)}, 400)
+        if path == '/api/methods/document':
+            try:
+                from .methods import read
+                from .method_document import project
+                row = read(store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0])
+                filename = query.get('file', [None])[0]
+                if filename not in row['payload'].get('files', {}):
+                    raise ValueError('准确文件不存在；请恢复原资料，未替换为最新版')
+                return self._json({'record': row, 'file': filename, 'blocks': project(row['payload'], filename)})
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/record':
             try:
                 from .methods import read
@@ -558,7 +591,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/methods.js", "/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             asset = self.server.root / "export" / "assets" / path[8:]
@@ -589,11 +622,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({'error': str(exc)}, 409)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
-        if self.path in ('/api/methods/save', '/api/methods/prepare', '/api/methods/artifact', '/api/methods/media-prepare'):
+        if self.path in ('/api/methods/save', '/api/methods/edit', '/api/methods/respond', '/api/methods/prepare', '/api/methods/artifact', '/api/methods/media-prepare'):
             try:
                 from . import methods
                 from .method_media import prepare as media_prepare
-                operation = {'save': methods.save, 'prepare': methods.prepare, 'artifact': methods.artifact, 'media-prepare': media_prepare}[self.path.rsplit('/', 1)[1]]
+                operation = {'save': methods.save, 'edit': methods.edit, 'respond': methods.respond, 'prepare': methods.prepare, 'artifact': methods.artifact, 'media-prepare': media_prepare}[self.path.rsplit('/', 1)[1]]
                 return self._json(operation(self.server.store, self._input(2_000_000)), 201)
             except Conflict as exc:
                 return self._json({'error': str(exc)}, 409)
