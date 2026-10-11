@@ -195,6 +195,15 @@ test('version return restores the viewed candidate together with its draft targe
   c.switchMaterialRound(data,'shared',2);assert.equal(data.selectedCandidates.shared,a.id);assert.equal(c.state.productionSelected,a);assert.equal(c.state.anchor.start_seconds,1);
 });
 
+test('manual candidate choice leaves an exact old original and selects from the complete candidate set',()=>{
+  const {c,data,shared,a,b}=sharedMaterialFixture();data.selectedMaterialRounds={shared:2};data.localVersions={[a.object_id]:a};data.selectedCandidates={shared:a.id};
+  c.state.productionSelected=a;c.state.materialCommentCard={data,material_id:'shared',number:2};c.renderProductionReader=()=>{};
+  const model={material_id:'shared',need:shared,round:data.material_versions.shared[0],candidates:[{record:a}]};
+  c.entityMaterialCandidateOptions(data,model).selectCandidate(b.id);
+  assert.equal(c.state.productionSelected,b);assert.equal(data.selectedCandidates.shared,b.id);assert.equal(data.localVersions[a.object_id],undefined);assert.equal(data.localVersions[b.object_id],b);
+  assert.equal(new URL(c.location.href).searchParams.get('material_target'),b.id);
+});
+
 test('candidate generation reads its actual call and never borrows a current plan when history is absent',()=>{
   const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);c.materialTextSurface=parent=>parent;
   const need={id:'need-current',object_id:'need',payload:{blocks:[],generation:{prompt:'CURRENT PLAN',inputs:[],parameters:{},output:{}}}},record={id:'asset-old',payload:{blocks:[]}},call={id:'call-old',object_id:'call',payload:{format:'production-call-v1',blocks:[],model:'old-model',parameters:{seed:7},prompt:'EXACT OLD CALL',inputs:[]}};
