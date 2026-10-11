@@ -135,6 +135,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if self._write_window is not None:
                 self._write_window.close()
                 self._write_window = None
+            # A failed request must not leave its worker in an unfinished
+            # transaction. The next reader needs a fresh snapshot and token;
+            # successful mutations have already committed before responding.
+            store = getattr(self.server._local, 'store', None)
+            if store is not None and store.db.in_transaction:
+                store.db.rollback()
 
     def parse_request(self):
         if not super().parse_request():
