@@ -426,6 +426,10 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             raise ValueError("invalid required media type")
         _refs(store, p, "entities", {"ENTITY"})
         _refs(store, p, "states", {"STATE"})
+        from .production_current import enabled as current_enabled
+        if current_enabled(store) and p.get('status') != 'withdrawn':
+            from .material_origin import validate as validate_origin
+            validate_origin(store, p)
         if not isinstance(p.get('specification'), dict):
             raise ValueError('requirement specification must be an object')
         for key, value in p['specification'].items():

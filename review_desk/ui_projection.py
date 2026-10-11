@@ -6,7 +6,7 @@ from . import list_reading as light
 
 def material_entries(store):
     from .read_cache import read_json
-    return read_json(store, 'material-entries-v7', lambda: _material_entries(store))
+    return read_json(store, 'material-entries-v8', lambda: _material_entries(store))
 
 
 def _material_entries(store):
@@ -58,6 +58,13 @@ def _material_entries(store):
         if row['kind']=='ASSET':
             for coverage in value.get('state_coverage',[]):add_scope(coverage['state'],'coverage')
             for reference in value.get('subjects',[]):owners[reference['object_id']]=reference
+        if row['kind']=='REQUIREMENT' and current_enabled(store):
+            from .material_origin import origin
+            direct = origin(store, value, metadata=True)
+            # The locations above remain a search/filter index of every use.
+            # Neither applicability nor the parent of a state is an owner.
+            owners = {direct['object_id']:scope} if direct['kind'] in ('ENTITY','AV_SHOT') else {}
+            state_ids = {direct['object_id']} if direct['kind']=='STATE' else set()
         candidates=results.get(row['object_id'],[]) if row['kind']=='REQUIREMENT' else [row]
         real=[a for a in candidates if not a['payload'].get('placeholder') and any(c['role']=='original' for c in a['payload'].get('components',[]))]
         preview=next((c for a in real for c in a['payload']['components'] if c['role']=='original' and c['mime'].startswith('image/')),None)
@@ -210,7 +217,16 @@ def card(store, object_id, revision_id=None, entity_id=None):
         needs=(evidence.get('review_context') or {}).get('requirements',[])
         actual=(evidence.get('review_context') or {}).get('call')
         call_need=(actual or {}).get('payload',{}).get('generation_requirement')
-        references=[need['payload'].get('scope') for need in needs if not need.get('unavailable')]
+        # Current candidates have one current production origin. Their frozen
+        # submitted scopes remain evidence, not today's owning entity/state.
+        from . import production_current as current
+        current_scopes=[]
+        if current.enabled(store):
+            targets=list(store.db.execute('''SELECT t.material_id FROM production_candidate_targets t
+                JOIN production_candidates c ON c.id=t.candidate_id WHERE c.asset_object_id=?''', (asset['object_id'],)))
+            if len(targets)==1:
+                current_scopes=[p.record(store,targets[0][0])['payload'].get('scope')]
+        references=[*current_scopes,*[need['payload'].get('scope') for need in needs if not need.get('unavailable')]]
         if call_need:
             call_record=p.ref_record(store,call_need)
             if not call_record.get('unavailable'):references.append(call_record['payload'].get('scope'))
@@ -219,7 +235,8 @@ def card(store, object_id, revision_id=None, entity_id=None):
         # A retired placeholder is evidence of absence, not a source. Try the
         # remaining exact evidence without replacing any referenced revision.
         scope=next((reference for reference in references if reference and
-                    not p.ref_record(store,reference).get('unavailable')),None)
+                    not p.ref_record(store,reference).get('unavailable') and
+                    p.ref_record(store,reference)['payload'].get('status')!='withdrawn'),None)
     scoped=p.ref_record(store,scope) if scope else None
     if scoped and scoped['kind']=='STATE':form=scoped
     elif scoped and scoped['kind'] in ('ENTITY','AV_SHOT'):owner=scoped

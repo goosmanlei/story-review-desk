@@ -91,11 +91,8 @@ def validate_plan(store, object_id, payload):
 
 def requirements_for(rows, states):
     refs = {canonical(ref(s)) for s in states}
-    kinds = {r['object_id']:r['kind'] for r in rows}
     return sorted((r for r in rows if r['kind'] == 'REQUIREMENT' and r['payload'].get('status') != 'withdrawn'
-                   and (canonical(r['payload']['scope']) in refs or
-                        kinds.get(r['payload']['scope']['object_id']) in ('ENTITY','STATE') and
-                        any(canonical(s) in refs for s in r['payload'].get('states', [])))), key=lambda r: r['object_id'])
+                   and canonical(r['payload']['scope']) in refs), key=lambda r: r['object_id'])
 
 
 def current_scope(store, entity_id, rows=None):
@@ -147,10 +144,8 @@ def preparation(store, scope):
             issues.append({'object_id':row['object_id'], 'code':'description_missing', 'message':row['payload']['title']+'：制作描述待完善'})
         for message in row['payload'].get('production_blockers', []):
             issues.append({'object_id':row['object_id'], 'code':'content_unresolved', 'message':message})
-    if not data['states']:
-        issues.append({'object_id':data['entity']['object_id'], 'code':'states_missing', 'message':'尚无完整状态'})
     for form in data['states']:
-        needs = [r for r in data['requirements'] if r['payload']['scope']==ref(form) or ref(form) in r['payload'].get('states', [])]
+        needs = [r for r in data['requirements'] if r['payload']['scope']==ref(form)]
         if form['payload']['reference_media']!='none' and form['payload'].get('reference_mode')!='description' and not any(r['payload']['required'] for r in needs):
             issues.append({'object_id':form['object_id'], 'code':'materials_missing', 'message':form['payload']['title']+'：预期素材待明确'})
     for need in data['requirements']:
@@ -176,7 +171,7 @@ def snapshot(store, entity_id, revision_id=None):
     # Write validation and caller-owned transactions always read their own data.
     with p.read_scope(store):
         from .read_cache import read_json
-        return read_json(store, ['entity-review-v4', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
+        return read_json(store, ['entity-review-v6', entity_id, revision_id], lambda: _snapshot(store, entity_id, revision_id))
 
 
 def _snapshot(store, entity_id, revision_id=None):
@@ -235,9 +230,9 @@ def _snapshot(store, entity_id, revision_id=None):
         refs=[v['state'] for v in asset['payload'].get('state_coverage',[]) if v.get('component_id')==item['component_id']]
         if not refs:refs=asset['payload'].get('states',[])
         exact_states=[(r,p.ref_record(store,r,{'STATE'})) for r in refs]
-        owned=[r for r,s in exact_states if not s.get('unavailable') and s['payload']['entity']['object_id']==entity_id]
+        owned=[r for r,s in exact_states if not s.get('unavailable') and s['payload'].get('entity',{}).get('object_id')==entity_id]
         if not item.get('state') and len({r['revision_id'] for r in owned})==1:item['review_state']=owned[0]
-        item['associated_states']=[{'state':s,'entity':p.ref_record(store,s['payload']['entity'],{'ENTITY'})} for r,s in exact_states if not s.get('unavailable')]
+        item['associated_states']=[{'state':s,'entity':p.ref_record(store,s['payload']['entity'],{'ENTITY'})} for r,s in exact_states if not s.get('unavailable') and s['payload'].get('entity')]
         item['missing_states']=[s for _,s in exact_states if s.get('unavailable')]
     contexts=media_review.enrich_media(store,data['media'])
     calls=[c['call'] for c in contexts.values() if c['call']]
@@ -265,7 +260,9 @@ def _snapshot(store, entity_id, revision_id=None):
         # The same ownership projection drives the graph, detail lists and
         # every state count. Input consumers do not become owners of a material.
         from .ui_projection import material_entries
-        entries = [entry for entry in material_entries(store) if entity_id in entry['entity_ids']]
+        state_ids = {form['object_id'] for form in data['states']}
+        entries = [entry for entry in material_entries(store) if entity_id in entry['entity_ids']
+                   or state_ids.intersection(entry.get('state_ids', []))]
         owned_needs = [p.record(store,entry['object_id']) for entry in entries if entry['kind']=='REQUIREMENT']
         data['requirements'] = list({r['id']:r for r in [*data['requirements'],*owned_needs]}.values())
         data['state_material_ids'] = {form['object_id']:[entry['canonical_material_id'] for entry in entries
@@ -278,6 +275,8 @@ def _snapshot(store, entity_id, revision_id=None):
     for need in data['requirements']:
         need['material_identity']=material_identity(store,need['object_id'])
         need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
+        from .shot_references import enrich_detail
+        enrich_detail(store, {'record': need})
     material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
     for need in data['requirements']:
         mid=need['material_identity']['id']
@@ -317,6 +316,7 @@ def _snapshot(store, entity_id, revision_id=None):
     return {'reference_titles': reference_titles,**base,**data,'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
+            'material_origin_contract':'material-unique-origin-v1' if current_enabled(store) else None,
             'preparation':prep,
             'adoptions':[r for r in p.current_records(store,{'RELATION'}) if r['payload'].get('relation_type')=='adoption'],'versions':versions,'comment_records':list(targets.values()),'comment_targets':[ref(r) for r in targets.values()]}
 

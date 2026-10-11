@@ -38,6 +38,9 @@ def required_assets(store):
             names.update(v['file'] for section in payload['sections'] for v in section.get('visuals', []))
     for row in store.db.execute('SELECT snapshot FROM production_submissions'):
         names.update(file_references(json.loads(row[0])))
+    from .material_reference import receipts
+    for receipt in receipts(store):
+        names.update(item['component']['file'] for item in receipt['references'] if item.get('component'))
     icon = store.configuration('SYSTEM')['body']['site_favicon']
     if icon:
         names.add(icon)
@@ -165,6 +168,8 @@ def validate(store):
         raise ValueError('current recovery foreign key mismatch')
     from .semantic_consolidation import validate as validate_consolidation
     validate_consolidation(store)
+    from .material_reference import validate_evidence
+    validate_evidence(store)
     for obj in store.objects():
         rows = list(store.db.execute('SELECT * FROM revisions WHERE object_id=?', (obj['id'],)))
         heads = [r for r in rows if r['id'] == obj['current_revision'] and r['version'] == obj['version']]

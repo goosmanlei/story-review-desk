@@ -4,6 +4,10 @@ from review_desk import navigation_search as search
 
 
 class NavigationSearchTest(unittest.TestCase):
+    def setUp(self):
+        active = patch('review_desk.production_current.enabled', return_value=False)
+        active.start(); self.addCleanup(active.stop)
+
     def test_normalized_identity_and_chinese_content(self):
         terms = [search.normalize(v) for v in ['M2624', '周家米铺', '阿蘅翻过两页']]
         for query in ('m2624', 'Ｍ２６２４', '周家米铺', '阿蘅翻过两页', ''):
