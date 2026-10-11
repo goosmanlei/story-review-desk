@@ -202,7 +202,7 @@ function renderMaterialRequirements(parent,requirement){
   renderReviewHelp(info,requirement);
 }
 function renderSelectedGenerationRecipe(parent,requirement,item,round){
-  const box=el('section','material-plan');nodeText('h3',null,(requirement||round?.plan)?.payload.media_type==='project'?'制作内容':'生成方案',box);parent.append(box);
+  const working=(requirement||round?.plan)?.payload,box=el('section','material-plan');nodeText('h3',null,working?.media_type==='project'||working?.generation?.method==='external-edit'?'制作内容':'生成方案',box);parent.append(box);
   const call=item?.review_context?.call||(!item&&round?.definition_records?.call);
   if(item&&!call){
     if(round?.current_content){nodeText('p','production-meta',item.review_context?.submission?.snapshot.source?.description||'此原件没有模型调用记录；未用当前方案补填。',box);return}
@@ -240,7 +240,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true});
   if(!(plan.inputs||[]).length)nodeText('p','production-meta','本方案没有参考素材输入',host);
   renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt');
-  if(!plan.prompt)nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
+  if(!plan.prompt&&plan.method!=='external-edit')nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=false}={}){
   if(state.reviewWork&&!historical)return;
