@@ -61,15 +61,9 @@ def material_uses(store, entries):
     cache = {}
 
     def add(reference, scope, evidence):
-        try:
-            target = light.ref_record(store, reference)
-        except KeyError:
-            if evidence['kind']=='actual_input':
-                # A real old call may predate retained object envelopes. Its
-                # immutable submission still exposes that gap on the candidate;
-                # it is not a current preparation dependency or list owner.
-                return
-            raise
+        target = (light.historical_ref_record(store, reference) if evidence['kind']=='actual_input'
+                  else light.ref_record(store, reference))
+        if target is None:return
         if target.get('unavailable') or target['payload'].get('status')=='withdrawn':return
         if target['kind'] not in ('ASSET', 'REQUIREMENT'):
             return
@@ -84,13 +78,11 @@ def material_uses(store, entries):
         scope = need['payload'].get('scope')
         if not scope:
             continue
-        from .material_relations import active_inputs
         plan = need['payload'].get('generation', {})
-        active = {index for index,_ in active_inputs(store,plan,need['object_id'])[0]}
+        active = light.active_indices(store, need)
         for index,value in enumerate([] if need['payload'].get('status')=='withdrawn' else plan.get('inputs', [])):
             add(value['reference'], scope, {'kind': 'planned_input' if index in active else 'alternative', 'record': b.ref(need), 'input': value})
-        for row in store.db.execute("SELECT DISTINCT r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='call'", (need['object_id'],)):
-            call = light.record(store, revision_id=row[0])
+        for call in light.material_calls(store, need['object_id']):
             exact_need = call['payload'].get('generation_requirement')
             exact_scope = light.ref_record(store, exact_need)['payload'].get('scope') if exact_need else scope
             if exact_scope:
@@ -105,8 +97,7 @@ def material_uses(store, entries):
     for link in b.rows(store, 'MATERIAL_RELATION'):
         value=link['payload']
         add(value['upstream'],value['context'],{'kind':'material_relation','record':b.ref(link),'semantics':value['semantics']})
-    from .business_relations import material_bindings
-    for link, subject, scope in material_bindings(store):
+    for link, subject, scope in light.material_bindings(store):
         add(subject, scope, {'kind': 'business_relation', 'record': b.ref(link)})
     return entries
 
