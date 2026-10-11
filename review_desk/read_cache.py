@@ -215,19 +215,38 @@ def read_json(store, identity, reader):
     if not cache or not generation:
         return reader()
     key = cache.key(generation, ['projection', identity, layout_version(store)])
-    raw = cache.get(key)
-    if raw is not None:
-        try:
-            decoder = zlib.decompressobj()
-            expanded = decoder.decompress(raw, MAX_JSON+1)
-            if len(expanded) <= MAX_JSON and decoder.eof:
-                return json.loads(expanded)
-        except (ValueError, zlib.error):
-            pass
-    changes = store.db.total_changes
-    value = reader()
-    if store.db.total_changes == changes:
-        raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
-        if len(raw) <= MAX_JSON:
-            cache.put(key, zlib.compress(raw, 1))
-    return value
+    def cached():
+        raw = cache.get(key)
+        if raw is not None:
+            try:
+                decoder = zlib.decompressobj()
+                expanded = decoder.decompress(raw, MAX_JSON+1)
+                if len(expanded) <= MAX_JSON and decoder.eof:
+                    return True, json.loads(expanded)
+            except (ValueError, zlib.error):
+                pass
+        return False, None
+
+    # Different words/filters have different HTTP keys but share this exact
+    # projection. Coalesce their fills too, with the same bounded crash/failure
+    # recovery as the HTTP cache. Waiting readers remain cancellable.
+    from .production import check_read
+    deadline = time.monotonic()+15
+    while True:
+        check_read(store)
+        found, value = cached()
+        if found:
+            return value
+        with cache.lease(key) as owned:
+            found, value = cached()
+            if found:
+                return value
+            if owned or time.monotonic() >= deadline:
+                changes = store.db.total_changes
+                value = reader()
+                if store.db.total_changes == changes:
+                    raw = json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode()
+                    if len(raw) <= MAX_JSON:
+                        cache.put(key, zlib.compress(raw, 1))
+                return value
+        time.sleep(.005)
