@@ -1,5 +1,5 @@
 const test=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-function fixture(){const c={state:{},URL,URLSearchParams};vm.createContext(c);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
+function fixture(){const c={state:{},URL,URLSearchParams,AbortController};vm.createContext(c);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);return c}
 const shot=(id,revision)=>({object_id:id,id:revision,kind:'AV_SHOT'});
 const scene=(id,revision,shots)=>({object_id:id,id:revision,kind:'AV_SCENE',payload:{shots:shots.map(r=>({object_id:r.object_id,revision_id:r.id}))}});
 const params=(id,revision,where)=>new URLSearchParams({breakdown_object:id,...(revision?{breakdown_revision:revision}:{}),...(where?{breakdown_scene:where}:{})});

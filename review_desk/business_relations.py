@@ -164,7 +164,12 @@ def code(store, row, codes=None):
         return None
     if codes is None:
         from .business_codes import code as render, visible_codes
-        codes = {r['object_id']: render(r) for r in visible_codes(store)}
+        scope = getattr(store, '_production_reads', None)
+        codes = scope.get('relation_codes') if scope is not None else None
+        if codes is None:
+            codes = {r['object_id']: render(r) for r in visible_codes(store)}
+            if scope is not None:
+                scope['relation_codes'] = codes
     a, b = row['payload']['endpoints']
     connector = {'related': '-', 'forward': '->', 'reverse': '<-'}[row['payload']['direction']]
     return 'R-' + codes.get(a, a) + connector + codes.get(b, b)

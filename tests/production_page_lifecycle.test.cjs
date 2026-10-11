@@ -9,7 +9,7 @@ class Node {
   remove(){if(this.parent)this.parent.children=this.parent.children.filter(n=>n!==this);this.isConnected=false}
 }
 function fixture(){
-  const host=new Node(),c={state:{workspace:'settings.workspace',comments:[]},URL,URLSearchParams,
+  const host=new Node(),c={state:{workspace:'settings.workspace',comments:[]},URL,URLSearchParams,AbortController,
     location:{href:'http://fixture/?workspace=settings.workspace&production_tab=breakdown'},
     document:{querySelector:()=>null,querySelectorAll:()=>[]},$:()=>host,el:()=>new Node(),
     nodeText:(_tag,_class,text,parent)=>{const n=new Node();n.text=text;parent.append(n);return n},

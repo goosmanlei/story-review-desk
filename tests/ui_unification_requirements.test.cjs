@@ -24,7 +24,7 @@ class Element {
 }
 function fixture(){
   const host=new Element('main'),reader=new Element('article');reader.id='production-reader';host.append(reader);
-  const c={URL,URLSearchParams,CSS:{escape:v=>v},state:{workspace:'materials.workspace',productionRecords:[],comments:[]},location:{href:'http://fixture/?workspace=materials.workspace'},setTimeout,clearTimeout,getSelection:()=>({isCollapsed:true}),console};
+  const c={URL,URLSearchParams,AbortController,CSS:{escape:v=>v},state:{workspace:'materials.workspace',productionRecords:[],comments:[]},location:{href:'http://fixture/?workspace=materials.workspace'},setTimeout,clearTimeout,getSelection:()=>({isCollapsed:true}),console};
   c.el=(tag,classes)=>{const n=new Element(tag);n.className=classes||'';return n};
   c.nodeText=(tag,classes,text,parent)=>{const n=c.el(tag,classes);n.textContent=text;parent.append(n);return n};
   c.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};

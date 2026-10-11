@@ -199,7 +199,7 @@ def annotate(store, value, *, share_records=False):
                     return dict(annotated) if share_records else _clone_json_tree(annotated)
         result = {k:walk(i) for k,i in v.items()}
         from .production_current import enabled, annotate as annotate_current
-        if record_key and 'version' in v and not v.get('submission_only'):
+        if record_key and 'version' in v and not v.get('submission_only') and not v.get('deferred_detail'):
             result = annotate_current(store, result)
         if v.get('kind') == 'RELATION' and v.get('payload', {}).get('relation_type') == 'business':
             from .business_relations import code as relation_code
