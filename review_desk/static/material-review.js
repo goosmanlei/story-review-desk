@@ -201,8 +201,8 @@ function renderMaterialRequirements(parent,requirement){
   renderReviewHelp(info,requirement);
 }
 function renderSelectedGenerationRecipe(parent,requirement,item,round){
-  const working=(requirement||round?.plan)?.payload,box=el('section','material-plan');nodeText('h3',null,working?.media_type==='project'||['external-edit','reuse'].includes(working?.generation?.method)?'制作内容':'生成方案',box);parent.append(box);
   const call=item?.review_context?.call||(!item&&round?.definition_records?.call);
+  const working=(requirement||round?.plan)?.payload,box=el('section','material-plan');nodeText('h3',null,!call?.payload?.model&&(working?.media_type==='project'||['external-edit','reuse'].includes(working?.generation?.method))?'制作内容':'生成方案',box);parent.append(box);
   if(item&&!call){
     if(round?.current_content){nodeText('p','production-meta',item.review_context?.submission?.snapshot.source?.description||'此原件没有模型调用记录；未用当前方案补填。',box);return}
     nodeText('p','production-meta','此候选未保留完整的历史生成依据。',box);
