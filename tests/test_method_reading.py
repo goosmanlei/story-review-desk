@@ -32,6 +32,15 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(methods.read(self.store,self.method['object_id'])['version'],2)
         self.assertEqual(methods.prepare(self.store,{'work_type':'media-plan','run_id':'r','step_id':'s','target':'x','inputs':{'context':'source'}}),execution)
 
+    def test_explicit_existing_branch_can_choose_another_applicable_method(self):
+        other=methods.save(self.store,{'category':'skill','name':'alternative','expected_version':0,'payload':self.method['payload']})
+        p=copy.deepcopy(self.binding['payload']);p['rules'] += [{**methods.reference(other),'when':{'media_type':'image'}}]
+        b=methods.save(self.store,{'category':'binding','name':'media-plan','expected_version':1,'payload':p})
+        req=self.request();req['scopes']=[{**methods.reference(b),'index':1}]
+        result=methods.edit(self.store,req);self.assertFalse(result['unapplied'])
+        rules=methods.read(self.store,b['object_id'])['payload']['rules']
+        self.assertEqual(rules[0],p['rules'][0]);self.assertEqual(rules[1],{**methods.reference(result['saved']),'when':{'media_type':'image'}})
+
     def test_partial_conflict_and_retry_never_copy_method(self):
         p=copy.deepcopy(self.method['payload']);p['work_types']+=['audiovisual-design'];m=methods.save(self.store,{'category':'skill','name':'review','expected_version':1,'payload':p})
         b2=methods.save(self.store,{'category':'binding','name':'audiovisual-design','expected_version':0,'payload':{'work_type':'audiovisual-design','rules':[{**methods.reference(m),'when':{}}]}})
@@ -83,3 +92,42 @@ class ReadingTest(unittest.TestCase):
         self.assertEqual(methods.read(self.store,old['object_id'],old['revision_id']),old)
         with self.assertRaisesRegex(ValueError,'项目源'):
             methods.edit(self.store,{'object_id':new['object_id'],'base_revision':new['revision_id'],'changes':{'title':'Forged'},'scopes':[]})
+
+
+class ReadingHTTPTest(unittest.TestCase):
+    def setUp(self):
+        from review_desk.server import ReviewServer
+        self.tmp=tempfile.TemporaryDirectory();self.addCleanup(self.tmp.cleanup)
+        self.root=Path(self.tmp.name)
+        self.server=ReviewServer(('127.0.0.1',0),self.root,{'id':'reading','title':'Reading'})
+        self.addCleanup(self.server.server_close)
+        self.resource,self.method,self.binding=seed(self.server.store,'media-plan')
+
+    def get(self,path,status=200):
+        import urllib.request,urllib.error,threading,json
+        response={}
+        def read():
+            opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            try:r=opener.open('http://127.0.0.1:%s'%self.server.server_port+path,timeout=5)
+            except urllib.error.HTTPError as exc:r=exc
+            with r:response.update(status=r.status,body=r.read(),mime=r.headers.get_content_type())
+        t=threading.Thread(target=read);t.start();self.server.handle_request();t.join(6)
+        self.assertFalse(t.is_alive());self.assertEqual(response['status'],status,response)
+        return json.loads(response['body']) if response['mime']=='application/json' else response['body']
+
+    def test_exact_document_and_media_fail_closed_then_recover(self):
+        from urllib.parse import urlencode
+        method=methods.reference(self.method)
+        doc=self.get('/api/methods/document?'+urlencode({**method,'file':'SKILL.md'}))
+        self.assertEqual(doc['record']['payload'],self.method['payload'])
+        self.get('/api/methods/document?'+urlencode({**method,'file':'missing.md'}),400)
+        (self.root/'book').mkdir();(self.root/'media').mkdir()
+        original=b'exact-original';media=self.root/'media/image.png';media.write_bytes(original)
+        (self.root/'book/main.md').write_text('![original](../media/image.png)')
+        r=methods.sync_source(self.server.store,self.root,{'name':'source','title':'Source','expected_version':0,'sections':{'main':{'path':'book/main.md'}}})
+        url='/api/methods/media?'+urlencode({**methods.reference(r),'file':'references/main.md','href':'../media/image.png'})
+        self.assertEqual(self.get(url),original)
+        media.write_bytes(b'changed');self.get(url,400)
+        media.unlink();self.get(url,400)
+        media.write_bytes(original);self.assertEqual(self.get(url),original)
+        self.get('/api/methods/media?'+urlencode({**methods.reference(self.resource),'file':'references/main.md','href':'../media/image.png'}),400)
