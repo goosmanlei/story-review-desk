@@ -7,6 +7,16 @@ function fixture(url){
  c.switchWorkspace=()=>{};c.rememberWorkspacePosition=()=>{};c.rememberWorkspaceRoute=()=>{};
  return c;
 }
+test('a reopened story address returns to its explicit production reader and exact target',()=>{
+ const c=fixture('http://fixture/?workspace=story.sources&production_tab=entities&production_scope_episode=ep17&production_scope_revision=exact17&production_scope_scene=scene65&production_scope_shot=shot344&breakdown_episode=ep1&breakdown_object=shot010&production_object=lamp&material_target=lamp-candidate');
+ c.state.workspace='story.sources';let entered;c.switchWorkspace=id=>entered=id;c.navigateWorkspace('settings.workspace');
+ const p=new URL(c.location.href).searchParams;assert.equal(entered,'settings.workspace');assert.equal(p.get('production_tab'),'entities');assert.equal(p.get('production_scope_shot'),'shot344');assert.equal(p.get('material_target'),'lamp-candidate');
+});
+test('a reopened all-materials address retains filters and its existing working shot',()=>{
+ const c=fixture('http://fixture/?workspace=story.sources&production_tab=materials&breakdown_episode=ep1&breakdown_episode_revision=exact1&breakdown_object=shot010&material_search=M2544&material_media=image&material_page=2');
+ c.state.workspace='story.sources';let entered;c.switchWorkspace=id=>entered=id;c.navigateWorkspace('settings.workspace');
+ const p=new URL(c.location.href).searchParams;assert.equal(entered,'materials.workspace');assert.equal(p.get('production_tab'),'materials');assert.equal(p.get('material_page'),'2');assert.equal(p.get('material_media'),'image');assert.equal(p.get('material_search'),'M2544');assert.equal(p.get('breakdown_object'),'shot010');
+});
 test('both managers share exact scope and reject guessing a legacy source scene',()=>{
  const c=fixture('http://fixture/?entity_episode=story&entity_scene=s1'),memory={page:2,filters:{search:'M001'}};
  c.managementScopeMemory(memory,new URL(c.location.href).searchParams,'entity_');assert.equal(memory.legacyScope,true);assert.equal(memory.filters.episode,'');assert.equal(memory.filters.search,'M001');
