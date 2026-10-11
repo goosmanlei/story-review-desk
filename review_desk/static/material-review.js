@@ -150,7 +150,6 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
     const subtitle=(row.kind==='REQUIREMENT'?'参考方案 · 尚未选定原件':actual?'实际原件':'已指定原件')+range;
     const button=materialSmallCard(line,{...row,object_id:row.object_id,title:row.payload.title,media_type:row.payload.media_type,preview:component?.mime?.startsWith('image/')?component:null,current_content:true,candidate_count:row.candidate_number?1:0},trigger=>openMaterialReference(item.ref,trigger),false,{subtitle});
     button.dataset.reviewDialogTrigger='';
-    bindRelationSummary(button,need?.review_shot_slots?.find(slot=>slot.index===item.index)?.relation_context);
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
   }
 }
@@ -443,16 +442,15 @@ function renderMaterialCard(parent,model,options={}){
     const working=model.round?.current_content&&requirement;
     const selected=options.selectedCandidateId||(working?'current':null),chosen=selected==='current'?null:materialCandidateChoice(items,selected);
     const choices=items.map((item,index)=>({id:item.record.id,label:'候选'+(item.candidate_number||item.record.candidate_number||index+1)}));
-    const nav=el('nav','material-content-navigation');nav.setAttribute('aria-label','方案与历史候选');box.append(nav);
+    const nav=el('nav','material-content-navigation');nav.setAttribute('aria-label','当前方案与候选');box.append(nav);
     if(working){const button=productionButton(nav,'当前方案',()=>options.selectCandidate('current'));button.setAttribute('aria-pressed',String(!chosen))}
-    const history=el('section','material-candidate-navigation');nav.append(history);nodeText('span',null,'历史候选',history);
-    if(choices.length)reviewChoiceButtons(history,'历史候选',choices,chosen?.record.id||'',options.selectCandidate);
-    else nodeText('span','production-meta','尚无候选',history);
+    const history=el('div','material-candidate-navigation');nav.append(history);nodeText('span',null,'候选',history);
+    if(choices.length)reviewChoiceButtons(history,'候选',choices,chosen?.record.id||'',options.selectCandidate);
     items=chosen?[chosen]:[];
   }
   if(options.selectedComponents)items=items.map(item=>{const component=item.components?.find(c=>c.id===options.selectedComponents[item.record.id]);return component?{...item,component}:item});
   if(need?.payload.status==='withdrawn')nodeText('p','production-meta','此素材需求已撤回',box);
-  else if(!items.length)renderMaterialPlaceholder(box,need||model.identity,!!(model.round?.current_content&&model.candidates.length));
+  else if(!items.length&&!(model.round?.current_content&&model.candidates.length))renderMaterialPlaceholder(box,need||model.identity);
   for(const item of items){
     const h=el('div','entity-review-local-heading');if(need||items.length>1)nodeText('h4',null,reviewPositionText(item.record.payload.title),h);
     if(!model.round)options.assetVersion?.(h,item);box.append(h);

@@ -80,8 +80,10 @@ def shot_workspace(store, object_id, revision_id=None):
     needs = direct_materials(store, row)
     versions = {need['object_id']: material_plans.snapshot(store, need['object_id']) for need in needs}
     contexts, targets = {}, {r['id']: r for r in [row, *needs]}
+    from .shot_references import enrich_detail
     for need in needs:
         need['review_input_records'] = [p.ref_record(store, item['reference']) for item in need['payload'].get('generation', {}).get('inputs', [])]
+        enrich_detail(store, {'record':need,'material_versions':{need['object_id']:versions[need['object_id']]}})
     for rounds in versions.values():
         for plan in rounds:
             for member in plan['members']:

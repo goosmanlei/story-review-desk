@@ -24,6 +24,22 @@ class UiProjectionTest(unittest.TestCase):
     def summary(self):
         return ui.entity_summaries(self.store, [p.record(self.store, 'songbook')], ui.material_entries(self.store))
 
+    def test_inline_shot_recipe_keeps_prompt_input_relation_context(self):
+        from audiovisual_fixture import composition
+        from review_desk.entity_contract import shot_workspace
+        self.setup_plans();composition(self)
+        need=self.need('wet');need['object_id']='shot-reference';need['payload']['scope']=self.ref('shot')
+        need['payload']['specification']={}
+        need['payload']['generation']=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        need['payload']['generation']['inputs']=[{'reference':self.ref('need-full-overall'),'use':'准确参考'}]
+        self.put(need)
+        context={'summary':'仅用于构图','record':{'id':'relation-r1'}}
+        with patch('review_desk.business_relations.input_context',return_value=context):
+            data=shot_workspace(self.store,'shot')
+        for plan in (data['requirements'][0],data['material_versions']['shot-reference'][0]['plan']):
+            self.assertEqual(plan['review_shot_slots'][0]['relation_context'],context)
+            self.assertEqual(plan['review_input_records'][0]['id'],self.ref('need-full-overall')['revision_id'])
+
     def test_candidates_and_metadata_revisions_do_not_inflate_material_counts(self):
         self.setup_plans()
         baseline = self.summary()['entity_material_counts']['songbook']
