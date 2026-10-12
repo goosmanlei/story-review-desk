@@ -22,10 +22,16 @@ function renderNovelIndex(){
     button.onclick=()=>{if(!active)chooseSource(source.id)};
   }
   versions.scrollLeft=scroll;
+  const selected=versions.querySelector('.active');
+  if(selected){
+    const item=selected.getBoundingClientRect(),edge=versions.getBoundingClientRect();
+    if(item.left<edge.left)versions.scrollLeft+=item.left-edge.left;
+    else if(item.right>edge.right)versions.scrollLeft+=item.right-edge.right;
+  }
   const chapters=sourceChapters(state.current);
   if(!chapters.some(chapter=>chapter.id===state.sourceChapter))state.sourceChapter=chapters[0]?.id||null;
   for(const chapter of chapters){
-    const button=nodeText('button','source-chapter-button screenplay-scene-button'+(chapter.id===state.sourceChapter?' active':''),'',nav);
+    const button=nodeText('button','source-chapter-button screenplay-scene-button source-button'+(chapter.id===state.sourceChapter?' active':''),'',nav);
     button.type='button';button.dataset.sourceId=state.current.id;button.dataset.blockId=chapter.id;
     button.setAttribute('aria-current',chapter.id===state.sourceChapter?'location':'false');
     button.setAttribute('aria-controls','source-view');nodeText('strong',null,chapter.title,button);
