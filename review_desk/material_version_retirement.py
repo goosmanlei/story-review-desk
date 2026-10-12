@@ -38,6 +38,10 @@ def validate_absent(store):
         raise ValueError('retired material draft identities are present')
     if store.db.execute("SELECT 1 FROM business_codes WHERE prefix='MV' LIMIT 1").fetchone():
         raise ValueError('retired material numbering is present')
+    if 'read_generations' in names:
+        cached = {r[0] for r in store.db.execute('SELECT name FROM read_generations')}
+        if cached & set(RETIRED_TABLES):
+            raise ValueError('retired material cache identities are present')
 
 
 def apply(store, *, expected=None, fault=None):
@@ -66,6 +70,8 @@ def apply(store, *, expected=None, fault=None):
         for table in RETIRED_TABLES:
             store.db.execute('DROP VIEW IF EXISTS temp.'+table)
             store.db.execute('DROP TABLE IF EXISTS main.'+table)
+        if store.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='read_generations'").fetchone():
+            store.db.executemany('DELETE FROM read_generations WHERE name=?', ((name,) for name in RETIRED_TABLES))
         content = collect_content(store)
         if fault == 'before-commit':
             raise RuntimeError('injected cleanup interruption')

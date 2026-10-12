@@ -257,8 +257,8 @@ function sourceChapters(source){
 }
 
 function renderSources(preserveScroll=true){
+  if(state.workspace==='story.novel')return renderNovelIndex(preserveScroll);
   const nav=$('#source-list'),scrollTop=preserveScroll?nav.scrollTop:0;nav.replaceChildren();
-  if(state.workspace==='story.novel')return renderNovelIndex();
   const versions=$('#novel-index');if(versions)versions.hidden=true;
   const sources=state.sources.filter(source=>source.group!=='story-refinements');
   const addSource=(source,parent)=>{

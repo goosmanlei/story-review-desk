@@ -33,16 +33,16 @@ button { border-radius: var(--desk-radius); }
 :where(.workspace-content,.review-dialog,.comment-panel) :is(button.secondary,.production-toolbar button,.review-reference-button,.review-choice-buttons button,.card-actions button,.editor-actions button,.management-pagination button,.review-pagination button) {
   padding: 8px 12px; border: 1px solid var(--desk-line); border-radius: var(--desk-radius); background: var(--desk-surface); color: var(--desk-ink); font: inherit; font-size: 13px; line-height: 1.5;
 }
-.workspace-content :is(#source-list,#structure-status,#structure-index,#screenplay-index,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button,
+.workspace-content :is(#source-list,#structure-status,#structure-index,.screenplay-versions,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button,
 #source-list .source-group-toggle {
   border: 1px solid var(--desk-line); border-radius: var(--desk-radius); background: var(--desk-surface); color: var(--desk-ink); box-shadow: none; line-height: 1.5;
 }
 #source-list .source-group { border: 0; }
 #source-list .source-group-toggle { display: block; text-align: left; padding: 12px; }
 #source-list .source-group-items { border-left-color: var(--desk-line); }
-.workspace-content :is(#source-list,#structure-status,#structure-index,#screenplay-index,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button:hover,
+.workspace-content :is(#source-list,#structure-status,#structure-index,.screenplay-versions,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button:hover,
 #source-list .source-group-toggle:hover { background: var(--desk-hover); border-color: var(--desk-selection-line); }
-.workspace-content :is(#source-list,#structure-status,#structure-index,#screenplay-index,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button.active,
+.workspace-content :is(#source-list,#structure-status,#structure-index,.screenplay-versions,#screenplay-episodes,#screenplay-scene-index,.breakdown-episode-tabs,.breakdown-scene-list) .source-button.active,
 :where(.workspace-content,.review-dialog) .review-choice-buttons button[aria-pressed=true] {
   background: var(--desk-selected); border-color: var(--desk-selection-line); color: var(--desk-ink); box-shadow: inset 3px 0 var(--desk-selection-line); font-weight: 650;
 }
@@ -183,11 +183,10 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-flow { position:sticky; top:112px; max-height:calc(100vh - 132px); overflow:auto; padding:0 16px 12px 0; scrollbar-width:thin; }
 .skill-flow h2 { font-size:17px; margin:0 0 18px; }
 .novel-workspace #novel-index { margin-bottom:16px; }
-.novel-workspace .source-chapter-button { display:block; border-radius:0; }
+.novel-workspace .source-chapter-button { display:block; }
 .novel-workspace .source-chapter-button strong { display:block; }
 .novel-workspace .source-chapter-button small { display:block; margin-top:8px; }
-.novel-workspace #source-view .document { max-width:none; padding:24px clamp(18px,3vw,48px) 45px; }
-.novel-workspace #source-view .source-text { max-width:82ch; font-size:17px; line-height:1.9; }
+.novel-workspace #source-view .source-text { max-width:82ch; }
 .skill-flow-main,.skill-flow-branches { list-style:none; margin:0; padding:0; }
 .skill-flow-stage { position:relative; text-align:center; padding:0 0 27px; }
 .skill-flow-main .skill-flow-stage:not(:last-child)::after { content:'↓'; position:absolute; bottom:3px; left:calc(50% - 5px); color:#94a291; font-size:17px; }
