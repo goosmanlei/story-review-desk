@@ -157,8 +157,11 @@ function selectProductionTab(tab){
   const workspace=tab==='materials'?'materials.workspace':'settings.workspace';
   const routeKey=workspaceGroup(workspace)+':'+tab;
   const saved=workspaceSubRoutes.get(routeKey+':'+productionScopeKey(source.searchParams))||workspaceSubRoutes.get(routeKey);
-  const url=new URL(saved||location.href),sameScope=!!saved&&productionWorkingScopeKey(url.searchParams)===productionWorkingScopeKey(source.searchParams);
-  const allMaterials=tab==='materials'&&!!saved&&!url.searchParams.get('production_scope_episode')&&!url.searchParams.get('production_scope_scene');
+  const url=new URL(saved||location.href),sameScope=!!saved&&productionWorkingScopeKey(url.searchParams)===productionWorkingScopeKey(source.searchParams)&&!(tab==='materials'&&url.searchParams.get('production_scope_episode'));
+  // Ordinary tab navigation starts at the full material library. Explicit
+  // links, reloads and browser history bypass this entry and keep their scope.
+  const allMaterials=tab==='materials';
+  if(allMaterials&&(url.searchParams.get('production_scope_episode')||url.searchParams.get('production_scope_scene')||url.searchParams.get('production_scope_shot')))url.searchParams.set('material_page','1');
   for(const key of ['production_scope_episode','production_scope_revision','production_scope_scene','production_scope_shot']){
     const value=source.searchParams.get(key);if(value&&!allMaterials)url.searchParams.set(key,value);else url.searchParams.delete(key);
   }
@@ -240,7 +243,7 @@ function workspacePageDescriptor(workspace,params){
   return ({
     breakdown:['STORY → PRODUCTION','视听制作','按视听集、场、镜阅读设计，审阅各项素材方案与准确候选。'],
     entities:['ENTITIES & STATES','实体管理','按集场镜查看实体关系，打开实体与镜头审阅其素材。'],
-    materials:['MATERIAL LIBRARY','素材管理','按素材分类浏览素材，筛选集场与结果，打开当前方案与真实候选。']
+    materials:['MATERIAL LIBRARY','素材管理','按素材分类浏览素材，筛选集场镜与结果，打开当前方案与真实候选。']
   })[tab]||['STORY REVIEW DESK','故事审阅台','选择页面，阅读并审阅当前故事实例。'];
 }
 function renderPageHeading(){

@@ -148,7 +148,7 @@ def _material_av_catalog(store, episode, revision, compact):
     # Compact responses never expose input bodies or entity associations here.
     # Keep every exact location and its record for scope selection, plus all
     # fields of the actual card; details still resolve the full authority.
-    keys = {'scope','source','source_scene_name','source_version','episode','scene','kind','relation','title'}
+    keys = {'scope','source','source_scene_name','source_version','episode','scene','shot','kind','relation','title'}
     return {'management_episodes':value['management_episodes'], 'entries':[
         {**{k:v for k,v in item.items() if k not in ('entity_ids','material_identity','locations')},
          'locations':[{**{k:v for k,v in loc.items() if k in keys},
@@ -212,8 +212,10 @@ def _material_filter_facets(values, chosen, search, categorized=False):
     return facets, result
 
 
-def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False):
+def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False, shot=None):
     if scope and scope != 'av':raise ValueError('unknown production scope')
+    if shot and (scope != 'av' or not episode or not scene):
+        raise ValueError('镜头筛选需要准确所属视听集和视听场，请重新选择制作范围')
     categorized = categories.enabled(store)
     # Previous URLs used project for the physical container of a text layer.
     # Convert only that explicit old filter; never classify the records by it.
@@ -226,13 +228,24 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
         from .read_cache import read_json
         # Scene, word and media/status only filter this exact catalog. Reuse
         # its locations across queries; every committed write changes the key.
-        projected=read_json(store, ['material-av-catalog-v4-category', episode, scope_revision, compact],
+        projected=read_json(store, ['material-av-catalog-v5-shot', episode, scope_revision, compact],
                             lambda: _material_av_catalog(store, episode, scope_revision, compact))
         if scene and not episode:
             raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
         if scene and not any(e['object_id'] == episode and any(s['id'] == scene for s in e['scenes']) for e in projected['management_episodes']):
             raise ValueError('视听场不属于本版视听集，请重新选择制作范围')
         values=projected['entries'];catalog=projected['management_episodes']
+        if shot:
+            selected_scene = next(sc for ep in catalog if ep['object_id'] == episode
+                                  for sc in ep['scenes'] if sc['id'] == scene)
+            if not any(row['object_id'] == shot for row in selected_scene['shots']):
+                raise ValueError('镜头不属于本版视听场，请重新选择制作范围')
+            # Keep only concrete uses in this exact composition. Shared inputs
+            # retain their identity; unrelated uses cannot widen counts/groups.
+            values = [{**item, 'locations': locations} for item in values
+                      if (locations := [loc for loc in item['locations']
+                                        if loc.get('episode') == episode
+                                        and loc.get('scene') == scene and loc.get('shot') == shot])]
     else:
         values=material_entries(store);catalog=management_episodes(store)
     chosen={'episode':episode,'scene':scene,'media':media,'status':status}

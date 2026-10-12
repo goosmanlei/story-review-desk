@@ -91,3 +91,28 @@ test('returning to the all-materials range in the same working shot retains its 
  c.selectProductionTab('materials');const p=new URL(c.location.href).searchParams;
  assert.equal(p.get('material_target'),'candidate');assert.equal(p.get('material_page'),'2');assert.equal(p.get('production_scope_episode'),null);
 });
+
+test('ordinary material navigation drops inherited scope even on first entry or a saved scoped page',()=>{
+ for(const saved of [false,true]){
+  const c=fixture('http://fixture/?workspace=settings.workspace&production_tab=entities&production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=shot');
+  if(saved)vm.runInContext("workspaceSubRoutes.set('settings.workspace:materials','http://fixture/?workspace=materials.workspace&production_scope_episode=old&production_scope_scene=old-scene&material_media=image&material_page=3')",c);
+  c.selectProductionTab('materials');const p=new URL(c.location.href).searchParams;
+  for(const k of ['episode','revision','scene','shot'])assert.equal(p.has('production_scope_'+k),false);
+  assert.equal(p.get('breakdown_object'),'shot');
+  if(saved){assert.equal(p.get('material_page'),'1');assert.equal(p.get('material_media'),'image')}
+ }
+});
+test('material scene controls show only their shots and clear them on parent changes',()=>{
+ const c=fixture('http://fixture/'),filters={episode:'ep',scene:'scene',shot:'first',scope_revision:'exact'},catalog={episodes:[{object_id:'ep',id:'exact',kind:'AV_EPISODE',scenes:[{id:'scene',kind:'AV_SCENE',title:'场',shots:[{object_id:'first',kind:'AV_SHOT',title:'镜'}]}]}]};
+ c.managementScopeFilters({},filters,catalog,[],()=>{});
+ assert.deepEqual(Array.from(c.groups[2].options,x=>x[0]),['','first']);
+ c.groups[1].change('');assert.equal(filters.shot,'');assert.equal(filters.scene,'');
+ c.groups=[];c.managementScopeFilters({},filters,catalog,[],()=>{});assert.equal(c.groups.length,2);
+ filters.scene='scene';filters.shot='first';c.groups[0].change('');assert.equal(filters.scene,'');assert.equal(filters.shot,'');
+});
+test('material refresh memory and routing retain an explicit shot and clear it for all scenes',()=>{
+ const c=fixture('http://fixture/?production_scope_episode=ep&production_scope_revision=exact&production_scope_scene=scene&production_scope_shot=shot'),memory={filters:{}};
+ c.managementScopeMemory(memory,new URL(c.location.href).searchParams,'material_');assert.equal(memory.filters.shot,'shot');
+ c.managementScopeRoute(memory.filters);assert.equal(new URL(c.location.href).searchParams.get('production_scope_shot'),'shot');
+ Object.assign(memory.filters,{scene:'',shot:''});c.managementScopeRoute(memory.filters);assert.equal(new URL(c.location.href).searchParams.has('production_scope_shot'),false);
+});
