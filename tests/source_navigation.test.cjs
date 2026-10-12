@@ -25,10 +25,10 @@ const sources=[
   {id:'refinement-b',title:'故事精修二',group:'story-refinements',target_revision_id:'source-b-r2',blocks:[{id:'chapter-1',text:'第一章 另一稿'},{id:'chapter-10',text:'第十章 另一结尾'}]},
   {id:'plain',title:'资料',target_revision_id:'plain-r1',blocks:[{id:'chapter-10',text:'普通段落同名 ID'}]}
 ];
-const base='http://isolated/?workspace=story.sources&source=refinement-a';
+const base='http://isolated/?workspace=story.novel&source=refinement-a';
 async function fixture(href=base,{internal=true,settle=true,historyState=null,navigation=false}={}){
   const root=new Element(),nodes=new Map(),storage=new Map(),listeners={},frames=new Map(),writes=[],scrolls=[],requests=[];let frame=0,pageY=0;
-  for(const id of ['source-list','source-view','selection-action','comment-body','open-count','comments-toggle','toast','instance-title','story-creation-shell','story-workspace','screenplay-workspace','structure-workspace','configuration-view','approach-view','placeholder-view','production-view','open-story-sources','open-story-structure','open-story-script','view-title','view-symbol','brand-home','screenplay-comments','comments-close']){const n=new Element();n.id=id;root.append(n);nodes.set('#'+id,n)}
+  for(const id of ['novel-index','source-list','source-view','selection-action','comment-body','open-count','comments-toggle','toast','instance-title','story-creation-shell','story-workspace','screenplay-workspace','structure-workspace','configuration-view','approach-view','placeholder-view','production-view','open-story-sources','open-story-novel','open-story-structure','open-story-script','view-title','view-symbol','brand-home','screenplay-comments','comments-close']){const n=new Element();n.id=id;root.append(n);nodes.set('#'+id,n)}
   const topbar=new Element();topbar.className='workspace-topbar';topbar.rect=()=>({top:0,bottom:70});root.append(topbar);
   const reader=nodes.get('#source-view');reader.rect=()=>({top:200-pageY,bottom:800-pageY});
   reader.scrollTo=value=>{reader.scrollTop=value.top;scrolls.push({container:'reader',top:value.top,visible:!nodes.get('#story-workspace').hidden})};
@@ -39,9 +39,9 @@ async function fixture(href=base,{internal=true,settle=true,historyState=null,na
     window:{innerHeight:800,addEventListener:(name,fn)=>listeners[name]=fn,scrollBy:value=>{pageY+=value.top;scrolls.push({container:'window',top:pageY,visible:!nodes.get('#story-workspace').hidden})},scrollTo(_x,y){pageY=y}},
     getSelection:()=>({removeAllRanges(){}}),getComputedStyle:()=>({overflowY:internal?'auto':'visible'}),
     localStorage:{getItem:k=>storage.get(k)??null,setItem:(k,v)=>storage.set(k,String(v)),removeItem:k=>storage.delete(k)}};
-  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);
+  vm.createContext(context);require('./load_review_helpers.cjs')(context);vm.runInContext(app,context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/novel.js'),'utf8'),context);
   if(navigation){vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/navigation.js'),'utf8'),context);context.renderWorkspaceTabs=()=>{}}
-  const framework={workspaces:['story.sources','story.outline','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
+  const framework={workspaces:['story.sources','story.novel','story.outline','story.script','production.approach','project.configuration'].map(id=>({id,implemented:true}))};
   context.fetch=async(url,options)=>{requests.push({url,...options});return {ok:true,json:async()=>({'/api/business-codes':{objects:[],types:[]},'/api/instance':{title:'Isolated'},'/api/sources?with_revision=1':JSON.parse(JSON.stringify(sources)),'/api/comments':[], '/api/framework':framework,'/api/configurations':{},'/api/configurations?summary=1':{},'/api/story-structure':{current_revision:null,revisions:[]},'/api/screenplays':{versions:[]},'/api/screenplays?metadata=1':{versions:[]},'/api/sources?with_revision=1&metadata=1':sources.map(({id,title,target_revision_id})=>({id,title,target_revision_id})),'/api/screenplay-summaries':{episodes:[]}}[url])}};
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;globalThis.saves=commentSaves;
     applyFavicon=()=>{};renderWorkspaceNav=()=>{};closePanel=()=>{};openPanel=()=>{};hideSelectionAction=()=>{};watchTextSelection=()=>{};
@@ -49,7 +49,7 @@ async function fixture(href=base,{internal=true,settle=true,historyState=null,na
     renderApproach=()=>{};renderConfigurations=()=>{};renderStructureReader=()=>{};
     restoreScriptDraft=()=>{};renderScriptIndex=()=>{};renderScriptReader=()=>{};renderScriptCommentCounts=()=>{};scriptEpisode=()=>null;`,context);
   context.renderDocument=()=>{reader.replaceChildren();const text=new Element('section');text.id='source-text';reader.append(text);
-    for(const [index,block] of (context.state.current?.blocks||[]).entries()){const n=new Element('p');n.id='block-'+block.id;n.dataset.blockId=block.id;n.rect=()=>({top:200+500+index*5000-pageY-(internal?reader.scrollTop:0)});text.append(n)}
+    for(const [index,block] of (context.state.workspace==='story.novel'?context.novelChapterBlocks(context.state.current,context.sourceChapters(context.state.current).find(chapter=>chapter.id===context.state.sourceChapter)):context.state.current?.blocks||[]).entries()){const n=new Element('p');n.id='block-'+block.id;n.dataset.blockId=block.id;n.rect=()=>({top:200+500+index*5000-pageY-(internal?reader.scrollTop:0)});text.append(n)}
     context.scheduleSourceChapter()};
   const flush=()=>{let count=0;while(frames.size){assert.ok(++count<10,'frames settle');const pending=[...frames.values()];frames.clear();for(const fn of pending)fn()}};
   await context.init();assert.doesNotMatch(reader.textContent||'',/^加载失败/);if(settle)flush();
@@ -61,21 +61,21 @@ async function fixture(href=base,{internal=true,settle=true,historyState=null,na
 
 test('real chapter menu writes exact source and refresh restores after the workspace becomes visible',async()=>{
   const f=await fixture();f.chapter('refinement-a','chapter-10').onclick();f.flush();
-  assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-10');assert.equal(f.writes.length,1);assert.equal(f.writes[0].type,'push');assert.equal(f.reader.scrollTop,5488);
+  assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-10');assert.equal(f.writes.length,1);assert.equal(f.writes[0].type,'push');assert.equal(f.reader.scrollTop,488);
   const reload=await fixture(f.context.location.href,{settle:false});assert.equal(reload.scrolls.length,0);reload.flush();
-  assert.equal(reload.reader.scrollTop,5488);assert.ok(reload.scrolls.every(x=>x.visible));assert.equal(reload.context.state.sourceChapter,'chapter-10');assert.equal(reload.writes.length,0);
+  assert.equal(reload.reader.scrollTop,488);assert.ok(reload.scrolls.every(x=>x.visible));assert.equal(reload.context.state.sourceChapter,'chapter-10');assert.equal(reload.writes.length,0);
   reload.chapter('refinement-a','chapter-10').onclick();reload.flush();assert.equal(reload.writes.length,0);
 });
 
 test('same source back/forward restores explicit chapters and the route without a chapter returns to the document start',async()=>{
   const f=await fixture();f.chapter('refinement-a','chapter-1').onclick();const one=f.context.location.href;f.chapter('refinement-a','chapter-10').onclick();const ten=f.context.location.href;
-  f.pop(one);assert.equal(f.reader.scrollTop,488);f.pop(ten);assert.equal(f.reader.scrollTop,5488);f.pop(base);assert.equal(f.reader.scrollTop,0);assert.equal(f.writes.length,2);
+  f.pop(one);assert.equal(f.reader.scrollTop,488);f.pop(ten);assert.equal(f.reader.scrollTop,488);f.pop(base);assert.equal(f.reader.scrollTop,0);assert.equal(f.writes.filter(x=>x.type==='push').length,2);
 });
 
 test('narrow layout uses window and still restores the selected chapter',async()=>{
   const f=await fixture(base,{internal:false});f.chapter('refinement-a','chapter-10').onclick();f.flush();
-  assert.equal(f.scrolls.at(-1).container,'window');assert.equal(f.scrolls.at(-1).top,5618);assert.equal(f.reader.scrollTop,0);
-  const reload=await fixture(f.context.location.href,{internal:false});assert.equal(reload.scrolls.at(-1).container,'window');assert.equal(reload.scrolls.at(-1).top,5618);
+  assert.equal(f.scrolls.at(-1).container,'window');assert.equal(f.scrolls.at(-1).top,618);assert.equal(f.reader.scrollTop,0);
+  const reload=await fixture(f.context.location.href,{internal:false});assert.equal(reload.scrolls.at(-1).container,'window');assert.equal(reload.scrolls.at(-1).top,618);
 });
 
 test('ordinary source selection clears chapter; cross-source chapter selection creates one complete history item',async()=>{
@@ -87,7 +87,7 @@ test('ordinary source selection clears chapter; cross-source chapter selection c
 
 test('invalid source or chapter cannot borrow an unrelated source block or a nonchapter block',async()=>{
   for(const query of ['source=unknown&source_chapter=chapter-10','source=refinement-a&source_chapter=notes','source=refinement-a&source_chapter=missing','source=plain&source_chapter=chapter-10','source_chapter=chapter-10']){
-    const f=await fixture('http://isolated/?workspace=story.sources&'+query);assert.equal(f.scrolls.length,0,query);assert.equal(f.writes.length,0);
+    const f=await fixture('http://isolated/?workspace=story.novel&'+query);assert.equal(f.scrolls.length,0,query);assert.equal(f.writes.length,0);
     const current=f.context.state.current;f.context.jumpSourceChapter('missing','chapter-10');f.context.jumpSourceChapter('plain','chapter-10');f.context.jumpSourceChapter('refinement-a','notes');assert.equal(f.context.state.current,current);assert.equal(f.writes.length,0);
   }
   const f=await fixture(base+'&source_chapter=chapter-10');f.pop(base+'&source_chapter=notes');assert.equal(f.reader.scrollTop,0);
@@ -117,22 +117,22 @@ test('pending route scroll yields to actual comment location, editor changes and
 
 test('hidden source does not scroll; cross-workspace history applies only after it is visible; manual return keeps the live position',async()=>{
   const hidden='http://isolated/?workspace=project.configuration&source=refinement-a&source_chapter=chapter-10',f=await fixture(hidden);assert.equal(f.scrolls.length,0);
-  await f.popAsync(base+'&source_chapter=chapter-10');assert.equal(f.reader.scrollTop,5488);assert.ok(f.scrolls.every(x=>x.visible));
-  f.reader.scrollTop=6000;f.context.switchWorkspace('project.configuration');f.context.switchWorkspace('story.sources');f.flush();assert.equal(f.reader.scrollTop,6000);
+  await f.popAsync(base+'&source_chapter=chapter-10');assert.equal(f.reader.scrollTop,488);assert.ok(f.scrolls.every(x=>x.visible));
+  f.reader.scrollTop=6000;f.context.switchWorkspace('project.configuration');f.context.switchWorkspace('story.novel');f.flush();assert.equal(f.reader.scrollTop,6000);
   f.pop(base+'&source_chapter=chapter-1',false);f.context.switchWorkspace('project.configuration');const before=f.scrolls.length;f.flush();assert.equal(f.scrolls.length,before);
 });
 
-test('passive highlighting preserves URL; an entry without a snapshot uses its accurate chapter',async()=>{
-  const f=await fixture(base+'&source_chapter=chapter-1');f.reader.scrollTop=5600;f.context.syncSourceChapter();assert.equal(f.context.state.sourceChapter,'chapter-10');assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-1');
+test('novel scrolling stays in the selected chapter; an entry without a snapshot uses its accurate chapter',async()=>{
+  const f=await fixture(base+'&source_chapter=chapter-1');f.reader.scrollTop=5600;f.context.syncSourceChapter();assert.equal(f.context.state.sourceChapter,'chapter-1');assert.equal(new URL(f.context.location.href).searchParams.get('source_chapter'),'chapter-1');
   f.pop(base+'&source_chapter=chapter-1&structure_revision=unrelated');assert.equal(f.reader.scrollTop,488);assert.equal(f.writes.length,0);
 });
 
 test('nonstory entry loads no story text; entering the reader restores exact chapter and loads only once',async()=>{
   const f=await fixture('http://isolated/?workspace=project.configuration&source=refinement-b&source_chapter=chapter-10');
   assert.equal(f.requests.some(r=>r.url==='/api/sources?with_revision=1'),false);
-  await f.context.switchWorkspace('story.sources');f.flush();
-  assert.equal(f.context.state.current.id,'refinement-b');assert.equal(f.reader.scrollTop,5488);
-  f.context.switchWorkspace('project.configuration');await f.context.switchWorkspace('story.sources');
+  await f.context.switchWorkspace('story.novel');f.flush();
+  assert.equal(f.context.state.current.id,'refinement-b');assert.equal(f.reader.scrollTop,488);
+  f.context.switchWorkspace('project.configuration');await f.context.switchWorkspace('story.novel');
   assert.equal(f.requests.filter(r=>r.url==='/api/sources?with_revision=1').length,1);
 });
 
@@ -140,26 +140,26 @@ test('late first story load cannot replace a newer workspace and parallel entrie
   const f=await fixture('http://isolated/?workspace=project.configuration');
   const fetch=f.context.fetch;let release;const pending=new Promise(resolve=>release=resolve);
   f.context.fetch=async(...args)=>{if(args[0].startsWith('/api/sources'))await pending;return fetch(...args)};
-  const first=f.context.switchWorkspace('story.sources'),second=f.context.switchWorkspace('story.outline');
+  const first=f.context.switchWorkspace('story.novel'),second=f.context.switchWorkspace('story.outline');
   f.context.switchWorkspace('project.configuration');release();await Promise.all([first,second]);f.flush();
   assert.equal(f.context.state.workspace,'project.configuration');assert.equal(f.scrolls.length,0);
   assert.equal(f.requests.filter(r=>r.url==='/api/sources?with_revision=1').length,1);
-  await f.context.switchWorkspace('story.sources');assert.equal(f.context.state.workspace,'story.sources');
+  await f.context.switchWorkspace('story.novel');assert.equal(f.context.state.workspace,'story.novel');
 });
 
 test('failed first story read remains retryable without marking partial data ready',async()=>{
   const f=await fixture('http://isolated/?workspace=project.configuration'),fetch=f.context.fetch;
   f.context.fetch=async(...args)=>{if(args[0]==='/api/story-structure')throw Error('temporary read failure');return fetch(...args)};
-  await f.context.switchWorkspace('story.sources');assert.equal(f.context.state.workspace,'project.configuration');
-  f.context.fetch=fetch;await f.context.switchWorkspace('story.sources');f.flush();
-  assert.equal(f.context.state.workspace,'story.sources');assert.equal(f.context.state.current.id,'plain');
+  await f.context.switchWorkspace('story.novel');assert.equal(f.context.state.workspace,'project.configuration');
+  f.context.fetch=fetch;await f.context.switchWorkspace('story.novel');f.flush();
+  assert.equal(f.context.state.workspace,'story.novel');assert.equal(f.context.state.current.id,'refinement-b');
 });
 
 // Controlled frame/response ordering supplements real browser history acceptance.
 test('identical source URLs restore each entry snapshot, including long-block interior and reload',async()=>{
   const f=await fixture(base+'&source_chapter=chapter-1'),c=f.context,href=c.location.href;
   f.reader.scrollTop=1400;c.rememberSourceReadingPosition();const a=JSON.parse(JSON.stringify(c.history.state));
-  c.switchWorkspace('story.outline');c.switchWorkspace('story.sources');f.flush();
+  c.switchWorkspace('story.outline');c.switchWorkspace('story.novel');f.flush();
   assert.equal(c.location.href,href);f.reader.scrollTop=2200;c.rememberSourceReadingPosition();const b=JSON.parse(JSON.stringify(c.history.state));
   c.switchWorkspace('story.outline');f.pop(href,true,a);assert.equal(f.reader.scrollTop,1400);
   f.pop(href,true,b);assert.equal(f.reader.scrollTop,2200);f.pop(href,true,a);assert.equal(f.reader.scrollTop,1400);
@@ -172,14 +172,14 @@ test('snapshot identity rejects a different source, revision or route and preser
   const f=await fixture(base+'&source_chapter=chapter-10'),c=f.context;c.history.state={unrelated:{keep:42}};
   f.reader.scrollTop=6300;c.rememberSourceReadingPosition();assert.equal(c.history.state.unrelated.keep,42);
   const saved=JSON.parse(JSON.stringify(c.history.state));
-  for(const field of ['source','revision','url']){const invalid=JSON.parse(JSON.stringify(saved));invalid.sourceReading[field]='different';f.pop(c.location.href,true,invalid);assert.equal(f.reader.scrollTop,5488)}
+  for(const field of ['source','revision','url']){const invalid=JSON.parse(JSON.stringify(saved));invalid.sourceReading[field]='different';f.pop(c.location.href,true,invalid);assert.equal(f.reader.scrollTop,488)}
 });
 
 test('queued entry and ordinary tab restoration yield to the last same-URL chapter, comment or editor',async()=>{
   const f=await fixture(base+'&source_chapter=chapter-10',{navigation:true}),c=f.context,href=c.location.href;
   f.reader.scrollTop=6200;c.rememberWorkspacePosition();const saved=JSON.parse(JSON.stringify(c.history.state));
-  f.pop(href,false,saved);f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,5488);
-  c.restoreWorkspacePosition();f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,5488);
+  f.pop(href,false,saved);f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,488);
+  c.restoreWorkspacePosition();f.chapter('refinement-a','chapter-10').onclick();f.flush();assert.equal(f.reader.scrollTop,488);
   f.pop(href,false,saved);const comment={id:'old',target_object_id:'refinement-a',target_revision_id:'source-a-r1',anchor:{type:'text',block_id:'chapter-1',quote:'first'}};
   c.locateComment(comment);const block=f.root.querySelector('#block-chapter-1');assert.equal(block.located,true);const before=f.reader.scrollTop;f.flush();assert.equal(f.reader.scrollTop,before);
   f.pop(href,false,saved);c.startDraft(comment.anchor);const editor=f.root.querySelector('#comment-editor-text');editor.value='original source draft';editor.listeners.input();f.flush();assert.equal(editor.value,'original source draft');assert.equal(c.state.anchor,comment.anchor);assert.ok(f.requests.every(r=>!r.method));
@@ -190,7 +190,7 @@ test('layout changes use verified text within the block; missing text falls back
   const saved=JSON.parse(JSON.stringify(c.history.state));saved.sourceReading.layout=['old layout'];saved.sourceReading.point={block:'chapter-10',offset:1,quote:'confirmed',gap:4};
   const block=f.root.querySelector('#block-chapter-10');block.textContent='xconfirmed';let located=false;c.sourceTextPointRect=()=>{located=true;return {top:300}};
   f.pop(c.location.href,true,saved);assert.ok(located);assert.notEqual(f.reader.scrollTop,6100);
-  saved.sourceReading.point.quote='changed text';located=false;f.pop(c.location.href,true,saved);assert.equal(located,false);assert.equal(f.reader.scrollTop,5488);
+  saved.sourceReading.point.quote='changed text';located=false;f.pop(c.location.href,true,saved);assert.equal(located,false);assert.equal(f.reader.scrollTop,488);
 });
 
 test('late history story-read success or failure cannot displace a newer workspace',async()=>{

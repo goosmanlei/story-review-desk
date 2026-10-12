@@ -172,18 +172,7 @@ def material_comment_targets(store, revision):
             if subject['kind']=='REQUIREMENT':needs.setdefault(subject['object_id'],subject)
     targets=[]
     for need in needs.values():
-        for version in store.db.execute('''SELECT v.number,d.provenance FROM material_plan_versions v
-            LEFT JOIN material_definition_versions d ON d.material_id=v.material_id AND d.number=v.number
-            WHERE v.material_id=? ORDER BY v.number DESC''',(need['object_id'],)):
-            targets.extend(dict(r) for r in store.db.execute('''SELECT r.id,r.object_id FROM material_plan_members m
-                JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.number=? ORDER BY r.id''',
-                (need['object_id'],version['number'])))
-            provenance=json.loads(version['provenance']) if version['provenance'] else {}
-            for field in ('requirements','generation'):
-                source=provenance.get(field)
-                if source:
-                    row=light.ref_record(store,source['record'])
-                    if field=='requirements' or row['kind']=='CALL':targets.append(row)
+        targets.extend(dict(r) for r in store.db.execute("SELECT r.id,r.object_id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? ORDER BY r.id", (need['object_id'],)))
     return targets
 
 
@@ -275,8 +264,8 @@ def materials(store, episode=None, scene=None, media=None, search='', status=Non
     if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
     values=rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
-    associated={r[0] for r in store.db.execute("SELECT DISTINCT r.object_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result' AND m.material_id!=r.object_id")}
-    generated_ids={r[0] for r in store.db.execute("SELECT DISTINCT material_id FROM material_plan_members WHERE role='result'")}
+    associated={r[0] for r in store.db.execute("SELECT DISTINCT r.object_id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result' AND m.material_id!=r.object_id")}
+    generated_ids={r[0] for r in store.db.execute("SELECT DISTINCT material_id FROM material_memberships WHERE role='result'")}
     values.extend(a for a in rows(store,'ASSET') if a['object_id'] not in associated and not a['payload'].get('candidate_requirements'))
     links={};cache={}
     for link in rows(store,'RELATION',"json_extract(r.payload,'$.relation_type')='applicability'"):

@@ -194,11 +194,6 @@ def _snapshot(store, entity_id, revision_id=None):
     rows=[r for r in rows if r['payload'].get('format') in p.FORMATS and r['object_id'] not in archived]
     from .production_current import annotate as annotate_current, enabled as current_enabled
     rows = [annotate_current(store, r) for r in rows]
-    # Match the complete record projection used by current_records for assets.
-    for row in rows:
-        if row['kind']=='ASSET':
-            member=store.db.execute('SELECT number FROM material_plan_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(row['id'],row['object_id'])).fetchone() or store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(row['id'],row['object_id'])).fetchone()
-            row['material_version']=member[0] if member else None
     if revision_id:
         target = p.record(store, entity_id, revision_id)
         if target.get('unavailable') or target['kind'] != 'ENTITY':
@@ -277,18 +272,18 @@ def _snapshot(store, entity_id, revision_id=None):
         need['review_input_records'] = [p.ref_record(store, v['reference']) for v in need['payload'].get('generation', {}).get('inputs', [])]
         from .shot_references import enrich_detail
         enrich_detail(store, {'record': need})
-    material_versions = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
+    material_cards = {r['object_id']: material_snapshot(store, r['object_id']) for r in data['requirements']}
     for need in data['requirements']:
         mid=need['material_identity']['id']
-        if mid not in material_versions:material_versions[mid]=material_snapshot(store,mid)
+        if mid not in material_cards:material_cards[mid]=material_snapshot(store,mid)
     for item in data['media']:
         # Shared media may have its production requirement on another entity.
         # Read that same round without extending this entity's acceptance scope.
         for mid in sorted({item['record']['object_id'],*[m['material_id'] for m in plan_memberships(store,item['record']['id'])]}):
-            if mid not in material_versions:
+            if mid not in material_cards:
                 rounds=material_snapshot(store,mid)
-                if rounds:material_versions[mid]=rounds
-    for rounds in material_versions.values():
+                if rounds:material_cards[mid]=rounds
+    for rounds in material_cards.values():
         for round in rounds:
             for row in [*round['members'],*[v for v in round.get('definition_records',{}).values() if v]]:
                 targets[row['id']] = row
@@ -296,13 +291,6 @@ def _snapshot(store, entity_id, revision_id=None):
                     if row['id'] not in contexts:contexts[row['id']]=media_review.context(store,row)
                     for related in [contexts[row['id']]['call'], *contexts[row['id']]['requirements']]:
                         if related:targets[related['id']] = related
-    from .material_versions import memberships as legacy_memberships, snapshot as legacy_snapshot
-    legacy_versions={}
-    for row in ([] if current_enabled(store) else [*data['requirements'],*[item['record'] for item in data['media']]]):
-        ids=[row['object_id']] if row['kind']=='REQUIREMENT' else sorted({m['material_id'] for m in legacy_memberships(store,row['id'])},key=lambda mid:(mid==row['object_id'],mid))
-        for mid in ids:
-            if mid not in legacy_versions:legacy_versions[mid]=legacy_snapshot(store,mid)
-    if not any(material_versions.values()):material_versions=legacy_versions
     from .material_plans import card_counts
     # All switchable originals bring their exact historical use names. These
     # are labels only; they never extend the entity's acceptance scope.
@@ -313,7 +301,7 @@ def _snapshot(store, entity_id, revision_id=None):
         target = p.ref_record(store, reference)
         if not target.get('unavailable'):
             reference_titles.append({**reference, 'title': target['payload']['title']})
-    return {'reference_titles': reference_titles,**base,**data,'material_card_counts':card_counts(store,material_versions),'retained_states':retained_states,'legacy_material_versions':legacy_versions,'material_versions':material_versions,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
+    return {'reference_titles': reference_titles,**base,**data,'material_card_counts':card_counts(store,material_cards),'retained_states':retained_states,'material_cards':material_cards,'materialContexts':contexts,'related_entities':rel.nodes(store,data['relationships'],bool(revision_id)),
             'relationship_layout':rel.layout(store,entity_id,data['relationships']),
             'format':'entity-workspace-v2','scope':scope,'content_key':digest(canonical(scope).encode()),'historical':bool(revision_id),
             'material_origin_contract':'material-unique-origin-v1' if current_enabled(store) else None,

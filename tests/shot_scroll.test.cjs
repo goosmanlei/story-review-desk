@@ -59,7 +59,7 @@ test('shot selection address restores its group, material, candidate and compone
     const u=new URL(context.location.href);for(const [key,value] of Object.entries(values))value==null?u.searchParams.delete(key):u.searchParams.set(key,value);context.location.href=String(u);
   }};
   vm.createContext(context);vm.runInContext(route+render,context);
-  const workspace=()=>({entity:{object_id:'shot'},material_groups:[{key:'video',material_ids:['video-a','video-b']}],material_versions:{'video-b':[{results:[{id:'candidate-2',payload:{components:[{id:'preview'}]}}]}]}});
+  const workspace=()=>({entity:{object_id:'shot'},material_groups:[{key:'video',material_ids:['video-a','video-b']}],material_cards:{'video-b':[{results:[{id:'candidate-2',payload:{components:[{id:'preview'}]}}]}]}});
   const selected={...workspace(),shotTab:'video',unifiedMaterialId:'video-b',shotSelections:{video:'video-b'},selectedCandidates:{'video-b':'candidate-2'},selectedComponents:{'candidate-2':'preview'}};
   context.writeShotWorkspaceRoute(selected);
   const restored=context.renderBreakdownShot(null,{record:{object_id:'shot',id:'shot-r1',version:1},entity_workspace:workspace()});

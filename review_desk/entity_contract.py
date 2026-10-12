@@ -129,7 +129,7 @@ def shot_workspace(store, object_id, revision_id=None, *, deferred=False, materi
         need = versions[need['object_id']][0]['plan'] if deferred else need
         needs[index] = need
         need['review_input_records'] = [p.ref_record(store, item['reference']) for item in need['payload'].get('generation', {}).get('inputs', [])]
-        enrich_detail(store, {'record':need,'material_versions':{need['object_id']:versions[need['object_id']]}})
+        enrich_detail(store, {'record':need,'material_cards':{need['object_id']:versions[need['object_id']]}})
     if candidate_revision and not any(r['id'] == candidate_revision for v in versions.get(selected, []) for r in v['results']):
         raise ValueError('准确镜头候选不属于此素材')
     for mid, rounds in versions.items():
@@ -151,7 +151,7 @@ def shot_workspace(store, object_id, revision_id=None, *, deferred=False, materi
             'position': [{'object_id': r['object_id'], 'id': r['id'], 'kind': r['kind'],
                           'title': r['payload']['title']} for r in audiovisual.path(store, row)],
             'scope': scope, 'content_key': digest(canonical(scope).encode()), 'historical': False,
-            'usages': {}, 'versions': {}, 'material_versions': versions, 'legacy_material_versions': {},
+            'usages': {}, 'versions': {}, 'material_cards': versions,
             'deferred_materials': [n['object_id'] for n in needs if deferred and (not load_selected or n['object_id'] != selected)],
             'deferred_candidates': [r['id'] for v in versions.values() for plan in v for r in plan['results'] if deferred and r['id'] not in contexts],
             'materialContexts': contexts, 'material_card_counts': material_plans.card_counts(store, versions),

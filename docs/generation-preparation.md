@@ -16,7 +16,7 @@ ENTITY（实体）、STATE（完整状态）、REQUIREMENT（素材需求）、R
 
 `production-generation-ready ID` 与 `/api/production/generation-ready?requirement_id=ID` 检查准确方案、方法、输入锁、文件、范围、谱系、参数和执行渠道契约。`production-generation-package ID --output DIR` 写入空目录并携带准确原件；它只准备，不调用模型。
 
-准备包包含当时当前方案、方法、完整 Prompt、参数和准确有序参考。对外调用之前通过 `/api/production/submit` 核对包摘要和并发标记并持久化快照；成功后才发请求。相同操作重放只查询原调用。回调沿 `/api/production/result` 归回原提交；候选由真实原件形成。完整协议见 [当前制作与候选](material-versions.md)。
+准备包包含当时当前方案、方法、完整 Prompt、参数和准确有序参考。对外调用之前通过 `/api/production/submit` 核对包摘要和并发标记并持久化快照；成功后才发请求。相同操作重放只查询原调用。回调沿 `/api/production/result` 归回原提交；候选由真实原件形成。完整协议见 [当前制作与候选](current-materials.md)。
 
 任务授权、付费额度和正式发布权限由实际委托决定，方案无需内容审批不产生额外执行权限。
 
@@ -40,6 +40,6 @@ ENTITY（实体）、STATE（完整状态）、REQUIREMENT（素材需求）、R
 
 AI 用既有 `comment-handling-v1` 回应，保存原评论、实际说明及必要改后片段。制作意见保存当时原摘录；后来再次修改时明确当时回应与当前正文不同。缺失目标不跳到最新候选，不按相似文字定位。
 
-Schema 13 保存原评论、事件、回应局部片段、真实调用、候选快照、原件与最小退役映射；旧审批和制作全文链不能通过导入或恢复复活。
+Schema 14 保存原评论、事件、回应局部片段、真实调用、候选快照、原件与最小退役映射；旧审批和制作全文链不能通过导入或恢复复活。
 
 当前方案、候选、音频播放器与共同素材卡的具体契约见 [素材卡与关系](materials-and-relationships.md) 和 [镜头制作](production-breakdown.md)。

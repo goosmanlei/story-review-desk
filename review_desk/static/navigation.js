@@ -41,7 +41,7 @@ function reviewPositionText(value){
     .replace(/\b(SH|E|S)0*(\d+)\b/giu,(_all,prefix,number)=>reviewPositionLabel(prefix.toUpperCase(),number));
 }
 const workspaceRoutes=new Map(),workspaceSubRoutes=new Map();
-const workspacePositionSelectors=['#source-view','#source-list','#structure-reader','#structure-index','#screenplay-reader','#screenplay-scene-index','#production-reader','#production-index','.breakdown-body','.breakdown-scene-list','#approach-index'];
+const workspacePositionSelectors=['#source-view','#source-list','#novel-index','#structure-reader','#structure-index','#screenplay-reader','#screenplay-scene-index','#production-reader','#production-index','.breakdown-body','.breakdown-scene-list','#approach-index'];
 const workspacePositions=new Map();
 // Per history entry, never shared storage: a new tab opens the link's target
 // without inheriting another tab's last production selection.
@@ -74,7 +74,7 @@ function navigateApproachLink(target){
   if(target.href!==location.href)pushWorkspaceNavigation(target);
   switchWorkspace('production.approach',false);
 }
-function workspaceGroup(id){return ['story.sources','story.outline','story.script'].includes(id)?'story.sources':['settings.workspace','materials.workspace','production.workspace'].includes(id)?'settings.workspace':id}
+function workspaceGroup(id){return ['story.sources','story.outline','story.novel','story.script'].includes(id)?'story.sources':['settings.workspace','materials.workspace','production.workspace'].includes(id)?'settings.workspace':id}
 function normalizeProductionWorkspace(id){
   const url=new URL(location.href),p=url.searchParams;
   if(id==='production.workspace'||id==='settings.workspace'&&p.get('production_tab')==='shots'){
@@ -106,7 +106,7 @@ function rememberWorkspacePosition(){
 }
 function restoreWorkspacePosition(){
   const href=location.href;
-  const sourceGuard=typeof state!=='undefined'&&state.workspace==='story.sources'&&typeof sourceReadingRestoreGuard==='function'?sourceReadingRestoreGuard():null;
+  const sourceGuard=typeof state!=='undefined'&&['story.sources','story.novel'].includes(state.workspace)&&typeof sourceReadingRestoreGuard==='function'?sourceReadingRestoreGuard():null;
   let position=workspacePositions.get(href);
   if(!position){try{const saved=JSON.parse(sessionStorage.getItem('review-view-position')||'null');if(saved?.url===href)position=saved.position}catch{}}
   if(!position)return;
@@ -186,8 +186,8 @@ function workspaceTabItems(){
     const params=new URL(location.href).searchParams,active=(typeof approachSelectedTab==='function'?approachSelectedTab(params):(tabs.find(tab=>tab.id===params.get('tab'))||tabs[0])).id;
     return tabs.map(({id,label})=>({id:'approach-tab-'+id,label,active:id===active,controls:'approach-body',open:()=>selectApproachTab(id)}));
   }
-  if(['story.sources','story.outline','story.script'].includes(workspace))return [
-    ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','故事剧本','screenplay-workspace']
+  if(['story.sources','story.outline','story.novel','story.script'].includes(workspace))return [
+    ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.novel','open-story-novel','小说创作','story-workspace'],['story.script','open-story-script','故事剧本','screenplay-workspace']
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
   if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['METHODS','SKILL管理'],['CODES','数据模型']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
@@ -226,6 +226,7 @@ function workspacePageDescriptor(workspace,params){
   const story={
     'story.sources':['SOURCE EVIDENCE','故事采编','阅读原始依据与整理稿，核对出处和版本；圈选原文提出审阅意见。'],
     'story.outline':['STORY STRUCTURE','故事结构','按稿次阅读人物、关系与故事线，结合图文审阅整体设计。'],
+    'story.novel':['NOVEL WRITING','小说创作','按版本与章节阅读小说，圈选正文提出意见并复核修订。'],
     'story.script':['STORY → SCREENPLAY','剧本集场阅读与审阅','按版本、分集、场次阅读完整剧本并评论；预计时长是制作估算。']
   };if(story[workspace])return story[workspace];
   if(workspace==='project.configuration')return ({

@@ -94,8 +94,6 @@ def apply(store, document, *, fault=None, transaction=True):
                     store.db.execute('INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)',
                         (cid, None, target['object_id'], target['revision_id'], canonical(anchor),
                          item['body'], 'OPEN', 1, at, at))
-                    from .material_versions import comment_scope
-                    comment_scope(store, store.comment(cid))
                     imported += 1
                 source = {**item['source'], 'format': 'historical-comment-source-v1',
                           'source_object': revision['object_id'], 'source_revision': rid,

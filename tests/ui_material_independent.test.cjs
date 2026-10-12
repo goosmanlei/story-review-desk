@@ -130,8 +130,8 @@ for(const submitted of [false,true])test(`P05/C06 empty frozen video version ${s
   c.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};
   const need={object_id:'video-need',id:'current-need',kind:'REQUIREMENT',payload:{title:'本镜视频',media_type:'video',generation:{model:'current-model',prompt:'CURRENT PLAN MUST NOT BE BORROWED',inputs:[],parameters:{},output:{}}}};
   const call={object_id:'old-call',id:'old-call-r1',kind:'CALL',payload:{format:'production-call-v1',status:'failed',model:'historical-model',prompt:'EXACT FAILED CALL',inputs:[],parameters:{}}};
-  const round={number:2,model:'plan-v1',frozen:true,plan:null,members:submitted?[call]:[],results:[],definition_records:{requirement:null,call:submitted?call:null}};
-  const context={adoptions:[],video_details:{'video-need':{material_versions:{'video-need':[round]},review_contexts:{}}}};
+  const round={number:2,model:'production-current-v1',frozen:true,plan:null,members:submitted?[call]:[],results:[],definition_records:{requirement:null,call:submitted?call:null}};
+  const context={adoptions:[],video_details:{'video-need':{material_cards:{'video-need':[round]},review_contexts:{}}}};
   c.state.breakdownVideoSelections={[need.id]:{number:2}};const parent=new Element('section');c.renderShotProductPlan(parent,need,context);
   const text=parent.all().map(n=>n.textContent||'').join('\n');
   assert.ok(!text.includes('CURRENT PLAN MUST NOT BE BORROWED'));
@@ -154,8 +154,8 @@ function sharedMaterialFixture(){
   const shared=need('shared','state-a'),alias=need('alias','state-b');
   const asset=id=>({object_id:id,id:id+'-r1',kind:'ASSET',version:1,created_at:id==='asset-a'?'2026-10-01':'2026-10-02',payload:{title:id,media_type:'audio',components:[{id:'original',role:'original',mime:'audio/wav',file:id+'.wav'}]}});
   const a=asset('asset-a'),b=asset('asset-b'),items=[a,b].map(record=>({record,component:record.payload.components[0]}));
-  const round=(number,plan)=>({number,model:'plan-v1',plan,members:[plan,a,b],results:[a,b]});
-  const data={entity:{object_id:'entity',id:'entity-r1',kind:'ENTITY',payload:{title:'实体'}},states:['state-a','state-b'].map(id=>({object_id:id,id:id+'-r1',kind:'STATE',payload:{title:id}})),comment_records:[],comment_targets:[],requirements:[shared,alias],material_versions:{shared:[round(2,shared)],alias:[round(5,alias)]},media:items,adoptions:[
+  const round=(number,plan)=>({number,model:'production-current-v1',plan,members:[plan,a,b],results:[a,b]});
+  const data={entity:{object_id:'entity',id:'entity-r1',kind:'ENTITY',payload:{title:'实体'}},states:['state-a','state-b'].map(id=>({object_id:id,id:id+'-r1',kind:'STATE',payload:{title:id}})),comment_records:[],comment_targets:[],requirements:[shared,alias],material_cards:{shared:[round(2,shared)],alias:[round(5,alias)]},media:items,adoptions:[
     {payload:{scope:scope('state-a'),slot:'voice',asset:scope('asset-a'),component_id:'original'}},
     {payload:{scope:scope('state-b'),slot:'voice',asset:scope('asset-b'),component_id:'original'}},
   ]};
@@ -173,8 +173,8 @@ test('entity material selection stays inside the displayed ownership and leaves 
 
 test('switching ownership restores its exact reader and URL rather than the other tab target',()=>{
   const {c,data,a,b}=sharedMaterialFixture();data.materialTab='states';data.unifiedMaterialId='shared';data.tabMaterialViews={entity:'identity'};
-  data.material_versions.identity=[{number:1,members:[a],results:[a]}];data.materialReaders={identity:{productionSelected:a}};
-  data.unifiedGroups=[{material_id:'identity',identity:a,round:data.material_versions.identity[0],candidates:[{record:a}]}];
+  data.material_cards.identity=[{number:1,members:[a],results:[a]}];data.materialReaders={identity:{productionSelected:a}};
+  data.unifiedGroups=[{material_id:'identity',identity:a,round:data.material_cards.identity[0],candidates:[{record:a}]}];
   c.state.productionSelected=b;c.renderProductionReader=()=>{c.renderUnifiedSelected(data)};c.renderMaterialCard=()=>{};
   data.unifiedRight=new Element('aside');c.selectEntityMaterialTab(data,'entity');
   assert.equal(data.unifiedMaterialId,'identity');assert.equal(c.state.productionSelected.id,a.id);
@@ -184,16 +184,10 @@ test('switching ownership restores its exact reader and URL rather than the othe
 
 test('a reader remembered on another material version cannot restore its candidate or anchor',()=>{
   const {c,data,a,b}=sharedMaterialFixture();data.materialReaders={shared:{productionSelected:a,anchor:{type:'time',start_seconds:1,end_seconds:2}}};
-  data.material_versions.shared[0].members=[b];c.state.materialCommentCard={data,material_id:'shared',number:2};
+  data.material_cards.shared[0].members=[b];c.state.materialCommentCard={data,material_id:'shared',number:2};
   c.restoreUnifiedMaterialReader(data,'shared',b);assert.equal(c.state.productionSelected,b);assert.equal(c.state.anchor,null);
 });
 
-test('version return restores the viewed candidate together with its draft target',()=>{
-  const {c,data,shared,a,b}=sharedMaterialFixture();data.material_versions.shared.push({...data.material_versions.shared[0],number:1});
-  data.selectedMaterialRounds={shared:2};data.selectedCandidates={shared:a.id};c.state.productionSelected=a;c.state.anchor={type:'time',start_seconds:1,end_seconds:2};
-  c.switchMaterialRound(data,'shared',1);assert.equal(data.selectedCandidates.shared,b.id);
-  c.switchMaterialRound(data,'shared',2);assert.equal(data.selectedCandidates.shared,a.id);assert.equal(c.state.productionSelected,a);assert.equal(c.state.anchor.start_seconds,1);
-});
 
 test('candidate generation reads its actual call and never borrows a current plan when history is absent',()=>{
   const {c}=fixture();vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);c.materialTextSurface=parent=>parent;
@@ -268,23 +262,23 @@ test('D01 state-specific default adoption does not leak through a cached shared 
 
 function provenanceFixture(){
   const f=sharedMaterialFixture(),{c,data,shared,a,b}=f;
-  data.material_versions.shared[0]={...data.material_versions.shared[0],plan:null,members:[a,b],definition_records:{requirement:shared,call:null}};
+  data.material_cards.shared[0]={...data.material_cards.shared[0],plan:null,members:[a,b],definition_records:{requirement:shared,call:null}};
   c.state.productionSelected=shared;c.state.materialCommentCard={data,material_id:'shared',number:2};
-  const params=new URLSearchParams({material_id:'shared',material_version:'2',material_target:shared.id});
-  const result={params,entity_review:data,detail:{record:shared,history:[shared],material_versions:data.material_versions}};
+  const params=new URLSearchParams({material_id:'shared',material_target:shared.id});
+  const result={params,entity_review:data,detail:{record:shared,history:[shared],material_cards:data.material_cards}};
   return {...f,params,result};
 }
 
 test('D04/C08 a displayed exact definition source submits comment context for its frozen version',()=>{
   const {c,data,shared}=provenanceFixture();
-  assert.deepEqual(JSON.parse(JSON.stringify(c.materialCommentContext())),{material_id:'shared',number:2,model:'plan-v1'});
-  assert.equal(data.material_versions.shared[0].members.some(r=>r.id===shared.id),false);
+  assert.deepEqual(JSON.parse(JSON.stringify(c.materialCommentContext())),{material_id:'shared',number:2,model:'production-current-v1'});
+  assert.equal(data.material_cards.shared[0].members.some(r=>r.id===shared.id),false);
 });
 
 test('D04/C08 refreshing an exact definition-source target is accepted without making it a candidate',()=>{
   const {c,data,shared,result}=provenanceFixture();
   assert.doesNotThrow(()=>c.validateUnifiedReference(result));
-  assert.equal(data.material_versions.shared[0].results.some(r=>r.id===shared.id),false);
+  assert.equal(data.material_cards.shared[0].results.some(r=>r.id===shared.id),false);
   result.params.set('material_target','unrelated-source-r1');
   assert.throws(()=>c.validateUnifiedReference(result),/不存在|不属于/);
 });
@@ -307,8 +301,8 @@ function componentFixture(entry='demand'){
     {id:'preview',role:'preview',mime:'image/png',file:id+'.png',sha256:id+'-preview-sha'},
   ]}});
   const a=asset('candidate-a'),b=asset('candidate-b'),need={object_id:'need',id:'need-r1',kind:'REQUIREMENT',payload:{title:'多组成夹具',media_type:'video',slot:'video',scope:{object_id:'scope',revision_id:'scope-r1'}}};
-  const round={number:1,model:'plan-v1',plan:need,members:[need,a,b],results:[a,b]};
-  const detail={record:entry==='demand'?need:a,history:[entry==='demand'?need:a],candidate_records:[a,b],material_versions:{need:[round]},selectedCandidateId:a.id,uses:[]};
+  const round={number:1,model:'production-current-v1',plan:need,members:[need,a,b],results:[a,b]};
+  const detail={record:entry==='demand'?need:a,history:[entry==='demand'?need:a],candidate_records:[a,b],material_cards:{need:[round]},selectedCandidateId:a.id,uses:[]};
   c.state.materialReview=detail;
   let last;
   c.renderMaterialCard=(_root,model,options)=>{last={model,options,shown:c.materialCandidateChoice(model.candidates,options.selectedCandidateId)}};
@@ -345,7 +339,7 @@ test('C08 locating a preview comment records only its exact candidate component'
 });
 
 test('C09 an exact asset reader offers adoption only for its matching material requirement',()=>{
-  const {c,detail,a,b}=componentFixture('asset'),need=detail.material_versions.need[0].plan;
+  const {c,detail,a,b}=componentFixture('asset'),need=detail.material_cards.need[0].plan;
   const unrelated={...need,object_id:'unrelated',id:'unrelated-r1'};
   let requests=[];c.renderMaterialAdoptionControls=(_root,value)=>{requests.push(value)};
   detail.adoptionContext={requirements:[unrelated],adoptions:[]};
@@ -354,13 +348,13 @@ test('C09 an exact asset reader offers adoption only for its matching material r
   c.renderProductionReader();assert.equal(requests.length,1);
   assert.equal(requests[0].record,need);
   assert.deepEqual(Array.from(requests[0].candidate_records.map(r=>r.id)),[a.id,b.id]);
-  detail.material_versions={};c.renderProductionReader();assert.equal(requests.length,1);
+  detail.material_cards={};c.renderProductionReader();assert.equal(requests.length,1);
 });
 
 test('C09 material adoption forwards its exact candidates even without global asset rows',async()=>{
   const {c,detail,a,b}=componentFixture('asset');
   c.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};
-  detail.record=detail.material_versions.need[0].plan;
+  detail.record=detail.material_cards.need[0].plan;
   detail.adoptionContext={requirements:[detail.record],adoptions:[]};
   c.state.productionRecords=[];
   const parent=new Element('article');
@@ -388,8 +382,8 @@ function materialDraftFixture(){
   const create=(id,number=1)=>{
     const need={object_id:id,id:id+'-r1',kind:'REQUIREMENT',payload:{title:id}};
     const asset={object_id:id+'-asset',id:id+'-asset-r1',kind:'ASSET',payload:{title:id+' image',components:[{id:'original',role:'original',mime:'image/png',file:id+'.png'}]}};
-    const round={number,model:'plan-v1',plan:need,members:[need,asset],results:[asset]};
-    return {entity_review:null,explicit:false,allowDraftFocus:true,params:new URLSearchParams(),detail:{record:need,history:[need],candidate_records:[asset],material_versions:{[id]:[round]}}};
+    const round={number,model:'production-current-v1',plan:need,members:[need,asset],results:[asset]};
+    return {entity_review:null,explicit:false,allowDraftFocus:true,params:new URLSearchParams(),detail:{record:need,history:[need],candidate_records:[asset],material_cards:{[id]:[round]}}};
   };
   const first=create('first'),second=create('second'),asset=first.detail.candidate_records[0];
   c.activateUnifiedCard(first);c.focusProductionReview({record:asset,history:[asset],uses:[]},false);
@@ -449,8 +443,8 @@ test('C08 saved asset draft focus cannot cross its material version or surviving
   for(const mismatch of ['version','member']){
     const {c,create}=materialDraftFixture(),target=create('first',mismatch==='version'?2:1);
     if(mismatch==='member'){
-      target.detail.material_versions.first[0].members=[target.detail.record];
-      target.detail.material_versions.first[0].results=[];target.detail.candidate_records=[];
+      target.detail.material_cards.first[0].members=[target.detail.record];
+      target.detail.material_cards.first[0].results=[];target.detail.candidate_records=[];
     }
     c.activateUnifiedCard(target);
     assert.equal(c.state.productionSelected.id,'first-r1',mismatch);

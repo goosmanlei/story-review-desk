@@ -26,7 +26,7 @@ function fixture({storage=new Map(),fetch:transport,pageStorage=null,navigationT
   };
   const material=(number=1,mid='need',data=null)=>{
     target('materials.workspace','plan','plan-v1');const row=context.state.productionSelected;
-    context.state.materialReview=data||{record:{object_id:mid},material_versions:{[mid]:[2,1].map(n=>({number:n,state:n===1?'produced':'preparing',members:[row],plan:row,results:[]}))},selectedMaterialRounds:{[mid]:number}};
+    context.state.materialReview=data||{record:{object_id:mid},material_cards:{[mid]:[2,1].map(n=>({number:n,state:n===1?'produced':'preparing',members:[row],plan:row,results:[]}))},selectedMaterialRounds:{[mid]:number}};
     context.state.materialReview.selectedMaterialRounds[mid]=number;return context.key();
   };
   return {context,storage,textarea,intent,messages,requests,target,material,Element};

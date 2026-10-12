@@ -9,6 +9,20 @@ from test_methods import seed
 
 
 class FileHistoryTest(unittest.TestCase):
+    def test_reading_outline_numbers_follow_document_order_not_alphabetical_paths(self):
+        ordered, labels = files.reading_order({'payload': {'files': {
+            'book/checks.md': '# 检查', 'book/prompt.md': '# 提示词',
+            'book/handbook.md': '# 视频手册\n<!-- section:prompt -->\n<!-- section:checks -->',
+            'book/extra.md': '# 更多资料'}}})
+        self.assertEqual(ordered, ['book/handbook.md', 'book/prompt.md', 'book/checks.md', 'book/extra.md'])
+        self.assertEqual(labels['book/prompt.md']['reading_label'], '01 · 提示词')
+        self.assertEqual(labels['book/checks.md']['reading_label'], '02 · 检查')
+        order, titles = files.reading_order({'payload': {'files': {
+            'README.md': '# 影视知识\n[镜头](01-shots.md)\n[剪辑](12-edit.md)',
+            '12-edit.md': '# 12 剪辑', '01-shots.md': '# 01 镜头'}}})
+        self.assertEqual(order, ['README.md', '01-shots.md', '12-edit.md'])
+        self.assertEqual(titles['12-edit.md']['reading_label'], '12 · 剪辑')
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

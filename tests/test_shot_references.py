@@ -7,7 +7,7 @@ import urllib.request
 import urllib.error
 from unittest.mock import patch
 from pathlib import Path
-import test_material_plans as fixtures
+import current_material_fixture as fixtures
 import test_production_breakdown as breakdown
 from review_desk import production as p, generation as g, material_plans as mp, shot_references as sr
 from review_desk.store import Conflict, Store
@@ -15,10 +15,10 @@ from review_desk.bundle import export, restore
 
 
 class ShotReferenceTest(unittest.TestCase):
-    setUp=fixtures.PlanVersionsTest.setUp
-    tearDown=fixtures.PlanVersionsTest.tearDown
+    setUp=fixtures.MaterialFixture.setUp
+    tearDown=fixtures.MaterialFixture.tearDown
     for name in ('spec','put','ref','entity','full','need','media','change','setup_plans','generate'):
-        locals()[name]=getattr(fixtures.PlanVersionsTest,name)
+        locals()[name]=getattr(fixtures.MaterialFixture,name)
     scene_shot=breakdown.BreakdownTest.scene_shot
 
     def prepare(self, complete=False):

@@ -26,10 +26,10 @@ function fixture(){
   const input=name=>box.all().find(e=>e.attrs['aria-label']===name);
   return {c,context,box,item,slot,model,calls,saved,render,input};
 }
-test('selected current reference carries the consolidation baseline to the shared exact reader',()=>{
+test('selected current reference opens the exact candidate without a removed baseline',()=>{
   const f=fixture();let opened;f.c.openUnifiedMaterial=ref=>opened=ref;
   f.c.openShotReference({slot:f.slot,value:f.slot.value},{need:f.context.need,number:1},null);
-  assert.equal(opened.params.get('material_baseline'),'baseline');
+  assert.equal(opened.params.get('material_baseline'),null);
   assert.equal(opened.params.get('material_target'),'candidate');
 });
 test('audition follows saved and unsaved reference fields, discard restores them, and comment selection has no write',()=>{

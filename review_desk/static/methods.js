@@ -11,10 +11,11 @@ function methodScene(){return Object.fromEntries(['category','selected','revisio
 function rememberMethodPosition(){if(methodView.document)methodView.positions[methodKey()]=window.scrollY;try{sessionStorage.setItem('method-reading',JSON.stringify({scope:methodStorageScope(),...methodScene(),positions:methodView.positions,stack:methodView.stack}))}catch{}}
 window.addEventListener('scroll',()=>{if(isMethodsReading())rememberMethodPosition()},{passive:true});
 function methodRoute(){const url=new URL(location.href);for(const key of ['method_group','method_range','method_file_type'])url.searchParams.delete(key);for(const [key,value]of Object.entries({method_category:methodView.category,method_object:methodView.selected,method_revision:methodView.revision||methodView.requestedRevision,method_file:methodView.file,method_file_version:methodView.fileVersion,method_node:methodView.flowSelected,method_node_revision:methodView.rootRevision})){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key)}history.replaceState(history.state,'',url)}
+function methodEmbeddedResource(oid){return (methodView.rootRecord?.payload.resources||[]).some(ref=>ref.object_id===oid)}
 function methodOpen(root,category,oid,rid,file,back=false,version=null){
  rememberMethodPosition();if(isMethodsReading()&&typeof rememberStoryDraft==='function')rememberStoryDraft();
  if(oid===methodView.flowSelected&&!rid&&!version)methodView.rootRevision=null;
- if(back)methodView.stack.push(methodScene());
+ if(methodEmbeddedResource(oid))methodView.stack=[];else if(back)methodView.stack.push(methodScene());
  Object.assign(methodView,{category,selected:oid,revision:null,requestedRevision:rid,file,fileVersion:version,mode:'read',document:null});
  state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;hideSelectionAction();methodRoute();return drawMethods(root);
 }
@@ -27,9 +28,10 @@ function methodFlow(parent,root){
  const flow=methodView.data.flow,nav=el('nav','skill-flow');nav.setAttribute('aria-label','创作基础流程');parent.append(nav);
  nodeText('h2',null,'基础流程',nav);const main=el('ol','skill-flow-main');nav.append(main);
  const draw=(entry,host)=>{const section=el('li','skill-flow-stage');section.dataset.flowNode=entry.id;host.append(section);const methods=entry.methods||[];
-  if(methods.length===1&&!entry.supports){const m=methods[0],b=methodButton(section,entry.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}
+  if(methods.length===1){const m=methods[0],b=methodButton(section,entry.supports?m.title:entry.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}
   else{nodeText('span','skill-flow-label',entry.title,section);if(methods.length){const choices=el('div','skill-flow-parallel');section.append(choices);for(const m of methods){const b=methodButton(choices,m.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}}}
   if(entry.output)nodeText('small','skill-flow-output',entry.output,section);
+  if(entry.repeat?.methods?.length){const loop=el('div','skill-flow-repeat');section.append(loop);for(const m of entry.repeat.methods){const b=methodButton(loop,'↔ '+m.title,()=>methodSelectNode(root,m.object_id));b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}nodeText('small',null,entry.repeat.label,loop)}
   for(const link of flow.returns||[])if(link.from===entry.id)nodeText('span','skill-flow-return','↶ '+link.label+' · '+flow.stages.find(n=>n.id===link.to).title,section);
  };
  for(const stage of flow.stages)draw(stage,main);
@@ -39,9 +41,9 @@ function methodFileTree(parent,record,directory,root,pinned=false){
  const group=el('section','skill-file-group');parent.append(group);nodeText('h3',null,record.payload.title,group);
  const current=directory.files.filter(f=>f.selected),removed=directory.files.filter(f=>!f.selected&&methodView.selected===record.object_id&&methodView.file===f.path);let lastFolder='';
  for(const item of [...current,...removed]){
-  const file=item.path,folder=file.split('/').slice(0,-1).join('/');if(folder!==lastFolder){if(folder)nodeText('p','skill-folder',folder+'/',group);lastFolder=folder}
-  const b=methodButton(group,file.split('/').at(-1)+(item.selected?'':' · 已移除'),()=>methodOpen(root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,pinned&&item.selected?record.revision_id:null,file,record.object_id!==methodView.selected));
-  b.title=file;b.dataset.methodPath=file;b.style.setProperty('--file-depth',Math.min(3,file.split('/').length-1));const active=methodView.selected===record.object_id&&methodView.file===file;b.classList.toggle('active',active);b.setAttribute('aria-current',String(active));
+  const file=item.path,folder=item.reading_group||file.split('/').slice(0,-1).join('/');if(folder!==lastFolder){if(folder)nodeText('p','skill-folder',folder,group);lastFolder=folder}
+  const b=methodButton(group,(item.reading_label||file.split('/').at(-1))+(item.selected?'':' · 已移除'),()=>methodOpen(root,record.payload.format==='managed-method-skill-v1'?'skill':'resource',record.object_id,pinned&&item.selected?record.revision_id:null,file,false));
+  b.title=file;b.dataset.methodPath=file;const active=methodView.selected===record.object_id&&methodView.file===file;b.classList.toggle('active',active);b.setAttribute('aria-current',String(active));
  }
 }
 async function drawMethods(root){
@@ -55,7 +57,7 @@ async function drawMethods(root){
  if(!methodView.selected){const first=[...flow.stages,...flow.branches||[]].flatMap(n=>n.methods||[])[0];if(first){methodView.selected=first.object_id;methodView.flowSelected=first.object_id;methodView.category='skill';methodView.file='SKILL.md'}}
  methodView.document=null;methodView.prose=null;renderComments();root.replaceChildren();const page=el('article','config-page methods-page skill-admin');root.append(page);methodView.page=page;methodView.root=root;
  const layout=el('div','skill-admin-layout');page.append(layout);methodFlow(layout,root);const content=el('section','skill-content');layout.append(content);methodView.content=content;
- if(methodView.stack.length)methodButton(content,'返回原阅读位置',()=>{rememberMethodPosition();if(isMethodsReading()&&typeof rememberStoryDraft==='function')rememberStoryDraft();Object.assign(methodView,methodView.stack.pop());state.anchor=null;state.editing=null;state.selected=null;drawMethods(root)});
+
  if(!methodView.selected){nodeText('p',null,'此实例还没有已绑定的 SKILL。',content);return}
  const status=nodeText('p','config-save-status','正在读取准确文件…',content);status.setAttribute('role','status');
  const active=()=>epoch===methodReadEpoch&&page.isConnected&&state.workspace==='project.configuration'&&state.configSection==='METHODS';
@@ -63,7 +65,9 @@ async function drawMethods(root){
   let rootId=methodView.flowSelected||methodView.selected;
   const record=await api('/api/methods/record?'+new URLSearchParams({object_id:rootId,...((methodView.rootRevision||(rootId===methodView.selected?methodView.requestedRevision:null))?{revision_id:methodView.rootRevision||methodView.requestedRevision}:{})}));if(!active())return;
   if(!methodView.flowSelected&&record.payload.format==='managed-method-skill-v1')methodView.flowSelected=rootId;
-  methodView.rootRevision=record.revision_id;
+  methodView.rootRevision=record.revision_id;methodView.rootRecord=record;
+  if(methodEmbeddedResource(methodView.selected))methodView.stack=[];
+  if(methodView.stack.length&&!methodEmbeddedResource(methodView.selected))methodButton(content,'返回原阅读位置',()=>{rememberMethodPosition();if(isMethodsReading()&&typeof rememberStoryDraft==='function')rememberStoryDraft();Object.assign(methodView,methodView.stack.pop());state.anchor=null;state.editing=null;state.selected=null;drawMethods(root)});
   const own=await api('/api/methods/files?'+new URLSearchParams({object_id:record.object_id,revision_id:record.revision_id}));if(!active())return;
   const split=el('div','skill-reading-grid'),tree=el('nav','skill-file-tree');tree.setAttribute('aria-label','SKILL 文件结构');split.append(tree);
   methodFileTree(tree,record,own,root);
@@ -78,7 +82,7 @@ async function drawMethods(root){
   nodeText('h2','skill-heading',methodTitle(record),content);content.append(split);
   const reader=el('div','skill-reader');split.append(reader);const heading=el('header','skill-file-heading');reader.append(heading);nodeText('h3',null,doc.file,heading);
   const tools=el('div','skill-file-tools');heading.append(tools);const comparison=methodButton(tools,'版本比较',()=>compareMethodFile(doc,comparison));comparison.disabled=doc.versions.length<2;
-  methodChoiceRow(tools,'文件版本',doc.versions.map(v=>[v.version,'第 '+v.version+' 版'+(v===doc.versions[0]?' · 最新':'')]),doc.file_version.version,v=>methodOpen(root,methodView.category,doc.record.object_id,null,doc.file,false,v));
+  methodChoiceRow(tools,'文件版本',doc.versions.map(v=>[v.version,'第 '+v.version+' 版']),doc.file_version.version,v=>methodOpen(root,methodView.category,doc.record.object_id,null,doc.file,false,v));
   methodButton(reader,'查看评论',()=>{openPanel();renderComments()});
   if(!doc.present)nodeText('p','production-issue','当前 SKILL 已移除或改名此文件；这里保留原文件历史。',reader);
   if(doc.record.payload.source)nodeText('p','method-source',doc.record.payload.source.files[doc.file]?.path||doc.file,reader);

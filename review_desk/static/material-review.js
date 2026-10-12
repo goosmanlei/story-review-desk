@@ -1,9 +1,9 @@
 /* One review card for planned materials and exact, existing media. */
 const isMaterialReview=()=>isProduction()&&!!state.materialReview&&materialRows(state.materialReview).some(r=>r.id===state.productionSelected?.id);
-function materialVersionCommentRows(round){return [...new Map([...(round?.members||[]),...Object.values(round?.definition_records||{})].filter(Boolean).map(row=>[row.id,row])).values()]}
+function materialCommentRows(round){return [...new Map([...(round?.members||[]),...Object.values(round?.definition_records||{})].filter(Boolean).map(row=>[row.id,row])).values()]}
 function materialRows(detail){
   const contexts=Object.values(detail.review_contexts||{current:detail.review_context}).filter(Boolean);
-  return [detail.record,...(detail.history||[]),...(detail.candidate_records||[]),...Object.values(detail.material_versions||{}).flatMap(rounds=>rounds.flatMap(materialVersionCommentRows)),...(detail.relation_records||[]),...contexts.flatMap(c=>[c.call,...(c.requirements||[])])].filter(Boolean);
+  return [detail.record,...(detail.history||[]),...(detail.candidate_records||[]),...Object.values(detail.material_cards||{}).flatMap(rounds=>rounds.flatMap(materialCommentRows)),...(detail.relation_records||[]),...contexts.flatMap(c=>[c.call,...(c.requirements||[])])].filter(Boolean);
 }
 function materialReviewComments(){const ids=new Set(materialRows(state.materialReview).map(r=>r.id));return state.comments.filter(c=>ids.has(c.target_revision_id))}
 function appendMaterialReviewComments(parent,comments){
@@ -250,14 +250,14 @@ function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=
   const host=materialTextSurface(box,need);if(!requirementsShown)materialField(host,need,'generation.output.description',null);
   if(historical){materialExecution(host,plan);if(plan.method!=='reuse')materialParameters(host,need,'generation',plan.model)}
   if(!historical)renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
-  if(!historical&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialVersions()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
+  if(!historical&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:materialRecordRound(need),frozen:!!Object.values(materialCards()).flat().find(r=>r.members.some(v=>v.id===need.id))?.frozen,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need);
   if(historical&&plan.blockers?.length){nodeText('h4',null,plan.method==='reuse'?'复用前仍需':'生成前仍需',host);for(const issue of plan.blockers)nodeText('p','production-issue',issue,host)}
   if(historical)materialField(host,need,'generation.prompt',plan.method==='reuse'?'复用说明':'提示词','pre');parent.append(box);
 }
-function materialVersions(){return (state.materialCommentCard?.data|| (typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview))?.material_versions||{}}
-function materialRecordRound(row){for(const rounds of Object.values(materialVersions()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;if(Number.isInteger(row.material_version))return row.material_version;if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];return null}
-function materialVersionLabel(row){if(row.candidate_id||row.component_snapshot)return '准确候选原件';if(row.submission_only)return '提交时内容';if(row.current_content)return '当前方案';const number=materialRecordRound(row);return number?'素材版本 '+number:'记录修订 '+row.version}
+function materialCards(){return (state.materialCommentCard?.data|| (typeof isEntityReview==='function'&&isEntityReview()?state.entityReview:state.materialReview))?.material_cards||{}}
+function materialRecordRound(row){for(const rounds of Object.values(materialCards()))for(const round of rounds)if(round.members.some(r=>r.id===row.id))return round.number;if(Number.isInteger(row.material_version))return row.material_version;if(row.material_round_numbers&&Object.keys(row.material_round_numbers).length)return Object.values(row.material_round_numbers)[0];return null}
+function materialContentLabel(row){if(row.candidate_id||row.component_snapshot)return '准确候选原件';if(row.submission_only)return '提交时内容';return '当前方案'}
 function materialResultKey(row){return JSON.stringify([row.payload.production?.object_id,[...new Set(row.payload.components.filter(c=>c.role==='original').map(c=>c.sha256))].sort()])}
 function materialRoundResults(round,selected,explicit){return round.results.map(row=>explicit&&row.object_id===selected.object_id&&materialResultKey(row)===materialResultKey(selected)&&round.members.some(m=>m.id===selected.id)?selected:row)}
 function materialCandidateChoice(items,targetId){
@@ -276,14 +276,10 @@ function materialCandidateOptions(detail,items){
   const requested=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target');
   const targetId=items.some(i=>i.record.id===requested)?requested:typeof materialDefaultCandidate==='function'?materialDefaultCandidate({need:detail.record,candidates:items},detail):null;
   return {selectedComponents:detail.selectedComponents,selectedCandidateId:targetId,selectCandidate:id=>{
-    const item=items.find(i=>i.record.id===id),row=id==='current'?Object.values(detail.material_versions||{}).flat().find(r=>r.current_content&&r.plan)?.plan:item?.record;if(!row)return;
+    const item=items.find(i=>i.record.id===id),row=id==='current'?Object.values(detail.material_cards||{}).flat().find(r=>r.current_content&&r.plan)?.plan:item?.record;if(!row)return;
     rememberProductionDraft();detail.selectedCandidateId=id;const url=new URL(location.href);url.searchParams.set('material_target',id);history.replaceState(history.state,'',url);focusProductionReview({record:row,history:[row],uses:[]},false);restoreProductionDraft();
     renderProductionReader();renderComments();document.querySelector('[aria-label="本轮候选"] [aria-pressed="true"]')?.focus({preventScroll:true});
   }};
-}
-function materialRoundControl(parent,mid,rounds,selected,change){
-  if(selected.current_content)return;
-  return reviewChoiceButtons(parent,'素材版本',[...rounds].sort((a,b)=>a.number-b.number).map(r=>({id:r.number,label:'版本 '+r.number})),selected.number,change);
 }
 function reviewChoiceButtons(parent,label,choices,selected,change,{repeat=false}={}){
   const bar=el('div','review-choice-buttons');bar.setAttribute('role','group');bar.setAttribute('aria-label',label);
@@ -294,26 +290,10 @@ function materialDefaultRound(rounds){
   const ordered=[...(rounds||[])].sort((a,b)=>b.number-a.number);
   return ordered.find(r=>(r.results||[]).some(row=>!row.payload.placeholder&&row.payload.components?.some(c=>c.role==='original')))||ordered[0];
 }
-function switchMaterialRound(data,mid,number){
-  cancelMaterialCommentLocation();
-  const rounds=data.material_versions[mid],old=data.selectedMaterialRounds?.[mid]||rounds[0].number;
-  data.roundDrafts||={};data.roundDrafts[mid+':'+old]={row:state.productionSelected,candidateId:data.selectedCandidates?.[mid]||data.selectedCandidateId||(state.productionSelected?.kind==='ASSET'?state.productionSelected.id:null),anchor:state.anchor,editing:state.editing,selected:state.selected,scope:state.reviewCommentScope};
-  data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=number;data.explicitRevision=false;delete data.selectedCandidateId;
-  const round=rounds.find(r=>r.number===number);if(!round)throw Error('准确素材版本不存在；未替换为最新版本');const saved=data.roundDrafts[mid+':'+number];
-  state.materialCommentCard={data,material_id:mid,number};
-  const candidates=round.results.map(record=>({record})),preferred=typeof materialDefaultCandidate==='function'?materialDefaultCandidate({need:round.plan,identity:data.requirements?.find(r=>r.object_id===mid),candidates},data):null;
-  const candidate=materialCandidateChoice(candidates,saved?.candidateId||preferred)?.record;
-  data.selectedCandidates||={};data.selectedCandidates[mid]=candidate?.id||null;data.selectedCandidateId=candidate?.id||null;
-  const row=saved?.row&&materialVersionCommentRows(round).some(r=>r.id===saved.row.id)?saved.row:candidate||round.plan||round.definition_records?.call||round.definition_records?.requirement;
-  state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;state.drawMode=null;
-  if(row)focusProductionReview({record:row,history:[row],uses:[]},false);
-  if(saved&&row===saved.row){state.anchor=saved.anchor;state.editing=saved.editing;state.selected=saved.selected;state.reviewCommentScope=saved.scope}
-}
-function focusMaterialRoundControl(mid){[...document.querySelectorAll('.material-card')].find(n=>n.dataset.materialKey===mid)?.querySelector('[aria-label="素材版本"] [aria-pressed="true"]')?.focus({preventScroll:true})}
 function materialRoundSelection(current,data){
-  const rounds=data.material_versions?.[current.object_id]||[],number=data.selectedMaterialRounds?.[current.object_id],round=rounds.find(r=>r.number===number)||materialDefaultRound(rounds);
+  const rounds=data.material_cards?.[current.object_id]||[],number=data.selectedMaterialRounds?.[current.object_id],round=rounds.find(r=>r.number===number)||materialDefaultRound(rounds);
   const local=data.localVersions?.[current.object_id];
-  return {rounds,round,need:round?(local&&round.members.some(r=>r.id===local.id)?local:round.plan||(round.model==='plan-v1'&&round.frozen?null:current)):current};
+  return {rounds,round,need:round?(local&&round.members.some(r=>r.id===local.id)?local:round.plan||current):current};
 }
 function materialHistoricalDefinition(need,round){
   const definition=round?.definition_records?.requirement||round?.plan;
@@ -349,7 +329,7 @@ function materialRoundModels(needs,items,data){
   const shownRounds=new Set(models.map(m=>m.material_id).filter(Boolean));
   const extra=materialCardModels([],items.filter(i=>!used.has(i.record.object_id))).flatMap(model=>{
     const original=model.candidates[0],identity=original.record;
-    const [mid,rounds]=Object.entries(data.material_versions||{}).find(([mid,rs])=>mid!==identity.object_id&&rs.some(r=>r.members.some(m=>m.kind==='ASSET'&&m.object_id===identity.object_id)))||[identity.object_id,data.material_versions?.[identity.object_id]];
+    const [mid,rounds]=Object.entries(data.material_cards||{}).find(([mid,rs])=>mid!==identity.object_id&&rs.some(r=>r.members.some(m=>m.kind==='ASSET'&&m.object_id===identity.object_id)))||[identity.object_id,data.material_cards?.[identity.object_id]];
     const round=rounds?.find(r=>r.number===data.selectedMaterialRounds?.[mid])||materialDefaultRound(rounds);if(!round)return [model];
     if(shownRounds.has(mid))return [];shownRounds.add(mid);data.selectedMaterialRounds||={};data.selectedMaterialRounds[mid]=round.number;
     return [{...model,need:round.plan||null,identity,material_id:mid,round,rounds,candidates:materialRoundResults(round,identity,!!data.localVersions?.[identity.object_id]).map(record=>({...original,record,components:record.payload.components,label:record.id===identity.id?original.label:items.find(item=>item.record.id===record.id)?.label,component:record.payload.components.find(c=>c.id===original.component?.id)||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],review_context:data.materialContexts?.[record.id]||(record.id===identity.id?original.review_context:undefined),range:record.id===identity.id?original.range:null,crop:record.id===identity.id?original.crop:null}))}];
@@ -361,10 +341,10 @@ function materialCommentContext(){
   if(state.reviewReferenceContext)return null;
   const row=state.productionSelected;if(!isProduction()||!row)return null;
   const card=state.materialCommentCard,data=card?.data||(isEntityReview()?state.entityReview:state.materialReview),matches=[];
-  for(const [mid,rounds] of Object.entries(materialVersions())){
+  for(const [mid,rounds] of Object.entries(materialCards())){
     const selected=data?.selectedMaterialRounds?.[mid]||rounds[0]?.number,round=rounds.find(r=>r.number===selected);
     const candidate=row.kind==='CALL'&&(round?.results||[]).find(result=>(data?.materialContexts?.[result.id]||data?.review_contexts?.[result.id]||data?.media?.find(item=>item.record.id===result.id)?.review_context)?.call?.id===row.id);
-    if(materialVersionCommentRows(round).some(r=>r.id===row.id)||candidate)matches.push({material_id:mid,number:selected,...(candidate?{candidateTarget:candidate.id}:{}),...(round?.model==='plan-v1'?{model:'plan-v1'}:{})});
+    if(materialCommentRows(round).some(r=>r.id===row.id)||candidate)matches.push({material_id:mid,number:selected,...(candidate?{candidateTarget:candidate.id}:{}),model:'production-current-v1'});
   }
   return matches.find(c=>card?.data===data&&c.material_id===card.material_id&&c.number===card.number)||matches.find(c=>c.material_id===data?.record?.object_id)||(matches.length===1?matches[0]:null);
 }
@@ -394,7 +374,7 @@ function materialMedia(parent,item,options={}){
   if(!component.mime.startsWith('audio/'))link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
   return player;
 }
-function materialModelCode(model){return model.round?.business_code?.split(' / MV')[0]||businessCode(model.need||model.identity||model.candidates[0]?.record)}
+function materialModelCode(model){return model.round?.business_code||businessCode(model.need||model.identity||model.candidates[0]?.record)}
 function materialCompareControl(host,model){
   const choices=[];
   for(const round of model.rounds||[])for(const [index,row] of (round.results||[]).entries()){
@@ -435,7 +415,7 @@ function renderMaterialCard(parent,model,options={}){
   box.dataset.materialKey=need?.object_id||model.material_id||items[0].record.object_id;
   if(model.round){const focus=e=>{if(e?.target.closest('.material-reference,[data-review-dialog-trigger]'))return;focusMaterialCommentCard(model.material_id,model.round.number,options.workspace)};box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true)}
   const heading=el('div','entity-review-local-heading');nodeText('h3',null,businessTitle({...need||model.identity||items[0].record,material_code:materialModelCode(model)},need?.payload.generation?.output?.name||need?.payload.title||model.identity?.payload.title||items[0].record.payload.title),heading);
-  if(model.round)materialRoundControl(heading,model.material_id,model.rounds,model.round,options.roundChange);else if(need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
+  if(!model.round&&need&&options.planVersion)options.planVersion(heading,need);box.append(heading);
   materialCompareControl(heading,model);
 
   // Read uses of the same definition shown below. A frozen plan can have no
@@ -484,19 +464,18 @@ function renderMaterialCard(parent,model,options={}){
 function renderMaterialWorkspace(root,detail){
   if(detail.record.kind==='REQUIREMENT')return renderMaterialDemand(root,detail);
   const r=detail.record,component=r.payload.components.find(c=>c.id===(detail.selectedComponents?.[r.id]||detail.componentId))||r.payload.components.find(c=>c.role==='original')||r.payload.components[0];
-  const entries=Object.entries(detail.material_versions||{}),card=state.materialCommentCard;
+  const entries=Object.entries(detail.material_cards||{}),card=state.materialCommentCard;
   const [mid,rounds]=(card?.data===detail&&entries.find(([mid])=>mid===card.material_id))||entries[0]||[];
   // An asset opened from the index is already an exact result. Its material may
   // have newer rounds containing different assets; retain this result on entry.
-  let round;if(rounds?.length){const number=detail.selectedMaterialRounds?.[mid]||Number(new URL(location.href).searchParams.get(materialVersionParam(detail)));if(number&&!rounds.some(v=>v.number===number))throw Error('准确素材版本不存在；未替换为最新版本');round=rounds.find(v=>v.number===number)||rounds.find(v=>v.members.some(m=>m.id===r.id))||rounds[0]}
-  if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,round);history.replaceState(history.state,'',url)}
+  let round;if(rounds?.length){const number=detail.selectedMaterialRounds?.[mid]||0;if(number&&!rounds.some(v=>v.number===number))throw Error('准确素材版本不存在；未替换为最新版本');round=rounds.find(v=>v.number===number)||rounds.find(v=>v.members.some(m=>m.id===r.id))||rounds[0]}
+  if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);writeMaterialRoute(url.searchParams,mid,round);history.replaceState(history.state,'',url)}
   if(round&&round.plan&&detail.localPlans?.[round.plan.object_id]&&round.members.some(r=>r.id===detail.localPlans[round.plan.object_id].id))round={...round,plan:detail.localPlans[round.plan.object_id]};
   const allCandidates=round?materialRoundResults(round,r,detail.explicitRevision).map(row=>{const c=row.payload.components.find(c=>c.id===(detail.selectedComponents?.[row.id]||(row.id===r.id?detail.componentId:null)))||row.payload.components.find(c=>c.role==='original')||row.payload.components[0];return {record:row,component:c,components:row.payload.components,review_context:detail.review_contexts?.[row.id]||(row.id===r.id?detail.review_context:null)}}):[{record:r,component,components:r.payload.components,review_context:detail.review_context}];
   const candidateTarget=detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target')||r.id,candidates=materialExactCandidates(detail,allCandidates,candidateTarget,round);
   renderMaterialCard(root,{need:round?.plan||null,identity:r,candidates,round,rounds,material_id:mid},{
     ...materialCandidateOptions(detail,candidates),
     selectedCandidateId:candidateTarget,
-    roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,rounds.find(r=>r.number===number));history.replaceState(history.state,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},
     relatedPlans:round?[]:detail.review_context?.requirements||[],
     assetVersion:(parent,item)=>{if(detail.history.length<2)return;const select=el('select','entity-review-version');select.setAttribute('aria-label',reviewPositionText(r.payload.title)+'的版本');for(const v of detail.history)select.append(new Option(`记录修订 ${v.version}${v.id===v.current_revision?' · 当前':''}`,v.id));select.value=r.id;select.onchange=()=>openProductionRecord(r.object_id,select.value);parent.append(select)},
     selectComponent:(id,revision)=>{detail.selectedComponents||={};detail.selectedComponents[revision]=id;renderProductionReader();document.querySelector('#production-component')?.focus({preventScroll:true})}
@@ -527,31 +506,16 @@ function cancelMaterialCommentLocation(){
   if(pending?.loading&&pending.epoch===productionReadEpoch)++productionReadEpoch;
 }
 function selectCommentMaterialRound(data,row,comment,materialId=null){
-  if(comment.material_plan_scopes?.length&&data.planMaterialVersions)data.material_versions=data.planMaterialVersions;
-  else if(!comment.material_plan_scopes?.length&&comment.material_scopes?.length&&data.legacy_material_versions){data.planMaterialVersions||=data.material_versions;data.material_versions=data.legacy_material_versions}
-  const versions=data.material_versions||{},scopes=comment.material_plan_scopes?.length?comment.material_plan_scopes:comment.material_scopes||[];
-  if(scopes.length){
-    const matches=scopes.filter(scope=>versions[scope.material_id]);
-    const card=state.materialCommentCard;
-    const selected=materialId?scopes.find(scope=>scope.material_id===materialId):matches.find(scope=>card?.data===data&&scope.material_id===card.material_id)||matches.find(scope=>scope.material_id===data.record?.object_id)||matches.find(scope=>row.kind==='REQUIREMENT'&&scope.material_id===row.object_id)||(matches.length===1?matches[0]:null);
-    if(!selected){toast(matches.length?'这条评论关联多个素材，请先选择对应素材卡再定位。':'原评论的素材版本当前无法准确定位；评论仍保留。');return false}
-    if(!versions[selected.material_id]?.some(round=>round.number===selected.number&&materialVersionCommentRows(round).some(member=>member.id===row.id))){toast('原评论的素材版本当前无法准确定位；评论仍保留。');return false}
-    data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.number;
-    state.materialCommentCard={data,material_id:selected.material_id,number:selected.number};
-  }else{
-    // Legacy opinions lack an exact round: retain a compatible current view,
-    // otherwise use the existing revision-based fallback without writing history.
-    const choices=[];
-    for(const [mid,rounds] of Object.entries(versions)){
-      const matches=rounds.filter(round=>materialVersionCommentRows(round).some(member=>member.id===row.id));
-      const round=matches.find(round=>round.number===data.selectedMaterialRounds?.[mid])||matches[0];
-      if(round)choices.push({material_id:mid,number:round.number});
-    }
-    const preferred=materialId||(state.materialCommentCard?.data===data?state.materialCommentCard.material_id:null)||data.unifiedMaterialId;
-    const selected=choices.find(choice=>choice.material_id===preferred)||(choices.length===1?choices[0]:null);
-    if(choices.length&&!selected){toast('这条评论关联多个素材，请先选择对应素材卡再定位。');return false}
-    if(selected){data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.number;state.materialCommentCard={data,...selected}}
+  const choices=[];
+  for(const [mid,cards] of Object.entries(data.material_cards||{})){
+    const card=cards.find(card=>materialCommentRows(card).some(member=>member.id===row.id));
+    if(card)choices.push({material_id:mid,number:card.number});
   }
+  const preferred=materialId||(state.materialCommentCard?.data===data?state.materialCommentCard.material_id:null);
+  if(materialId&&!choices.some(choice=>choice.material_id===materialId)){toast('无法准确定位此素材中的评论目标。');return false}
+  const selected=choices.find(choice=>choice.material_id===preferred)||(choices.length===1?choices[0]:null);
+  if(choices.length&&!selected){toast('这条评论关联多个素材，请先选择对应素材卡再定位。');return false}
+  if(selected){data.selectedMaterialRounds||={};data.selectedMaterialRounds[selected.material_id]=selected.number;state.materialCommentCard={data,...selected}}
   return true;
 }
 async function locateMaterialComment(comment){
@@ -685,7 +649,7 @@ async function openMaterialReference(ref,trigger,source=false){
       // reader. A new modal must not retain the detached reader as its parent.
       dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openUnifiedMaterial(ref,trigger)),{once:true});dialog.close();return
     }
-    const row=detail.record,p=row.payload,identity=ref.reference_identity;body.replaceChildren();title.textContent=identity?.label||businessTitle(row)+' · '+materialVersionLabel(row);body.dataset.referenceRevision=ref.revision_id;
+    const row=detail.record,p=row.payload,identity=ref.reference_identity;body.replaceChildren();title.textContent=identity?.label||businessTitle(row)+' · '+materialContentLabel(row);body.dataset.referenceRevision=ref.revision_id;
     if(identity?.disposition==='current'){
       title.replaceChildren();const params=new URLSearchParams({material_id:identity.canonical_material_id,...(identity.candidate?{material_target:identity.candidate.revision_id}:{})});
       productionButton(title,identity.label,()=>openUnifiedMaterial({... (identity.candidate||productionRef(row)),params,component_id:ref.component_id},document.activeElement));
@@ -735,19 +699,19 @@ async function openMaterialReference(ref,trigger,source=false){
 // A demand is a real REQUIREMENT, never a fabricated ASSET. Round data comes
 // from the shared material version contract when available.
 function renderMaterialDemand(root,detail){
-  const r=detail.record,[mid,rounds]=Object.entries(detail.material_versions||{})[0]||[];
-  const selected=detail.selectedMaterialRounds?.[mid]||Number(new URL(location.href).searchParams.get(materialVersionParam(detail)));
+  const r=detail.record,[mid,rounds]=Object.entries(detail.material_cards||{})[0]||[];
+  const selected=detail.selectedMaterialRounds?.[mid]||0;
   if(selected&&!rounds?.some(v=>v.number===selected))throw Error('准确素材版本不存在；未替换为最新版本');
   const round=rounds?.find(v=>v.number===selected)||(detail.explicitRevision?rounds?.find(v=>v.members.some(m=>m.id===r.id)):null)||materialDefaultRound(rounds);
-  if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,round);history.replaceState(history.state,'',url)}
+  if(round){detail.selectedMaterialRounds||={};detail.selectedMaterialRounds[mid]=round.number;const url=new URL(location.href);writeMaterialRoute(url.searchParams,mid,round);history.replaceState(history.state,'',url)}
   const local=detail.localPlans?.[r.object_id];
-  const belongs=row=>row?.kind==='REQUIREMENT'&&materialVersionCommentRows(round).some(m=>m.id===row.id&&m.object_id===row.object_id);
+  const belongs=row=>row?.kind==='REQUIREMENT'&&materialCommentRows(round).some(m=>m.id===row.id&&m.object_id===row.object_id);
   const exact=belongs(local)?local:detail.explicitRevision?r:null;
   // An unfrozen version can contain several immutable preparation revisions.
   // A link to an earlier one reads that revision, not the version's latest plan.
   // Frozen definitions and their real results retain the normal version contract.
   const exactPreparingRevision=materialHistoricalDefinition(exact,round);
-  const need=exactPreparingRevision?exact:local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||(round?.model==='plan-v1'&&round.frozen?null:r);
+  const need=exactPreparingRevision?exact:local&&round?.members.some(m=>m.id===local.id)?local:round?.plan||r;
   const results=exactPreparingRevision?[]:round?.results||(detail.candidate_records||[]).filter(a=>a.payload.candidate_requirements?.some(ref=>ref.revision_id===r.id));
   const allCandidates=results.filter(a=>!a.payload.placeholder).map(record=>({record,component:record.payload.components.find(c=>c.id===detail.selectedComponents?.[record.id])||record.payload.components.find(c=>c.role==='original')||record.payload.components[0],components:record.payload.components,review_context:detail.review_contexts?.[record.id]})).filter(i=>i.component);
   const candidates=materialExactCandidates(detail,allCandidates,detail.selectedCandidateId||new URL(location.href).searchParams.get('material_target'),round);
@@ -755,7 +719,6 @@ function renderMaterialDemand(root,detail){
   renderMaterialCard(root,{need,identity:r,candidates,round,rounds,material_id:mid,exactPreparingRevision,historicalRecipe},{
     definitionHistory:detail.history||[],
     ...materialCandidateOptions(detail,candidates),
-    roundChange:number=>{switchMaterialRound(detail,mid,number);const url=new URL(location.href);writeMaterialVersionRoute(url.searchParams,mid,rounds.find(r=>r.number===number));history.replaceState(history.state,'',url);renderProductionReader();renderComments();focusMaterialRoundControl(mid)},
     planVersion:(parent,row)=>{if(rounds?.length||detail.history.length<2)return;const select=el('select','entity-review-version');select.setAttribute('aria-label',reviewPositionText(row.payload.title)+'的版本');for(const v of detail.history)select.append(new Option(`记录修订 ${v.version}${v.id===v.current_revision?' · 当前':''}`,v.id));select.value=row.id;select.onchange=()=>openProductionRecord(row.object_id,select.value);parent.append(select)},
     selectComponent:(id,revision)=>{detail.selectedComponents||={};detail.selectedComponents[revision]=id;renderProductionReader();document.querySelector('#production-component')?.focus({preventScroll:true})}
   });
@@ -763,23 +726,10 @@ function renderMaterialDemand(root,detail){
   if(!historicalRecipe&&typeof renderMaterialAdoptionControls==='function')renderMaterialAdoptionControls(root,detail);
 }
 
-function materialVersionParam(data){return Object.values(data?.material_versions||{}).some(rs=>rs.some(r=>r.model==='plan-v1'))?'material_version':'material_round'}
-function writeMaterialVersionRoute(params,mid,round){
-  if(round.current_content){params.set('material_id',mid);for(const key of ['material_round','material_version','material_baseline'])params.delete(key);return}
-  params.set('material_id',mid);params.delete(round.model==='plan-v1'?'material_round':'material_version');
-  params.set(round.model==='plan-v1'?'material_version':'material_round',round.number);
-  if(round.baseline_id)params.set('material_baseline',round.baseline_id);else params.delete('material_baseline');
+function writeMaterialRoute(params,mid,card){
+  params.set('material_id',mid);
+  for(const key of ['material_round','material_version','material_baseline'])params.delete(key);
 }
-function normalizeConsolidatedMaterialRoute(params,versions){
-  if(Object.values(versions||{}).some(rs=>rs.some(r=>r.current_content))&&(params.has('material_round')||params.has('material_version'))){if(params.has('material_target')&&Object.values(versions).flatMap(rs=>rs.flatMap(r=>r.results||[])).some(r=>r.id===params.get('material_target'))){for(const key of ['material_round','material_version','material_baseline'])params.delete(key);}else throw Error('此制作历史稿已退役；请打开当前素材或准确候选。');}
-  const parameter=params.has('material_round')?'material_round':'material_version',mid=params.get('material_id');
-  const sets=Object.entries(versions||{}).filter(([id])=>!mid||id===mid),rounds=sets.flatMap(([,rs])=>rs),baseline=rounds.find(r=>r.baseline_id);
-  if(!baseline||!params.has(parameter))return;
-  const number=Number(params.get(parameter));
-  if(params.has('material_baseline')){
-    if(params.get('material_baseline')!==baseline.baseline_id)throw Error('素材版本基线已失效，请重新选择。');
-  }else{
-    if(parameter==='material_round'||sets.length!==1||!baseline.previous_numbers?.[number])throw Error('此准确素材版本已删除；原链接不可用，请重新选择。');
-    params.set(parameter,baseline.previous_numbers[number]);params.set('material_baseline',baseline.baseline_id);
-  }
+function validateMaterialRoute(params){
+  if(['material_round','material_version','material_baseline'].some(key=>params.has(key)))throw Error('素材版本已删除，此链接不再支持。请从素材列表打开当前方案或候选。');
 }

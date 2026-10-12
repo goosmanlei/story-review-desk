@@ -4,9 +4,9 @@
 
 首页为“制作思路”，默认打开实例文档的第一子页；“故事创作”“生产制作”及实例提供的独立方法子页按文档顺序展示。旧 `workspace=current` 链接兼容进入新页。方法内容由故事实例的 `content/production-approach.json` 提供，通用系统只做阅读展示，不维护工作统计或执行进度。存储格式、清理清单和验收入口见[制作思路说明](docs/production-approach.md)。
 
-制作域只维护当前内容，素材卡在当前方案和真实候选之间切换；候选固定提交前的完整方案与准确输入，故事版本保持。数据、接口、迁移及恢复见 [当前制作与候选](docs/material-versions.md)。
+制作域只维护当前内容，素材卡在当前方案和真实候选之间切换；候选固定提交前的完整方案与准确输入，故事版本保持。数据、接口、迁移及恢复见 [当前制作与候选](docs/current-materials.md)。
 
-当前实例通过准确事务迁移取消制作全文链。较早版本收敛的历史背景见 [版本收敛](docs/version-consolidation.md)，后续制作与 Schema 13 恢复以 [当前制作与候选](docs/material-versions.md) 为准。
+当前实例通过准确事务迁移取消制作全文链。较早版本收敛的历史背景见 [版本收敛](docs/version-consolidation.md)，后续制作与 Schema 14 恢复以 [当前制作与候选](docs/current-materials.md) 为准。
 
 制作页面按需读取正文，列表和目录保留准确身份；有界并发、事务失效缓存、轻量接口及恢复边界见[制作读取说明](docs/production-performance.md)。
 
@@ -92,7 +92,7 @@ git push origin main
 
 批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 在必要输入齐备且完整包的准确依赖与全部原件均有效时生成目录包；已采用的可选原件或历史输入缺失也会阻断导出。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
 
-Schema 13 导出保存当前制作单份正文、不可变提交快照、真实候选、意见／回应摘录、故事原有版本、配置方法及有效原件。迁移删除旧制作全文与专属版本索引，恢复仅进入空实例并拒绝旧模型复活。详见 [当前制作与候选](docs/material-versions.md)。
+Schema 14 导出保存当前制作单份正文、不可变提交快照、真实候选、意见／回应摘录、故事原有版本、配置方法及有效原件。迁移删除旧制作全文与专属版本索引，恢复仅进入空实例并拒绝旧模型复活。详见 [当前制作与候选](docs/current-materials.md)。
 
 `tests/test_complete_states.py` 验证完整形态、状态转换、整体与细节覆盖、就绪阻断和读取依赖并发保护；`tests/test_production.py` 验证原子批量导入、并发、来源、状态并存、一材多用、显式换版、变更复核、谱系、精确媒体评论和恢复；`tests/test_production_api.py` 验证真实 HTTP 上传、Range、来源及冲突响应。真实故事数据和浏览器操作证据归故事实例；测试夹具不计作媒体成果。
 
@@ -105,6 +105,6 @@ Schema 13 导出保存当前制作单份正文、不可变提交快照、真实�
 制作设定与素材管理共用素材卡；直接关系、历史意见及准确实际生成信息见 [素材卡与关系契约](docs/materials-and-relationships.md)。
 ## 业务对象与历史读取
 
-业务编号、版本与候选选择，以及关系旧说明清理后的读取与恢复规则见 [编号规则](docs/business-codes.md)、[实体和素材审阅](docs/materials-and-relationships.md)、[素材版本与导出](docs/material-versions.md)。系统管理的编号说明直接读取同一前缀定义。
+业务编号、版本与候选选择，以及关系旧说明清理后的读取与恢复规则见 [编号规则](docs/business-codes.md)、[实体和素材审阅](docs/materials-and-relationships.md)、[素材版本与导出](docs/current-materials.md)。系统管理的编号说明直接读取同一前缀定义。
 
 SKILL管理的流程阅读、文件独立版本比较、后台维护与实际执行、媒体启用与恢复契约见 [工作方法](docs/managed-methods.md)。

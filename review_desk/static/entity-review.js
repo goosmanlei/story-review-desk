@@ -15,7 +15,7 @@ function entityReviewMediaState(data,item){
 }
 function restoreEntityCallContext(data,row){
   const card=state.materialCommentCard;
-  const results=card?.data===data?data.material_versions?.[card.material_id]?.find(r=>r.number===card.number)?.results:null;
+  const results=card?.data===data?data.material_cards?.[card.material_id]?.find(r=>r.number===card.number)?.results:null;
   const items=data.media.filter(m=>m.review_context?.call?.id===row.id&&m.review_context.call.object_id===row.object_id&&(!results||results.some(r=>r.id===m.record.id)));
   const item=items.find(m=>m.id===state.entityReviewMedia)||items[0];
   if(!item){data.historicalCall=row;return}
@@ -45,23 +45,22 @@ function entityMaterialRouteOwner(row,param){
   return owner||null;
 }
 function entityMaterialRoute(data,row,param,{defaultSelection=false}={}){
-  data.planMaterialVersions||=data.material_versions;
-  const routeVersions=param.has('material_round')?data.legacy_material_versions:data.material_versions;
-  if(Object.values(routeVersions||{}).some(rs=>rs.some(r=>r.baseline_id)))normalizeConsolidatedMaterialRoute(param,routeVersions);
-  if(param.has('material_round')&&Object.keys(data.legacy_material_versions||{}).length)data.material_versions=data.legacy_material_versions;
+  data.currentMaterialCards||=data.material_cards;
+  const routeVersions=data.material_cards;
+  validateMaterialRoute(param);
   const same=r=>r.object_id===row.object_id&&r.id===row.id;
-  const entries=Object.entries(data.material_versions||{}).flatMap(([material_id,rounds])=>rounds.filter(round=>materialVersionCommentRows(round).some(same)).map(round=>({material_id,round})));
-  const mid=param.get('material_id'),number=param.get(materialVersionParam(data));
+  const entries=Object.entries(data.material_cards||{}).flatMap(([material_id,rounds])=>rounds.filter(round=>materialCommentRows(round).some(same)).map(round=>({material_id,round})));
+  const mid=param.get('material_id'),number=null;
   const choices=entries.filter(e=>(!mid||e.material_id===mid)&&(!number||String(e.round.number)===number));
-  if((mid||number)&&!choices.length)throw new Error('此实体中的素材版本已不可用，请从实体内重新选择；原链接未改动。');
+  if((mid||number)&&!choices.length)throw new Error('此实体中的素材已不可用，请从实体内重新选择；原链接未改动。');
   const contexts=[...Object.values(data.materialContexts||{}),...data.media.map(item=>item.review_context)].filter(Boolean);
   const known=[...entityReviewRows(data),...contexts.flatMap(context=>[context.call,...(context.requirements||[])].filter(Boolean))];
-  if(!entries.length&&!known.some(same))throw new Error('此准确素材版本不属于当前实体，请核对原链接。');
+  if(!entries.length&&!known.some(same))throw new Error('此素材不属于当前实体，请核对原链接。');
   const stateId=param.get('entity_state');
   const preferred=mid||(defaultSelection?row.material_identity?.id:null)||row.object_id;
   let selected=(stateId?choices.find(e=>e.round.plan?.payload.scope?.object_id===stateId):null)||choices.find(e=>e.material_id===preferred)||choices[0]||null;
   if(defaultSelection&&row.kind==='REQUIREMENT'&&row.id===row.current_revision&&selected&&!number&&!param.has('material_target')){
-    selected={material_id:selected.material_id,round:materialDefaultRound(data.material_versions[selected.material_id])};
+    selected={material_id:selected.material_id,round:materialDefaultRound(data.material_cards[selected.material_id])};
     row=selected.round.plan||row;
   }
   return {row,selected};
@@ -80,7 +79,7 @@ function restoreEntityMaterialRoute(data,route){
   const assets=row.kind==='ASSET'?[row]:(selected?.round.results||[]),assetIds=new Set(assets.map(r=>r.object_id));
   const items=data.media.filter(item=>assetIds.has(item.record.object_id));
   if(!form){const item=items.find(item=>item.state?.revision_id===state.productionChildDetail?.record.id)||items.find(item=>item.state&&data.states.some(s=>s.id===item.state.revision_id));const covered=item&&data.states.find(s=>s.id===item.state.revision_id&&s.object_id===item.state.object_id);if(covered)state.productionChildDetail=entityReviewDetail(covered)}
-  const retained=selected&&data.media.some(item=>!item.state&&(data.material_versions[selected.material_id]||[]).some(round=>round.members.some(member=>member.kind==='ASSET'&&member.object_id===item.record.object_id&&member.id===item.record.id)));
+  const retained=selected&&data.media.some(item=>!item.state&&(data.material_cards[selected.material_id]||[]).some(round=>round.members.some(member=>member.kind==='ASSET'&&member.object_id===item.record.object_id&&member.id===item.record.id)));
   if(retained||items.some(item=>!item.state))data.unassignedOpen=true;
   if(!scope&&!form&&items.length&&items.every(item=>!(item.state||item.review_state)))data.materialTab='entity';
   if(row.kind==='REQUIREMENT')data.openRecipe=row.object_id;if(selected?.round.current_content){data.selectedCandidates||={};data.selectedCandidates[selected.material_id]=row.kind==='ASSET'?row.id:'current';}
@@ -96,7 +95,7 @@ async function openEntityReview(owner,detail,epoch,exactRevision,view=null){
   if(reviewRevision)throw new Error('旧审批记录已退役；此链接不自动跳到当前设计。请沿原意见查看准确内容。');
   const query=new URLSearchParams({entity_id:owner,...(reviewRevision?{revision_id:reviewRevision}:{})});
   const data=await api('/api/production/entity-review?'+query);
-  data.planMaterialVersions=data.material_versions;
+  data.currentMaterialCards=data.material_cards;
   if(epoch!==productionReadEpoch||(state.unifiedCardRoot||null)!==cardRoot||!isProduction()||state.workspace!==workspace||workspace==='settings.workspace'&&!state.unifiedCardRoot&&state.productionVisibleEntities&&!state.productionVisibleEntities.has(owner)&&!(exactRevision&&data.entity.payload.status==='withdrawn'))return;
   const retained=view?.();
   const materialRoute=['ASSET','REQUIREMENT','CALL'].includes(detail.record.kind)?entityMaterialRoute(data,detail.record,url.searchParams):null;
@@ -305,20 +304,20 @@ function entityReviewMaterialItems(data,items){
   }).filter(i=>i.component);
 }
 function entityReviewMaterialModels(needs,items,data,{history=false}={}){
-  const card=state.materialCommentCard,rounds=card?.data===data?data.material_versions?.[card.material_id]:null;
+  const card=state.materialCommentCard,rounds=card?.data===data?data.material_cards?.[card.material_id]:null;
   const selected=rounds?.find(round=>round.number===card.number);
   const target=state.productionSelected;
   const owns=selected?.members.some(row=>row.object_id===target?.object_id&&row.id===target.id)&&items.some(item=>rounds.some(round=>round.members.some(row=>row.kind==='ASSET'&&row.object_id===item.record.object_id&&row.id===item.record.id)));
   // Unassigned media can share several real cards. Preserve the already
   // verified card choice without adding cards or changing their membership.
-  const modelData=owns?{...data,material_versions:{[card.material_id]:rounds,...Object.fromEntries(Object.entries(data.material_versions).filter(([mid])=>mid!==card.material_id))}}:data;
+  const modelData=owns?{...data,material_cards:{[card.material_id]:rounds,...Object.fromEntries(Object.entries(data.material_cards).filter(([mid])=>mid!==card.material_id))}}:data;
   // Normal state browsing follows the explicitly shared material. An exact
   // alias URL/comment retains its old material/version numbering and members.
   const associations=new Map(),sharedNeeds=[];
   for(const need of needs){
     const canonical=need.material_identity?.id,exact=card?.data===data&&card.material_id===need.object_id||data.localVersions?.[need.object_id];
-    const alias=card?.data===data&&card.material_id!==need.object_id&&need.material_identity?.aliases?.includes(card.material_id)?[(data.requirements||[]).find(r=>r.object_id===card.material_id),...(data.material_versions?.[card.material_id]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===card.material_id):null;
-    const shared=canonical&&[(data.requirements||[]).find(r=>r.object_id===canonical),...(data.material_versions?.[canonical]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===canonical);
+    const alias=card?.data===data&&card.material_id!==need.object_id&&need.material_identity?.aliases?.includes(card.material_id)?[(data.requirements||[]).find(r=>r.object_id===card.material_id),...(data.material_cards?.[card.material_id]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===card.material_id):null;
+    const shared=canonical&&[(data.requirements||[]).find(r=>r.object_id===canonical),...(data.material_cards?.[canonical]||[]).flatMap(r=>[r.plan,r.definition_records?.requirement])].find(r=>r?.kind==='REQUIREMENT'&&r.object_id===canonical);
     const current=alias||(!exact&&canonical&&canonical!==need.object_id?shared||need:need);
     if(!associations.has(current.object_id)){associations.set(current.object_id,need);sharedNeeds.push(current)}
   }
@@ -345,7 +344,7 @@ function renderStateMaterials(parent,data,form,withdrawn=false){
   if(data.unifiedRight)return renderUnifiedModels(parent,entityReviewMaterialModels(needs,items,data),data);
   const grid=el('section','entity-review-materials');grid.setAttribute('aria-label','此状态的素材与生成方案');
   const change=row=>{data.localVersions||={};data.localVersions[row.object_id]=row};
-  for(const model of entityReviewMaterialModels(needs,items,data))renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model),roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)},planVersion:(h,row)=>entityVersionControl(h,row,change),assetVersion:(h,item)=>entityVersionControl(h,item.record,change)});
+  for(const model of entityReviewMaterialModels(needs,items,data))renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model),planVersion:(h,row)=>entityVersionControl(h,row,change),assetVersion:(h,item)=>entityVersionControl(h,item.record,change)});
   parent.append(grid);
 }
 function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMedia'){
@@ -353,7 +352,7 @@ function renderEntityReviewMedia(parent,items,form,selectionKey='entityReviewMed
   if(data.unifiedRight)return renderUnifiedModels(parent,entityReviewMaterialModels([],entityReviewMaterialItems(data,items),data,{history:true}),data);
   const grid=el('section','entity-review-materials');parent.append(grid);
   for(const model of entityReviewMaterialModels([],entityReviewMaterialItems(data,items),data,{history:true})){
-    const card=renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model),roundChange:number=>{switchMaterialRound(data,model.material_id,number);renderProductionReader();renderComments();focusMaterialRoundControl(model.material_id)}});
+    const card=renderMaterialCard(grid,model,{...entityMaterialCandidateOptions(data,model)});
     if(selectionKey==='entityReviewHistoricalMedia')for(const pane of card.querySelectorAll('.entity-review-media-pane'))pane.dataset.commentMedia='true';
   }
 }
@@ -391,7 +390,7 @@ function locateEntityReviewComment(comment){
   }
   if(row.kind==='CALL')restoreEntityCallContext(data,row);
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
-  data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
+  data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_cards||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
   if(materialPlanCommentNeedsHistory(row,comment))return openProductionCommentOriginal(row,comment).then(()=>true);return locateProductionComment(comment,true)!==false;
 }

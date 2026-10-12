@@ -31,8 +31,9 @@
         <header class="page-heading" aria-labelledby="page-title"><small id="page-marker"></small><h1 id="page-title"></h1><p id="page-purpose"></p></header>
         <section id="story-creation-shell" class="workspace-view" aria-labelledby="page-title">
           <section id="story-workspace" role="tabpanel" aria-labelledby="open-story-sources">
+            <nav id="novel-index" class="screenplay-versions" aria-label="小说版本" hidden></nav>
             <div class="text-reader">
-              <aside id="source-section" class="text-reader-index"><header><h2>资料目录</h2><p>评论数包含已关闭评论。</p></header><nav id="source-list" aria-label="资料"></nav></aside>
+              <aside id="source-section" class="text-reader-index"><header><h2 id="source-index-title">资料目录</h2><p>评论数包含已关闭评论。</p></header><nav id="source-list" aria-label="资料"></nav></aside>
               <div class="source-reader-main"><header class="text-reader-head"><div><small id="reader-kind">SOURCE DOCUMENT</small><h2 id="reader-head-title">选择一份采编资料</h2><p id="reader-head-detail">原文与整理稿分别标注</p></div></header><div id="source-view" class="text-reader-scroll" aria-live="polite"></div></div>
             </div>
           </section>
@@ -79,6 +80,7 @@
   <script src="/structure.js" defer></script>
   <script src="/comment-review.js" defer></script>
   <script src="/screenplay.js" defer></script>
+  <script src="/novel.js" defer></script>
   <script src="/production.js" defer></script>
   <script src="/material-review.js" defer></script>
   <script src="/production-breakdown.js" defer></script>
