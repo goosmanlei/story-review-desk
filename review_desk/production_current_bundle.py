@@ -136,6 +136,12 @@ def populate(store, framework, materials, comments, configurations, content):
         install(store)
         if 'generation_publications' in framework:
             store.db.execute('CREATE TABLE IF NOT EXISTS generation_publications (id TEXT PRIMARY KEY, receipt TEXT NOT NULL)')
+        from . import method_files
+        present = set(framework) & set(method_files.TABLES)
+        if present and present != set(method_files.TABLES):
+            raise ValueError('incomplete method file history')
+        if present:
+            method_files.install(store)
         allowed = table_names(store)-{'sources', 'comments', 'comment_events', 'configurations', 'configuration_events', 'read_generations', 'material_content'}
         if set(framework) != allowed:
             raise ValueError('current recovery tables missing or unsupported: '+str(set(framework)^allowed))
@@ -151,6 +157,8 @@ def populate(store, framework, materials, comments, configurations, content):
         insert_rows(store, 'configurations', configurations['records'])
         insert_rows(store, 'configuration_events', configurations['events'])
         current.read_adapters(store)
+        if not present:
+            method_files.sync(store)
     finally:
         store._material_migrating = False
 
@@ -168,6 +176,8 @@ def validate(store):
         raise ValueError('current recovery foreign key mismatch')
     from .semantic_consolidation import validate as validate_consolidation
     validate_consolidation(store)
+    from .method_files import validate as validate_files
+    validate_files(store)
     from .material_reference import validate_evidence
     validate_evidence(store)
     for obj in store.objects():

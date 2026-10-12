@@ -280,7 +280,7 @@ class Store:
                     continue
                 raise ValueError("unknown dependency revision")
             refs.append((revision_id, target["id"], ref["role"]))
-        stamp = now()
+        stamp = getattr(self, '_method_timestamp', None) or now()
         if current:
             self.db.execute("UPDATE objects SET current_revision=?,version=?,updated_at=? WHERE id=?", (revision_id, new_version, stamp, object_id))
         else:
@@ -306,6 +306,9 @@ class Store:
             refresh_identity(self,row)
             register(self, row)
             allocate_candidates(self, revision_id)
+        if payload.get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1'):
+            from . import method_files
+            method_files.sync(self, object_id if method_files.installed(self) else None)
         return {"id": object_id, "kind": kind, "revision": revision_id, "version": new_version}
 
     def _encode_material(self, payload):

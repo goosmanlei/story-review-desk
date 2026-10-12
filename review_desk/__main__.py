@@ -58,6 +58,8 @@ def main():
     method_export.add_argument('revision_id')
     method_export.add_argument('--output', type=Path, required=True)
     subs.add_parser('method-registry')
+    subs.add_parser('method-files-migrate')
+    subs.add_parser('method-files-check')
     subs.add_parser('method-activate-media')
     source = subs.add_parser('method-source')
     source.add_argument('file', type=Path)
@@ -120,6 +122,14 @@ def main():
             if args.command == 'methods': result = methods.catalog(store)
             elif args.command == 'method-get': result = methods.read(store, args.object_id, args.revision)
             elif args.command == 'method-export': result = methods.export_execution(store, {'object_id': args.object_id, 'revision_id': args.revision_id}, args.output)
+            elif args.command == 'method-files-check':
+                from . import method_files
+                method_files.require_history(store)
+                method_files.validate(store)
+                result = {'validated': True}
+            elif args.command == 'method-files-migrate':
+                from .method_files import migrate
+                result = migrate(store)
             elif args.command == 'method-registry': result = methods.export_registry(store)
             elif args.command == 'method-activate-media':
                 from .method_media import activate
