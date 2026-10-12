@@ -400,8 +400,9 @@ function locateEntityReviewCommentLoaded(comment){
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
   data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
-  if(row.kind==='STATE'&&state.unifiedCardRoot){
-    const group=state.unifiedCardRoot.querySelector(`[data-source-revision="${CSS.escape(row.id)}"]`);
+  if(['STATE','AV_SHOT'].includes(row.kind)&&state.unifiedCardRoot){
+    const field=productionTextBlocks(row).find(b=>b.id===comment.anchor.block_id)?.field;
+    const group=row.kind==='STATE'?state.unifiedCardRoot.querySelector(`[data-source-revision="${CSS.escape(row.id)}"]`):[...state.unifiedCardRoot.querySelectorAll('.material-source-group')].find(g=>g.sourceFields?.includes(field));
     if(group)return group.openSourceExplanation().then(popup=>{if(!popup?.isConnected||state.entityReview!==data)return false;popup.querySelector('.review-surface')?.reviewFocus?.();state.selected=comment.id;paintProductionReview();renderComments();return locateProductionComment(comment,true)!==false});
   }
   if(materialPlanCommentNeedsHistory(row,comment))return openProductionCommentOriginal(row,comment).then(()=>true);return locateProductionComment(comment,true)!==false;
