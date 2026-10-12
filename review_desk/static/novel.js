@@ -14,7 +14,7 @@ function novelVersionLabel(source,index){
 }
 function renderNovelIndex(){
   const versions=$('#novel-index'),nav=$('#source-list');if(!versions)return;
-  versions.hidden=false;const scroll=versions.scrollLeft;versions.replaceChildren();nav.replaceChildren();
+  versions.hidden=false;const scroll=versions.scrollLeft,chapterScroll=nav.scrollTop;versions.replaceChildren();nav.replaceChildren();
   const novels=state.sources.filter(source=>source.group==='story-refinements');
   for(const [index,source] of novels.entries()){
     const active=source.id===state.current?.id,button=nodeText('button','screenplay-version source-button'+(active?' active':''),novelVersionLabel(source,index),versions);
@@ -41,6 +41,7 @@ function renderNovelIndex(){
   }
   if(!novels.length)nodeText('p','source-no-results','尚未发布小说。',nav);
   else if(!chapters.length)nodeText('p','source-no-results','本版按完整正文阅读。',nav);
+  nav.scrollTop=chapterScroll;
 }
 function renderNovelDocument(){
   hideSelectionAction();const source=state.current,root=$('#source-view');root.replaceChildren();
