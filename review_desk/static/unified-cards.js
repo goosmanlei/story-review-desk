@@ -388,15 +388,26 @@ function renderShotEntityWorkspace(root,data){
   if(!groups.some(g=>g.key===data.shotTab))data.shotTab=groups.find(g=>g.material_ids.includes(data.unifiedMaterialId))?.key||groups[0]?.key;
   const focus=(row,restore=false)=>{if(!row)return;const model=by.get(data.unifiedMaterialId);state.materialCommentCard={data,material_id:data.unifiedMaterialId,number:model?.round?.number||1};if(restore)restoreUnifiedMaterialReader(data,data.unifiedMaterialId,row);else{focusProductionReview(entityReviewDetail(row),false);restoreProductionDraft()}if(root.closest?.('.breakdown-scene')){breakdownRoute({breakdown_object:shot.object_id,breakdown_revision:shot.id});writeShotWorkspaceRoute(data)}renderComments()};
   let by=new Map(),observer=null,drawEpoch=0;
+  // Keep the previous reader mounted until the exact next plan is ready. The
+  // zero-height notice cannot collapse the card or reset its scroll position.
+  const pending=(message,error=false)=>{
+    right.querySelector('.material-reader-status')?.remove();
+    for(const child of right.children)child.inert=true;
+    right.setAttribute('aria-busy',String(!error));
+    const notice=el('div','material-reader-status');notice.setAttribute('role','status');right.prepend(notice);
+    nodeText('p',error?'production-issue':'production-meta',message,notice);
+    if(error)productionButton(notice,'重试',()=>draw(true,true));
+  };
+  const issue=message=>{right.replaceChildren();right.setAttribute('aria-busy','false');nodeText('p','production-issue',message,right)};
   function draw(priority=false,reuseList=false){
     observer?.disconnect();const selection=++drawEpoch;
     by=new Map(entityReviewMaterialModels(data.requirements,[],data).map(m=>[materialModelKey(m),m]));
-    pauseReviewMedia?.(right);if(!reuseList){for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();panel.replaceChildren()}right.replaceChildren();
+    pauseReviewMedia?.(right);if(!reuseList){for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();panel.replaceChildren()}
     const available=groups.flatMap(group=>group.material_ids).filter(id=>by.has(id));
     if(!available.length){nodeText('p','production-meta','本镜尚无独立素材需求',panel);return}
-    let selected=data.unifiedMaterialId;if(selected&&!available.includes(selected)){nodeText('p','production-issue','准确素材已不可用；未替换为首项',right);return}selected||=available[0];data.unifiedMaterialId=selected;
+    let selected=data.unifiedMaterialId;if(selected&&!available.includes(selected)){issue('准确素材已不可用；未替换为首项');return}selected||=available[0];data.unifiedMaterialId=selected;
     const preserve=action=>{const body=card.closest('.breakdown-body'),top=card.getBoundingClientRect().top;action();if(body)body.scrollTop+=card.getBoundingClientRect().top-top};
-    const select=id=>{for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;data.selectedCandidates[id]||='current';const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
+    const select=id=>{if(id===data.unifiedMaterialId)return;for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;data.selectedCandidates[id]||='current';const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
     if(!reuseList)for(const group of groups){
       const sections=new Map();
       for(const id of group.material_ids.filter(id=>by.has(id))){const states=(group.key_states||[]).filter(s=>s.requirements.some(ref=>ref.object_id===id)),key=states.map(s=>s.id).join('|');if(!sections.has(key))sections.set(key,{states,ids:[]});sections.get(key).ids.push(id)}
@@ -412,10 +423,10 @@ function renderShotEntityWorkspace(root,data){
     const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
     for(const button of panel.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===selected));
     if(!data.selectedCandidates[selected])data.selectedCandidates[selected]='current';
-    if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){nodeText('p','production-issue','准确候选已不可用；未替换为其他结果',right);return}
+    if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){issue('准确候选已不可用；未替换为其他结果');return}
     const candidate=data.selectedCandidates[selected];
     if(data.deferred_materials?.includes(selected)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){
-      const status=nodeText('p','production-meta','正在读取素材方案…',right);status.setAttribute('role','status');
+      pending('正在读取 '+materialModelCode(model)+' · '+reviewPositionText(model.need.payload.title)+'…');
       const load=()=>{observer?.disconnect();queueShotDetail(data,selected,candidate==='current'?null:candidate,card,priority).then(()=>{
         if(selection!==drawEpoch||!card.isConnected)return;
         const body=card.closest('.breakdown-body'),anchor=card;
@@ -425,12 +436,14 @@ function renderShotEntityWorkspace(root,data){
         const current=data.requirements.find(n=>n.object_id===selected);
         if(state.productionSelected?.object_id===selected)focusProductionReview(entityReviewDetail(current),false);
         paintProductionReview();
-      }).catch(error=>{if(selection!==drawEpoch||!card.isConnected||error.name==='AbortError')return;right.replaceChildren();nodeText('p','production-issue','素材方案读取失败：'+error.message,right);productionButton(right,'重试',()=>draw(true,true))})};
+      }).catch(error=>{if(selection!==drawEpoch||!card.isConnected||error.name==='AbortError')return;pending('素材方案读取失败：'+error.message,true)})};
       if(priority||typeof IntersectionObserver==='undefined')load();
       else {const body=root.closest('.breakdown-body');observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load()},{root:body&&['auto','scroll'].includes(getComputedStyle(body).overflowY)?body:null,rootMargin:'500px'});observer.observe(card)}
       return;
     }
-    renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);preserve(()=>draw(true,true));paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;preserve(()=>draw(false,true));paintProductionReview()}}});
+    const x=right.scrollLeft,y=right.scrollTop;
+    const reader=renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{if(id===data.selectedCandidates[selected])return;rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);preserve(()=>draw(true,true));paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate&&id!==data.selectedComponents?.[candidate.record.id]){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;preserve(()=>draw(false,true));paintProductionReview()}}});
+    right.replaceChildren(reader);right.setAttribute('aria-busy','false');right.scrollLeft=x;right.scrollTop=y;
   }
   draw();return card;
 }
