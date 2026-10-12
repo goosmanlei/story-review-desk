@@ -41,3 +41,11 @@ test('method comment draft metadata is isolated by object, revision, file and br
  vm.createContext(c);vm.runInContext(source.slice(source.indexOf('function storyDraftMetaKey()'),source.indexOf('function switchWorkspace(')),c);
  const first=c.storyDraftMetaKey();c.methodView.document.file='two.md';assert.notEqual(c.storyDraftMetaKey(),first);c.methodView.document.file='one.md';c.methodView.document.record.revision_id='v2';assert.notEqual(c.storyDraftMetaKey(),first);c.methodView.document.record.revision_id='v1';assert.equal(c.storyDraftMetaKey(),first);
 });
+test('opening an exact SVG file shows the diagram, keeps the original source anchor, and reports image failure without substitution',()=>{
+ const f=setup(),source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/methods.js'),'utf8');
+ vm.runInContext(source.slice(source.indexOf('function renderMethodBlocks('),source.indexOf('function paintMethodComments(')),f.ctx);
+ const body='<svg xmlns="http://www.w3.org/2000/svg"><title>原准确图示</title><text>Original</text></svg>',doc={file:'book/diagram.svg',record:{payload:{files:{'book/diagram.svg':body,'book/other.svg':'<svg>Other</svg>'}}},blocks:[{id:'original-source'}]};
+ f.ctx.renderMethodBlocks(f.root,doc,f.root);const picture=f.root.querySelector('img');
+ assert.equal(decodeURIComponent(picture.src.split(',')[1]),body);assert.equal(picture.alt,'原准确图示');assert.equal(picture.parent.dataset.blockId,'original-source');assert.doesNotMatch(f.root.textContent,/<svg/);
+ picture.onerror();assert.equal(f.root.querySelectorAll('img').length,0);assert.match(f.root.textContent,/准确图示无法显示.*未替换/);
+});
