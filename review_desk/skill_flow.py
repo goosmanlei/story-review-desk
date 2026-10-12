@@ -20,6 +20,8 @@ def load(root, catalog):
         if not isinstance(stage.get('id'), str) or not stage['id'] or not isinstance(stage.get('title'), str) or not stage['title'] or stage['id'] in ids:
             raise ValueError('基础流程节点缺少名称或身份重复')
         ids.add(stage['id'])
+        if 'output' in stage and (not isinstance(stage['output'], str) or not stage['output'].strip()):
+            raise ValueError('基础流程产出说明无效')
         stage['methods'] = []
         for selector in stage.get('capabilities', []):
             binding = bindings.get(selector['work_type'])

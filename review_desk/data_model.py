@@ -20,9 +20,17 @@ def load(root):
         for node in nodes:
             if not all(isinstance(node.get(key), str) and node[key] for key in ('id', 'title', 'text')):
                 raise ValueError('数据模型节点缺少正文')
+            for key in ('version', 'comments'):
+                if key in node and (not isinstance(node[key], str) or not node[key].strip()):
+                    raise ValueError('数据模型版本或评论说明无效')
         for edge in diagram['connections']:
             if edge['from'] not in names or edge['to'] not in names or not edge.get('label'):
                 raise ValueError('数据模型关系缺少准确端点或含义')
+    for diagram in value['diagrams']:
+        for node in diagram['nodes']:
+            for relation in node.get('related', []):
+                if relation.get('to') not in ids or not isinstance(relation.get('label'), str) or not relation['label'].strip():
+                    raise ValueError('数据模型跨图关系缺少准确端点或含义')
     for example in value.get('examples', []):
         if not isinstance(example.get('href'), str) or not example['href'].startswith('/?workspace='):
             raise ValueError('数据模型示例须指向本实例业务页面')
