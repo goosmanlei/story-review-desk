@@ -208,6 +208,10 @@ def _export(store, export_dir, content_file):
         method_files.validate(store)
         for table in method_files.TABLES:
             framework[table] = [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY 1')]
+    else:
+        # Restore initializes this schema. Keep untouched instances canonical.
+        for table in method_files.TABLES:
+            framework[table] = []
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
     files = {"materials.json": material_bytes, "comments.json": comment_bytes,
              "objects.json": framework_bytes, "configurations.json": configuration_bytes}

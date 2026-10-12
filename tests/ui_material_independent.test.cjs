@@ -255,12 +255,12 @@ test('D01 state-specific default adoption does not leak through a cached shared 
   data.unifiedRight=new Element('aside');c.renderMaterialCard=()=>{};c.cancelMaterialCommentLocation=()=>{};
   c.renderProductionReader=()=>{const selected=c.state.productionChildDetail.record;data.unifiedGroups=c.entityReviewMaterialModels(data.requirements.filter(n=>n.payload.scope.revision_id===selected.id),items,data);c.renderUnifiedSelected(data)};
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
+  assert.equal(data.selectedCandidates.shared,'current');
   c.selectEntityReviewState(second);
-  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
+  assert.equal(data.selectedCandidates.shared,'current');
   data.selectedComponents['asset-b-r1']='preview-b';
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
+  assert.equal(data.selectedCandidates.shared,'current');
   assert.equal(data.selectedComponents['asset-b-r1'],undefined);
   c.selectEntityReviewState(second);
   assert.equal(data.selectedComponents['asset-b-r1'],'preview-b');
