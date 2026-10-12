@@ -148,7 +148,7 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
     const identity=item.slot,row=item.row,component=row?.payload.components?.find(c=>c.id===item.value.component_id)||row?.payload.components?.find(c=>c.role==='original');
     const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
     const subtitle=(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?'尚未选定原件':identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件')+range;
-    const button=reviewSmallCard(line,{title:identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
+    const button=reviewSmallCard(line,{title:identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),material_category:identity?.material_category||row?.payload.material_category,icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
     if(identity?.reason)nodeText('p',item.missing?'production-issue':'production-meta',identity.reason,line);
     button.dataset.reviewDialogTrigger='';
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);

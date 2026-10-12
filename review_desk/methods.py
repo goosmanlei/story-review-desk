@@ -285,6 +285,10 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
         require(binding_ref.get('object_id') == 'method.binding.' + work_type, '冻结绑定属于其他工作类型')
     binding = read(store, 'method.binding.' + identifier(work_type), (binding_ref or {}).get('revision_id'))
     matches = [rule for rule in binding['payload']['rules'] if all(conditions.get(k) == v for k, v in rule['when'].items())]
+    if work_type == 'media-plan' and any('material_category' in rule['when'] for rule in binding['payload']['rules']):
+        from .material_categories import CATEGORIES
+        require(conditions.get('material_category') in CATEGORIES, '请从准确素材取得具体分类后准备方法')
+        require(all('material_category' in rule['when'] for rule in matches), '素材分类不能使用通用兜底方法')
     if not matches and work_type == 'media-plan' and conditions.get('media_type') == 'audio' and any('audio_type' in rule['when'] for rule in binding['payload']['rules']):
         raise ValueError('声音方案须指定 audio_type：voice（音色）或 song（演唱）')
     require(bool(matches), '没有适用方法；请在系统配置中补全此环节的适用条件')
@@ -312,12 +316,24 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
               'title': method['payload']['title'], 'work_type': work_type, 'conditions': conditions,
               'files': method['payload']['files'], 'resources': resources,
               'required_inputs': method['payload']['required_inputs'], 'steps': method['payload']['steps']}
+    category = conditions.get('material_category')
+    if work_type == 'media-plan' and category:
+        from .material_categories import CATEGORIES
+        require(category in CATEGORIES and method['object_id'] == 'method.skill.' + CATEGORIES[category][3],
+                '素材分类与方法绑定不匹配')
+        if CATEGORIES[category][0] == 'image':
+            path = 'references/' + category + '.md'
+            require(bool(result['files'].get(path, '').strip()), '图像分类缺少专项文件：' + path)
+            result['applicable_files'] = ['SKILL.md', path]
     result['sha256'] = checksum(result)
     return result
 
 
 def instructions(package):
-    return package['files']['SKILL.md'] + ''.join('\n\n## 包内文件：' + name + '\n' + body for name, body in package['files'].items() if name != 'SKILL.md') + ''.join('\n\n## 共用资料：' + r['title'] + ' / ' + r['reference']['section'] + '\n' + r['content'] for r in package['resources'])
+    from .material_categories import CATEGORIES
+    specialties = {'references/' + key + '.md' for key, spec in CATEGORIES.items() if spec[0] == 'image'}
+    applicable = package.get('applicable_files')
+    return package['files']['SKILL.md'] + ''.join('\n\n## 包内文件：' + name + '\n' + body for name, body in package['files'].items() if name != 'SKILL.md' and (not applicable or name not in specialties or name in applicable)) + ''.join('\n\n## 共用资料：' + r['title'] + ' / ' + r['reference']['section'] + '\n' + r['content'] for r in package['resources'])
 
 
 def prepare(store, request):
@@ -351,6 +367,13 @@ def prepare(store, request):
     from . import method_files
     if not method_files.installed(store):
         method_files.migrate(store)
+    if request['work_type'] == 'media-plan':
+        from .material_categories import conditions as category_conditions, enabled as categories_enabled
+        if categories_enabled(store):
+            context = raw_inputs.get('context')
+            require(isinstance(context, dict) and 'media_type' in context, '媒体准备需要准确素材正文')
+            require(category_conditions(store, context, request.get('conditions')) == request.get('conditions'),
+                    '媒体准备条件须由准确素材分类取得')
     package = resolve(store, request['work_type'], request.get('conditions'), request.get('binding'))
     missing = [key for key in package['required_inputs'] if raw_inputs.get(key) in (None, '', [], {})]
     require(not missing, '缺少必要输入：' + '、'.join(missing))

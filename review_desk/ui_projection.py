@@ -2,11 +2,12 @@
 from . import production as p, generation as g
 from . import production_breakdown as b
 from . import list_reading as light
+from . import material_categories as categories
 
 
 def material_entries(store, *, uses=True, identities=True):
     from .read_cache import read_json
-    return read_json(store, ['material-entries-v9', uses, identities],
+    return read_json(store, ['material-entries-v10-category', uses, identities],
                      lambda: _material_entries(store, uses=uses, identities=identities))
 
 
@@ -70,7 +71,7 @@ def _material_entries(store, *, uses=True, identities=True):
         real=[a for a in candidates if not a['payload'].get('placeholder') and any(c['role']=='original' for c in a['payload'].get('components',[]))]
         preview=next((c for a in real for c in a['payload']['components'] if c['role']=='original' and c['mime'].startswith('image/')),None)
         entries.append({'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],
-                        'media_type':value['media_type'],'generated':bool(real),'preview':preview,
+                        'media_type':value['media_type'],'material_category':value.get('material_category'),'generated':bool(real),'preview':preview,
                         'generation_scope':'history' if row['kind']=='REQUIREMENT' else 'exact',
                         'slot':value.get('slot'),'scope':scope,'locations':locations,'entity_ids':list(owners),'state_ids':sorted(state_ids)})
     from .material_storage import canonical_id, identity
@@ -155,7 +156,7 @@ def _material_av_catalog(store, episode, revision, compact):
         for item in value['entries']]}
 
 
-def _material_filter_facets(values, chosen, search):
+def _material_filter_facets(values, chosen, search, categorized=False):
     """Count each matching material once, without rescanning all its uses.
 
     Each facet relaxes only its own selected condition. Exact episode/scene
@@ -165,7 +166,7 @@ def _material_filter_facets(values, chosen, search):
     located = [(item, {(loc.get('episode'), loc.get('scene')) for loc in item['locations']})
                for item in values]
     episode, scene = chosen['episode'], chosen['scene']
-    options = {'media': sorted({item['media_type'] for item in values}),
+    options = {'media': list(dict.fromkeys([*categories.GROUPS, *categories.CATEGORIES])) if categorized else sorted({item['media_type'] for item in values}),
                'status': ['generated', 'ungenerated'],
                'episode': sorted({ep for _, pairs in located for ep, _ in pairs if ep}),
                'scene': sorted({sc for _, pairs in located for ep, sc in pairs
@@ -181,12 +182,19 @@ def _material_filter_facets(values, chosen, search):
         in_scene = not scene or any(sc == scene for _, sc in pairs)
         in_location = ((episode, scene) in pairs if episode and scene
                        else in_episode and in_scene)
-        in_media = not chosen['media'] or item['media_type'] == chosen['media']
+        category = item.get('material_category')
+        in_media = categories.matches(category, chosen['media']) if categorized else (not chosen['media'] or item['media_type'] == chosen['media'])
         item_status = 'generated' if item['generated'] else 'ungenerated'
         in_status = not chosen['status'] or item_status == chosen['status']
         if in_location and in_status:
             facets['media'][''] += 1
-            facets['media'][item['media_type']] += 1
+            if categorized:
+                facets['media'][category] += 1
+                group = categories.CATEGORIES[category][0]
+                if group != category:
+                    facets['media'][group] += 1
+            else:
+                facets['media'][item['media_type']] += 1
         if in_location and in_media:
             facets['status'][''] += 1
             facets['status'][item_status] += 1
@@ -206,14 +214,19 @@ def _material_filter_facets(values, chosen, search):
 
 def material_list(store, episode=None, scene=None, media=None, search='', status=None, offset=0, limit=40, focus=None, grouped=False, compact=False, scope=None, scope_revision=None, cards=False):
     if scope and scope != 'av':raise ValueError('unknown production scope')
-    if media and media not in ('image','audio','video','project','document'):raise ValueError('unknown media filter')
+    categorized = categories.enabled(store)
+    # Previous URLs used project for the physical container of a text layer.
+    # Convert only that explicit old filter; never classify the records by it.
+    if categorized and media == 'project': media = 'text-layer'
+    allowed = set(categories.CATEGORIES) | set(categories.GROUPS) if categorized else {'image','audio','video','project','document'}
+    if media and media not in allowed: raise ValueError('素材分类筛选无效，请重新选择')
     if status and status not in ('generated','ungenerated'):raise ValueError('unknown status filter')
     if cards and not (grouped and compact):raise ValueError('cards requires a grouped compact list')
     if scope == 'av':
         from .read_cache import read_json
         # Scene, word and media/status only filter this exact catalog. Reuse
         # its locations across queries; every committed write changes the key.
-        projected=read_json(store, ['material-av-catalog-v3', episode, scope_revision, compact],
+        projected=read_json(store, ['material-av-catalog-v4-category', episode, scope_revision, compact],
                             lambda: _material_av_catalog(store, episode, scope_revision, compact))
         if scene and not episode:
             raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
@@ -223,7 +236,10 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
     else:
         values=material_entries(store);catalog=management_episodes(store)
     chosen={'episode':episode,'scene':scene,'media':media,'status':status}
-    facets,result=_material_filter_facets(values,chosen,search)
+    if categorized:
+        for item in values:
+            categories.validate(item, required=True)
+    facets,result=_material_filter_facets(values,chosen,search,categorized)
     if scope == 'av' and (episode or scene):
         enriched=[]
         for item in result:
@@ -253,7 +269,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
                     for item in result]
             if cards:
                 result=[{k:v for k,v in item.items() if k!='search_fields'} for item in result]
-        return {'management_episodes':catalog,'items':result,'total':len(result),'groups':groups,
+        return {'material_categories': categories.catalog() if categorized else None, 'management_episodes':catalog,'items':result,'total':len(result),'groups':groups,
                 'management_locations':list({(loc.get('episode'),loc.get('scene')):
                     {'episode':loc.get('episode'),'scene':loc.get('scene')} for item in values for loc in item['locations']
                     }.values()),
@@ -358,7 +374,7 @@ def card(store, object_id, revision_id=None, entity_id=None):
         needs=[r for r in context['requirements'] if r['payload']['scope']==b.ref(scoped)]
         counts=card_counts(store,[r['object_id'] for r in needs])
         source_materials=[{'object_id':r['object_id'],'id':r['id'],'title':r['payload']['title'],
-                           'media_type':r['payload']['media_type'],'scope':r['payload']['scope'],
+                           'media_type':r['payload']['media_type'],'material_category':r['payload'].get('material_category'),'scope':r['payload']['scope'],
                            **counts.get(r['object_id'],{})} for r in needs]
     return {'detail':detail,'entity_review':entity,'form':form,'scope':scoped,
             'source_materials':source_materials,'adoption_context':context,'position_review':position_review}
@@ -464,7 +480,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
         for mid,(row,relation,evidence) in needs.items():
             item=all_entries.get(mid)
             if not item:
-                value=row['payload'];item={'object_id':row['object_id'],'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder') and any(c['role']=='original' for c in value.get('components',[])),'generation_scope':'exact','preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
+                value=row['payload'];item={'object_id':row['object_id'],'material_category':value.get('material_category'),'media_type':value['media_type'],'slot':value.get('slot'),'generated':row['kind']=='ASSET' and not value.get('placeholder') and any(c['role']=='original' for c in value.get('components',[])),'generation_scope':'exact','preview':next((c for c in value.get('components',[]) if c['mime'].startswith('image/')),None)}
                 item.update(material_plans.card_counts(store,[mid])[mid])
             placement=row['payload'].get('scope') or item.get('scope')
             owner=p.ref_record(store,placement) if placement else scoped

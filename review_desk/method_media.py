@@ -9,7 +9,7 @@ ACTIVATION = 'method.activation.media-plan'
 
 def brief(payload):
     return {k: copy.deepcopy(v) for k, v in payload.items()
-            if k not in ('generation', 'method_basis', 'status', 'withdrawal_reason', 'required', 'blocks', 'method_adjustment', 'shot_reference_operation')}
+            if k not in (('specification',) if payload.get('material_category') == 'text-layer' else ()) + ('generation', 'method_basis', 'status', 'withdrawal_reason', 'required', 'blocks', 'method_adjustment', 'shot_reference_operation')}
 
 
 def inputs(store, payload, baseline=None, supporting=None, include_relations=True,
@@ -91,7 +91,10 @@ def inputs(store, payload, baseline=None, supporting=None, include_relations=Tru
 
 
 def output(payload):
-    return {'requirement': brief(payload), 'generation': copy.deepcopy(payload['generation'])}
+    result = {'requirement': brief(payload), 'generation': copy.deepcopy(payload.get('generation'))}
+    if payload.get('material_category') == 'text-layer':
+        result['text_layer'] = {key: copy.deepcopy(payload.get(key)) for key in ('blocks', 'specification')}
+    return result
 
 
 def validate_stage(store, execution, stage, value):
@@ -107,7 +110,13 @@ def validate_stage(store, execution, stage, value):
     from .generation import validate_plan
     validate_plan(store, execution['payload']['target'],
                   {**value['requirement'], 'generation': value.get('generation')})
-    methods.require(isinstance(value.get('generation'), dict), '媒体步骤缺少生成方案')
+    if execution['payload']['conditions'].get('material_category') == 'text-layer':
+        project = value.get('text_layer')
+        methods.require(value.get('generation') is None and isinstance(project, dict)
+                        and isinstance(project.get('specification'), dict) and bool(project.get('blocks')),
+                        '字层须交准确正文与工程规格；本地制作不虚构生成调用')
+    else:
+        methods.require(isinstance(value.get('generation'), dict), '媒体步骤缺少生成方案')
 
 
 def prepare(store, value):
@@ -115,10 +124,11 @@ def prepare(store, value):
     current = store.db.execute('SELECT version,current_revision FROM objects WHERE id=?', (value['object_id'],)).fetchone()
     methods.require(value.get('expected_version') == (current['version'] if current else 0), '制作方案基线已变化；请回读准确版本后新建步骤')
     baseline = {'object_id': value['object_id'], 'revision_id': current['current_revision']} if current else None
-    conditions = value.get('method_conditions', {})
-    methods.require(isinstance(conditions, dict) and
-                    ('media_type' not in conditions or conditions['media_type'] == payload['media_type']),
-                    '方法选择条件不能改变素材媒体类型')
+    from .material_categories import conditions as category_conditions
+    identity = {'work_type': 'media-plan', 'run_id': value['run_id'], 'step_id': value['step_id'], 'target': value['object_id']}
+    frozen = bool(store.db.execute('SELECT 1 FROM objects WHERE id=?',
+                                  ('method.execution.' + methods.checksum(identity),)).fetchone())
+    conditions = category_conditions(store, payload, value.get('method_conditions'), frozen=frozen)
     request = {'work_type': 'media-plan', 'run_id': value['run_id'], 'step_id': value['step_id'],
                'target': value['object_id'], 'conditions': {**conditions, 'media_type': payload['media_type']},
                'inputs': inputs(store, payload, baseline, value.get('supporting_references'), target_id=value['object_id'])}

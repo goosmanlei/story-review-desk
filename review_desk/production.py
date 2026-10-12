@@ -420,6 +420,11 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
             _text(p.get('withdrawal_reason'), 'withdrawal reason')
         if p["media_type"] not in ("image", "audio", "video", "project", "document"):
             raise ValueError("invalid required media type")
+        from .material_categories import validate as validate_category, enabled as categories_enabled
+        validate_category(p, required=check_current and p.get('status') != 'withdrawn' and categories_enabled(store))
+        if p.get('material_category') == 'text-layer' and (p.get('generation') is not None or not p.get('blocks')
+                                                         or not isinstance(p.get('specification'), dict)):
+            raise ValueError('字层须保存准确正文与工程规格，不虚构模型生成方案')
         _refs(store, p, "entities", {"ENTITY"})
         _refs(store, p, "states", {"STATE"})
         from .production_current import enabled as current_enabled
@@ -439,11 +444,22 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         if check_current:
             from .material_origin import validate_output_name
             validate_output_name(store, object_id, p)
-        if check_current and store.db.execute("""SELECT 1 FROM objects o JOIN revisions r ON r.id=o.current_revision
-                WHERE o.kind='REQUIREMENT' AND o.id!=? AND json_extract(r.payload,'$.format')='production-requirement-v1'
-                AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
-                (object_id, p['scope']['object_id'], p['slot'])).fetchone():
-            raise Conflict('scope/slot already has a requirement; revise that object explicitly')
+        # Earlier semantic migrations can retain distinct references (e.g. two
+        # characters owned by one shot) under the same legacy slot. Editing one
+        # exact existing requirement must not force a new identity or owner.
+        # New requirements and moves into an occupied slot still conflict.
+        if check_current:
+            previous = store.db.execute("""SELECT r.payload FROM objects o
+                JOIN revisions r ON r.id=o.current_revision WHERE o.id=? AND o.kind='REQUIREMENT'""",
+                (object_id,)).fetchone()
+            previous_payload = json.loads(previous[0]) if previous else {}
+            same_slot = (previous_payload.get('scope', {}).get('object_id') == p['scope']['object_id']
+                         and previous_payload.get('slot') == p['slot'])
+            if not same_slot and store.db.execute("""SELECT 1 FROM objects o JOIN revisions r ON r.id=o.current_revision
+                    WHERE o.kind='REQUIREMENT' AND o.id!=? AND json_extract(r.payload,'$.format')='production-requirement-v1'
+                    AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
+                    (object_id, p['scope']['object_id'], p['slot'])).fetchone():
+                raise Conflict('scope/slot already has a requirement; revise that object explicitly')
     elif kind == "ASSET":
         _components(store, p, inspect)
         if p.get("media_type") not in ("image", "audio", "video", "project", "document"):

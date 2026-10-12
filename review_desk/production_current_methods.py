@@ -33,6 +33,8 @@ def compact_output(value, target, stage):
     if stage in ('draft', 'result') and isinstance(value, dict) and 'requirement' in value and 'generation' in value:
         result.update(requirement_sha256=methods.checksum(value['requirement']),
                       generation_sha256=methods.checksum(value['generation']))
+        if 'text_layer' in value:
+            result['text_layer_sha256'] = methods.checksum(value['text_layer'])
     elif isinstance(value, dict) and isinstance(value.get('assessment'), str):
         result['assessment'] = value['assessment']
     return result

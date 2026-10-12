@@ -75,7 +75,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
         if row.get('unavailable') or row['payload'].get('status')=='withdrawn' or row['kind'] not in ('REQUIREMENT', 'ASSET'): return
         mid = canonical_id(store, row['object_id'])
         if row['kind']=='REQUIREMENT' and mid not in identities:
-            value=row['payload'];additional[mid]={'canonical_material_id':mid,'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],'media_type':value['media_type'],'generated':False,'preview':None,'search_fields':[value['title']],'scope':value.get('scope'),'entity_ids':[]}
+            value=row['payload'];additional[mid]={'canonical_material_id':mid,'object_id':row['object_id'],'id':row['id'],'kind':row['kind'],'title':value['title'],'media_type':value['media_type'],'material_category':value.get('material_category'),'generated':False,'preview':None,'search_fields':[value['title']],'scope':value.get('scope'),'entity_ids':[]}
             identities.add(mid)
         mids = {mid} if mid in identities else candidate_owners[row['object_id']]
         for identity in mids:

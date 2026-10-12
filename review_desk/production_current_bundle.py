@@ -176,6 +176,10 @@ def validate(store):
         raise ValueError('current recovery foreign key mismatch')
     from .semantic_consolidation import validate as validate_consolidation
     validate_consolidation(store)
+    from .material_origin import validate_state_ownership
+    validate_state_ownership(store)
+    from .material_categories import validate_tree as validate_categories
+    validate_categories(store)
     from .method_files import validate as validate_files
     validate_files(store)
     from .material_reference import validate_evidence
