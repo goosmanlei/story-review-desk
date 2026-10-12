@@ -100,5 +100,5 @@ class GlobalCodesTest(unittest.TestCase):
         self.assertFalse({'source','story'} & {r['object_id'] for r in codes.display_dump(self.store)})
         types = {v['prefix']:v for v in codes.catalog()['types']}
         self.assertNotIn('D',types);self.assertNotIn('B',types)
-        self.assertIn('同一准确素材身份内',types['MV']['scope'])
-        self.assertIn('同一素材版本内',types['MC']['scope'])
+        self.assertIn('仅旧链接回查',types['MV']['scope'])
+        self.assertIn('同一素材需求内',types['MC']['scope'])
