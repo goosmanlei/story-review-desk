@@ -63,6 +63,42 @@ class MaterialCatalogTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '所属'):
             self.query(scene='av-scene')
 
+    def test_shot_filter_tracks_shared_inputs_and_excludes_siblings(self):
+        self.split()
+        self.store.put_object('master-owner','ENTITY',{'title':'共享素材出处','sources':[]})
+        master=self.need('master');master['payload']['scope']=self.ref('master-owner');master['payload']['entities']=[self.ref('master-owner')];self.put(master)
+        for oid in ('first','second'):
+            row=p.record(self.store,oid)
+            self.store.put_object(oid,'REQUIREMENT',{**row['payload'],'generation':{
+                **row['payload']['generation'],'inputs':[{'reference':self.ref('master')}] }},expected_version=row['version'])
+        for scene,shot,own,other in [('av-scene','av-shot','first','second'),
+                                    ('other-scene','other-shot','second','first')]:
+            result=self.query(episode='av-episode',scene=scene,shot=shot,cards=True)
+            ids=[v['object_id'] for v in result['items']]
+            self.assertIn(own,ids);self.assertIn('master',ids);self.assertNotIn(other,ids)
+            self.assertEqual(ids.count('master'),1)
+            self.assertEqual(result['facets']['media'][''],result['total'])
+            self.assertEqual(result['facets']['status'][''],result['total'])
+            self.assertEqual(self.query(episode='av-episode',scene=scene,shot=shot,search='master')['total'],1)
+            self.assertEqual(self.query(episode='av-episode',scene=scene,shot=shot,media='audio')['total'],0)
+        with self.assertRaisesRegex(ValueError,'不属于'):
+            self.query(episode='av-episode',scene='other-scene',shot='av-shot')
+        with self.assertRaisesRegex(ValueError,'所属'):
+            self.query(episode='av-episode',shot='av-shot')
+        with self.assertRaisesRegex(ValueError,'所属'):
+            ui.material_list(self.store,shot='av-shot')
+
+    def test_empty_scene_and_invalid_exact_range_do_not_fallback_to_first_shot(self):
+        self.split()
+        row=p.record(self.store,'other-scene')
+        self.store.put_object('other-scene','AV_SCENE',{**row['payload'],'shots':[]},expected_version=row['version'])
+        empty=self.query(episode='av-episode',scene='other-scene')
+        self.assertEqual(next(sc for ep in empty['management_episodes'] for sc in ep['scenes'] if sc['id']=='other-scene')['shots'],[])
+        with self.assertRaisesRegex(ValueError,'不属于'):
+            self.query(episode='av-episode',scene='other-scene',shot='other-shot')
+        with self.assertRaisesRegex(ValueError,'不存在'):
+            self.query(episode='av-episode',scope_revision='missing',scene='av-scene',shot='av-shot')
+
     def test_failed_cache_reads_writes_and_disabled_cache_keep_every_result(self):
         self.split();expected={}
         filters=[{}, {'search':'absent'}, {'media':'image'},
