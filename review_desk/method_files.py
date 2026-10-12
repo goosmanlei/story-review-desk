@@ -169,7 +169,7 @@ def execution_manifest(store, package):
     return {'method': manifest(store, package['method']['revision_id']), 'resources': resources}
 
 
-def reading_order(record):
+def reading_order(record, source_outlines=None):
     """Use the document's own outline and links; keep exact file identities."""
     import re
     import posixpath
@@ -179,6 +179,16 @@ def reading_order(record):
     entry = next((p for name in ('SKILL.md', 'README.md', 'handbook.md')
                   for p in paths if posixpath.basename(p) == name), None)
     ordered = [entry] if entry else []
+    if not entry:
+        # Older projections contain only chapter files. Recover their order
+        # from an available complete copy of the SAME source bytes, never from
+        # a newer document with different contents or an inferred filename order.
+        sources = record['payload'].get('source', {}).get('files', {})
+        for identity, body in (source_outlines or {}).items():
+            for section in re.findall(r'<!--\s*section:([\w-]+)\s*-->', body):
+                ordered.extend(path for path in paths if path not in ordered and
+                    (sources.get(path, {}).get('path'), sources.get(path, {}).get('sha256')) == identity and
+                    sources.get(path, {}).get('section') == section)
     if entry:
         body = files[entry]
         # A split handbook keeps section identifiers from its complete text.
@@ -221,7 +231,22 @@ def directory(store, object_id, revision_id=None):
     record = read(store, object_id, revision_id)
     selected = manifest(store, record['revision_id'])
     paths = [r[0] for r in store.db.execute('SELECT DISTINCT path FROM method_file_versions WHERE object_id=? ORDER BY path', (object_id,))]
-    ordered, labels = reading_order(record)
+    outlines = {}
+    sources = record['payload'].get('source', {}).get('files', {})
+    wanted = {(item.get('path'), item.get('sha256')) for item in sources.values() if item.get('section')}
+    if wanted and not any(path.rsplit('/', 1)[-1] in ('SKILL.md', 'README.md', 'handbook.md')
+                          for path in record['payload']['files']):
+        for row in store.db.execute('SELECT payload FROM revisions WHERE object_id=? ORDER BY version DESC', (object_id,)):
+            payload = json.loads(row[0])
+            for path, source in payload.get('source', {}).get('files', {}).items():
+                identity = (source.get('path'), source.get('sha256'))
+                body = payload.get('files', {}).get(path)
+                if identity in wanted and identity not in outlines and not source.get('section') and isinstance(body, str):
+                    if digest(body.encode()) == identity[1]:
+                        outlines[identity] = body
+            if set(outlines) == wanted:
+                break
+    ordered, labels = reading_order(record, outlines)
     ordered += [p for p in paths if p not in ordered]
     return {'record': record, 'files': [{'path': path, **labels.get(path, {}), 'selected': selected.get(path),
         'versions': [metadata(r) for r in store.db.execute('SELECT * FROM method_file_versions WHERE object_id=? AND path=? ORDER BY version DESC', (object_id, path))]}

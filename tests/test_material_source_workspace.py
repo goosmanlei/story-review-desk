@@ -56,4 +56,4 @@ class MaterialSourceWorkspaceTest(unittest.TestCase):
             data = entity_workspace(self.store, 'mentioned', deferred=True, load_selected=False)
         self.assertEqual(data['material_groups'], [])
         self.assertEqual(data['requirements'], [])
-        self.assertEqual(data['material_versions'], {})
+        self.assertEqual(data['material_cards'], {})
