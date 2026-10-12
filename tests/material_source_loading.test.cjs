@@ -1,10 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/unified-cards.js'),'utf8');
-const code=source.slice(source.indexOf('function loadEntityMaterial('),source.indexOf('function renderUnifiedCard('));
+const code=source.slice(source.indexOf('function retainLoadedMaterialMembers('),source.indexOf('function renderUnifiedCard('));
 function fixture(){
  const before={object_id:'m',id:'m-current',version:4},data={entity:{object_id:'e',id:'e-current',edit_token:2},source_signature:'s1',requirements:[before],material_versions:{},materialContexts:{},deferred_materials:['m'],deferred_candidates:['c'],comment_records:[],comment_targets:[]};
  const results=[],context={URLSearchParams,api:url=>new Promise((resolve,reject)=>results.push({url,resolve,reject}))};vm.createContext(context);vm.runInContext(code,context);
- const response=()=>({entity:data.entity,source_signature:'s1',requirements:[{...before,payload:{generation:{prompt:'exact'}}}],material_versions:{m:[{number:1}]},materialContexts:{c:{call:{id:'call-original'}}},comment_records:[],comment_targets:[]});return {context,data,results,response};
+ const response=()=>({entity:data.entity,source_signature:'s1',requirements:[{...before,payload:{generation:{prompt:'exact'}}}],material_versions:{m:[{number:1,results:[],members:[]}]},materialContexts:{c:{call:{id:'call-original'}}},comment_records:[],comment_targets:[]});return {context,data,results,response};
 }
 test('read failure retries the original candidate and never erases its choice',async()=>{
  const f=fixture(),first=f.context.loadEntityMaterial(f.data,'m','c');f.results[0].reject(Error('offline'));await assert.rejects(first,/offline/);assert.equal(f.data.deferred_candidates[0],'c');assert.equal(f.data.requirements[0].version,4);

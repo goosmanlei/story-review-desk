@@ -92,7 +92,7 @@ function renderUnifiedModels(parent,models,data){
     for(const group of data.unifiedLeft?.querySelectorAll('.material-source-group')||[])group.closeSourceExplanation?.();
     rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=key;state.materialCommentCard=null;
     data.selectedCandidates||={};data.selectedCandidates[key]||='current';
-    const row=model.candidates.find(i=>i.record.id===data.selectedCandidates[key])?.record||model.need||model.identity;
+    const currentModel=data.unifiedGroups.find(m=>materialModelKey(m)===key)||model,row=currentModel.candidates.find(i=>i.record.id===data.selectedCandidates[key])?.record||currentModel.need||currentModel.identity;
     if(model.round)state.materialCommentCard={data,material_id:key,number:model.round.number};
     restoreUnifiedMaterialReader(data,key,row);renderUnifiedSelected(data);paintProductionReview();renderComments();
   },key===data.unifiedMaterialId)}
@@ -122,8 +122,8 @@ function renderUnifiedSelected(data){
   if(data.deferred_materials?.includes(key)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){
     nodeText('p','production-meta','正在读取素材方案…',right).setAttribute('role','status');
     loadEntityMaterial(data,key,candidate).then(()=>{
-      if(!right.isConnected||state.entityReview!==data||data.unifiedMaterialId!==key||data.selectedCandidates[key]!==candidate)return;
       const by=new Map(entityReviewMaterialModels(data.requirements,[],data).map(model=>[materialModelKey(model),model]));data.unifiedGroups=data.unifiedGroups.map(model=>by.get(materialModelKey(model))||model);
+      if(!right.isConnected||state.entityReview!==data||data.unifiedMaterialId!==key||data.selectedCandidates[key]!==candidate)return;
       renderUnifiedSelected(data);paintProductionReview();renderComments();
     }).catch(error=>{if(!right.isConnected||data.unifiedMaterialId!==key||data.selectedCandidates[key]!==candidate)return;right.replaceChildren();nodeText('p','production-issue','素材方案读取失败：'+error.message,right);productionButton(right,'重试',()=>renderUnifiedSelected(data))});
     return;
@@ -135,13 +135,17 @@ function renderUnifiedSelected(data){
 
 
 }
+function retainLoadedMaterialMembers(data,mid,rounds){
+  const old=new Map((data.material_versions[mid]||[]).flatMap(r=>r.members||[]).filter(r=>!r.deferred_detail).map(r=>[r.id,r]));
+  return rounds.map(round=>({...round,results:round.results.map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r),members:round.members.map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r)}));
+}
 function loadEntityMaterial(data,mid,candidate){
   data.materialDetailReads||=new Map();const key=mid+':'+candidate;if(data.materialDetailReads.has(key))return data.materialDetailReads.get(key);
   const before=data.requirements.find(r=>r.object_id===mid),token=data.entity.edit_token||data.entity.version;
   const request=api('/api/production/entity-material?'+new URLSearchParams({entity_id:data.entity.object_id,revision_id:data.entity.id,material_id:mid,...(candidate==='current'?{}:{candidate_revision:candidate})})).then(result=>{
     const after=result.requirements.find(r=>r.object_id===mid);
     if((result.entity.edit_token||result.entity.version)!==token||result.source_signature!==data.source_signature||!after||before.version!==after.version)throw Error('实体或素材已更新，请重新打开；保留原选择与草稿');
-    data.requirements=data.requirements.map(r=>r.object_id===mid?after:r);data.material_versions[mid]=result.material_versions[mid];Object.assign(data.materialContexts,result.materialContexts);
+    data.requirements=data.requirements.map(r=>r.object_id===mid?after:r);data.material_versions[mid]=retainLoadedMaterialMembers(data,mid,result.material_versions[mid]);Object.assign(data.materialContexts,result.materialContexts);
     data.deferred_materials=data.deferred_materials.filter(id=>id!==mid);if(candidate!=='current')data.deferred_candidates=data.deferred_candidates.filter(id=>id!==candidate);
     data.comment_records=[...new Map([...data.comment_records,...result.comment_records].map(r=>[r.id,r])).values()];data.comment_targets=[...new Map([...data.comment_targets,...result.comment_targets].map(r=>[r.revision_id,r])).values()];return result;
   }).finally(()=>data.materialDetailReads.delete(key));data.materialDetailReads.set(key,request);return request;
@@ -363,7 +367,7 @@ async function drainShotDetails(){
       const before=data.requirements.find(n=>n.object_id===mid),after=result.requirements.find(n=>n.object_id===mid);
       if(!after||before.version!==after.version)throw Error('此素材方案已更新，请重新打开当前场');
       data.requirements=data.requirements.map(n=>n.object_id===mid?after:n);
-      data.material_versions[mid]=result.material_versions[mid];
+      data.material_versions[mid]=retainLoadedMaterialMembers(data,mid,result.material_versions[mid]);
       Object.assign(data.materialContexts,result.materialContexts);
       data.deferred_materials=data.deferred_materials.filter(id=>id!==mid);
       if(candidate)data.deferred_candidates=data.deferred_candidates.filter(id=>id!==candidate);
@@ -404,6 +408,7 @@ function renderShotEntityWorkspace(root,data){
           if(states.length){const surface=materialTextSurface(body,shot);for(const keyState of states){const index=shot.payload.key_states.findIndex(s=>s.id===keyState.id);materialField(surface,shot,`key_states.${index}.description`,null)}}
           else for(const id of ids){const summary=by.get(id).need;const result=await api('/api/production/material-source?'+new URLSearchParams({object_id:summary.object_id,revision_id:summary.id,expected_version:summary.version}));const surface=materialTextSurface(body,result.record);surface.sourceRecord=result.record;materialField(surface,result.record,'purpose',null)}
         });
+        section.sourceFields=states.map(s=>`key_states.${shot.payload.key_states.findIndex(k=>k.id===s.id)}.description`);
         const list=el('div','material-small-list');list.setAttribute('aria-label',label+'素材');section.append(list);for(const id of ids){const model=by.get(id);materialSmallCard(list,modelSmallItem(model),()=>select(id),selected===id)}
       }
     }
