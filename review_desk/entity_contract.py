@@ -82,20 +82,31 @@ def material_groups(row, needs):
     return result
 
 
-def shot_workspace(store, object_id, revision_id=None, *, deferred=False, material_id=None,
+def entity_workspace(store, object_id, revision_id=None, *, deferred=False, material_id=None,
                    candidate_revision=None, load_selected=True):
     from . import material_plans, material_review, audiovisual
     from .store import canonical, digest
     row = source_labels(store, p.record(store, object_id, revision_id))
-    if row['kind'] != 'AV_SHOT': raise ValueError('shot entity required')
+    if row['kind'] not in KINDS: raise ValueError('entity required')
+    shot = row['kind'] == 'AV_SHOT'
+    states = []
+    if not shot:
+        from . import list_reading as light
+        states = [source_labels(store, p.record(store, item['object_id'])) for item in light.rows(
+            store, 'STATE', "json_extract(r.payload,'$.entity.object_id')=? AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (object_id,))
+            if item['payload'].get('format') == 'production-state-v1']
     from .production_current import enabled
     # Legacy clients retain the complete workspace. The scene reader carries
     # every direct need but expands only the actual selection, on demand.
     deferred = deferred and enabled(store)
-    needs = direct_materials(store, row, metadata=deferred)
+    needs = [need for owner in [row, *states] for need in direct_materials(store, owner, metadata=deferred)]
     if deferred:
         needs = [material_summary(n) for n in needs]
-    groups = material_groups(row, needs)
+    groups = material_groups(row, needs) if shot else [
+        {'key': owner['object_id'], 'label': '基础状态' if owner is row else owner['payload']['title'],
+         'material_ids': [n['object_id'] for n in needs if n['payload']['scope']['object_id'] == owner['object_id']],
+         'source': {'object_id': owner['object_id'], 'revision_id': owner['id']}}
+        for owner in [row, *states] if any(n['payload']['scope']['object_id'] == owner['object_id'] for n in needs)]
     selected = material_id or (groups[0]['material_ids'][0] if groups else None)
     if material_id and not any(n['object_id'] == material_id for n in needs):
         raise ValueError('准确镜头素材不属于此镜头')
@@ -121,7 +132,7 @@ def shot_workspace(store, object_id, revision_id=None, *, deferred=False, materi
                 'number': 1, 'frozen': False, 'state': 'current', 'plan': plan, 'results': results,
                 'members': [plan, *results], 'definition_records': {'requirement': plan, 'call': None},
                 'feedback': [], 'current_content': True}]
-    contexts, targets = {}, {r['id']: r for r in [row, *needs]}
+    contexts, targets = {}, {r['id']: r for r in [row, *states, *needs]}
     from .shot_references import enrich_detail
     for index, need in enumerate(needs):
         if deferred and (not load_selected or need['object_id'] != selected):
@@ -142,21 +153,44 @@ def shot_workspace(store, object_id, revision_id=None, *, deferred=False, materi
                     if context.get('call'): targets[context['call']['id']] = context['call']
     if candidate_revision and candidate_revision not in contexts:
         raise ValueError('准确镜头候选不属于此素材')
-    scope = {'entity': {'object_id': object_id, 'revision_id': row['id']}, 'states': [],
+    # Comments remain discoverable before expanding a candidate's full call or
+    # frozen plan. Only tiny target rows are read here; exact text is on demand.
+    if deferred:
+        from . import list_reading as light
+        owned = {r['object_id'] for r in targets.values()}
+        for value in list(targets.values()):
+            call = value['payload'].get('production')
+            if call: owned.add(call['object_id'])
+        for relation in light.rows(store, 'RELATION'):
+            if object_id in relation['payload'].get('endpoints', []):owned.add(relation['object_id'])
+        for comment in store.db.execute('SELECT DISTINCT target_object_id,target_revision_id FROM comments'):
+            if comment['target_object_id'] in owned and comment['target_revision_id'] not in targets:
+                value=light.record(store,comment['target_object_id'],comment['target_revision_id'])
+                targets[value['id']]=material_summary(value)
+    scope = {'entity': {'object_id': object_id, 'revision_id': row['id']}, 'states': [{'object_id': r['object_id'], 'revision_id': r['id']} for r in states],
              'requirements': [{'object_id': n['object_id'], 'revision_id': n['id']} for n in needs],
              'relationships': [], 'dependencies': []}
-    return {'format': 'entity-workspace-v2', 'entity': row, 'states': [], 'retained_states': [],
+    source_signature = digest(canonical([(r['object_id'], r['id'], r['version']) for r in [row, *states, *needs]]).encode())
+    return {'format': 'entity-workspace-v2', 'entity': row, 'states': states, 'retained_states': [],
             'requirements': needs, 'relationships': [], 'related_entities': [], 'media': [],
             'material_groups': groups,
             'position': [{'object_id': r['object_id'], 'id': r['id'], 'kind': r['kind'],
-                          'title': r['payload']['title']} for r in audiovisual.path(store, row)],
-            'scope': scope, 'content_key': digest(canonical(scope).encode()), 'historical': False,
-            'usages': {}, 'versions': {}, 'material_cards': versions,
+                          'title': r['payload']['title']} for r in audiovisual.path(store, row)] if shot else [],
+            'scope': scope, 'content_key': digest(canonical(scope).encode()), 'source_signature': source_signature, 'historical': False,
+            'usages': {}, 'versions': {}, 'material_origin_contract': 'material-unique-origin-v1',
+            'state_material_ids': {r['object_id']: [n['object_id'] for n in needs if n['payload']['scope']['object_id'] == r['object_id']] for r in states},
+            'material_cards': versions,
             'deferred_materials': [n['object_id'] for n in needs if deferred and (not load_selected or n['object_id'] != selected)],
             'deferred_candidates': [r['id'] for v in versions.values() for plan in v for r in plan['results'] if deferred and r['id'] not in contexts],
             'materialContexts': contexts, 'material_card_counts': material_plans.card_counts(store, versions),
             'comment_records': list(targets.values()),
             'comment_targets': [{'object_id': r['object_id'], 'revision_id': r['id']} for r in targets.values()]}
+
+
+def shot_workspace(store, object_id, revision_id=None, **options):
+    if p.record(store, object_id, revision_id)['kind'] != 'AV_SHOT':
+        raise ValueError('shot entity required')
+    return entity_workspace(store, object_id, revision_id, **options)
 
 
 def graph(store, entities):

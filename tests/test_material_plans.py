@@ -31,4 +31,3 @@ class CurrentMaterialCardsTest(MaterialFixture, unittest.TestCase):
         for key,val in [('model','other'),('prompt','other'),('parameters',{'resolution':'720p'}),('inputs',[{'reference':{'object_id':'a','revision_id':'r'},'component_id':'one','crop':{'x':0}}])]:
             altered=copy.deepcopy(plan);altered['generation'][key]=val
             self.assertNotEqual(base,mp.scheme(altered,'REQUIREMENT'))
-

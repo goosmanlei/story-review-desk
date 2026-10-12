@@ -313,7 +313,14 @@ def card(store, object_id, revision_id=None, entity_id=None):
             owner=p.record(store,form['owner_object_id']) if form.get('owner_object_id') else None
             form=None
         else:owner=p.ref_record(store,form['payload']['entity'])
-    entity=entity_review.snapshot(store,entity_id or owner['object_id'], owner['id'] if owner and owner['kind']=='AV_SHOT' else None) if entity_id or owner else None
+    entity=None
+    if entity_id or owner:
+        from .entity_contract import entity_workspace
+        from .production_current import enabled
+        oid=entity_id or owner['object_id']
+        entity=(entity_workspace(store,oid,owner['id'] if owner and owner['kind']=='AV_SHOT' else None,
+                                deferred=True,load_selected=False) if enabled(store)
+                else entity_review.snapshot(store,oid,owner['id'] if owner and owner['kind']=='AV_SHOT' else None))
     if entity_id:
         allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
         if row.get('cleaned_target') and row['payload']['entity']['object_id']==entity_id:

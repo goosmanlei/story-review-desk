@@ -542,7 +542,27 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/impact":
                     return self._json(production.impact(store, param("revision_id")))
                 if path == '/api/production/entity-review':
+                    if param('view') == 'workspace':
+                        from .entity_contract import entity_workspace
+                        with production.read_scope(store):
+                            return self._json(entity_workspace(store, param('entity_id'), param('revision_id'),
+                                deferred=True, load_selected=False))
                     return self._json(entity_review.snapshot(store, param('entity_id'), param('revision_id')))
+                if path == '/api/production/entity-material':
+                    from .entity_contract import entity_workspace
+                    with production.read_scope(store):
+                        return self._json(entity_workspace(store, param('entity_id'), param('revision_id'),
+                            deferred=True, material_id=param('material_id'), candidate_revision=param('candidate_revision')))
+                if path == '/api/production/material-source':
+                    with production.read_scope(store):
+                        row = production.record(store, param('object_id'), param('revision_id'))
+                        if row['kind'] != 'REQUIREMENT':
+                            raise ValueError('来源说明必须指向准确素材需求')
+                        if param('expected_version') and str(row['version']) != param('expected_version'):
+                            raise ValueError('素材来源已更新，请重新打开；保留原选择与草稿')
+                        return self._json({'record': {**row, 'payload': {
+                            key: row['payload'][key] for key in ('format', 'title', 'purpose', 'blocks', 'scope')
+                            if key in row['payload']}}})
                 if path == "/api/production/generation-ready":
                     return self._json(generation.readiness(store, param("requirement_id")))
                 if path == "/api/production/generation-package":

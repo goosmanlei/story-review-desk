@@ -586,11 +586,12 @@ function referenceReviewSession(dialog,detail){
     if(panel.parentNode!==dialog)dialog.append(panel);
   };
   const locate=comment=>{focus();state.selected=comment.id;[...dialog.querySelectorAll('.review-media-player')].find(box=>box.dataset.reviewFile===comment.anchor.asset_file&&box.querySelector('[data-component-id]')?.dataset.componentId===comment.anchor.component_id)?.reviewLocate(comment.anchor);paintProductionReview();renderComments()};
-  dialog.addEventListener('close',()=>{
+  const close=()=>{
     rememberProductionDraft();parent.insertBefore(panel,next?.parentNode===parent?next:null);Object.assign(state,previous);panel.hidden=hidden;
     paintProductionReview();renderComments();setPanelOpen(!hidden);
-  },{once:true});
-  return {focus,locate};
+  };
+  dialog.addEventListener('close',close,{once:true});
+  return {focus,locate,close:()=>{dialog.removeEventListener('close',close);close()}};
 }
 function renderSourceReference(view,initial,ref,source){
   const {dialog,title,body}=view;

@@ -33,6 +33,7 @@ function productionTextBlocks(record){
   return blocks;
 }
 const productionEntitySymbols={
+  help:['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4','M12 17h.01'],
   shot:['M3 7h18v14H3Z','M3 7V3h18v4','m4 3 3 4m4-4 3 4m4-4 3 4'],
   character:['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M4.5 21v-2a7.5 7.5 0 0 1 15 0v2'],
   space:['M3 4h18v16H3Z','M3 17l5-5 4 4 4-7 5 8','M8 8h.01'],
@@ -370,6 +371,7 @@ function preserveCardPosition(){
   return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
 }
 function renderProductionReaderContent(){
+  for(const group of document.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;if(typeof pauseReviewMedia==='function')pauseReviewMedia(root);root.replaceChildren();
   if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}
