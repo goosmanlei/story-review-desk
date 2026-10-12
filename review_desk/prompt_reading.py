@@ -8,7 +8,17 @@ def reading(row, specification):
         return None
     if specification.get('format') != 'exact-prompt-reading-v1':
         raise ValueError('unsupported exact Prompt reading map')
-    entry = specification.get('entries', {}).get(row['id'])
+    blocks = production_text_blocks(row['payload'])
+    entries = specification.get('entries', {})
+    # A current production identity survives prose edits. Select its exact
+    # saved text map by hash, so a candidate's older snapshot can retain its
+    # original ranges under the same identity.
+    matches = [entries[row['id'] + ':' + hashlib.sha256(block['text'].encode()).hexdigest()]
+               for block in blocks if block.get('field') in ('generation.prompt', 'call.prompt')
+               and row['id'] + ':' + hashlib.sha256(block['text'].encode()).hexdigest() in entries]
+    if len(matches) > 1:
+        raise ValueError('reading map addresses multiple complete Prompts')
+    entry = matches[0] if matches else entries.get(row['id'])
     if entry is None:
         return None
     if row['object_id'] != entry.get('object_id') or row['payload'].get('scope') != entry.get('scope'):
@@ -16,7 +26,7 @@ def reading(row, specification):
     field = entry.get('field')
     if field not in ('generation.prompt', 'call.prompt'):
         raise ValueError('reading map must address a complete Prompt')
-    block = next((b for b in production_text_blocks(row['payload']) if b.get('field') == field), None)
+    block = next((b for b in blocks if b.get('field') == field), None)
     if not block or hashlib.sha256(block['text'].encode()).hexdigest() != entry.get('sha256'):
         raise ValueError('reading map differs from exact Prompt')
     parts, previous = [], -1

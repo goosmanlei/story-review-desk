@@ -66,3 +66,19 @@ class PromptReadingTest(unittest.TestCase):
         spec = {'format': 'exact-prompt-reading-v1', 'entries': {row['id']: entry}}
         self.assertEqual(reading(row, spec)['field'], 'call.prompt')
         self.assertIsNone(reading(row, self.spec))
+
+    def test_current_edit_and_old_candidate_share_identity_but_keep_their_own_text_ranges(self):
+        current = copy.deepcopy(self.row)
+        current['payload']['generation']['prompt'] = '阿蘅看向李寄，说：“晚些一起练。”\n歌本仍留在手中。'
+        text = current['payload']['generation']['prompt']
+        entry = {**self.entry, 'sha256': hashlib.sha256(text.encode()).hexdigest(),
+                 'parts': [{'start': 0, 'end': text.index('\n'), 'role': 'voice'}]}
+        self.spec['entries'][current['id'] + ':' + entry['sha256']] = entry
+        old_result = reading(self.row, self.spec)
+        new_result = reading(current, self.spec)
+        self.assertEqual(old_result['parts'][0]['text'], '看她一眼🐍，接回歌本。')
+        self.assertEqual(new_result['parts'][0]['text'], '阿蘅看向李寄，说：“晚些一起练。”')
+        # Similar words or an unregistered later edit cannot inherit either map.
+        current['payload']['generation']['prompt'] = text.replace('晚些', '明天')
+        with self.assertRaisesRegex(ValueError, 'differs from exact Prompt'):
+            reading(current, self.spec)
