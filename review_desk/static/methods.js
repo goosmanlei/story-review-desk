@@ -1,7 +1,8 @@
 /* Read, compare and discuss exact SKILL files. Authoring stays in the API. */
 let methodView={category:'skill',selected:null,revision:null,requestedRevision:null,file:null,fileVersion:null,flowSelected:null,rootRevision:null,data:null,mode:'read',positions:{},stack:[],memories:{}};
 let methodReadEpoch=0;
-const isMethodsReading=()=>state.workspace==='project.configuration'&&state.configSection==='METHODS'&&!!methodView.document&&methodView.mode==='read';
+const isMethodsWorkspace=()=>state.workspace==='production.approach'&&new URL(location.href).searchParams.get('tab')==='foundation';
+const isMethodsReading=()=>isMethodsWorkspace()&&!!methodView.document&&methodView.mode==='read';
 const methodKey=()=>JSON.stringify([methodView.category,methodView.selected,methodView.revision,methodView.file]);
 const methodStorageScope=()=>JSON.stringify([typeof REVIEW_DEPLOYMENT==='undefined'?'':REVIEW_DEPLOYMENT.publication_id,state.navigationInstanceId||'']);
 function methodButton(parent,label,action){const b=nodeText('button',null,label,parent);b.type='button';b.onclick=action;return b}
@@ -10,10 +11,11 @@ function methodTitle(record){return record.payload.title||record.object_id}
 function methodScene(){return Object.fromEntries(['category','selected','revision','requestedRevision','file','fileVersion','flowSelected','rootRevision'].map(k=>[k,methodView[k]]))}
 function rememberMethodPosition(){if(methodView.document)methodView.positions[methodKey()]=window.scrollY;try{sessionStorage.setItem('method-reading',JSON.stringify({scope:methodStorageScope(),...methodScene(),positions:methodView.positions,stack:methodView.stack}))}catch{}}
 window.addEventListener('scroll',()=>{if(isMethodsReading())rememberMethodPosition()},{passive:true});
-function methodRoute(){const url=new URL(location.href);for(const key of ['method_group','method_range','method_file_type'])url.searchParams.delete(key);for(const [key,value]of Object.entries({method_category:methodView.category,method_object:methodView.selected,method_revision:methodView.revision||methodView.requestedRevision,method_file:methodView.file,method_file_version:methodView.fileVersion,method_node:methodView.flowSelected,method_node_revision:methodView.rootRevision})){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key)}history.replaceState(history.state,'',url)}
+function methodRoute(){const url=new URL(location.href);url.searchParams.set('workspace','production.approach');url.searchParams.set('tab','foundation');url.searchParams.delete('config_section');for(const key of ['method_group','method_range','method_file_type'])url.searchParams.delete(key);for(const [key,value]of Object.entries({method_category:methodView.category,method_object:methodView.selected,method_revision:methodView.revision||methodView.requestedRevision,method_file:methodView.file,method_file_version:methodView.fileVersion,method_node:methodView.flowSelected,method_node_revision:methodView.rootRevision})){if(value)url.searchParams.set(key,value);else url.searchParams.delete(key)}history.replaceState(history.state,'',url);if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute()}
 function methodEmbeddedResource(oid){return (methodView.rootRecord?.payload.resources||[]).some(ref=>ref.object_id===oid)}
 function methodOpen(root,category,oid,rid,file,back=false,version=null){
  rememberMethodPosition();if(isMethodsReading()&&typeof rememberStoryDraft==='function')rememberStoryDraft();
+ if(new URL(location.href).hash)history.replaceState(history.state,'',location.href.split('#')[0]);
  if(oid===methodView.flowSelected&&!rid&&!version)methodView.rootRevision=null;
  if(methodEmbeddedResource(oid))methodView.stack=[];else if(back)methodView.stack.push(methodScene());
  Object.assign(methodView,{category,selected:oid,revision:null,requestedRevision:rid,file,fileVersion:version,mode:'read',document:null});
@@ -22,16 +24,17 @@ function methodOpen(root,category,oid,rid,file,back=false,version=null){
 function methodSelectNode(root,id,file='SKILL.md'){methodView.stack=[];methodView.flowSelected=id;methodView.rootRevision=null;return methodOpen(root,'skill',id,null,file).then(()=>{if(matchMedia('(max-width:900px)').matches)methodView.content?.scrollIntoView({block:'start'})})}
 async function renderMethods(root){
  const epoch=++methodReadEpoch;methodView.root=root;root.replaceChildren();const notice=nodeText('p','config-save-status','正在读取 SKILL…',root);
- try{const data=await api('/api/methods');if(epoch!==methodReadEpoch||state.workspace!=='project.configuration'||state.configSection!=='METHODS')return;methodView.data=data;return drawMethods(root)}catch(error){if(epoch===methodReadEpoch&&notice.isConnected){notice.textContent=error.message;methodButton(root,'重试读取',()=>renderMethods(root))}}
+ try{const data=await api('/api/methods');if(epoch!==methodReadEpoch||!isMethodsWorkspace())return;methodView.data=data;return drawMethods(root)}catch(error){if(epoch===methodReadEpoch&&notice.isConnected){notice.textContent=error.message;methodButton(root,'重试读取',()=>renderMethods(root))}}
 }
 function methodFlow(parent,root){
  const flow=methodView.data.flow,nav=el('nav','skill-flow');nav.setAttribute('aria-label','创作基础流程');parent.append(nav);
  nodeText('h2',null,'基础流程',nav);const main=el('ol','skill-flow-main');nav.append(main);
- const draw=(entry,host)=>{const section=el('li','skill-flow-stage');section.dataset.flowNode=entry.id;host.append(section);const methods=entry.methods||[];
-  if(methods.length===1){const m=methods[0],b=methodButton(section,entry.supports?m.title:entry.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}
-  else{nodeText('span','skill-flow-label',entry.title,section);if(methods.length){const choices=el('div','skill-flow-parallel');section.append(choices);let family=null,host=choices;for(const m of methods){if(m.group&&m.group!==family){family=m.group;host=el('div','skill-flow-family');choices.append(host);if(methods.filter(item=>item.group===family).length>1)nodeText('small','skill-flow-label',family,host)}const b=methodButton(host,m.title,()=>methodSelectNode(root,m.object_id,m.file));b.dataset.methodNode=m.object_id;const selected=m.object_id===methodView.flowSelected&&(!m.file||m.file===methodView.file);b.setAttribute('aria-current',String(selected));b.classList.toggle('active',selected)}}}
-  if(entry.output)nodeText('small','skill-flow-output',entry.output,section);
-  if(entry.repeat?.methods?.length){const loop=el('div','skill-flow-repeat');section.append(loop);for(const m of entry.repeat.methods){const b=methodButton(loop,'↔ '+m.title,()=>methodSelectNode(root,m.object_id));b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}nodeText('small',null,entry.repeat.label,loop)}
+ const draw=(entry,host)=>{const section=el('li','skill-flow-stage');section.dataset.flowNode=entry.id;host.append(section);const methods=entry.methods||[];const frame=el('div','skill-flow-frame');section.append(frame);const action=el('div','skill-flow-action');frame.append(action);
+  if(methods.length===1){const m=methods[0],b=methodButton(action,entry.supports?m.title:entry.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}
+  else{nodeText('span','skill-flow-label',entry.title,action);if(methods.length){const choices=el('div','skill-flow-parallel');action.append(choices);let family=null,host=choices;for(const m of methods){if(m.group&&m.group!==family){family=m.group;host=el('div','skill-flow-family');choices.append(host);if(methods.filter(item=>item.group===family).length>1)nodeText('small','skill-flow-label',family,host)}const b=methodButton(host,m.title,()=>methodSelectNode(root,m.object_id,m.file));b.dataset.methodNode=m.object_id;const selected=m.object_id===methodView.flowSelected&&(!m.file||m.file===methodView.file);b.setAttribute('aria-current',String(selected));b.classList.toggle('active',selected)}}}
+
+  if(entry.repeat?.methods?.length){const loop=el('div','skill-flow-repeat');action.append(loop);for(const m of entry.repeat.methods){const b=methodButton(loop,'↔ '+m.title,()=>methodSelectNode(root,m.object_id));b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}nodeText('small',null,entry.repeat.label,loop)}
+  if(entry.output){nodeText('span','skill-flow-produce','产出',frame);nodeText('div','skill-flow-output',entry.output,frame);}
   for(const link of flow.returns||[])if(link.from===entry.id)nodeText('span','skill-flow-return','↶ '+link.label+' · '+flow.stages.find(n=>n.id===link.to).title,section);
  };
  for(const stage of flow.stages)draw(stage,main);
@@ -48,7 +51,7 @@ function methodFileTree(parent,record,directory,root,pinned=false){
 }
 async function drawMethods(root){
  const epoch=++methodReadEpoch;
- if(!methodView.restored){methodView.restored=true;const route=new URL(location.href).searchParams;
+ {const route=new URL(location.href).searchParams;
   if(route.has('method_object')){Object.assign(methodView,{category:route.get('method_category')||'skill',selected:route.get('method_object'),revision:route.get('method_revision'),requestedRevision:route.get('method_revision'),file:route.get('method_file'),fileVersion:Number(route.get('method_file_version'))||null,flowSelected:route.get('method_node')||((route.get('method_category')||'skill')==='skill'?route.get('method_object'):null),rootRevision:route.get('method_node_revision')});
    try{const saved=JSON.parse(sessionStorage.getItem('method-reading')||'null');if(saved?.scope===methodStorageScope()){methodView.positions=saved.positions||{};methodView.stack=saved.stack||[]}}catch{}
   }
@@ -60,7 +63,7 @@ async function drawMethods(root){
 
  if(!methodView.selected){nodeText('p',null,'此实例还没有已绑定的 SKILL。',content);return}
  const status=nodeText('p','config-save-status','正在读取准确文件…',content);status.setAttribute('role','status');
- const active=()=>epoch===methodReadEpoch&&page.isConnected&&state.workspace==='project.configuration'&&state.configSection==='METHODS';
+ const active=()=>epoch===methodReadEpoch&&page.isConnected&&isMethodsWorkspace();
  try{
   let rootId=methodView.flowSelected||methodView.selected;
   const record=await api('/api/methods/record?'+new URLSearchParams({object_id:rootId,...((methodView.rootRevision||(rootId===methodView.selected?methodView.requestedRevision:null))?{revision_id:methodView.rootRevision||methodView.requestedRevision}:{})}));if(!active())return;
@@ -88,7 +91,7 @@ async function drawMethods(root){
   if(doc.record.payload.source)nodeText('p','method-source',doc.record.payload.source.files[doc.file]?.path||doc.file,reader);
   const prose=el('div','method-prose');prose.dataset.reviewRevision=doc.record.revision_id;prose.dataset.methodFile=doc.file;prose.dataset.reviewFile=doc.file;methodView.prose=prose;reader.append(prose);
   if(doc.media)renderMethodOriginal(prose,doc);else renderMethodBlocks(prose,doc,root);
-  if(typeof restoreStoryDraft==='function')restoreStoryDraft();paintMethodComments();renderComments();methodRoute();window.scrollTo(0,methodView.positions[methodKey()]||0);rememberMethodPosition();
+  if(typeof restoreStoryDraft==='function')restoreStoryDraft();paintMethodComments();renderComments();methodRoute();window.scrollTo(0,methodView.positions[methodKey()]||0);rememberMethodPosition();restoreMethodAnchor();
  }catch(error){if(active()){status.textContent=error.message;if(!status.isConnected)content.append(status);methodButton(content,'重试准确文件',()=>drawMethods(root));if(methodView.requestedRevision)methodButton(content,'查看此文件的现存历史',()=>methodOpen(root,methodView.category,methodView.selected,null,methodView.file));methodRoute()}}
 }
 function renderMethodOriginal(parent,doc){
@@ -131,7 +134,12 @@ function methodLink(root,doc,part,parent){
       for(const file of Object.keys(resource?.payload.files||{}))if(file===wanted||resource.payload.source?.files[file]?.path===wanted){ref={category:'resource',object_id:r.object_id,revision_id:r.revision_id,file};break}if(ref)break
     }
   }
-  link.href='#';link.onclick=e=>{e.preventDefault();if(!ref){toast('本准确包未包含此资料；请从源入口补取，未替换为最新版');return}if(ref.object_id===doc.record.object_id&&ref.file===doc.file&&hash){const target=[...methodView.prose.querySelectorAll('[data-section]')].find(n=>n.dataset.section===hash||n.dataset.section.startsWith(hash.toLowerCase()+'-'));if(target){target.scrollIntoView({block:'start'});return}}methodOpen(root,ref.category,ref.object_id,ref.revision_id,ref.file,true).then(()=>{if(hash&&methodView.document?.record.revision_id===ref.revision_id&&methodView.document.file===ref.file){const target=[...methodView.prose.querySelectorAll('[data-section]')].find(n=>n.dataset.section===hash||n.dataset.section.startsWith(hash.toLowerCase()+'-'));target?.scrollIntoView({block:'start'})}})};
+  const targetUrl=new URL(location.href);targetUrl.searchParams.set('workspace','production.approach');targetUrl.searchParams.set('tab','foundation');targetUrl.searchParams.delete('config_section');if(methodView.flowSelected)targetUrl.searchParams.set('method_node',methodView.flowSelected);if(methodView.rootRevision)targetUrl.searchParams.set('method_node_revision',methodView.rootRevision);if(ref){for(const [key,value] of Object.entries({method_category:ref.category,method_object:ref.object_id,method_revision:ref.revision_id,method_file:ref.file})){targetUrl.searchParams.set(key,value)}targetUrl.searchParams.delete('method_file_version');targetUrl.hash=hash?'method-section-'+hash:'';}link.href=ref?targetUrl.href:'#';link.onclick=e=>{e.preventDefault();if(!ref){toast('本准确包未包含此资料；请从源入口补取，未替换为最新版');return}
+    if(ref.object_id===doc.record.object_id&&ref.file===doc.file&&hash){history.replaceState(history.state,'',targetUrl);restoreMethodAnchor();return}
+    const reading=methodOpen(root,ref.category,ref.object_id,ref.revision_id,ref.file,true),epoch=methodReadEpoch;
+    reading.then(()=>{if(epoch!==methodReadEpoch||!isMethodsReading()||methodView.document?.record.revision_id!==ref.revision_id||methodView.document.file!==ref.file)return;history.replaceState(history.state,'',targetUrl);restoreMethodAnchor();rememberWorkspaceRoute()});
+  };
+
 }
 function renderMethodBlocks(parent,doc,root){
   if(/\.svg$/i.test(doc.file)){
@@ -186,4 +194,12 @@ function appendMethodResponseAction(actions,comment,onSaved=null){
     const input=el('textarea');input.rows=5;input.setAttribute('aria-label','回应说明');dialog.append(input);const notice=nodeText('p','config-save-status','',dialog);
     const submit=methodButton(dialog,'保存回应',async()=>{submit.disabled=true;try{if(!file)throw Error('请选择回应实际对应的当前文件；输入仍保留。');await api('/api/methods/respond',{method:'POST',body:JSON.stringify({comment_id:comment.id,revision_id:current.revision_id,file,explanation:input.value})});modal.dialog.close();afterReviewDialogReturn(()=>{renderComments();onSaved?.()});toast('回应已保存，可复核原文与改动')}catch(error){notice.textContent=error.message;submit.disabled=false}});
   });
+}
+
+function restoreMethodAnchor(){
+ if(!isMethodsReading())return;
+ let hash;try{hash=decodeURIComponent(new URL(location.href).hash.slice(1)).replace(/^method-section-/, '')}catch{hash=new URL(location.href).hash.slice(1)}
+ if(!hash)return;
+ const target=[...methodView.prose.querySelectorAll('[data-section]')].find(n=>n.dataset.section===hash||n.dataset.section===hash.toLowerCase()||n.dataset.section===hash.toLowerCase().replace(/[^\p{L}\p{N}]+/gu,'-')||n.dataset.section.replace(/-/g,'')===hash.toLowerCase().replace(/[-\s]/g,''));
+ if(target)target.scrollIntoView({block:'start'});else if(!methodView.prose.querySelector('.method-anchor-issue'))nodeText('p','production-issue method-anchor-issue','此准确文件没有所指章节；保留原定位，未替换为其他章节。',methodView.prose);
 }
