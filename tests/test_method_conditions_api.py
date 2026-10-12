@@ -165,4 +165,6 @@ class MethodConditionsApiTest(unittest.TestCase):
         response = self.api('/api/methods/stage?' + urllib.parse.urlencode({
             'execution_object_id': ref['object_id'], 'execution_revision_id': ref['revision_id'], 'stage': 'result'}))
         self.assertEqual(response, {'artifact': artifact, 'previous': []})
-        self.assertEqual(response['artifact']['payload']['output'], {'record': row})
+        self.assertEqual(response['artifact']['payload']['output'], {
+            'format': 'production-method-output-v1', 'target': 'coded-input',
+            'stage': 'result', 'sha256': methods.checksum({'record': row})})
