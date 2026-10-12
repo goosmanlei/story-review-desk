@@ -120,7 +120,23 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .review-pagination button:disabled { color: var(--desk-muted); background: var(--desk-soft); opacity: .55; cursor: default; }
 
 /* Keep each method resource and its condition together across form columns. */
-.methods-page .method-tabs { margin-bottom: 12px; }
+.methods-page .method-tabs { display:flex; gap:0; margin:0 0 22px; border-bottom:1px solid var(--desk-line); }
+.methods-page .method-tabs button[role=tab] { border:0; border-bottom:3px solid transparent; border-radius:0; padding:10px 20px; background:transparent; color:var(--desk-muted); }
+.methods-page .method-tabs button[aria-selected=true] { border-bottom-color:var(--desk-selection-line); background:var(--desk-selected); color:#355339; }
+.methods-page button:focus-visible { outline:2px solid #507658; outline-offset:3px; }
+.method-tab-panel { min-width:0; }
+.method-choices { display:flex; flex-wrap:wrap; gap:6px; margin:10px 0; }
+.methods-page .method-choices button.active,.method-catalog button.active { background:var(--desk-selected); border-color:var(--desk-selection-line); color:#355339; }
+.method-browse-layout { display:grid; grid-template-columns:minmax(175px,230px) minmax(0,1fr); gap:28px; margin-top:24px; }
+.method-catalog { display:flex; flex-direction:column; align-self:start; position:sticky; top:110px; max-height:72vh; overflow:auto; gap:6px; }
+.method-catalog button { text-align:left; }
+.method-catalog small { display:block; color:var(--desk-muted); font-size:12px; line-height:1.6; margin-top:5px; }
+.method-content { min-width:0; }
+.method-content h2 { margin-top:0; }
+.method-content .method-choices button { font-size:13px; }
+.method-rule-choice { flex:1 1 100%; min-width:0; }
+.method-binding-rule { padding:12px 0; border-bottom:1px solid var(--desk-line); }
+.method-binding-rule p { white-space:pre-wrap; overflow-wrap:anywhere; font-size:14px; }
 .methods-page .method-tabs button,.methods-page .method-files button,.methods-page .method-rules button { border: 1px solid var(--desk-line); border-radius: var(--desk-radius); background: #fffdfa; padding: 7px 11px; font: inherit; font-size: 13px; cursor: pointer; }
 .methods-page .method-tabs button.active { background: var(--desk-selected); border-color: var(--desk-selection-line); color: #355339; }
 .methods-page > select { margin-bottom: 24px; max-width: 100%; }
@@ -135,10 +151,13 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .methods-page .method-rules .config-field { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
 .methods-page .method-rules input,.methods-page .method-rules select { flex: 1 1 240px; }
 @media(max-width:700px) { .methods-page .method-resource-row { grid-template-columns: minmax(0,1fr); margin-bottom: 18px; } }
-.method-reading-layout { display:grid; grid-template-columns:minmax(170px,230px) minmax(0,1fr); gap:28px; margin-top:24px; }
-.method-directory { align-self:start; position:sticky; top:110px; display:flex; flex-direction:column; max-height:65vh; overflow:auto; gap:4px; }
+.method-reading-layout { display:flex; flex-direction:column; gap:24px; margin-top:24px; }
+.method-directory { display:flex; flex-wrap:wrap; gap:6px; }
+.method-directory > .method-choices { flex:1 1 100%; }
 .methods-page button { font:inherit; border:1px solid var(--desk-line); background:#fffdfa; border-radius:4px; padding:7px 10px; cursor:pointer; }
 .method-directory button { text-align:left; overflow-wrap:anywhere; }
+.method-directory > button { flex:0 1 auto; max-width:100%; font-size:13px; }
+.method-directory small { display:block; color:var(--desk-muted); font-size:11px; }
 .method-directory button.active { background:var(--desk-selected); }
 .method-prose { min-width:0; line-height:1.85; overflow-wrap:anywhere; }
 .method-prose h2,.method-prose h3,.method-prose h4 { margin:24px 0 12px; scroll-margin-top:120px; }
@@ -155,4 +174,5 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .method-body-editor { width:100%; min-height:55vh; font:14px/1.8 monospace; }
 .method-apply-scopes { margin-top:20px; }
 .method-apply-scopes label { display:block; margin:10px; }
-@media(max-width:750px) { .method-reading-layout { grid-template-columns:1fr; gap:16px; } .method-directory { position:static; flex-direction:row; flex-wrap:wrap; max-height:160px; } }
+@media(max-width:900px) { .method-browse-layout { grid-template-columns:1fr; gap:24px; } .method-catalog { position:static; max-height:none; display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); } .method-catalog small { display:none; } .method-reading-layout { gap:16px; } }
+@media(max-width:500px) { .methods-page .method-tabs button[role=tab] { flex:1; padding:10px 8px; } .method-catalog { grid-template-columns:1fr; } }

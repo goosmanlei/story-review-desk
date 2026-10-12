@@ -231,7 +231,7 @@ function workspacePageDescriptor(workspace,params){
   if(workspace==='project.configuration')return ({
     PROJECT:['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'],
     SYSTEM:['SYSTEM & AI','系统与 AI','管理站点图标与评论润色选项；修改后统一保存配置。'],
-    METHODS:['WORKING METHODS','工作方法','维护执行方法、共用资料与工作环节；每次保存形成可回查的准确版本。'],
+    METHODS:['WORKING METHODS','工作方法','按创作环节阅读方法与准确共用资料；选择适用于后续工作的版本。'],
     CODES:['BUSINESS CODES','编号前缀','查阅对象编号的前缀、示例和唯一性范围，识别准确的版本与候选。']
   })[params.get('config_section')]||['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'];
   if(params.get('production_tab')==='history')return ['页面不可用','页面已退役','此旧页面已移除，请从生产制作选择当前工作入口。'];

@@ -58,6 +58,11 @@ def reference(row):
     return {'object_id': row['object_id'], 'revision_id': row['revision_id']}
 
 
+def condition_texts(item):
+    refs = item['payload'].get('resources', item['payload'].get('rules', []))
+    return [json.dumps(ref['when'], ensure_ascii=False, allow_nan=False) if 'when' in ref else None for ref in refs]
+
+
 def catalog(store):
     result = {name: [] for name in ('skill', 'resource', 'binding')}
     for row in store.db.execute("SELECT o.id FROM objects o JOIN revisions r ON r.id=o.current_revision WHERE o.kind='GUIDANCE' AND json_extract(r.payload,'$.format') LIKE 'managed-method-%'"):
@@ -67,13 +72,16 @@ def catalog(store):
                 result[name].append(item)
     result['condition_texts'] = {}
     result['referenced'] = {}
+    # Version navigation needs identities, not another copy of every file.
+    # Include unbound and intermediate revisions so old links remain readable.
+    result['versions'] = {}
+    for row in store.db.execute("SELECT r.object_id,r.id AS revision_id,r.version FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='GUIDANCE' AND json_extract(r.payload,'$.format') IN (?,?,?) ORDER BY r.object_id,r.version DESC", tuple(FORMATS[name] for name in ('skill', 'resource', 'binding'))):
+        result['versions'].setdefault(row['object_id'], []).append(dict(row))
     for item in result['skill'] + result['binding']:
         refs = item['payload'].get('resources', item['payload'].get('rules', []))
         # Send exact JSON text as well: browser numbers cannot represent every
         # integer that the ledger and resolver already support.
-        result['condition_texts'][item['revision_id']] = [
-            json.dumps(ref['when'], ensure_ascii=False, allow_nan=False) if 'when' in ref else None
-            for ref in refs]
+        result['condition_texts'][item['revision_id']] = condition_texts(item)
         for ref in refs:
             row = read(store, ref['object_id'], ref['revision_id'])
             result['referenced'][row['revision_id']] = row
