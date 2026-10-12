@@ -250,6 +250,14 @@ function methodLink(root,doc,part,parent){
   link.href='#';link.onclick=e=>{e.preventDefault();if(!ref){toast('本准确包未包含此资料；请从源入口补取，未替换为最新版');return}if(ref.object_id===doc.record.object_id&&ref.file===doc.file&&hash){const target=[...methodView.prose.querySelectorAll('[data-section]')].find(n=>n.dataset.section===hash||n.dataset.section.startsWith(hash.toLowerCase()+'-'));if(target){target.scrollIntoView({block:'start'});return}}methodOpen(root,ref.category,ref.object_id,ref.revision_id,ref.file,true).then(()=>{if(hash&&methodView.document?.record.revision_id===ref.revision_id&&methodView.document.file===ref.file){const target=[...methodView.prose.querySelectorAll('[data-section]')].find(n=>n.dataset.section===hash||n.dataset.section.startsWith(hash.toLowerCase()+'-'));target?.scrollIntoView({block:'start'})}})};
 }
 function renderMethodBlocks(parent,doc,root){
+  if(/\.svg$/i.test(doc.file)){
+    const body=doc.record.payload.files[doc.file],figure=el('figure','approach-media'),image=el('img');
+    if(doc.blocks[0])figure.dataset.blockId=doc.blocks[0].id;
+    image.alt=(body.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||doc.file).replace(/<[^>]*>/g,'').trim();
+    image.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(body);
+    image.onerror=()=>{image.remove();nodeText('p','production-issue','准确图示无法显示，可下载原文件；未替换为其他版本。',figure)};
+    figure.append(image);parent.append(figure);reviewSurface(parent,'text');return;
+  }
   let table=null,tableRow=null,lastRow=null;
   for(const block of doc.blocks){
     let node;
