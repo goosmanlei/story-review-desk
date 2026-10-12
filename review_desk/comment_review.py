@@ -31,7 +31,15 @@ def reference(store, value):
     record = exact_revision(store, value.get('object_id'), value.get('revision_id'))
     from .production_current import enabled, RECORD_KINDS
     current = enabled(store) and record['kind'] in RECORD_KINDS
-    return {**value, 'title': record['title'], 'version': None if current else record['version'],
+    extra = {}
+    file = value.get('file') or value.get('anchor', {}).get('file')
+    if record['kind'] == 'GUIDANCE' and file:
+        from .method_files import installed, manifest
+        if installed(store):
+            item = manifest(store, record['id']).get(file)
+            if item:
+                extra = {'file': file, 'file_version': item['version'], 'file_revision': item['id']}
+    return {**value, **extra, 'title': record['title'], 'version': None if current else record['version'],
             'kind': record['kind'], 'current_content': current}
 
 
@@ -106,7 +114,7 @@ def evidence_records(store):
     return [json.loads(row[0]) for row in rows]
 
 
-def snapshot(store, object_id, revision_id):
+def snapshot(store, object_id, revision_id, file=None):
     current = exact_revision(store, object_id, revision_id)
     method = current['kind'] == 'GUIDANCE'
     supplements = evidence_records(store)
@@ -155,6 +163,8 @@ def snapshot(store, object_id, revision_id):
     reviews = []
     for cid in relevant:
         comment = store.comment(cid)
+        if method and file and comment and comment['anchor'].get('file') != file:
+            continue
         if not comment:
             continue
         replies = []
@@ -163,7 +173,7 @@ def snapshot(store, object_id, revision_id):
             from .production_current import enabled
             refs = [(saved_excerpt(store,response,'evidence:'+str(index),ref) if enabled(store) else None) or {**readable_reference(store, ref), 'anchor_state': store.anchor_state(
                 ref['object_id'], ref['revision_id'], ref['anchor'])} for index, ref in enumerate(response.get('evidence', []))]
-            replies.append({**response, 'response': (saved_excerpt(store,response,'response',response['response']) if enabled(store) else None) or readable_reference(store, response['response']), 'evidence': refs,
+            replies.append({**response, 'response': (saved_excerpt(store,response,'response',response['response']) if enabled(store) else None) or readable_reference(store, {**response['response'], **({'file': response.get('evidence', [{}])[0].get('anchor', {}).get('file', comment['anchor'].get('file'))} if method else {})}), 'evidence': refs,
                             'original_excerpt': saved_excerpt(store,response,'original',response.get('original',{})) if enabled(store) else None})
         replies.sort(key=lambda r: (r['response']['version'] or 0, r['response']['revision_id']))
         comment = store.comment_anchor_states([comment])[0]
@@ -178,8 +188,11 @@ def snapshot(store, object_id, revision_id):
                         'current_evidence': [ref for reply in replies for ref in reply['evidence']
                                              if ref['object_id'] == object_id and ref['revision_id'] == revision_id and ref.get('matches_current',True)]})
     reviews.sort(key=lambda row: (row['comment']['created_at'], row['comment']['id']))
-    return {'context': reference(store, {'object_id': object_id, 'revision_id': current['id']}),
-            'reviews': reviews}
+    context = reference(store, {'object_id': object_id, 'revision_id': current['id'], **({'file': file} if file else {})})
+    if method:
+        latest = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()[0]
+        context['latest'] = reference(store, {'object_id': object_id, 'revision_id': latest, **({'file': file} if file else {})})
+    return {'context': context, 'reviews': reviews}
 
 
 def content(store, object_id, revision_id, file=None):

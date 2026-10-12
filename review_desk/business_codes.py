@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS business_candidates (
 CREATE TABLE IF NOT EXISTS business_comments (comment_id TEXT PRIMARY KEY,number INTEGER NOT NULL UNIQUE);'''
 
 TYPES = (
-    ('视听集', 'AE', 'AE001', '本实例内；准确引用故事集，设计版本独立'),
+    ('视听集', 'AE', 'AE001', '本实例内；准确引用剧本内容，制作只维护当前稿'),
     ('视听场', 'AS', 'AS001', '本实例内；可组合多个故事场或局部正文'),
     ('业务关系', 'R', 'R-EN012->EN055', '一对稳定对象一条关系；箭头指向依赖方，短横线表示相关；旧RL/MR只读回查'),
     ('集', 'E', 'E02', '同一剧本版本内；按该版本完整集序编号'),
@@ -24,8 +24,8 @@ TYPES = (
     ('实体', 'EN', 'EN001', '本实例内'),
     ('实体状态', 'ST', 'ST001', '本实例内；历史保留状态也有独立编号'),
     ('素材', 'M', 'M001', '本实例内；准确共享身份共用编号，旧身份可追溯'),
-    ('素材版本', 'MV', 'M001 / MV002', '同一准确素材身份内；沿用方案版本号'),
-    ('素材候选', 'MC', 'M001 / MV002 / MC001', '同一素材版本内；按实际结果登记顺序分配'),
+    ('旧素材版本（历史）', 'MV', 'M001 / MV002', '仅旧链接回查；当前需求只有一个当前方案，不再滚动 MV 版本'),
+    ('素材候选', 'MC', 'M001 / MC001', '同一素材需求内；每次真实产出形成候选，保存当时方案与原件'),
     ('评论', 'C', 'C001', '本实例内；原文圈选、修订和评论身份不变'),
 )
 PREFIXES = dict(ENTITY='EN', STATE='ST', REQUIREMENT='M', ASSET='M',
@@ -128,7 +128,7 @@ def restore(store, rows, candidates=(), comments=()):
 def catalog():
     return {'types': [dict(type=t, prefix=p, example=e, scope=s) for t,p,e,s in TYPES],
             'allocation': '集、场按准确剧本版本的完整顺序编号，场号跨集连续；切换版本各自从一开始。其他对象按首次登记次序递增，已分配编号保留。编号不替换稳定身份或准确修订。',
-            'excluded': '资料、剧本与故事结构不使用简写编号。后台调用、依赖边、事件、配置表和输入锁也不增加编号。V/C 是当前素材内的局部版本／候选序号，须连同素材身份理解。'}
+            'excluded': '资料、剧本与故事结构不使用简写编号。后台调用、依赖边、事件、配置表和输入锁也不增加编号。候选号须连同素材身份理解；旧 MV 链仅作历史兼容。镜头属于实体范畴，沿用 ASH 编号。'}
 
 
 def edition_codes(store):

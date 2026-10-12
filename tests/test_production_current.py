@@ -26,6 +26,26 @@ class CurrentProductionTest(unittest.TestCase):
         migration.apply(self.store, plan)
         return plan
 
+    def test_file_histories_public_recovery_and_explicit_private_execution(self):
+        from review_desk import method_files
+        self.migrate()
+        resource, method, binding=seed(self.store)
+        request={'work_type':'comment-polish','run_id':'private','step_id':'one','target':'text',
+                 'inputs':{'context':'PRIVATE-NOT-IN-PUBLIC'},'private':True}
+        execution=methods.prepare(self.store,request)
+        expected=method_files.directory(self.store,method['object_id'])
+        archive=methods.export_registry(self.store,executions=[execution['object_id']])
+        export(self.store,self.root/'export')
+        public=(self.root/'export/objects.json').read_text()
+        self.assertNotIn('PRIVATE-NOT-IN-PUBLIC',public)
+        recovered=Store(self.root/'file-recovery/.runtime/review.sqlite3');self.addCleanup(recovered.close)
+        restore(recovered,self.root/'export')
+        self.assertEqual(method_files.directory(recovered,method['object_id']),expected)
+        self.assertIsNone(recovered.db.execute('SELECT 1 FROM objects WHERE id=?',(execution['object_id'],)).fetchone())
+        methods.restore_registry(recovered,archive)
+        self.assertEqual(methods.prepare(recovered,request),execution)
+        method_files.validate(recovered)
+
     def author(self, prompt, step):
         row = p.record(self.store, 'need-full-overall')
         payload = copy.deepcopy(row['payload'])
