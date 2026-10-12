@@ -107,4 +107,4 @@ Schema 13 导出保存当前制作单份正文、不可变提交快照、真实�
 
 业务编号、版本与候选选择，以及关系旧说明清理后的读取与恢复规则见 [编号规则](docs/business-codes.md)、[实体和素材审阅](docs/materials-and-relationships.md)、[素材版本与导出](docs/material-versions.md)。系统管理的编号说明直接读取同一前缀定义。
 
-工作方法的页面维护、实际执行、媒体启用与恢复契约见 [工作方法](docs/managed-methods.md)。
+SKILL管理的流程阅读、文件独立版本比较、后台维护与实际执行、媒体启用与恢复契约见 [工作方法](docs/managed-methods.md)。

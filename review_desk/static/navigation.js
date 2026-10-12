@@ -18,7 +18,7 @@ function readableProductionTitle(row,title=row?.payload?.title||row?.title||''){
 function renderBusinessCodeCatalog(root){
   const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
   const table=el('table','business-code-table'),head=el('tr');for(const title of ['类型','前缀','示例','唯一性范围'])nodeText('th',null,title,head);table.append(head);
-  for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);
+  for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);renderDataModel(root);
 }
 /* View labels and tabs share the existing workspace/URL routing contract. */
 function reviewPositionLabel(kind,value,episode=null){
@@ -189,7 +189,7 @@ function workspaceTabItems(){
   if(['story.sources','story.outline','story.script'].includes(workspace))return [
     ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.script','open-story-script','故事剧本','screenplay-workspace']
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
-  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['METHODS','工作方法'],['CODES','编号前缀']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
+  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['METHODS','SKILL管理'],['CODES','数据模型']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
     const options=[['breakdown','视听制作'],['entities','实体管理'],['materials','素材管理']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));
@@ -231,8 +231,8 @@ function workspacePageDescriptor(workspace,params){
   if(workspace==='project.configuration')return ({
     PROJECT:['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'],
     SYSTEM:['SYSTEM & AI','系统与 AI','管理站点图标与评论润色选项；修改后统一保存配置。'],
-    METHODS:['WORKING METHODS','工作方法','按创作环节阅读方法与准确共用资料；选择适用于后续工作的版本。'],
-    CODES:['BUSINESS CODES','编号前缀','查阅对象编号的前缀、示例和唯一性范围，识别准确的版本与候选。']
+    METHODS:['SKILL MANAGEMENT','SKILL管理','沿基础流程阅读方法、比较文件变化并提出意见。'],
+    CODES:['DATA MODEL','数据模型','查阅编号，理解故事、制作、素材与方法之间的关系。']
   })[params.get('config_section')]||['STORY PROJECT','故事项目配置','设置本故事的创作阶段、背景与表达目标，为审阅和评论润色提供依据。'];
   if(params.get('production_tab')==='history')return ['页面不可用','页面已退役','此旧页面已移除，请从生产制作选择当前工作入口。'];
   const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'||params.get('production_tab')==='shots'?'breakdown':(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
@@ -247,3 +247,37 @@ function renderPageHeading(){
   for(const [index,id] of ['page-marker','page-title','page-purpose'].entries()){const node=document.getElementById(id);if(node)node.textContent=parts[index]}
 }
 if(typeof window!=='undefined')window.addEventListener?.('pagehide',()=>{rememberWorkspacePosition();rememberWorkspaceRoute()});
+
+let modelGraphObserver=null;
+async function renderDataModel(root){
+ modelGraphObserver?.disconnect();
+ const host=el('section','data-model');root.append(host);const notice=nodeText('p',null,'正在读取数据模型…',host);
+ try{const data=await api('/api/data-model');if(!host.isConnected)return;host.replaceChildren();if(!data)return;
+  nodeText('h2',null,data.title,host);nodeText('p','model-lead',data.lead,host);
+  const redraw=[];
+  for(const diagram of data.diagrams){const figure=el('figure','model-diagram');nodeText('figcaption',null,diagram.title,figure);host.append(figure);
+   const graph=el('div','model-graph');figure.append(graph);const nodes=new Map(diagram.nodes.map(n=>[n.id,n])),elements=new Map();
+   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('model-lines');svg.setAttribute('aria-hidden','true');graph.append(svg);
+   const defs=document.createElementNS(svg.namespaceURI,'defs'),marker=document.createElementNS(svg.namespaceURI,'marker'),tip=document.createElementNS(svg.namespaceURI,'path');const markerId='model-arrow-'+diagram.nodes[0].id;
+   for(const [k,v]of Object.entries({id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'}))marker.setAttribute(k,v);tip.setAttribute('d','M1 1L9 5L1 9');marker.append(tip);defs.append(marker);svg.append(defs);
+   for(const group of diagram.groups){const area=el('section','model-group');graph.append(area);if(group.title)nodeText('h3','model-group-title',group.title,area);
+    for(const row of group.rows){const line=el('div','model-row');line.style.setProperty('--model-columns',row.length);area.append(line);
+     for(const id of row){const value=nodes.get(id),card=el('div','model-node');card.id='model-'+id;nodeText('h4',null,value.title,card);nodeText('p',null,value.text,card);line.append(card);elements.set(id,card);
+      const links=el('ul','model-mobile-links');for(const edge of diagram.connections.filter(e=>e.from===id)){const item=el('li');nodeText('span',null,(edge.style==='dashed'?'⇢ ':'→ ')+edge.label+' · '+nodes.get(edge.to).title,item);links.append(item)}card.append(links);
+     }
+    }
+   }
+   const paths=diagram.connections.map(edge=>{const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('marker-end','url(#'+markerId+')');if(edge.style==='dashed')path.setAttribute('stroke-dasharray','5 5');svg.append(path);const label=nodeText('span','model-edge-label',edge.label,graph);return {edge,path,label}});
+   redraw.push(()=>{const bounds=graph.getBoundingClientRect();svg.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
+    for(const {edge,path,label}of paths){const a=elements.get(edge.from).getBoundingClientRect(),b=elements.get(edge.to).getBoundingClientRect();let x1,y1,x2,y2,d,lx,ly;
+     if(Math.abs(a.top-b.top)<5){x1=a.right-bounds.left;y1=(a.top+a.bottom)/2-bounds.top;x2=b.left-bounds.left;y2=(b.top+b.bottom)/2-bounds.top;d=`M${x1} ${y1}L${x2} ${y2}`;lx=(x1+x2)/2;ly=(y1+y2)/2}
+     else{x1=(a.left+a.right)/2-bounds.left;y1=a.bottom-bounds.top;x2=(b.left+b.right)/2-bounds.left;y2=b.top-bounds.top;const mid=(y1+y2)/2;d=`M${x1} ${y1}V${mid}H${x2}V${y2}`;lx=(x1+x2)/2;ly=mid}
+     path.setAttribute('d',d);label.style.left=lx+'px';label.style.top=ly+'px';
+    }
+   });
+   if(diagram.note)nodeText('p','model-note',diagram.note,figure);
+  }
+  const examples=el('div','model-examples');for(const value of data.examples||[]){const item=el('p'),link=nodeText('a',null,value.title,item);link.href=reviewURL(value.href);nodeText('span',null,' · '+value.text,item);examples.append(item)}host.append(examples);
+  modelGraphObserver=new ResizeObserver(()=>{if(host.isConnected)redraw.forEach(fn=>fn());else modelGraphObserver?.disconnect()});modelGraphObserver.observe(host);redraw.forEach(fn=>fn());
+ }catch(error){if(host.isConnected){notice.textContent='数据模型读取失败：'+error.message;host.replaceChildren(notice);const retry=nodeText('button',null,'重试数据模型',host);retry.onclick=()=>{host.remove();renderDataModel(root)}}}
+}
