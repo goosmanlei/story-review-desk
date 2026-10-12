@@ -150,7 +150,7 @@ def validate(store, payload):
         for name, content in files.items():
             file_path(name)
             require(PurePosixPath(name).parts[0] not in ('shared', 'materials', 'RESOURCES.md', 'execution.json', 'request.json', 'registry.json', 'delivery.json', 'record.json', 'begin-request.json', 'result-import.json') and not PurePosixPath(name).parts[0].startswith('stage-'), '包内文件名与执行交付文件冲突')
-            text(content, name)
+            text(content, name, 1000000 if name.endswith('.json') else 200000)
         require(sum(len(v) for v in files.values()) <= 1000000, '方法包正文过大；请拆分按需资源')
     if kind == 'resource':
         sections = payload.get('sections')

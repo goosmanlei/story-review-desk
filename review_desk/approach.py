@@ -38,7 +38,7 @@ def validate_workflow(diagram, tab_ids=None):
 
     require(isinstance(diagram, dict) and set(diagram) == {
         'type', 'description', 'nodes', 'groups', 'connections', 'feedback', 'note', 'methods'})
-    require(diagram['type'] == 'workflow' and text(diagram['description']) and text(diagram['note']))
+    require(diagram['type'] == 'workflow' and text(diagram['description']) and isinstance(diagram['note'], str))
     nodes = diagram['nodes']
     require(isinstance(nodes, list) and 2 <= len(nodes) <= 24)
     for node in nodes:
@@ -87,7 +87,7 @@ def validate_workflow(diagram, tab_ids=None):
     require(set(ids) == {v for pair in pairs for v in pair})
     feedback = diagram['feedback']
     require(isinstance(feedback, dict) and set(feedback) == {'steps', 'targets', 'label'})
-    require(text(feedback['label']) and isinstance(feedback['steps'], list) and 2 <= len(feedback['steps']) <= 4)
+    require(isinstance(feedback['label'], str) and isinstance(feedback['steps'], list) and 2 <= len(feedback['steps']) <= 4)
     require(all(text(v) for v in feedback['steps']))
     require(isinstance(feedback['targets'], list) and 1 <= len(feedback['targets']) <= 4)
     require(all(isinstance(v, str) and v in ids for v in feedback['targets']))
@@ -275,6 +275,20 @@ def read_document(root):
             require(tab_ids == ["story", "materials"])
         else:
             require({"story", "materials"}.issubset(tab_ids))
+        routes = value.get('reading_routes', {})
+        require(isinstance(routes, dict) and set(routes) <= {'filmcraft', 'video-handbook'})
+        for legacy, route in routes.items():
+            require(isinstance(route, dict) and set(route) == {'default', 'anchors'})
+            require(isinstance(route['anchors'], dict) and len(route['anchors']) <= 500)
+            require(all(key.startswith('approach-'+legacy+'-') and identifier(key) for key in route['anchors']))
+            for entry in [route['default'], *route['anchors'].values()]:
+                require(isinstance(entry, dict) and set(entry) == {'category','object','node','file','section'})
+                require(entry['category'] == 'resource')
+                require(isinstance(entry['object'],str) and re.fullmatch(r'method\.resource\.[a-z0-9-]+',entry['object']))
+                require(isinstance(entry['node'],str) and re.fullmatch(r'method\.skill\.[a-z0-9-]+',entry['node']))
+                from .methods import file_path
+                file_path(entry['file'])
+                require(isinstance(entry['section'],str) and len(entry['section']) <= 300 and not any(c in entry['section'] for c in ('<','>',chr(0))))
         for tab in value["tabs"]:
             require(all(isinstance(tab[key], str) for key in ("label", "title", "lead")))
             require(isinstance(tab["sections"], list))

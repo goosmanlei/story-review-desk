@@ -309,8 +309,7 @@ function renderApproachWorkflow(diagram) {
         const node = nodes.get(id), card = el('div', `approach-workflow-node is-${node.shape || 'card'}`);
         card.id = `approach-${tabId}-${id}`; card.classList.add('approach-anchor');
         const title = el('div', 'approach-workflow-node-title'); title.append(approachDiagramIcon(node.icon));
-        const label = nodeText(node.href ? 'a' : 'strong', null, node.title, title);
-        if (node.href) { label.href = reviewURL(node.href); bindApproachNavigation(label); }
+        nodeText('strong', null, node.title, title);
         card.append(title); nodeText('p', null, node.text, card);
         if (node.items) {
           const list = el('ul', 'approach-workflow-items');
@@ -344,13 +343,7 @@ function renderApproachWorkflow(diagram) {
   const flow = el('div', 'approach-workflow-feedback-steps');
   diagram.feedback.steps.forEach((step, i) => { if (i) nodeText('span', null, '→', flow); nodeText('strong', null, step, flow); });
   feedback.append(flow);
-  const targets = el('div', 'approach-workflow-feedback-targets');
-  nodeText('span', null, '↶ ' + diagram.feedback.label, targets);
-  for (const id of diagram.feedback.targets) {
-    const link = nodeText('a', null, nodes.get(id).title, targets);
-    link.href = `#approach-${tabId}-${id}`; bindApproachNavigation(link);
-  }
-  feedback.append(targets); figure.append(feedback);
+  figure.append(feedback);
   const returnLines = document.createElementNS(svg.namespaceURI, 'svg');
   returnLines.classList.add('approach-workflow-lines', 'approach-workflow-return-lines');
   returnLines.setAttribute('aria-hidden', 'true');
@@ -361,13 +354,7 @@ function renderApproachWorkflow(diagram) {
     return {id, path};
   });
   figure.append(returnLines);
-  nodeText('p', 'approach-workflow-note', diagram.note, figure);
-  const methods = el('nav', 'approach-workflow-methods'); methods.setAttribute('aria-label', '专业方法');
-  for (const method of diagram.methods) {
-    const link = nodeText('a', null, method.label, methods);
-    link.href = reviewURL(method.href); bindApproachNavigation(link);
-  }
-  figure.append(methods);
+  if(diagram.note)nodeText('p','approach-workflow-note',diagram.note,figure);
   const draw = () => {
     if (!graph.isConnected) return;
     const bounds = graph.getBoundingClientRect();
@@ -416,9 +403,9 @@ async function renderApproach() {
   if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   host.setAttribute('aria-labelledby', `approach-tab-${selected}`);
   // Hash navigation must keep the mounted text and its browser reading position.
-  if (host.dataset.tab === selected) { restoreApproachAnchor(); return; }
+  if (host.dataset.tab === selected && !['foundation','model'].includes(selected)) { restoreApproachAnchor(); return; }
   delete host.dataset.tab;
-  host.classList.remove('approach-cycle', 'approach-diagram');
+  host.classList.remove('approach-cycle', 'approach-diagram', 'approach-methods');
   approachIndexObserver?.disconnect();
   approachWorkflowObserver?.disconnect();
   const index = $('#approach-index'), sidebar = $('#approach-sidebar');
@@ -431,9 +418,11 @@ async function renderApproach() {
     const current = new URL(location.href).searchParams.get('tab') || 'story';
     if (sequence !== approachRenderSequence || current !== requested || $('#approach-view').hidden) return;
     approachContent = guide;
+    if(migrateApproachReadingRoute(guide)){return renderApproach();}
     host.replaceChildren();
     if (!guide) { nodeText('p', 'approach-note', '本实例尚未提供制作方法文档。已有故事与审阅功能可继续使用。', host); return; }
     const tab = approachSelectedTab();
+    if(['foundation','model'].includes(tab.id)){host.classList.add('approach-methods');host.dataset.tab=tab.id;if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();host.setAttribute('aria-labelledby','approach-tab-'+tab.id);if(tab.id==='foundation')await renderMethods(host);else await renderBusinessCodeCatalog(host);return;}
     if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
     host.setAttribute('aria-labelledby', `approach-tab-${tab.id}`);
     if (!tab.layout) nodeText('h2', null, tab.title, host);
@@ -518,9 +507,26 @@ window.addEventListener('hashchange', () => {
 
 function selectApproachTab(tab, focus = false) {
   if(typeof rememberWorkspacePosition==='function')rememberWorkspacePosition();
-  const url = new URL(location.href); url.searchParams.set('workspace', 'production.approach'); url.searchParams.set('tab', tab); url.hash = '';
+  if(typeof rememberStoryDraft==='function')rememberStoryDraft();
+  if(typeof rememberMethodPosition==='function'&&isMethodsReading())rememberMethodPosition();
+  if(typeof rememberWorkspaceRoute==='function')rememberWorkspaceRoute();
+  state.anchor=null;state.editing=null;state.selected=null;state.reviewCommentScope=null;hideSelectionAction();closePanel();
+  const saved=typeof workspaceSubRoutes==='undefined'?null:workspaceSubRoutes.get('production.approach:'+tab);
+  const url = new URL(saved||location.href); url.searchParams.set('workspace', 'production.approach'); url.searchParams.set('tab', tab); if(!saved){url.hash = '';for(const key of [...url.searchParams.keys()])if(key.startsWith('method_'))url.searchParams.delete(key);}
   if (url.href !== location.href) typeof pushWorkspaceNavigation==='function'?pushWorkspaceNavigation(url):history.pushState(null, '', url);
   if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs();
   renderApproach().then(()=>{if(typeof restoreWorkspacePosition==='function')restoreWorkspacePosition()});
   if (focus) $(`#approach-tab-${tab}`).focus();
+}
+
+function migrateApproachReadingRoute(guide){
+ const url=new URL(location.href),p=url.searchParams;
+ const legacy=p.get('tab')||url.hash.match(/^#approach-(video-handbook|filmcraft)-/)?.[1];
+ if(!['video-handbook','filmcraft'].includes(legacy))return false;
+ const route=guide.reading_routes?.[legacy],entry=route?.anchors?.[url.hash.slice(1)]||route?.default;
+ if(!entry)return false;
+ p.set('tab','foundation');p.delete('config_section');
+ if(!p.has('method_object')){for(const [key,value] of Object.entries(entry))if(key!=='section')p.set('method_'+key,value);}
+ url.hash=entry.section?'method-section-'+entry.section:(url.hash&&!route.anchors?.[url.hash.slice(1)]?'method-section-'+url.hash.slice(1):'');
+ history.replaceState(history.state,'',url);return true;
 }

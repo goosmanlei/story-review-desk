@@ -40,6 +40,28 @@ class ApproachTest(unittest.TestCase):
         with urlopen(self.base + path) as response:
             return json.load(response)
 
+    def test_retired_professional_routes_are_bounded_exact_and_fail_closed(self):
+        entry={'category':'resource','object':'method.resource.filmcraft-execution',
+               'node':'method.skill.story-structure','file':'production/filmcraft/applications.md',
+               'section':'情绪表演两次不去怎样形成变化'}
+        value={'schema_version':2,'tabs':[
+            {'id':name,'label':name,'title':name,'lead':'','sections':[]}
+            for name in ('vision','model','foundation','story','materials')],
+            'reading_routes':{'filmcraft':{'default':entry,'anchors':{'approach-filmcraft-case':entry}}}}
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'),value)
+        for key,bad in [('file','../../private.md'),('object','method.execution.private'),
+                        ('node','method.resource.source'),('category','skill'),('section','<script>')]:
+            invalid=copy.deepcopy(value)
+            invalid['reading_routes']['filmcraft']['default'][key]=bad
+            self.path.write_text(json.dumps(invalid))
+            with self.subTest(key=key),self.assertRaises(HTTPError) as caught:
+                self.get('/api/production-approach')
+            self.assertEqual(caught.exception.code,503)
+            self.assertEqual(self.get('/api/sources'),[])
+        self.path.write_text(json.dumps(value))
+        self.assertEqual(self.get('/api/production-approach'),value)
+
     def test_cycle_layout_is_explicit_and_rejects_unsupported_content(self):
         value = {"schema_version": 2, "tabs": [
             {"id": name, "label": name, "title": name, "lead": "lead", "sections": []}

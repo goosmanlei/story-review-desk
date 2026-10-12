@@ -107,4 +107,4 @@ Schema 14 导出保存当前制作单份正文、不可变提交快照、真实�
 
 业务编号、当前方案与候选选择，以及关系旧说明清理后的读取与恢复规则见 [编号规则](docs/business-codes.md)、[实体和素材审阅](docs/materials-and-relationships.md)、[当前素材与导出](docs/current-materials.md)。系统管理的数据模型直接读取同一编号定义。
 
-SKILL管理的流程阅读、文件独立版本比较、后台维护与实际执行、媒体启用与恢复契约见 [工作方法](docs/managed-methods.md)。
+制作思路中基础流程的 SKILL 阅读、文件独立版本比较、后台维护与实际执行、媒体启用与恢复契约见 [工作方法](docs/managed-methods.md)。旧 METHODS/CODES 链接保留准确身份，转入基础流程／数据模型；系统管理保留故事项目与系统配置。
