@@ -254,7 +254,7 @@ async function renderDataModel(root){
  const host=el('section','data-model');root.append(host);const notice=nodeText('p',null,'正在读取数据模型…',host);
  try{const data=await api('/api/data-model');if(!host.isConnected)return;host.replaceChildren();if(!data)return;
   nodeText('h2',null,data.title,host);nodeText('p','model-lead',data.lead,host);
-  const redraw=[];
+  const redraw=[],allNodes=new Map(data.diagrams.flatMap(d=>d.nodes).map(n=>[n.id,n]));
   for(const diagram of data.diagrams){const figure=el('figure','model-diagram');nodeText('figcaption',null,diagram.title,figure);host.append(figure);
    const graph=el('div','model-graph');figure.append(graph);const nodes=new Map(diagram.nodes.map(n=>[n.id,n])),elements=new Map();
    const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.classList.add('model-lines');svg.setAttribute('aria-hidden','true');graph.append(svg);
@@ -262,7 +262,9 @@ async function renderDataModel(root){
    for(const [k,v]of Object.entries({id:markerId,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:7,markerHeight:7,orient:'auto-start-reverse'}))marker.setAttribute(k,v);tip.setAttribute('d','M1 1L9 5L1 9');marker.append(tip);defs.append(marker);svg.append(defs);
    for(const group of diagram.groups){const area=el('section','model-group');graph.append(area);if(group.title)nodeText('h3','model-group-title',group.title,area);
     for(const row of group.rows){const line=el('div','model-row');line.style.setProperty('--model-columns',row.length);area.append(line);
-     for(const id of row){const value=nodes.get(id),card=el('div','model-node');card.id='model-'+id;nodeText('h4',null,value.title,card);nodeText('p',null,value.text,card);line.append(card);elements.set(id,card);
+     for(const id of row){const value=nodes.get(id),card=el('div','model-node');card.id='model-'+id;card.tabIndex=-1;nodeText('h4',null,value.title,card);nodeText('p',null,value.text,card);line.append(card);elements.set(id,card);
+      if(value.version||value.comments){const properties=el('dl','model-properties');card.append(properties);for(const [label,text]of [['版本',value.version],['评论',value.comments]])if(text){nodeText('dt',null,label,properties);nodeText('dd',null,text,properties)}}
+      if(value.related?.length){const related=el('ul','model-related');card.append(related);for(const ref of value.related){const item=el('li');nodeText('span',null,ref.label+' → ',item);const link=nodeText('a',null,allNodes.get(ref.to).title,item);link.href='#model-'+ref.to;link.onclick=event=>{event.preventDefault();const target=elements.get(ref.to)||document.getElementById('model-'+ref.to);target?.focus({preventScroll:true});target?.scrollIntoView({block:'start',behavior:'instant'})};related.append(item)}}
       const links=el('ul','model-mobile-links');for(const edge of diagram.connections.filter(e=>e.from===id)){const item=el('li');nodeText('span',null,(edge.style==='dashed'?'⇢ ':'→ ')+edge.label+' · '+nodes.get(edge.to).title,item);links.append(item)}card.append(links);
      }
     }
@@ -270,7 +272,7 @@ async function renderDataModel(root){
    const paths=diagram.connections.map(edge=>{const path=document.createElementNS(svg.namespaceURI,'path');path.setAttribute('marker-end','url(#'+markerId+')');if(edge.style==='dashed')path.setAttribute('stroke-dasharray','5 5');svg.append(path);const label=nodeText('span','model-edge-label',edge.label,graph);return {edge,path,label}});
    redraw.push(()=>{const bounds=graph.getBoundingClientRect();svg.setAttribute('viewBox',`0 0 ${bounds.width} ${bounds.height}`);
     for(const {edge,path,label}of paths){const a=elements.get(edge.from).getBoundingClientRect(),b=elements.get(edge.to).getBoundingClientRect();let x1,y1,x2,y2,d,lx,ly;
-     if(Math.abs(a.top-b.top)<5){x1=a.right-bounds.left;y1=(a.top+a.bottom)/2-bounds.top;x2=b.left-bounds.left;y2=(b.top+b.bottom)/2-bounds.top;d=`M${x1} ${y1}L${x2} ${y2}`;lx=(x1+x2)/2;ly=(y1+y2)/2}
+     if(Math.abs(a.top-b.top)<5){const right=a.left<b.left;x1=(right?a.right:a.left)-bounds.left;y1=(a.top+a.bottom)/2-bounds.top;x2=(right?b.left:b.right)-bounds.left;y2=(b.top+b.bottom)/2-bounds.top;d=`M${x1} ${y1}L${x2} ${y2}`;lx=(x1+x2)/2;ly=(y1+y2)/2}
      else{x1=(a.left+a.right)/2-bounds.left;y1=a.bottom-bounds.top;x2=(b.left+b.right)/2-bounds.left;y2=b.top-bounds.top;const mid=(y1+y2)/2;d=`M${x1} ${y1}V${mid}H${x2}V${y2}`;lx=(x1+x2)/2;ly=mid}
      path.setAttribute('d',d);label.style.left=lx+'px';label.style.top=ly+'px';
     }

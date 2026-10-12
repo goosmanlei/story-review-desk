@@ -29,6 +29,7 @@ function methodFlow(parent,root){
  const draw=(entry,host)=>{const section=el('li','skill-flow-stage');section.dataset.flowNode=entry.id;host.append(section);const methods=entry.methods||[];
   if(methods.length===1&&!entry.supports){const m=methods[0],b=methodButton(section,entry.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}
   else{nodeText('span','skill-flow-label',entry.title,section);if(methods.length){const choices=el('div','skill-flow-parallel');section.append(choices);for(const m of methods){const b=methodButton(choices,m.title,()=>methodSelectNode(root,m.object_id));b.dataset.methodNode=m.object_id;b.setAttribute('aria-current',String(m.object_id===methodView.flowSelected));b.classList.toggle('active',m.object_id===methodView.flowSelected)}}}
+  if(entry.output)nodeText('small','skill-flow-output',entry.output,section);
   for(const link of flow.returns||[])if(link.from===entry.id)nodeText('span','skill-flow-return','↶ '+link.label+' · '+flow.stages.find(n=>n.id===link.to).title,section);
  };
  for(const stage of flow.stages)draw(stage,main);
