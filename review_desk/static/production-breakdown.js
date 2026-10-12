@@ -221,7 +221,7 @@ function renderShotInputs(host,row,inputs,records,context,{pure=false}={}){
         bindRelationSummary(button,item.slot.relation_context);
         nodeText('small','production-meta',selectionLabel+range+(item.slot.direct===false?' · 间接':''),line);
       }else{
-      const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:selectionLabel+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(!pure&&item.value.use?' · 用途：'+item.value.use:'')+range;
+      const card=materialSmallCard(line,{...r,version_count:item.slot.version_count,candidate_count:item.slot.candidate_count,object_id:item.slot.material_id||r.object_id,material_code:item.slot.material_code,business_code:item.slot.material_code||r.business_code,title,media_type:r.payload.media_type,material_category:item.slot.material_category||r.payload.material_category,generated:!!item.slot.candidate,preview:component},trigger=>openShotReference(item,context,trigger),false,{subtitle:selectionLabel+range+(item.slot.direct===false?' · 间接':'')+(issues.length?' · '+issues.join('；'):'')});card.dataset.reviewDialogTrigger='';card.setAttribute('aria-label',card.textContent+'；'+owner);card.title+=` · ${owner}：${shotReferenceLabel(item.slot)}；V 为素材版本，C 为该版候选，? 表示尚未选定`+(!pure&&item.value.use?' · 用途：'+item.value.use:'')+range;
       }
     }else nodeText('p','production-issue',item.label+' · 准确引用缺失，需先修复槽位',line);
     if(!context.compact&&!pure){if(item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
@@ -670,7 +670,7 @@ async function openBreakdownMaterial(need,reader,selectionEpoch=null,restore=fal
   }catch(error){if(read===productionReadEpoch){reader.replaceChildren();nodeText('p','production-issue',error.message,reader)}}
 }
 function flatFilterGroup(parent,key,label,options,selected,counts,onchange){
-  const group=el('div','production-filter-group');group.setAttribute('role','group');group.setAttribute('aria-label',label);nodeText('span','production-filter-label',label,group);const choices=el('div','production-filter-options');group.append(choices);
+  const group=el('div','production-filter-group');if(label){group.setAttribute('role','group');group.setAttribute('aria-label',label);nodeText('span','production-filter-label',label,group)}const choices=el('div','production-filter-options');group.append(choices);
   for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;nodeText('span',null,title,button);if(counts)nodeText('b','production-filter-count',String(counts[value]||0),button)}parent.append(group);
 }
 async function loadProductionMaterials(){return loadMaterialManagement()}

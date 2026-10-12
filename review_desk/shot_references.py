@@ -22,6 +22,8 @@ def with_identity(store,result):
     if result['material_id']:
         from .material_storage import canonical_id
         result['canonical_material_id']=canonical_id(store,result['material_id'])
+        current = p.record(store, result['canonical_material_id'])
+        result['material_category'] = current['payload'].get('material_category')
         result.update(mp.card_counts(store,[result['material_id']])[result['material_id']])
         code=store.db.execute('SELECT prefix,number FROM business_codes WHERE object_id=?',(result['canonical_material_id'],)).fetchone()
         if code:result['material_code']=code[0]+str(code[1]).zfill(3)

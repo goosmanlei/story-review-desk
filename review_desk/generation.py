@@ -313,6 +313,13 @@ def readiness(store, requirement_id):
     need=p.record(store,requirement_id)
     if need['kind']!='REQUIREMENT':raise ValueError('generation needs a requirement')
     plan=need['payload'].get('generation');issues=[];inputs=[]
+    from .material_categories import enabled as categories_enabled, package as category_package
+    category_method = None
+    if categories_enabled(store):
+        try:
+            category_method = category_package(store, need['payload'])
+        except (KeyError, ValueError) as exc:
+            issues.append(str(exc))
     from .version_consolidation import deleted, NOTICE
     # Unselected alternatives remain inspectable, but do not block the active route.
     from .material_relations import active_inputs
@@ -323,7 +330,7 @@ def readiness(store, requirement_id):
     if missing or need['payload'].get('consolidation_identity_only'):
         return {'requirement':need,'plan':plan,'inputs':[], 'i2i_depth':0,
                 'issues':[NOTICE+' '+path for path in missing] or ['保留产物的原始需求方案未登记'], 'ready':False}
-    if not plan:issues.append('尚无生成方案')
+    if not plan:issues.append('字层按正文与工程规格制作，无需模型生成' if need['payload'].get('material_category') == 'text-layer' else '尚无生成方案')
     method_basis = None
     if plan:
         from .method_media import verify
@@ -383,7 +390,7 @@ def readiness(store, requirement_id):
     depth=1+max((d for d in depths if type(d) is int),default=-1)
     if plan and plan['method']=='generate' and images and depth>2:issues.append('图像参考超过两代，应回到干净母版')
     return {'requirement':need,'plan':plan,'inputs':inputs,'i2i_depth':max(depth,0),
-            'input_contract':contract,'method_basis':method_basis,'issues':list(dict.fromkeys(issues)),'ready':not issues}
+            'input_contract':contract,'method_basis':method_basis,'category_method':category_method,'issues':list(dict.fromkeys(issues)),'ready':not issues}
 
 
 def package(store, requirement_id):
@@ -393,7 +400,8 @@ def package(store, requirement_id):
     from .input_contracts import label_inputs, check
     from .material_plans import randomization
     inputs=label_inputs(ready['inputs'])
-    contract=check(plan['model'],plan['prompt'],inputs,parameters=plan['parameters'],execution=plan.get('execution'))
+    contract=check(plan.get('model') or '',plan.get('prompt') or '',inputs,parameters=plan['parameters'],execution=plan.get('execution')) if plan['method']=='generate' else {
+        'scope':'准确原件与选段；不提交模型调用', 'verified':True, 'issues':[]}
     if contract['issues']:raise Conflict('；'.join(contract['issues']))
     method_snapshot = None
     if (ready.get('method_basis') or {}).get('execution'):
@@ -406,12 +414,13 @@ def package(store, requirement_id):
         current_fields = {'current_marker': marker(ready['requirement']),
                           'current_basis': [{**r, 'content_sha256': checksum(p.ref_record(store,r)['payload'])} for r in basis.values()]}
     return {'format':'generation-package-v1','requirement':ref(ready['requirement']), **current_fields,
+            **({'category_method': ready['category_method']} if ready.get('category_method') else {}),
             **({'method_basis': ready['method_basis']} if ready.get('method_basis') else {}),
             **({'method_snapshot': method_snapshot} if method_snapshot else {}),
-            'method':plan['method'],'model':plan['model'],'parameters':copy.deepcopy(plan['parameters']),
-            'randomization':randomization(plan),
+            'method':plan['method'],**{k:plan[k] for k in ('model','prompt') if plan.get(k)},'parameters':copy.deepcopy(plan['parameters']),
+            **({'randomization':randomization(plan)} if plan['method']=='generate' else {}),
             **({'execution':copy.deepcopy(plan['execution'])} if 'execution' in plan else {}),
-            'prompt':plan['prompt'],'output':copy.deepcopy(plan['output']),'inputs':inputs,'input_contract':contract,'i2i_depth':ready['i2i_depth'],
+            'output':copy.deepcopy(plan['output']),'inputs':inputs,'input_contract':contract,'i2i_depth':ready['i2i_depth'],
             'execution_note':'执行前重新检查任务授权、准确参考文件、平台可用性及现有额度；此包不表示已经调用模型。'}
 
 

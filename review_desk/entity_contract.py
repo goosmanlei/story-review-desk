@@ -51,7 +51,7 @@ def source_labels(store, row):
 
 def material_summary(row):
     """Membership and small-card fields, never a usable generation definition."""
-    fields = ('format', 'title', 'media_type', 'slot', 'scope', 'status', 'components',
+    fields = ('format', 'title', 'media_type', 'material_category', 'slot', 'scope', 'status', 'components',
               'placeholder', 'candidate_requirements', 'production', 'candidate_identity')
     return {**{k: v for k, v in row.items() if k not in ('payload', 'submission')},
             'payload': {k: row['payload'][k] for k in fields if k in row['payload']},
@@ -60,13 +60,15 @@ def material_summary(row):
 
 def material_groups(row, needs):
     products = {item['requirement']['object_id']: item for item in row['payload'].get('products', [])}
-    keys = [('camera', '机位参考'), ('image', '镜头首帧'), ('video', '镜头视频'),
+    keys = [('reference', '独立素材参考'), ('camera', '机位参考'), ('image', '镜头首帧'), ('video', '镜头视频'),
             ('project', '字层工程'), ('audio', '声音素材'), ('other', '其他素材')]
     groups = {key: [] for key, _ in keys}
     for need in needs:
         value = need['payload']
         slot = value.get('slot', '')
         key = 'camera' if slot in ('camera', 'camera-reverse', 'camera-main') or slot.startswith('camera-') else value.get('media_type')
+        if key == 'image' and slot != 'first-frame':
+            key = 'reference'
         if key not in groups: key = 'other'
         groups[key].append(need)
     order = {oid: i for i, oid in enumerate(products)}

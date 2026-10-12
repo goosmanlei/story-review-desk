@@ -1,3 +1,4 @@
+function materialCategoryLabel(category){return ({'character-image':'角色图像','scene-image':'场景图像','prop-image':'道具图像','shot-image':'镜头画面',voice:'人物音色','scene-sound':'场景音',song:'演唱',video:'视频','text-layer':'字层'})[category]||''}
 /* One entity/material reader, whether embedded or opened over a scene. */
 function materialModelKey(model){return model.material_id||model.need?.object_id||model.identity?.object_id||model.candidates[0]?.record.object_id}
 function materialDefaultCandidate(model,data){
@@ -10,7 +11,7 @@ function reviewSmallCard(parent,item,activate,selected=false){
   if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src=reviewURL('/api/production/files/'+encodeURIComponent(item.preview.file));img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
   if(item.preview?.mime?.startsWith('image/'))button.append(preview);
   const content=el('span','material-small-copy'),heading=el('span','small-card-title'),icon=productionEntityIcon(item.icon);
-  const type=productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
+  const type=materialCategoryLabel(item.material_category)||productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
   const name=nodeText('strong',null,item.title,heading);name.title=item.title;
   if(item.business_code)nodeText('span','small-card-code',item.business_code,heading);content.append(heading);
   if(item.subtitle)nodeText('small','small-card-metrics',item.subtitle,content);
@@ -38,7 +39,7 @@ function materialSmallCard(parent,item,activate,selected=false,{includesHistory=
 
 function modelSmallItem(model){
   const row=model.need||model.identity||model.candidates[0]?.record,real=(model.candidates||[]).filter(i=>!i.record.payload.placeholder&&i.record.payload.components.some(c=>c.role==='original'));
-  return {...model.cardCounts,business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
+  return {...model.cardCounts,business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,material_category:row.payload.material_category,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
 }
 // Source help is transient information. Original comments use the existing
 // exact-text reader, so hovering never enters or changes a review session.

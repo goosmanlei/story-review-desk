@@ -23,8 +23,8 @@ def load(root, catalog):
                 if 'when' in selector and rule['when'] != selector['when']:
                     continue
                 skill = skills.get(rule['object_id'])
-                if skill and not any(m['object_id'] == skill['object_id'] for m in found):
-                    found.append({'object_id': skill['object_id'], 'title': selector.get('title') or skill['payload']['title']})
+                if skill and not any(m['object_id'] == skill['object_id'] and m.get('file') == selector.get('file') for m in found):
+                    found.append({'object_id': skill['object_id'], 'title': selector.get('title') or skill['payload']['title'], **{k: selector[k] for k in ('file', 'group') if k in selector}})
         return found
     ids = set()
     for stage in [*specification['stages'], *specification.get('branches', [])]:

@@ -237,7 +237,7 @@ class Store:
         version = current["version"] if current else 0
         if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
             raise Conflict("object version or kind changed")
-        if kind == 'REQUIREMENT' and payload.get('generation'):
+        if kind == 'REQUIREMENT' and (payload.get('generation') or payload.get('material_category') == 'text-layer'):
             from .method_media import verify, administrative
             payload, administrative_ref = administrative(self, object_id, payload, current)
             if administrative_ref:
