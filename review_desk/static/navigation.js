@@ -18,7 +18,7 @@ function readableProductionTitle(row,title=row?.payload?.title||row?.title||''){
 function renderBusinessCodeCatalog(root){
   const catalog=state.businessCodeCatalog;nodeText('p',null,catalog.allocation,root);
   const table=el('table','business-code-table'),head=el('tr');for(const title of ['类型','前缀','示例','唯一性范围'])nodeText('th',null,title,head);table.append(head);
-  for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);renderDataModel(root);
+  for(const entry of catalog.types){const row=el('tr');for(const key of ['type','prefix','example','scope'])nodeText('td',null,entry[key],row);table.append(row)}root.append(table);nodeText('p','production-meta',catalog.excluded,root);return renderDataModel(root);
 }
 /* View labels and tabs share the existing workspace/URL routing contract. */
 function reviewPositionLabel(kind,value,episode=null){
@@ -41,7 +41,7 @@ function reviewPositionText(value){
     .replace(/\b(SH|E|S)0*(\d+)\b/giu,(_all,prefix,number)=>reviewPositionLabel(prefix.toUpperCase(),number));
 }
 const workspaceRoutes=new Map(),workspaceSubRoutes=new Map();
-const workspacePositionSelectors=['#source-view','#source-list','#novel-index','#structure-reader','#structure-index','#screenplay-reader','#screenplay-scene-index','#production-reader','#production-index','.breakdown-body','.breakdown-scene-list','#approach-index'];
+const workspacePositionSelectors=['#source-view','#source-list','#novel-index','#structure-reader','#structure-index','#screenplay-reader','#screenplay-scene-index','#production-reader','#production-index','.breakdown-body','.breakdown-scene-list','#approach-index','.skill-flow','.skill-file-tree'];
 const workspacePositions=new Map();
 // Per history entry, never shared storage: a new tab opens the link's target
 // without inheriting another tab's last production selection.
@@ -94,6 +94,7 @@ function rememberWorkspaceRoute(){
   if(typeof state==='undefined'||id!==state.workspace)return;
   workspaceRoutes.set(workspaceGroup(id),url.href);
   if(['settings.workspace','materials.workspace','production.workspace'].includes(id)&&typeof productionTab==='function'){const key=workspaceGroup(id)+':'+productionTab();workspaceSubRoutes.set(key,url.href);workspaceSubRoutes.set(key+':'+productionScopeKey(url.searchParams),url.href);}
+  if(id==='production.approach'){const tab=url.searchParams.get('tab');if(tab)workspaceSubRoutes.set('production.approach:'+tab,url.href);}
   saveWorkspaceNavigation();
 }
 function rememberWorkspacePosition(){
@@ -189,7 +190,7 @@ function workspaceTabItems(){
   if(['story.sources','story.outline','story.novel','story.script'].includes(workspace))return [
     ['story.sources','open-story-sources','故事采编','story-workspace'],['story.outline','open-story-structure','故事结构','structure-workspace'],['story.novel','open-story-novel','小说创作','story-workspace'],['story.script','open-story-script','故事剧本','screenplay-workspace']
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
-  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI'],['METHODS','SKILL管理'],['CODES','数据模型']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
+  if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
     const options=[['breakdown','视听制作'],['entities','实体管理'],['materials','素材管理']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));
@@ -283,4 +284,12 @@ async function renderDataModel(root){
   const examples=el('div','model-examples');for(const value of data.examples||[]){const item=el('p'),link=nodeText('a',null,value.title,item);link.href=reviewURL(value.href);nodeText('span',null,' · '+value.text,item);examples.append(item)}host.append(examples);
   modelGraphObserver=new ResizeObserver(()=>{if(host.isConnected)redraw.forEach(fn=>fn());else modelGraphObserver?.disconnect()});modelGraphObserver.observe(host);redraw.forEach(fn=>fn());
  }catch(error){if(host.isConnected){notice.textContent='数据模型读取失败：'+error.message;host.replaceChildren(notice);const retry=nodeText('button',null,'重试数据模型',host);retry.onclick=()=>{host.remove();renderDataModel(root)}}}
+}
+
+function normalizeApproachWorkspace(id){
+ const url=new URL(location.href),p=url.searchParams;
+ if(id==='project.configuration'&&['METHODS','CODES'].includes(p.get('config_section'))){
+  p.set('tab',p.get('config_section')==='METHODS'?'foundation':'model');p.set('workspace','production.approach');p.delete('config_section');history.replaceState(history.state,'',url);return 'production.approach';
+ }
+ return id;
 }

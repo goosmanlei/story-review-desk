@@ -486,7 +486,9 @@ function switchWorkspace(id,updateUrl=true,restorePosition=true){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   if(typeof pauseReviewMedia==='function')pauseReviewMedia();
   hideSelectionAction();
+  if(typeof rememberMethodPosition==='function'&&isMethodsReading())rememberMethodPosition();
   if(id==='current')id='production.approach';
+  if(typeof normalizeApproachWorkspace==='function')id=normalizeApproachWorkspace(id);
   if(typeof normalizeProductionWorkspace==='function')id=normalizeProductionWorkspace(id);
   if(!state.framework.workspaces.some(workspace=>workspace.id===id))id='production.approach';
   if(state.workspace!==id){cancelSourceReadingRestore();cancelSourceChapterRestore()}
@@ -555,8 +557,6 @@ function showConfigurationSection(){
 function renderConfigurations({preserve=false}={}){
   const root=$('#configuration-view');
   if(typeof configurationSectionFromRoute==='function')state.configSection=configurationSectionFromRoute();
-  if(state.configSection==='METHODS'){root.configurationMounted=false;renderMethods(root);return}
-  if(state.configSection==='CODES'){root.replaceChildren();root.configurationMounted=false;renderBusinessCodeCatalog(root);return}
   if(state.configurations.favicon_assets===undefined){
     root.replaceChildren();root.configurationMounted=false;nodeText('p',null,'正在读取配置…',root);
     state.configurationRead ||= api('/api/configurations').then(data=>{state.configurations=data}).finally(()=>{state.configurationRead=null});
