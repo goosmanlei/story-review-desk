@@ -361,12 +361,51 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.server.web_assets.serve(self, path):
             return
         store = self.server.store
+        if path == '/api/data-model':
+            from .data_model import load
+            try:
+                return self._json(load(self.server.root))
+            except (ValueError, KeyError, TypeError, OSError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == '/api/business-codes':
             from .business_codes import catalog, display_dump
             return self._json({**catalog(), 'objects':display_dump(store)})
         if path == '/api/methods':
             from .methods import catalog
-            return self._json(catalog(store))
+            from .skill_flow import load
+            result = catalog(store)
+            try:
+                result['flow'] = load(self.server.root, result)
+                return self._json(result)
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
+        if path in ('/api/methods/files', '/api/methods/file', '/api/methods/compare', '/api/methods/file-media'):
+            try:
+                from . import method_files
+                param = lambda name: query.get(name, [None])[0]
+                if path.endswith('/files'):
+                    return self._json(method_files.directory(store, param('object_id'), param('revision_id')))
+                if path.endswith('/compare'):
+                    return self._json(method_files.compare(store, param('object_id'), param('file'), int(param('left')), int(param('right'))))
+                doc = method_files.document(store, param('object_id'), param('file'), revision_id=param('revision_id'),
+                    version=int(param('version')) if param('version') else None)
+                if path.endswith('/file'):
+                    return self._json(doc)
+                spec = doc['media']
+                if not spec:
+                    raise ValueError('此文件版本没有准确媒体原件')
+                media = (self.server.root / spec['path']).resolve(strict=True)
+                if self.server.root.resolve() not in media.parents:
+                    raise ValueError('准确媒体路径无效')
+                sha = hashlib.sha256()
+                with media.open('rb') as stream:
+                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
+                        sha.update(chunk)
+                if media.stat().st_size != spec['bytes'] or sha.hexdigest() != spec['sha256']:
+                    raise ValueError('准确媒体原件已变化；未使用其他版本替代')
+                return self._file(media, spec['mime'])
+            except (ValueError, KeyError, TypeError, OSError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/resolve':
             try:
                 from .methods import resolve
@@ -577,8 +616,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             try:
                 operation = comment_review.content if path.endswith('/content') else comment_review.snapshot
                 args = (store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0])
-                return self._json(operation(*args, file=query.get('file', [None])[0])
-                                  if path.endswith('/content') else operation(*args))
+                return self._json(operation(*args, file=query.get('file', [None])[0]))
             except (ValueError, Conflict) as exc:
                 return self._json({'error': str(exc)}, 404)
         if path == "/api/screenplays":

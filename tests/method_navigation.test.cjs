@@ -1,11 +1,12 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 class Node {
- constructor(tag,cls){this.tag=tag;this.className=cls;this.children=[];this.attrs={};this.dataset={};this.isConnected=false;this.classList={toggle:(k,on)=>{this.classes||=new Set();on?this.classes.add(k):this.classes.delete(k)},add:()=>{}}}
+ constructor(tag,cls){this.tag=tag;this.className=cls;this.children=[];this.attrs={};this.dataset={};this.isConnected=false;this.style={setProperty(){}};this.classList={toggle:(k,on)=>{this.classes||=new Set();on?this.classes.add(k):this.classes.delete(k)},add:()=>{}}}
  connected(on){this.isConnected=on;for(const n of this.children)n.connected?.(on)}
  append(...nodes){for(let n of nodes){if(typeof n==='string'){const t=new Node('text');t.text=n;n=t}n.parent=this;this.children.push(n);n.connected?.(this.isConnected)}}
  replaceChildren(...nodes){for(const n of this.children)n.connected?.(false);this.children=[];this.text='';this.append(...nodes)}
  set textContent(t){this.replaceChildren();this.text=String(t)}get textContent(){return (this.text||'')+this.children.map(n=>n.textContent).join('')}
  setAttribute(k,v){this.attrs[k]=String(v)} getAttribute(k){return this.attrs[k]}
+ get lastElementChild(){return this.children.at(-1)}
  all(){return this.children.flatMap(n=>[n,...n.all()])}
  querySelectorAll(s){return this.all().filter(n=>s.startsWith('#')?n.id===s.slice(1):n.tag===s)} querySelector(s){return this.querySelectorAll(s)[0]}
  remove(){this.parent.children=this.parent.children.filter(n=>n!==this);this.connected(false)} focus(){this.focused=true}
@@ -15,25 +16,47 @@ const binding=(type,m)=>({object_id:'method.binding.'+type,revision_id:'binding-
 function setup(href='http://fixture/?workspace=project.configuration&config_section=METHODS'){
  const structure=skill('structure','story-structure',2),oldStructure=skill('structure','story-structure',1),video=skill('video','media-plan',3),unused=skill('old-comment','comment-polish',1),unknown=skill('future','future-work',1),bs=[binding('media-plan',video),binding('story-structure',oldStructure),binding('future-work',unknown)];
  const data={skill:[unused,video,unknown,structure],resource:[],binding:bs,condition_texts:{},referenced:Object.fromEntries([oldStructure,video,unknown].map(r=>[r.revision_id,r])),versions:{[structure.object_id]:[structure,oldStructure],[video.object_id]:[video],[unused.object_id]:[unused],[unknown.object_id]:[unknown]}};
+ data.flow={stages:[{id:'source',title:'采编与方向',methods:[]},{id:'structure',title:'故事结构',methods:[{object_id:structure.object_id,title:'故事结构'}]},{id:'video',title:'视频方案',methods:[{object_id:video.object_id,title:'视频方案'}]}],branches:[]};
  const root=new Node('div');root.connected(true);const location={href},saved=new Map(),pending=[];let delay=false;
- const ctx={URL,URLSearchParams,Blob,state:{workspace:'project.configuration',configSection:'METHODS',comments:[]},fixtureData:data,location,history:{state:{},replaceState(s,t,u){location.href=String(u)}},window:{scrollY:0,addEventListener(){},scrollTo(x,y){this.scrollY=y}},sessionStorage:{getItem:k=>saved.get(k)||null,setItem:(k,v)=>saved.set(k,v)},localStorage:{getItem:()=>null},document:{createTextNode:t=>{const n=new Node('text');n.text=t;return n}},el:(t,c)=>new Node(t,c),nodeText:(t,c,text,p)=>{const n=new Node(t,c);n.textContent=text;p?.append(n);return n},hideSelectionAction(){},renderComments(){},reviewSurface(){},api(url){const q=new URL(url,'http://fixture'),oid=q.searchParams.get('object_id'),rid=q.searchParams.get('revision_id');const record=[...data.skill,...data.binding,...Object.values(data.referenced)].find(r=>r.object_id===oid&&(!rid||r.revision_id===rid));const result=q.pathname.endsWith('document')?{record,file:q.searchParams.get('file'),blocks:[]}:record;if(delay)return new Promise((resolve,reject)=>pending.push({url,resolve,reject,result}));return Promise.resolve(result)}};
+ const ctx={matchMedia:()=>({matches:false}),reviewURL:s=>s,toast(){},URL,URLSearchParams,Blob,state:{workspace:'project.configuration',configSection:'METHODS',comments:[]},fixtureData:data,location,history:{state:{},replaceState(s,t,u){location.href=String(u)}},window:{scrollY:0,addEventListener(){},scrollTo(x,y){this.scrollY=y}},sessionStorage:{getItem:k=>saved.get(k)||null,setItem:(k,v)=>saved.set(k,v)},localStorage:{getItem:()=>null},document:{createTextNode:t=>{const n=new Node('text');n.text=t;return n}},el:(t,c)=>new Node(t,c),nodeText:(t,c,text,p)=>{const n=new Node(t,c);n.textContent=text;p?.append(n);return n},hideSelectionAction(){},renderComments(){},reviewSurface(){},api(url){const q=new URL(url,'http://fixture'),oid=q.searchParams.get('object_id'),rid=q.searchParams.get('revision_id');const record=[...data.skill,...data.binding,...Object.values(data.referenced)].find(r=>r.object_id===oid&&(!rid||r.revision_id===rid));const versions=(data.versions[oid]||[]).map(r=>({version:r.version,kind:'text'}));
+ const requested=Number(q.searchParams.get('version'));const exact=requested?(data.versions[oid]||[]).find(r=>r.version===requested):record;
+ const result=q.pathname.endsWith('/files')?{record,files:Object.keys(record.payload.files).map(path=>({path,selected:{version:record.version},versions}))}:q.pathname.endsWith('/file')?{record:exact,file:q.searchParams.get('file'),present:true,content:'text',blocks:[],file_version:{version:exact.version},versions}:q.pathname==='/api/methods'?data:record;
+ if(delay&&q.pathname.endsWith('/file'))return new Promise((resolve,reject)=>pending.push({url,resolve,reject,result}));return Promise.resolve(result)}};
  vm.createContext(ctx);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/methods.js'),'utf8')+'\nmethodView.data=fixtureData;renderMethodBlocks=()=>{};paintMethodComments=()=>{};',ctx);
  return {ctx,root,data,structure,oldStructure,video,unused,unknown,pending,delay(){delay=true},read:()=>vm.runInContext('({selected:methodView.selected,revision:methodView.revision,document:methodView.document,filters:methodView.filters})',ctx)};
 }
 const flush=()=>new Promise(r=>setImmediate(r));
-test('first visit uses business order and the actually bound revision, not the newest or an unbound legacy method',async()=>{
- const f=setup();await f.ctx.drawMethods(f.root);assert.equal(f.read().selected,f.structure.object_id);assert.equal(f.read().revision,'structure1');assert.doesNotMatch(f.root.textContent,/old-comment purpose/);assert.match(f.root.textContent,/第 2 版/);assert.equal(f.root.querySelectorAll('select').length,0);
- assert.equal(f.root.querySelector('#method-tab-skill').attrs['aria-selected'],'true');assert.equal(f.root.querySelector('#method-tab-resource').tabIndex,-1);assert.equal(f.root.querySelector('#method-panel-skill').attrs.role,'tabpanel');
+test('first visit uses flow order and latest file; no tabs, authoring or fake source button',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);assert.equal(f.read().selected,f.structure.object_id);assert.equal(f.read().revision,'structure2');assert.equal(f.root.querySelectorAll('select').length,0);
+ assert.equal(f.root.querySelectorAll('button').some(b=>b.textContent==='采编与方向'),false);assert.equal(f.root.querySelector('#method-tab-skill'),undefined);assert.doesNotMatch(f.root.textContent,/新建|执行配置|下载|old-comment/);
 });
-test('legacy deep links override active filtering; unknown work types remain visible under other',async()=>{
- const f=setup('http://fixture/?method_category=skill&method_object=method.skill.old-comment&method_revision=old-comment1');await f.ctx.drawMethods(f.root);assert.equal(f.read().selected,f.unused.object_id);assert.equal(f.read().filters.skill.range,'all');
- vm.runInContext('methodFilter().group="other";methodFilter().range="active"',f.ctx);assert.deepEqual(Array.from(f.ctx.methodRows(),r=>r.object_id),[f.unknown.object_id]);
+test('legacy exact links read their original file while ordinary node selection starts latest',async()=>{
+ const f=setup('http://fixture/?method_category=skill&method_object=method.skill.old-comment&method_revision=old-comment1');await f.ctx.drawMethods(f.root);assert.equal(f.read().revision,'old-comment1');
+ await f.ctx.methodSelectNode(f.root,f.structure.object_id);assert.equal(f.read().revision,'structure2');
 });
-test('keyboard tab switches read existing bindings and expose rules without entering a new configuration form',async()=>{
- const f=setup();await f.ctx.drawMethods(f.root);let prevented=false;f.root.querySelector('#method-tab-skill').onkeydown({key:'End',preventDefault(){prevented=true}});await flush();assert.equal(prevented,true);assert.equal(f.root.querySelector('#method-tab-binding').focused,true);assert.match(f.root.textContent,/故事结构/);assert.equal(f.root.querySelectorAll('form').length,0);assert.equal(f.root.querySelectorAll('select').length,0);
+test('a late file response cannot replace a newer exact file or selected node',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);f.delay();
+ const a=f.ctx.methodOpen(f.root,'skill',f.video.object_id,'video3','SKILL.md');await flush();
+ const b=f.ctx.methodOpen(f.root,'skill',f.structure.object_id,'structure1','SKILL.md');await flush();
+ assert.equal(f.pending.length,2);f.pending[1].resolve(f.pending[1].result);await b;f.pending[0].resolve(f.pending[0].result);await a;
+ assert.equal(f.read().document.record.revision_id,'structure1');
 });
-test('a delayed exact read cannot replace a newer exact selection',async()=>{
- const f=setup();await f.ctx.drawMethods(f.root);f.delay();const a=f.ctx.methodOpen(f.root,'skill',f.video.object_id,'video3','SKILL.md');const b=f.ctx.methodOpen(f.root,'skill',f.structure.object_id,'structure1','SKILL.md');f.pending[1].resolve(f.pending[1].result);await flush();f.pending[2].resolve(f.pending[2].result);await b;f.pending[0].resolve(f.pending[0].result);await a;assert.equal(f.read().document.record.revision_id,'structure1');assert.doesNotMatch(f.root.textContent,/video purpose.*正文版本/);
+test('exact read failure keeps target and offers explicit retry without displaying another file',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);f.delay();const pending=f.ctx.methodOpen(f.root,'skill',f.structure.object_id,'structure1','SKILL.md');await flush();f.pending[0].reject(Error('exact file unavailable'));await pending;
+ assert.equal(f.read().document,null);assert.match(f.root.textContent,/exact file unavailable.*重试准确文件/);assert.equal(new URL(f.ctx.location.href).searchParams.get('method_revision'),'structure1');
+});
+test('shared export links resolve only the exact indexed resource and retain its path',async()=>{
+ const f=setup(),resource={object_id:'method.resource.review',revision_id:'exact-resource',payload:{files:{'skills/review/SKILL.md':'Body'},sections:{main:'skills/review/SKILL.md'}}};
+ f.data.referenced[resource.revision_id]=resource;let opened;f.ctx.methodOpen=(...args)=>{opened=args;return Promise.resolve()};
+ f.ctx.methodLink(f.root,{file:'SKILL.md',record:{payload:{files:{'SKILL.md':'entry'},resources:[{object_id:resource.object_id,revision_id:resource.revision_id,section:'main'}]}}},{text:'完整方法',href:'shared/0/skills/review/SKILL.md'},f.root);
+ f.root.querySelector('a').onclick({preventDefault(){}});await flush();assert.deepEqual(opened.slice(1,5),['resource',resource.object_id,resource.revision_id,'skills/review/SKILL.md']);
+});
+test('comparison defaults previous against latest despite outer old version and never changes the reader',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);const before=f.read().document,body=new Node('div'),dialog=new Node('dialog');dialog.connected(true);body.connected(true);
+ const requests=[];f.ctx.openReviewDialog=()=>({body,dialog});f.ctx.api=async url=>{const q=new URL(url,'http://fixture');requests.push(q);return {left:{content:'旧文\n'},right:{content:'新文\n'},equal:q.searchParams.get('left')===q.searchParams.get('right'),changes:[{type:'replace',left:['旧文\n'],right:['新文\n'],left_start:1,right_start:1}]}};
+ await f.ctx.compareMethodFile({...before,file_version:{version:1},versions:[{version:3},{version:2},{version:1}]},null);
+ assert.equal(requests[0].searchParams.get('left'),'2');assert.equal(requests[0].searchParams.get('right'),'3');assert.match(body.textContent,/旧文.*新文/);
+ body.querySelectorAll('button').find(n=>n.textContent==='第 3 版').onclick();await flush();assert.match(body.textContent,/内容相同，无差异/);assert.equal(f.read().document,before);
 });
 test('method comment draft metadata is isolated by object, revision, file and browser page',()=>{
  const source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/app.js'),'utf8');

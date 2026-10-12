@@ -346,11 +346,15 @@ def prepare(store, request):
         verify_dependencies(store, execution)
         require(resolve(store, request['work_type'], execution['payload']['conditions'], execution['payload']['package']['binding']) == execution['payload']['package'], '冻结方法或共用资料不可用；请恢复准确资源包')
         return execution
+    from . import method_files
+    if not method_files.installed(store):
+        method_files.migrate(store)
     package = resolve(store, request['work_type'], request.get('conditions'), request.get('binding'))
     missing = [key for key in package['required_inputs'] if raw_inputs.get(key) in (None, '', [], {})]
     require(not missing, '缺少必要输入：' + '、'.join(missing))
     payload = {'format': FORMATS['execution'], **identity, 'inputs': inputs, 'inputs_sha256': checksum(inputs),
-               'conditions': request.get('conditions', {}), 'package': package, 'private': request.get('private') is True}
+               'conditions': request.get('conditions', {}), 'package': package, 'private': request.get('private') is True,
+               'file_manifest': method_files.execution_manifest(store, package)}
     return _save(store, object_id, payload, 0,
                  [{'revision_id': package['method']['revision_id'], 'role': 'executed-method'},
                   {'revision_id': package['binding']['revision_id'], 'role': 'execution-binding'}])
@@ -371,6 +375,9 @@ def verify_execution(store, ref, identity, inputs=None):
     package = copy.deepcopy(value['package'])
     sha = package.pop('sha256')
     require(checksum(package) == sha, '方法快照损坏；请恢复准确执行包')
+    if 'file_manifest' in value:
+        from .method_files import execution_manifest
+        require(value['file_manifest'] == execution_manifest(store, value['package']), '执行文件组合与准确历史不符')
     return execution
 
 
@@ -488,6 +495,9 @@ def export_execution(store, ref, destination):
     (folder / 'execution.json').write_text(json.dumps(execution, ensure_ascii=False, indent=2) + '\n')
     (folder / 'request.json').write_text(json.dumps(value['inputs'], ensure_ascii=False, indent=2) + '\n')
     (folder / 'registry.json').write_text(json.dumps(export_registry(store, executions=[execution['object_id']]), ensure_ascii=False, indent=2) + '\n')
+    from . import method_files
+    if method_files.installed(store):
+        (folder / 'file-manifest.json').write_text(json.dumps(method_files.execution_manifest(store, value['package']), ensure_ascii=False, indent=2)+'\n')
     return {'execution': reference(execution), 'directory': str(folder)}
 
 
@@ -500,7 +510,7 @@ def sync_source(store, root, value):
         relative = file_path(spec['path'])
         path = (root / relative).resolve(strict=True)
         require(root in path.parents and path.suffix == '.md', '资料源必须是项目内 Markdown 文件')
-        body = path.read_text(encoding='utf-8')
+        body = path.read_bytes().decode('utf-8')
         content = body
         if spec.get('section'):
             parts = re.split(r'<!--\s*section:\s*([a-z0-9-]+)\s*-->', body)
@@ -522,7 +532,7 @@ def sync_source(store, root, value):
                 relative = file_path(name)
                 path = (root / relative).resolve(strict=True)
                 require(root in path.parents and path.suffix in ('.md', '.svg', '.json'), '附属资料须为项目内 Markdown、SVG 或 JSON')
-                body = path.read_text(encoding='utf-8')
+                body = path.read_bytes().decode('utf-8')
                 require(name not in payload['files'] or payload['files'][name] == body, '附属文件不能替换章节切片')
                 payload['files'][name] = body
                 payload['source']['files'][name] = {'path': name, 'sha256': digest(body.encode()), 'content_sha256': digest(body.encode())}
@@ -620,10 +630,12 @@ def restore_registry(store, archive, *, transaction=True):
                 if version + 1 != row['version'] or any(not store.db.execute('SELECT 1 FROM revisions WHERE id=?', (d['revision_id'],)).fetchone() for d in row['dependencies']):
                     continue
                 store._method_write = True
+                store._method_timestamp = row['created_at']
                 try:
                     result = store._put_object(row['object_id'], row['kind'], row['payload'], version, row['dependencies'])
                 finally:
                     store._method_write = False
+                    store._method_timestamp = None
                 require(result['revision'] == row['revision_id'], '恢复版本身份不一致')
                 store.db.execute('UPDATE revisions SET created_at=? WHERE id=?', (row['created_at'], row['revision_id']))
                 if version == 0:
@@ -631,6 +643,9 @@ def restore_registry(store, archive, *, transaction=True):
                 store.db.execute('UPDATE objects SET updated_at=? WHERE id=?', (row['created_at'], row['object_id']))
                 inserted += 1; remaining.remove(row); progress = True
             require(progress, '方法包缺少连续历史或存在循环依赖')
+        from . import method_files
+        method_files.sync(store)
+        method_files.validate(store)
         for row in rows:
             payload = row['payload']
             verify_dependencies(store, row)

@@ -14,7 +14,7 @@ function commentReviewData(target){
   if(!commentReviewReads.has(key))commentReviewReads.set(key,api(commentReviewURL(target)).finally(()=>commentReviewReads.delete(key)));
   return commentReviewReads.get(key);
 }
-function reviewRevisionLabel(ref){const label=ref.unavailable?'准确稿件已不可用':ref.object_id==='story-structure'?`结构第 ${ref.version} 稿`:ref.version?`${ref.title} · 修订 ${ref.version}`:ref.title;return label+(ref.file?' · '+ref.file:'')}
+function reviewRevisionLabel(ref){if(ref.file_version)return ref.file+' · 第 '+ref.file_version+' 版';const label=ref.unavailable?'准确稿件已不可用':ref.object_id==='story-structure'?`结构第 ${ref.version} 稿`:ref.version?`${ref.title} · 修订 ${ref.version}`:ref.title;return label+(ref.file?' · '+ref.file:'')}
 function currentReviewComment(row){return state.comments.find(c=>c.id===row.comment.id)||row.comment}
 function appendMethodReviewStatus(body){
   const target=commentReviewTarget(),section=el('section');body.append(section);
@@ -137,7 +137,7 @@ async function openCommentReview(row,context,trigger){
       if(b.disabled){b.textContent+='（引用不可用）';b.title='准确引用已不可用，未替换为其他稿件'}
     }
   });
-  if(context.kind==='GUIDANCE')button('当前稿',()=>showContent({...context,file:row.original.file},null,'当前稿'));
+  if(context.kind==='GUIDANCE')button('当前稿',()=>showContent({...context.latest||context,file:row.original.file},null,'当前稿'));
   if(!row.responses.length)nodeText('p','comment-help',context.kind==='GUIDANCE'?'尚未回应。可用“回应原意见”保存处理说明及准确稿件。':'尚无可用作者处理记录。没有记录不能证明没有修改。',dialog);
   dialog.reviewRefresh=showDecision;
   dialog.reviewError=message=>{notice.textContent=message||'';notice.hidden=!message};

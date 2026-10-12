@@ -94,13 +94,13 @@ test('method exact read ignores a late result after a file switch within the sam
 });
 
 
-test('ordinary method queue counts unique opinions across versions and files without crossing objects',()=>{
+test('method queue counts unique opinions across versions of the current file without crossing files or objects',()=>{
  const f=setup();f.ctx.isMethodsReading=()=>true;f.ctx.methodView={document:{file:'SKILL.md',record:{object_id:'method.skill.one',revision_id:'current'}}};
  const opinion=(id,object,revision,file,status='OPEN')=>({id,target_object_id:object,target_revision_id:revision,anchor:{file},status});
- const old=opinion('old','method.skill.one','old','deleted.md');
- f.ctx.state.comments=[old,opinion('new','method.skill.one','current','SKILL.md'),opinion('closed','method.skill.one','older','renamed.md','CLOSED'),opinion('foreign','method.skill.other','current','SKILL.md'),old];
+ const old=opinion('old','method.skill.one','old','SKILL.md');
+ f.ctx.state.comments=[old,opinion('new','method.skill.one','current','SKILL.md'),opinion('closed','method.skill.one','older','SKILL.md','CLOSED'),opinion('deleted','method.skill.one','older','deleted.md'),opinion('foreign','method.skill.other','current','SKILL.md'),old];
  const source=fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/app.js'),'utf8');
  vm.runInContext(source.slice(source.indexOf('const unscopedComments='),source.indexOf('const newDraftAnchor='))+'; queue=activeComments();',f.ctx);
  assert.equal(f.ctx.queue.length,3);assert.equal(f.ctx.queue.filter(c=>c.status==='OPEN').length,2);
- assert.equal(f.ctx.queue.find(c=>c.id==='old').target_revision_id,'old');assert.equal(f.ctx.queue.find(c=>c.id==='old').anchor.file,'deleted.md');
+ assert.equal(f.ctx.queue.find(c=>c.id==='old').target_revision_id,'old');assert.equal(f.ctx.queue.find(c=>c.id==='old').anchor.file,'SKILL.md');
 });

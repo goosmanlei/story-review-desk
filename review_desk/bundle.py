@@ -203,6 +203,11 @@ def _export(store, export_dir, content_file):
         framework['objects'] = [row for row in framework['objects'] if row['id'] not in private_methods]
         framework['revisions'] = [row for row in framework['revisions'] if row['id'] not in private_revisions]
         framework['dependencies'] = [row for row in framework['dependencies'] if row['from_revision'] not in private_revisions]
+    from . import method_files
+    if method_files.installed(store):
+        method_files.validate(store)
+        for table in method_files.TABLES:
+            framework[table] = [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY 1')]
     framework_bytes, configuration_bytes = _bytes(framework), _bytes(configurations)
     files = {"materials.json": material_bytes, "comments.json": comment_bytes,
              "objects.json": framework_bytes, "configurations.json": configuration_bytes}
@@ -484,6 +489,16 @@ def restore(store, export_dir):
                 if schema >= 6:material_storage.restore_indices(store,framework)
                 from .business_codes import restore as restore_codes
                 restore_codes(store,framework.get("business_codes",[]),framework.get("business_candidates",[]),framework.get("business_comments",[]))
+            from . import method_files
+            method_files.sync(store)
+            if framework and set(method_files.TABLES) & set(framework):
+                if not set(method_files.TABLES) <= set(framework):
+                    raise ValueError('incomplete method file history')
+                for table in method_files.TABLES:
+                    actual = [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY 1')]
+                    if sorted(map(canonical,actual)) != sorted(map(canonical,framework[table])):
+                        raise ValueError('method file history differs from exact package bytes')
+            method_files.validate(store)
             if schema >= 2:
                 from .production import FORMATS, validate_payload, references, current_records
                 dependencies_by_revision={}
