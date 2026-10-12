@@ -370,6 +370,7 @@ function preserveCardPosition(){
   return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
 }
 function renderProductionReaderContent(){
+  for(const group of document.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;if(typeof pauseReviewMedia==='function')pauseReviewMedia(root);root.replaceChildren();
   if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}

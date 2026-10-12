@@ -27,7 +27,7 @@ function reviewBlockScope(host,kind){
       if(row){revisions=round.model==='plan-v1'?[revision]:commentRows(round).filter(r=>r.object_id===row.object_id).map(r=>r.id);materialId=mid;materialNumber=round.number;materialModel=round.model;break}
     }
   }
-  if(host.closest('.material-reference-dialog')){revisions=[revision];materialId=null;materialNumber=null}
+  if(host.closest('.material-reference-dialog')||host.closest('.material-source-explanation')){revisions=[revision];materialId=null;materialNumber=null}
   return {revision,revisions,materialId,materialNumber,materialModel,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
 }
 function reviewBlockComments(comments,scope){
