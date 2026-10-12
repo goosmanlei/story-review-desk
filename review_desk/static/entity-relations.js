@@ -206,96 +206,41 @@ function managementGraphLayout(rows,edges){
   return nodes;
 }
 function managementOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y;}
-function managementEdgeGeometry(nodes,edges){
-  const by=new Map(nodes.map(n=>[n.id,n])),boxes=nodes.map(n=>({x:n.x-12,y:n.y-12,w:n.w+24,h:n.h+24}));let width=Math.max(480,...nodes.map(n=>n.x+n.w+60)),height=Math.max(300,...nodes.map(n=>n.y+n.h+60));
-  const views=[];
-  for(const edge of edges){let [a,b]=edge.endpoints.map(id=>by.get(id));if(!a||!b||edge.derived)continue;if(edge.direction==='reverse')[a,b]=[b,a];
-    const w=180,h=Math.max(48,Math.ceil(Array.from(edge.summary||'').length/14)*20+18),mx=(a.x+b.x+a.w)/2-w/2,my=(a.y+b.y+a.h)/2-h/2;let label=null;
-    // Search existing whitespace first; the finite fallback extends the canvas.
-    for(let ring=0;ring<40&&!label;ring++)for(let dx=-ring;dx<=ring&&!label;dx++)for(let dy=-ring;dy<=ring;dy++){
-      if(Math.max(Math.abs(dx),Math.abs(dy))!==ring)continue;const candidate={x:Math.max(20,Math.round(mx/10)*10+dx*40),y:Math.max(20,Math.round(my/10)*10+dy*40),w,h};
-      if(!boxes.some(box=>managementOverlap({x:candidate.x-24,y:candidate.y-24,w:candidate.w+48,h:candidate.h+48},box))){label=candidate;break;}
+// One bounded worker keeps layout off the UI thread. Only successful complete
+// geometry is cached; failures release the worker and can be retried normally.
+let managementGraphWorker=null,managementGraphRequest=0;
+const managementGraphPending=new Map(),managementGraphCache=new Map();
+function managementGraphWorkerFailure(error){
+  managementGraphWorker?.terminate();managementGraphWorker=null;
+  for(const item of managementGraphPending.values()){clearTimeout(item.timer);item.reject(error);}
+  managementGraphPending.clear();
+}
+async function managementEdgeGeometry(nodes,edges){
+  const input=nodes.map(({id,w,h,component,rank})=>({id,w,h,component,rank})),key=JSON.stringify([input,edges]);
+  let raw=managementGraphCache.get(key);
+  if(!raw){
+    if(!managementGraphWorker){
+      managementGraphWorker=new Worker(reviewURL('/entity-graph-worker.js'));
+      managementGraphWorker.onmessage=({data})=>{
+        const item=managementGraphPending.get(data.id);if(!item)return;
+        clearTimeout(item.timer);managementGraphPending.delete(data.id);
+        if(data.error)item.reject(new Error(data.error));else item.resolve(data.geometry);
+      };
+      managementGraphWorker.onerror=()=>managementGraphWorkerFailure(new Error('关系图计算程序未能运行，请重试'));
     }
-    if(!label)label={x:width+40,y:40,w,h};boxes.push({x:label.x-8,y:label.y-8,w:w+16,h:h+16});width=Math.max(width,label.x+w+60);height=Math.max(height,label.y+h+60);views.push({edge,a,b,label});
-  }
-  function side(box,target){const dx=target.x+target.w/2-box.x-box.w/2,dy=target.y+target.h/2-box.y-box.h/2;return Math.abs(dx)/box.w>=Math.abs(dy)/box.h?(dx>=0?'right':'left'):(dy>=0?'bottom':'top');}
-  const ports=new Map();
-  function register(box,target){const key=box.id+':'+side(box,target);if(!ports.has(key))ports.set(key,[]);const entry={box,target,side:side(box,target)};ports.get(key).push(entry);return entry;}
-  for(const [i,v] of views.entries()){v.label.id='caption:'+i;v.ap=register(v.a,v.label);v.bp=register(v.b,v.label);v.al=register(v.label,v.a);v.bl=register(v.label,v.b);}
-  const verticalPorts=[],horizontalPorts=[];
-  function coordinate(value,min,max,used){
-    const options=[value,...used.flatMap(v=>[v-6,v+6])].filter(v=>v>=min&&v<=max).sort((a,b)=>Math.abs(a-value)-Math.abs(b-value));
-    let chosen=options.find(v=>used.every(other=>Math.abs(v-other)>=3));
-    if(chosen===undefined){const bounds=[min,...used.filter(v=>v>min&&v<max),max].sort((a,b)=>a-b),gaps=bounds.slice(1).map((v,i)=>[bounds[i],v]).sort((a,b)=>(b[1]-b[0])-(a[1]-a[0]));chosen=(gaps[0][0]+gaps[0][1])/2;}
-    used.push(chosen);return chosen;
-  }
-  for(const entries of ports.values()){
-    entries.sort((a,b)=>a.side==='left'||a.side==='right'?a.target.y-b.target.y:a.target.x-b.target.x);
-    entries.forEach((p,i)=>{const {box,side}=p,f=(i+1)/(entries.length+1),horizontal=side==='left'||side==='right',sign=side==='left'||side==='top'?-1:1;
-      p.point=horizontal?[box.x+(sign>0?box.w:0),box.y+16+(box.h-32)*f]:[box.x+16+(box.w-32)*f,box.y+(sign>0?box.h:0)];
-      // Captions in the same column/row also need distinct exit axes. Local
-      // per-card port ordering alone does not separate their short connectors.
-      if(horizontal)p.point[1]=coordinate(p.point[1],box.y+16,box.y+box.h-16,horizontalPorts);
-      else p.point[0]=coordinate(p.point[0],box.x+16,box.x+box.w-16,verticalPorts);
-      p.outer=[p.point[0]+(horizontal?sign*(14+(i%3)*4):0),p.point[1]+(horizontal?0:sign*(14+(i%3)*4))];
+    raw=await new Promise((resolve,reject)=>{
+      const id=++managementGraphRequest,timer=setTimeout(()=>managementGraphWorkerFailure(new Error('关系图计算超时，请重试')),5000);
+      managementGraphPending.set(id,{resolve,reject,timer});managementGraphWorker.postMessage({id,nodes:input,edges});
     });
+    if(!Number.isFinite(raw.width)||!Number.isFinite(raw.height)||raw.width<=0||raw.height<=0)throw new Error('实体关系图边界无效');
+    if(raw.nodes.length!==nodes.length||raw.views.length!==edges.length||new Set(raw.nodes.map(n=>n.id)).size!==nodes.length||new Set(raw.views.map(v=>v.edge.id)).size!==edges.length)throw new Error('实体关系图未返回完整集合');
+    if(raw.nodes.some((n,i)=>n.id!==nodes[i].id||![n.x,n.y,n.w,n.h].every(Number.isFinite)))throw new Error('实体关系节点不一致');
+    for(const [i,view] of raw.views.entries())if(JSON.stringify(view.edge)!==JSON.stringify(edges[i])||!view.path||!view.curves?.length||view.curves.some(c=>c.length<4||(c.length-1)%3||c.some(p=>p.length!==2||!p.every(Number.isFinite))))throw new Error('实体关系连线不完整');
+    managementGraphCache.set(key,raw);while(managementGraphCache.size>24)managementGraphCache.delete(managementGraphCache.keys().next().value);
   }
-  // Reserve every exit before routing. A later connector must not be laid on
-  // an earlier route; searching only between the outer ports misses that case.
-  const connectors=[...ports.values()].flat().map(p=>[p.point,p.outer]),occupied=[...connectors];
-  const overlap=(a,b,c,d)=>a[0]===b[0]&&c[0]===d[0]?Math.abs(a[0]-c[0])<.01&&Math.min(Math.max(a[1],b[1]),Math.max(c[1],d[1]))-Math.max(Math.min(a[1],b[1]),Math.min(c[1],d[1]))>1:a[1]===b[1]&&c[1]===d[1]?Math.abs(a[1]-c[1])<.01&&Math.min(Math.max(a[0],b[0]),Math.max(c[0],d[0]))-Math.max(Math.min(a[0],b[0]),Math.min(c[0],d[0]))>1:false;
-  const straight=route=>route.slice(1).map((b,i)=>[route[i],b]).filter(([a,b])=>a[0]===b[0]||a[1]===b[1]);
-  for(const [index,view] of views.entries()){
-    const {ap,al,bl,bp}=view;
-    const direct=(start,end)=>managementDirectCurve(start,end,nodes,views.map(v=>v.label));
-    const d1=direct(ap,al),d2=direct(bl,bp);
-    const otherRuns=occupied.filter(([a])=>![ap,al,bl,bp].some(p=>p.point===a));
-    if(d1&&d2&&![...straight(d1.points),...straight(d2.points)].some(([a,b])=>otherRuns.some(([c,d])=>overlap(a,b,c,d)))){view.routes=[d1.points,d2.points];view.points=[...d1.points,...d2.points];view.path=d1.path+' '+d2.path;for(const route of view.routes)occupied.push(...straight(route));continue;}
-    const one=managementOrthogonalRoute(ap.outer,al.outer,boxes,width,height,occupied,index*2),two=managementOrthogonalRoute(bl.outer,bp.outer,boxes,width,height,occupied,index*2+1);
-    // The caption interrupts its own edge. No line is painted through text.
-    const first=[ap.point,...one,al.point],last=[bl.point,...two,bp.point];
-    view.routes=[first,last];view.points=[...first,...last];view.path=managementSmoothRoute(first)+' '+managementSmoothRoute(last);
-    for(const route of view.routes)for(let i=1;i<route.length;i++)occupied.push([route[i-1],route[i]]);
-  }
-  return {views,width,height};
-}
-function managementDirectCurve(start,end,nodes,labels){
-  const a=start.point,b=end.point,d=Math.min(220,Math.max(40,Math.hypot(a[0]-b[0],a[1]-b[1])*.45));
-  const control=p=>{const dx=p.outer[0]-p.point[0],dy=p.outer[1]-p.point[1],length=Math.hypot(dx,dy);return [p.point[0]+dx/length*d,p.point[1]+dy/length*d];};
-  const c=control(start),e=control(end),points=[];
-  for(let i=0;i<=64;i++){const t=i/64,u=1-t,p=[u*u*u*a[0]+3*u*u*t*c[0]+3*u*t*t*e[0]+t*t*t*b[0],u*u*u*a[1]+3*u*u*t*c[1]+3*u*t*t*e[1]+t*t*t*b[1]];
-    if(p[0]<1||p[1]<1)return null;
-    if(i>0&&i<64&&[...nodes,...labels].some(box=>p[0]>box.x&&p[0]<box.x+box.w&&p[1]>box.y&&p[1]<box.y+box.h))return null;points.push(p);
-  }
-  return {points,path:'M'+a.join(' ')+' C'+[...c,...e,...b].join(' ')};
-}
-function managementSmoothRoute(points){
-  const p=[];for(const point of points){if(p.length&&point[0]===p[p.length-1][0]&&point[1]===p[p.length-1][1])continue;p.push(point);while(p.length>2){const [a,b,c]=p.slice(-3);if((a[0]===b[0]&&b[0]===c[0])||(a[1]===b[1]&&b[1]===c[1]))p.splice(p.length-2,1);else break;}}
-  let path='M'+p[0].join(' ');
-  if(p.length===2){const [a,b]=p,dx=b[0]-a[0],dy=b[1]-a[1],length=Math.hypot(dx,dy)||1;return path+' C'+[a[0]+dx/3-dy/length*5,a[1]+dy/3+dx/length*5,a[0]+dx*2/3-dy/length*5,a[1]+dy*2/3+dx/length*5,...b].join(' ');}
-  for(let i=1;i<p.length-1;i++){const [a,b,c]=[p[i-1],p[i],p[i+1]],ab=Math.hypot(b[0]-a[0],b[1]-a[1]),bc=Math.hypot(c[0]-b[0],c[1]-b[1]),r=Math.min(16,ab/2,bc/2),before=[b[0]+(a[0]-b[0])*r/ab,b[1]+(a[1]-b[1])*r/ab],after=[b[0]+(c[0]-b[0])*r/bc,b[1]+(c[1]-b[1])*r/bc];
-    path+=' L'+before.join(' ')+' C'+[before[0]+(b[0]-before[0])*.65,before[1]+(b[1]-before[1])*.65,b[0]+(after[0]-b[0])*.35,b[1]+(after[1]-b[1])*.35,...after].join(' ');
-  }
-  return path+' L'+p[p.length-1].join(' ');
-}
-// A visibility grid follows rectangle borders. No straight-line fallback is
-// allowed through cards when a route needs to travel around another entity.
-function managementOrthogonalRoute(start,end,boxes,width,height,occupied=[],lane=0){
-  // Distant lanes can skip an entire narrow corridor and strand a valid port.
-  // Always retain the near borders of every padded obstacle as well as the
-  // separated lanes. The obstacle padding still protects rounded corners.
-  const xs=[...new Set([0,width,start[0],end[0],...boxes.flatMap(b=>[b.x-2,b.x+b.w+2,b.x-12-(lane%11)*6,b.x+b.w+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[0]-8,a[0]+8,b[0]-8,b[0]+8])])].filter(x=>x>=0&&x<=width).sort((a,b)=>a-b),ys=[...new Set([0,height,start[1],end[1],...boxes.flatMap(b=>[b.y-2,b.y+b.h+2,b.y-12-(lane%11)*6,b.y+b.h+12+(lane%11)*6]),...occupied.slice(-64).flatMap(([a,b])=>[a[1]-8,a[1]+8,b[1]-8,b[1]+8])])].filter(y=>y>=0&&y<=height).sort((a,b)=>a-b),nx=xs.length;
-  const origin=ys.indexOf(start[1])*nx+xs.indexOf(start[0]),goal=ys.indexOf(end[1])*nx+xs.indexOf(end[0]);
-  const blocked=(a,b)=>boxes.some(box=>a[0]===b[0]?a[0]>box.x&&a[0]<box.x+box.w&&Math.max(a[1],b[1])>box.y&&Math.min(a[1],b[1])<box.y+box.h:a[1]>box.y&&a[1]<box.y+box.h&&Math.max(a[0],b[0])>box.x&&Math.min(a[0],b[0])<box.x+box.w);
-  const overlap=(a,b,c,d)=>a[0]===b[0]&&c[0]===d[0]?Math.abs(a[0]-c[0])<.01&&Math.min(Math.max(a[1],b[1]),Math.max(c[1],d[1]))-Math.max(Math.min(a[1],b[1]),Math.min(c[1],d[1]))>1:a[1]===b[1]&&c[1]===d[1]?Math.abs(a[1]-c[1])<.01&&Math.min(Math.max(a[0],b[0]),Math.max(c[0],d[0]))-Math.max(Math.min(a[0],b[0]),Math.min(c[0],d[0]))>1:false;
-  const point=id=>[xs[id%nx],ys[Math.floor(id/nx)]],distance=new Map([[origin,0]]),previous=new Map(),done=new Set(),heap=[];
-  function push(item){heap.push(item);let i=heap.length-1;while(i){const parent=(i-1)>>1;if(heap[parent].cost<=item.cost)break;heap[i]=heap[parent];i=parent;}heap[i]=item;}
-  function pop(){const first=heap[0],last=heap.pop();if(heap.length){let i=0;while(i*2+1<heap.length){let c=i*2+1;if(c+1<heap.length&&heap[c+1].cost<heap[c].cost)c++;if(heap[c].cost>=last.cost)break;heap[i]=heap[c];i=c;}heap[i]=last;}return first;}
-  const heuristic=p=>Math.abs(p[0]-end[0])+Math.abs(p[1]-end[1]);push({id:origin,cost:heuristic(start)});
-  while(heap.length){const {id}=pop();if(done.has(id))continue;if(id===goal){const result=[end];let cursor=goal;while(cursor!==origin){cursor=previous.get(cursor);result.push(point(cursor));}return result.reverse();}done.add(id);const x=id%nx,y=Math.floor(id/nx),a=point(id);
-    for(const [xx,yy] of [[x-1,y],[x+1,y],[x,y-1],[x,y+1]]){if(xx<0||xx>=nx||yy<0||yy>=ys.length)continue;const next=yy*nx+xx,b=point(next);if(done.has(next)||blocked(a,b)||occupied.some(([c,d])=>overlap(a,b,c,d)))continue;const cost=distance.get(id)+Math.abs(a[0]-b[0])+Math.abs(a[1]-b[1]);if(cost<(distance.get(next)??Infinity)){distance.set(next,cost);previous.set(next,id);push({id:next,cost:cost+heuristic(b)});}}
-  }
-  throw new Error('实体关系连线路径不可用');
+  const by=new Map(nodes.map(n=>[n.id,n])),placed=raw.nodes.map(n=>({...n,row:by.get(n.id)?.row})),newBy=new Map(placed.map(n=>[n.id,n]));
+  if(placed.some(n=>!n.row))throw new Error('实体关系节点不一致');
+  return {...raw,nodes:placed,views:raw.views.map(v=>({...v,a:newBy.get(v.a.id),b:newBy.get(v.b.id)}))};
 }
 function renderManagementEntityGraph(root,rows,result,memory){
   if(!rows.length){nodeText('p','production-meta','此范围没有实体',root);return}
@@ -303,7 +248,7 @@ function renderManagementEntityGraph(root,rows,result,memory){
   const signature=JSON.stringify([rows.map(r=>[r.object_id,r.id]),edges]);if(memory.signature!==signature){memory.nodes=managementGraphLayout(rows,edges);memory.signature=signature;memory.selection=null;memory.scale=null;memory.mode='fit';memory.left=0;memory.top=0;}
   const nodes=memory.nodes,by=new Map(nodes.map(n=>[n.id,n])),controls=el('div','relation-controls'),viewport=el('div','relation-graph-viewport management-graph-viewport'),canvas=el('div','relation-graph-canvas');
   root.append(controls,viewport);viewport.append(canvas);viewport.tabIndex=0;viewport.setAttribute('aria-label','实体关系图，可拖动和缩放');
-  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('relation-graph','management-relation-graph');svg.setAttribute('role','group');svg.setAttribute('aria-label','实体与关系');canvas.append(svg);
+  const ns='http://www.w3.org/2000/svg',svg=document.createElementNS(ns,'svg');svg.classList.add('relation-graph','management-relation-graph');svg.style.visibility='hidden';svg.setAttribute('role','group');svg.setAttribute('aria-label','实体与关系');canvas.append(svg);
   const make=(tag,attrs={},parent=svg)=>{const node=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))node.setAttribute(k,v);parent.append(node);return node};
   const marker='entity-map-arrow-'+(++relationGraphSerial),defs=make('defs'),arrow=make('marker',{id:marker,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},arrow);
   const edgeLayer=make('g'),captionLayer=make('g'),edgeViews=[];let width=Math.max(800,...nodes.map(n=>n.x+360)),height=Math.max(450,...nodes.map(n=>n.y+220));
@@ -322,20 +267,20 @@ function renderManagementEntityGraph(root,rows,result,memory){
     button.onkeydown=e=>{if(e.isComposing||e.repeat)return;if(e.key===' '){e.preventDefault();e.stopPropagation();choose(memory.selection?.kind==='node'&&memory.selection.id===node.id?null:{kind:'node',id:node.id});}else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();moved=false;open();}};
     nodeHosts.push({node,foreign,host,button});}
 
-  function drawEdges(){
+  async function drawEdges(token){
     // Calculate and build the complete replacement offscreen before changing
     // the visible graph, including card bounds and viewBox. One failed route
     // must not erase a complete drawing or leave a partially committed layer.
     const measured=nodeHosts.map(({node,host})=>({...node,h:Math.max(110,host.scrollHeight)}));
-    const geometry=managementEdgeGeometry(measured,edges),nextEdges=document.createElementNS(ns,'g'),nextCaptions=document.createElementNS(ns,'g'),nextViews=[];
+    const geometry=await managementEdgeGeometry(measured,edges);if(token!==layoutSerial||!viewport.isConnected)return false;const nextEdges=document.createElementNS(ns,'g'),nextCaptions=document.createElementNS(ns,'g'),nextViews=[];
     for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},nextEdges);
       if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute('marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
       const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},nextCaptions),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
       label.onclick=e=>{e.stopPropagation();if(!moved)choose({kind:'edge',id:edge.id});};nextViews.push({edge,path,label,foreign});
     }
-    for(const [i,{node,foreign}] of nodeHosts.entries()){node.h=measured[i].h;foreign.setAttribute('height',node.h);}
+    for(const [i,{node,foreign}] of nodeHosts.entries()){Object.assign(node,geometry.nodes[i]);foreign.setAttribute('x',node.x);foreign.setAttribute('y',node.y);foreign.setAttribute('height',node.h);}
     edgeLayer.replaceChildren(...nextEdges.childNodes);captionLayer.replaceChildren(...nextCaptions.childNodes);edgeViews.splice(0,edgeViews.length,...nextViews);width=geometry.width;height=geometry.height;
-    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);paintSelection();
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.visibility='visible';paintSelection();return true;
   }
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
   let scale=memory.scale||1,ready=false;const status=nodeText('output','relation-scale','',controls);
@@ -351,10 +296,11 @@ function renderManagementEntityGraph(root,rows,result,memory){
   viewport.onclick=e=>{if(!moved&&!e.target.closest('[data-entity-id],[data-relation-id]'))choose(null);};
   viewport.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();choose(null);return;}if(e.target!==viewport)return;const key={'+':'in','=':'in','-':'out','0':'original',f:'fit'}[e.key];if(key){e.preventDefault();zoom(key);}};
   const issue=el('div','production-issue');issue.hidden=true;issue.setAttribute('role','alert');root.append(issue);
-  function layout(){
-    if(!viewport.isConnected)return;const left=memory.left,top=memory.top;
-    try{drawEdges();issue.hidden=true;issue.replaceChildren();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
-    catch(error){issue.hidden=false;issue.replaceChildren();nodeText('p',null,(ready?'关系图未能重新绘制，仍保留上一次完整结果。':'关系图绘制失败。')+error.message,issue);productionButton(issue,'重新绘制关系图',layout);}
+  let layoutSerial=0;
+  async function layout(){
+    if(!viewport.isConnected)return;const token=++layoutSerial;
+    try{if(!await drawEdges(token))return;const {left,top}=memory;issue.hidden=true;issue.replaceChildren();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
+    catch(error){if(token!==layoutSerial||!viewport.isConnected)return;issue.hidden=false;issue.replaceChildren();nodeText('p',null,(ready?'关系图未能重新绘制，仍保留上一次完整结果。':'关系图绘制失败。')+error.message,issue);productionButton(issue,'重新绘制关系图',layout);}
   }
   requestAnimationFrame(layout);
   if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return;}layout();});observer.observe(viewport);for(const {host} of nodeHosts)observer.observe(host);}
