@@ -669,9 +669,9 @@ async function openBreakdownMaterial(need,reader,selectionEpoch=null,restore=fal
     for(const button of document.querySelectorAll('.material-index [data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===mid));
   }catch(error){if(read===productionReadEpoch){reader.replaceChildren();nodeText('p','production-issue',error.message,reader)}}
 }
-function flatFilterGroup(parent,key,label,options,selected,counts,onchange){
+function flatFilterGroup(parent,key,label,options,selected,counts,onchange,{iconFor}={}){
   const group=el('div','production-filter-group');if(label){group.setAttribute('role','group');group.setAttribute('aria-label',label);nodeText('span','production-filter-label',label,group)}const choices=el('div','production-filter-options');group.append(choices);
-  for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;nodeText('span',null,title,button);if(counts)nodeText('b','production-filter-count',String(counts[value]||0),button)}parent.append(group);
+  for(const [value,title] of options){const button=productionButton(choices,'',()=>onchange(selected===value?'':value));button.className='production-filter-chip';button.setAttribute('aria-pressed',String(selected===value));button.dataset.filterKey=key;button.dataset.filterValue=value;if(iconFor)button.append(productionEntityIcon(iconFor(value)));nodeText('span',null,title,button);if(counts)nodeText('b','production-filter-count',String(counts[value]||0),button)}parent.append(group);return group;
 }
 async function loadProductionMaterials(){return loadMaterialManagement()}
 
