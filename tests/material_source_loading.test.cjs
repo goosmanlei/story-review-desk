@@ -16,3 +16,11 @@ test('same-address source drift fails before merging any plan or candidate',asyn
 test('parallel identical reads share one request while different targets stay separate',async()=>{
  const f=fixture(),one=f.context.loadEntityMaterial(f.data,'m','current'),two=f.context.loadEntityMaterial(f.data,'m','current'),candidate=f.context.loadEntityMaterial(f.data,'m','c');assert.equal(one,two);assert.equal(f.results.length,2);f.results[1].resolve(f.response());await candidate;f.results[0].resolve(f.response());await one;assert.equal(f.data.requirements[0].payload.generation.prompt,'exact');
 });
+test('a later current-plan summary preserves an already read exact candidate',async()=>{
+ const f=fixture(),original={id:'c',object_id:'asset',payload:{prompt:'original'}};
+ f.data.material_versions.m=[{number:1,results:[],members:[original]}];
+ const read=f.context.loadEntityMaterial(f.data,'m','current'),result=f.response();
+ result.material_versions.m[0].members=[{id:'c',object_id:'asset',deferred_detail:true}];
+ f.results[0].resolve(result);await read;
+ assert.equal(f.data.material_versions.m[0].members[0].payload.prompt,'original');
+});
