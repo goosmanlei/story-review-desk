@@ -12,9 +12,9 @@ function novelChapterBlocks(source,chapter){
 function novelVersionLabel(source,index){
   return '第'+(source.title.match(/^故事精修([一二三四五六七八九十百零〇\d]+)/u)?.[1]||source.order||index+1)+'版';
 }
-function renderNovelIndex(){
+function renderNovelIndex(preserveScroll=true){
   const versions=$('#novel-index'),nav=$('#source-list');if(!versions)return;
-  versions.hidden=false;const scroll=versions.scrollLeft;versions.replaceChildren();nav.replaceChildren();
+  versions.hidden=false;const scroll=versions.scrollLeft,chapterScroll=preserveScroll?nav.scrollTop:0;versions.replaceChildren();nav.replaceChildren();
   const novels=state.sources.filter(source=>source.group==='story-refinements');
   for(const [index,source] of novels.entries()){
     const active=source.id===state.current?.id,button=nodeText('button','screenplay-version source-button'+(active?' active':''),novelVersionLabel(source,index),versions);
@@ -22,10 +22,16 @@ function renderNovelIndex(){
     button.onclick=()=>{if(!active)chooseSource(source.id)};
   }
   versions.scrollLeft=scroll;
+  const selected=versions.querySelector('.active');
+  if(selected){
+    const item=selected.getBoundingClientRect(),edge=versions.getBoundingClientRect();
+    if(item.left<edge.left)versions.scrollLeft+=item.left-edge.left;
+    else if(item.right>edge.right)versions.scrollLeft+=item.right-edge.right;
+  }
   const chapters=sourceChapters(state.current);
   if(!chapters.some(chapter=>chapter.id===state.sourceChapter))state.sourceChapter=chapters[0]?.id||null;
   for(const chapter of chapters){
-    const button=nodeText('button','source-chapter-button screenplay-scene-button'+(chapter.id===state.sourceChapter?' active':''),'',nav);
+    const button=nodeText('button','source-chapter-button screenplay-scene-button source-button'+(chapter.id===state.sourceChapter?' active':''),'',nav);
     button.type='button';button.dataset.sourceId=state.current.id;button.dataset.blockId=chapter.id;
     button.setAttribute('aria-current',chapter.id===state.sourceChapter?'location':'false');
     button.setAttribute('aria-controls','source-view');nodeText('strong',null,chapter.title,button);
@@ -35,6 +41,7 @@ function renderNovelIndex(){
   }
   if(!novels.length)nodeText('p','source-no-results','尚未发布小说。',nav);
   else if(!chapters.length)nodeText('p','source-no-results','本版按完整正文阅读。',nav);
+  nav.scrollTop=chapterScroll;
 }
 function renderNovelDocument(){
   hideSelectionAction();const source=state.current,root=$('#source-view');root.replaceChildren();
