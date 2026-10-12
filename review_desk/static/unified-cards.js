@@ -137,7 +137,7 @@ function renderUnifiedSelected(data){
 }
 function retainLoadedMaterialMembers(data,mid,rounds){
   const old=new Map((data.material_versions[mid]||[]).flatMap(r=>r.members||[]).filter(r=>!r.deferred_detail).map(r=>[r.id,r]));
-  return rounds.map(round=>({...round,results:round.results.map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r),members:round.members.map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r)}));
+  return rounds.map(round=>({...round,results:(round.results||[]).map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r),members:(round.members||[]).map(r=>r.deferred_detail&&old.has(r.id)?old.get(r.id):r)}));
 }
 function loadEntityMaterial(data,mid,candidate){
   data.materialDetailReads||=new Map();const key=mid+':'+candidate;if(data.materialDetailReads.has(key))return data.materialDetailReads.get(key);
@@ -406,7 +406,7 @@ function renderShotEntityWorkspace(root,data){
         const label=group.label+(sections.size>1&&states.length?' · '+states.map(s=>s.title||s.description.split(/[：:；。]/u)[0]).join('／'):'');
         const section=materialSourceSection(panel,label,shot,async body=>{
           if(states.length){const surface=materialTextSurface(body,shot);for(const keyState of states){const index=shot.payload.key_states.findIndex(s=>s.id===keyState.id);materialField(surface,shot,`key_states.${index}.description`,null)}}
-          else for(const id of ids){const summary=by.get(id).need;const result=await api('/api/production/material-source?'+new URLSearchParams({object_id:summary.object_id,revision_id:summary.id,expected_version:summary.version}));const surface=materialTextSurface(body,result.record);surface.sourceRecord=result.record;materialField(surface,result.record,'purpose',null)}
+          else for(const id of ids){const summary=by.get(id).need;const result=await api('/api/production/material-source?'+new URLSearchParams({object_id:summary.object_id,revision_id:summary.id,expected_version:summary.version}));const surface=materialTextSurface(body,result.record);surface.sourceRecord=result.record;for(const block of productionTextBlocks(result.record)){const text=nodeText('p',null,block.text,surface);text.dataset.blockId=block.id}}
         });
         section.sourceFields=states.map(s=>`key_states.${shot.payload.key_states.findIndex(k=>k.id===s.id)}.description`);
         const list=el('div','material-small-list');list.setAttribute('aria-label',label+'素材');section.append(list);for(const id of ids){const model=by.get(id);materialSmallCard(list,modelSmallItem(model),()=>select(id),selected===id)}
@@ -424,13 +424,13 @@ function renderShotEntityWorkspace(root,data){
         const body=card.closest('.breakdown-body'),anchor=card;
         const top=anchor.getBoundingClientRect().top,x=right.scrollLeft,y=right.scrollTop;
         draw(false,true);right.scrollLeft=x;right.scrollTop=y;
-        if(anchor&&top!==undefined){const delta=anchor.getBoundingClientRect().top-top;if(['auto','scroll'].includes(getComputedStyle(body).overflowY))body.scrollTop+=delta;else window.scrollTo(window.scrollX,window.scrollY+delta)}
+        if(anchor&&top!==undefined){const delta=anchor.getBoundingClientRect().top-top;if(body&&['auto','scroll'].includes(getComputedStyle(body).overflowY))body.scrollTop+=delta;else window.scrollTo(window.scrollX,window.scrollY+delta)}
         const current=data.requirements.find(n=>n.object_id===selected);
         if(state.productionSelected?.object_id===selected)focusProductionReview(entityReviewDetail(current),false);
         paintProductionReview();
       }).catch(error=>{if(selection!==drawEpoch||!card.isConnected||error.name==='AbortError')return;right.replaceChildren();nodeText('p','production-issue','素材方案读取失败：'+error.message,right);productionButton(right,'重试',()=>draw(true,true))})};
       if(priority||typeof IntersectionObserver==='undefined')load();
-      else {observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load()},{root:['auto','scroll'].includes(getComputedStyle(root.closest('.breakdown-body')).overflowY)?root.closest('.breakdown-body'):null,rootMargin:'500px'});observer.observe(card)}
+      else {const body=root.closest('.breakdown-body');observer=new IntersectionObserver(entries=>{if(entries.some(e=>e.isIntersecting))load()},{root:body&&['auto','scroll'].includes(getComputedStyle(body).overflowY)?body:null,rootMargin:'500px'});observer.observe(card)}
       return;
     }
     renderMaterialCard(right,model,{workspace:data,selectedCandidateId:data.selectedCandidates[selected],selectedComponents:data.selectedComponents,multipleCards:true,selectCandidate:id=>{rememberProductionDraft();data.selectedCandidates[selected]=id;focus(id==='current'?model.need:model.candidates.find(i=>i.record.id===id)?.record);preserve(()=>draw(true,true));paintProductionReview()},selectComponent:id=>{const candidate=model.candidates.find(i=>i.record.id===data.selectedCandidates[selected]);if(candidate){data.selectedComponents||={};data.selectedComponents[candidate.record.id]=id;preserve(()=>draw(false,true));paintProductionReview()}}});
