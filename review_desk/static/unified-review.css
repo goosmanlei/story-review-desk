@@ -10,6 +10,9 @@
 .unified-card-context,.unified-card-material{min-width:0;padding:20px;overflow-wrap:anywhere}
 .unified-card-context{border-right:1px solid var(--desk-line)}
 .unified-card-material{background:#fcfaf4;position:sticky;top:80px;max-height:calc(100dvh - 100px);overflow:auto;overscroll-behavior:contain}
+.material-reader-status{position:sticky;top:0;height:0;z-index:2}
+.material-reader-status>p{margin:0;background:#fcfaf4;border:1px solid var(--desk-line);border-radius:6px;padding:8px 12px;box-shadow:0 2px 8px #0000000a}
+.material-reader-status>button{position:relative;background:#fcfaf4}
 .unified-card h2{font-size:21px}.unified-card h3{font-size:16px}.unified-card h4{font-size:14px}.unified-card pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .unified-card .material-card{border:0;padding:0;box-shadow:none;background:transparent}.unified-card .entity-review-materials{display:block}
 .unified-card .entity-review-media-pane{margin:12px 0}.unified-card .entity-review-relationships{overflow:auto}
