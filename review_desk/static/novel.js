@@ -12,9 +12,9 @@ function novelChapterBlocks(source,chapter){
 function novelVersionLabel(source,index){
   return '第'+(source.title.match(/^故事精修([一二三四五六七八九十百零〇\d]+)/u)?.[1]||source.order||index+1)+'版';
 }
-function renderNovelIndex(){
+function renderNovelIndex(preserveScroll=true){
   const versions=$('#novel-index'),nav=$('#source-list');if(!versions)return;
-  versions.hidden=false;const scroll=versions.scrollLeft,chapterScroll=nav.scrollTop;versions.replaceChildren();nav.replaceChildren();
+  versions.hidden=false;const scroll=versions.scrollLeft,chapterScroll=preserveScroll?nav.scrollTop:0;versions.replaceChildren();nav.replaceChildren();
   const novels=state.sources.filter(source=>source.group==='story-refinements');
   for(const [index,source] of novels.entries()){
     const active=source.id===state.current?.id,button=nodeText('button','screenplay-version source-button'+(active?' active':''),novelVersionLabel(source,index),versions);
