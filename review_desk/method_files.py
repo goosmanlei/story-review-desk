@@ -169,15 +169,88 @@ def execution_manifest(store, package):
     return {'method': manifest(store, package['method']['revision_id']), 'resources': resources}
 
 
+def reading_order(record, source_outlines=None):
+    """Use the document's own outline and links; keep exact file identities."""
+    import re
+    import posixpath
+    from urllib.parse import unquote, urlsplit
+    files = record['payload']['files']
+    paths = list(entries(record['payload']))
+    entry = next((p for name in ('SKILL.md', 'README.md', 'handbook.md')
+                  for p in paths if posixpath.basename(p) == name), None)
+    ordered = [entry] if entry else []
+    if not entry:
+        # Older projections contain only chapter files. Recover their order
+        # from an available complete copy of the SAME source bytes, never from
+        # a newer document with different contents or an inferred filename order.
+        sources = record['payload'].get('source', {}).get('files', {})
+        for identity, body in (source_outlines or {}).items():
+            for section in re.findall(r'<!--\s*section:([\w-]+)\s*-->', body):
+                ordered.extend(path for path in paths if path not in ordered and
+                    (sources.get(path, {}).get('path'), sources.get(path, {}).get('sha256')) == identity and
+                    sources.get(path, {}).get('section') == section)
+    if entry:
+        body = files[entry]
+        # A split handbook keeps section identifiers from its complete text.
+        for section in re.findall(r'<!--\s*section:([\w-]+)\s*-->', body):
+            path = posixpath.join(posixpath.dirname(entry), section+'.md')
+            if path in files and path not in ordered:
+                ordered.append(path)
+        for link in re.findall(r'\[[^\]]*\]\(([^\s)]+)', body):
+            url = urlsplit(link)
+            if url.scheme or url.netloc:
+                continue
+            path = posixpath.normpath(posixpath.join(posixpath.dirname(entry), unquote(url.path)))
+            if path in files and path not in ordered:
+                ordered.append(path)
+    ordered += [p for p in sorted(paths) if p not in ordered]
+    labels = {}
+    counts = {}
+    for path in ordered:
+        name = posixpath.basename(path)
+        category = '正文' if path == entry else '模板' if 'templates/' in path else '图示' if path.lower().endswith(('.svg','.png','.jpg','.webp')) else '媒体' if path.lower().endswith(('.mp4','.mov','.webm','.mp3','.wav','.m4a')) else '资料' if not path.endswith('.md') else '参考资料'
+        text = files.get(path, '')
+        heading = re.search(r'^#{1,6}\s+(.+?)\s*#*\s*$', text, re.M) if path.endswith('.md') else None
+        title = heading.group(1).strip() if heading else name
+        existing = re.match(r'^(\d{2})[-_. ]', name)
+        counts[category] = counts.get(category, 0)+1
+        number = existing.group(1) if existing else str(counts[category]).zfill(2)
+        if category == '正文':
+            label = '阅读入口 · '+title
+        else:
+            title = re.sub(r'^\d{1,2}[.、：:·\s-]+', '', title)
+            label = ('' if category == '参考资料' else category+' ')+number+' · '+title
+        labels[path] = {'reading_label': label, 'reading_group': category}
+    groups = ('正文', '参考资料', '模板', '图示', '媒体', '资料')
+    return sorted(ordered, key=lambda path: groups.index(labels[path]['reading_group'])), labels
+
+
 def directory(store, object_id, revision_id=None):
     from .methods import read
     require_history(store)
     record = read(store, object_id, revision_id)
     selected = manifest(store, record['revision_id'])
     paths = [r[0] for r in store.db.execute('SELECT DISTINCT path FROM method_file_versions WHERE object_id=? ORDER BY path', (object_id,))]
-    return {'record': record, 'files': [{'path': path, 'selected': selected.get(path),
+    outlines = {}
+    sources = record['payload'].get('source', {}).get('files', {})
+    wanted = {(item.get('path'), item.get('sha256')) for item in sources.values() if item.get('section')}
+    if wanted and not any(path.rsplit('/', 1)[-1] in ('SKILL.md', 'README.md', 'handbook.md')
+                          for path in record['payload']['files']):
+        for row in store.db.execute('SELECT payload FROM revisions WHERE object_id=? ORDER BY version DESC', (object_id,)):
+            payload = json.loads(row[0])
+            for path, source in payload.get('source', {}).get('files', {}).items():
+                identity = (source.get('path'), source.get('sha256'))
+                body = payload.get('files', {}).get(path)
+                if identity in wanted and identity not in outlines and not source.get('section') and isinstance(body, str):
+                    if digest(body.encode()) == identity[1]:
+                        outlines[identity] = body
+            if set(outlines) == wanted:
+                break
+    ordered, labels = reading_order(record, outlines)
+    ordered += [p for p in paths if p not in ordered]
+    return {'record': record, 'files': [{'path': path, **labels.get(path, {}), 'selected': selected.get(path),
         'versions': [metadata(r) for r in store.db.execute('SELECT * FROM method_file_versions WHERE object_id=? AND path=? ORDER BY version DESC', (object_id, path))]}
-        for path in paths]}
+        for path in ordered]}
 
 
 def document(store, object_id, path, *, revision_id=None, version=None):

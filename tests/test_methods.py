@@ -24,6 +24,25 @@ def seed(store, work_type='comment-polish', steps=None):
 
 
 class MethodsTest(unittest.TestCase):
+    def test_media_binding_requires_specific_audio_and_keeps_frozen_generic_package(self):
+        payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['media-plan']; payload['steps'] = ['draft', 'review', 'result']
+        method = methods.save(self.store, {'category':'skill','name':'media-original','expected_version':0,'payload':payload})
+        binding = methods.save(self.store, {'category':'binding','name':'media-plan','expected_version':0,'payload':{'work_type':'media-plan','rules':[{**methods.reference(method),'when':{}}]}})
+        frozen = methods.resolve(self.store, 'media-plan', {'media_type': 'audio'})
+        rules = []
+        for name, condition in [('image', {'media_type': 'image'}), ('voice', {'media_type': 'audio', 'audio_type': 'voice'}), ('song', {'media_type': 'audio', 'audio_type': 'song'}), ('video', {'media_type': 'video'})]:
+            payload = copy.deepcopy(method['payload']); payload['title'] = name
+            row = methods.save(self.store, {'category': 'skill', 'name': name, 'expected_version': 0, 'payload': payload})
+            rules.append({**methods.reference(row), 'when': condition})
+        methods.save(self.store, {'category': 'binding', 'name': 'media-plan', 'expected_version': binding['version'], 'payload': {'work_type': 'media-plan', 'rules': rules}})
+        for kind in ('voice', 'song'):
+            self.assertEqual(methods.resolve(self.store, 'media-plan', {'media_type': 'audio', 'audio_type': kind})['title'], kind)
+        with self.assertRaisesRegex(ValueError, 'voice.*song'):
+            methods.resolve(self.store, 'media-plan', {'media_type': 'audio'})
+        with self.assertRaises(ValueError):
+            methods.resolve(self.store, 'media-plan', {'media_type': 'unknown'})
+        self.assertEqual(methods.resolve(self.store, 'media-plan', {'media_type': 'audio'}, methods.reference(binding)), frozen)
+
     def test_source_companions_preserve_links_export_restore_and_old_snapshot(self):
         root = Path(self.tmp.name)
         (root / 'book/diagrams').mkdir(parents=True)
@@ -162,8 +181,7 @@ class MethodsTest(unittest.TestCase):
             methods.stage_record(self.store, ref, 'draft')
 
     def test_stage_read_compact_hashes_and_assessment_keep_old_export_boundary(self):
-        from review_desk import production_current_migration as migration
-        migration.apply(self.store, migration.plan(self.store))
+        self.assertTrue(__import__("review_desk.production_current",fromlist=["enabled"]).enabled(self.store))
         payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['audiovisual-design']
         method = methods.save(self.store, {'category': 'skill', 'name': 'design', 'expected_version': 0, 'payload': payload})
         methods.save(self.store, {'category': 'binding', 'name': 'audiovisual-design', 'expected_version': 0,
@@ -182,8 +200,7 @@ class MethodsTest(unittest.TestCase):
         export(self.store, folder)
         self.assertNotIn(execution['object_id'], (folder / 'objects.json').read_text())
 
-    def test_full_production_execution_resumes_after_current_content_cutover(self):
-        from review_desk import production_current_migration as migration
+    def test_current_production_execution_resumes_with_exact_output_hash(self):
         payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['audiovisual-design']
         method = methods.save(self.store, {'category': 'skill', 'name': 'design', 'expected_version': 0, 'payload': payload})
         methods.save(self.store, {'category': 'binding', 'name': 'audiovisual-design', 'expected_version': 0,
@@ -192,9 +209,9 @@ class MethodsTest(unittest.TestCase):
         old = methods.prepare(self.store, request)
         for stage in ['draft', 'review', 'result']:
             methods.artifact(self.store, {**request, 'execution': methods.reference(old), 'stage': stage, 'output': '旧完整稿'})
-        migration.apply(self.store, migration.plan(self.store))
+        self.assertTrue(__import__("review_desk.production_current",fromlist=["enabled"]).enabled(self.store))
         self.assertEqual(methods.prepare(self.store, request), old)
-        self.assertEqual(methods.stage_record(self.store, methods.reference(old), 'result')['artifact']['payload']['output'], '旧完整稿')
+        self.assertEqual(methods.stage_record(self.store, methods.reference(old), 'result')['artifact']['payload']['output']['sha256'], methods.checksum('旧完整稿'))
         fresh = methods.prepare(self.store, {**request, 'step_id': 'new'})
         self.assertEqual(fresh['payload']['inputs']['format'], 'production-method-inputs-v1')
 

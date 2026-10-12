@@ -29,6 +29,8 @@ class ProductionTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def spec(self, oid, kind, **fields):
+        if kind == 'REQUIREMENT' and fields.get('generation'):
+            fields = copy.deepcopy(fields); fields['generation']['output']['name'] = oid
         return {'object_id': oid, 'kind': kind, 'expected_version': 0, 'payload': {
             'format': 'production-' + p.KINDS[kind] + '-v1', 'title': oid,
             'blocks': [{'id': 'notes', 'text': oid + '的说明'}], **fields}}

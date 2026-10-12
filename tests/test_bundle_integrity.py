@@ -38,7 +38,7 @@ class BundleIntegrityTest(unittest.TestCase):
         store = store or self.destination
         tables = [row[0] for row in store.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")]
         for name in tables:
-            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM ' + name).fetchone()[0], 0, name)
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM ' + name).fetchone()[0], 1 if name == 'production_current_policy' else 0, name)
 
     def assert_no_stage(self, directory):
         self.assertEqual(list(directory.glob('.bundle-*')), [])
@@ -136,40 +136,25 @@ class BundleIntegrityTest(unittest.TestCase):
         self.assertEqual(list(self.destination.db.execute('SELECT id,body FROM material_content ORDER BY id')),
                          list(self.source.db.execute('SELECT id,body FROM material_content ORDER BY id')))
 
-    def test_all_supported_schemas_require_their_core_files_and_still_restore(self):
-        for schema in (1, 2, 3, 4, 5, 6):
-            manifest = export(self.source, self.bundle)
-            manifest['schema_version'] = schema
-            if schema<6:manifest['files'].pop('material-content.json',None)
-            if schema == 1:
-                for name in ('objects.json', 'configurations.json'):
-                    del manifest['files'][name]
-            elif schema < 4:
-                objects = json.loads((self.bundle / 'objects.json').read_text())
-                for name in list(objects):
-                    if name.startswith('material_'):
-                        del objects[name]
-                data = json.dumps(objects).encode()
-                (self.bundle / 'objects.json').write_bytes(data)
-                manifest['files']['objects.json'] = digest(data)
-            required = ('materials.json', 'comments.json') if schema == 1 else ('materials.json', 'comments.json', 'objects.json', 'configurations.json')
-            for missing in required:
-                with self.subTest(schema=schema, missing=missing):
-                    incomplete = {**manifest, 'files': {k: v for k, v in manifest['files'].items() if k != missing}}
-                    (self.bundle / 'manifest.json').write_text(json.dumps(incomplete))
-                    with self.assertRaisesRegex(ValueError, 'manifest|missing'):
-                        restore(self.destination, self.bundle)
-                    self.assert_empty()
-            with self.subTest(schema=schema, complete=True):
-                (self.bundle / 'manifest.json').write_text(json.dumps(manifest))
-                recovered = Store(self.root / str(schema) / '.runtime/review.sqlite3')
-                try:
-                    restore(recovered, self.bundle)
-                    self.assertEqual(recovered.sources(), self.source.sources())
-                    self.assertEqual(recovered.comments(), self.source.comments())
-                    self.assertEqual(recovered.events(), self.source.events())
-                finally:
-                    recovered.close()
+    def test_current_schema_requires_every_core_file_and_rejects_retired_schemas(self):
+        manifest = export(self.source, self.bundle)
+        for schema in range(1, 14):
+            with self.subTest(schema=schema):
+                (self.bundle/'manifest.json').write_text(json.dumps({**manifest, 'schema_version':schema}))
+                with self.assertRaisesRegex(ValueError, 'manifest'):
+                    restore(self.destination, self.bundle)
+                self.assert_empty()
+        for missing in ('materials.json','comments.json','objects.json','configurations.json','material-content.json'):
+            with self.subTest(missing=missing):
+                (self.bundle/'manifest.json').write_text(json.dumps({**manifest, 'files':{k:v for k,v in manifest['files'].items() if k!=missing}}))
+                with self.assertRaisesRegex(ValueError, 'manifest'):
+                    restore(self.destination, self.bundle)
+                self.assert_empty()
+        (self.bundle/'manifest.json').write_text(json.dumps(manifest))
+        restore(self.destination, self.bundle)
+        self.assertEqual(self.destination.sources(), self.source.sources())
+        self.assertEqual(self.destination.comments(), self.source.comments())
+        self.assertEqual(self.destination.events(), self.source.events())
 
     def test_export_staging_failure_does_not_replace_previous_files(self):
         export(self.source, self.bundle)
@@ -257,7 +242,7 @@ class BundleIntegrityTest(unittest.TestCase):
         replace = Path.replace
 
         def fail_layout(path, destination):
-            if path.parent.name == 'new' and path.name == old_layout.name:
+            if path.parent.parent.name == 'new' and path.name == old_layout.name:
                 raise OSError('injected layout replacement failure')
             return replace(path, destination)
 

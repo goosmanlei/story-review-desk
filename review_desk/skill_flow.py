@@ -15,6 +15,17 @@ def load(root, catalog):
         raise ValueError('基础流程格式无效')
     bindings = {r['payload']['work_type']: r for r in catalog['binding']}
     skills = {r['object_id']: r for r in catalog['skill']}
+    def resolve(selectors):
+        found = []
+        for selector in selectors:
+            binding = bindings.get(selector['work_type'])
+            for rule in binding['payload']['rules'] if binding else []:
+                if 'when' in selector and rule['when'] != selector['when']:
+                    continue
+                skill = skills.get(rule['object_id'])
+                if skill and not any(m['object_id'] == skill['object_id'] for m in found):
+                    found.append({'object_id': skill['object_id'], 'title': selector.get('title') or skill['payload']['title']})
+        return found
     ids = set()
     for stage in [*specification['stages'], *specification.get('branches', [])]:
         if not isinstance(stage.get('id'), str) or not stage['id'] or not isinstance(stage.get('title'), str) or not stage['title'] or stage['id'] in ids:
@@ -22,15 +33,11 @@ def load(root, catalog):
         ids.add(stage['id'])
         if 'output' in stage and (not isinstance(stage['output'], str) or not stage['output'].strip()):
             raise ValueError('基础流程产出说明无效')
-        stage['methods'] = []
-        for selector in stage.get('capabilities', []):
-            binding = bindings.get(selector['work_type'])
-            for rule in binding['payload']['rules'] if binding else []:
-                if 'when' in selector and rule['when'] != selector['when']:
-                    continue
-                skill = skills.get(rule['object_id'])
-                if skill and not any(m['object_id'] == skill['object_id'] for m in stage['methods']):
-                    stage['methods'].append({'object_id': skill['object_id'], 'title': selector.get('title') or skill['payload']['title']})
+        stage['methods'] = resolve(stage.get('capabilities', []))
+        if 'repeat' in stage:
+            if not isinstance(stage['repeat'].get('label'), str) or not stage['repeat']['label'].strip():
+                raise ValueError('多轮协作缺少说明')
+            stage['repeat']['methods'] = resolve(stage['repeat'].get('capabilities', []))
     stages = {n['id'] for n in specification['stages']}
     for edge in specification.get('returns', []):
         if edge.get('from') not in stages or edge.get('to') not in stages or not edge.get('label'):

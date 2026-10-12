@@ -23,7 +23,7 @@ def validate_workflow(diagram, tab_ids=None):
         require(all(len(values) == 1 and text(values[0]) for values in query.values()))
         workspace = query.get('workspace', [''])[0]
         allowed = {
-            'story.sources': {'source'}, 'story.outline': set(),
+            'story.sources': {'source'}, 'story.novel': {'source','source_chapter'}, 'story.outline': set(),
             'story.script': {'script', 'episode', 'scene'},
             'settings.workspace': {'production_tab'},
             'production.approach': {'tab'},

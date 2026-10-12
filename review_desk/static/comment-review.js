@@ -5,7 +5,7 @@ function commentReviewTarget(){
   if(typeof isMethodsReading==='function'&&isMethodsReading())return {object_id:methodView.document.record.object_id,revision_id:methodView.document.record.revision_id,file:methodView.document.file};
   if(state.unifiedCardRoot&&state.productionSelected)return productionRef(state.productionSelected);
   return isStructure()?{object_id:'story-structure',revision_id:state.structureRevision}:
-    state.workspace==='story.sources'&&state.current?{object_id:state.current.id,revision_id:state.current.target_revision_id}:
+    ['story.sources','story.novel'].includes(state.workspace)&&state.current?{object_id:state.current.id,revision_id:state.current.target_revision_id}:
     typeof isProduction==='function'&&isProduction()&&state.productionSelected?productionRef(state.productionSelected):null;
 }
 function commentReviewURL(target,content=false){return '/api/comment-review'+(content?'/content':'')+'?'+new URLSearchParams(target)}

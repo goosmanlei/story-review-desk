@@ -285,6 +285,8 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
         require(binding_ref.get('object_id') == 'method.binding.' + work_type, '冻结绑定属于其他工作类型')
     binding = read(store, 'method.binding.' + identifier(work_type), (binding_ref or {}).get('revision_id'))
     matches = [rule for rule in binding['payload']['rules'] if all(conditions.get(k) == v for k, v in rule['when'].items())]
+    if not matches and work_type == 'media-plan' and conditions.get('media_type') == 'audio' and any('audio_type' in rule['when'] for rule in binding['payload']['rules']):
+        raise ValueError('声音方案须指定 audio_type：voice（音色）或 song（演唱）')
     require(bool(matches), '没有适用方法；请在系统配置中补全此环节的适用条件')
     rank = max(len(rule['when']) for rule in matches)
     matches = [rule for rule in matches if len(rule['when']) == rank]

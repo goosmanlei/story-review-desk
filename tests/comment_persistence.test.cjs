@@ -2,21 +2,10 @@ const {test}=require('node:test'),assert=require('node:assert/strict');
 const {fixture}=require('./comment-persistence-fixture.cjs');
 const payloads=f=>f.requests.map(r=>JSON.parse(r.body));
 
-test('same immutable plan has isolated draft and discussion choices in each material round',()=>{
-  const f=fixture(),old=f.material(1),data=f.context.state.materialReview;
-  f.storage.set(old,'old draft');f.storage.set(old+':discussion','true');
-  f.context.switchMaterialRound(data,'need',2);f.context.state.anchor={type:'global'};
-  const current=f.context.key();assert.notEqual(current,old);assert.equal(f.storage.get(current),undefined);
-  f.storage.set(current,'new draft');f.context.switchMaterialRound(data,'need',1);
-  assert.equal(f.context.key(),old);assert.equal(f.storage.get(old),'old draft');
-  assert.equal(f.storage.get(old+':discussion'),'true');assert.equal(f.storage.get(current+':discussion'),undefined);
-  f.context.switchMaterialRound(data,'need',2);f.context.abandonDraft('cancel');
-  assert.equal(f.storage.get(current),undefined);assert.equal(f.storage.get(old),'old draft');
-});
 
 test('one original shared by two material cards uses the clicked card identity',()=>{
   const f=fixture();f.material();const data=f.context.state.materialReview;
-  data.material_versions.other=data.material_versions.need;data.selectedMaterialRounds.other=1;
+  data.material_cards.other=data.material_cards.need;data.selectedMaterialRounds.other=1;
   f.context.focusMaterialCommentCard('need',1);f.context.state.anchor={type:'global'};const first=f.context.key();
   f.context.focusMaterialCommentCard('other',1);assert.equal(f.context.state.anchor,null);
   f.context.state.anchor={type:'global'};assert.notEqual(f.context.key(),first);
@@ -71,7 +60,7 @@ test('changed anchor and material create distinct operations; comments add no re
 
 test('old round reload retains the unconfirmed feedback intent after the server advanced',async()=>{
   const f=fixture({fetch:async()=>{throw Error('lost response')}});const key=f.material(1),data=f.context.state.materialReview;
-  data.material_versions.need=data.material_versions.need.filter(r=>r.number===1);f.context.intent=f.intent;f.intent.checked=true;await f.context.saveComment();
+  data.material_cards.need=data.material_cards.need.filter(r=>r.number===1);f.context.intent=f.intent;f.intent.checked=true;await f.context.saveComment();
   // This pending payload was written by an archived pre-plan client.
   const archived=JSON.parse(f.storage.get(key+':submission'));archived.payload.material_revision={material_id:'need',expected_round:1};f.storage.set(key+':submission',JSON.stringify(archived));f.requests[0].body=JSON.stringify({...JSON.parse(f.requests[0].body),material_revision:archived.payload.material_revision});
   const next=fixture({storage:f.storage});next.material(1);assert.equal(next.context.materialRevisionIntent(),null);

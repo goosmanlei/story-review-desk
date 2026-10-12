@@ -16,7 +16,7 @@ test('visible block number and its existing list share scope after edits, close/
 });
 test('reference scopes use exactly the quoted revision even when an outer round has carried versions',()=>{
  const {ctx,host}=fixture();ctx.isProduction=()=>true;ctx.isEntityReview=()=>false;ctx.productionTextBlocks=()=>[{id:'body'}];
- ctx.state.productionSelected={id:'r'};ctx.state.materialReview={selectedMaterialRounds:{need:1}};ctx.materialVersions=()=>({need:[{number:1,members:[{id:'r',object_id:'asset'},{id:'other',object_id:'asset'}]}]});
+ ctx.state.productionSelected={id:'r'};ctx.state.materialReview={selectedMaterialRounds:{need:1}};ctx.materialCards=()=>({need:[{number:1,members:[{id:'r',object_id:'asset'},{id:'other',object_id:'asset'}]}]});
  host.closest=s=>s==='.material-reference-dialog'?{}:null;const scope=ctx.reviewBlockScope(host,'text');assert.deepEqual(Array.from(scope.revisions),['r']);assert.equal(scope.materialId,null);
 });
 test('nested reference sessions return the panel and outer pending draft without borrowing material context',()=>{

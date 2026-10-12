@@ -27,7 +27,7 @@ for(const status of [400,409])test(`explicit HTTP ${status} preserves the actual
 });
 test('refreshing the old material round retains rejected status, original UUID and exact scope after a new plan appears',async()=>{
  const f=fixture({fetch:async()=>rejection()}),key=f.material(2),root=editor(f);root.querySelector('#comment-editor-text').value='原轮唯一意见';await f.context.saveComment();
- const next=fixture({storage:f.storage,fetch:async()=>rejection()}),same=next.material(2),data=next.context.state.materialReview;data.material_versions.need.unshift({...data.material_versions.need[0],number:3});const after=editor(next);
+ const next=fixture({storage:f.storage,fetch:async()=>rejection()}),same=next.material(2),data=next.context.state.materialReview;data.material_cards.need.unshift({...data.material_cards.need[0],number:3});const after=editor(next);
  assert.equal(same,key);assert.equal(next.context.materialRevisionIntent(),null);assert.equal(next.context.commentRevisionIntent(),null);assert.match(notice(after),/提交被拒绝/);assert.equal(after.querySelector('#material-revision-intent'),null);
  await next.context.saveComment();assert.deepEqual(submit(next)[0],submit(f)[0]);assert.equal(data.selectedMaterialRounds.need,2);assert.match(notice(after),/提交被拒绝/);assert.doesNotMatch(notice(after),/原样重试可确认保存/);
 });

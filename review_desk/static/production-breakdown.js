@@ -176,7 +176,7 @@ async function refreshShotReference(context,slot,result){
   // A draft stays on its original immutable text, even when only inputs changed.
   const draft=state.anchor?Object.fromEntries(['productionSelected','productionDetail','anchor','editing','selected','reviewCommentScope','productionDraftScope'].map(key=>[key,state[key]])):null;
   state.breakdownVideoSelections[context.need.id]={number:result.number};
-  breakdownRoute({shot_material_id:context.need.object_id,shot_plan:result.number,shot_baseline:result.baseline_id||null,shot_candidate:null});
+  breakdownRoute({shot_material_id:context.need.object_id,shot_plan:null,shot_baseline:null,shot_candidate:null});
   await loadProductionBreakdown({refresh:true}).catch(e=>toast(e.message));
   const shot=document.querySelector(`[data-shot-id="${CSS.escape(context.need.payload.scope.object_id)}"]`);
   const target=slot.routeKey?shot?.querySelector(`[data-route-key="${CSS.escape(slot.routeKey)}"]`):shot?.querySelector(`[data-input-index="${slot.index}"] button`);target?.focus({preventScroll:true});
@@ -184,7 +184,7 @@ async function refreshShotReference(context,slot,result){
 }
 function openShotReference(item,context,trigger){
   const slot=item.slot;if(!slot?.material_id||!slot.record)return openMaterialReference(item.ref,trigger);
-  const params=new URLSearchParams({material_id:slot.material_id,...(!slot.current_content&&slot.number?{material_version:slot.number}:{}),...(slot.baseline_id?{material_baseline:slot.baseline_id}:{}),...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
+  const params=new URLSearchParams({material_id:slot.material_id,...(slot.candidate?{material_target:slot.candidate.revision_id}:{})});
   const ref=slot.candidate||productionRef(slot.record);
   const parentDialog=typeof reviewDialogStack==='undefined'?null:reviewDialogStack.at(-1)||null;
   const onSaved=result=>{
@@ -250,7 +250,7 @@ function renderShotReferenceChoice(box,model,item,player){
   const savedChoice=()=>context.slot.number===model.round?.number&&(context.slot.material_id===model.material_id||context.slot.canonical_material_id===model.material_id)&&(context.slot.candidate?.revision_id||null)===(item?.record.id||null)&&(!item||context.slot.value.component_id===item.component.id);
   const savedBounds=()=>savedChoice()?referenceSelectionBounds(context.slot,item):{};
   const selectionFields=renderReferenceSelectionFields(actions,item,{...context.slot,value:savedChoice()?context.slot.value:{}},()=>{player?.reviewPause();context.drafts[identity]=selectionFields.snapshot();context.error=null;refresh()},context.drafts[identity]);
-  const actionLabel=item?'选为方案参考':'选定此版本，候选待选';
+  const actionLabel=item?'选为方案参考':'选定此素材，候选待选';
   const unchanged=()=>savedChoice()&&JSON.stringify(selectionFields())===JSON.stringify(referenceSelectionBounds(context.slot,item));
   const audition=player?productionButton(actions,'试听选段',()=>{
     try{const bounds=selectionFields();if(!bounds.range||!player.reviewAudition(bounds.range,unchanged()?'已保存片段':'未保存范围'))throw Error('起点须早于终点，且在此原件范围内');context.error=null}
@@ -273,9 +273,9 @@ function renderShotReferenceChoice(box,model,item,player){
   const discard=productionButton(actions,'放弃范围修改',()=>{player?.reviewPause();delete context.drafts[identity];context.error=null;selectionFields.restore(savedBounds());refresh()});
   const message=nodeText('small','production-meta','',actions);message.setAttribute('role','status');
   const refresh=()=>{if(!actions.isConnected)return;let same=false;try{same=unchanged()}catch{}
-    purpose.textContent=`为此素材方案版本 ${context.number} 的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 已提交版本改选将建立新制作版本。':'');
+    purpose.textContent=`为当前方案的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 保存修改不改变已提交的候选。':'');
     button.disabled=context.busy||same||!model.round||!!(item&&(item.record.payload.placeholder||item.component?.role!=='original'));
-    button.textContent=context.busy?'正在保存…':same?'已保存 · 方案版本 '+context.number:context.slot.number?'保存修改 · 未保存':actionLabel;
+    button.textContent=context.busy?'正在保存…':same?'已保存':context.slot.number?'保存修改 · 未保存':actionLabel;
     message.textContent=context.error||(item&&item.component?.role!=='original'?'试听／预览组成仅供比较；请选择原件后保存。':'');message.className=context.error?'production-issue':'production-meta';
     discard.hidden=!context.drafts[identity]||same;discard.disabled=context.busy;
     if(audition){let bounds;try{bounds=selectionFields()}catch{}
@@ -322,9 +322,9 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
   pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);
 }
 function breakdownPromptSelection(need,context){
-  const detail=context.video_details?.[need.object_id],rounds=detail?.material_versions?.[need.object_id]||[];
+  const detail=context.video_details?.[need.object_id],rounds=detail?.material_cards?.[need.object_id]||[];
   state.breakdownVideoSelections||={};const params=new URL(location.href).searchParams,exact=params.get('shot_material_id')===need.object_id;
-  const saved=exact&&params.has('shot_plan')?{number:Number(params.get('shot_plan')),candidate:params.get('shot_candidate')}:state.breakdownVideoSelections[need.id]||{};
+  const saved=exact&&params.has('shot_candidate')?{candidate:params.get('shot_candidate')}:state.breakdownVideoSelections[need.id]||{};
   if(exact&&params.has('shot_plan')){
     const checked=new URLSearchParams({material_id:need.object_id,material_version:params.get('shot_plan'),...(params.has('shot_baseline')?{material_baseline:params.get('shot_baseline')}:{})});
     validateUnifiedReference({params:checked,detail});saved.number=Number(checked.get('material_version'));
@@ -526,7 +526,7 @@ function renderBreakdownShot(parent,item,common={fields:{},sounds:[]},references
     const group=data.material_groups.find(g=>g.material_ids.includes(mid));
     if(!group)throw Error('准确镜头素材不属于此镜头；未替换为首项');
     data.shotTab=group.key;data.unifiedMaterialId=mid;data.shotSelections||={};data.shotSelections[group.key]=mid;
-    const candidate=params.get('shot_candidate'),rows=(data.material_versions?.[mid]||[]).flatMap(r=>r.results||[]);
+    const candidate=params.get('shot_candidate'),rows=(data.material_cards?.[mid]||[]).flatMap(r=>r.results||[]);
     if(candidate&&!rows.some(r=>r.id===candidate))throw Error('准确镜头候选不存在；未替换为最新结果');
     data.selectedCandidates||={};data.selectedCandidates[mid]=candidate||'current';
     if(candidate&&params.has('shot_component')){
@@ -595,8 +595,7 @@ function renderShotProductPlan(parent,need,context){
   const {rounds,round,model,referenceContext,historicalRecipe}=selected;
   const source=model.need||round?.definition_records?.call;
   const controls=el('div','av-plan-controls');parent.append(controls);
-  if(rounds.length>1)materialRoundControl(controls,need.object_id,rounds,round||{number:null},number=>{rememberProductionDraft();state.breakdownVideoSelections[need.id]={number};breakdownRoute({shot_material_id:need.object_id,shot_plan:number,shot_candidate:null,shot_baseline:rounds.find(r=>r.number===number)?.baseline_id||null});parent.replaceChildren();renderShotProductPlan(parent,need,context);restoreBreakdownPromptDraft(parent);paintReviewCommentCounts()});
-  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,...(round&&!round.current_content?{material_version:round.number,...(round.baseline_id?{material_baseline:round.baseline_id}:{})}:{})})},inspect));inspect.className='review-reference-button';inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
+  const inspect=productionButton(controls,'查看素材',()=>openUnifiedMaterial({...productionRef(source||need),params:new URLSearchParams({material_id:need.object_id,})},inspect));inspect.className='review-reference-button';inspect.dataset.reviewDialogTrigger='';if(source?.kind==='REQUIREMENT')renderReviewHelp(controls,source);
   if(!source){nodeText('p','production-meta','此版本未保留准确生成方案',parent);return}
   const plan=source.kind==='CALL'?source.payload:source.payload.generation;
   if(!plan){nodeText('p','production-meta',need.payload.media_type==='project'?'此产物为已有工程；尚无模型生成方案，可打开素材核对工程与交付要求。':'此产物尚无生成方案',parent);return}
@@ -666,7 +665,7 @@ async function openBreakdownMaterial(need,reader,selectionEpoch=null,restore=fal
   if(!restore)breakdownRoute({material_id:null,material_version:null,material_round:null,material_target:null,production_entity:null,entity_state:null});
   try{const result=await readUnifiedCard(need.object_id,need.id||null,params);if(read!==productionReadEpoch||workspace!==state.workspace||selectionEpoch!==null&&selectionEpoch!==breakdownSelectionEpoch)return;
     result.allowDraftFocus=!restore;result.defaultSelection=!restore;state.unifiedCardRoot=null;activateUnifiedCard(result);renderProductionReader();renderComments();
-    const mid=state.entityReview?.unifiedMaterialId||Object.keys(result.detail.material_versions||{})[0]||result.detail.record.object_id;
+    const mid=state.entityReview?.unifiedMaterialId||Object.keys(result.detail.material_cards||{})[0]||result.detail.record.object_id;
     for(const button of document.querySelectorAll('.material-index [data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===mid));
   }catch(error){if(read===productionReadEpoch){reader.replaceChildren();nodeText('p','production-issue',error.message,reader)}}
 }
@@ -743,7 +742,7 @@ async function openBreakdownSceneNotes(row,comment){
 
 async function refreshMaterialPlan(result){
   const epoch=productionLoadEpoch,workspace=state.workspace,target=state.productionSelected?.id;
-  const params=new URLSearchParams({material_id:result.requirement_id,...(result.number?{material_version:result.number}:{}),...(result.baseline_id?{material_baseline:result.baseline_id}:{})});
+  const params=new URLSearchParams({material_id:result.requirement_id});
   const value=await readUnifiedCard(result.requirement_id,result.revision_id,params);
   if(epoch!==productionLoadEpoch||workspace!==state.workspace||target!==state.productionSelected?.id)return;
   activateUnifiedCard(value);renderProductionReader();renderComments();

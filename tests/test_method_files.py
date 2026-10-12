@@ -9,6 +9,36 @@ from test_methods import seed
 
 
 class FileHistoryTest(unittest.TestCase):
+    def test_old_split_reference_uses_only_an_identical_source_outline(self):
+        source=self.root/'handbook.md'
+        source.write_text('# 手册\n<!-- section:use -->\n## 开始\n<!-- section:checks -->\n## 检查\n')
+        sections={name:{'path':'handbook.md','section':name} for name in ('use','checks')}
+        old=methods.sync_source(self.store,self.root,{'name':'book','title':'手册','expected_version':0,'sections':sections})
+        methods.sync_source(self.store,self.root,{'name':'book','title':'手册','expected_version':1,
+                            'sections':{**sections,'handbook':{'path':'handbook.md'}}})
+        source.write_text('# 手册\n<!-- section:checks -->\n## 检查\n<!-- section:use -->\n## 开始\n')
+        methods.sync_source(self.store,self.root,{'name':'book','title':'手册','expected_version':2,
+                            'sections':{**sections,'handbook':{'path':'handbook.md'}}})
+        directory=files.directory(self.store,old['object_id'],old['revision_id'])
+        selected=[row for row in directory['files'] if row['selected']]
+        self.assertEqual([row['path'] for row in selected],['references/use.md','references/checks.md'])
+        self.assertEqual([row['reading_label'] for row in selected],['01 · 开始','02 · 检查'])
+        self.assertEqual(files.document(self.store,old['object_id'],'references/use.md',revision_id=old['revision_id'])['content'],'## 开始\n')
+
+    def test_reading_outline_numbers_follow_document_order_not_alphabetical_paths(self):
+        ordered, labels = files.reading_order({'payload': {'files': {
+            'book/checks.md': '# 检查', 'book/prompt.md': '# 提示词',
+            'book/handbook.md': '# 视频手册\n<!-- section:prompt -->\n<!-- section:checks -->',
+            'book/extra.md': '# 更多资料'}}})
+        self.assertEqual(ordered, ['book/handbook.md', 'book/prompt.md', 'book/checks.md', 'book/extra.md'])
+        self.assertEqual(labels['book/prompt.md']['reading_label'], '01 · 提示词')
+        self.assertEqual(labels['book/checks.md']['reading_label'], '02 · 检查')
+        order, titles = files.reading_order({'payload': {'files': {
+            'README.md': '# 影视知识\n[镜头](01-shots.md)\n[剪辑](12-edit.md)',
+            '12-edit.md': '# 12 剪辑', '01-shots.md': '# 01 镜头'}}})
+        self.assertEqual(order, ['README.md', '01-shots.md', '12-edit.md'])
+        self.assertEqual(titles['12-edit.md']['reading_label'], '12 · 剪辑')
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)

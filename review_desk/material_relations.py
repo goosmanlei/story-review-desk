@@ -190,7 +190,7 @@ def for_material(store, material_id, revision_id=None):
             row['downstream_version'] = next((s['number'] for s in scopes if s['material_id'] == target['object_id']), None)
             candidates = []
             for scope in scopes:
-                for raw in store.db.execute("SELECT r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.material_id=? AND m.number=? AND m.role='result' ORDER BY r.created_at DESC", (scope['material_id'], scope['number'])):
+                for raw in store.db.execute("SELECT r.*,o.kind,o.current_revision FROM material_memberships m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.material_id=? AND m.number=? AND m.role='result' ORDER BY r.created_at DESC", (scope['material_id'], scope['number'])):
                     asset = p.record_view(raw)
                     if not asset['payload'].get('placeholder') and any(c['role'] == 'original' for c in asset['payload'].get('components', [])):
                         candidates.append(asset)

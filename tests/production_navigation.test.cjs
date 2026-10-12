@@ -49,10 +49,10 @@ test('shared entity card retains an exact older revision even without legacy his
 
 test('changing entity material focus replaces the prior candidate route before refresh',()=>{
   const ctx=setup([]);ctx.isEntityReview=()=>true;
-  ctx.state.entityReview={material_versions:{wet:[{number:1,current_content:true}]}};
+  ctx.state.entityReview={material_cards:{wet:[{number:1,current_content:true}]}};
   ctx.location.href='http://localhost/?material_id=woodcutter&material_target=woodcutter-candidate';
   ctx.materialCommentContext=()=>({material_id:'wet',number:1});
-  ctx.writeMaterialVersionRoute=(params,id)=>params.set('material_id',id);
+  ctx.writeMaterialRoute=(params,id)=>params.set('material_id',id);
   const wet={...row('wet','REQUIREMENT'),current_content:true};
   ctx.focusProductionReview({record:wet},false);
   assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),'current');
@@ -67,9 +67,9 @@ for(const entityCard of [false,true])test(`call comment focus retains its parent
   const candidate=row('original','ASSET'),call=row('generation','CALL'),ctx=setup([]);
   ctx.isEntityReview=()=>entityCard;ctx.isMaterialReview=()=>!entityCard;
   ctx.materialCommentContext=()=>({material_id:'material',number:1,candidateTarget:candidate.id});
-  ctx.state.entityReview={material_versions:{material:[{number:1,current_content:true,results:[candidate]}]}};
+  ctx.state.entityReview={material_cards:{material:[{number:1,current_content:true,results:[candidate]}]}};
   ctx.state.materialReview={record:row('material','REQUIREMENT')};
-  ctx.writeMaterialVersionRoute=(params,id)=>params.set('material_id',id);
+  ctx.writeMaterialRoute=(params,id)=>params.set('material_id',id);
   ctx.focusProductionReview({record:call},false);
   assert.equal(ctx.state.productionSelected.id,call.id);
   assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),candidate.id);

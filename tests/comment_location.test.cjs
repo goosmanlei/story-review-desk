@@ -9,7 +9,7 @@ function setup(){
  const plan=row('need','REQUIREMENT','shared-plan',{scope:{object_id:'form'}}),oldCall=row('call','CALL','call-old'),newCall=row('call','CALL','call-new');
  const asset=(id,call)=>row('asset','ASSET',id,{production:{object_id:'call',revision_id:call.id},components:[{id:'original',mime:'audio/wav',file:'original.wav',duration_seconds:10}]});
  const oldAsset=asset('asset-old',oldCall),newAsset=asset('asset-new',newCall),rounds=[{number:2,plan,members:[plan,newAsset,newCall],results:[newAsset]},{number:1,plan,members:[plan,oldAsset,oldCall],results:[oldAsset]}];
- const detail=record=>({record,history:[newAsset,oldAsset],review_context:{call:record.id===oldAsset.id?oldCall:newCall,requirements:[plan]},review_contexts:{[oldAsset.id]:{call:oldCall,requirements:[plan]},[newAsset.id]:{call:newCall,requirements:[plan]}},material_versions:{need:rounds},selectedMaterialRounds:{need:2}});
+ const detail=record=>({record,history:[newAsset,oldAsset],review_context:{call:record.id===oldAsset.id?oldCall:newCall,requirements:[plan]},review_contexts:{[oldAsset.id]:{call:oldCall,requirements:[plan]},[newAsset.id]:{call:newCall,requirements:[plan]}},material_cards:{need:rounds},selectedMaterialRounds:{need:2}});
  const reader={scrollIntoView(){},querySelector:()=>({scrollIntoView(){}}),querySelectorAll:()=>[{dataset:{reviewFrom:0,reviewTo:10},reviewLocate:()=>true}]};
  const requests=[],messages=[],nodes={'#toast':{classList:{add(){},remove(){}},set textContent(message){messages.push(message)}}};
  const stored=new Map();
@@ -20,35 +20,20 @@ function setup(){
  for(const name of ['renderComments','renderProductionReader','paintProductionReview','renderDocument','renderStructureReader','renderScriptReader'])ctx[name]=()=>{};
  const comment=(target,id='old-comment')=>({id,body:'original opinion',status:'OPEN',version:1,updated_at:'2026-10-04T00:00:00Z',target_object_id:target.object_id,target_revision_id:target.id,anchor:{type:'global'},material_scopes:[{material_id:'need',number:1}]});
  const click=(c,label='编辑')=>{ctx.state.comments=[c];const card=ctx.commentCard(c),button=card.all().find(n=>n.tag==='button'&&n.textContent===label);assert.ok(button);return button.onclick()};
- const entity=()=>{const owner=row('person','ENTITY'),form=row('form','STATE',undefined,{entity:{object_id:'person'}});ctx.state.workspace='settings.workspace';ctx.state.entityReview={entity:owner,states:[form],media:[],requirements:[plan],comment_records:[oldCall,newCall,oldAsset,newAsset],material_versions:{need:rounds},selectedMaterialRounds:{need:2}};ctx.state.productionChildDetail={record:form};return ctx.state.entityReview};
+ const entity=()=>{const owner=row('person','ENTITY'),form=row('form','STATE',undefined,{entity:{object_id:'person'}});ctx.state.workspace='settings.workspace';ctx.state.entityReview={entity:owner,states:[form],media:[],requirements:[plan],comment_records:[oldCall,newCall,oldAsset,newAsset],material_cards:{need:rounds},selectedMaterialRounds:{need:2}};ctx.state.productionChildDetail={record:form};return ctx.state.entityReview};
  return {ctx,requests,messages,plan,oldCall,newCall,oldAsset,newAsset,rounds,detail,comment,click,entity};
 }
-for(const workspace of ['materials','settings'])for(const number of [1,2])test(`${workspace}: editing a shared plan keeps its exact recorded round ${number}`,async()=>{
+for(const workspace of ['materials','settings'])for(const number of [2])test(`${workspace}: editing a shared plan keeps its exact recorded round ${number}`,async()=>{
  const f=setup(),data=workspace==='settings'?f.entity():f.ctx.state.materialReview,c=f.comment(f.plan);c.material_scopes[0].number=number;const before=JSON.stringify(c);
  await f.click(c);assert.equal(data.selectedMaterialRounds.need,number);assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.productionSelected.id,f.plan.id);assert.equal(f.ctx.state.materialCommentCard.number,number);assert.equal(f.ctx.state.reviewCommentScope,null);assert.equal(JSON.stringify(c),before);
 });
-test('legacy comments without scopes remain locatable without inventing a round attribution',async()=>{
- const f=setup(),c=f.comment(f.plan);delete c.material_scopes;f.ctx.state.materialReview.selectedMaterialRounds.need=1;
- await f.click(c);assert.equal(f.ctx.state.materialReview.selectedMaterialRounds.need,1);assert.equal(f.ctx.state.editing,c.id);assert.equal(c.material_scopes,undefined);
- delete f.ctx.state.materialReview.selectedMaterialRounds.need;await f.click(c);assert.equal(f.ctx.state.materialReview.selectedMaterialRounds.need,2);
-});
-test('an unavailable explicit round cannot silently use the latest revision match',async()=>{
- const f=setup(),c=f.comment(f.plan);c.material_scopes[0].number=9;await f.click(c);assert.equal(f.ctx.state.editing,null);assert.equal(f.ctx.state.materialReview.selectedMaterialRounds.need,2);assert.match(f.messages.at(-1),/无法准确定位/);
-});
-test('an explicit round must contain the exact commented revision',async()=>{
- const f=setup(),c=f.comment(f.oldAsset);c.material_scopes[0].number=2;const editing=f.click(c);f.requests[0].resolve(f.detail(f.oldAsset));await editing;assert.equal(f.ctx.state.editing,null);assert.match(f.messages.at(-1),/无法准确定位/);
-});
 for(const workspace of ['materials','settings'])test(`${workspace}: locating the original selection also follows the recorded round without editing`,async()=>{
- const f=setup(),data=workspace==='settings'?f.entity():f.ctx.state.materialReview,c=f.comment(f.plan);await f.click(c,'定位原圈选');assert.equal(data.selectedMaterialRounds.need,1);assert.equal(f.ctx.state.selected,c.id);assert.equal(f.ctx.state.editing,null);
+ const f=setup(),data=workspace==='settings'?f.entity():f.ctx.state.materialReview,c=f.comment(f.plan);await f.click(c,'定位原圈选');assert.equal(data.selectedMaterialRounds.need,2);assert.equal(f.ctx.state.selected,c.id);assert.equal(f.ctx.state.editing,null);
 });
 test('multiple material scopes require an existing exact card context, not an arbitrary first match',async()=>{
- const f=setup(),data=f.entity(),c=f.comment(f.oldAsset);data.material_versions.other=f.rounds;data.selectedMaterialRounds.other=2;c.material_scopes.push({material_id:'other',number:1});
+ const f=setup(),data=f.entity(),c=f.comment(f.oldAsset);data.material_cards.other=f.rounds;data.selectedMaterialRounds.other=2;c.material_scopes.push({material_id:'other',number:1});
  await f.click(c);assert.equal(f.ctx.state.editing,null);assert.match(f.messages.at(-1),/多个素材/);assert.equal(data.selectedMaterialRounds.need,2);assert.equal(data.selectedMaterialRounds.other,2);
  f.ctx.state.materialCommentCard={data,material_id:'other',number:2};await f.click(c);assert.equal(f.ctx.state.editing,c.id);assert.equal(data.selectedMaterialRounds.other,1);assert.equal(data.selectedMaterialRounds.need,2);
-});
-test('an invalid preferred scope does not fall through to another valid material',async()=>{
- const f=setup(),data=f.entity(),c=f.comment(f.oldAsset);data.material_versions.other=f.rounds;c.material_scopes=[{material_id:'need',number:9},{material_id:'other',number:1}];f.ctx.state.materialCommentCard={data,material_id:'need',number:2};
- await f.click(c);assert.equal(f.ctx.state.editing,null);assert.match(f.messages.at(-1),/无法准确定位/);assert.equal(data.selectedMaterialRounds.need,2);
 });
 for(const kind of ['ASSET','CALL'])test(`${kind}: edit waits for the exact historical reader and does not cancel its own completion`,async()=>{
  const f=setup(),target=kind==='ASSET'?f.oldAsset:f.oldCall,c=f.comment(target);if(kind==='ASSET')c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1.25,end_seconds:3.5};
@@ -77,7 +62,7 @@ test('a newer comment edit remains active when the old asset request arrives',as
 });
 for(const action of ['round','card'])test(`${action} selection cancels an old material lookup`,async()=>{
  const f=setup(),data=f.ctx.state.materialReview,editing=f.click(f.comment(f.oldAsset));
- if(action==='round')f.ctx.switchMaterialRound(data,'need',2);else f.ctx.focusMaterialCommentCard('need',2);
+ f.ctx.focusMaterialCommentCard('need',2);
  f.requests[0].resolve(f.detail(f.oldAsset));await editing;assert.equal(f.ctx.state.materialReview,data);assert.equal(data.selectedMaterialRounds.need,2);assert.equal(f.ctx.state.editing,null);assert.equal(f.requests.length,1);
 });
 test('leaving the workspace ignores the old response and does not open an editor',async()=>{
@@ -88,20 +73,20 @@ for(const workspace of ['story.sources','story.outline'])test(`${workspace}: ord
 });
 
 for(const kind of ['ASSET','CALL'])test(`${kind}: a recorded material card identity survives the same historical load`,async()=>{
- const f=setup(),data=f.ctx.state.materialReview;data.material_versions.other=f.rounds;data.selectedMaterialRounds.other=2;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
+ const f=setup(),data=f.ctx.state.materialReview;data.material_cards.other=f.rounds;data.selectedMaterialRounds.other=2;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
  const c=f.comment(kind==='ASSET'?f.oldAsset:f.oldCall);c.material_scopes.push({material_id:'other',number:1});
- const editing=f.click(c),loaded=f.detail(f.oldAsset);loaded.material_versions.other=f.rounds;loaded.selectedMaterialRounds.other=2;f.requests[0].resolve(loaded);await editing;
+ const editing=f.click(c),loaded=f.detail(f.oldAsset);loaded.material_cards.other=f.rounds;loaded.selectedMaterialRounds.other=2;f.requests[0].resolve(loaded);await editing;
  assert.equal(f.ctx.state.editing,c.id);assert.equal(f.ctx.state.materialCommentCard.data,loaded);assert.equal(f.ctx.state.materialCommentCard.material_id,'other');assert.equal(loaded.selectedMaterialRounds.other,1);assert.equal(loaded.selectedMaterialRounds.need,2);assert.equal(f.requests.length,1);assert.deepEqual(f.messages,[]);
 });
 test('a captured material absent after loading cannot fall through to another valid scope',async()=>{
- const f=setup(),data=f.ctx.state.materialReview;data.material_versions.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
+ const f=setup(),data=f.ctx.state.materialReview;data.material_cards.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
  const c=f.comment(f.oldAsset);c.material_scopes.push({material_id:'other',number:1});const editing=f.click(c);f.requests[0].resolve(f.detail(f.oldAsset));await editing;
  assert.equal(f.ctx.state.editing,null);assert.equal(f.ctx.state.materialReview.selectedMaterialRounds.need,2);assert.match(f.messages.at(-1),/无法准确定位/);
 });
 test('a new card choice invalidates the captured identity of an old asynchronous location',async()=>{
- const f=setup(),data=f.ctx.state.materialReview;data.material_versions.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
+ const f=setup(),data=f.ctx.state.materialReview;data.material_cards.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
  const c=f.comment(f.oldAsset);c.material_scopes.push({material_id:'other',number:1});const editing=f.click(c);f.ctx.focusMaterialCommentCard('need',2);const anchor={type:'global'};f.ctx.startDraft(anchor);
- const loaded=f.detail(f.oldAsset);loaded.material_versions.other=f.rounds;f.requests[0].resolve(loaded);await editing;await flush();
+ const loaded=f.detail(f.oldAsset);loaded.material_cards.other=f.rounds;f.requests[0].resolve(loaded);await editing;await flush();
  assert.equal(f.ctx.state.materialReview,data);assert.equal(f.ctx.state.materialCommentCard.data,data);assert.equal(f.ctx.state.materialCommentCard.material_id,'need');assert.equal(f.ctx.state.anchor,anchor);assert.equal(f.ctx.state.editing,null);assert.equal(f.requests.length,1);
 });
 
@@ -111,16 +96,16 @@ test('an older failed lookup stays silent after newer navigation owns the reader
  assert.equal(f.ctx.state.materialReview.record.id,f.newAsset.id);assert.equal(f.ctx.state.editing,null);assert.equal(f.requests.length,2);assert.deepEqual(f.messages,[]);
 });
 test('the actual material workspace and card renderer retain the explicitly located nonfirst card',async()=>{
- const f=setup(),data=f.ctx.state.materialReview;data.material_versions.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
+ const f=setup(),data=f.ctx.state.materialReview;data.material_cards.other=f.rounds;f.ctx.state.materialCommentCard={data,material_id:'other',number:2};
  const c=f.comment(f.oldAsset);c.material_scopes.push({material_id:'other',number:1});const editing=f.click(c),loaded=f.detail(f.oldAsset);
  const otherPlan={...f.plan,object_id:'other',id:'other-plan',payload:{...f.plan.payload,title:'Explicit other material'}};
- loaded.material_versions.other=f.rounds.map(round=>({...round,plan:otherPlan}));f.requests[0].resolve(loaded);await editing;
+ loaded.material_cards.other=f.rounds.map(round=>({...round,plan:otherPlan}));f.requests[0].resolve(loaded);await editing;
  // Paint the actual workspace and card, substituting only embedded media and
  // generation details which do not decide the card or round to display.
  f.ctx.Option=function(text,value){const node=new Element('option');node.textContent=text;node.value=value;return node};
  f.ctx.reviewSurface=host=>host;f.ctx.materialMedia=()=>{};f.ctx.renderActualGeneration=()=>{};const root=new Element('main');f.ctx.renderMaterialWorkspace(root,loaded);
  const card=root.all().find(node=>node.className==='material-card');assert.ok(card);assert.equal(card.dataset.materialKey,'other');
- const selectedRound=card.all().find(node=>node.attributes['aria-label']==='素材版本');assert.equal(selectedRound.children.find(node=>node.attributes['aria-pressed']==='true').dataset.choiceId,1);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
+ const selectedRound=card.all().find(node=>node.attributes['aria-label']==='素材版本');assert.equal(selectedRound,undefined);assert.ok(card.all().some(node=>node.textContent==='Explicit other material'));
  assert.equal(f.ctx.state.materialCommentCard.material_id,'other');assert.equal(f.ctx.state.editing,c.id);assert.equal(loaded.selectedMaterialRounds.need,2);
 });
 
@@ -155,14 +140,6 @@ test('a migrated candidate opinion selects its material instead of the previousl
  assert.equal(f.ctx.locateEntityReviewComment(c),true);
  assert.equal(data.unifiedMaterialId,'need');assert.equal(f.ctx.state.materialCommentCard.material_id,'need');
  assert.equal(f.ctx.state.productionSelected.id,f.newAsset.id);
-});
-test('legacy round traversal returns to the exact plan model used by a saved draft',()=>{
- const f=setup(),data=f.ctx.state.materialReview,plans=data.material_versions;
- data.legacy_material_versions={need:f.rounds.map(round=>({...round,model:'legacy'}))};
- const both=f.comment(f.plan);both.material_plan_scopes=[{material_id:'need',number:1}];
- assert.equal(f.ctx.selectCommentMaterialRound(data,f.plan,both),true);assert.equal(data.material_versions,plans);
- const old=f.comment(f.plan);f.ctx.selectCommentMaterialRound(data,f.plan,old);assert.equal(data.material_versions,data.legacy_material_versions);
- f.ctx.selectCommentMaterialRound(data,f.plan,both);assert.equal(data.material_versions,plans);
 });
 test('entity entry locates a retained state supplied with the exact media, without borrowing its current state',async()=>{
  const f=setup(),data=f.entity(),current=data.states[0],old={...current,id:'old-state'},c=f.comment(f.newAsset);c.material_scopes[0].number=2;c.anchor={type:'time',component_id:'original',asset_file:'original.wav',start_seconds:1,end_seconds:2};

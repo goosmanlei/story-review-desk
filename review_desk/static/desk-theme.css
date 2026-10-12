@@ -182,6 +182,12 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-admin-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:28px; align-items:start; }
 .skill-flow { position:sticky; top:112px; max-height:calc(100vh - 132px); overflow:auto; padding:0 16px 12px 0; scrollbar-width:thin; }
 .skill-flow h2 { font-size:17px; margin:0 0 18px; }
+.novel-workspace #novel-index { margin-bottom:16px; }
+.novel-workspace .source-chapter-button { display:block; border-radius:0; }
+.novel-workspace .source-chapter-button strong { display:block; }
+.novel-workspace .source-chapter-button small { display:block; margin-top:8px; }
+.novel-workspace #source-view .document { max-width:none; padding:24px clamp(18px,3vw,48px) 45px; }
+.novel-workspace #source-view .source-text { max-width:82ch; font-size:17px; line-height:1.9; }
 .skill-flow-main,.skill-flow-branches { list-style:none; margin:0; padding:0; }
 .skill-flow-stage { position:relative; text-align:center; padding:0 0 27px; }
 .skill-flow-main .skill-flow-stage:not(:last-child)::after { content:'↓'; position:absolute; bottom:3px; left:calc(50% - 5px); color:#94a291; font-size:17px; }
@@ -189,11 +195,14 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-flow-label { box-sizing:border-box; background:transparent; border-color:transparent; }
 .skill-flow button:hover { border-color:#7c967d; }
 .skill-flow button.active { background:#dfe9d8; border-color:#6e886f; color:#294c34; font-weight:600; }
-.skill-flow-parallel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; padding:8px; border:1px solid #d4d8ca; border-radius:8px; background:#f0f2e7; }
-.skill-flow-parallel button { padding:8px 4px; font:inherit; font-size:13px; border:1px solid #d1d5c8; background:#f9f7ed; border-radius:5px; }
+.skill-flow-parallel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; padding:8px; border:1px solid #e2e0d8; border-radius:8px; background:transparent; }
+.skill-flow-parallel button { padding:8px 4px; font:inherit; font-size:13px; border:1px solid #d4d8ca; background:#f5f2e9; border-radius:5px; }
+.skill-flow-repeat { margin:7px 4px 0; padding-left:8px; border-left:1px dashed #c6ccbf; text-align:left; }
+.skill-flow-repeat button { padding:3px 6px; border:1px solid transparent; border-radius:4px; background:transparent; color:#647661; font:inherit; font-size:12px; }
+.skill-flow-repeat small { display:block; padding:3px 6px; color:#71756b; font-size:11px; line-height:1.65; }
 .skill-flow-return { display:block; font-size:12px; line-height:1.6; color:#647661; border-left:1px dashed #9ba994; text-align:left; margin:6px 0 0 4px; padding-left:10px; }
 .skill-flow-output { white-space:pre-line; display:block; margin:6px 6px 0; color:#71756b; font-size:12px; font-weight:400; line-height:1.65; text-align:left; }
-.skill-flow-branches { margin-top:6px; padding:18px 0 0 12px; border-left:1px dashed #9ba994; border-top:1px dashed #9ba994; }
+.skill-flow-branches { margin-top:6px; padding-top:18px; }
 .skill-flow-branches .skill-flow-stage { padding-bottom:18px; }
 .skill-flow-support { display:block; margin:8px 0 0; font-size:12px; line-height:1.6; color:#687562; text-align:left; }
 .skill-content,.skill-reader { min-width:0; scroll-margin-top:120px; }
@@ -203,7 +212,7 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-file-group { margin:0 0 22px; }
 .skill-file-group h3 { margin:0 0 8px; font-size:13px; font-weight:600; color:#64705e; }
 .skill-folder { margin:10px 0 3px; font:12px/1.5 ui-monospace,monospace; color:#7a8071; overflow-wrap:anywhere; }
-.skill-file-group button { display:block; width:100%; text-align:left; font:13px/1.6 ui-monospace,monospace; padding:6px 7px 6px calc(7px + var(--file-depth,0)*6px); border:1px solid transparent; background:transparent; border-radius:5px; overflow-wrap:anywhere; }
+.skill-file-group button { display:block; width:100%; text-align:left; font:13px/1.6 ui-monospace,monospace; padding:6px 7px; border:1px solid transparent; background:transparent; border-radius:5px; overflow-wrap:anywhere; }
 .skill-file-group button.active { background:#e3eada; border-color:#acb9a4; color:#294c34; }
 .skill-file-group button:hover { background:#e9eddf; }
 .skill-file-heading h3 { margin:0; font:15px/1.6 ui-monospace,monospace; overflow-wrap:anywhere; }

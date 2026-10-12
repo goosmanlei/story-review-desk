@@ -10,7 +10,7 @@ test('old design demands keep their own definition without assigning another pla
  const current={...old,id:'now',version:2,payload:{...old.payload,scope:{object_id:'shot',revision_id:'design-two'},generation:{prompt:'new start to new end'}}};
  const round={number:1,plan:current,definition_records:{requirement:current},members:[old,current],results:[{id:'actual',object_id:'asset',kind:'ASSET',payload:{components:[{role:'original'}]}}]};
  for(const frozen of [false,true]){
-  round.frozen=frozen;const data={material_versions:{'shot-video':[round]}};
+  round.frozen=frozen;const data={material_cards:{'shot-video':[round]}};
   const before=JSON.stringify(round),model=ctx.materialRoundModels([old],[],data)[0];
   assert.equal(model.need,old);assert.equal(model.historicalRecipe,true);assert.equal(model.candidates.length,0);assert.equal(JSON.stringify(round),before);
   assert.equal(ctx.materialHistoricalDefinition(current,round),false);
@@ -203,7 +203,7 @@ test('a preparing round owns its older results without showing duplicate current
  old.payload.components=[{id:'original',role:'original'}];
  const first={number:1,plan:demand,results:[old],members:[demand,old]};
  const pending={number:2,plan:demand,results:[],members:[demand]};
- const data={material_versions:{demand:[pending,first]}};
+ const data={material_cards:{demand:[pending,first]}};
  const cards=ctx.materialRoundModels([demand],[{record:old}],data);
  assert.equal(cards.length,1);assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds.demand=1;
@@ -216,7 +216,7 @@ test('shared media use its associated requirement round even outside the visible
  const asset={...item('shared-voice',[ref(demand)],'audio').record,kind:'ASSET'};
  asset.payload.components=[{id:'original',role:'original'}];
  const round={number:1,plan:demand,results:[asset],members:[demand,asset]};
- const data={material_versions:{'other-state-demand':[round]}};
+ const data={material_cards:{'other-state-demand':[round]}};
  const cards=ctx.materialRoundModels([],[{record:asset}],data);
  assert.equal(cards.length,1);assert.equal(cards[0].material_id,demand.object_id);
  assert.equal(cards[0].round.number,1);assert.equal(cards[0].need.id,demand.id);
@@ -225,7 +225,7 @@ test('shared media use its associated requirement round even outside the visible
 test('a pending material round keeps earlier results inside history instead of creating duplicate cards',()=>{
  const plan=need('portrait'),asset={id:'old-image',object_id:'portrait-image',kind:'ASSET',payload:{media_type:'image',components:[{id:'original',role:'original'}]}},media={id:'media',record:asset,component:asset.payload.components[0]};
  const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
- const data={material_versions:{portrait:[pending,old]}};
+ const data={material_cards:{portrait:[pending,old]}};
  let cards=ctx.materialRoundModels([plan],[media],data);
  assert.equal(cards.length,1);assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds.portrait=1;cards=ctx.materialRoundModels([plan],[media],data);
@@ -242,7 +242,7 @@ test('a shared asset uses its producing requirement rounds on another state inst
  const plan=need('foreign-plan'),asset={id:'shared-v4',object_id:'shared',kind:'ASSET',version:4,payload:{media_type:'audio',components:[{id:'original',role:'original'}]}};
  const original={id:'shared-media',record:asset,component:asset.payload.components[0],range:{start_seconds:1,end_seconds:2}};
  const old={number:1,plan,members:[plan,asset],results:[asset]},pending={number:2,plan,members:[plan],results:[]};
- const data={material_versions:{'foreign-plan':[pending,old]}};
+ const data={material_cards:{'foreign-plan':[pending,old]}};
  let cards=ctx.materialRoundModels([],[original],data);
  assert.equal(cards.length,1);assert.equal(cards[0].material_id,'foreign-plan');assert.equal(cards[0].round.number,1);assert.equal(cards[0].candidates.length,1);
  data.selectedMaterialRounds['foreign-plan']=1;cards=ctx.materialRoundModels([],[original],data);
@@ -268,13 +268,13 @@ test('shared material cards display the exact definition and candidate without r
  const row=(object,id,kind='REQUIREMENT')=>({object_id:object,id,kind,payload:{title:object,components:[]}});
  const current=row('need','current'),frozen=row('need','frozen'),a=row('asset-a','a','ASSET'),b=row('asset-b','b','ASSET');
  const scenarios=[
-  {name:'frozen definition with no active plan',need:null,round:{model:'plan-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
-  {name:'direct candidate in a frozen material',need:null,identity:a,round:{model:'plan-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
+  {name:'frozen definition with no active plan',need:null,round:{model:'production-current-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
+  {name:'direct candidate in a frozen material',need:null,identity:a,round:{model:'production-current-v1',frozen:true,plan:null,definition_records:{requirement:frozen}},expected:frozen},
   {name:'exact old demand overrides another round definition',need:frozen,exactPreparingRevision:true,round:{definition_records:{requirement:current}},expected:frozen},
   {name:'preparing plan remains its own exact record',need:current,expected:current},
   {name:'missing frozen definition uses exact selected candidate',need:null,round:{definition_records:{}},selectedCandidateId:b.id,expected:b},
   {name:'standalone original uses its own identity',need:null,identity:a,material_id:undefined,expected:a},
-  {name:'frozen version without an original still uses its definition',need:null,candidates:[],round:{model:'plan-v1',members:[],definition_records:{requirement:frozen}},expected:frozen},
+  {name:'frozen version without an original still uses its definition',need:null,candidates:[],round:{model:'production-current-v1',members:[],definition_records:{requirement:frozen}},expected:frozen},
  ];
  for(const s of scenarios)await t.test(s.name,()=>{
   const c={state:{},URLSearchParams};vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);

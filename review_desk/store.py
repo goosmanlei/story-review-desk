@@ -119,29 +119,7 @@ class Store:
           id INTEGER PRIMARY KEY AUTOINCREMENT, scope TEXT NOT NULL,
           version INTEGER NOT NULL, body TEXT NOT NULL, at TEXT NOT NULL
         );
-        CREATE TABLE IF NOT EXISTS material_rounds (
-          material_id TEXT NOT NULL REFERENCES objects(id), number INTEGER NOT NULL,
-          state TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY(material_id,number)
-        );
-        CREATE TABLE IF NOT EXISTS material_members (
-          material_id TEXT NOT NULL, number INTEGER NOT NULL,
-          revision_id TEXT NOT NULL REFERENCES revisions(id), role TEXT NOT NULL, evidence TEXT NOT NULL,
-          PRIMARY KEY(material_id,number,revision_id),
-          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
-        );
-        CREATE TABLE IF NOT EXISTS material_feedback (
-          comment_id TEXT PRIMARY KEY REFERENCES comments(id), material_id TEXT NOT NULL, number INTEGER NOT NULL,
-          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
-        );
-        CREATE TABLE IF NOT EXISTS material_comment_scopes (
-          comment_id TEXT NOT NULL REFERENCES comments(id), material_id TEXT NOT NULL, number INTEGER NOT NULL,
-          PRIMARY KEY(comment_id,material_id),
-          FOREIGN KEY(material_id,number) REFERENCES material_rounds(material_id,number)
-        );
         """)
-        self.db.execute('CREATE INDEX IF NOT EXISTS material_members_revision ON material_members(revision_id)')
-        from .material_plans import SCHEMA
-        self.db.executescript(SCHEMA)
         from .material_storage import SCHEMA as CONTENT_SCHEMA, row_factory, upgrade_identity_triggers
         self._material_functions()
         try:
@@ -168,6 +146,13 @@ class Store:
             self.db.executescript(BUSINESS_RELATION_SCHEMA)
             from .version_consolidation import initialize as initialize_consolidation
             initialize_consolidation(self)
+            from .production_current import SCHEMA as CURRENT_SCHEMA, CONTRACT
+            self.db.executescript(CURRENT_SCHEMA)
+            self.db.execute('INSERT OR IGNORE INTO production_current_policy VALUES (1,?,?)',(CONTRACT,'fresh-current-instance'))
+            from .method_files import install as install_file_history
+            install_file_history(self)
+            self.db.commit()
+            read_adapters(self)
         except BaseException:
             self.db.rollback()
             try:
@@ -298,14 +283,6 @@ class Store:
             supersede(self, object_id, current['current_revision'] if current else None)
         from .business_codes import allocate, allocate_candidates
         allocate(self, object_id, kind, payload)
-        if kind in ("REQUIREMENT", "CALL", "ASSET"):
-            from .material_plans import register
-            from .production import record
-            row=record(self, revision_id=revision_id)
-            from .material_model import refresh_identity
-            refresh_identity(self,row)
-            register(self, row)
-            allocate_candidates(self, revision_id)
         if payload.get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1'):
             from . import method_files
             method_files.sync(self, object_id if method_files.installed(self) else None)
@@ -523,10 +500,6 @@ class Store:
     def _comment(self, row):
         value = dict(row)
         value["anchor"] = json.loads(value["anchor"])
-        scopes = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_comment_scopes WHERE comment_id=? ORDER BY material_id', (value['id'],))]
-        if scopes:value['material_scopes'] = scopes
-        plans = [dict(v) for v in self.db.execute('SELECT material_id,number FROM material_plan_comments WHERE comment_id=? ORDER BY material_id', (value['id'],))]
-        if plans:value['material_plan_scopes'] = plans
         value['history_sources'] = [json.loads(event[0]) for event in self.db.execute(
             "SELECT body FROM comment_events WHERE comment_id=? AND action='HISTORY_IMPORT' ORDER BY id", (value['id'],))]
         from .production_current import enabled, comment_context
@@ -712,12 +685,6 @@ class Store:
             raise ValueError("source_id is only valid for SOURCE targets")
         comment_id = value.get("id") or str(uuid.uuid4())
         def matches(existing):
-            context=value.get('material_context')
-            if context is not None:
-                if not isinstance(context,dict):return False
-                key='material_plan_scopes' if context.get('model')=='plan-v1' else 'material_scopes'
-                if not any(scope['material_id']==context.get('material_id') and scope['number']==context.get('number') for scope in existing.get(key,[])):
-                    return False
             return existing['target_object_id']==object_id and existing['target_revision_id']==revision_id and existing['anchor']==anchor and existing['body']==body
         existing = self.comment(comment_id)
         if existing:
@@ -747,15 +714,6 @@ class Store:
             if enabled(self) and obj['kind'] in RECORD_KINDS:
                 remember_comment(self, self.comment(comment_id))
                 return self.comment(comment_id)
-            context = value.get('material_context')
-            if isinstance(context, dict) and context.get('model') == 'plan-v1':
-                from .material_plans import comment_scope
-                comment_scope(self, self.comment(comment_id), context)
-            else:
-                from .material_versions import comment_scope
-                comment_scope(self, self.comment(comment_id), context, value.get('material_revision'))
-            # Revision intent remains readable in old clients; comments never
-            # create a plan version or modify generation inputs.
             return self.comment(comment_id)
 
     def change_comment(self, comment_id, action, expected_version, body=None):

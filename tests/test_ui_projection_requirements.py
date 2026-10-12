@@ -8,7 +8,7 @@ from urllib.parse import urlencode
 import test_production as production_fixture
 import test_complete_states as state_fixture
 import test_generation as generation_fixture
-import test_material_versions as material_fixture
+import current_material_fixture as material_fixture
 from review_desk import production as p, ui_projection as ui
 
 
@@ -25,7 +25,7 @@ class UIProjectionRequirementsTest(unittest.TestCase):
     need = state_fixture.CompleteStatesTest.need
     setup_plans = generation_fixture.GenerationTest.setup_plans
     change = generation_fixture.GenerationTest.change
-    generate = material_fixture.MaterialVersionsTest.generate
+    generate = material_fixture.MaterialFixture.generate
 
     def scene_and_state(self):
         self.put(self.entity())
@@ -145,7 +145,7 @@ class UIProjectionRequirementsTest(unittest.TestCase):
             self.assertEqual(focused['facets'], ordinary['facets'])
         card = ui.card(self.store, exact['object_id'], exact['revision_id'])
         self.assertEqual(card['detail']['record']['id'], exact['revision_id'])
-        versions = card['detail']['material_versions']['need-full-overall']
+        versions = card['detail']['material_cards']['need-full-overall']
         self.assertEqual(versions[0]['results'], [])
         self.assertIn(exact['revision_id'], [r['id'] for version in versions[1:] for r in version['members']])
 
@@ -217,13 +217,13 @@ class UIProjectionRequirementsTest(unittest.TestCase):
         self.put(need)
         view=g.snapshot(self.store,'songbook')
         self.assertIn('entity-identity',[r['object_id'] for r in view['requirements']])
-        self.assertIn('entity-identity',view['material_versions'])
+        self.assertIn('entity-identity',view['material_cards'])
         entries=ui.material_entries(self.store)
         self.assertIn('entity-identity',[r['object_id'] for r in entries])
         counts=ui.entity_summaries(self.store,[view['entity']],entries)['entity_material_counts']
         self.assertEqual(counts['songbook']['audio'],3)
         card=ui.card(self.store,'entity-identity',self.ref('entity-identity')['revision_id'])
-        self.assertIn('entity-identity',card['entity_review']['material_versions'])
+        self.assertIn('entity-identity',card['entity_review']['material_cards'])
 
     def test_retired_need_does_not_hide_exact_subject_or_coverage(self):
         from unittest.mock import patch

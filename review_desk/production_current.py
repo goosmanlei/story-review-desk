@@ -379,20 +379,10 @@ def dump(store):
             for table in TABLES}
 
 
-# Read adapters for existing list/association queries. These are TEMP views,
-# never exported, never writable and contain no historical version storage.
-# Keep their removal independent of the on-disk migration/rollback contract.
-LEGACY_TABLES = ('material_feedback', 'material_comment_scopes', 'material_members', 'material_rounds',
-                 'material_plan_comments', 'material_candidate_members', 'material_plan_members',
-                 'material_definition_versions', 'material_definitions', 'material_plan_versions',
-                 'business_candidates')
-
-
+# Current ownership is projected from the plan identity and candidate targets.
 def read_adapters(store):
-    if not enabled(store):
-        return
-    views = {
-        'material_plan_members': '''SELECT coalesce(json_extract(a.evidence,'$.canonical_material_id'),a.material_id,o.id) material_id,1 number,o.current_revision revision_id,'plan' role
+    if enabled(store):
+        store.db.execute("""CREATE TEMP VIEW IF NOT EXISTS material_memberships AS SELECT coalesce(json_extract(a.evidence,'$.canonical_material_id'),a.material_id,o.id) material_id,1 number,o.current_revision revision_id,'plan' role
             FROM objects o JOIN revisions r ON r.id=o.current_revision LEFT JOIN material_aliases a ON a.alias_id=o.id
             WHERE o.kind='REQUIREMENT' AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'
             UNION SELECT t.material_id,1,o.current_revision,'result'
@@ -400,23 +390,7 @@ def read_adapters(store):
             JOIN objects o ON o.id=c.asset_object_id
             UNION SELECT t.material_id,1,o.current_revision,'call'
             FROM production_candidate_targets t JOIN production_candidates c ON c.id=t.candidate_id
-            JOIN objects o ON o.id=c.operation_id''',
-        'material_plan_versions': '''SELECT DISTINCT m.material_id,1 number,coalesce(c.payload_sha256,'') fingerprint,
-            0 frozen,'current-content' evidence FROM material_plan_members m
-            LEFT JOIN production_current_records c ON c.object_id=m.material_id''',
-        'material_candidate_members': '''SELECT c.id candidate_id,o.current_revision revision_id
-            FROM production_candidates c JOIN objects o ON o.id=c.asset_object_id''',
-        'material_members': "SELECT *, 'current-content' evidence FROM material_plan_members",
-        'material_rounds': "SELECT material_id,number,'current' state,'' created_at FROM material_plan_versions",
-        'material_feedback': "SELECT '' comment_id,'' material_id,1 number WHERE 0",
-        'material_comment_scopes': "SELECT '' comment_id,'' material_id,1 number WHERE 0",
-        'material_plan_comments': "SELECT '' comment_id,'' material_id,1 number WHERE 0",
-        'material_definition_versions': "SELECT '' material_id,1 number,'' definition_id,'{}' provenance,'[]' gaps WHERE 0",
-        'material_definitions': "SELECT '' id WHERE 0",
-        'business_candidates': 'SELECT material_id,1 version,candidate_id,number FROM production_candidate_targets',
-    }
-    for name, query in views.items():
-        store.db.execute('CREATE TEMP VIEW IF NOT EXISTS '+name+' AS '+query)
+            JOIN objects o ON o.id=c.operation_id""")
 
 
 def material_snapshot(store, mid):

@@ -150,7 +150,7 @@ def material_calls(store, material_id):
     key = store.db.total_changes
     if key not in cache:
         grouped = {}
-        for row in store.db.execute("SELECT DISTINCT m.material_id,r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='call'"):
+        for row in store.db.execute("SELECT DISTINCT m.material_id,r.id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.role='call'"):
             grouped.setdefault(row['material_id'], []).append(row['id'])
         cache[key] = grouped
     return [record(store, revision_id=rid) for rid in cache[key].get(material_id, [])]
