@@ -72,3 +72,18 @@ test('opening an exact SVG file shows the diagram, keeps the original source anc
  assert.equal(decodeURIComponent(picture.src.split(',')[1]),body);assert.equal(picture.alt,'原准确图示');assert.equal(picture.parent.dataset.blockId,'original-source');assert.doesNotMatch(f.root.textContent,/<svg/);
  picture.onerror();assert.equal(f.root.querySelectorAll('img').length,0);assert.match(f.root.textContent,/准确图示无法显示.*未替换/);
 });
+
+test('a shared chapter stays embedded and its reader/comment identity belongs to the shared resource',async()=>{
+ const f=setup(),resource={object_id:'method.resource.book',revision_id:'book1',version:1,payload:{files:{'chapter.md':'# 共享章节'},sections:{main:'chapter.md'}}};
+ f.structure.payload.resources=[{object_id:resource.object_id,revision_id:resource.revision_id,section:'main'}];
+ f.data.referenced[resource.revision_id]=resource;f.data.versions[resource.object_id]=[resource];
+ await f.ctx.drawMethods(f.root);
+ await f.ctx.methodOpen(f.root,'resource',resource.object_id,resource.revision_id,'chapter.md',true);
+ assert.equal(f.read().document.record.object_id,resource.object_id);
+ assert.equal(f.read().document.file,'chapter.md');
+ assert.doesNotMatch(f.root.textContent,/返回原阅读位置/);
+ assert.equal(new URL(f.ctx.location.href).searchParams.get('method_node'),f.structure.object_id);
+ // A persisted stack from a previous interface must not reintroduce the guide.
+ vm.runInContext('methodView.stack=[{selected:"old"}];methodView.rootRecord=null',f.ctx);
+ await f.ctx.drawMethods(f.root);assert.doesNotMatch(f.root.textContent,/返回原阅读位置/);
+});

@@ -1,4 +1,4 @@
-"""Schema 13: complete recovery of current production without retired trees."""
+"""Schema 14: complete recovery of current production without retired trees."""
 import json
 import tempfile
 from pathlib import Path
@@ -50,12 +50,7 @@ def required_assets(store):
 def install(store):
     """Prepare an empty database inside the caller's transaction."""
     from .production_current_migration import statements
-    for trigger in ('material_frozen_definition_update', 'material_frozen_version_update'):
-        store.db.execute('DROP TRIGGER IF EXISTS '+trigger)
-    for table in current.LEGACY_TABLES:
-        store.db.execute('DROP TABLE IF EXISTS '+table)
-    store.db.execute('DROP TABLE business_relation_aliases')
-    store.db.execute('CREATE TABLE business_relation_aliases (alias_id TEXT PRIMARY KEY,relation_id TEXT NOT NULL REFERENCES business_relations(object_id))')
+    store.db.execute('DELETE FROM production_current_policy')
     statements(store.db, current.SCHEMA)
 
 
@@ -91,6 +86,8 @@ def export(store, directory):
             configurations = {'records': [dict(r) for r in store.db.execute('SELECT * FROM configurations ORDER BY scope')],
                               'events': store.configuration_events()}
             names = required_assets(store)
+            from .favicon import current as favicon_current
+            favicon_current(target.parent, store.configuration('SYSTEM')['body'])
             _write_content(store, content_file)
         finally:
             store.db.execute('RELEASE SAVEPOINT current_export')
@@ -106,7 +103,7 @@ def export(store, directory):
         hashes = {name: physical_file_hash(data) if isinstance(data, Path) else digest(data) for name, data in files.items()}
         for name in sorted(names):
             hashes['assets/'+_safe_asset(name)] = physical_file_hash(target/'assets'/name)
-        manifest = {'schema_version': 13, 'production_model': current.CONTRACT,
+        manifest = {'schema_version': 14, 'production_model': current.CONTRACT,
                     'sources': len(materials), 'comments': len(comments['comments']), 'events': len(comments['events']),
                     'objects': len(framework['objects']), 'revisions': len(framework['revisions']),
                     'configurations': len(configurations['records']), 'files': hashes}
@@ -168,10 +165,13 @@ def validate(store):
     from .production_media import validate_component
     if not current.enabled(store) or store.db.execute('SELECT contract FROM production_current_policy').fetchone()[0] != current.CONTRACT:
         raise ValueError('missing current production contract')
-    if table_names(store) & set(current.LEGACY_TABLES):
-        raise ValueError('retired production tables cannot be recovered')
+    from .material_version_retirement import validate_absent
+    validate_absent(store)
     if store.db.execute("SELECT 1 FROM objects WHERE kind IN ('MATERIAL_RELATION','JUDGMENT','REPRESENTATION')").fetchone():
         raise ValueError('retired business objects cannot be recovered')
+    from .production_cutover import RETIRED_KINDS
+    if any(row['kind'] in RETIRED_KINDS | {'ASSEMBLY','DELIVERABLE','SHOT'} for row in store.objects()):
+        raise ValueError('unsupported restored production type')
     if store.db.execute('PRAGMA foreign_key_check').fetchone():
         raise ValueError('current recovery foreign key mismatch')
     from .semantic_consolidation import validate as validate_consolidation
@@ -255,7 +255,7 @@ def restore(store, directory):
     target = Path(directory)
     manifest = json.loads((target/'manifest.json').read_text())
     core = {'materials.json', 'comments.json', 'objects.json', 'configurations.json', 'material-content.json'}
-    if manifest.get('schema_version') != 13 or manifest.get('production_model') != current.CONTRACT or not core <= manifest.get('files', {}).keys():
+    if manifest.get('schema_version') != 14 or manifest.get('production_model') != current.CONTRACT or not core <= manifest.get('files', {}).keys():
         raise ValueError('invalid current production recovery manifest')
     for name, sha in manifest['files'].items():
         if name.startswith('assets/'):

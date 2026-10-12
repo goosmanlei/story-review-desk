@@ -12,7 +12,7 @@ function setup(){
  const asset=(object,id,call)=>row(object,'ASSET',id,{media_type:'audio',production:{object_id:call.object_id,revision_id:call.id},components:[{id:'original',role:'original',mime:'audio/wav',sha256:id}]});
  const a=asset('asset-a','a-new',callA),oldA=asset('asset-a','a-old',callA),b=asset('asset-b','b-exact',callB);
  const rounds=[{number:2,state:'produced',plan,members:[plan,a,callA],results:[a]},{number:1,state:'produced',plan,members:[plan,oldA,b,callA,callB],results:[oldA,b]}];
- const detail={record:b,history:[b],review_context:{call:callB,requirements:[plan]},review_contexts:{[a.id]:{call:callA,requirements:[plan]},[oldA.id]:{call:callA,requirements:[plan]},[b.id]:{call:callB,requirements:[plan]}},material_versions:{need:rounds}};
+ const detail={record:b,history:[b],review_context:{call:callB,requirements:[plan]},review_contexts:{[a.id]:{call:callA,requirements:[plan]},[oldA.id]:{call:callA,requirements:[plan]},[b.id]:{call:callB,requirements:[plan]}},material_cards:{need:rounds}};
  const root=new Element('main'),requests=[];
  const ctx={URL,URLSearchParams,CSS:{escape:x=>x},console,setTimeout:()=>1,clearTimeout(){},getSelection:()=>null,location:{href:'http://local/?workspace=materials.workspace&production_object=previous&material_round=2&material_target=previous'},history:{replaceState(_a,_b,u){ctx.location.href=String(u)}},localStorage:{getItem:()=>null,setItem(){},removeItem(){}},document:{addEventListener(){},querySelector:s=>s==='#production-reader'?root:null,querySelectorAll:()=>[],createElement:tag=>new Element(tag)},fetch:async url=>{requests.push(url);return {ok:true,json:async()=>url.includes('/judgments?')?{current:[],history:[],conflicting:false}:detail}}};
  ctx.Option=function(text,value){const n=new Element('option');n.textContent=text;n.value=value;return n};vm.createContext(ctx);require('./load_review_helpers.cjs')(ctx);
@@ -31,48 +31,33 @@ function setup(){
 }
 for(const explicit of [false,true])test(`${explicit?'exact link':'asset index'} opens B in its own older round, with B media, call, text and comment target`,async()=>{
  const f=setup();await f.ctx.openProductionRecord(f.b.object_id,explicit?f.b.id:null);
- assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.b.id]);assert.deepEqual(f.nodes('call'),[]);assert.equal(f.detail.review_contexts[f.b.id].call.id,'call-b-v1');assert.deepEqual(f.nodes('text'),[]);
+ assert.equal(f.roundControl(),undefined);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.b.id]);assert.deepEqual(f.nodes('call'),[]);assert.equal(f.detail.review_contexts[f.b.id].call.id,'call-b-v1');assert.deepEqual(f.nodes('text'),[]);
  const choice=f.root.all().find(n=>n.attributes['aria-label']==='候选');assert.equal(selected(choice),f.b.id);
  f.nodes('media')[0].onfocus();assert.equal(f.ctx.state.productionSelected.id,f.b.id);assert.equal(new URL(f.ctx.location.href).searchParams.get('material_target'),f.b.id);assert.equal(f.requests.filter(url=>!url.includes('/acceptance?')&&!url.includes('/material-relations?')&&!url.includes('/judgments?')).length,1);
 });
 test('the actual asset renderer defaults to its own exact candidate without relying on a URL target',()=>{
  const f=setup();f.ctx.location.href='http://local/?workspace=materials.workspace';f.ctx.state.materialReview=f.detail;f.ctx.renderMaterialWorkspace(f.root,f.detail);
- assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);assert.deepEqual(f.nodes('text'),[]);
-});
-test('a deliberate round change still opens that round and allows returning to the saved exact candidate',async()=>{
- const f=setup();await f.ctx.openProductionRecord(f.b.object_id);let select=f.roundControl();await choose(select,2);
- assert.equal(selected(f.roundControl()),2);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.a.id);assert.equal(f.ctx.state.productionSelected.id,f.a.id);
- select=f.roundControl();await choose(select,1);assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);assert.equal(f.ctx.state.productionSelected.id,f.b.id);
-});
-for(const explicit of [false,true])test(`${explicit?'explicit':'ordinary'} PLAN respects an exact target or defaults to a generated version`,async()=>{
- const f=setup();f.rounds[0].state='preparing';f.rounds[0].members=[f.plan];f.rounds[0].results=[];f.detail.record=f.plan;f.detail.history=[f.plan];f.detail.candidate_records=[f.oldA,f.b];
- await f.ctx.openProductionRecord(f.plan.object_id,explicit?f.plan.id:null);
- assert.equal(selected(f.roundControl()),explicit?2:1);assert.equal(f.nodes('media').length,explicit?0:1);
-});
-test('an asset remains readable in its historical round while a newer round is preparing',async()=>{
- const f=setup();f.rounds[0].state='preparing';f.rounds[0].members=[f.plan];f.rounds[0].results=[];await f.ctx.openProductionRecord(f.b.object_id);
- assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
- const select=f.roundControl();await choose(select,2);assert.equal(selected(f.roundControl()),2);assert.equal(f.nodes('media').length,0);
+ assert.equal(f.roundControl(),undefined);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);assert.deepEqual(f.nodes('text'),[]);
 });
 test('multiple material memberships retain the explicitly selected nonfirst card and its matching exact round',()=>{
  const f=setup(),otherPlan={...f.plan,object_id:'other',id:'other-plan',payload:{...f.plan.payload,title:'Other material'}};
- f.detail.material_versions.other=f.rounds.map(round=>({...round,number:round.number+2,plan:otherPlan,members:round.members.map(r=>r===f.plan?otherPlan:r)}));
+ f.detail.material_cards.other=f.rounds.map(round=>({...round,number:round.number+2,plan:otherPlan,members:round.members.map(r=>r===f.plan?otherPlan:r)}));
  f.ctx.state.materialReview=f.detail;f.ctx.state.materialCommentCard={data:f.detail,material_id:'other',number:4};f.ctx.location.href='http://local/?workspace=materials.workspace';f.ctx.renderMaterialWorkspace(f.root,f.detail);
- const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'other');assert.equal(selected(f.roundControl()),3);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);assert.equal(f.detail.selectedMaterialRounds.need,undefined);
+ const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'other');assert.equal(f.roundControl(),undefined);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);assert.equal(f.detail.selectedMaterialRounds.need,undefined);
 });
 test('a previous detail card cannot override the newly opened asset membership',async()=>{
  const f=setup();f.ctx.state.materialCommentCard={data:f.ctx.state.materialReview,material_id:'other',number:9};await f.ctx.openProductionRecord(f.b.object_id);
- const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'need');assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
+ const card=f.root.all().find(n=>n.className==='material-card');assert.equal(card.dataset.materialKey,'need');assert.equal(f.roundControl(),undefined);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
 });
 
 for(const exact of [false,true])test(`unified material ${exact?'exact reference':'fresh entry'} ignores another card's version in the caller URL`,()=>{
  const f=setup();f.ctx.location.href='http://local/?workspace=materials.workspace&material_page=2&material_media=audio&material_id=foreign&material_round=9&material_target=foreign-result';
- const params=new URLSearchParams(exact?'material_id=need&material_round=1&material_target=b-exact':'');
- f.detail.legacy_material_versions=f.detail.material_versions;
+ const params=new URLSearchParams(exact?'material_id=need&material_target=b-exact':'');
+ f.detail.retired_material_cards=f.detail.material_cards;
  const result={entity_review:null,detail:f.detail,params,explicit:true};
  f.ctx.validateUnifiedReference(result);f.ctx.activateUnifiedCard(result);f.ctx.renderMaterialWorkspace(f.root,f.detail);
- assert.equal(selected(f.roundControl()),1);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
- const url=new URL(f.ctx.location.href);assert.equal(url.searchParams.get('material_page'),'2');assert.equal(url.searchParams.get('material_media'),'audio');assert.notEqual(url.searchParams.get('material_id'),'foreign');assert.equal(url.searchParams.get('material_round'),'1');
+ assert.equal(f.roundControl(),undefined);assert.equal(f.nodes('media')[0].dataset.reviewRevision,f.b.id);
+ const url=new URL(f.ctx.location.href);assert.equal(url.searchParams.get('material_page'),'2');assert.equal(url.searchParams.get('material_media'),'audio');assert.notEqual(url.searchParams.get('material_id'),'foreign');assert.equal(url.searchParams.get('material_round'),null);
 });
 
 test('a lazy material list keeps the exact scope title supplied with its standalone card',()=>{
@@ -87,7 +72,7 @@ for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'a
  f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
  f.rounds.splice(0,f.rounds.length,{number:1,state:'produced',plan:f.plan,members:[f.plan,f.a,f.b],results:[f.b]});
  const before=JSON.stringify(f.rounds);await f.ctx.openProductionRecord(f.a.object_id,explicit?f.a.id:null);
- assert.equal(selected(f.roundControl()),1);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text'),[]);
+ assert.equal(f.roundControl(),undefined);assert.deepEqual(f.nodes('media').map(n=>n.dataset.reviewRevision),[f.a.id]);assert.deepEqual(f.nodes('text'),[]);
  const candidates=f.root.all().find(n=>n.attributes['aria-label']==='候选');assert.equal(candidates.children.length,1);assert.equal(candidates.children[0].textContent,'候选1');assert.equal(JSON.stringify(f.rounds),before);
  assert.ok(!f.nodes('button').some(n=>n.textContent==='记录本版本审阅结论'));
  assert.equal(f.ctx.state.productionSelected.id,f.a.id);
@@ -95,9 +80,9 @@ for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'a
 
 test('same-source switching retains each exact reader and never adopts a sibling',async()=>{
  const f=setup(),scope={object_id:'shot',id:'shot-exact',kind:'AV_SHOT',payload:{title:'Exact source'}};
- const other={...f.detail,record:{...f.plan,object_id:'other',id:'other-exact'},history:[],material_versions:{other:[{number:1,plan:f.plan,members:[f.plan],results:[]}]}};
+ const other={...f.detail,record:{...f.plan,object_id:'other',id:'other-exact'},history:[],material_cards:{other:[{number:1,plan:f.plan,members:[f.plan],results:[]}]}};
  const initial={detail:f.detail,params:new URLSearchParams(),explicit:true,scope},next={detail:other,params:new URLSearchParams(),explicit:true,scope};
- const session={cards:{[f.detail.record.id]:initial,'other-exact':next},request:0};f.detail.sourceSession=session;f.ctx.location.href='http://local/?material_id=need&material_round=1&material_target=b-exact';
+ const session={cards:{[f.detail.record.id]:initial,'other-exact':next},request:0};f.detail.sourceSession=session;f.ctx.location.href='http://local/?material_id=need&material_target=b-exact';
  f.ctx.state.materialReview=f.detail;f.ctx.state.unifiedScope=scope;f.ctx.state.productionSelected=f.b;f.ctx.state.anchor={type:'text',quote:'exact B'};f.ctx.state.selected='comment-b';
  f.ctx.renderProductionReader=()=>{};f.ctx.renderComments=()=>{};
  await f.ctx.switchUnifiedSourceMaterial({object_id:'other',id:'other-exact'});

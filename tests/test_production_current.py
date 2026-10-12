@@ -3,9 +3,9 @@ import json
 import shutil
 import unittest
 
-from test_generation import GenerationTest
+import test_generation as generation_fixtures
 from test_methods import seed
-from review_desk import production as p, production_current as c, production_current_migration as migration
+from review_desk import production as p, production_current as c
 from review_desk import production_operations as operations, generation, methods, method_media
 from review_desk.bundle import export, restore
 from review_desk.store import Store, Conflict
@@ -14,17 +14,21 @@ from review_desk.review_text import production_text_blocks
 
 class CurrentProductionTest(unittest.TestCase):
     for name in ('setUp','tearDown','spec','put','ref','entity','full','need','setup_plans','media'):
-        locals()[name] = getattr(GenerationTest, name)
+        locals()[name] = getattr(generation_fixtures.GenerationTest, name)
 
     def migrate(self, activate=False):
-        self.setup_plans()
+        from unittest.mock import patch
+        def seed_records(store, document, validate_only=False):
+            return p._import_records(store, document, validate_only, check_current=False)
+        with patch.object(p, 'import_records', seed_records):
+            self.setup_plans()
+        from review_desk.semantic_consolidation import validate
+        validate(self.store)
         self.component = self.media()
         if activate:
             seed(self.store, 'media-plan', ['draft','review','result'])
             method_media.activate(self.store)
-        plan = migration.plan(self.store)
-        migration.apply(self.store, plan)
-        return plan
+        self.assertTrue(c.enabled(self.store))
 
     def test_file_histories_public_recovery_and_explicit_private_execution(self):
         from review_desk import method_files
@@ -106,36 +110,6 @@ class CurrentProductionTest(unittest.TestCase):
         self.assertTrue(operations.reuse(self.store,reuse)['already_applied'])
         with self.assertRaises(Conflict): operations.reuse(self.store,{**reuse,'id':'reuse-stale'})
 
-    def test_comments_migration_failure_and_two_recoveries(self):
-        self.setup_plans();self.component=self.media()
-        plan=migration.plan(self.store)
-        with self.assertRaises(RuntimeError): migration.apply(self.store,plan,fault='after-snapshots')
-        self.assertEqual(migration.inventory(self.store),plan['inventory'])
-        row=p.record(self.store,'full');payload=copy.deepcopy(row['payload']);payload['production_description']='并发编辑'
-        self.put({'object_id':row['object_id'],'kind':'STATE','expected_version':row['version'],'payload':payload})
-        with self.assertRaises(Conflict): migration.apply(self.store,plan)
-        plan=migration.plan(self.store);migration.apply(self.store,plan)
-        self.assertTrue(migration.apply(self.store,plan)['already_applied'])
-        need=p.record(self.store,'need-full-overall')
-        block=next(b for b in production_text_blocks(need['payload']) if b.get('field')=='generation.prompt')
-        anchor={'type':'text','block_id':block['id'],'end_block_id':block['id'],'start':0,'end':4,'quote':block['text'][:4]}
-        comment=self.store.create_comment({'target_object_id':need['object_id'],'target_revision_id':need['id'],
-                   'expected_edit_token':need['edit_token'],'anchor':anchor,'body':'保留动作间隔'})
-        payload=copy.deepcopy(need['payload']);payload['generation']['prompt']='新句包含相似的翻页后停，但并非原句。'
-        self.put({'object_id':need['object_id'],'kind':'REQUIREMENT','expected_version':need['version'],'payload':payload})
-        state=self.store.comment_anchor_states([self.store.comment(comment['id'])])[0]
-        self.assertFalse(state['anchor_state']['valid'])
-        self.assertEqual(state['original_context']['excerpt']['anchor'],anchor)
-        source=self.root
-        for n in range(2):
-            export(self.store,source/'export')
-            destination=self.root/('recovery-'+str(n));recovered=Store(destination/'.runtime/review.sqlite3')
-            restore(recovered,source/'export')
-            self.store.close();self.store=recovered;source=destination
-            row=p.record(self.store,'full');payload=copy.deepcopy(row['payload']);payload['production_description']='恢复后继续编辑 '+str(n)
-            self.put({'object_id':row['object_id'],'kind':'STATE','expected_version':row['version'],'payload':payload})
-            self.assertFalse(c.comment_context(self.store,self.store.comment(comment['id']))['original_context']['matches_current'])
-        self.assertFalse(set(c.LEGACY_TABLES)&{r[0] for r in self.store.db.execute("SELECT name FROM sqlite_master WHERE type='table'")})
 
     def test_callbacks_unknown_failure_components_and_external_original(self):
         self.migrate()
@@ -165,26 +139,6 @@ class CurrentProductionTest(unittest.TestCase):
         self.assertIsNone(context['call'])
         self.assertEqual(context['submission']['snapshot']['source'],external['external_source'])
 
-    def test_historical_original_without_call_remains_honest(self):
-        self.setup_plans();self.component=self.media()
-        original=copy.deepcopy(p.record(self.store,'voice')['payload'])
-        original.pop('production')
-        # A legacy import predating the production validator may contain an
-        # uploaded original without CALL. Migration must not invent one.
-        from review_desk.version_consolidation import new_identity
-        from review_desk.store import canonical,now
-        rid=new_identity(self.store,'legacy-upload',1,original);stamp=now()
-        with self.store.db:
-            self.store.db.execute('INSERT INTO objects VALUES (?,?,?,?,?,?)',('legacy-upload','ASSET',rid,1,stamp,stamp))
-            self.store.db.execute('INSERT INTO revisions VALUES (?,?,?,?,?)',(rid,'legacy-upload',1,canonical(original),stamp))
-        migration.apply(self.store,migration.plan(self.store))
-        asset=p.record(self.store,'legacy-upload')
-        context=c.candidate_context(self.store,asset)
-        self.assertIsNone(context['call'])
-        self.assertEqual(context['submission']['origin'],'external')
-        self.assertEqual(context['submission']['snapshot']['source']['kind'],'historical')
-        self.assertEqual(asset['payload']['components'],original['components'])
-        self.assertFalse(context['submission']['snapshot']['request'])
 
     def test_response_excerpt_survives_later_edit(self):
         from review_desk import comment_review, production_current_comments as excerpts

@@ -52,7 +52,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
                      and row['object_id'] == focus['shot']]
     materials, entities = defaultdict(list), defaultdict(list)
     candidate_owners = defaultdict(set)
-    for row in store.db.execute("SELECT DISTINCT m.material_id,r.object_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result'"):
+    for row in store.db.execute("SELECT DISTINCT m.material_id,r.object_id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result'"):
         candidate_owners[row['object_id']].add(canonical_id(store, row['material_id']))
     identities = {item['canonical_material_id'] for item in entries}
     additional = {}
@@ -152,7 +152,7 @@ def projection(store, entries, episode=None, revision=None, scene=None, *, focus
         metrics=card_counts(store,additional);mapping=codes(store)
         for mid,item in additional.items():
             item.update(metrics[mid]);item['search_fields']=material_fields(store,item,mapping)
-            for raw in store.db.execute("SELECT DISTINCT r.id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='result'",(mid,)):
+            for raw in store.db.execute("SELECT DISTINCT r.id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.material_id=? AND m.role='result'",(mid,)):
                 asset=light.record(store,revision_id=raw[0])['payload']
                 if not asset.get('placeholder') and any(c['role']=='original' for c in asset.get('components',[])):item['generated']=True
     projected = [{**item, 'locations': materials[item['canonical_material_id']]} for item in [*entries,*additional.values()]]

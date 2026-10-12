@@ -3,14 +3,14 @@ import json
 import shutil
 import unittest
 
-import test_material_plans as fixtures
+import current_material_fixture as fixtures
 from review_desk import version_consolidation as vc, production as p, material_plans as mp, bundle, generation
 from review_desk.store import Store, Conflict
 
 
 class ConsolidationTest(unittest.TestCase):
     for _name in ('setUp','tearDown','spec','put','ref','entity','full','need','media','change','setup_plans','generate'):
-        locals()[_name] = getattr(fixtures.PlanVersionsTest, _name)
+        locals()[_name] = getattr(fixtures.MaterialFixture, _name)
 
     def prepared(self):
         self.setup_plans()

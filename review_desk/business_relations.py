@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS business_relations (
  endpoint_b TEXT NOT NULL REFERENCES objects(id),
  CHECK(endpoint_a < endpoint_b), UNIQUE(endpoint_a,endpoint_b));
 CREATE TABLE IF NOT EXISTS business_relation_aliases (
- alias_id TEXT PRIMARY KEY REFERENCES objects(id),
+ alias_id TEXT PRIMARY KEY,
  relation_id TEXT NOT NULL REFERENCES business_relations(object_id));
 CREATE TABLE IF NOT EXISTS business_relation_runs (
  id TEXT PRIMARY KEY, receipt TEXT NOT NULL);

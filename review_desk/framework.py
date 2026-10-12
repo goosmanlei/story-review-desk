@@ -16,6 +16,7 @@ DOMAINS = {
 STAGES = (
     {"id": "STORY_COMPILATION", "label": "故事采编", "domain": "story", "workspace": "story.sources"},
     {"id": "STORY_OUTLINE", "label": "故事梗概", "domain": "story", "workspace": "story.outline"},
+    {"id": "NOVEL_WRITING", "label": "小说创作", "domain": "story", "workspace": "story.novel"},
     {"id": "SCRIPT_DRAFT", "label": "故事剧本", "domain": "story", "workspace": "story.script"},
     {"id": "STORY_SETTINGS", "label": "生产制作", "domain": "settings", "workspace": "settings.workspace"},
     {"id": "MATERIAL_PREPARATION", "label": "素材准备", "domain": "materials", "workspace": "materials.workspace"},
@@ -26,6 +27,7 @@ WORKSPACES = (
     {"id": "production.approach", "label": "制作思路", "domain": "project", "implemented": True},
     {"id": "story.sources", "label": "资料采编", "domain": "story", "implemented": True},
     {"id": "story.outline", "label": "故事结构", "domain": "story", "implemented": True},
+    {"id": "story.novel", "label": "小说创作", "domain": "story", "implemented": True},
     {"id": "story.script", "label": "故事剧本", "domain": "story", "implemented": True},
     {"id": "settings.workspace", "label": "生产制作", "domain": "settings", "implemented": True},
     {"id": "materials.workspace", "label": "素材管理", "domain": "materials", "implemented": True},

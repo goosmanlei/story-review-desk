@@ -21,7 +21,7 @@ async function main(){
     await next.context.saveComment();assert.equal(next.messages.at(-1),'评论已保存');
     const before=JSON.parse(first.requests[0].body),after=JSON.parse(next.requests[0].body);
     assert.deepEqual(before,after);assert.equal(after.id,pending.id);assert.equal(next.storage.has(key),false);assert.equal(next.storage.has(key+':submission'),false);
-    results.push({body:example.body,first:before,retry:after,material_rounds_after_first:data.material_versions?.[example.object_id]?.map(r=>r.number)});
+    results.push({body:example.body,first:before,retry:after,material_rounds_after_first:data.material_cards?.[example.object_id]?.map(r=>r.number)});
   }
   const changed={...input.examples[0],body:'changed first'},f=fixture({fetch:transport});setup(f,changed);await f.context.saveComment();
   f.textarea.value='changed second';await f.context.saveComment();assert.equal(f.messages.at(-1),'评论已保存');

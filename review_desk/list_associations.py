@@ -58,7 +58,7 @@ def material_uses(store, entries):
     from .material_storage import canonical_id
     by_id = {item['canonical_material_id']: item for item in entries}
     candidate_owners = {}
-    for row in store.db.execute("SELECT DISTINCT m.material_id,r.object_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result'"):
+    for row in store.db.execute("SELECT DISTINCT m.material_id,r.object_id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE m.role='result'"):
         candidate_owners.setdefault(row['object_id'], set()).add(canonical_id(store, row['material_id']))
     cache = {}
 

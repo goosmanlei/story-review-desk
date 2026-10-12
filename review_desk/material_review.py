@@ -3,36 +3,8 @@ from . import production as p
 
 
 def context(store, asset):
-    from .production_current import enabled, candidate_context
-    if enabled(store):
-        return candidate_context(store, asset)
-    call_ref = asset['payload'].get('production')
-    call = p.ref_record(store, call_ref, {'CALL'}) if call_ref else None
-    if call:
-        # Entity cards consume these contexts directly, without going through
-        # production.snapshot. Enrich the exact call at this shared boundary.
-        from .shot_references import enrich_detail
-        enrich_detail(store, {'record': call})
-    plans = [p.ref_record(store, ref, {'REQUIREMENT'})
-             for ref in asset['payload'].get('candidate_requirements', [])]
-    inputs = []
-    if call:
-        for value in call['payload'].get('inputs', []):
-            if value.get('revision_id'):
-                inputs.append(p.ref_record(store, value))
-    from .material_storage import canonical_id
-    from .material_model import definition
-    unique={}
-    for plan in plans:
-        unique.setdefault(canonical_id(store,plan['object_id']),plan)
-    if call:
-        _,provenance,_=definition(store,call)
-        evidence=provenance.get('requirements')
-        if evidence:
-            exact=p.ref_record(store,evidence['record'])
-            unique[canonical_id(store,exact['object_id'])]=exact
-    return {'call': call, 'requirements': list(unique.values()), 'associated_requirements':plans,
-            'inputs': inputs}
+    from .production_current import candidate_context
+    return candidate_context(store, asset)
 
 
 def enrich_media(store, media):
