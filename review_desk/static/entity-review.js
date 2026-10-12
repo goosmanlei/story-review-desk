@@ -272,9 +272,7 @@ function renderEntityReview(root){
   // Old state URLs still select that state's actual material. New entity
   // entries start with the first real source and its current plan.
   if(!data.unifiedMaterialId){const exact=state.materialCommentCard?.data===data?state.materialCommentCard.material_id:null;const wanted=data.requestedState;data.unifiedMaterialId=exact||(wanted&&groups.find(g=>g.row.object_id===wanted)?.models[0]&&materialModelKey(groups.find(g=>g.row.object_id===wanted).models[0]))||null;}
-  for(const group of groups){const section=materialSourceSection(sources,group.label,group.row,body=>{
-    if(group.row.kind==='STATE')reviewTextBlocks(body,group.row);else {const host=materialTextSurface(body,group.row);const block=group.row.payload.blocks?.find(b=>b.id==='description');if(block)nodeText('p',null,block.text,host).dataset.blockId=block.id;else materialField(host,group.row,'production_description',null);reviewNotes(host,group.row)}
-  });renderUnifiedModels(section,group.models,data);}
+  for(const group of groups){const section=materialSourceSection(sources,group.label,group.row,body=>materialSourceText(body,group.row));renderUnifiedModels(section,group.models,data);}
   if(!groups.length)nodeText('p','production-meta','此实体尚无独立素材需求',sources);
   if(data.historicalMedia){const original=el('section','entity-review-secondary');original.setAttribute('aria-label','评论对应的素材版本');nodeText('h3',null,'评论对应的素材版本',original);renderEntityReviewMedia(original,[data.historicalMedia],null,'entityReviewHistoricalMedia');root.append(original)}
 
@@ -400,10 +398,6 @@ function locateEntityReviewCommentLoaded(comment){
   if(row.kind==='RELATION'){data.selectedRelation=row.object_id;if((data.relationships||[]).some(r=>r.object_id===row.object_id))data.localVersions[row.object_id]=row;else data.historicalRelation=row}
   data.selectedCandidates||={};if(row.kind==='ASSET')for(const [mid,rounds] of Object.entries(data.material_versions||{})){if(rounds.some(round=>round.members.some(member=>member.id===row.id)))data.selectedCandidates[mid]=row.id}
   state.reviewCommentScope=null;focusProductionReview(entityReviewDetail(row),false);state.selected=comment.id;renderProductionReader();
-  if(['STATE','AV_SHOT'].includes(row.kind)&&state.unifiedCardRoot){
-    const field=productionTextBlocks(row).find(b=>b.id===comment.anchor.block_id)?.field;
-    const group=row.kind==='STATE'?state.unifiedCardRoot.querySelector(`[data-source-revision="${CSS.escape(row.id)}"]`):[...state.unifiedCardRoot.querySelectorAll('.material-source-group')].find(g=>g.sourceFields?.includes(field));
-    if(group)return group.openSourceExplanation().then(popup=>{if(!popup?.isConnected||state.entityReview!==data)return false;popup.querySelector('.review-surface')?.reviewFocus?.();state.selected=comment.id;paintProductionReview();renderComments();return locateProductionComment(comment,true)!==false});
-  }
+  if(['STATE','AV_SHOT'].includes(row.kind)&&state.unifiedCardRoot&&!document.querySelector(`[data-production-blocks="${CSS.escape(row.id)}"] [data-block-id="${CSS.escape(comment.anchor.block_id||'')}"]`))return openProductionCommentOriginal(row,comment).then(value=>value!==false);
   if(materialPlanCommentNeedsHistory(row,comment))return openProductionCommentOriginal(row,comment).then(()=>true);return locateProductionComment(comment,true)!==false;
 }
