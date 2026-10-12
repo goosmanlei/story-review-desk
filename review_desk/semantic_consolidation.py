@@ -359,8 +359,14 @@ def apply(store, plan, *, fault=None):
         receipt = {'format': FORMAT, 'id': plan['id'], 'mapping': plan['mapping'],
                    'relations':plan['relations'],
                    'retired': {oid:current.checksum(v) for oid,v in patches.items() if is_retired(v)},
+                   'content_sha256': {oid: current.checksum(v) for oid, v in patches.items()},
+                   'before_sha256': {oid: marker['content_sha256'] for oid, marker in plan['guards'].items()},
                    'retired_candidates': plan.get('retired_candidate_ids', []),
                    'changed_objects': sorted(patches), 'already_applied': False}
+        from .material_origin import validate_output_name
+        for oid, payload in patches.items():
+            if oid in rows and rows[oid]['kind'] == 'REQUIREMENT':
+                validate_output_name(store, oid, payload)
         store.db.execute('INSERT INTO production_current_operations VALUES (?,?,?)',
                          (plan['id'], current.checksum(plan), canonical(receipt)))
         for comment in store.comments():
@@ -434,6 +440,8 @@ def validate(store):
     for relation in relations.current(store):
         if relation['payload'].get('status')!='withdrawn' and any(oid in retired for oid in relation['payload']['endpoints']):
             raise Conflict('retired object remains a current relationship endpoint: '+relation['object_id'])
+    from .material_origin import validate_state_ownership
+    validate_state_ownership(store)
 
 
 def cleanup_files(store, operation_id):

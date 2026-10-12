@@ -9,8 +9,15 @@ from review_desk.store import Store, Conflict
 
 
 class SemanticConsolidationTest(unittest.TestCase):
-    for name in ('setUp','tearDown','spec','put','ref','entity','full','need','setup_plans','media','migrate'):
+    for name in ('setUp','tearDown','spec','put','ref','entity','full','need','setup_plans','media'):
         locals()[name] = getattr(CurrentProductionTest, name)
+
+    def migrate(self, activate=False):
+        result = CurrentProductionTest.migrate(self, activate)
+        # Shared overall use no longer keeps an otherwise empty form alive.
+        # This separately prepared detail gives wet its own real work.
+        self.put(self.need(state='wet', slot='fold-detail', required=False))
+        return result
 
     def choices(self):
         return {'merges':[{'source':'need-wet-overall','target':'need-full-overall',

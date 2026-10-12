@@ -193,6 +193,9 @@ def check_adjustment(store, object_id, payload):
         expected = copy.deepcopy(source['payload']['generation'])
         for key in ('method','model','parameters','prompt','output','randomization','execution'):
             if key in snap['request']: expected[key] = copy.deepcopy(snap['request'][key])
+        from .production_current import enabled
+        if enabled(store) and expected.get('output'):
+            expected['output']['name'] = payload['title']
         for item in expected['inputs']:
             actual = p.ref_record(store, item['reference'])
             item['reference'] = {'object_id': actual['object_id'], 'revision_id': actual['id']}

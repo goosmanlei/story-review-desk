@@ -440,6 +440,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
         full_states.validate_reference_requirement(store, p)
         from .generation import validate_plan
         validate_plan(store, object_id, p)
+        if check_current:
+            from .material_origin import validate_output_name
+            validate_output_name(store, object_id, p)
         if check_current and store.db.execute("""SELECT 1 FROM objects o JOIN revisions r ON r.id=o.current_revision
                 WHERE o.kind='REQUIREMENT' AND o.id!=? AND json_extract(r.payload,'$.format')='production-requirement-v1'
                 AND json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.slot')=?""",
@@ -634,6 +637,11 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
                     raise ValueError("material relation downstream is missing") from exc
                 if downstream["kind"] != "REQUIREMENT":
                     raise ValueError("material relation downstream must be a requirement")
+        if check_current:
+            from .production_current import enabled as current_enabled
+            if current_enabled(store):
+                from .semantic_consolidation import validate as validate_current_tree
+                validate_current_tree(store)
         if transaction:
             if validate_only:
                 store.db.rollback()

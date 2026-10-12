@@ -89,6 +89,10 @@ def reuse(store, request):
         for key in ('method','model','parameters','prompt','output','randomization','execution'):
             if key in actual:
                 plan[key] = copy.deepcopy(actual[key])
+        # Keep the historical submission intact; its copied output belongs to
+        # today's stable material identity and uses today's reviewed name.
+        if current.enabled(store) and plan.get('output'):
+            plan['output']['name'] = need['payload']['title']
         for item in plan['inputs']:
             ref = item['reference']
             target = p.ref_record(store, ref)
