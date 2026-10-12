@@ -23,6 +23,8 @@ class RemovalTest(unittest.TestCase):
             self.store.db.execute("INSERT INTO production_legacy_links VALUES ('old','need','REQUIREMENT',NULL,NULL,NULL,'removed','hash')")
             self.store.db.execute("INSERT INTO consolidation_revisions VALUES ('old','need','REQUIREMENT',2,NULL,'hash',NULL,'prior')")
             self.store.db.execute("INSERT INTO consolidation_missing VALUES ('old','input','entity','earlier')")
+            self.store.db.execute('CREATE TABLE IF NOT EXISTS read_generations (name TEXT PRIMARY KEY, token TEXT NOT NULL)')
+            self.store.db.execute("INSERT OR REPLACE INTO read_generations VALUES ('material_plan_versions',?)", ('a'*32,))
 
     def test_physical_removal_preserves_other_rows_and_is_repeatable(self):
         self.old_indexes()
@@ -32,6 +34,7 @@ class RemovalTest(unittest.TestCase):
         self.assertEqual(receipt['removed_draft_links'], 1)
         self.assertEqual(receipt['freelist_pages'], 0)
         self.assertFalse(receipt['backup_created'])
+        self.assertFalse(self.store.db.execute("SELECT 1 FROM read_generations WHERE name='material_plan_versions'").fetchone())
         self.assertNotIn(b'DISCARDED-MATERIAL-DRAFT', self.store.db_path.read_bytes())
         for table in receipt['preserved_tables']:
             self.assertEqual(receipt['after'][table], before[table])
