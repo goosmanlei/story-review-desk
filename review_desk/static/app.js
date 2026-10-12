@@ -458,6 +458,7 @@ function renderWorkspaceNav(){
 }
 
 function storyDraftMetaKey(){
+  if(typeof isMethodsReading==='function'&&isMethodsReading())return 'review-method-editor:'+JSON.stringify([methodView.document.record.object_id,methodView.document.record.revision_id,methodView.document.file])+(commentPageId?':page:'+commentPageId:'');
   if(!['story.sources','story.outline'].includes(state.workspace))return null;
   const ref=isStructure()?state.structureRevision:state.current?.target_revision_id;if(!ref)return null;
   return 'review-story-editor:'+JSON.stringify([state.workspace,ref])+(commentPageId?':page:'+commentPageId:'');

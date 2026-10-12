@@ -416,8 +416,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/record':
             try:
-                from .methods import read
-                return self._json(read(store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0]))
+                from .methods import read, condition_texts, FORMATS
+                record = read(store, query.get('object_id', [None])[0], query.get('revision_id', [None])[0])
+                if record['payload']['format'] in (FORMATS['skill'], FORMATS['binding']):
+                    record['condition_texts'] = condition_texts(record)
+                return self._json(record)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
         if path == "/api/production" or path.startswith("/api/production/"):

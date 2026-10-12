@@ -75,6 +75,19 @@ class MethodsTest(unittest.TestCase):
         fresh = methods.prepare(self.store, {**self.request, 'step_id': 'paragraph-2'})
         self.assertEqual(fresh['payload']['package']['version'], 2)
 
+    def test_navigation_versions_include_unbound_history_without_file_copies(self):
+        payload = copy.deepcopy(self.method['payload'])
+        payload['files']['SKILL.md'] += '\nA version saved for later.'
+        latest = methods.save(self.store, {'category': 'skill', 'name': 'review',
+                                          'expected_version': 1, 'payload': payload})
+        catalog = methods.catalog(self.store)
+        self.assertEqual(catalog['versions'][latest['object_id']], [
+            {**methods.reference(latest), 'version': 2},
+            {**methods.reference(self.method), 'version': 1}])
+        self.assertEqual(catalog['binding'][0]['payload']['rules'][0]['revision_id'], self.method['revision_id'])
+        self.assertEqual(catalog['referenced'][self.method['revision_id']], self.method)
+        self.assertNotIn('files', catalog['versions'][latest['object_id']][0])
+
     def test_conflict_does_not_overwrite_and_missing_chapter_is_rejected(self):
         payload = copy.deepcopy(self.method['payload'])
         payload['title'] = 'Other editor'
