@@ -13,6 +13,10 @@ class MaterialOriginTest(unittest.TestCase):
 
     def test_usage_does_not_add_an_owner_and_baseline_is_optional(self):
         self.migrate()
+        # Moving an overall use to the entity cannot orphan a state. This
+        # genuinely separate detail remains owned by the full form.
+        detail = self.need(slot='voice-detail', required=False)
+        self.put(detail)
         row = p.record(self.store, 'need-full-overall')
         body = copy.deepcopy(row['payload'])
         body.update(scope=self.ref('songbook'), states=[self.ref('full'), self.ref('wet')])

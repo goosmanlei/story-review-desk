@@ -54,6 +54,17 @@ def verify(store, object_id, payload):
     old = store.db.execute('SELECT payload_sha256 FROM production_current_baselines WHERE object_id=?', (object_id,)).fetchone()
     if old and old[0] == sha:
         return copy.deepcopy(payload.get('method_basis')) or {'history': 'unknown', 'migration_verified': True}
+    # A reviewed semantic migration changes today's scope/names/conditions,
+    # while the original generation authoring remains an immutable fact. Its
+    # exact transaction receipt proves this content without attributing a later
+    # extraction to the old media-plan execution.
+    for raw in store.db.execute("SELECT result FROM production_current_operations WHERE json_extract(result,'$.format')='production-semantic-consolidation-v1'"):
+        receipt = json.loads(raw[0])
+        if receipt.get('content_sha256', {}).get(object_id) == sha:
+            return {'history': 'reviewed-semantic-migration', 'semantic_operation': receipt['id'],
+                    'before_sha256': receipt.get('before_sha256', {}).get(object_id),
+                    'original_media_plan_basis': copy.deepcopy(payload.get('method_basis')),
+                    'extraction_assessment': copy.deepcopy(payload.get('extraction_assessment'))}
     adjustment = payload.get('method_adjustment')
     if adjustment:
         op = 'method-adjustment-' + methods.checksum({'target': object_id, 'sha256': sha})

@@ -221,10 +221,9 @@ def scope_coverage(store, subjects, heads):
     for key, ref in used.items():
         state = ref_record(store, ref, {'STATE'})
         matches = [r for r in heads if r["kind"] == "REQUIREMENT" and r['payload'].get('status') != 'withdrawn' and
-                   (exact(r['payload']['scope']) == key or key in {exact(s) for s in r['payload'].get('states', [])}) and
+                   exact(r['payload']['scope']) == key and
                    r['payload']['required'] is True and r['payload']['media_type'] == state['payload']['reference_media'] and
-                   (r['payload']['specification'].get('reference_role') == 'overall' or
-                    ref_record(store,r['payload']['scope'])['kind'] == 'ENTITY')]
+                   r['payload']['specification'].get('reference_role') == 'overall']
         if not matches:
             issues.append({"code": "missing_overall_reference_requirement", "state": ref})
     return {"checked_count": checked, "states": list(used.values()), "issues": issues}
