@@ -40,30 +40,30 @@ function modelSmallItem(model){
   const row=model.need||model.identity||model.candidates[0]?.record,real=(model.candidates||[]).filter(i=>!i.record.payload.placeholder&&i.record.payload.components.some(c=>c.role==='original'));
   return {...model.cardCounts,business_code:materialModelCode(model),object_id:materialModelKey(model),id:row.id,title:row.payload.generation?.output.name||row.payload.title,media_type:row.payload.media_type,scope:row.payload.scope,slot:row.payload.slot,generated:real.length>0,preview:real.flatMap(i=>i.record.payload.components).find(c=>c.role==='original'&&c.mime.startsWith('image/'))||real.flatMap(i=>i.record.payload.components).find(c=>['preview','thumbnail'].includes(c.role)&&c.mime.startsWith('image/'))};
 }
-// A source explanation is an exact comment surface, opened on demand. Merely
-// hovering it never changes the selected material, candidate or comment draft.
+// Source help is transient information. Original comments use the existing
+// exact-text reader, so hovering never enters or changes a review session.
+function materialSourceText(parent,row,fields=null){
+  const host=el('div','material-source-text');parent.append(host);
+  for(const block of productionTextBlocks(row).filter(block=>!fields||fields.includes(block.field)||fields.includes(block.id)))nodeText('p',null,block.text,host);
+  return host;
+}
 function materialSourceSection(parent,label,row,render){
   const section=el('section','material-source-group'),heading=el('div','material-source-heading');section.dataset.sourceRevision=row.id;section.setAttribute('aria-label',label);nodeText('h4',null,label,heading);section.append(heading);parent.append(section);
-  const button=productionButton(heading,'?',()=>open(true));button.className='material-source-question';button.setAttribute('aria-label',label+'来源说明');button.setAttribute('aria-expanded','false');
-  let popup=null,session=null,timer=null,pinned=false,suppressFocus=false,ready=Promise.resolve();
-  const close=()=>{clearTimeout(timer);if(!popup)return;popup.dispatchEvent(new Event('close'));popup.remove();popup=null;session=null;pinned=false;button.setAttribute('aria-expanded','false')};
+  const button=productionButton(heading,'',()=>open());button.className='material-source-question';button.append(productionEntityIcon('help'));button.setAttribute('aria-label',label+'来源说明');button.setAttribute('aria-expanded','false');
+  let popup=null,timer=null;
+  const close=()=>{clearTimeout(timer);popup?.remove();popup=null;button.setAttribute('aria-expanded','false')};
   const enclosingDialog=button.closest('dialog');enclosingDialog?.addEventListener('close',event=>{if(event.target===enclosingDialog)close()},{capture:true});
-  const dismiss=()=>{close();suppressFocus=true;button.focus({preventScroll:true})};
-  const leave=()=>{clearTimeout(timer);timer=setTimeout(()=>{if(!pinned&&!popup?.contains(document.activeElement))close()},160)};
-  const open=(pin=false)=>{
-    clearTimeout(timer);pinned=pinned||pin;if(popup)return;
-    popup=el('section','material-source-explanation');popup.setAttribute('role','dialog');popup.setAttribute('aria-label',label+'来源说明');popup.tabIndex=-1;(button.closest('dialog')||document.body).append(popup);button.setAttribute('aria-expanded','true');
-    productionButton(popup,'关闭来源说明',dismiss);
+  const leave=()=>{clearTimeout(timer);timer=setTimeout(close,100)};
+  const open=()=>{
+    clearTimeout(timer);if(popup)return;
+    popup=el('section','material-source-explanation');popup.setAttribute('role','tooltip');popup.setAttribute('aria-label',label+'来源说明');(button.closest('dialog')||document.body).append(popup);button.setAttribute('aria-expanded','true');
     const currentPopup=popup,body=el('div','material-source-description');popup.append(body);
-    const selectionAction=document.querySelector('#selection-action'),actionParent=selectionAction?.parentNode,actionNext=selectionAction?.nextSibling;
-    popup.addEventListener('close',()=>{if(actionParent&&selectionAction.parentNode===currentPopup)actionParent.insertBefore(selectionAction,actionNext?.parentNode===actionParent?actionNext:null)},{once:true});
-    ready=Promise.resolve(render(body)).then(()=>{if(popup!==currentPopup||!currentPopup.isConnected)return;for(const host of body.querySelectorAll('.review-surface')){const focus=()=>{pinned=true;const source=host.sourceRecord||row;if(session?.sourceId!==source.id){session?.close?.();rememberProductionDraft();session=referenceReviewSession(currentPopup,entityReviewDetail(source));session.sourceId=source.id}session.focus();if(selectionAction&&selectionAction.parentNode!==currentPopup)currentPopup.append(selectionAction);paintProductionReview();renderComments()};host.reviewFocus=focus;host.onpointerdown=focus;host.onfocusin=focus;}paintProductionReview()}).catch(error=>{if(popup===currentPopup&&currentPopup.isConnected){body.replaceChildren();nodeText('p','production-issue','来源说明读取失败：'+error.message,body);productionButton(body,'重试',()=>{close();open(true)})}});
+    Promise.resolve(render(body)).catch(error=>{if(popup===currentPopup&&currentPopup.isConnected){body.replaceChildren();nodeText('p','production-issue','来源说明读取失败：'+error.message+'；重新悬停可重试。',body)}});
     const rect=button.getBoundingClientRect(),width=Math.min(420,window.innerWidth-24),below=window.innerHeight-rect.bottom-18,height=Math.min(520,below<280&&rect.top>280?rect.top-18:Math.max(160,below)),top=below<280&&rect.top>280?rect.top-height-6:Math.min(rect.bottom+6,window.innerHeight-height-12);popup.style.width=width+'px';popup.style.left=Math.max(12,Math.min(rect.left,window.innerWidth-width-12))+'px';popup.style.top=Math.max(12,top)+'px';popup.style.maxHeight=height+'px';
-    popup.onmouseenter=()=>clearTimeout(timer);popup.onmouseleave=leave;popup.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();dismiss()}};
-    popup.onfocusout=leave;
+    popup.onmouseenter=()=>clearTimeout(timer);popup.onmouseleave=leave;
   };
-  button.onmouseenter=()=>open();button.onfocus=()=>{if(!suppressFocus)open()};button.onmouseleave=leave;button.onblur=()=>{suppressFocus=false;leave()};button.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close();suppressFocus=true}else if(event.key==='Tab'&&!event.shiftKey&&popup){event.preventDefault();pinned=true;popup.querySelector('button')?.focus()}};
-  section.closeSourceExplanation=close;section.openSourceExplanation=async()=>{open(true);await ready;return popup};return section;
+  button.onmouseenter=open;button.onfocus=open;button.onmouseleave=leave;button.onblur=close;button.onkeydown=event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();close()}};
+  section.closeSourceExplanation=close;return section;
 }
 function unifiedModelSelection(models,data){
   if(data===state.entityReview)return models.find(m=>materialModelKey(m)===data.unifiedMaterialId)||models[0];
@@ -405,10 +405,9 @@ function renderShotEntityWorkspace(root,data){
       for(const {states,ids} of sections.values()){
         const label=group.label+(sections.size>1&&states.length?' · '+states.map(s=>s.title||s.description.split(/[：:；。]/u)[0]).join('／'):'');
         const section=materialSourceSection(panel,label,shot,async body=>{
-          if(states.length){const surface=materialTextSurface(body,shot);for(const keyState of states){const index=shot.payload.key_states.findIndex(s=>s.id===keyState.id);materialField(surface,shot,`key_states.${index}.description`,null)}}
-          else for(const id of ids){const summary=by.get(id).need;const result=await api('/api/production/material-source?'+new URLSearchParams({object_id:summary.object_id,revision_id:summary.id,expected_version:summary.version}));const surface=materialTextSurface(body,result.record);surface.sourceRecord=result.record;for(const block of productionTextBlocks(result.record)){const text=nodeText('p',null,block.text,surface);text.dataset.blockId=block.id}}
+          if(states.length)materialSourceText(body,shot,states.map(keyState=>`key_states.${shot.payload.key_states.findIndex(s=>s.id===keyState.id)}.description`));
+          else for(const id of ids){const summary=by.get(id).need;const result=await api('/api/production/material-source?'+new URLSearchParams({object_id:summary.object_id,revision_id:summary.id,expected_version:summary.version}));materialSourceText(body,result.record)}
         });
-        section.sourceFields=states.map(s=>`key_states.${shot.payload.key_states.findIndex(k=>k.id===s.id)}.description`);
         const list=el('div','material-small-list');list.setAttribute('aria-label',label+'素材');section.append(list);for(const id of ids){const model=by.get(id);materialSmallCard(list,modelSmallItem(model),()=>select(id),selected===id)}
       }
     }

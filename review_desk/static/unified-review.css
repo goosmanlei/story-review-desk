@@ -252,13 +252,15 @@
 .entity-review-lyrics p { white-space:pre-line; }
 .material-source-group{margin:20px 0;border-top:1px solid var(--desk-line);padding-top:12px}
 .material-source-heading{display:flex;align-items:center;gap:8px}.material-source-heading h4{margin:0;min-width:0;overflow-wrap:anywhere}
-.material-source-question{flex:none;width:25px;height:25px;min-height:25px!important;padding:0!important;border-radius:50%!important;font-weight:600}
+.material-source-heading .material-source-question{display:inline-flex;align-items:center;justify-content:center;flex:none;width:24px;height:24px;min-height:24px;padding:0;border:0;border-radius:var(--desk-radius);background:transparent;color:var(--desk-muted);cursor:help}
+.material-source-heading .material-source-question:hover:enabled{background:var(--desk-hover);color:var(--desk-ink)}
+.material-source-question .production-entity-icon{width:17px;height:17px}
 .material-source-group .material-small-list{grid-template-columns:repeat(2,minmax(0,1fr))}
 .material-source-group .material-small-copy strong{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
 .material-source-group .small-card-title{flex-wrap:wrap}
-.material-source-explanation{position:fixed;z-index:40;max-height:min(60dvh,600px);overflow:auto;box-sizing:border-box;background:#fffdf7;border:1px solid var(--desk-line);padding:14px;box-shadow:0 8px 30px #0003;font-size:13px;line-height:1.7}
-.material-source-explanation>.comment-panel{position:fixed;inset:80px 18px 70px auto;z-index:41;width:min(360px,calc(100vw - 36px));max-height:calc(100dvh - 150px)}
-.material-source-description .entity-review-text{margin-top:10px;padding:0}
+.material-source-explanation{position:fixed;z-index:40;max-height:min(60dvh,600px);overflow:auto;box-sizing:border-box;background:var(--desk-surface);color:var(--desk-ink);border:1px solid var(--desk-line);border-radius:var(--desk-radius);padding:12px 14px;box-shadow:0 4px 18px #17241f1a;font-size:13px;line-height:1.7}
+.material-source-text p{margin:0 0 8px;white-space:pre-wrap;overflow-wrap:anywhere}
+.material-source-text p:last-child{margin-bottom:0}
 .material-source-list{container-type:inline-size}
 @container (max-width:330px){.material-source-group .material-small-list{grid-template-columns:minmax(0,1fr)}}
 .shot-entity-workspace { margin:18px 0 30px; border:1px solid var(--line,#d5d3c4); border-radius:8px; padding:18px; }
