@@ -13,7 +13,7 @@ def material_entries(store, *, uses=True, identities=True):
 def _material_entries(store, *, uses=True, identities=True):
     needs=light.rows(store,'REQUIREMENT',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'")
     assets=light.rows(store,'ASSET',"COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'");results={};used=set()
-    for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
+    for raw in store.db.execute("SELECT m.material_id,r.*,o.kind,o.current_revision FROM material_memberships m JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id WHERE m.role='result' ORDER BY r.created_at DESC,r.version DESC,r.id DESC"):
         row=p.record_view(raw);results.setdefault(raw['material_id'],[]).append(row)
         if raw['material_id']!=row['object_id']:used.add(row['object_id'])
     from .production_current import enabled as current_enabled
@@ -264,7 +264,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
         focus=canonical_id(store,focus)
         focused=next((item for item in values if item['object_id']==focus),None)
         if focused is None:
-            mids=[r['material_id'] for r in store.db.execute('SELECT DISTINCT m.material_id FROM material_plan_members m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=?',(focus,))]
+            mids=[r['material_id'] for r in store.db.execute('SELECT DISTINCT m.material_id FROM material_memberships m JOIN revisions r ON r.id=m.revision_id WHERE r.object_id=?',(focus,))]
             focused=next((item for item in values if item['object_id'] in mids),None)
         if focused in result and focused is not None:offset=result.index(focused)//limit*limit
     return {'items':result[offset:offset+limit],'total':len(result),'offset':offset,'limit':limit,'facets':facets,
@@ -313,7 +313,14 @@ def card(store, object_id, revision_id=None, entity_id=None):
             owner=p.record(store,form['owner_object_id']) if form.get('owner_object_id') else None
             form=None
         else:owner=p.ref_record(store,form['payload']['entity'])
-    entity=entity_review.snapshot(store,entity_id or owner['object_id'], owner['id'] if owner and owner['kind']=='AV_SHOT' else None) if entity_id or owner else None
+    entity=None
+    if entity_id or owner:
+        from .entity_contract import entity_workspace
+        from .production_current import enabled
+        oid=entity_id or owner['object_id']
+        entity=(entity_workspace(store,oid,owner['id'] if owner and owner['kind']=='AV_SHOT' else None,
+                                deferred=True,load_selected=False) if enabled(store)
+                else entity_review.snapshot(store,oid,owner['id'] if owner and owner['kind']=='AV_SHOT' else None))
     if entity_id:
         allowed={entity['entity']['object_id'],*(r['object_id'] for r in entity['states']),*(r['object_id'] for r in entity.get('retained_states',[])),*(r['object_id'] for r in entity.get('comment_records',[]))}
         if row.get('cleaned_target') and row['payload']['entity']['object_id']==entity_id:
@@ -328,9 +335,9 @@ def card(store, object_id, revision_id=None, entity_id=None):
         # An explicit old demand/result remains reachable even when its source
         # has since advanced. This does not enter decision_scope or acceptance.
         if row['kind'] in ('REQUIREMENT','ASSET'):
-            for field in ('material_versions','legacy_material_versions','material_card_counts'):
+            for field in ('material_cards','material_card_counts'):
                 entity[field]={**entity.get(field,{}),**detail.get(field,{})}
-            exact_rows=[row,*[member for rounds in detail.get('material_versions',{}).values()
+            exact_rows=[row,*[member for rounds in detail.get('material_cards',{}).values()
                             for version in rounds for member in version['members']]]
             entity['comment_records']=list({r['id']:r for r in [*entity['comment_records'],*exact_rows]}.values())
             entity['comment_targets']=[b.ref(r) for r in entity['comment_records']]
@@ -431,7 +438,7 @@ def scene(store, object_id, revision_id=None, shot_revision=None, view=None, epi
                 add(read_ref(store,value['reference']),'planned_input',
                     {'kind':'planned_input','record':b.ref(need),'reference':value})
             for membership in material_plans.memberships(store,need['id']):
-                for call_ref in store.db.execute("SELECT revision_id FROM material_plan_members WHERE material_id=? AND number=? AND role='call'",(membership['material_id'],membership['number'])):
+                for call_ref in store.db.execute("SELECT revision_id FROM material_memberships WHERE material_id=? AND number=? AND role='call'",(membership['material_id'],membership['number'])):
                     call=(light.record if metadata else p.record)(store,revision_id=call_ref[0])
                     for value in call['payload'].get('inputs',[]):
                         exact=value.get('reference',value)

@@ -30,16 +30,19 @@ class GenerationTest(unittest.TestCase):
         self.put({'object_id':oid,'kind':row['kind'],'expected_version':row['version'],'payload':payload})
 
     def setup_plans(self):
-        e=self.entity();e['payload']['production_description']='掌中大小，灰蓝布封，使用压线缝合。';self.put(e)
-        self.put(self.full(production_description='完整干燥歌本，纸页平整。'), self.full('wet',production_description='封面洇湿，外沿卷起。'))
-        for form in ('full','wet'):
-            need=self.need(form);need['payload']['generation']={'format':g.PLAN,'method':'generate','tool':'test','model':'test-audio',
-                'parameters':{'format':'wav'},'prompt':'翻页后停顿，保留🧵动作间隔。','inputs':[],
-                'output':{'name':'翻页声','description':'用于核对干湿纸页差异','review_criteria':['听清动作，无失真']},'blockers':[]}
-            self.put(need)
-
-
-
+        from unittest.mock import patch
+        def seed_records(store, document, validate_only=False):
+            return p._import_records(store, document, validate_only, check_current=False)
+        with patch.object(p, 'import_records', seed_records):
+            e=self.entity();e['payload']['production_description']='掌中大小，灰蓝布封，使用压线缝合。';self.put(e)
+            self.put(self.full(production_description='完整干燥歌本，纸页平整。'), self.full('wet',production_description='封面洇湿，外沿卷起。'))
+            for form in ('full','wet'):
+                need=self.need(form);need['payload']['generation']={'format':g.PLAN,'method':'generate','tool':'test','model':'test-audio',
+                    'parameters':{'format':'wav'},'prompt':'翻页后停顿，保留🧵动作间隔。','inputs':[],
+                    'output':{'name':need['payload']['title'],'description':'用于核对干湿纸页差异','review_criteria':['听清动作，无失真']},'blockers':[]}
+                self.put(need)
+        from review_desk.semantic_consolidation import validate
+        validate(self.store)
 
 
     def test_adoption_does_not_select_a_plan_input_and_changes_require_acceptance(self):

@@ -185,7 +185,7 @@ PYTHONPATH=.:tests python3 tests/creation_ui_server.py --port 8803 --evidence /t
 
 新建素材评论的正文及待确认请求按素材 ID 和方案版本隔离；已有评论编辑按本页、准确目标修订、评论 ID 和原圈选分别保存。旧无轮次草稿无法推断归属，保留原文供查看／复制，仅在用户明确选择恢复到当前轮次且本轮没有草稿时迁移。切换到另一素材卡时同步撤下已失去锚点的编辑器，原准确范围草稿仍可恢复。旧修订反馈在断响应前已推进历史轮次时，原样重试仍确认原提交；新评论不再推动素材版本。
 
-新增夹具 `tests/material_ui_server.py --port FREE_PORT` 提供完整图幅、同版多候选、混合输入及三层预览；验证几何和交互，不生成媒体。迁移、并发及恢复规则见 [方案版本与候选](material-versions.md)。
+新增夹具 `tests/material_ui_server.py --port FREE_PORT` 提供完整图幅、同版多候选、混合输入及三层预览；验证几何和交互，不生成媒体。迁移、并发及恢复规则见 [方案版本与候选](current-materials.md)。
 
 ## 并行编辑与冲突后的继续处理
 

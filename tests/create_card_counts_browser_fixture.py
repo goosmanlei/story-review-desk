@@ -4,14 +4,14 @@ import copy
 import json
 import shutil
 from pathlib import Path
-from test_material_plans import PlanVersionsTest
+from current_material_fixture import MaterialFixture
 from review_desk import production as p, generation as g, entity_review as er, material_plans as mp
 
 
 def create(destination):
     destination = Path(destination).resolve()
     if destination.exists():raise ValueError('fixture must be new')
-    f = PlanVersionsTest();f.setUp()
+    f = MaterialFixture();f.setUp()
     try:
         f.setup_plans();f.generate();f.generate('call2', 'result2')
         # Multiple file components of the same original remain one candidate.

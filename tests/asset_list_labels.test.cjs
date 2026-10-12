@@ -15,12 +15,12 @@ function render(records,episodes=[]){
 }
 test('asset card totals are independent of selected version and record revision, with navigation',()=>{
   const f=render([{object_id:'old-result',kind:'ASSET',version:9,material_version:1,material_generated:true,card_counts:{version_count:2,candidate_count:3},payload:{title:'Older result'}}]);
-  assert.equal(f.subtitle(f.buttons[0]),'版本 2 个 · 候选 3 个');f.buttons[0].onclick();assert.deepEqual(f.opened,['old-result']);assert.equal(f.buttons[0].className,'material-small-card');
+  assert.equal(f.subtitle(f.buttons[0]),'候选 3 个');f.buttons[0].onclick();assert.deepEqual(f.opened,['old-result']);assert.equal(f.buttons[0].className,'material-small-card');
 });
 test('asset list without a positive integer material round does not invent a version or empty label',()=>{
   for(const material_version of [undefined,null,0,-1,'2']){
     const f=render([{object_id:'legacy',kind:'ASSET',version:9,material_version,payload:{title:'Legacy original'}}]);
-    assert.equal(f.title(f.buttons[0]),'Legacy original');assert.equal(f.subtitle(f.buttons[0]),'版本未登记 · 候选未登记');
+    assert.equal(f.title(f.buttons[0]),'Legacy original');assert.equal(f.subtitle(f.buttons[0]),'候选未登记');
   }
 });
 test('other production records retain their record revision label',()=>{

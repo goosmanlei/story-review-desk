@@ -3,23 +3,23 @@ import copy
 import unittest
 from unittest.mock import patch
 
-import test_material_plans as fixtures
+import current_material_fixture as fixtures
 from review_desk import generation as g, production as p, ui_projection as ui
 
 
 class UiProjectionTest(unittest.TestCase):
-    setUp = fixtures.PlanVersionsTest.setUp
-    tearDown = fixtures.PlanVersionsTest.tearDown
-    spec = fixtures.PlanVersionsTest.spec
-    put = fixtures.PlanVersionsTest.put
-    ref = fixtures.PlanVersionsTest.ref
-    entity = fixtures.PlanVersionsTest.entity
-    full = fixtures.PlanVersionsTest.full
-    need = fixtures.PlanVersionsTest.need
-    media = fixtures.PlanVersionsTest.media
-    change = fixtures.PlanVersionsTest.change
-    setup_plans = fixtures.PlanVersionsTest.setup_plans
-    generate = fixtures.PlanVersionsTest.generate
+    setUp = fixtures.MaterialFixture.setUp
+    tearDown = fixtures.MaterialFixture.tearDown
+    spec = fixtures.MaterialFixture.spec
+    put = fixtures.MaterialFixture.put
+    ref = fixtures.MaterialFixture.ref
+    entity = fixtures.MaterialFixture.entity
+    full = fixtures.MaterialFixture.full
+    need = fixtures.MaterialFixture.need
+    media = fixtures.MaterialFixture.media
+    change = fixtures.MaterialFixture.change
+    setup_plans = fixtures.MaterialFixture.setup_plans
+    generate = fixtures.MaterialFixture.generate
 
     def summary(self):
         return ui.entity_summaries(self.store, [p.record(self.store, 'songbook')], ui.material_entries(self.store))
@@ -36,7 +36,7 @@ class UiProjectionTest(unittest.TestCase):
         context={'summary':'仅用于构图','record':{'id':'relation-r1'}}
         with patch('review_desk.business_relations.input_context',return_value=context):
             data=shot_workspace(self.store,'shot')
-        for plan in (data['requirements'][0],data['material_versions']['shot-reference'][0]['plan']):
+        for plan in (data['requirements'][0],data['material_cards']['shot-reference'][0]['plan']):
             self.assertEqual(plan['review_shot_slots'][0]['relation_context'],context)
             self.assertEqual(plan['review_input_records'][0]['id'],self.ref('need-full-overall')['revision_id'])
 
@@ -78,7 +78,7 @@ class UiProjectionTest(unittest.TestCase):
         result = ui.card(self.store, original['object_id'], original['revision_id'])
         self.assertEqual(result['detail']['record']['id'], original['revision_id'])
         self.assertEqual(result['detail']['record']['payload']['generation']['prompt'], plan['prompt'])
-        current = result['entity_review']['material_versions']['need-full-overall'][0]
+        current = result['entity_review']['material_cards']['need-full-overall'][0]
         self.assertEqual(current['number'], 2)
         self.assertEqual(current['results'], [])
 
@@ -97,7 +97,7 @@ class UiProjectionTest(unittest.TestCase):
         entries = {row['object_id']: row for row in ui.material_entries(self.store)}
         item = entries['need-full-overall']
         self.assertEqual((item['generated'], item['generation_scope']), (True, 'history'))
-        versions = p.snapshot(self.store, object_id='need-full-overall')['material_versions']['need-full-overall']
+        versions = p.snapshot(self.store, object_id='need-full-overall')['material_cards']['need-full-overall']
         self.assertEqual(versions[0]['results'], [])
         self.assertTrue(any(r['id'] == original['revision_id'] for version in versions[1:] for r in version['members']))
         # A standalone exact asset and an empty demand have different scopes.
@@ -117,7 +117,7 @@ class UiProjectionTest(unittest.TestCase):
         self.assertEqual(item['record']['id'], exact['revision_id'])
         self.assertEqual(item['association'], 'applicable')
         self.assertEqual(data['shots'][0]['context']['adoptions'], [])
-        versions = ui.card(self.store, **{'object_id': exact['object_id'], 'revision_id': exact['revision_id']})['detail']['material_versions'][exact['object_id']]
+        versions = ui.card(self.store, **{'object_id': exact['object_id'], 'revision_id': exact['revision_id']})['detail']['material_cards'][exact['object_id']]
         self.assertEqual(versions[0]['results'], [])
 
     def test_breakdown_reads_only_list_metadata_but_keeps_exact_card_and_counts(self):

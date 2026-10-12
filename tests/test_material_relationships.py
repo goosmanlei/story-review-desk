@@ -40,7 +40,7 @@ class MaterialRelationshipsTest(unittest.TestCase):
         self.change('need-full-voice-detail',status='withdrawn',withdrawal_reason='当前准备不再使用，保留原件与历史轮次')
         view=g.snapshot(self.store,'songbook')
         self.assertNotIn('need-full-voice-detail',[r['object_id'] for r in view['requirements']])
-        rounds=view['material_versions']['need-full-voice-detail']
+        rounds=view['material_cards']['need-full-voice-detail']
         self.assertIn('voice',[r['object_id'] for version in rounds for r in version['results']])
 
     def test_relationship_revision_preserves_the_original_comment_and_evidence_after_restore(self):

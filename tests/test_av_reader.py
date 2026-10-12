@@ -58,7 +58,7 @@ class AvReaderTest(unittest.TestCase):
             data=entity_contract.shot_workspace(self.store,'shot',deferred=True,material_id='video')
             with patch('review_desk.production_current.submission',side_effect=AssertionError('unselected snapshot')):
                 decorated=annotate(self.store,data)
-        candidate=decorated['material_versions']['camera'][0]['results'][0]
+        candidate=decorated['material_cards']['camera'][0]['results'][0]
         self.assertNotIn('submission',candidate)
         self.assertEqual(candidate['candidate_number'],1)
         self.assertTrue(candidate['deferred_detail'])

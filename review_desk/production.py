@@ -117,11 +117,7 @@ def record(store, object_id=None, revision_id=None):
     if value["kind"]=="DELETED_STATE":
         from .state_cleanup import view
         value=view(value)
-    memberships_cache = reads.setdefault('round_memberships', {}) if reads is not None else {}
-    if value['id'] not in memberships_cache:
-        memberships_cache[value['id']] = store.db.execute('SELECT material_id,number FROM material_members WHERE revision_id=? ORDER BY number DESC,material_id', (value['id'],)).fetchall()
-    memberships = memberships_cache[value['id']]
-    value['material_round_numbers'] = {v['material_id']: v['number'] for v in reversed(memberships)}
+
     return value
 
 
@@ -557,11 +553,6 @@ def current_records(store, kinds=None):
             from .production_current import annotate
             value=annotate(store, value)
             if value["payload"].get("format") in FORMATS:
-                if value['kind']=='ASSET':
-                    # Match the default detail card: associated material first,
-                    # then its latest round containing this exact revision.
-                    member=store.db.execute('SELECT number FROM material_plan_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone() or store.db.execute('SELECT number FROM material_members WHERE revision_id=? ORDER BY (material_id=?),material_id,number DESC LIMIT 1',(value['id'],value['object_id'])).fetchone()
-                    value['material_version']=member[0] if member else None
                 result.append(value)
     return result
 
@@ -626,7 +617,6 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
             resolved[object_id] = result["revision"]
             from .production_current import enabled as current_enabled
             if check_current and not current_enabled(store):
-                from .material_plans import register
                 register(store, record(store, revision_id=result['revision']))
         for result in results:
             row = record(store, revision_id=result["revision"])
@@ -675,17 +665,11 @@ def remove_unreferenced_requirements(store, removals):
     for oid in sorted(ids):
         store.db.execute('DELETE FROM dependencies WHERE from_revision IN (SELECT id FROM revisions WHERE object_id=?)', (oid,))
     for oid in sorted(ids):
-        if store.db.execute('SELECT 1 FROM material_feedback WHERE material_id=?', (oid,)).fetchone():
-            raise Conflict('cannot remove a material with revision feedback')
-        if store.db.execute("SELECT 1 FROM material_plan_members WHERE material_id=? AND role!='plan'", (oid,)).fetchone():
+        if store.db.execute("SELECT 1 FROM material_memberships WHERE material_id=? AND role!='plan'", (oid,)).fetchone():
             raise Conflict('cannot remove material with actual calls or candidates')
-        store.db.execute('DELETE FROM material_definition_versions WHERE material_id=?', (oid,))
         store.db.execute('DELETE FROM material_aliases WHERE alias_id=?', (oid,))
         if store.db.execute('SELECT 1 FROM material_aliases WHERE material_id=?',(oid,)).fetchone():raise Conflict('cannot remove an explicitly shared material')
-        store.db.execute('DELETE FROM material_plan_members WHERE material_id=?', (oid,))
-        store.db.execute('DELETE FROM material_plan_versions WHERE material_id=?', (oid,))
-        store.db.execute('DELETE FROM material_members WHERE material_id=?', (oid,))
-        store.db.execute('DELETE FROM material_rounds WHERE material_id=?', (oid,))
+        store.db.execute('DELETE FROM production_current_records WHERE object_id=?', (oid,))
         store.db.execute('DELETE FROM revisions WHERE object_id=?', (oid,))
         store.db.execute('DELETE FROM objects WHERE id=?', (oid,))
     return sorted(ids)
@@ -705,7 +689,7 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
         from .semantic_consolidation import is_retired
         if is_retired(selected['payload']):
             return {'record':selected, 'history':[selected], 'uses':[], 'reference_titles':[],
-                    'retired':True, 'material_versions':{}, 'legacy_material_versions':{}}
+                    'retired':True, 'material_cards':{}}
         if selected.get('unavailable'):
             if selected.get('retired_review'):
                 return {'record':selected, 'history':[], 'comments':selected['history_comments'], 'uses':[], 'reference_titles':[]}
@@ -749,20 +733,15 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
             candidates=[a for a in candidates if any(ref.get('object_id')==selected['object_id'] for ref in a['payload'].get('candidate_requirements', []))]
             result['candidate_records']=candidates
             result['review_contexts']={a['id']:context(store,a) for a in candidates}
-        from .material_versions import for_record as legacy_versions
         from .material_plans import for_record
-        from .production_current import enabled as current_enabled
-        result['legacy_material_versions'] = legacy_versions(store, selected) if not current_enabled(store) and selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
-        result['material_versions'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
-        if not result['material_versions']:
-            result['material_versions'] = result['legacy_material_versions']
+        result['material_cards'] = for_record(store, selected) if selected['kind'] in ('REQUIREMENT', 'ASSET') else {}
         if selected['kind'] in ('REQUIREMENT', 'ASSET'):
             from .material_plans import card_counts
-            result['material_card_counts'] = card_counts(store, {selected['object_id'], *result['material_versions']})
-        if result['material_versions']:
+            result['material_card_counts'] = card_counts(store, {selected['object_id'], *result['material_cards']})
+        if result['material_cards']:
             from .material_review import context
             contexts = result.setdefault('review_contexts', {})
-            for rounds in result['material_versions'].values():
+            for rounds in result['material_cards'].values():
                 for round in rounds:
                     for candidate in round['members']:
                         if candidate['kind'] == 'ASSET' and candidate['id'] not in contexts:
@@ -773,7 +752,7 @@ def snapshot(store, kind=None, object_id=None, revision_id=None):
     # Only actual original results count. Round history belongs to the demand,
     # not to a second list entry; missing/failed calls do not manufacture media.
     material_assets = {}
-    for row in store.db.execute("""SELECT DISTINCT m.material_id,r.object_id FROM material_members m
+    for row in store.db.execute("""SELECT DISTINCT m.material_id,r.object_id FROM material_memberships m
         JOIN revisions r ON r.id=m.revision_id JOIN objects o ON o.id=r.object_id
         WHERE o.kind='ASSET' AND coalesce(json_extract(r.payload,'$.placeholder'),0)=0
         AND EXISTS(SELECT 1 FROM json_each(r.payload,'$.components') c

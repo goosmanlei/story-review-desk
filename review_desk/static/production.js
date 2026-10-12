@@ -33,6 +33,7 @@ function productionTextBlocks(record){
   return blocks;
 }
 const productionEntitySymbols={
+  help:['M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z','M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2-3 4','M12 17h.01'],
   shot:['M3 7h18v14H3Z','M3 7V3h18v4','m4 3 3 4m4-4 3 4m4-4 3 4'],
   character:['M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z','M4.5 21v-2a7.5 7.5 0 0 1 15 0v2'],
   space:['M3 4h18v16H3Z','M3 17l5-5 4 4 4-7 5 8','M8 8h.01'],
@@ -282,8 +283,8 @@ async function openProductionRecord(objectId,revisionId=null,navigate=false,enti
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();const workspaceAtStart=state.workspace,epoch=++productionReadEpoch;
   let detail=await api('/api/production?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{})}));
   const exactRoute=new URL(location.href);
-  if(exactRoute.searchParams.get('production_object')===objectId&&Object.values(detail.material_versions||{}).some(rs=>rs.some(r=>r.baseline_id))){
-    normalizeConsolidatedMaterialRoute(exactRoute.searchParams,exactRoute.searchParams.has('material_round')?detail.legacy_material_versions:detail.material_versions);history.replaceState(history.state,'',exactRoute);
+  if(exactRoute.searchParams.get('production_object')===objectId&&typeof validateMaterialRoute==='function'){
+    validateMaterialRoute(exactRoute.searchParams,detail.material_cards);history.replaceState(history.state,'',exactRoute);
   }
   if(epoch!==productionReadEpoch||state.workspace!==workspaceAtStart)return;
   const needsWorkspaceRoute=!productionWorkspaceCanRead(state.workspace,detail.record);
@@ -342,7 +343,7 @@ function focusProductionReview(detail,paint=true){
   if(typeof isEntityReview==='function'&&isEntityReview()){
     if(!['ASSET','REQUIREMENT','CALL'].includes(r.kind)&&r.id===r.current_revision&&!state.entityReview.historical&&!state.entityReview.historicalTarget)url.searchParams.delete('production_revision');
     const context=['ASSET','REQUIREMENT','CALL'].includes(r.kind)?materialCommentContext():null;
-    if(context){const round=state.entityReview.material_versions?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialVersionRoute(url.searchParams,context.material_id,round||context);url.searchParams.set('material_target',r.kind==='REQUIREMENT'&&r.current_content?'current':context.candidateTarget||r.id);if(context.candidateTarget){const candidate=round?.results.find(row=>row.id===context.candidateTarget);if(candidate){url.searchParams.set('production_object',candidate.object_id);url.searchParams.set('production_revision',candidate.id)}}}
+    if(context){const round=state.entityReview.material_cards?.[context.material_id]?.find(r=>r.number===context.number);writeMaterialRoute(url.searchParams,context.material_id,round||context);url.searchParams.set('material_target',r.kind==='REQUIREMENT'&&r.current_content?'current':context.candidateTarget||r.id);if(context.candidateTarget){const candidate=round?.results.find(row=>row.id===context.candidateTarget);if(candidate){url.searchParams.set('production_object',candidate.object_id);url.searchParams.set('production_revision',candidate.id)}}}
     else{for(const key of ['material_id','material_round','material_version','material_baseline','material_target'])url.searchParams.delete(key)}
   }
   if((state.workspace==='settings.workspace'||state.unifiedCardRoot&&state.entityReview)&&state.productionEntityId){url.searchParams.set('production_entity',state.productionEntityId);if(state.productionChildDetail?.record)url.searchParams.set('entity_state',state.productionChildDetail.record.object_id);}else url.searchParams.delete('production_entity');
@@ -370,6 +371,7 @@ function preserveCardPosition(){
   return ()=>{for(const [selector,values] of offsets)[...document.querySelectorAll(selector)].forEach((node,i)=>{if(values[i]){node.scrollLeft=values[i][0];node.scrollTop=values[i][1]}});window.scrollTo(x,y)};
 }
 function renderProductionReaderContent(){
+  for(const group of document.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();
   const root=state.unifiedCardRoot||$('#production-reader');if(!root)return;if(typeof pauseReviewMedia==='function')pauseReviewMedia(root);root.replaceChildren();
   if(state.positionReview&&state.unifiedCardRoot){renderUnifiedCard(root);return}
   if(typeof isEntityReview==='function'&&isEntityReview()){renderUnifiedCard(root);return}

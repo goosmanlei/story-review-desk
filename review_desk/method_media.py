@@ -143,7 +143,8 @@ def activate(store):
         return activation(store)
     methods.resolve(store, 'media-plan', {'media_type': 'video'})
     methods.resolve(store, 'media-plan', {'media_type': 'image'})
-    methods.resolve(store, 'media-plan', {'media_type': 'audio'})
+    methods.resolve(store, 'media-plan', {'media_type': 'audio', 'audio_type': 'voice'})
+    methods.resolve(store, 'media-plan', {'media_type': 'audio', 'audio_type': 'song'})
     frozen = []
     for row in store.db.execute("SELECT r.* FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind='REQUIREMENT'"):
         item = p.record(store, revision_id=row['id'])

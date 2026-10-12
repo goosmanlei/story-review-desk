@@ -18,7 +18,7 @@ class Element{
 }
 async function fixture(href='http://isolated/?workspace=story.outline',data={current_revision:'revision-10',revisions:[{id:'revision-10',version:10},{id:'revision-8',version:8}]}){
   const root=new Element('main'),nodes=new Map(),storage=new Map(),listeners={},pushes=[],requests=[];
-  for(const selector of ['#comment-body','#open-count','#comments-toggle','#toast','#instance-title','#story-creation-shell','#story-workspace','#screenplay-workspace','#structure-workspace','#configuration-view','#approach-view','#placeholder-view','#production-view','#open-story-sources','#open-story-structure','#open-story-script','#view-title','#view-symbol','#brand-home','#screenplay-comments','#comments-close','#selection-action','#source-view','#structure-reader']){const node=new Element();node.id=selector.slice(1);nodes.set(selector,node);root.append(node)}
+  for(const selector of ['#comment-body','#open-count','#comments-toggle','#toast','#instance-title','#story-creation-shell','#story-workspace','#screenplay-workspace','#structure-workspace','#configuration-view','#approach-view','#placeholder-view','#production-view','#open-story-sources','#open-story-structure','#open-story-script','#view-title','#view-symbol','#brand-home','#screenplay-comments','#comments-close','#selection-action','#source-view','#source-list','#structure-reader']){const node=new Element();node.id=selector.slice(1);nodes.set(selector,node);root.append(node)}
   const context={URL,console,CSS:{escape:x=>x},setTimeout:()=>0,clearTimeout(){},requestAnimationFrame:()=>1,cancelAnimationFrame(){},
     location:{href},history:{pushState(_state,_title,url){context.location.href=String(url);pushes.push(String(url))}},
     document:{addEventListener(){},querySelector:s=>root.querySelector(s)||nodes.get(s)||null,querySelectorAll:()=>[],createElement:tag=>new Element(tag),createTextNode:text=>{const node=new Element('text');node.textContent=text;return node}},
@@ -31,7 +31,7 @@ async function fixture(href='http://isolated/?workspace=story.outline',data={cur
   vm.runInContext(`globalThis.state=state;globalThis.key=draftKey;
     applyFavicon=()=>{};renderWorkspaceNav=()=>{};closePanel=()=>{};openPanel=()=>{};hideSelectionAction=()=>{};scheduleSourceChapter=()=>{};watchTextSelection=()=>{};
     chooseSource=id=>{state.current=state.sources.find(source=>source.id===id)};chooseScript=()=>{};
-    renderApproach=()=>{};renderConfigurations=()=>{};renderDocument=()=>{};
+    renderApproach=()=>{};renderConfigurations=()=>{};renderDocument=()=>{};renderSources=()=>{};
     restoreScriptDraft=()=>{};renderScriptIndex=()=>{};renderScriptReader=()=>{};`,context);
   const buttons=structure.split('\n').find(line=>line.includes('for(const revision of state.structure.revisions)'));
   context.renderStructureReader=()=>{context.versions.replaceChildren();if(context.state.structure)vm.runInContext(buttons,context)};

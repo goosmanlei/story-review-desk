@@ -63,7 +63,7 @@ class FaviconTests(unittest.TestCase):
         manifest['files'].pop('assets/'+name)
         (restored/'export/manifest.json').write_text(json.dumps(manifest))
         target=Store(self.root/'empty/.runtime/review.sqlite3')
-        with self.assertRaisesRegex(ValueError,'unmanifested favicon'):bundle.restore(target,restored/'export')
+        with self.assertRaisesRegex(ValueError,'omits referenced originals'):bundle.restore(target,restored/'export')
         self.assertEqual(target.configuration('SYSTEM')['version'],0);target.close()
         (self.root/'export/assets'/name).write_bytes(b'broken')
         with self.assertRaises(ValueError):bundle.export(self.store,self.root/'export')

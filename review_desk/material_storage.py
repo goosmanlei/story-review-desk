@@ -15,41 +15,22 @@ FIELDS = {'blocks', 'purpose', 'specification', 'generation', 'method', 'model',
           'receipt', 'samples', 'sources', 'sample_policy', 'plan_source_sha256', 'preparation_task'}
 KINDS = {'production-requirement-v1', 'production-call-v1'}
 MARKER = '_material_fields'
-TABLES = ('material_content', 'material_definitions', 'material_aliases',
-          'material_definition_versions', 'material_archive_files', 'material_model_migrations')
+TABLES = ('material_content', 'material_aliases', 'material_archive_files')
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS material_content (
  id TEXT PRIMARY KEY, body TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS material_definitions (
- id TEXT PRIMARY KEY REFERENCES material_content(id));
 CREATE TABLE IF NOT EXISTS material_aliases (
  alias_id TEXT PRIMARY KEY REFERENCES objects(id), material_id TEXT NOT NULL REFERENCES objects(id),
  evidence TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS material_aliases_identity ON material_aliases(material_id);
-CREATE TABLE IF NOT EXISTS material_definition_versions (
- material_id TEXT NOT NULL, number INTEGER NOT NULL,
- definition_id TEXT NOT NULL REFERENCES material_definitions(id),
- provenance TEXT NOT NULL, gaps TEXT NOT NULL,
- PRIMARY KEY(material_id,number),
- FOREIGN KEY(material_id,number) REFERENCES material_plan_versions(material_id,number) ON DELETE CASCADE);
 CREATE TABLE IF NOT EXISTS material_archive_files (
  path TEXT PRIMARY KEY, container TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS material_model_migrations (
- id TEXT PRIMARY KEY, document TEXT NOT NULL);
 CREATE TRIGGER IF NOT EXISTS material_content_immutable BEFORE UPDATE ON material_content
 WHEN NEW.id!=OLD.id OR NEW.body!=OLD.body
 BEGIN SELECT RAISE(ABORT,'material content is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS material_content_checksum BEFORE INSERT ON material_content
 WHEN material_sha256(NEW.body)!=NEW.id
 BEGIN SELECT RAISE(ABORT,'material content checksum mismatch'); END;
-CREATE TRIGGER IF NOT EXISTS material_frozen_version_update BEFORE UPDATE ON material_plan_versions
-WHEN OLD.frozen=1 AND (NEW.frozen!=1 OR NEW.fingerprint!=OLD.fingerprint) AND material_model_migrating()=0
-BEGIN SELECT RAISE(ABORT,'frozen material version is immutable'); END;
-CREATE TRIGGER IF NOT EXISTS material_frozen_definition_update BEFORE UPDATE ON material_definition_versions
-WHEN (NEW.definition_id!=OLD.definition_id OR NEW.provenance!=OLD.provenance OR NEW.gaps!=OLD.gaps)
- AND EXISTS(SELECT 1 FROM material_plan_versions WHERE material_id=OLD.material_id AND number=OLD.number AND frozen=1)
- AND material_model_migrating()=0
-BEGIN SELECT RAISE(ABORT,'frozen material definition is immutable'); END;
 CREATE TRIGGER IF NOT EXISTS material_revision_insert BEFORE INSERT ON revisions
 WHEN json_extract(NEW.payload,'$.format') IN ('production-requirement-v1','production-call-v1') AND material_model_migrating()=0 AND material_revision_valid(NEW.object_id,NEW.version,NEW.payload,NEW.id)=0
 BEGIN SELECT RAISE(ABORT,'material revision logical checksum mismatch'); END;
@@ -61,7 +42,7 @@ BEGIN SELECT RAISE(ABORT,'material revision logical checksum mismatch'); END;
 
 
 TRIGGERS=('material_content_immutable','material_content_checksum','material_revision_insert',
-          'material_revision_update','material_frozen_version_update','material_frozen_definition_update')
+          'material_revision_update')
 
 
 def upgrade_identity_triggers(db):
@@ -79,16 +60,7 @@ def enable_constraints(db):
 
 
 def cleanup_legacy_triggers(db):
-    """Only a fully raw, unapplied database can be returned to an older writer."""
-    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='material_model_migrations'").fetchone() and db.execute('SELECT 1 FROM material_model_migrations LIMIT 1').fetchone():
-        raise ValueError('applied material migration requires exact rollback before legacy runtime')
-    if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='revisions'").fetchone() and db.execute("SELECT 1 FROM revisions WHERE json_type(payload,'$._material_fields') IS NOT NULL LIMIT 1").fetchone():
-        raise ValueError('referenced material revisions cannot be read by legacy runtime')
-    removed=[]
-    for name in TRIGGERS:
-        if db.execute("SELECT 1 FROM sqlite_master WHERE type='trigger' AND name=?",(name,)).fetchone():
-            db.execute('DROP TRIGGER '+name);removed.append(name)
-    return removed
+    raise ValueError('current storage cannot return to a retired version writer')
 
 
 def intern(store, value):
@@ -240,13 +212,10 @@ def restore_content(store, data):
         if set(row)!={'id','body'} or digest(row['body'].encode())!=row['id']:
             raise ValueError('material content checksum mismatch')
         store.db.execute('INSERT INTO material_content VALUES (?,?)',(row['id'],row['body']))
-    for row in data.get('material_definitions',[]):
-        expand(store,row['id'])
-        store.db.execute('INSERT INTO material_definitions VALUES (?)',(row['id'],))
 
 
 def restore_indices(store,data):
-    for table in TABLES[2:]:
+    for table in TABLES[1:]:
         columns=[r['name'] for r in store.db.execute('PRAGMA table_info('+table+')')]
         for row in data.get(table,[]):
             if set(row)!=set(columns):raise ValueError('invalid material model columns')
@@ -274,7 +243,7 @@ def identity(store, material_id):
             for row in store.db.execute("SELECT *,COALESCE(json_extract(evidence,'$.canonical_material_id'),material_id) canonical_id FROM material_aliases ORDER BY alias_id"):
                 indexed.setdefault(row['canonical_id'],[]).append(row)
             memberships={}
-            for row in store.db.execute('SELECT revision_id,material_id,number FROM material_plan_members ORDER BY material_id,number'):
+            for row in store.db.execute('SELECT revision_id,material_id,number FROM material_memberships ORDER BY material_id,number'):
                 memberships.setdefault(row['revision_id'],[]).append({'material_id':row['material_id'],'number':row['number']})
             scope['material_identity_index']=(indexed,memberships,{row[0] for row in store.db.execute('SELECT id FROM objects')})
         indexed,memberships,object_ids=scope['material_identity_index']
@@ -292,7 +261,7 @@ def identity(store, material_id):
                 'title':record['payload']['title'],'scope':record['payload']['scope'],
                 'states':record['payload'].get('states',[]),'evidence':evidence.get(alias,{'kind':'original_requirement'}),
                 'source_requirements':[v['reference'] for v in record['payload'].get('generation',{}).get('inputs',[]) if record['payload'].get('generation',{}).get('method')=='reuse'],
-                'versions':memberships.get(record['id'],[]) if scope is not None else [dict(v) for v in store.db.execute('SELECT material_id,number FROM material_plan_members WHERE revision_id=? ORDER BY material_id,number',(record['id'],))]})
+                'versions':memberships.get(record['id'],[]) if scope is not None else [dict(v) for v in store.db.execute('SELECT material_id,number FROM material_memberships WHERE revision_id=? ORDER BY material_id,number',(record['id'],))]})
     return {'id':mid,'aliases':aliases,'associations':associations}
 
 

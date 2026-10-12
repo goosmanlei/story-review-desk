@@ -3,7 +3,7 @@ import json
 import shutil
 import unittest
 from pathlib import Path
-import test_material_plans as fixtures
+import current_material_fixture as fixtures
 from review_desk import material_model as model, material_storage as storage, material_archives as archives, material_plans as plans
 from review_desk import production as p
 from review_desk.store import Store,Conflict,canonical,digest
@@ -11,18 +11,18 @@ from review_desk.bundle import export,restore
 
 
 class MaterialModelTest(unittest.TestCase):
-    setUp=fixtures.PlanVersionsTest.setUp
-    tearDown=fixtures.PlanVersionsTest.tearDown
-    spec=fixtures.PlanVersionsTest.spec
-    put=fixtures.PlanVersionsTest.put
-    ref=fixtures.PlanVersionsTest.ref
-    entity=fixtures.PlanVersionsTest.entity
-    full=fixtures.PlanVersionsTest.full
-    need=fixtures.PlanVersionsTest.need
-    media=fixtures.PlanVersionsTest.media
-    change=fixtures.PlanVersionsTest.change
-    setup_plans=fixtures.PlanVersionsTest.setup_plans
-    generate=fixtures.PlanVersionsTest.generate
+    setUp=fixtures.MaterialFixture.setUp
+    tearDown=fixtures.MaterialFixture.tearDown
+    spec=fixtures.MaterialFixture.spec
+    put=fixtures.MaterialFixture.put
+    ref=fixtures.MaterialFixture.ref
+    entity=fixtures.MaterialFixture.entity
+    full=fixtures.MaterialFixture.full
+    need=fixtures.MaterialFixture.need
+    media=fixtures.MaterialFixture.media
+    change=fixtures.MaterialFixture.change
+    setup_plans=fixtures.MaterialFixture.setup_plans
+    generate=fixtures.MaterialFixture.generate
 
     def test_expand_repeated_children_are_independent_at_every_returned_position(self):
         shared={'parts':[{'labels':['original']}]}

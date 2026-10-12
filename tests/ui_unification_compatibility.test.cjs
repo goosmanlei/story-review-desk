@@ -23,7 +23,7 @@ test('an exact entity relation is readable in settings without admitting adoptio
   assert.equal(vm.runInContext("productionWorkspaceCanRead('settings.workspace',{kind:'RELATION',payload:{relation_type:'adoption'}})",ctx),false);
 });
 test('shared candidates use the chosen material round number in both small and large cards',()=>{
-  const ctx=setup(),f=fixture(ctx);f.model.identity={...f.need,business_code:'M004'};f.model.need=null;f.model.round.business_code='M841 / MV001';
+  const ctx=setup(),f=fixture(ctx);f.model.identity={...f.need,business_code:'M004'};f.model.need=null;f.model.round.business_code='M841';
   assert.equal(ctx.materialModelCode(f.model),'M841');
   assert.equal(ctx.modelSmallItem(f.model).business_code,'M841');
 });
@@ -43,8 +43,8 @@ function fixture(ctx){
   const asset=(id,date)=>({...row(id,'ASSET',undefined,{media_type:'image',components:[{id:'original',role:'original',mime:'image/png',sha256:id}],candidate_requirements:[ref(need)]}),created_at:date});
   const older=asset('z-old','2026-10-03T00:00:00Z'),newer=asset('a-new','2026-10-04T00:00:00Z');
   const items=[older,newer].map(record=>({record,component:record.payload.components[0],components:record.payload.components}));
-  const round={number:1,model:'plan-v1',plan:need,members:[need,older,newer],results:[older,newer]};
-  const data={entity,states:[form],requirements:[need],relationships:[],media:[],comment_records:[],comment_targets:[],usages:{},material_versions:{need:[round]},materialContexts:{},adoptions:[]};
+  const round={number:1,model:'production-current-v1',plan:need,members:[need,older,newer],results:[older,newer]};
+  const data={entity,states:[form],requirements:[need],relationships:[],media:[],comment_records:[],comment_targets:[],usages:{},material_cards:{need:[round]},materialContexts:{},adoptions:[]};
   const model={material_id:'need',need,identity:need,round,rounds:[round],candidates:items};
   Object.assign(ctx.state,{entityReview:data,productionSelected:form,productionEntityDetail:{record:entity},productionChildDetail:{record:form},productionRecords:[entity,form,need,older,newer]});
   return {entity,form,need,older,newer,items,round,data,model};
@@ -109,37 +109,27 @@ test('the entity material renderer uses the candidate original and preserves ado
 test('a preparing current version never borrows its historical adopted result',()=>{
   const ctx=setup(),f=fixture(ctx);
   f.data.adoptions=[{payload:{scope:ref(f.form),slot:'overall',asset:ref(f.older),component_id:'original'}}];
-  f.data.material_versions.need.unshift({number:2,model:'plan-v1',plan:f.need,members:[f.need],results:[]});
+  f.data.material_cards.need.unshift({number:2,model:'production-current-v1',plan:f.need,members:[f.need],results:[]});
   f.data.selectedMaterialRounds={need:2};const models=ctx.materialRoundModels([f.need],f.items,f.data);
   assert.equal(models[0].round.number,2);assert.equal(models[0].candidates.length,0);
   assert.equal(ctx.materialDefaultCandidate(models[0],f.data),null);
 });
-test('ordinary demand cards choose the last generated version while exact and manual targets retain the empty version',()=>{
-  const ctx=setup(),f=fixture(ctx),latest={...f.need,id:'need-2',current_revision:'need-2',version:2};
-  f.data.requirements=[latest];f.data.material_versions.need.unshift({number:2,model:'plan-v1',plan:latest,members:[latest],results:[]});
-  const empty=new URLSearchParams();
-  assert.equal(ctx.entityMaterialRoute(f.data,latest,empty,{defaultSelection:true}).selected.round.number,1);
-  assert.equal(ctx.entityMaterialRoute(f.data,latest,empty).selected.round.number,2);
-  assert.equal(ctx.entityMaterialRoute(f.data,latest,new URLSearchParams({material_version:2}),{defaultSelection:true}).selected.round.number,2);
-  assert.equal(ctx.entityMaterialRoute(f.data,latest,new URLSearchParams({material_target:'need-2'}),{defaultSelection:true}).selected.round.number,2);
-  assert.equal(f.data.selectedMaterialRounds,undefined);
-});
 for(const version of ['999','not-a-version','0'])test(`an explicit invalid version ${version} is rejected without changing the URL`,()=>{
   const ctx=setup(),f=fixture(ctx),url=ctx.location.href;
-  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},params:new URLSearchParams({material_version:version})}));
+  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_cards:f.data.material_cards},params:new URLSearchParams({material_version:version})}));
   assert.equal(ctx.location.href,url);
 });
 test('an explicit unknown material identity is rejected even without a numeric version',()=>{
   const ctx=setup(),f=fixture(ctx);
-  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},params:new URLSearchParams({material_id:'foreign'})}));
+  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_cards:f.data.material_cards},params:new URLSearchParams({material_id:'foreign'})}));
 });
 test('an explicit candidate must belong to the named material version',()=>{
   const ctx=setup(),f=fixture(ctx);
-  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},params:new URLSearchParams({material_id:'need',material_version:'1',material_target:'foreign-result'})}));
+  assert.throws(()=>ctx.validateUnifiedReference({detail:{record:f.need,history:[f.need],material_cards:f.data.material_cards},params:new URLSearchParams({material_id:'need',material_target:'foreign-result'})}));
 });
 test('a material requirement URL restores its requested older candidate inside the owning entity card',()=>{
-  const ctx=setup(),f=fixture(ctx),params=new URLSearchParams({material_id:'need',material_version:'1',material_target:f.older.id});
-  const result={detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},entity_review:f.data,form:f.form,params,explicit:true};
+  const ctx=setup(),f=fixture(ctx),params=new URLSearchParams({material_id:'need',material_target:f.older.id});
+  const result={detail:{record:f.need,history:[f.need],material_cards:f.data.material_cards},entity_review:f.data,form:f.form,params,explicit:true};
   ctx.validateUnifiedReference(result);ctx.activateUnifiedCard(result);
   let shown;ctx.materialSmallCard=()=>{};ctx.renderMaterialCard=(_root,_model,options)=>{shown=options.selectedCandidateId};
   f.data.unifiedRight=new Element('aside');ctx.renderUnifiedModels(new Element('main'),[f.model],f.data);
@@ -149,7 +139,7 @@ test('ordinary legacy asset entry chooses the current plan while exact candidate
   for(const ordinary of [true,false]){
     const ctx=setup(),f=fixture(ctx);f.round.current_content=true;
     const params=new URLSearchParams();
-    ctx.activateUnifiedCard({detail:{record:f.older,history:[f.older],material_versions:f.data.material_versions},entity_review:f.data,form:f.form,params,explicit:true,defaultSelection:ordinary});
+    ctx.activateUnifiedCard({detail:{record:f.older,history:[f.older],material_cards:f.data.material_cards},entity_review:f.data,form:f.form,params,explicit:true,defaultSelection:ordinary});
     assert.equal(f.data.selectedCandidates.need,ordinary?'current':f.older.id);
   }
   const ctx=setup(),source=fs.readFileSync(path.join(__dirname,'../review_desk/static/management-cards.js'),'utf8');let refs;
@@ -175,15 +165,6 @@ test('a response to a detached entity version control cannot restore its obsolet
   const request=control.children.find(n=>n.dataset.choiceId==='old').onclick();await new Promise(done=>setImmediate(done));control.isConnected=false;
   release({record:{...f.entity,id:'old'}});await request;assert.deepEqual(shown,[]);
 });
-test('editing a carried exact text in one material version is not restored into another version',()=>{
-  const ctx=setup(),f=fixture(ctx);
-  f.round.results=[];f.model.candidates=[];
-  f.data.material_versions.need=[{...f.round,number:2},f.round];f.data.selectedMaterialRounds={need:1};
-  Object.assign(ctx.state,{productionSelected:f.need,materialCommentCard:{data:f.data,material_id:'need',number:1},anchor:{type:'global'},editing:'saved-comment-in-version-1'});
-  ctx.rememberProductionDraft();ctx.switchMaterialRound(f.data,'need',2);
-  assert.equal(ctx.state.editing,null);
-  assert.equal(ctx.materialCommentContext().number,2);
-});
 
 function modalFixture(ctx,f){
   const panel=new Element('aside'),outer=new Element('main'),dialog=new Element('dialog'),body=new Element('div');outer.append(panel);
@@ -192,7 +173,7 @@ function modalFixture(ctx,f){
   panel.hidden=true;for(const [,button] of triggers){button.setAttribute('aria-expanded','false');outer.append(button)}
   const nodes=new Map([['#comment-panel',panel],...triggers]);ctx.document.querySelector=s=>nodes.get(s)||null;
   ctx.openReviewDialog=()=>({dialog,body});ctx.renderUnifiedCard=()=>{};
-  const result={detail:{record:f.need,history:[f.need],material_versions:f.data.material_versions},entity_review:f.data,form:f.form};
+  const result={detail:{record:f.need,history:[f.need],material_cards:f.data.material_cards},entity_review:f.data,form:f.form};
   return {panel,outer,dialog,body,result,triggers:triggers.map(([,button])=>button)};
 }
 for(const failure of [false,true])test(`refreshed exact card ${failure?'failure':'success'} keeps its target but closes to the scoped list`,async()=>{
@@ -269,9 +250,9 @@ function genericMaterialFixture(ctx){
     {id:'alternate',role:'original',mime:'video/mp4',sha256:id+'-alternate',file:id+'-alternate.mp4'}]}),created_at:date});
   const old1=asset('old-v1','2026-10-01T00:00:00Z'),new1=asset('new-v1','2026-10-02T00:00:00Z');
   const old2=asset('adopted-v2','2026-10-03T00:00:00Z'),new2=asset('latest-v2','2026-10-04T00:00:00Z');
-  const rounds=[{number:2,model:'plan-v1',plan:plan(2),results:[old2,new2]},{number:1,model:'plan-v1',plan:plan(1),results:[old1,new1]}];
+  const rounds=[{number:2,model:'production-current-v1',plan:plan(2),results:[old2,new2]},{number:1,model:'production-current-v1',plan:plan(1),results:[old1,new1]}];
   for(const round of rounds)round.members=[round.plan,...round.results];
-  const detail={record:rounds[0].plan,history:rounds.map(r=>r.plan),uses:[],material_versions:{'video-need':rounds},
+  const detail={record:rounds[0].plan,history:rounds.map(r=>r.plan),uses:[],material_cards:{'video-need':rounds},
     adoptionContext:{adoptions:[{payload:{scope:ref(scope),slot:'scene-video',asset:ref(old2),component_id:'alternate',range:{start_seconds:.5,end_seconds:1.5}}}]}};
   Object.assign(ctx.state,{workspace:'materials.workspace',entityReview:null,materialReview:detail,productionSelected:detail.record,productionDetail:detail,productionRecords:[scope,...rounds.flatMap(r=>r.members)]});
   ctx.location.href='http://isolated/?workspace=materials.workspace';
@@ -290,7 +271,7 @@ function preparingRevisionFixture(ctx){
     revision.payload.generation.inputs=[{reference:{object_id:'image',revision_id:label+'-image'},use:label+' input'}];
   }
   old.current_revision=current.id;old.review_shot_slots=[];current.review_shot_slots=[];
-  f.rounds.splice(0,f.rounds.length,{number:1,model:'plan-v1',frozen:false,plan:current,members:[old,current],results:[],definition_records:{requirement:current}});
+  f.rounds.splice(0,f.rounds.length,{number:1,model:'production-current-v1',frozen:false,plan:current,members:[old,current],results:[],definition_records:{requirement:current}});
   Object.assign(f.detail,{record:old,history:[current,old],explicitRevision:true});
   ctx.state.productionSelected=old;ctx.state.productionRecords=[f.scope,old,current];
   const controls=[],inputs=[];
@@ -335,37 +316,16 @@ test('locating an older demand in a frozen empty version reads its own requireme
   assert.match(text,/original requirement/);assert.doesNotMatch(text,/current requirement/);assert.match(text,/plan 1/);assert.match(text,/生成方案/);
   assert.deepEqual(f.inputs,[[f.old.id,'original-image']]);assert.deepEqual(f.controls,[]);
 });
-test('returning from another material version leaves an old explicit preparation link and reads that version normally',()=>{
-  const ctx=setup(),f=preparingRevisionFixture(ctx),next=f.plan(3);
-  f.rounds.unshift({number:2,model:'plan-v1',plan:next,members:[next],results:[]});f.render();
-  ctx.switchMaterialRound(f.detail,'video-need',2);f.render();ctx.switchMaterialRound(f.detail,'video-need',1);
-  const text=descendants(f.render()).map(n=>n.textContent||'').join('\n');
-  assert.match(text,/current requirement/);assert.match(text,/plan 2/);assert.doesNotMatch(text,/plan 1/);assert.equal(f.detail.explicitRevision,false);
-});
 test('a non-entity demand defaults to the latest candidate original without copying adoption range',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);f.render();
   assert.equal(f.shown.length,1);assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(f.shown[0].component.id,'original');assert.equal(f.shown[0].range,undefined);
-});
-test('switching a non-entity demand to an older version picks that version newest result and comment scope',()=>{
-  const ctx=setup(),f=genericMaterialFixture(ctx);f.render();
-  ctx.switchMaterialRound(f.detail,'video-need',1);f.render();
-  assert.equal(f.shown[0].record.id,f.new1.id);assert.equal(ctx.state.productionSelected.id,f.new1.id);
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:1,model:'plan-v1'});
-  assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),f.new1.id);
-});
-test('switching a non-entity demand to an empty version keeps its plan and never borrows an adopted historical file',()=>{
-  const ctx=setup(),f=genericMaterialFixture(ctx),plan=f.plan(3);
-  f.rounds.unshift({number:3,model:'plan-v1',plan,members:[plan],results:[]});f.detail.selectedMaterialRounds={'video-need':2};f.render();
-  ctx.switchMaterialRound(f.detail,'video-need',3);f.render();
-  assert.equal(f.shown.length,0);assert.equal(ctx.state.productionSelected.id,plan.id);
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:3,model:'plan-v1'});
 });
 test('selecting a non-entity candidate focuses its exact revision without changing the material comment version',async()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx),root=f.render();
   const candidates=descendants(root).find(n=>n.attributes?.['aria-label']==='候选');
   await candidates.children.find(n=>n.dataset.choiceId===f.old2.id).onclick();await descendants(f.render()).find(n=>n.attributes?.['aria-label']==='候选').children.find(n=>n.dataset.choiceId===f.new2.id).onclick();f.render();
   assert.equal(f.shown[0].record.id,f.new2.id);assert.equal(ctx.state.productionSelected.id,f.new2.id);
-  assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:2,model:'plan-v1'});
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.materialCommentContext())),{material_id:'video-need',number:2,model:'production-current-v1'});
   assert.equal(new URL(ctx.location.href).searchParams.get('material_target'),f.new2.id);
 });
 test('an explicit non-entity file choice can replace the adopted default without reverting on repaint',()=>{
@@ -375,7 +335,7 @@ test('an explicit non-entity file choice can replace the adopted default without
   assert.equal(f.shown[0].record.id,f.old2.id);assert.equal(f.shown[0].component.id,'original');
   assert.equal(f.shown[0].range??null,null,'an adopted alternate-file range cannot annotate another file');
 });
-test('media comments require the exact candidate, file component and material version together',()=>{
+test('media comments require the exact candidate and file component',()=>{
   const ctx=setup(),f=genericMaterialFixture(ctx);
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8'),ctx);
   const make=(id,revision,component,number)=>({id,target_revision_id:revision,material_plan_scopes:[{material_id:'video-need',number}],
@@ -383,8 +343,8 @@ test('media comments require the exact candidate, file component and material ve
   const comments=[make('exact',f.old2.id,'original',2),make('other-file',f.old2.id,'alternate',2),
     make('other-candidate',f.new2.id,'original',2),make('other-version',f.old2.id,'original',1)];
   const shown=ctx.reviewBlockComments(comments,{kind:'video',revision:f.old2.id,revisions:[f.old2.id],
-    componentId:'original',file:'original.mp4',from:0,to:4,materialId:'video-need',materialNumber:2,materialModel:'plan-v1'});
-  assert.deepEqual(Array.from(shown,c=>c.id),['exact']);
+    componentId:'original',file:'original.mp4',from:0,to:4,materialId:'video-need',materialNumber:2,materialModel:'production-current-v1'});
+  assert.deepEqual(Array.from(shown,c=>c.id),['exact','other-version']);
 });
 for(const closeBy of ['button','Escape'])test(`entity reload inside a shared dialog preserves its history marker until ${closeBy} closes it`,async()=>{
   const ctx=setup(),f=fixture(ctx);let backCount=0;
@@ -434,7 +394,7 @@ test('late image pointerup cannot replace the newer revision comment draft after
 test('actual unified dialog close restores the outer revision and draft before a late inner image pointerup',async()=>{
   const ctx=setup(),f=fixture(ctx),m=modalFixture(ctx,f),old=imageRevision('image-old','old.png'),newer=imageRevision('image-new','new.png');
   const outerAnchor={type:'global'};Object.assign(ctx.state,{workspace:'materials.workspace',entityReview:null,materialReview:null,productionSelected:newer,anchor:outerAnchor});
-  m.result={detail:{record:old,history:[old],uses:[],material_versions:{}},entity_review:null};
+  m.result={detail:{record:old,history:[old],uses:[],material_cards:{}},entity_review:null};
   ctx.fetch=async()=>({ok:true,json:async()=>m.result});await ctx.openUnifiedMaterial(ref(old),null);
   ctx.setPanelOpen(true);
   const g=installImageGesture(ctx,old,m.body);ctx.state.drawMode='original';g.emit('pointerdown');
@@ -515,15 +475,15 @@ test('UX010 outer refresh completing after a modal opens cannot overwrite the in
 });
 test('shared requirement cards prefer their actual identity over an earlier legacy alias',()=>{
   const ctx=setup(),f=fixture(ctx),row={...f.need,current_revision:f.need.id,material_identity:{id:'need',aliases:['legacy','need']}};
-  f.data.material_versions={legacy:[f.round],need:[f.round]};
+  f.data.material_cards={legacy:[f.round],need:[f.round]};
   assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams(),{defaultSelection:true}).selected.material_id,'need');
-  assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams({material_id:'legacy',material_version:1})).selected.material_id,'legacy');
+  assert.equal(ctx.entityMaterialRoute(f.data,row,new URLSearchParams({material_id:'legacy'})).selected.material_id,'legacy');
 });
 test('an exact shared alias retains its own round and members inside the unified card',()=>{
   const ctx=setup(),f=fixture(ctx),alias={...f.need,object_id:'legacy-voice',id:'legacy-plan',material_identity:{id:'need',aliases:['need','legacy-voice']}};
   f.need.material_identity=alias.material_identity;f.data.requirements=[f.need,alias];
   const old={...f.round,number:1,plan:alias,members:[alias,f.older],results:[f.older]};
-  f.data.material_versions['legacy-voice']=[old];f.data.selectedMaterialRounds={'legacy-voice':1};
+  f.data.material_cards['legacy-voice']=[old];f.data.selectedMaterialRounds={'legacy-voice':1};
   ctx.state.materialCommentCard={data:f.data,material_id:'legacy-voice',number:1};ctx.state.productionSelected=alias;
   const models=ctx.entityReviewMaterialModels([f.need],f.items,f.data);
   const selected=ctx.unifiedModelSelection(models,f.data);
