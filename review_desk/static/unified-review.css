@@ -305,6 +305,8 @@ dialog #toast { position:fixed; z-index:50; }
 .reference-candidate-choices>button{flex:0 0 auto;margin:0!important;white-space:nowrap}
 .reference-candidate-choice,.reference-candidate-choices>button{box-sizing:border-box;font-size:11px!important;line-height:16px!important;padding:1px 5px!important;min-height:22px!important;height:22px;border:1px solid #c9d1c3;border-radius:3px;background:#fffdf8;cursor:pointer}
 .reference-candidate-choice.selected{border-color:#6d916b;background:#e3eddd;color:#244e2b}
+.reference-candidate-choice:not(:disabled):is(:hover,.previewing){border-color:#5b8154;background:#f0f4e9;box-shadow:inset 0 0 0 1px #95ae88}
+.reference-candidate-choice.selected:not(:disabled):is(:hover,.previewing){border-color:#4e7046;background:#d5e6cc}
 .reference-candidate-choice:focus-visible{outline:2px solid #517b55;outline-offset:-2px}
 .material-small-copy .reference-picker-status{flex:0 0 auto;margin:0;white-space:nowrap;font-size:11px;line-height:22px}
 .reference-picker-status[hidden]{display:none}

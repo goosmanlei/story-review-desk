@@ -92,9 +92,10 @@ test('authored @entity references hover without activation and synchronize real 
  const other=f.need.review_shot_slots[1];other.material_id=other.canonical_material_id='material';other.value.reference=f.candidates[1].candidate;other.value.component_id='original';other.candidate=f.candidates[1].candidate;other.component=f.candidates[1].originals[0];other.record={...f.item.row,object_id:'asset-2',id:'candidate-2',payload:{...f.item.row.payload,components:f.candidates[1].originals}};
  f.need.review_reference_links=[{key:'rice-shop',label:'周家米铺',path:[0]}];f.need.review_prompt_links=[{reference_key:'rice-shop',quote,start,end:start+Array.from(quote).length}];
  Object.assign(f.c,{productionTextBlocks:()=>[{id:'prompt',field:'prompt',text:raw}],materialReferenceRequest:()=>({url:'/exact'}),businessCode:()=> 'M1',getSelection:()=>({isCollapsed:true}),openMaterialReference:()=>{throw Error('hover must not activate the material dialog')}});
- const line=new f.Element('div'),card=new f.Element('div'),copy=new f.Element('span','material-small-copy'),name=new f.Element('button','reference-material-name');card.append(name,copy);line.append(card);f.body.append(line);
+ // Production assembles the card and Prompt inside a detached parent, then mounts it.
+ const shell=new f.Element('section'),line=new f.Element('div'),card=new f.Element('div'),copy=new f.Element('span','material-small-copy'),name=new f.Element('button','reference-material-name');card.append(name,copy);line.append(card);shell.append(line);
  f.c.renderReferenceCandidatePicker(line,f.item,f.need,card);
- const parent=new f.Element('main');f.body.append(parent);f.c.renderLinkedPrompt(parent,f.need,f.need.payload.generation.inputs,[],'prompt',null,{selectable:true});
+ const parent=new f.Element('main');shell.append(parent);f.c.renderLinkedPrompt(parent,f.need,f.need.payload.generation.inputs,[],'prompt',null,{selectable:true});f.body.append(shell);
  const a=parent.querySelector('a');assert.ok(a);assert.equal(a.textContent,'@M1 · 周家米铺 · 空间布局参考 · 参考1');
  assert.equal(a.getAttribute('aria-expanded'),'false');assert.equal(f.popup(),null);a.onmouseenter();await f.settle();assert.equal(a.getAttribute('aria-expanded'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.calls.filter(c=>c.id).length,0);
  const cardChoice=n=>card.querySelector('.reference-candidate-choices').querySelectorAll('[data-candidate-revision]')[n-1];
@@ -103,4 +104,12 @@ test('authored @entity references hover without activation and synchronize real 
  await cardChoice(1).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
  await f.choice(1).onclick({stopPropagation(){}});assert.equal(cardChoice(1).getAttribute('aria-pressed'),'false');assert.ok(f.popup().querySelector('.reference-preview-placeholder'));assert.equal(card.querySelector('.material-small-preview').dataset.placeholder,'true');
  await cardChoice(2).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');assert.equal(f.need.review_shot_slots[1].value.crop.x,.2);
+});
+test('audio candidate hover survives moving to its player, while leaving closes and resets the audition',async()=>{
+ const f=fixture({selected:false,media:'audio'});f.anchor.onmouseenter();await f.settle();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
+ const button=f.choice(2);button.onmouseenter();const player=f.popup().querySelector('audio');assert.equal(player.src,'/api/production/files/file-2');
+ button.onmouseleave({type:'mouseleave',relatedTarget:player});assert.equal(f.popup().querySelector('audio'),player);assert.equal(player.isConnected,true);assert.ok(button.className.split(' ').includes('previewing'));player.paused=false;
+ f.popup().onmouseleave({type:'mouseleave',relatedTarget:f.anchor});f.leave();assert.equal(player.paused,true);assert.equal(player.src,null);assert.equal(f.popup(),null);assert.equal(f.calls.filter(c=>c.id).length,0);
+ f.anchor.onmouseenter();await f.settle();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
+ f.choice(1).onfocus();const keyboardPlayer=f.popup().querySelector('audio');f.choice(1).onblur({type:'blur',relatedTarget:keyboardPlayer});assert.equal(f.popup().querySelector('audio'),keyboardPlayer);f.key('Escape');assert.equal(keyboardPlayer.paused,true);assert.equal(keyboardPlayer.src,null);
 });
