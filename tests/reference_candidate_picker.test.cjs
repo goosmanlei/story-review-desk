@@ -9,8 +9,8 @@ test('same consumer queues slots against each new marker and original positions'
  const f=fixture();await Promise.all([f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component),f.c.referencePickerSave(f.session,1,f.candidate('b'),f.component),f.c.referencePickerSave(f.session,0,f.candidate('b'),f.component)]);
  assert.deepEqual(f.calls.map(r=>r.index),[0,1,0]);assert.equal(f.calls[1].expected_content.edit_token,2);assert.equal(f.calls[2].input_key,'key-1');assert.equal(f.session.slots[0].candidate.revision_id,'b');assert.equal(f.session.slots[1].candidate.revision_id,'b');
 });
-test('same candidate and original is a no-op preserving audio bounds',async()=>{
- const f=fixture();f.session.slots[0]={...f.session.slots[0],candidate:{revision_id:'a'},value:{component_id:'original',range:{start_seconds:0,end_seconds:5.6}}};await f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component);assert.equal(f.calls.length,0);assert.equal(f.session.slots[0].value.range.end_seconds,5.6);
+test('saving the same original clears old bounds; an already whole original stays a no-op',async()=>{
+ const f=fixture();f.session.slots[0]={...f.session.slots[0],candidate:{revision_id:'a'},value:{component_id:'original',range:{start_seconds:0,end_seconds:5.6}}};await f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component);assert.equal(f.calls.length,1);assert.equal(f.calls[0].preserve_bounds,undefined);assert.equal(f.session.slots[0].value.range,undefined);await f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component);assert.equal(f.calls.length,1);
 });
 test('failed/unknown request retains selection and operation identity on retry',async()=>{
  const f=fixture();f.c.respond=()=>{throw Error('lost response')};await assert.rejects(f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component));assert.equal(f.session.slots[0].candidate,undefined);delete f.c.respond;await f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component);assert.equal(f.calls[0].id,f.calls[1].id);
@@ -57,4 +57,13 @@ test('unknown clear is retried as the same explicit clear, never as a new toggle
 test('selected multi-original candidate clears the whole input independent of original choice',async()=>{
  const f=fixture();await f.c.referencePickerSave(f.session,0,f.candidate('a'),{id:'second'});
  await f.c.referencePickerToggle(f.session,0,f.candidate('a'),null);assert.equal(f.calls[1].candidate,null);
+});
+
+test('only the changed input receives save notifications while other input saves queue normally',async()=>{
+ const f=fixture(),seen=[0,0];for(const index of [0,1])f.session.listeners.add({index,connected:()=>true,refresh:()=>seen[index]++});
+ let resolve;f.c.respond=()=>new Promise(r=>resolve=r);const first=f.c.referencePickerSave(f.session,0,f.candidate('a'),f.component);await Promise.resolve();
+ assert.equal(f.c.referencePickerBlocked(f.session,0),true);assert.equal(f.c.referencePickerBlocked(f.session,1),false);assert.equal(seen[1],0);
+ resolve({requirement_id:'consumer',revision_id:'stable',edit_token:2,content_sha256:'two',slots:f.session.slots.map(s=>s.index?s:{...s,candidate:{revision_id:'a'},value:{component_id:'original'}})});await first;
+ assert.equal(seen[1],0);assert.ok(seen[0]>1);delete f.c.respond;
+ await f.c.referencePickerSave(f.session,1,f.candidate('b'),f.component);assert.ok(seen[1]>0);assert.equal(f.session.busySlots.size,0);
 });

@@ -108,9 +108,9 @@ class ReferenceValidationTest(MaterialFixture, unittest.TestCase):
         self.assertFalse(p.record(self.store, first)['payload']['generation']['inputs'])
 
     def test_selection_replay_and_stale_marker_keep_exact_input(self):
-        self.generate()
+        self.generate();self.generate('call2','second')
         oid = 'need-full-overall'
-        self.change(oid, generation=self.plan(oid, [self.input('generated', component_id='original')]))
+        self.change(oid, generation=self.plan(oid, [self.input('second', component_id='original')]))
         need = p.record(self.store, oid)
         from review_desk.shot_references import input_key
         asset = p.record(self.store, 'generated')
@@ -118,8 +118,7 @@ class ReferenceValidationTest(MaterialFixture, unittest.TestCase):
                    'expected_content': current.marker(need), 'index': 0,
                    'input_key': input_key(need['payload']['generation']['inputs'][0]),
                    'material_id': oid, 'candidate': self.ref('generated'),
-                   'candidate_id': asset['candidate_id'], 'component_id': 'original',
-                   'range': {'start_seconds': .1, 'end_seconds': .8}}
+                   'candidate_id': asset['candidate_id'], 'component_id': 'original'}
         result = operations.select(self.store, request)
         saved = p.record(self.store, oid)
         self.assertTrue(operations.select(self.store, request)['already_applied'])

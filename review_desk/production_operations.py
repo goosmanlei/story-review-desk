@@ -179,11 +179,11 @@ def select(store, request):
         target = candidate or p.record(store, mid)
         if candidate and target['payload'].get('media_type') != origin['record']['payload'].get('media_type'):
             raise ValueError('此候选与输入媒体类型不兼容')
-        # A card click is a choice of original, not a request to clear its bounds.
-        # Explicit range editing continues through the existing contract.
+        if any(request.get(key) is not None for key in ('crop', 'range')):
+            raise ValueError('参考素材须使用完整原件，不支持局部区域或时间片段')
         same_original = (candidate and old.get('reference') == request['candidate']
                          and old.get('component_id') == request.get('component_id'))
-        if same_original and request.get('preserve_bounds') is True:
+        if same_original and not any(key in old for key in ('crop', 'range')):
             issues = slot(store, old, index)['issues']
             if issues:
                 raise Conflict('；'.join(issues))
@@ -192,7 +192,6 @@ def select(store, request):
         value['reference'] = {'object_id': target['object_id'], 'revision_id': target['id']}
         if candidate:
             value.update(component_id=request['component_id'], material_selection={'material_id': mid, 'candidate_id': candidate['candidate_id']})
-            value.update({k: copy.deepcopy(request[k]) for k in ('crop','range') if k in request})
         else:
             value['selection_state'] = 'unselected'
         issues = [x for x in slot(store,value,index)['issues'] if not (not candidate and x == '尚未选定候选')]
@@ -206,4 +205,32 @@ def select(store, request):
         result = store._put_object(need['object_id'], 'REQUIREMENT', payload, need['version'],
                                    [{'revision_id': r['revision_id'], 'role': role} for role,r in p.references(payload)])
         return response(store, p.record(store, need['object_id']), False)
+    return run(store, request, action)
+
+
+def whole_references(store, request):
+    """Remove retired partial-reference settings from guarded current plans only."""
+    def action():
+        changed = []
+        for target in request['requirements']:
+            need = p.record(store, target['object_id'])
+            if need['kind'] != 'REQUIREMENT':
+                raise ValueError('完整参考转换只能修改当前素材方案')
+            current.guard(store, need['object_id'], target['expected_content'])
+            payload = copy.deepcopy(need['payload'])
+            indices = []
+            for index, value in enumerate(payload.get('generation', {}).get('inputs', [])):
+                if any(key in value for key in ('crop', 'range')):
+                    indices.append(index)
+                    value.pop('crop', None)
+                    value.pop('range', None)
+            if not indices:
+                continue
+            from .method_media import adjusted
+            adjusted(payload, need, 'whole-reference', {'id': request['id'], **target})
+            p.validate_payload(store, need['object_id'], 'REQUIREMENT', payload)
+            store._put_object(need['object_id'], 'REQUIREMENT', payload, need['version'],
+                              [{'revision_id': r['revision_id'], 'role': role} for role, r in p.references(payload)])
+            changed.append({'object_id': need['object_id'], 'indices': indices})
+        return {'changed': changed, 'already_applied': False}
     return run(store, request, action)

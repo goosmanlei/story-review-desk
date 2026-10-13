@@ -12,10 +12,12 @@ function referencePickerLoad(material,type,retry=false){
 function referencePickerConsumer(need){
   let session=referencePickerConsumers.get(need.object_id);
   if(!session){
-    session={need,slots:need.review_shot_slots||need.input_slots||[],listeners:new Set(),tail:Promise.resolve(),pending:null,busy:0};
-    session.notify=()=>{for(const view of session.listeners){if(view.connected())view.refresh();else session.listeners.delete(view)}};
+    session={need,slots:need.review_shot_slots||need.input_slots||[],listeners:new Set(),tail:Promise.resolve(),pending:null,busy:0,busySlots:new Map()};
+    session.notify=(indices=null)=>{for(const view of session.listeners){if(!view.connected())session.listeners.delete(view);else if(!indices||view.index===undefined||indices.has(view.index))view.refresh()}};
     session.receipt=(result,savedWorkspaces=[])=>{
       if(result.requirement_id!==session.need.object_id||!Array.isArray(result.slots))throw Error('保存回执与消费方案不匹配，请重新打开核对');
+      const changed=new Set(result.slots.filter(slot=>referencePickerSlotKey(slot)!==referencePickerSlotKey(session.slots.find(old=>old.index===slot.index))).map(slot=>slot.index));
+      if(session.pending)changed.add(session.pending.request.index);
       const marker=result.workspace_marker;
       for(const data of new Set([...savedWorkspaces,...[...session.listeners].filter(v=>v.connected()).flatMap(v=>v.workspaces||[])])){
         if(!marker||data.entity?.object_id!==marker.owner_id)continue;
@@ -27,7 +29,7 @@ function referencePickerConsumer(need){
         data.source_signature=marker.source_signature;
       }
       session.slots=result.slots;Object.assign(session.need,{id:result.revision_id,current_revision:result.revision_id,version:result.edit_token,edit_token:result.edit_token,content_sha256:result.content_sha256,review_shot_slots:result.slots});
-      session.need.payload.generation.inputs=result.slots.map(s=>s.value);session.pending=null;session.notify();
+      session.need.payload.generation.inputs=result.slots.map(s=>s.value);session.pending=null;session.notify(changed);
     };
     referencePickerConsumers.set(need.object_id,session);
     // Only idle, unobserved readers can leave the small session cache.
@@ -35,6 +37,8 @@ function referencePickerConsumer(need){
   }else if(!session.busy&&!session.pending&&need.edit_token>session.need.edit_token){session.need=need;session.slots=need.review_shot_slots||need.input_slots||[]}
   return session;
 }
+function referencePickerSlotKey(slot){return JSON.stringify([slot?.value,slot?.candidate,slot?.component,slot?.issues,slot?.material_id,slot?.candidate_number])}
+function referencePickerBlocked(session,index){return !!session?.busySlots.get(index)||!!session?.conflict||!!(session?.pending&&(!session.busy||session.pending.request.index===index))}
 function referencePickerSame(slot,candidate,component){return !!candidate&&slot?.candidate?.revision_id===candidate.candidate.revision_id&&slot.value.component_id===component.id}
 function referencePickerSave(session,index,candidate,component){
   const workspaces=[...session.listeners].filter(v=>v.connected()).flatMap(v=>v.workspaces||[]);
@@ -42,21 +46,21 @@ function referencePickerSave(session,index,candidate,component){
     if(session.conflict)throw Error('当前方案已被修改，请重新读取方案后选择');
     const slot=session.slots.find(s=>s.index===index);
     if(!slot?.material_id||slot.direct===false)throw Error('此输入不可在当前方案选择');
-    if(!session.pending&&referencePickerSame(slot,candidate,component))return;
+    if(!session.pending&&referencePickerSame(slot,candidate,component)&&!slot.value.crop&&!slot.value.range)return;
     const choice=JSON.stringify([index,candidate?.candidate||null,component?.id||null]);
     if(session.pending&&session.pending.choice!==choice)throw Error('上次保存结果待核对，请先重试原选择');
     if(!session.pending){session.pending={choice,workspaces,request:{id:'reference-card-'+crypto.randomUUID(),requirement_id:session.need.object_id,
       expected_content:{edit_token:session.need.edit_token,content_sha256:session.need.content_sha256},index,input_key:slot.input_key,
-      material_id:slot.material_id,candidate:candidate?.candidate||null,...(candidate?{component_id:component.id,preserve_bounds:true}:{})}}}
+      material_id:slot.material_id,candidate:candidate?.candidate||null,...(candidate?{component_id:component.id}:{})}}}
     let result;
     try{result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(session.pending.request)})}
     catch(error){if([400,409].includes(error.status)){session.pending=null;session.conflict=error.status===409}throw error}
     if(!result.slots.some(s=>s.index===index))throw Error('保存回执缺少原输入位置，请重试核对');
     session.receipt(result,session.pending.workspaces);return result;
   };
-  session.busy++;session.notify();
+  session.busy++;session.busySlots.set(index,(session.busySlots.get(index)||0)+1);session.notify(new Set([index]));
   const operation=session.tail.then(choose);session.tail=operation.catch(()=>{});
-  return operation.finally(()=>{session.busy--;session.notify()});
+  return operation.finally(()=>{session.busy--;const remaining=session.busySlots.get(index)-1;if(remaining)session.busySlots.set(index,remaining);else session.busySlots.delete(index);session.notify(session.conflict?null:new Set([index]))});
 }
 // A second deliberate click is an explicit clear; saves and retries are never toggles.
 function referencePickerToggle(session,index,candidate,component){
@@ -137,13 +141,13 @@ function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace
     retry.hidden=!session?.pending||session.pending.request.index!==index||!!session.busy;reconcile.hidden=!session?.conflict;
     for(const button of choices.querySelectorAll('[data-candidate-revision]')){
       const same=current().candidate?.revision_id===button.dataset.candidateRevision;
-      button.setAttribute('aria-pressed',String(same));button.classList.toggle('selected',same);button.disabled=!!session.busy||!!session.pending||!!session.conflict;button.setAttribute('aria-disabled',String(!same&&!!button.dataset.issue));button.querySelector('.reference-choice-check').textContent=same?'✓ ':'';
+      button.setAttribute('aria-pressed',String(same));button.classList.toggle('selected',same);button.disabled=referencePickerBlocked(session,index);button.setAttribute('aria-disabled',String(!same&&!!button.dataset.issue));button.querySelector('.reference-choice-check').textContent=same?'✓ ':'';
       button.title=button.dataset.issue||(same?'再次点击取消此参考选择':'点击选择；悬停或聚焦临时预览');
     }
-    originals.querySelectorAll('button').forEach(button=>{button.disabled=!!button.dataset.issue||!!session?.busy||!!session?.pending||!!session?.conflict;button.setAttribute('aria-pressed',String(current().candidate?.revision_id===button.dataset.candidateRevision&&current().value.component_id===button.dataset.originalId))});display();
+    originals.querySelectorAll('button').forEach(button=>{button.disabled=!!button.dataset.issue||referencePickerBlocked(session,index);button.setAttribute('aria-pressed',String(current().candidate?.revision_id===button.dataset.candidateRevision&&current().value.component_id===button.dataset.originalId))});display();
   };
   const save=async(candidate,original,toggle=true)=>{
-    if(!session||session.busy||session.pending||session.conflict)return;error='';
+    if(!session||referencePickerBlocked(session,index))return;error='';
     try{await (toggle?referencePickerToggle(session,index,candidate,original):referencePickerSave(session,index,candidate,original));originals.replaceChildren()}
     catch(exc){error='保存失败：'+exc.message}refresh();
   };
@@ -163,7 +167,7 @@ function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace
       nodeText('span','reference-choice-check','',button);nodeText('span',null,`候选 ${candidate.number}`,button);button.setAttribute('aria-label',`候选 ${candidate.number}`);
       const issue=candidate.issue||single?.issue;if(issue)button.dataset.issue=issue;
       button.onmouseenter=button.onfocus=()=>{hovered=candidate;hoveredOriginal=null;display()};button.onmouseleave=button.onblur=restorePreview;
-      button.onclick=event=>{event.stopPropagation();if(session.busy||session.pending||session.conflict)return;const same=current().candidate?.revision_id===candidate.candidate.revision_id;if(issue&&!same)return;if(single||same)return save(candidate,single);chooseOriginals(candidate)};
+      button.onclick=event=>{event.stopPropagation();if(referencePickerBlocked(session,index))return;const same=current().candidate?.revision_id===candidate.candidate.revision_id;if(issue&&!same)return;if(single||same)return save(candidate,single);chooseOriginals(candidate)};
     }
     refresh();const selected=choices.querySelector('.selected');if(selected)choices.scrollLeft=Math.max(0,selected.offsetLeft-choices.offsetLeft-choices.clientWidth+selected.offsetWidth);
   };
@@ -196,7 +200,7 @@ function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace
   anchor.onkeydown=event=>{if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();open();(choices.querySelector('.selected')||choices.querySelector('[data-candidate-revision]')||preview.querySelector('audio,video'))?.focus()}else if(event.key==='Escape'){event.preventDefault();close()}};
   anchor.onpointerdown=event=>{if(event.pointerType!=='touch')return;touch={x:event.clientX,y:event.clientY};suppressClick=false;touchTimer=setTimeout(()=>{suppressClick=true;open(true)},450)};
   anchor.onpointermove=event=>{if(touch&&Math.hypot(event.clientX-touch.x,event.clientY-touch.y)>8){suppressClick=true;clearTimeout(touchTimer)}};anchor.onpointerup=()=>{clearTimeout(touchTimer);touch=null};anchor.onpointercancel=()=>{clearTimeout(touchTimer);touch=null;suppressClick=true};
-  if(session)view={connected:()=>anchor.isConnected,refresh,workspaces};
+  if(session)view={index,connected:()=>anchor.isConnected,refresh,workspaces};
   return {close,consumeClick:()=>{const suppressed=suppressClick;suppressClick=false;return suppressed},input:()=>{if(!session)return item;const slot=current(),row=slot.record||item.row;return {...item,slot,row,value:slot.value,ref:{...slot.value.reference,...slot.value,kind:row?.kind,reference_identity:slot,...(row?.submission_only||row?.unavailable||row?.component_snapshot?{snapshot_record:row}:{})}}}};
 }
 function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
@@ -208,19 +212,19 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   copy.querySelector('.small-card-selection')?.remove();
   const picker=el('div','reference-candidate-picker'),choices=el('div','reference-candidate-choices'),status=nodeText('small','reference-picker-status','正在读取候选…',choices);
   picker.append(choices);copy.append(picker);status.setAttribute('role','status');
-  let data=null,error='',loading=false,preview=null,previewKey=null,pinned=false,leaveTimer=null,cleanup=null,skipFocus=false;
+  let data=null,error='',loading=false,preview=null,previewKey=null,previewButton=null,pinned=false,leaveTimer=null,cleanup=null,skipFocus=false;
   const current=()=>session.slots.find(s=>s.index===index)||item.slot;
   const closePreview=()=>{
     clearTimeout(leaveTimer);cleanup?.();cleanup=null;
     referencePreviewStop(preview);
-    preview?.remove();preview=null;previewKey=null;pinned=false;
+    preview?.remove();preview=null;previewKey=null;previewButton?.classList.toggle('previewing',false);previewButton=null;pinned=false;
     if(referencePickerCloseActive===closePreview)referencePickerCloseActive=null;
   };
   const laterClose=event=>{const pointerLeave=event?.type==='mouseleave';clearTimeout(leaveTimer);leaveTimer=setTimeout(()=>{if(pointerLeave?!pinned&&!preview?.matches(':hover'):!preview?.contains(document.activeElement))closePreview()},180)};
   const showPreview=(button,candidate,component=null,explicit=false)=>{
     const key=JSON.stringify([candidate.candidate,component?.id||null]);
     if(key===previewKey&&preview){pinned||=explicit;clearTimeout(leaveTimer);return}
-    referencePickerCloseActive?.();closePreview();referencePickerCloseActive=closePreview;previewKey=key;pinned=explicit;
+    referencePickerCloseActive?.();closePreview();referencePickerCloseActive=closePreview;previewKey=key;pinned=explicit;previewButton=button;button.classList.add('previewing');
     preview=el('div','reference-candidate-preview');preview.setAttribute('popover','manual');preview.setAttribute('role','dialog');preview.setAttribute('aria-label',`候选 ${candidate.number} 预览`);picker.append(preview);
     const heading=el('div','reference-preview-heading');preview.append(heading);nodeText('strong',null,`候选 ${candidate.number}`,heading);
     const mediaBox=el('div','reference-preview-media');
@@ -245,7 +249,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     cleanup=()=>{events.abort();observer.disconnect()};
   };
   const select=async(candidate,component,toggle=true)=>{
-    if(session.busy||(component?.issue&&current().candidate?.revision_id!==candidate.candidate.revision_id))return;closePreview();error='';
+    if(referencePickerBlocked(session,index)||(component?.issue&&current().candidate?.revision_id!==candidate.candidate.revision_id))return;closePreview();error='';
     try{await (toggle?referencePickerToggle(session,index,candidate,component):referencePickerSave(session,index,candidate,component))}
     catch(exc){error='保存失败：'+exc.message}refresh();
   };
@@ -262,7 +266,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     button.onpointerdown=event=>{if(event.pointerType!=='touch')return;pointer={x:event.clientX,y:event.clientY};suppress=false;touchTimer=setTimeout(()=>{suppress=true;showPreview(button,candidate,component,true)},450)};
     button.onpointermove=event=>{if(pointer&&Math.hypot(event.clientX-pointer.x,event.clientY-pointer.y)>8){suppress=true;clearTimeout(touchTimer)}};
     button.onpointerup=()=>{clearTimeout(touchTimer);pointer=null};button.onpointercancel=()=>{clearTimeout(touchTimer);pointer=null;suppress=true};
-    button.onclick=event=>{event.stopPropagation();if(suppress){suppress=false;return}if(session.busy||session.pending||session.conflict)return;
+    button.onclick=event=>{event.stopPropagation();if(suppress){suppress=false;return}if(referencePickerBlocked(session,index))return;
       const selected=current().candidate?.revision_id===candidate.candidate.revision_id;
       if(button.dataset.issue&&!selected)return showPreview(button,candidate,component);
       if(component||selected)return select(candidate,component);
@@ -287,13 +291,12 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
       }else thumbnail?.remove();
     }
     status.textContent=error||(!data?'正在读取候选…':!data.candidates.length?'暂无候选':'');status.title=error;status.hidden=!status.textContent;status.className=error?'reference-picker-status production-issue':'reference-picker-status';
-    reconcile.hidden=!session.conflict;retry.hidden=!session.pending||!!session.busy;picker.setAttribute('aria-busy',String(!!session.busy));
+    reconcile.hidden=!session.conflict;retry.hidden=!session.pending||session.pending.request.index!==index||!!session.busy;picker.setAttribute('aria-busy',String(!!session.busySlots.get(index)));
     for(const button of choices.querySelectorAll('[data-candidate-revision]')){
       const same=slot.candidate?.revision_id===button.dataset.candidateRevision;
-      const range=same&&slot.value.range,crop=same&&slot.value.crop;
-      const label=`候选 ${button.dataset.candidateNumber}`+(range?` · ${range.start_seconds}–${range.end_seconds} 秒`:crop?' · 已登记裁切区域':'');
+      const label=`候选 ${button.dataset.candidateNumber}`;
       button.querySelector('.reference-choice-label').textContent=label;button.setAttribute('aria-label',label);
-      button.setAttribute('aria-pressed',String(same));button.classList.toggle('selected',same);button.disabled=!!session.busy||!!session.pending||!!session.conflict;button.setAttribute('aria-disabled',String(!same&&!!button.dataset.issue));
+      button.setAttribute('aria-pressed',String(same));button.classList.toggle('selected',same);button.disabled=referencePickerBlocked(session,index);button.setAttribute('aria-disabled',String(!same&&!!button.dataset.issue));
       button.querySelector('.reference-choice-check').textContent=same?'✓ ':'';
       button.title=button.dataset.issue||(same?'再次点击取消此参考选择':'点击选择；悬停或聚焦预览；触屏按住预览');
     }
@@ -310,7 +313,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     }
     refresh();const selected=choices.querySelector('.selected');if(selected){choices.scrollLeft=Math.max(0,selected.offsetLeft-choices.offsetLeft-choices.clientWidth+selected.offsetWidth)}
   };
-  const view={connected:()=>line.isConnected,refresh,workspaces};
+  const view={index,connected:()=>line.isConnected,refresh,workspaces};
   const observe=()=>{if(!line.isConnected)return;for(const old of session.listeners)if(!old.connected())session.listeners.delete(old);session.listeners.add(view)};
   const load=async(reload=false)=>{if(loading)return;loading=true;error='';observe();refresh();
     try{data=await referencePickerLoad(item.slot.canonical_material_id||item.slot.material_id,item.slot.record?.payload.media_type||item.row?.payload.media_type||'',reload);if(!Array.isArray(data.candidates))throw Error('候选响应不可用');if(line.isConnected){observe();render()}}

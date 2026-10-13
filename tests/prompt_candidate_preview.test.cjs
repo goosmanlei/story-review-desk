@@ -113,3 +113,23 @@ test('audio candidate hover survives moving to its player, while leaving closes 
  f.anchor.onmouseenter();await f.settle();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
  f.choice(1).onfocus();const keyboardPlayer=f.popup().querySelector('audio');f.choice(1).onblur({type:'blur',relatedTarget:keyboardPlayer});assert.equal(f.popup().querySelector('audio'),keyboardPlayer);f.key('Escape');assert.equal(keyboardPlayer.paused,true);assert.equal(keyboardPlayer.src,null);
 });
+
+function mountReferenceCard(f,index=0){
+ const slot=f.need.review_shot_slots[index],line=new f.Element('div'),card=new f.Element('div'),copy=new f.Element('span','material-small-copy'),name=new f.Element('button','reference-material-name');card.append(name,copy);line.append(card);f.body.append(line);
+ f.c.renderReferenceCandidatePicker(line,{...f.item,index,slot,value:slot.value,row:slot.record},f.need,card);return card;
+}
+test('Prompt choice does not mutate unrelated candidate controls during or after the save',async()=>{
+ const f=fixture(),card=mountReferenceCard(f),other=mountReferenceCard(f,1);f.anchor.onmouseenter();await f.settle();
+ const buttons=other.querySelectorAll('[data-candidate-revision]'),thumbnail=other.querySelector('.material-small-preview');let mutations=0;
+ for(const button of buttons){let disabled=button.disabled;Object.defineProperty(button,'disabled',{get:()=>disabled,set:value=>{disabled=value;mutations++}});const set=button.setAttribute.bind(button);button.setAttribute=(...args)=>{mutations++;set(...args)}}
+ const originalAPI=f.c.api;let release;f.c.api=(url,options)=>options?new Promise(resolve=>release=()=>originalAPI(url,options).then(resolve)):originalAPI(url,options);
+ const saving=f.choice(2).onclick({stopPropagation(){}});await f.settle();assert.equal(mutations,0);assert.equal(buttons[0].disabled,false);assert.equal(card.querySelectorAll('[data-candidate-revision]')[0].disabled,true);
+ release();await saving;assert.equal(mutations,0);assert.equal(other.querySelector('.material-small-preview'),thumbnail);assert.equal(card.querySelectorAll('[data-candidate-revision]')[1].getAttribute('aria-pressed'),'true');
+});
+test('reference card candidate stays highlighted through pointer or focus moves into its preview',async()=>{
+ const f=fixture({media:'audio'}),card=mountReferenceCard(f);await f.settle();const buttons=card.querySelectorAll('[data-candidate-revision]'),button=buttons[1];button.onmouseenter();
+ let preview=f.body.querySelector('.reference-candidate-preview'),player=preview.querySelector('audio');assert.ok(button.className.split(' ').includes('previewing'));
+ preview.hover=true;button.onmouseleave({type:'mouseleave',relatedTarget:player});preview.onmouseenter();f.leave();assert.equal(preview.isConnected,true);assert.ok(button.className.split(' ').includes('previewing'));
+ preview.hover=false;preview.onmouseleave({type:'mouseleave'});f.leave();assert.equal(preview.isConnected,false);assert.ok(!button.className.split(' ').includes('previewing'));
+ button.focus();preview=f.body.querySelector('.reference-candidate-preview');player=preview.querySelector('audio');player.focus();button.onblur({type:'blur',relatedTarget:player});preview.onfocusin();f.leave();assert.equal(preview.isConnected,true);assert.ok(button.className.split(' ').includes('previewing'));f.key('Escape');assert.ok(!button.className.split(' ').includes('previewing'));
+});
