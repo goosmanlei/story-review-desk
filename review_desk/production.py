@@ -599,55 +599,59 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
     elif not store.db.in_transaction or validate_only:
         raise ValueError("nested import requires an owning transaction")
     try:
-        guards = document.get('expected_heads', {})
-        if not isinstance(guards, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in guards.items()):
-            raise ValueError('expected_heads must map object ids to exact revision ids')
-        for object_id, revision_id in guards.items():
-            from .production_current import enabled, guard
-            if enabled(store) and store.db.execute('SELECT 1 FROM production_current_records WHERE object_id=?', (object_id,)).fetchone():
-                guard(store, object_id, document.get('expected_content', {}).get(object_id))
-            current = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
-            if not current or current['current_revision'] != revision_id:
-                raise Conflict('production planning input changed: ' + object_id)
-        removed = remove_unreferenced_requirements(store, document.get("remove_unreferenced_requirements", []))
-        for source in document["records"]:
-            if not isinstance(source, dict) or not ID.fullmatch(str(source.get("object_id", ""))):
-                raise ValueError("invalid production object id")
-            object_id, kind = source["object_id"], source.get("kind")
-            if object_id in resolved:
-                raise ValueError("an object may occur only once per batch")
-            p = copy.deepcopy(source.get("payload"))
-            if kind == 'RELATION' and p.get('relation_type') == 'business':
-                from .business_relations import normalize
-                p = normalize(p)
-            for _, ref in references(p):
-                if isinstance(ref["revision_id"], str) and ref["revision_id"].startswith("@"):
-                    alias = ref["revision_id"][1:]
-                    if alias != ref["object_id"] or alias not in resolved:
-                        raise ValueError("batch reference must target an earlier object")
-                    ref["revision_id"] = resolved[alias]
-            validate_payload(store, object_id, kind, p, check_current=check_current)
-            dependencies = [{"revision_id": ref["revision_id"], "role": path} for path, ref in references(p)]
-            result = store._put_object(object_id, kind, p, source.get("expected_version"), dependencies)
-            results.append(result)
-            resolved[object_id] = result["revision"]
-            from .production_current import enabled as current_enabled
-            if check_current and not current_enabled(store):
-                register(store, record(store, revision_id=result['revision']))
-        for result in results:
-            row = record(store, revision_id=result["revision"])
-            if row["kind"] == "MATERIAL_RELATION":
-                try:
-                    downstream = record(store, row["payload"]["downstream_id"])
-                except KeyError as exc:
-                    raise ValueError("material relation downstream is missing") from exc
-                if downstream["kind"] != "REQUIREMENT":
-                    raise ValueError("material relation downstream must be a requirement")
-        if check_current:
-            from .production_current import enabled as current_enabled
-            if current_enabled(store):
-                from .semantic_consolidation import validate as validate_current_tree
-                validate_current_tree(store)
+        from .material_input_validation import batch
+        with batch(store):
+            guards = document.get('expected_heads', {})
+            if not isinstance(guards, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in guards.items()):
+                raise ValueError('expected_heads must map object ids to exact revision ids')
+            for object_id, revision_id in guards.items():
+                from .production_current import enabled, guard
+                if enabled(store) and store.db.execute('SELECT 1 FROM production_current_records WHERE object_id=?', (object_id,)).fetchone():
+                    guard(store, object_id, document.get('expected_content', {}).get(object_id))
+                current = store.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
+                if not current or current['current_revision'] != revision_id:
+                    raise Conflict('production planning input changed: ' + object_id)
+            removed = remove_unreferenced_requirements(store, document.get("remove_unreferenced_requirements", []))
+            for source in document["records"]:
+                if not isinstance(source, dict) or not ID.fullmatch(str(source.get("object_id", ""))):
+                    raise ValueError("invalid production object id")
+                object_id, kind = source["object_id"], source.get("kind")
+                if object_id in resolved:
+                    raise ValueError("an object may occur only once per batch")
+                p = copy.deepcopy(source.get("payload"))
+                if kind == 'RELATION' and p.get('relation_type') == 'business':
+                    from .business_relations import normalize
+                    p = normalize(p)
+                for _, ref in references(p):
+                    if isinstance(ref["revision_id"], str) and ref["revision_id"].startswith("@"):
+                        alias = ref["revision_id"][1:]
+                        if alias != ref["object_id"] or alias not in resolved:
+                            raise ValueError("batch reference must target an earlier object")
+                        ref["revision_id"] = resolved[alias]
+                validate_payload(store, object_id, kind, p, check_current=check_current)
+                dependencies = [{"revision_id": ref["revision_id"], "role": path} for path, ref in references(p)]
+                result = store._put_object(object_id, kind, p, source.get("expected_version"), dependencies)
+                results.append(result)
+                resolved[object_id] = result["revision"]
+                from .production_current import enabled as current_enabled
+                if check_current and not current_enabled(store):
+                    register(store, record(store, revision_id=result['revision']))
+            for result in results:
+                row = record(store, revision_id=result["revision"])
+                if row["kind"] == "MATERIAL_RELATION":
+                    try:
+                        downstream = record(store, row["payload"]["downstream_id"])
+                    except KeyError as exc:
+                        raise ValueError("material relation downstream is missing") from exc
+                    if downstream["kind"] != "REQUIREMENT":
+                        raise ValueError("material relation downstream must be a requirement")
+            if check_current:
+                from .material_input_validation import validate_pending
+                validate_pending(store)
+                from .production_current import enabled as current_enabled
+                if current_enabled(store):
+                    from .semantic_consolidation import validate as validate_current_tree
+                    validate_current_tree(store)
         if transaction:
             if validate_only:
                 store.db.rollback()

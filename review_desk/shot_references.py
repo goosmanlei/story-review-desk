@@ -73,12 +73,15 @@ def enrich_detail(store, detail):
                             continue
                     item['relation_context'] = input_context(store, basis['object_id'], value)
             if row['kind']=='REQUIREMENT' and row['payload'].get('generation'):
+                from .material_storage import canonical_id
                 from .material_relations import active_inputs, rules
                 plan=row['payload']['generation']
                 active={index for index,_ in active_inputs(store,plan,row['object_id'])[0]}
                 for item in row['review_shot_slots']:
                     item['active']=item['index'] in active
                     item['rule']=rules(store,plan['inputs'][item['index']],row['object_id'])
+                    item['own_candidate'] = bool(item.get('candidate_id') and not item['issues']
+                        and item.get('canonical_material_id') == canonical_id(store, row['object_id']))
             row['review_reference_links'] = project(store, row)
             row['review_prompt_links'] = annotations(store, row).get('prompt_links', [])
     return detail

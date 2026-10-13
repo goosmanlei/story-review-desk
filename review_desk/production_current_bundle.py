@@ -184,6 +184,8 @@ def validate(store):
     validate_files(store)
     from .material_reference import validate_evidence
     validate_evidence(store)
+    from .material_input_validation import validate_tree as validate_inputs
+    validate_inputs(store)
     for obj in store.objects():
         rows = list(store.db.execute('SELECT * FROM revisions WHERE object_id=?', (obj['id'],)))
         heads = [r for r in rows if r['id'] == obj['current_revision'] and r['version'] == obj['version']]

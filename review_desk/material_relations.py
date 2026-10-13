@@ -128,23 +128,37 @@ def active_inputs(store, plan, requirement_id=None, *, metadata=False):
 
 
 def cycle_issues(store, need):
-    issues, finished = [], set()
-
-    def visit(row, chain):
-        if row['object_id'] in chain:
-            issues.append('所选执行路线存在循环：'+' → '.join([*chain, row['object_id']]))
-            return
-        if row['id'] in finished:
-            return
-        inputs, unresolved = active_inputs(store, row['payload'].get('generation', {}), row['object_id'])
-        issues.extend(unresolved)
-        for _, value in inputs:
-            target = p.ref_record(store, value['reference'])
-            if target['kind'] == 'REQUIREMENT':
-                visit(target, [*chain, row['object_id']])
-        finished.add(row['id'])
-
-    visit(need, [])
+    from .material_storage import canonical_id
+    issues, finished, chain = [], set(), []
+    stack = [(need, False)]
+    while stack:
+        row, leaving = stack.pop()
+        mid = canonical_id(store, row['object_id'])
+        if leaving:
+            chain.pop()
+            finished.add(mid)
+            continue
+        if mid in chain:
+            issues.append('所选执行路线存在循环：'+' → '.join([*chain, mid]))
+            continue
+        if mid in finished:
+            continue
+        chain.append(mid)
+        stack.append((row, True))
+        try:
+            inputs, unresolved = active_inputs(store, row['payload'].get('generation') or {}, row['object_id'])
+            issues.extend(unresolved)
+            children = []
+            for index, value in inputs:
+                try:
+                    target = p.ref_record(store, value['reference'])
+                    if target['kind'] == 'REQUIREMENT':
+                        children.append(target)
+                except (KeyError, ValueError) as exc:
+                    issues.append(mid+' 参考 '+str(index+1)+'：'+str(exc))
+            stack.extend((target, False) for target in reversed(children))
+        except (KeyError, ValueError) as exc:
+            issues.append(mid+'：'+str(exc))
     return list(dict.fromkeys(issues))
 
 
