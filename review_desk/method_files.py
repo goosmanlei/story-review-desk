@@ -253,6 +253,38 @@ def directory(store, object_id, revision_id=None):
         for path in ordered]}
 
 
+def referenced_directories(store, object_id, revision_id=None):
+    """List declared chapters, conditional chapters and their actual companions.
+
+    Full exact records remain available for legal links and historical deep links;
+    this is a reading projection, not a destructive package rewrite.
+    """
+    from .methods import read, resource_files
+    method = read(store, object_id, revision_id)
+    groups = {}
+    for ref in method['payload'].get('resources', []):
+        identity = (ref['object_id'], ref['revision_id'])
+        if identity not in groups:
+            groups[identity] = {'directory': directory(store, *identity), 'members': {}}
+        group = groups[identity]
+        resource = group['directory']['record']
+        filename, companions = resource_files(resource, ref['section'])
+        members = [filename, *companions]
+        for path in list(members):
+            members.extend(spec['path'] for spec in resource['payload'].get('media', {}).get(path, {}).values())
+        for path in dict.fromkeys(members):
+            declaration = {'section': ref['section'], 'when': ref.get('when', {})}
+            if path == filename:
+                declaration['anchor'] = resource['payload'].get('source', {}).get('files', {}).get(path, {}).get('section', '')
+            group['members'].setdefault(path, []).append(declaration)
+    result = []
+    for group in groups.values():
+        result.append({**group['directory'], 'files': [
+            {**item, 'declarations': group['members'][item['path']]}
+            for item in group['directory']['files'] if item['path'] in group['members'] and item['selected']]})
+    return result
+
+
 def document(store, object_id, path, *, revision_id=None, version=None):
     from .methods import read
     from .method_document import project

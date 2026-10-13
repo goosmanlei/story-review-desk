@@ -379,10 +379,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(result)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
-        if path in ('/api/methods/files', '/api/methods/file', '/api/methods/compare', '/api/methods/file-media'):
+        if path in ('/api/methods/files', '/api/methods/references', '/api/methods/file', '/api/methods/compare', '/api/methods/file-media'):
             try:
                 from . import method_files
                 param = lambda name: query.get(name, [None])[0]
+                if path.endswith('/references'):
+                    return self._json(method_files.referenced_directories(store, param('object_id'), param('revision_id')))
                 if path.endswith('/files'):
                     return self._json(method_files.directory(store, param('object_id'), param('revision_id')))
                 if path.endswith('/compare'):

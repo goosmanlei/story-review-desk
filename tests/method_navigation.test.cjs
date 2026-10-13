@@ -18,9 +18,9 @@ function setup(href='http://fixture/?workspace=production.approach&tab=foundatio
  const data={skill:[unused,video,unknown,structure],resource:[],binding:bs,condition_texts:{},referenced:Object.fromEntries([oldStructure,video,unknown].map(r=>[r.revision_id,r])),versions:{[structure.object_id]:[structure,oldStructure],[video.object_id]:[video],[unused.object_id]:[unused],[unknown.object_id]:[unknown]}};
  data.flow={stages:[{id:'source',title:'采编与方向',methods:[]},{id:'structure',title:'故事结构',methods:[{object_id:structure.object_id,title:'故事结构'}]},{id:'video',title:'视频方案',methods:[{object_id:video.object_id,title:'视频方案'}]}],branches:[]};
  const root=new Node('div');root.connected(true);const location={href},saved=new Map(),pending=[];let delay=false;
- const ctx={matchMedia:()=>({matches:false}),reviewURL:s=>s,toast(){},URL,URLSearchParams,Blob,state:{workspace:'production.approach',configSection:'PROJECT',comments:[]},fixtureData:data,location,history:{state:{},replaceState(s,t,u){location.href=String(u)}},window:{scrollY:0,addEventListener(){},scrollTo(x,y){this.scrollY=y}},sessionStorage:{getItem:k=>saved.get(k)||null,setItem:(k,v)=>saved.set(k,v)},localStorage:{getItem:()=>null},document:{createTextNode:t=>{const n=new Node('text');n.text=t;return n}},el:(t,c)=>new Node(t,c),nodeText:(t,c,text,p)=>{const n=new Node(t,c);n.textContent=text;p?.append(n);return n},hideSelectionAction(){},renderComments(){},reviewSurface(){},api(url){const q=new URL(url,'http://fixture'),oid=q.searchParams.get('object_id'),rid=q.searchParams.get('revision_id');const record=[...data.skill,...data.binding,...Object.values(data.referenced)].find(r=>r.object_id===oid&&(!rid||r.revision_id===rid));const versions=(data.versions[oid]||[]).map(r=>({version:r.version,kind:'text'}));
+ const ctx={matchMedia:()=>({matches:false}),reviewURL:s=>s,toast(){},URL,URLSearchParams,Blob,state:{workspace:'production.approach',configSection:'PROJECT',comments:[]},fixtureData:data,location,history:{state:{},replaceState(s,t,u){this.state=s;location.href=String(u)},pushState(s,t,u){this.state=s;location.href=String(u)}},window:{scrollY:0,addEventListener(){},scrollTo(x,y){this.scrollY=y}},sessionStorage:{getItem:k=>saved.get(k)||null,setItem:(k,v)=>saved.set(k,v)},localStorage:{getItem:()=>null},document:{createTextNode:t=>{const n=new Node('text');n.text=t;return n}},el:(t,c)=>new Node(t,c),nodeText:(t,c,text,p)=>{const n=new Node(t,c);n.textContent=text;p?.append(n);return n},hideSelectionAction(){},renderComments(){},reviewSurface(){},api(url){const q=new URL(url,'http://fixture'),oid=q.searchParams.get('object_id'),rid=q.searchParams.get('revision_id');const record=[...data.skill,...data.binding,...Object.values(data.referenced)].find(r=>r.object_id===oid&&(!rid||r.revision_id===rid));const versions=(data.versions[oid]||[]).map(r=>({version:r.version,kind:'text'}));
  const requested=Number(q.searchParams.get('version'));const exact=requested?(data.versions[oid]||[]).find(r=>r.version===requested):record;
- const result=q.pathname.endsWith('/files')?{record,files:Object.keys(record.payload.files).map(path=>({path,selected:{version:record.version},versions}))}:q.pathname.endsWith('/file')?{record:exact,file:q.searchParams.get('file'),present:true,content:'text',blocks:[],file_version:{version:exact.version},versions}:q.pathname==='/api/methods'?data:record;
+ const result=q.pathname.endsWith('/references')?(record.payload.resources||[]).map(ref=>{const r=data.referenced[ref.revision_id];return {record:r,files:[{path:r.payload.sections[ref.section],selected:{version:r.version},versions:data.versions[r.object_id]||[],declarations:[{section:ref.section,when:ref.when||{}}]}]}}):q.pathname.endsWith('/files')?{record,files:Object.keys(record.payload.files).map(path=>({path,selected:{version:record.version},versions}))}:q.pathname.endsWith('/file')?{record:exact,file:q.searchParams.get('file'),present:true,content:'text',blocks:[],file_version:{version:exact.version},versions}:q.pathname==='/api/methods'?data:record;
  if(delay&&q.pathname.endsWith('/file'))return new Promise((resolve,reject)=>pending.push({url,resolve,reject,result}));return Promise.resolve(result)}};
  vm.createContext(ctx);vm.runInContext(fs.readFileSync(require('node:path').join(__dirname,'../review_desk/static/methods.js'),'utf8')+'\nmethodView.data=fixtureData;renderMethodBlocks=()=>{};paintMethodComments=()=>{};',ctx);
  return {ctx,root,data,structure,oldStructure,video,unused,unknown,pending,delay(){delay=true},read:()=>vm.runInContext('({selected:methodView.selected,revision:methodView.revision,document:methodView.document,filters:methodView.filters})',ctx)};
@@ -86,4 +86,47 @@ test('a shared chapter stays embedded and its reader/comment identity belongs to
  // A persisted stack from a previous interface must not reintroduce the guide.
  vm.runInContext('methodView.stack=[{selected:"old"}];methodView.rootRecord=null',f.ctx);
  await f.ctx.drawMethods(f.root);assert.doesNotMatch(f.root.textContent,/返回原阅读位置/);
+});
+
+test('switching and retry preserve mounted navigation and all reading positions',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);
+ const nav=vm.runInContext('methodView.flow',f.ctx),tree=vm.runInContext('methodView.tree',f.ctx),reader=vm.runInContext('methodView.reader',f.ctx);
+ nav.scrollTop=820;tree.scrollTop=125;reader.scrollTop=340;f.ctx.window.scrollY=180;
+ await f.ctx.methodSelectNode(f.root,f.video.object_id);
+ assert.equal(vm.runInContext('methodView.flow',f.ctx),nav);assert.equal(vm.runInContext('methodView.tree',f.ctx),tree);
+ assert.equal(nav.scrollTop,820);assert.equal(tree.scrollTop,125);assert.equal(f.ctx.window.scrollY,180);assert.equal(reader.scrollTop,0);
+ reader.scrollTop=72;await f.ctx.methodSelectNode(f.root,f.video.object_id);assert.equal(reader.scrollTop,72);
+ await f.ctx.methodSelectNode(f.root,f.structure.object_id);assert.equal(reader.scrollTop,340);
+ f.delay();const p=f.ctx.methodSelectNode(f.root,f.video.object_id);await flush();f.pending[0].reject(Error('temporary'));await p;
+ const retry=f.root.querySelectorAll('button').find(b=>b.textContent==='重试准确文件').onclick();await flush();f.pending[1].resolve(f.pending[1].result);await retry;
+ assert.equal(nav.scrollTop,820);assert.equal(tree.scrollTop,125);assert.equal(f.ctx.window.scrollY,180);assert.equal(reader.scrollTop,72);
+});
+
+test('browser back preserves its destination snapshot, mounted rails and exact reader offset',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);
+ vm.runInContext('methodView.flow.scrollTop=870;methodView.tree.scrollTop=126;methodView.reader.scrollTop=345;window.scrollY=204;rememberMethodPosition()',f.ctx);
+ const destination=JSON.parse(JSON.stringify(f.ctx.history.state)),url=f.ctx.location.href,nav=vm.runInContext('methodView.flow',f.ctx);
+ await f.ctx.methodSelectNode(f.root,f.video.object_id);
+ vm.runInContext('methodView.flow.scrollTop=950;methodView.tree.scrollTop=80;methodView.reader.scrollTop=20;rememberMethodPosition()',f.ctx);
+ f.ctx.history.state=destination;f.ctx.location.href=url;
+ f.ctx.rememberMethodPosition();assert.deepEqual(f.ctx.history.state,destination);
+ assert.equal(await f.ctx.restoreMethodHistory(destination.methodReading),true);
+ assert.equal(vm.runInContext('methodView.flow',f.ctx),nav);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify([methodView.flow.scrollTop,methodView.tree.scrollTop,methodView.reader.scrollTop,window.scrollY])',f.ctx)),[870,126,345,204]);
+ // A full remount (reload) restores the same four independently owned offsets.
+ f.root.replaceChildren();f.ctx.window.scrollY=0;f.ctx.rememberMethodPosition();
+ await f.ctx.renderMethods(f.root);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify([methodView.flow.scrollTop,methodView.tree.scrollTop,methodView.reader.scrollTop,window.scrollY])',f.ctx)),[870,126,345,204]);
+});
+
+test('specialty selection survives back and a full remount with its exact file',async()=>{
+ const f=setup();await f.ctx.drawMethods(f.root);
+ await f.ctx.methodSelectNode(f.root,f.video.object_id,'SKILL.md');
+ assert.equal(new URL(f.ctx.location.href).searchParams.get('method_specialty'),'SKILL.md');
+ const url=f.ctx.location.href,saved=JSON.parse(JSON.stringify(f.ctx.history.state));
+ await f.ctx.methodSelectNode(f.root,f.structure.object_id);
+ f.ctx.location.href=url;f.ctx.history.state=saved;await f.ctx.restoreMethodHistory(saved.methodReading);
+ assert.equal(vm.runInContext('methodView.specialty',f.ctx),'SKILL.md');
+ f.root.replaceChildren();await f.ctx.renderMethods(f.root);
+ assert.equal(vm.runInContext('methodView.specialty',f.ctx),'SKILL.md');
 });

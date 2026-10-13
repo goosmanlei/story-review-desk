@@ -9,6 +9,30 @@ from test_methods import seed
 
 
 class FileHistoryTest(unittest.TestCase):
+    def test_reference_tree_and_execution_share_only_declared_chapters_and_companions(self):
+        resource=methods.save(self.store,{'category':'resource','name':'chapters','expected_version':0,
+            'payload':{'title':'Book','files':{'one.md':'One','two.md':'Two','unused.md':'Unused','figure.svg':'<svg/>'},
+                       'sections':{'one':'one.md','two':'two.md','unused':'unused.md'},'companions':{'two':['figure.svg']}}})
+        method=self.save(resources=[{**methods.reference(resource),'section':'one','when':{'mode':'one'}},
+                                    {**methods.reference(resource),'section':'two','when':{'mode':'two'}}])
+        methods.save(self.store,{'category':'binding','name':'comment-polish','expected_version':1,
+            'payload':{'work_type':'comment-polish','rules':[{**methods.reference(method),'when':{}}]}})
+        tree=files.referenced_directories(self.store,method['object_id'])[0]
+        self.assertEqual({f['path'] for f in tree['files']},{'one.md','two.md','figure.svg'})
+        self.assertEqual(next(f for f in tree['files'] if f['path']=='figure.svg')['declarations'],
+                         [{'section':'two','when':{'mode':'two'}}])
+        package=methods.resolve(self.store,'comment-polish',{'mode':'two'})
+        self.assertEqual(len(package['resources']),1)
+        self.assertEqual(package['resources'][0]['source_index'],1)
+        self.assertEqual(package['resources'][0]['files'],{'figure.svg':'<svg/>'})
+        self.assertEqual(files.document(self.store,resource['object_id'],'unused.md',revision_id=resource['revision_id'])['content'],'Unused')
+        request={'work_type':'comment-polish','run_id':'conditional','step_id':'two','target':'sample',
+                 'conditions':{'mode':'two'},'inputs':{'context':'input'}}
+        execution=methods.prepare(self.store,request)
+        methods.export_execution(self.store,methods.reference(execution),self.root/'selected')
+        self.assertEqual((self.root/'selected/shared/1/two.md').read_text(),'Two')
+        self.assertFalse((self.root/'selected/shared/0').exists())
+
     def test_old_split_reference_uses_only_an_identical_source_outline(self):
         source=self.root/'handbook.md'
         source.write_text('# 手册\n<!-- section:use -->\n## 开始\n<!-- section:checks -->\n## 检查\n')
