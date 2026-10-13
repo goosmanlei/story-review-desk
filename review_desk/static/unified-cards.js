@@ -6,14 +6,14 @@ function materialDefaultCandidate(model,data){
   return materialCandidateChoice(model.candidates||[],null)?.record.id||null;
 }
 function reviewSmallCard(parent,item,activate,selected=false){
-  const button=productionButton(parent,'',()=>activate(button));button.className='material-small-card';button.setAttribute('aria-pressed',String(selected));button.title=item.title;
+  const button=item.inlineControls?el('div'):productionButton(parent,'',()=>activate(button));if(item.inlineControls)parent.append(button);button.className='material-small-card';if(!item.inlineControls){button.setAttribute('aria-pressed',String(selected));button.title=item.title}
   const preview=el('span','material-small-preview');
   if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src=reviewURL('/api/production/files/'+encodeURIComponent(item.preview.file));img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
   if(item.preview?.mime?.startsWith('image/'))button.append(preview);
-  const content=el('span','material-small-copy'),heading=el('span','small-card-title'),icon=productionEntityIcon(item.icon);
+  const content=el('span','material-small-copy'),heading=item.inlineControls?productionButton(content,'',()=>activate(heading)):el('span','small-card-title'),icon=productionEntityIcon(item.icon);if(item.inlineControls){heading.className='small-card-title reference-material-name';heading.title=item.title}
   const type=materialCategoryLabel(item.material_category)||productionLabels[item.icon]||productionMediaLabels[item.icon]||item.icon||'对象';icon.setAttribute('aria-hidden','false');icon.setAttribute('role','img');icon.setAttribute('aria-label',type);icon.setAttribute('title',type);heading.append(icon);
   const name=nodeText('strong',null,item.title,heading);name.title=item.title;
-  if(item.business_code)nodeText('span','small-card-code',item.business_code,heading);content.append(heading);
+  if(item.business_code)nodeText('span','small-card-code',item.business_code,heading);if(!item.inlineControls)content.append(heading);
   if(item.subtitle)nodeText('small','small-card-metrics',item.subtitle,content);
   if(item.selectionSubtitle)nodeText('small','small-card-selection',item.selectionSubtitle,content);
   button.append(content);return button;

@@ -37,7 +37,7 @@
 .unified-card-placeholder-tabs{width:38%;height:36px!important;margin-bottom:24px}
 .unified-card-placeholder-cards{height:150px!important;margin-top:32px}
 .unified-card-dialog .unified-card-material{top:0;max-height:80dvh}
-.unified-card-dialog>.comment-panel{position:fixed;inset:80px 18px 70px auto;z-index:3;width:min(360px,calc(100vw - 36px));min-width:0;min-height:0;max-height:calc(100dvh - 150px);box-shadow:0 14px 48px #17241f33}
+.unified-card-dialog>.comment-panel{position:relative;inset:auto;grid-column:1;grid-row:2;justify-self:end;align-self:stretch;margin:12px 18px 18px;z-index:3;width:min(360px,calc(100% - 36px));min-width:0;min-height:0;max-height:none;box-shadow:0 14px 48px #17241f33}
 @media(max-width:1800px){.unified-card-dialog .unified-card-material .entity-review-local-heading>h3{flex-basis:100%}}
 .breakdown-episode-tabs{margin:16px 0}.breakdown-episode-tabs .source-button:not(.screenplay-episode){flex:0 0 155px;min-height:64px;margin:0;white-space:normal}
 .breakdown-scene-layout{display:grid;grid-template-columns:245px minmax(0,1fr);gap:0;border:1px solid var(--desk-line);height:calc(100dvh - 90px);min-height:400px;position:sticky;top:70px}
@@ -296,6 +296,24 @@ dialog #toast { position:fixed; z-index:50; }
 .material-reference-grid .material-input{margin:0;min-width:0;display:flex;flex-direction:column}
 .material-reference-grid .material-small-card{width:100%;height:auto;flex:1}
 .material-reference-grid .small-card-metrics{display:none}
+.material-small-card.reference-picker-card{cursor:default}
+.reference-picker-card .reference-material-name{display:flex;margin:0!important;padding:0!important;min-height:20px!important;border:0!important;background:transparent!important;font:inherit;color:inherit;text-align:left;width:100%;cursor:pointer}
+.reference-material-name:focus-visible{outline:2px solid #517b55;outline-offset:2px}
+.reference-candidate-picker{min-width:0;height:26px;margin-top:2px}
+.reference-candidate-choices{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;height:26px;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;touch-action:pan-x pan-y;overscroll-behavior-x:contain}
+.reference-candidate-choices::-webkit-scrollbar{display:none}
+.reference-candidate-choices>button{flex:0 0 auto;margin:0!important;white-space:nowrap}
+.reference-candidate-choice,.reference-candidate-choices>button{box-sizing:border-box;font-size:11px!important;line-height:16px!important;padding:1px 5px!important;min-height:22px!important;height:22px;border:1px solid #c9d1c3;border-radius:3px;background:#fffdf8;cursor:pointer}
+.reference-candidate-choice.selected{border-color:#6d916b;background:#e3eddd;color:#244e2b}
+.reference-candidate-choice:focus-visible{outline:2px solid #517b55;outline-offset:-2px}
+.material-small-copy .reference-picker-status{flex:0 0 auto;margin:0;white-space:nowrap;font-size:11px;line-height:22px}
+.reference-picker-status[hidden]{display:none}
+.reference-originals{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.reference-candidate-preview{position:fixed;inset:auto;margin:0;z-index:50;max-height:min(430px,calc(100dvh - 24px));overflow:auto;box-sizing:border-box;background:#fffdf8;border:1px solid #8da88b;border-radius:6px;box-shadow:0 4px 18px #0003;padding:10px;pointer-events:auto}
+.reference-preview-heading{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.reference-candidate-preview button{min-height:26px;margin:0;font-size:11px;padding:3px 6px;cursor:pointer}
+.reference-candidate-preview img{display:block;width:100%;height:280px;object-fit:contain;margin-top:6px}
+.reference-candidate-preview audio,.reference-candidate-preview video{display:block;width:100%;max-height:280px;margin-top:6px}
 @container (max-width:480px){.material-reference-grid{grid-template-columns:1fr}}
 .unified-card-material{container-type:inline-size}
 @media(max-width:700px){.material-reference-grid{grid-template-columns:1fr}}

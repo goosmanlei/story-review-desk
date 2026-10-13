@@ -111,5 +111,7 @@ def select(store, request):
 
 def response(store, row, repeated):
     from .production_current import marker
+    from .entity_contract import reference_workspace_marker
     return {'requirement_id': row['object_id'], 'revision_id': row['id'], **marker(row),
-            'already_applied': repeated, 'slots': slots(store, row['payload']['generation']['inputs'])}
+            'already_applied': repeated, 'slots': slots(store, row['payload']['generation']['inputs']),
+            'workspace_marker': reference_workspace_marker(store, row)}

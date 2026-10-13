@@ -106,13 +106,14 @@ function rememberWorkspacePosition(){
   try{sessionStorage.setItem('review-view-position',JSON.stringify({url:location.href,position:workspacePositions.get(location.href)}))}catch{}
 }
 function restoreWorkspacePosition(){
+  if(typeof isMethodsWorkspace==='function'&&isMethodsWorkspace())return;
   const href=location.href;
   const sourceGuard=typeof state!=='undefined'&&['story.sources','story.novel'].includes(state.workspace)&&typeof sourceReadingRestoreGuard==='function'?sourceReadingRestoreGuard():null;
   let position=workspacePositions.get(href);
   if(!position){try{const saved=JSON.parse(sessionStorage.getItem('review-view-position')||'null');if(saved?.url===href)position=saved.position}catch{}}
   if(!position)return;
   requestAnimationFrame(()=>{
-    if(location.href!==href||sourceGuard&&!sourceGuard())return;
+    if(location.href!==href||sourceGuard&&!sourceGuard()||typeof isMethodsWorkspace==='function'&&isMethodsWorkspace())return;
     for(const [selector,offset] of Object.entries(position.offsets||{})){const node=document.querySelector(selector);if(node){node.scrollLeft=Number(offset[0])||0;node.scrollTop=Number(offset[1])||0}}
     window.scrollTo(Number(position.window?.[0])||0,Number(position.window?.[1])||0);
   });
