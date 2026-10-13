@@ -379,10 +379,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json(result)
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
-        if path in ('/api/methods/files', '/api/methods/file', '/api/methods/compare', '/api/methods/file-media'):
+        if path in ('/api/methods/files', '/api/methods/references', '/api/methods/file', '/api/methods/compare', '/api/methods/file-media'):
             try:
                 from . import method_files
                 param = lambda name: query.get(name, [None])[0]
+                if path.endswith('/references'):
+                    return self._json(method_files.referenced_directories(store, param('object_id'), param('revision_id')))
                 if path.endswith('/files'):
                     return self._json(method_files.directory(store, param('object_id'), param('revision_id')))
                 if path.endswith('/compare'):
@@ -465,6 +467,17 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/api/production" or path.startswith("/api/production/"):
             try:
                 param = lambda name: query.get(name, [None])[0]
+                if path == '/api/production/shot-reference':
+                    from .shot_references import applies, response
+                    with production.read_scope(store):
+                        need = production.record(store, param('requirement_id'))
+                        if not applies(store, need):
+                            raise ValueError('当前方案没有可选择的参考输入')
+                        return self._json(response(store, need, False))
+                if path == '/api/production/reference-candidates':
+                    from .reference_candidates import summaries
+                    with production.read_scope(store):
+                        return self._json(summaries(store, param('material_id'), param('media_type')))
                 if path == "/api/production/material-model-verify":
                     from .material_model import verify
                     return self._json(verify(store))

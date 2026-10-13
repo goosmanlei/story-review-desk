@@ -177,6 +177,17 @@ def select(store, request):
             raise ValueError('不能把槽位换成另一素材')
         candidate = p.ref_record(store, request['candidate'], {'ASSET'}) if request.get('candidate') else None
         target = candidate or p.record(store, mid)
+        if candidate and target['payload'].get('media_type') != origin['record']['payload'].get('media_type'):
+            raise ValueError('此候选与输入媒体类型不兼容')
+        # A card click is a choice of original, not a request to clear its bounds.
+        # Explicit range editing continues through the existing contract.
+        same_original = (candidate and old.get('reference') == request['candidate']
+                         and old.get('component_id') == request.get('component_id'))
+        if same_original and request.get('preserve_bounds') is True:
+            issues = slot(store, old, index)['issues']
+            if issues:
+                raise Conflict('；'.join(issues))
+            return response(store, need, True)
         value = {k: v for k,v in old.items() if k not in ('component_id','crop','range','sha256','material_selection','selection_state')}
         value['reference'] = {'object_id': target['object_id'], 'revision_id': target['id']}
         if candidate:

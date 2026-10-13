@@ -279,7 +279,16 @@ def save(store, value):
         raise Conflict('此项已被更新；请核对已保存版本，再合并当前修改') from None
 
 
-def resolve(store, work_type, conditions=None, binding_ref=None):
+def resource_files(resource, section):
+    """Exact chapter and companions shared by execution and the reading tree."""
+    payload = resource['payload']
+    filename = payload['sections'].get(section)
+    require(filename in payload['files'], '共用章节失效；请恢复准确资源或保存修正的方法版本')
+    return filename, {name: payload['files'][name]
+                      for name in payload.get('companions', {}).get(section, [])}
+
+
+def resolve(store, work_type, conditions=None, binding_ref=None, *, legacy_resource_paths=False):
     conditions = conditions or {}
     if binding_ref:
         require(binding_ref.get('object_id') == 'method.binding.' + work_type, '冻结绑定属于其他工作类型')
@@ -300,18 +309,18 @@ def resolve(store, work_type, conditions=None, binding_ref=None):
     validate(store, method['payload'])
     require(work_type in method['payload']['work_types'], '方法不适用此工作类型')
     resources = []
-    for ref in method['payload'].get('resources', []):
+    for source_index, ref in enumerate(method['payload'].get('resources', [])):
         # Validate even inactive references: a missing chapter cannot disappear silently.
         resource = read(store, ref['object_id'], ref['revision_id'])
-        filename = resource['payload']['sections'].get(ref['section'])
-        require(filename in resource['payload']['files'], '共用章节失效；请恢复准确资源或保存修正的方法版本')
+        filename, companions = resource_files(resource, ref['section'])
         if all(conditions.get(k) == v for k, v in ref.get('when', {}).items()):
             resources.append({'reference': {**reference(resource), 'section': ref['section']},
                               'title': resource['payload']['title'], 'file': filename,
                               'content': resource['payload']['files'][filename]})
-            companions = resource['payload'].get('companions', {}).get(ref['section'])
+            if not legacy_resource_paths:
+                resources[-1]['source_index'] = source_index
             if companions:
-                resources[-1]['files'] = {name: resource['payload']['files'][name] for name in companions}
+                resources[-1]['files'] = companions
     result = {'binding': reference(binding), 'method': reference(method), 'version': method['version'],
               'title': method['payload']['title'], 'work_type': work_type, 'conditions': conditions,
               'files': method['payload']['files'], 'resources': resources,
@@ -362,7 +371,10 @@ def prepare(store, request):
             raise Conflict('恢复输入与冻结执行冲突；沿原输入恢复，换法或换输入须新建步骤')
         verify_execution(store, reference(execution), identity, inputs)
         verify_dependencies(store, execution)
-        require(resolve(store, request['work_type'], execution['payload']['conditions'], execution['payload']['package']['binding']) == execution['payload']['package'], '冻结方法或共用资料不可用；请恢复准确资源包')
+        frozen = execution['payload']['package']
+        legacy_paths = not any('source_index' in r for r in frozen['resources'])
+        require(resolve(store, request['work_type'], execution['payload']['conditions'], frozen['binding'],
+                        legacy_resource_paths=legacy_paths) == frozen, '冻结方法或共用资料不可用；请恢复准确资源包')
         return execution
     from . import method_files
     if not method_files.installed(store):
@@ -508,12 +520,13 @@ def export_execution(store, ref, destination):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     for index, resource in enumerate(value['package']['resources']):
-        if resource.get('files'):
-            for name, content in {**resource['files'], resource['file']: resource['content']}.items():
+        index = resource.get('source_index', index)
+        if resource.get('files') or 'source_index' in resource:
+            for name, content in {**resource.get('files', {}), resource['file']: resource['content']}.items():
                 path = folder / 'shared' / str(index) / file_path(name)
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(content)
-        else:
+        if not resource.get('files'):
             path = folder / 'shared' / (str(index) + '.md')
             path.parent.mkdir(exist_ok=True)
             path.write_text(resource['content'])
