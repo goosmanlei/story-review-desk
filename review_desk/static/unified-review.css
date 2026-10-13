@@ -314,6 +314,11 @@ dialog #toast { position:fixed; z-index:50; }
 .reference-candidate-preview button{min-height:26px;margin:0;font-size:11px;padding:3px 6px;cursor:pointer}
 .reference-candidate-preview img{display:block;width:100%;height:min(480px,var(--reference-preview-media-height,480px));object-fit:contain;margin-top:6px}
 .reference-candidate-preview audio,.reference-candidate-preview video{display:block;width:100%;max-height:min(480px,var(--reference-preview-media-height,480px));margin-top:6px}
+.prompt-reference-preview>.reference-candidate-choices{margin-top:6px}
+.prompt-reference-preview .reference-picker-status{flex:0 0 auto;white-space:nowrap;font-size:11px;line-height:22px}
+.prompt-reference-preview .reference-originals:empty{display:none}
+.reference-preview-placeholder{display:flex;align-items:center;justify-content:center;width:100%;height:min(480px,var(--reference-preview-media-height,480px));margin-top:6px;background:#eae8df;color:var(--desk-muted)}
+.reference-preview-placeholder .production-entity-icon{width:64px;height:64px}
 @container (max-width:480px){.material-reference-grid{grid-template-columns:1fr}}
 .unified-card-material{container-type:inline-size}
 @media(max-width:700px){.material-reference-grid{grid-template-columns:1fr}}

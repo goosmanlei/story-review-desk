@@ -241,7 +241,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round,workspace=
   if(editable&&!state.reviewWork&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:round?.number,frozen:false,compact:true,onSaved:result=>refreshMaterialPlan(result)});
   else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true,selectable:!!round?.current_content&&!item&&!need.submission_only,workspace});
   if(!(plan.inputs||[]).length)nodeText('p','production-meta','本方案没有参考素材输入',host);
-  renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt');
+  renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt',null,{selectable:!!round?.current_content&&!item&&!need.submission_only,workspace});
   if(!plan.prompt&&!['external-edit','reuse'].includes(plan.method))nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
 }
 function renderGenerationRecipe(parent,need,requirementsShown=false,{historical=false}={}){
