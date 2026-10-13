@@ -133,3 +133,28 @@ test('reference card candidate stays highlighted through pointer or focus moves 
  preview.hover=false;preview.onmouseleave({type:'mouseleave'});f.leave();assert.equal(preview.isConnected,false);assert.ok(!button.className.split(' ').includes('previewing'));
  button.focus();preview=f.body.querySelector('.reference-candidate-preview');player=preview.querySelector('audio');player.focus();button.onblur({type:'blur',relatedTarget:player});preview.onfocusin();f.leave();assert.equal(preview.isConnected,true);assert.ok(button.className.split(' ').includes('previewing'));f.key('Escape');assert.ok(!button.className.split(' ').includes('previewing'));
 });
+
+
+test('entity candidate reference cards and Prompt hover use the exact full snapshot original without range text or writes',async()=>{
+ const f=fixture({readonly:true,media:'audio'});loadPromptFunctions(f.c);
+ for(const [file,name] of [['unified-cards.js','reviewSmallCard'],['material-review.js','renderMaterialInputs']])loadFunction(f.c,'review_desk/static/'+file,name);
+ Object.assign(f.c,{productionLabels:{},productionMediaLabels:{},materialCategoryLabel:()=>'',businessCode:()=> 'M2669',openMaterialReference:()=>{throw Error('hover must not activate details')},materialReferenceRequest:()=>({url:'/exact'}),getSelection:()=>({isCollapsed:true})});
+ const slot=f.need.review_shot_slots[0];slot.candidate_number=2;slot.material_code='M2669';slot.value.range={start_seconds:0,end_seconds:14.5};
+ const snapshot={...f.item.row,submission_only:true,component_snapshot:true};slot.component={...slot.component,file:'wrong-live-original'};slot.record={...slot.record,payload:{...slot.record.payload,components:[slot.component]}};
+ f.need.payload.inputs=[slot.value];const before=JSON.stringify(f.need);
+ const raw='参考@音频1，保持身份';f.c.productionTextBlocks=()=>[{id:'exact-call-prompt',field:'call.prompt',text:raw}];
+ const host=new f.Element('section');f.body.append(host);
+ f.c.renderMaterialInputs(host,f.need.payload.inputs,[snapshot],f.need,true,{compact:true});
+ f.c.renderLinkedPrompt(host,f.need,f.need.payload.inputs,[snapshot],'call.prompt');
+ assert.doesNotMatch(host.textContent,/14\.5|秒|裁切/);
+ const button=host.querySelector('.reference-candidate-choice');assert.equal(button.textContent,'候选 2');button.onmouseenter();
+ let popup=f.popup(),player=popup.querySelector('audio');assert.equal(player.src,'/api/production/files/file-1');assert.equal(player.preload,'none');assert.equal(player.currentTime,undefined);assert.equal(popup.querySelectorAll('[data-candidate-revision]').length,0);
+ popup.hover=true;button.onmouseleave({type:'mouseleave',relatedTarget:player});popup.onmouseenter();f.leave();assert.equal(player.isConnected,true);assert.ok(button.className.split(' ').includes('previewing'));
+ player.paused=false;popup.hover=false;popup.onmouseleave({type:'mouseleave'});f.leave();assert.equal(player.paused,true);assert.equal(player.src,null);assert.ok(!button.className.split(' ').includes('previewing'));
+ const anchor=host.querySelector('a');anchor.onmouseenter();player=f.popup().querySelector('audio');assert.equal(player.src,'/api/production/files/file-1');assert.equal(f.calls.length,0);assert.equal(JSON.stringify(f.need),before);assert.equal(host.querySelector('pre').reviewSourceText,raw);
+});
+test('an exact media snapshot without a projected slot still receives readonly Prompt hover',()=>{
+ const f=fixture({readonly:true,media:'audio'}),anchor=new f.Element('a');f.body.append(anchor);
+ const item={...f.item,slot:null};const preview=f.c.bindPromptReferencePreview(anchor,item,f.need);
+ assert.ok(preview);anchor.onmouseenter();assert.equal(f.popup().querySelector('audio').src,'/api/production/files/file-1');assert.equal(f.calls.length,0);preview.close();
+});

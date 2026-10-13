@@ -146,15 +146,16 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
   for(const item of effective){
     const line=el('div','material-input');grid.append(line);
     const identity=item.slot,row=item.row,component=row?.payload.components?.find(c=>c.id===item.value.component_id)||row?.payload.components?.find(c=>c.role==='original');
-    const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
     const picking=selectable&&identity?.material_id&&identity.direct!==false;
     const ownCandidate=!actual&&(identity?.own_candidate||identity?.own_candidate_pending);
     const ownTitle=ownCandidate?`${identity.active===false?'待比较':need?.payload.generation?.method==='reuse'?'复用来源':identity.rule?.semantics==='variant'?'修订来源':'参考来源'}：本素材候选${identity.candidate_number||'待选'}`:null;
-    const subtitle=ownCandidate?((identity.active===false?'尚未启用 · ':'')+(range?range.slice(3):'准确原件')):(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?(picking?'':identity?.candidate_count===0?'暂无候选':'未选定候选'):identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件')+range;
-    const button=reviewSmallCard(line,{inlineControls:picking,title:ownTitle||identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),material_category:identity?.material_category||row?.payload.material_category,icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
+    const subtitle=ownCandidate?((identity.active===false?'尚未启用 · ':'')+'准确原件'):(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?(picking?'':identity?.candidate_count===0?'暂无候选':'未选定候选'):identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件');
+    const previewable=!picking&&typeof renderReadonlyReferencePreview==='function'&&(/^(image|audio|video)\//.test(component?.mime||'')||['image','audio','video'].includes(identity?.media_type||row?.payload.media_type));
+    const button=reviewSmallCard(line,{inlineControls:picking||previewable,title:ownTitle||identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),material_category:identity?.material_category||row?.payload.material_category,icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
     if(identity?.reason)nodeText('p',item.missing?'production-issue':'production-meta',identity.reason,line);
     button.dataset.reviewDialogTrigger='';
     if(picking&&typeof renderReferenceCandidatePicker==='function')renderReferenceCandidatePicker(line,item,need,button,workspace);
+    else if(previewable)renderReadonlyReferencePreview(button,item,need,subtitle);
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
   }
 }
@@ -683,10 +684,11 @@ async function openMaterialReference(ref,trigger,source=false){
         const url='/api/production/files/'+encodeURIComponent(c.file);
         if(c.mime.startsWith('image/')){const img=el('img');let failure=null;
           img.onerror=()=>{if(!dialog.isConnected)return;img.hidden=true;if(failure)return;failure=el('div','reference-media-error');nodeText('p','error','此准确原图读取失败，请重试。',failure);productionButton(failure,'重试原图',()=>{img.removeAttribute('src');img.src=reviewURL(url)});body.append(failure)};
-          img.onload=()=>{img.hidden=false;failure?.remove();failure=null};img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};if(ref.crop){const frame=el('div','reference-crop-frame'),region=el('div','reference-crop');frame.append(img,region);const c=ref.crop;Object.assign(region.style,{left:c.x*100+'%',top:c.y*100+'%',width:c.width*100+'%',height:c.height*100+'%'});region.setAttribute('aria-label','参考裁切范围');body.append(frame)}else body.append(img)}
+          img.onload=()=>{img.hidden=false;failure?.remove();failure=null};img.src=reviewURL(url);img.alt=reviewPositionText(p.title);img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label','放大查看：'+reviewPositionText(p.title));img.setAttribute('aria-haspopup','dialog');const show=()=>openStructureImage({...c,title:reviewPositionText(p.title),alt:reviewPositionText(p.title)},img);img.onclick=show;img.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();show()}};body.append(img)}
         else if(/^(audio|video)\//.test(c.mime)){
-          reviewMediaPlayer(body,c,row,ref,!row.submission_only,session||{});
-          nodeText('p','production-meta',(c.role==='original'?'原件':'预览')+(ref.range?` · ${ref.range.start_seconds}–${ref.range.end_seconds} 秒`:''),body);
+          const whole={...ref};delete whole.range;delete whole.crop;
+          reviewMediaPlayer(body,c,row,whole,!row.submission_only,session||{});
+          nodeText('p','production-meta',c.role==='original'?'原件':'预览',body);
         }
         if(!c.mime.startsWith('audio/'))link('下载原文件',url,body);
       }
