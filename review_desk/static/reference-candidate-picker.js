@@ -108,17 +108,19 @@ function referencePromptPreviewChoice(slot,candidates,hovered=null){
   return {candidate:null,original:original||(selected?{issue:'当前选定原件不可用'}:null),placeholder:!selected&&!original};
 }
 function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace=null}={}){
-  if(!item.slot||item.slot.nonmedia)return null;
-  const editable=!!(selectable&&need.kind==='REQUIREMENT'&&need.current_content&&!need.submission_only&&item.slot.material_id&&item.slot.direct!==false);
+  const slot=item.slot||{},value=slot.value||item.value||{},record=item.row||slot.record;
+  const component=record?record.payload.components?.find(c=>c.id===value.component_id):slot.component;
+  const type=component?.mime?.split('/')[0]||record?.payload.media_type||slot.media_type;
+  if(slot.nonmedia||!['image','audio','video'].includes(type))return null;
+  const editable=!!(selectable&&need?.kind==='REQUIREMENT'&&need.current_content&&!need.submission_only&&slot.material_id&&slot.direct!==false);
   const session=editable?referencePickerConsumer(need):null,index=item.index;
-  const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
-  const fallback={...item.slot,value:item.slot.value||item.value||{}};
+  const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need?.object_id));
+  const fallback={...slot,value,record,component:item.missing?{issue:'准确原件不可用'}:component};
   const current=()=>session?.slots.find(s=>s.index===index)||fallback;
-  const type=item.slot.record?.payload.media_type||item.row?.payload.media_type||'image';
   let preview=null,choices=null,status=null,mediaBox=null,originals=null,retry=null,reconcile=null,data=null,error='',loading=false,hovered=null,hoveredOriginal=null,shownKey=null,leaveTimer=null,cleanup=null,pinned=false,skipFocus=false,touch=null,touchTimer=null,suppressClick=false,view=null;
   anchor.setAttribute('aria-haspopup','dialog');anchor.setAttribute('aria-expanded','false');
   const close=()=>{
-    clearTimeout(leaveTimer);clearTimeout(touchTimer);cleanup?.();cleanup=null;referencePreviewStop(preview);preview?.remove();preview=null;hovered=null;hoveredOriginal=null;shownKey=null;pinned=false;anchor.setAttribute('aria-expanded','false');
+    clearTimeout(leaveTimer);clearTimeout(touchTimer);cleanup?.();cleanup=null;referencePreviewStop(preview);preview?.remove();preview=null;hovered=null;hoveredOriginal=null;shownKey=null;pinned=false;anchor.setAttribute('aria-expanded','false');anchor.classList.toggle('previewing',false);
     if(view)session.listeners.delete(view);if(referencePickerCloseActive===close)referencePickerCloseActive=null;
   };
   const laterClose=event=>{clearTimeout(leaveTimer);leaveTimer=setTimeout(()=>{if(event?.type==='mouseleave'? !pinned&&!preview?.matches(':hover'):!preview?.contains(document.activeElement)&&document.activeElement!==anchor)close()},180)};
@@ -183,7 +185,7 @@ function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace
     referencePickerCloseActive?.();referencePickerCloseActive=close;pinned=persist;
     if(view){for(const old of session.listeners)if(!old.connected())session.listeners.delete(old);session.listeners.add(view)}
     preview=el('div','reference-candidate-preview prompt-reference-preview');preview.id='prompt-reference-'+crypto.randomUUID();preview.setAttribute('popover','manual');preview.setAttribute('role','dialog');preview.setAttribute('aria-label',anchor.textContent+' 参考预览');document.body.append(preview);
-    anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-controls',preview.id);nodeText('strong','reference-preview-heading',anchor.textContent,preview);
+    anchor.classList.add('previewing');anchor.setAttribute('aria-expanded','true');anchor.setAttribute('aria-controls',preview.id);nodeText('strong','reference-preview-heading',anchor.textContent,preview);
     choices=el('div','reference-candidate-choices');choices.setAttribute('role','group');choices.setAttribute('aria-label','候选选择');choices.hidden=!editable;preview.append(choices);status=nodeText('small','reference-picker-status','',choices);status.setAttribute('role','status');
     reconcile=productionButton(choices,'重新读取方案',async()=>{try{session.receipt(await api('/api/production/shot-reference?requirement_id='+encodeURIComponent(need.object_id)),workspaces);session.conflict=false;error='';refresh()}catch(exc){error='读取失败：'+exc.message;refresh()}});reconcile.hidden=true;
     retry=productionButton(choices,'重试保存',async()=>{const request=session?.pending?.request;if(!request||request.index!==index)return;error='';try{await referencePickerSave(session,index,request.candidate?{candidate:request.candidate}:null,request.component_id?{id:request.component_id}:null)}catch(exc){error='保存失败：'+exc.message}refresh()});retry.hidden=true;
@@ -203,9 +205,19 @@ function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace
   if(session)view={index,connected:()=>anchor.isConnected,refresh,workspaces};
   return {close,consumeClick:()=>{const suppressed=suppressClick;suppressClick=false;return suppressed},input:()=>{if(!session)return item;const slot=current(),row=slot.record||item.row;return {...item,slot,row,value:slot.value,ref:{...slot.value.reference,...slot.value,kind:row?.kind,reference_identity:slot,...(row?.submission_only||row?.unavailable||row?.component_snapshot?{snapshot_record:row}:{})}}}};
 }
+function renderReadonlyReferencePreview(card,item,need,label){
+  card.classList.add('reference-picker-card');
+  const copy=card.querySelector('.material-small-copy');copy.querySelector('.small-card-selection')?.remove();
+  const picker=el('div','reference-candidate-picker'),choices=el('div','reference-candidate-choices');picker.append(choices);copy.append(picker);
+  const button=productionButton(choices,label,()=>{});button.className='reference-candidate-choice';
+  button.setAttribute('aria-label',label);button.title='悬停或聚焦预览完整原件';
+  const preview=bindPromptReferencePreview(button,item,need);
+  button.onclick=event=>{event.stopPropagation();if(!preview?.consumeClick())button.onmouseenter?.()};
+  return preview;
+}
 function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   const session=referencePickerConsumer(need),index=item.index;
-  const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
+  const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need?.object_id));
   line.dataset.referenceInput=String(index);card.classList.add('reference-picker-card');
   const copy=card.querySelector('.material-small-copy'),detailButton=card.querySelector('.reference-material-name');
   const ownPrefix=(item.slot?.own_candidate||item.slot?.own_candidate_pending)?detailButton.title.split('：')[0]:null;
