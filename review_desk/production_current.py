@@ -287,6 +287,9 @@ def write_record(store, object_id, kind, payload, current, dependencies):
         register(store, object_id, payload)
     if kind == 'ASSET' and not retiring:
         register_candidate(store, object_id, payload)
+    if kind == 'REQUIREMENT' and not retiring:
+        from .material_input_validation import validate_write
+        validate_write(store, object_id, payload)
     return {'id': object_id, 'kind': kind, 'revision': rid, 'version': token,
             'edit_token': token, 'content_sha256': sha}
 
