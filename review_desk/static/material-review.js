@@ -137,7 +137,7 @@ function materialInputs(inputs,records=[],slots=[]){
     if(!label)return [];
     if(slots.find(s=>s.index===index)?.active===false)return [{value,index,row,label:'备选 '+(slots.find(s=>s.index===index)?.rule?.route||index+1),ref:{...ref,...value}}];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
-  }).map(item=>{const slot=slots.find(s=>s.index===item.index);return {...item,slot,ref:{...item.ref,...(slot?{reference_identity:slot}:{}),...(item.row?.submission_only||item.row?.unavailable?{snapshot_record:item.row}:{})}}});
+  }).map(item=>{const slot=slots.find(s=>s.index===item.index);return {...item,slot,ref:{...item.ref,...(item.row?{kind:item.row.kind}:{}),...(slot?{reference_identity:slot}:{}),...(item.row?.submission_only||item.row?.unavailable?{snapshot_record:item.row}:{})}}});
 }
 function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false,selectable=false}={}){
   const effective=materialInputs(inputs,records,need?.review_shot_slots||need?.input_slots||[]);if(!effective.length)return;
@@ -637,22 +637,32 @@ function renderSourceReference(view,initial,ref,source){
   draw(initial);
 }
 async function openMaterialReference(ref,trigger,source=false){
-  const {dialog,title,body}=openReviewDialog(source?'剧情依据':'参考输入',trigger,'material-reference-dialog');
-  nodeText('p',null,'读取中…',body);
-  try{
-    const request=ref.snapshot_record?{isSource:false}:materialReferenceRequest(ref,source);
+  let request,requestError;
+  try{request=ref.snapshot_record?{isSource:false}:materialReferenceRequest(ref,source)}catch(error){requestError=error;request={isSource:!!source}}
+  const known=ref.snapshot_record||ref.reference_identity?.record||(state.productionRecords||[]).find(r=>r.object_id===ref.object_id),kind=ref.kind||known?.kind;
+  const unifiedKinds=['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'];
+  if(!requestError&&!request.isSource&&!ref.snapshot_record&&unifiedKinds.includes(kind))return openUnifiedMaterial(ref,trigger);
+  // Unknown production references resolve inside the final-sized container.
+  // Media originals and story sources keep their own exact readers.
+  const resolving=!request.isSource&&!kind&&!ref.component_id;
+  const view=openReviewDialog(resolving?'实体与素材详情':request.isSource?'剧情依据':'参考输入',trigger,resolving?'unified-card-dialog':'material-reference-dialog');
+  const {dialog,title,body}=view;
+  let attempt=0;
+  const load=async()=>{
+   const current=++attempt;
+   if(resolving)renderUnifiedCardLoading(body);else{body.replaceChildren();nodeText('p',null,'读取中…',body)}
+   try{
+    if(requestError)throw requestError;
     const detail=ref.snapshot_record?{record:ref.snapshot_record}:await api(request.url);
-    if(!dialog.isConnected)return;
+    if(!dialog.isConnected||current!==attempt)return;
     if(request.isSource){
       renderSourceReference({dialog,title,body},detail,ref,source);
       return;
     }
     if(!detail.record.submission_only&&['REQUIREMENT','ENTITY','STATE','AV_SHOT','AV_SCENE'].includes(detail.record.kind)){
-      // Restore the parent's selection control before replacing this temporary
-      // reader. A new modal must not retain the detached reader as its parent.
-      dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openUnifiedMaterial(ref,trigger)),{once:true});dialog.close();return
+      return openUnifiedMaterial(ref,trigger,view);
     }
-    const row=detail.record,p=row.payload,identity=ref.reference_identity;body.replaceChildren();title.textContent=identity?.label||businessTitle(row)+' · '+materialContentLabel(row);body.dataset.referenceRevision=ref.revision_id;
+    const row=detail.record,p=row.payload,identity=ref.reference_identity;body.replaceChildren();body.setAttribute('aria-busy','false');title.textContent=identity?.label||businessTitle(row)+' · '+materialContentLabel(row);body.dataset.referenceRevision=ref.revision_id;
     if(identity?.disposition==='current'){
       title.replaceChildren();const params=new URLSearchParams({material_id:identity.canonical_material_id,...(identity.candidate?{material_target:identity.candidate.revision_id}:{})});
       productionButton(title,identity.label,()=>openUnifiedMaterial({... (identity.candidate||productionRef(row)),params,component_id:ref.component_id},document.activeElement));
@@ -696,7 +706,9 @@ async function openMaterialReference(ref,trigger,source=false){
     if(row.kind==='REQUIREMENT')nodeText('p','production-issue','此引用是尚未产出准确原件的素材需求',body);
     if(p.generation){nodeText('h3',null,'参数 · '+(p.generation.model||'模型未知'),body);nodeText('pre',null,row.review_parameter_text||JSON.stringify(p.generation.parameters,null,2),body);renderMaterialInputs(body,p.generation.inputs||[],row.review_input_records||[],row);nodeText('h3',null,'提示词',body);nodeText('pre',null,p.generation.prompt,body)}
     paintReviewCommentCounts();
-  }catch(error){if(dialog.isConnected){body.replaceChildren();nodeText('p','error',error.message,body);productionButton(body,'重试准确引用',()=>{dialog.addEventListener('close',()=>afterReviewDialogReturn(()=>openMaterialReference(ref,trigger,source)),{once:true});dialog.close()})}}
+   }catch(error){if(dialog.isConnected&&current===attempt){body.replaceChildren();nodeText('p','error',error.message,body);productionButton(body,'重试准确引用',load)}}
+  };
+  return load();
 }
 
 // A demand is a real REQUIREMENT, never a fabricated ASSET. Round data comes
