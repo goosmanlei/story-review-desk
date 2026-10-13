@@ -73,3 +73,39 @@ class ReferenceCandidatesTest(MaterialFixture, unittest.TestCase):
             self.assertEqual(current.dump(self.store),before)
         finally:
             server.shutdown();server.server_close();thread.join()
+
+    def test_clear_bounds_replay_and_reselection_preserve_other_inputs_and_history(self):
+        self.prepare()
+        row=p.record(self.store,'need-wet-overall')
+        plan=copy.deepcopy(row['payload']['generation']);plan['inputs'].append(copy.deepcopy(plan['inputs'][0]))
+        plan['inputs'][0].update(use='identity',role='voice',necessity='required')
+        self.change('need-wet-overall',generation=plan)
+        history=p.record(self.store,'generated');upstream=p.record(self.store,'need-full-overall')
+        sr.select(self.store,self.request(range={'start_seconds':0.1,'end_seconds':0.8}))
+        other=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation']['inputs'][1])
+        clear={**self.request(operation='clear'),'candidate':None};clear.pop('component_id')
+        sr.select(self.store,clear);after=p.record(self.store,'need-wet-overall')
+        value=after['payload']['generation']['inputs'][0]
+        self.assertEqual(value['selection_state'],'unselected');self.assertEqual(value['use'],'identity');self.assertEqual(value['role'],'voice')
+        for key in ('component_id','range','crop','sha256','material_selection'):self.assertNotIn(key,value)
+        self.assertEqual(after['payload']['generation']['inputs'][1],other)
+        self.assertTrue(sr.select(self.store,clear)['already_applied']);self.assertEqual(p.record(self.store,'need-wet-overall'),after)
+        sr.select(self.store,self.request(operation='again',preserve_bounds=True))
+        self.assertNotIn('range',p.record(self.store,'need-wet-overall')['payload']['generation']['inputs'][0])
+        self.assertEqual(p.record(self.store,'generated'),history);self.assertEqual(p.record(self.store,'need-full-overall'),upstream)
+
+    def test_clear_original_endpoint_relation_requires_exact_candidate_membership(self):
+        from review_desk import business_relations as br
+        self.prepare();self.store.db.executescript(br.SCHEMA)
+        endpoints=sorted(['generated','need-wet-overall']);edge=br.identity(endpoints)
+        self.put(self.spec(edge,'RELATION',relation_type='business',endpoints=endpoints,direction='forward',summary='原件提供声音身份',sources=[],contexts=[]))
+        plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs'][0]={'reference':self.ref('generated'),'component_id':'original','range':{'start_seconds':0.1,'end_seconds':0.8},'relation':self.ref(edge),'semantics':'reuse','necessity':'required','use':'保留身份关系'}
+        self.change('need-wet-overall',generation=plan);relation=p.record(self.store,edge)
+        clear={**self.request(operation='clear-original-edge'),'candidate':None};clear.pop('component_id');sr.select(self.store,clear)
+        value=p.record(self.store,'need-wet-overall')['payload']['generation']['inputs'][0]
+        self.assertEqual(value['relation'],self.ref(edge));self.assertEqual(value['selection_state'],'unselected');self.assertNotIn('range',value)
+        sr.select(self.store,self.request('second','select-after-clear',preserve_bounds=True))
+        self.assertEqual(p.record(self.store,edge),relation)
+        unrelated={**value,'reference':self.ref('need-wet-overall')}
+        with self.assertRaisesRegex(ValueError,'对象对'):br.exact_input_relation(self.store,'need-wet-overall',unrelated)

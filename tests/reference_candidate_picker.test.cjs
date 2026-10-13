@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 function fixture(){
- const calls=[],c={state:{},URLSearchParams,crypto:require('node:crypto').webcrypto,api:async(_,options)=>{const r=JSON.parse(options.body);calls.push(r);if(c.respond)return c.respond(r);const s=session.slots.map(v=>v.index===r.index?{...v,input_key:'key-'+calls.length,candidate:r.candidate,candidate_number:r.candidate.revision_id==='a'?1:2,value:{reference:r.candidate,component_id:r.component_id}}:v);return {requirement_id:'consumer',revision_id:'stable',edit_token:calls.length+1,content_sha256:'hash-'+calls.length,slots:s}}};
+ const calls=[],c={state:{},URLSearchParams,crypto:require('node:crypto').webcrypto,api:async(_,options)=>{const r=JSON.parse(options.body);calls.push(r);if(c.respond)return c.respond(r);const s=session.slots.map(v=>v.index===r.index?{...v,input_key:'key-'+calls.length,candidate:r.candidate,candidate_number:r.candidate?(r.candidate.revision_id==='a'?1:2):null,value:r.candidate?{reference:r.candidate,component_id:r.component_id}:{reference:{object_id:'same-material',revision_id:'m'},selection_state:'unselected'}}:v);return {requirement_id:'consumer',revision_id:'stable',edit_token:calls.length+1,content_sha256:'hash-'+calls.length,slots:s}}};
  vm.createContext(c);vm.runInContext(fs.readFileSync(__dirname+'/../review_desk/static/reference-candidate-picker.js','utf8'),c);
  const need={object_id:'consumer',id:'stable',edit_token:1,content_sha256:'initial',payload:{generation:{inputs:[]}},review_shot_slots:[0,1].map(index=>({index,material_id:'same-material',input_key:'initial-'+index,value:{reference:{object_id:'same-material',revision_id:'m'}}}))};
  const session=c.referencePickerConsumer(need),candidate=n=>({candidate:{object_id:n,revision_id:n}}),component={id:'original'};return {c,calls,need,session,candidate,component};
@@ -39,4 +39,22 @@ test('receipt updates the separate deferred workspace consumer before history lo
  const f=fixture(),own={...f.need,payload:{title:'deferred'}},data={entity:{object_id:'owner',id:'o',version:1},states:[],requirements:[own],source_signature:'old'};
  f.session.receipt({requirement_id:'consumer',revision_id:'stable',edit_token:3,content_sha256:'new',slots:f.session.slots,workspace_marker:{owner_id:'owner',records:[['owner','o',1],['consumer','stable',3]],source_signature:'fresh'}},[data]);
  assert.equal(own.version,3);assert.equal(own.edit_token,3);assert.equal(data.source_signature,'fresh');assert.equal(own.payload.title,'deferred');
+});
+
+test('a deliberate second click sends explicit clear with a new operation, then can select again',async()=>{
+ const f=fixture();await f.c.referencePickerToggle(f.session,0,f.candidate('a'),f.component);
+ f.session.slots[0].value.range={start_seconds:0,end_seconds:5.6};
+ await f.c.referencePickerToggle(f.session,0,f.candidate('a'),f.component);
+ assert.equal(f.calls[1].candidate,null);assert.notEqual(f.calls[0].id,f.calls[1].id);assert.equal(f.calls[1].component_id,undefined);assert.equal(f.session.slots[0].value.range,undefined);
+ await f.c.referencePickerToggle(f.session,0,f.candidate('a'),f.component);assert.equal(f.calls[2].candidate.revision_id,'a');assert.equal(f.session.slots[0].value.range,undefined);assert.equal(f.session.slots[1].candidate,undefined);
+});
+test('unknown clear is retried as the same explicit clear, never as a new toggle',async()=>{
+ const f=fixture();await f.c.referencePickerToggle(f.session,0,f.candidate('a'),f.component);
+ f.c.respond=()=>{throw Error('lost clear response')};await assert.rejects(f.c.referencePickerToggle(f.session,0,f.candidate('a'),f.component));
+ assert.equal(f.session.slots[0].candidate.revision_id,'a');delete f.c.respond;
+ await f.c.referencePickerSave(f.session,0,null,null);assert.equal(f.calls[1].id,f.calls[2].id);assert.equal(f.calls[2].candidate,null);assert.equal(f.session.slots[0].candidate,null);
+});
+test('selected multi-original candidate clears the whole input independent of original choice',async()=>{
+ const f=fixture();await f.c.referencePickerSave(f.session,0,f.candidate('a'),{id:'second'});
+ await f.c.referencePickerToggle(f.session,0,f.candidate('a'),null);assert.equal(f.calls[1].candidate,null);
 });

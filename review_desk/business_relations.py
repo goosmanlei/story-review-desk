@@ -210,6 +210,19 @@ def exact_input_relation(store, requirement_id, item, *, metadata=False):
     from .material_storage import canonical_id
     possible = {target['object_id'], upstream, canonical_id(store, upstream)}
     ends = set(row['payload']['endpoints'])
+    # A current choice can return to its material demand while retaining a
+    # relationship originally pinned to one of that demand's actual originals.
+    # Membership is required; titles, subjects and similar files are no proof.
+    from .production_current import enabled as current_enabled
+    if (requirement_id in ends and not (ends - {requirement_id}) & possible
+            and (target['kind'] == 'REQUIREMENT' or item.get('material_selection'))
+            and current_enabled(store)):
+        mid = canonical_id(store, upstream)
+        for endpoint in ends - {requirement_id}:
+            if store.db.execute('''SELECT 1 FROM production_candidate_targets t
+                JOIN production_candidates c ON c.id=t.candidate_id
+                WHERE t.material_id=? AND c.asset_object_id=?''', (mid, endpoint)).fetchone():
+                possible.add(endpoint)
     if requirement_id not in ends or not (ends - {requirement_id}) & possible:
         raise ValueError('准确关系不属于本方案与此参考对象对')
     return row
