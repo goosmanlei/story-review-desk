@@ -208,7 +208,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
   line.dataset.referenceInput=String(index);card.classList.add('reference-picker-card');
   const copy=card.querySelector('.material-small-copy'),detailButton=card.querySelector('.reference-material-name');
-  const ownPrefix=item.slot?.own_candidate?detailButton.title.split('：')[0]:null;
+  const ownPrefix=(item.slot?.own_candidate||item.slot?.own_candidate_pending)?detailButton.title.split('：')[0]:null;
   copy.querySelector('.small-card-selection')?.remove();
   const picker=el('div','reference-candidate-picker'),choices=el('div','reference-candidate-choices'),status=nodeText('small','reference-picker-status','正在读取候选…',choices);
   picker.append(choices);copy.append(picker);status.setAttribute('role','status');
@@ -275,7 +275,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   };
   const refresh=()=>{
     if(!line.isConnected)return;const slot=current();
-    if(ownPrefix&&slot.candidate_number){const title=`${ownPrefix}：本素材候选${slot.candidate_number}`;detailButton.title=title;const heading=detailButton.querySelector('strong');heading.textContent=title;heading.title=title}
+    if(ownPrefix){const title=`${ownPrefix}：本素材候选${slot.candidate_number||'待选'}`;detailButton.title=title;const heading=detailButton.querySelector('strong');heading.textContent=title;heading.title=title}
     if(data){
       const original=data.candidates.find(c=>c.candidate.revision_id===slot.candidate?.revision_id)?.originals.find(o=>o.id===slot.value.component_id);
       let thumbnail=card.querySelector('.material-small-preview');
