@@ -47,6 +47,16 @@ class ReferenceValidationTest(MaterialFixture, unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '循环'):
             self.change(oid, generation=self.plan(oid, inputs, selected_routes={'choice': 'self'}))
 
+    def test_business_relationship_cycle_does_not_schedule_generation(self):
+        from review_desk import business_relations as relations
+        for ends in (['need-full-overall', 'need-wet-overall'],
+                     ['need-wet-overall', 'songbook'], ['songbook', 'need-full-overall']):
+            self.put(self.spec(relations.identity(ends), 'RELATION', relation_type='business',
+                endpoints=ends, direction='forward', summary='共同制作关联，未选为生成输入。',
+                sources=[self.source], contexts=[]))
+        validation.validate_tree(self.store)
+        self.assertTrue(g.readiness(self.store, 'need-full-overall')['ready'])
+
     def test_exact_own_candidate_terminal_and_frozen_history(self):
         self.generate()
         oid = 'need-full-overall'
@@ -133,6 +143,45 @@ class ReferenceValidationTest(MaterialFixture, unittest.TestCase):
         self.change(oid, generation=self.plan(oid, []))
         export(self.store, self.root / 'export')
         self.assertEqual(p.record(self.store, 'generated')['submission'], history)
+
+    def test_readiness_and_package_locate_a_missing_stored_target(self):
+        from unittest.mock import patch
+        oid = 'need-full-overall'
+        with patch.object(validation, 'validate_write'):
+            row = p.record(self.store, oid)
+            payload = copy.deepcopy(row['payload'])
+            payload['generation']['inputs'] = [self.input('need-wet-overall')]
+            self.put({'object_id':oid, 'kind':'REQUIREMENT', 'expected_version':row['version'], 'payload':payload})
+        # Simulate a broken external read without changing shared or real data.
+        original = p.ref_record
+        def missing(store, value, *args, **kwargs):
+            if value.get('object_id') == 'need-wet-overall':
+                raise KeyError('isolated missing exact target')
+            return original(store, value, *args, **kwargs)
+        with patch.object(p, 'ref_record', side_effect=missing):
+            ready = g.readiness(self.store, oid)
+            self.assertFalse(ready['ready'])
+            self.assertIn('参考 1', '；'.join(ready['issues']))
+            from review_desk.store import Conflict
+            with self.assertRaisesRegex(Conflict, 'missing exact target'):
+                g.package(self.store, oid)
+
+    def test_restore_rejects_a_corrupt_route_before_touching_empty_destination(self):
+        from unittest.mock import patch
+        from review_desk.bundle import export, restore
+        from review_desk.store import Store
+        oid = 'need-full-overall'
+        with patch.object(validation, 'validate_write'):
+            self.change(oid, generation=self.plan(oid, [self.input(oid)]))
+        # Only the isolated source's route check is bypassed to construct the
+        # bad bundle. Normal restore must perform the real check again.
+        with patch.object(validation, 'validate_tree'):
+            export(self.store, self.root / 'export')
+        recovered = Store(self.root / 'rejected-restore/.runtime/review.sqlite3')
+        self.addCleanup(recovered.close)
+        with self.assertRaisesRegex(ValueError, '循环'):
+            restore(recovered, self.root / 'export')
+        self.assertFalse(recovered.objects())
 
     def test_missing_original_blocks_then_recovers_on_the_same_exact_bytes(self):
         self.generate()
