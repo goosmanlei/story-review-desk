@@ -35,3 +35,8 @@ test('receipt advances only matching open workspace source markers',async()=>{
 test('candidate summary requests are reused while failures remain retryable',async()=>{
  const f=fixture();let requests=0;f.c.api=async()=>{requests++;return {candidates:[]}};await Promise.all([f.c.referencePickerLoad('m','image'),f.c.referencePickerLoad('m','image')]);assert.equal(requests,1);await f.c.referencePickerLoad('m','image',true);assert.equal(requests,2);
 });
+test('receipt updates the separate deferred workspace consumer before history loads',()=>{
+ const f=fixture(),own={...f.need,payload:{title:'deferred'}},data={entity:{object_id:'owner',id:'o',version:1},states:[],requirements:[own],source_signature:'old'};
+ f.session.receipt({requirement_id:'consumer',revision_id:'stable',edit_token:3,content_sha256:'new',slots:f.session.slots,workspace_marker:{owner_id:'owner',records:[['owner','o',1],['consumer','stable',3]],source_signature:'fresh'}},[data]);
+ assert.equal(own.version,3);assert.equal(own.edit_token,3);assert.equal(data.source_signature,'fresh');assert.equal(own.payload.title,'deferred');
+});

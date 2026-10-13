@@ -21,6 +21,9 @@ function referencePickerConsumer(need){
         if(!marker||data.entity?.object_id!==marker.owner_id)continue;
         const known=new Map([data.entity,...(data.states||[]),...(data.requirements||[])].map(r=>[r.object_id,r]));
         if(marker.records.length!==known.size||marker.records.some(([id,revision,version])=>id!==session.need.object_id&&(known.get(id)?.id!==revision||known.get(id)?.version!==version)))continue;
+        const own=known.get(session.need.object_id);
+        Object.assign(own,{id:result.revision_id,current_revision:result.revision_id,version:result.edit_token,edit_token:result.edit_token,content_sha256:result.content_sha256,review_shot_slots:result.slots});
+        if(own.payload?.generation)own.payload.generation.inputs=result.slots.map(s=>s.value);
         data.source_signature=marker.source_signature;
       }
       session.slots=result.slots;Object.assign(session.need,{id:result.revision_id,current_revision:result.revision_id,version:result.edit_token,edit_token:result.edit_token,content_sha256:result.content_sha256,review_shot_slots:result.slots});
@@ -55,9 +58,9 @@ function referencePickerSave(session,index,candidate,component){
   const operation=session.tail.then(choose);session.tail=operation.catch(()=>{});
   return operation.finally(()=>{session.busy--;session.notify()});
 }
-function renderReferenceCandidatePicker(line,item,need,detailButton){
+function renderReferenceCandidatePicker(line,item,need,detailButton,workspace=null){
   const session=referencePickerConsumer(need),index=item.index;
-  const workspaces=[state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
+  const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
   line.classList.add('reference-picker-card');line.dataset.referenceInput=String(index);
   const picker=el('div','reference-candidate-picker'),status=nodeText('small','production-meta','正在读取候选…',picker),choices=el('div','reference-candidate-choices');picker.append(choices);line.append(picker);
   const reconcile=productionButton(picker,'重新读取方案',async()=>{try{const value=await api('/api/production/shot-reference?requirement_id='+encodeURIComponent(need.object_id));session.receipt(value);session.conflict=false;error='';refresh()}catch(exc){error='读取失败：'+exc.message;refresh()}});reconcile.hidden=true;

@@ -139,7 +139,7 @@ function materialInputs(inputs,records=[],slots=[]){
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
   }).map(item=>{const slot=slots.find(s=>s.index===item.index);return {...item,slot,ref:{...item.ref,...(item.row?{kind:item.row.kind}:{}),...(slot?{reference_identity:slot}:{}),...(item.row?.submission_only||item.row?.unavailable?{snapshot_record:item.row}:{})}}});
 }
-function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false,selectable=false}={}){
+function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false,selectable=false,workspace=null}={}){
   const effective=materialInputs(inputs,records,need?.review_shot_slots||need?.input_slots||[]);if(!effective.length)return;
   nodeText('h4',null,actual?'实际使用的参考':'参考素材',host);
   const grid=el('div','material-reference-grid');host.append(grid);
@@ -152,7 +152,7 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
     const button=reviewSmallCard(line,{title:identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),material_category:identity?.material_category||row?.payload.material_category,icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
     if(identity?.reason)nodeText('p',item.missing?'production-issue':'production-meta',identity.reason,line);
     button.dataset.reviewDialogTrigger='';
-    if(picking&&typeof renderReferenceCandidatePicker==='function')renderReferenceCandidatePicker(line,item,need,button);
+    if(picking&&typeof renderReferenceCandidatePicker==='function')renderReferenceCandidatePicker(line,item,need,button,workspace);
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
   }
 }
@@ -203,7 +203,7 @@ function renderMaterialRequirements(parent,requirement){
   if(!repeated||locatingDescription)materialField(host,requirement,'generation.output.description',repeated?null:'需求描述');
   renderReviewHelp(info,requirement);
 }
-function renderSelectedGenerationRecipe(parent,requirement,item,round){
+function renderSelectedGenerationRecipe(parent,requirement,item,round,workspace=null){
   const call=item?.review_context?.call||(!item&&round?.definition_records?.call);
   const working=(requirement||round?.plan)?.payload,box=el('section','material-plan');nodeText('h3',null,!call?.payload?.model&&(working?.media_type==='project'||['external-edit','reuse'].includes(working?.generation?.method))?'制作内容':'生成方案',box);parent.append(box);
   if(item&&!call){
@@ -239,7 +239,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   const editable=!round?.current_content&&!item&&!round?.frozen&&(!need.current_revision||need.id===need.current_revision);
   if(editable&&!state.reviewWork)renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(editable&&!state.reviewWork&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:round?.number,frozen:false,compact:true,onSaved:result=>refreshMaterialPlan(result)});
-  else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true,selectable:!!round?.current_content&&!item&&!need.submission_only});
+  else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true,selectable:!!round?.current_content&&!item&&!need.submission_only,workspace});
   if(!(plan.inputs||[]).length)nodeText('p','production-meta','本方案没有参考素材输入',host);
   renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt');
   if(!plan.prompt&&!['external-edit','reuse'].includes(plan.method))nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
@@ -453,7 +453,7 @@ function renderMaterialCard(parent,model,options={}){
   }
   // A version owns one demand definition. Result associations are uses, not
   // interchangeable historical definitions for every related state.
-  renderSelectedGenerationRecipe(box,requirement,items[0],model.round);
+  renderSelectedGenerationRecipe(box,requirement,items[0],model.round,options.workspace);
   for(const item of items)options.renderResult?.(box,item);
 
   parent.append(box);
