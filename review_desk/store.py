@@ -217,7 +217,10 @@ class Store:
         """Publish a complete set atomically, including optimistic version checks."""
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
-            return [self._put_object(**record) for record in records]
+            from .material_input_validation import batch
+            with batch(self):
+                results = [self._put_object(**record) for record in records]
+            return results
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
         from .business_relations import guard_write as guard_relation
