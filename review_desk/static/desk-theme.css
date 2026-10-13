@@ -179,7 +179,7 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 
 /* SKILL reading: complete vertical flow, file tree, independent file history. */
 .config-page.skill-admin { max-width:none; padding:22px; container-type:inline-size; }
-.skill-admin-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:28px; align-items:start; }
+.skill-admin-layout { display:grid; grid-template-columns:260px minmax(0,1fr); gap:28px; align-items:start; min-height:calc(100vh + 100px); }
 .skill-flow { position:sticky; top:112px; max-height:calc(100vh - 132px); overflow:auto; padding:0 16px 12px 0; scrollbar-width:thin; }
 .skill-flow h2 { font-size:17px; margin:0 0 18px; }
 .novel-workspace #novel-index { margin-bottom:16px; }
@@ -196,7 +196,7 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-flow button.active { background:#dfe9d8; border-color:#6e886f; color:#294c34; font-weight:600; }
 .skill-flow-parallel { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; padding:8px; border:1px solid #e2e0d8; border-radius:8px; background:transparent; }
 .skill-flow-parallel button { padding:8px 4px; font:inherit; font-size:13px; border:1px solid #d4d8ca; background:#f5f2e9; border-radius:5px; }
-.skill-flow-family { grid-column:1 / -1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
+.skill-flow-family { grid-column:1 / -1; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; border:1px solid #d4d9ce; border-radius:7px; padding:6px; }
 .skill-flow-family > .skill-flow-label,.skill-flow-family > button:only-child { grid-column:1 / -1; }
 .skill-flow-family > .skill-flow-label { padding:3px; text-align:left; font-size:12px; }
 .material-category-filter > .production-filter-options { align-items:center; }
@@ -207,7 +207,8 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .material-category-filter .production-entity-icon { flex-shrink:0; }
 @media(max-width:750px) { .material-category-family,.material-category-children { gap:6px; } .material-category-parent { padding-right:6px; } }
 .skill-flow-repeat { margin:7px 4px 0; padding-left:8px; border-left:1px dashed #c6ccbf; text-align:left; }
-.skill-flow-repeat button { padding:3px 6px; border:1px solid transparent; border-radius:4px; background:transparent; color:#647661; font:inherit; font-size:12px; }
+.skill-flow-repeat button { padding:5px 8px; border:1px solid #cbd3c2; border-radius:5px; background:#eef2e6; color:#52674c; font:inherit; font-size:12px; }
+.skill-flow button:focus-visible,.skill-file-tree button:focus-visible { outline:2px solid #567d59; outline-offset:2px; }
 .skill-flow-repeat small { display:block; padding:3px 6px; color:#71756b; font-size:11px; line-height:1.65; }
 .skill-flow-return { display:block; font-size:12px; line-height:1.6; color:#647661; border-left:1px dashed #9ba994; text-align:left; margin:6px 0 0 4px; padding-left:10px; }
 .skill-flow-output { white-space:pre-line; display:block; margin:6px 6px 0; color:#71756b; font-size:12px; font-weight:400; line-height:1.65; text-align:left; }
@@ -215,8 +216,11 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .skill-flow-branches .skill-flow-stage { padding-bottom:18px; }
 .skill-flow-support { display:block; margin:8px 0 0; font-size:12px; line-height:1.6; color:#687562; text-align:left; }
 .skill-content,.skill-reader { min-width:0; scroll-margin-top:120px; }
+.skill-content { min-height:inherit; }
+.skill-reader { position:sticky; top:112px; height:calc(100vh - 132px); overflow:auto; scrollbar-width:thin; padding-right:8px; overflow-anchor:none; }
+.method-reference-condition { display:block; padding:0 7px 8px; font-size:12px; color:#687562; line-height:1.6; }
 .skill-heading { font-size:21px; margin:0 0 22px; }
-.skill-reading-grid { display:grid; grid-template-columns:minmax(160px,210px) minmax(0,1fr); gap:24px; align-items:start; }
+.skill-reading-grid { display:grid; grid-template-columns:minmax(160px,210px) minmax(0,1fr); gap:24px; align-items:start; min-height:calc(100vh + 50px); }
 .skill-file-tree { position:sticky; top:112px; max-height:calc(100vh - 135px); overflow:auto; padding-right:10px; scrollbar-width:thin; }
 .skill-file-group { margin:0 0 22px; }
 .skill-file-group h3 { margin:0 0 8px; font-size:13px; font-weight:600; color:#64705e; }

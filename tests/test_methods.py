@@ -24,6 +24,19 @@ def seed(store, work_type='comment-polish', steps=None):
 
 
 class MethodsTest(unittest.TestCase):
+    def test_frozen_legacy_paths_are_not_changed_by_stable_reference_indices(self):
+        from unittest.mock import patch
+        original=methods.resolve
+        def legacy(*args,**kwargs):
+            kwargs['legacy_resource_paths']=True
+            return original(*args,**kwargs)
+        with patch.object(methods,'resolve',legacy):
+            old=methods.prepare(self.store,self.request)
+        self.assertNotIn('source_index',old['payload']['package']['resources'][0])
+        self.assertEqual(methods.prepare(self.store,self.request),old)
+        fresh=methods.prepare(self.store,{**self.request,'step_id':'new-paths'})
+        self.assertEqual(fresh['payload']['package']['resources'][0]['source_index'],0)
+
     def test_media_binding_requires_specific_audio_and_keeps_frozen_generic_package(self):
         payload = copy.deepcopy(self.method['payload']); payload['work_types'] = ['media-plan']; payload['steps'] = ['draft', 'review', 'result']
         method = methods.save(self.store, {'category':'skill','name':'media-original','expected_version':0,'payload':payload})

@@ -1255,6 +1255,7 @@ async function init(){try{
   if(!['story.sources','story.novel'].includes(initialWorkspace)||!restoreSourceReadingPosition(history.state?.sourceReading))restoreSourceChapter(initialUrl,{initial:true});
   window.addEventListener('popstate',async event=>{
     cancelSourceReadingRestore();cancelSourceChapterRestore();
+    if(typeof restoreMethodHistory==='function'&&await restoreMethodHistory(event?.state?.methodReading))return;
     if(typeof restoreWorkspaceNavigation==='function')restoreWorkspaceNavigation();
     const readingPosition=event?.state?.sourceReading;
     const url=new URL(location.href),source=url.searchParams.get('source'),previous=state.workspace;let workspace=url.searchParams.get('workspace')||(source?'story.sources':'production.approach');
