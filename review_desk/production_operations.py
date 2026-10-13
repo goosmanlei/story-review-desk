@@ -176,7 +176,9 @@ def select(store, request):
         if not origin['material_id'] or canonical_id(store, mid) != canonical_id(store, origin['material_id']):
             raise ValueError('不能把槽位换成另一素材')
         candidate = p.ref_record(store, request['candidate'], {'ASSET'}) if request.get('candidate') else None
-        target = candidate or p.record(store, mid)
+        own_original = (origin['record']['kind'] == 'ASSET'
+                        and canonical_id(store, mid) == canonical_id(store, need['object_id']))
+        target = candidate or (origin['record'] if own_original else p.record(store, mid))
         if candidate and target['payload'].get('media_type') != origin['record']['payload'].get('media_type'):
             raise ValueError('此候选与输入媒体类型不兼容')
         if any(request.get(key) is not None for key in ('crop', 'range')):
@@ -194,6 +196,10 @@ def select(store, request):
             value.update(component_id=request['component_id'], material_selection={'material_id': mid, 'candidate_id': candidate['candidate_id']})
         else:
             value['selection_state'] = 'unselected'
+            if own_original:
+                # Keep the exact candidate provenance, not a dependency on the
+                # consumer itself. No original or bounds remain selected.
+                value['material_selection'] = {'material_id': mid}
         issues = [x for x in slot(store,value,index)['issues'] if not (not candidate and x == '尚未选定候选')]
         if issues:
             raise Conflict('；'.join(issues))
