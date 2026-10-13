@@ -130,6 +130,10 @@ CALL 投影 `@review/call/model`、`@review/call/parameters`、`@review/call/pro
 
 ## 验证与恢复
 
+参考小卡、Prompt 素材链接、关系图及素材管理共用一次打开的大卡。标题、关闭按钮和视口内外框从读取开始保持稳定，桌面预留双栏、窄屏预留单栏；准确内容就绪后在原容器填入，没有最低占位时长。方案与候选继续按需读取，不预取全部原件。读取失败在原卡说明原因并重试原目标，Esc／关闭后迟到结果失效。连点相同目标复用当前读取；卡外的新请求替换该卡，只有从卡内发起的动作才形成合法子层。返回保留父卡选择、评论草稿与阅读位置。故事依据及真实媒体原件仍使用各自准确阅读器。
+
+`comment_outside_click.test.cjs`、`generated_display_labels.test.cjs` 同时覆盖一次建窗、请求替换、原窗重试及关闭后迟到保护；布局、焦点和真实入口仍须在实例浏览器中验收。
+
 `test_material_relationships.py` 验证准确评论、素材采用隔离、原调用评论和导出恢复；`material_review.test.cjs` 验证准确方案与候选匹配、一材多用和调用参数投影。`test_ui_projection.py` 验证需求计数、无副作用读取、准确场镜归属及历史引用；`ui_unification_compatibility.test.cjs`、`ui_unification_requirements.test.cjs` 与 `production_image_region.test.cjs` 覆盖共用卡片、草稿、迟到读取、历史与图像手势上下文。测试几何和事件处理不能替代实际浏览器拖选、滚动与窄屏检查。
 
 Schema 14 保存当前统一关系、必要旧别名映射、稳定编号、候选及评论来源，删除旧制作全文与专属版本索引。恢复使用当前完整包，配置进入校验清单；详细契约见 [当前制作与候选](current-materials.md)。

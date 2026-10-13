@@ -24,10 +24,18 @@
 .material-small-preview img{width:100%;height:100%;object-fit:contain}.material-small-preview svg{width:27px;height:27px}
 .material-small-copy{display:block;min-width:0}.material-small-copy strong{font-size:13px;font-weight:600;display:block}.material-small-copy small{display:block;font-size:11px;color:#65695e;margin-top:4px}
 .entity-small-card{min-width:0;margin:0!important;white-space:normal}.entity-small-card small{display:block}.entity-material-counts{font-variant-numeric:tabular-nums}
-.unified-card-dialog{width:min(1420px,96vw);max-width:96vw;max-height:88dvh;padding:0;overflow:hidden}
+.unified-card-dialog{width:min(1420px,96vw);max-width:96vw;height:88dvh;max-height:88dvh;padding:0;overflow:hidden}
 .unified-card-dialog[open]{display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr)}
 .unified-card-dialog>.review-dialog-header{grid-column:1/-1;grid-row:1}
-.unified-card-dialog>.review-dialog-body{grid-column:1;grid-row:2;min-width:0;min-height:0;padding:0;max-height:80dvh;overflow:auto}
+.unified-card-dialog>.review-dialog-body{grid-column:1;grid-row:2;min-width:0;min-height:0;padding:0;max-height:none;overflow:auto}
+.unified-card-loading{min-height:100%}
+.unified-card-load-message{min-height:52px}
+.unified-card-placeholder{display:grid;gap:18px;padding-top:18px}
+.unified-card-placeholder>div{background:#eef0e9;border-radius:5px;height:16px;max-width:100%}
+.unified-card-placeholder-heading{width:55%;height:24px!important;margin-bottom:20px}
+.unified-card-placeholder-text:nth-child(even){width:88%}
+.unified-card-placeholder-tabs{width:38%;height:36px!important;margin-bottom:24px}
+.unified-card-placeholder-cards{height:150px!important;margin-top:32px}
 .unified-card-dialog .unified-card-material{top:0;max-height:80dvh}
 .unified-card-dialog>.comment-panel{position:fixed;inset:80px 18px 70px auto;z-index:3;width:min(360px,calc(100vw - 36px));min-width:0;min-height:0;max-height:calc(100dvh - 150px);box-shadow:0 14px 48px #17241f33}
 @media(max-width:1800px){.unified-card-dialog .unified-card-material .entity-review-local-heading>h3{flex-basis:100%}}

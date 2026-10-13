@@ -44,13 +44,17 @@ test('submitted reference preview uses its frozen original when the former upstr
  const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.src,'/api/production/files/submitted.png');
  assert.ok(title.textContent.includes('准确候选原件'));
 });
-test('replacing a temporary reference waits for modal cleanup and browser history return',async()=>{
+test('an unclassified requirement hands its existing container to the unified reader without reopening',async()=>{
  const c=fixture(),dialog=new Element('dialog'),body=new Element('section'),title=new Element('h2'),events=[];let closed,returned;
  dialog.addEventListener=(type,fn)=>{if(type==='close')closed=fn};dialog.close=()=>events.push('requested-close');
  c.openReviewDialog=()=>({dialog,body,title});c.api=async()=>({record:{kind:'REQUIREMENT'}});
- c.afterReviewDialogReturn=fn=>{returned=fn};c.openUnifiedMaterial=()=>events.push('opened');
- await c.openMaterialReference({object_id:'need',revision_id:'exact'},null);assert.deepEqual(events,['requested-close']);
- closed();assert.deepEqual(events,['requested-close']);returned();assert.deepEqual(events,['requested-close','opened']);
+ c.afterReviewDialogReturn=()=>assert.fail('must not close or go back');c.openUnifiedMaterial=(ref,trigger,view)=>{assert.equal(view.dialog,dialog);assert.equal(ref.revision_id,'exact');events.push('same-container')};
+ await c.openMaterialReference({object_id:'need',revision_id:'exact'},null);assert.deepEqual(events,['same-container']);
+});
+test('a typed material reference opens the unified reader without a preliminary record request',async()=>{
+ const c=fixture(),ref={object_id:'need',revision_id:'exact',kind:'REQUIREMENT'},events=[];
+ c.openReviewDialog=()=>assert.fail('must not create a temporary reader');c.api=()=>assert.fail('must not duplicate the card read');c.openUnifiedMaterial=value=>events.push(value);
+ await c.openMaterialReference(ref,null);assert.equal(events[0],ref);
 });
 test('legacy image projections and review renderer share display codes without mutating components',()=>{
  const c=fixture(),root=new Element('section'),visuals=[],component={id:'original',role:'original',mime:'image/png',file:'exact.png',width:160,height:90,bytes:4,sha256:'exact'};
