@@ -1,12 +1,15 @@
 // These check slot identity, persistence and text anchoring; they do not certify layout.
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
+function loadFunction(context,file,name){const source=fs.readFileSync(file,'utf8'),start=source.indexOf('function '+name+'(');vm.runInContext(source.slice(start,source.indexOf('\nfunction ',start+1)),context)}
+function loadPromptFunctions(context){for(const [file,name] of [['material-review.js','materialInputs'],['production-breakdown.js','shotReferenceItems'],['production-breakdown.js','renderLinkedPrompt']])loadFunction(context,'review_desk/static/'+file,name)}
 function fixture({selected=true,readonly=false,indirect=false,media='image',deferred=false}={}){
   const timers=new Map(),observers=[],events=[],calls=[];let clock=0,resolveRead;
   const original=(file,id='original')=>({id,role:'original',mime:media+'/test',file});
   const candidates=[1,2,3].map(number=>({number,candidate:{object_id:'asset-'+number,revision_id:'candidate-'+number},media_type:media,originals:number===3?[original('three','first'),original('four','second')]:[original('file-'+number)]}));
   class Element{
-    constructor(tag,classes=''){this.tagName=tag.toUpperCase();this.className=classes||'';this.dataset={};this.attrs={};this.children=[];this.parentNode=null;this.style={setProperty(k,v){this[k]=v}};this.paused=true;this.classList={toggle:(c,on)=>{const set=new Set(this.className.split(' ').filter(Boolean));if(on)set.add(c);else set.delete(c);this.className=[...set].join(' ')}}}
+    constructor(tag,classes=''){this.tagName=tag.toUpperCase();this.className=classes||'';this.dataset={};this.attrs={};this.children=[];this.parentNode=null;this.style={setProperty(k,v){this[k]=v}};this.paused=true;this.classList={toggle:(c,on)=>{const set=new Set(this.className.split(' ').filter(Boolean));if(on)set.add(c);else set.delete(c);this.className=[...set].join(' ')},add:c=>this.classList.toggle(c,true)}}
     append(...nodes){for(const n of nodes){n.parentNode=this;this.children.push(n)}}
+    insertBefore(node,before){node.parentNode=this;this.children.splice(this.children.indexOf(before),0,node)}
     replaceChildren(...nodes){for(const n of this.children)n.parentNode=null;this.children=[];this.ownText='';this.append(...nodes)}
     set textContent(v){this.replaceChildren();this.ownText=String(v)}
     get textContent(){return (this.ownText||'')+this.children.map(n=>n.textContent).join('')}
@@ -22,8 +25,9 @@ function fixture({selected=true,readonly=false,indirect=false,media='image',defe
   }
   const body=new Element('body'),anchor=new Element('a');anchor.textContent='@准确素材';body.append(anchor);
   const value=selected?{reference:candidates[0].candidate,component_id:'original',range:{start_seconds:0,end_seconds:5.6}}:{reference:{object_id:'material',revision_id:'m'},selection_state:'unselected'};
-  const slot={index:0,input_key:'initial-0',material_id:'material',canonical_material_id:'material',direct:!indirect,value,candidate:selected?candidates[0].candidate:null,component:selected?candidates[0].originals[0]:null,record:{kind:selected?'ASSET':'REQUIREMENT',payload:{media_type:media,components:selected?candidates[0].originals:[]}}};
-  const other={...slot,index:1,input_key:'initial-1',value:{reference:{object_id:'other',revision_id:'other-r'},component_id:'keep',crop:{x:.2,y:.2,width:.5,height:.5}}};
+  // The server's exact-reference contract is present on current media inputs too.
+  const slot={index:0,input_key:'initial-0',material_id:'material',canonical_material_id:'material',reference_contract:'material-exact-reference-v1',disposition:'current',material_code:'M1',title:'周家米铺 · 空间布局参考',label:'M1 · 周家米铺 · 空间布局参考 · 候选 1',direct:!indirect,value,candidate:selected?candidates[0].candidate:null,component:selected?candidates[0].originals[0]:null,record:{object_id:selected?'asset-1':'material',id:selected?'candidate-1':'m',kind:selected?'ASSET':'REQUIREMENT',payload:{title:'周家米铺 · 空间布局参考',media_type:media,components:selected?candidates[0].originals:[]}}};
+  const other={...slot,index:1,input_key:'initial-1',material_id:'other-material',canonical_material_id:'other-material',value:{reference:{object_id:'other',revision_id:'other-r'},component_id:'keep',crop:{x:.2,y:.2,width:.5,height:.5}}};
   const need={kind:readonly?'CALL':'REQUIREMENT',object_id:'consumer',id:'consumer-r',current_content:!readonly,edit_token:1,content_sha256:'one',payload:{generation:{inputs:[value,other.value]}},review_shot_slots:[slot,other]};
   const c={state:{},URLSearchParams,crypto:require('node:crypto').webcrypto,AbortController,
     el:(tag,cl)=>new Element(tag,cl),nodeText:(tag,cl,text,parent)=>{const n=new Element(tag,cl);n.textContent=text;parent.append(n);return n},productionEntityIcon:()=>new Element('svg','production-entity-icon'),reviewURL:s=>s,
@@ -76,8 +80,27 @@ test('a closed then reopened hover receives its pending candidate read and Esc d
  const f=fixture({deferred:true});f.anchor.onmouseenter();f.view.close();f.anchor.onmouseenter();f.read();await f.settle();assert.equal(f.popup().querySelectorAll('[data-candidate-revision]').length,3);f.key('Escape');assert.equal(f.popup(),null);assert.equal(f.c.document.activeElement,f.anchor);
 });
 test('Prompt text offsets remain unchanged and activation uses the latest slot receipt',async()=>{
- const f=fixture(),source=fs.readFileSync('review_desk/static/production-breakdown.js','utf8'),start=source.indexOf('function renderLinkedPrompt(');vm.runInContext(source.slice(start,source.indexOf('\nfunction ',start+1)),f.c);
- const raw='甲😀 @图片1 后文',opened=[];Object.assign(f.c,{productionTextBlocks:()=>[{id:'prompt',field:'prompt',text:raw}],materialInputs:()=>[f.item],materialReferenceRequest:()=>({url:'/exact'}),businessCode:()=> 'M1',getSelection:()=>({isCollapsed:true}),openMaterialReference:r=>opened.push(r)});const parent=new f.Element('main');f.body.append(parent);f.c.renderLinkedPrompt(parent,f.need,[],[],'prompt',null,{selectable:true});
+ const f=fixture();loadPromptFunctions(f.c);
+ const raw='甲😀 @图片1 后文',opened=[];Object.assign(f.c,{productionTextBlocks:()=>[{id:'prompt',field:'prompt',text:raw}],materialReferenceRequest:()=>({url:'/exact'}),businessCode:()=> 'M1',getSelection:()=>({isCollapsed:true}),openMaterialReference:r=>opened.push(r)});const parent=new f.Element('main');f.body.append(parent);f.c.renderLinkedPrompt(parent,f.need,f.need.payload.generation.inputs,[],'prompt',null,{selectable:true});
  const pre=parent.querySelector('pre'),a=pre.querySelector('a'),text=pre.textContent,map=JSON.stringify(pre.reviewTextMap);a.onmouseenter();await f.settle();assert.equal(pre.textContent,text);assert.equal(pre.reviewSourceText,raw);assert.equal(JSON.stringify(pre.reviewTextMap),map);assert.equal(pre.querySelector('.prompt-reference-preview'),null);
  await f.choice(2).onclick({stopPropagation(){}});a.onclick({preventDefault(){}});assert.equal(opened[0].revision_id,'candidate-2');assert.equal(pre.textContent,text);assert.equal(JSON.stringify(pre.reviewTextMap),map);
+});
+test('authored @entity references hover without activation and synchronize real card controls both ways',async()=>{
+ const f=fixture();loadPromptFunctions(f.c);
+ const raw='甲😀 @周家米铺 后文',quote='@周家米铺',start=Array.from(raw.slice(0,raw.indexOf(quote))).length;
+ // Two independent positions may consume the same material, with different originals and bounds.
+ const other=f.need.review_shot_slots[1];other.material_id=other.canonical_material_id='material';other.value.reference=f.candidates[1].candidate;other.value.component_id='original';other.candidate=f.candidates[1].candidate;other.component=f.candidates[1].originals[0];other.record={...f.item.row,object_id:'asset-2',id:'candidate-2',payload:{...f.item.row.payload,components:f.candidates[1].originals}};
+ f.need.review_reference_links=[{key:'rice-shop',label:'周家米铺',path:[0]}];f.need.review_prompt_links=[{reference_key:'rice-shop',quote,start,end:start+Array.from(quote).length}];
+ Object.assign(f.c,{productionTextBlocks:()=>[{id:'prompt',field:'prompt',text:raw}],materialReferenceRequest:()=>({url:'/exact'}),businessCode:()=> 'M1',getSelection:()=>({isCollapsed:true}),openMaterialReference:()=>{throw Error('hover must not activate the material dialog')}});
+ const line=new f.Element('div'),card=new f.Element('div'),copy=new f.Element('span','material-small-copy'),name=new f.Element('button','reference-material-name');card.append(name,copy);line.append(card);f.body.append(line);
+ f.c.renderReferenceCandidatePicker(line,f.item,f.need,card);
+ const parent=new f.Element('main');f.body.append(parent);f.c.renderLinkedPrompt(parent,f.need,f.need.payload.generation.inputs,[],'prompt',null,{selectable:true});
+ const a=parent.querySelector('a');assert.ok(a);assert.equal(a.textContent,'@M1 · 周家米铺 · 空间布局参考 · 参考1');
+ assert.equal(a.getAttribute('aria-expanded'),'false');assert.equal(f.popup(),null);a.onmouseenter();await f.settle();assert.equal(a.getAttribute('aria-expanded'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.calls.filter(c=>c.id).length,0);
+ const cardChoice=n=>card.querySelector('.reference-candidate-choices').querySelectorAll('[data-candidate-revision]')[n-1];
+ f.choice(2).onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');f.choice(2).onmouseleave();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
+ await f.choice(2).onclick({stopPropagation(){}});assert.equal(cardChoice(2).getAttribute('aria-pressed'),'true');assert.equal(cardChoice(1).getAttribute('aria-pressed'),'false');assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');
+ await cardChoice(1).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
+ await f.choice(1).onclick({stopPropagation(){}});assert.equal(cardChoice(1).getAttribute('aria-pressed'),'false');assert.ok(f.popup().querySelector('.reference-preview-placeholder'));assert.equal(card.querySelector('.material-small-preview').dataset.placeholder,'true');
+ await cardChoice(2).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');assert.equal(f.need.review_shot_slots[1].value.crop.x,.2);
 });

@@ -163,7 +163,7 @@ function breakdownFacetTitle(key,value,catalog){
 function breakdownLevel(row){return ({INPUT_LOCK:'story',STORY:'story',EPISODE:'episode',AV_EPISODE:'episode',AV_SCENE:'scene',AV_SHOT:'shot'})[row.kind]}
 const breakdownShotLabels={purpose:'叙事目的'};
 function shotReferenceItems(row,inputs,records){
-  const items=materialInputs(inputs,records,row.review_shot_slots||[]).map(item=>({...item,slot:row.review_shot_slots?.find(s=>s.index===item.index)}));
+  const items=materialInputs(inputs,records,row.review_shot_slots||row.input_slots||[]);
   for(const slot of row.review_reference_links||[]){
     if(slot.path?.length===1){const item=items.find(i=>i.index===slot.path[0]);if(item){item.referenceKeys||=[];item.referenceKeys.push(slot.key);item.referenceLabel=slot.label}continue}
     items.push({index:slot.index,label:slot.label,ref:slot.candidate||(slot.record&&productionRef(slot.record)),row:slot.record,value:slot.value||{},slot,referenceKeys:[slot.key],missing:slot.invalid});
@@ -292,7 +292,7 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null,{select
   const block=productionTextBlocks(row).find(b=>b.field===field);if(!block)return;
   const pre=el('pre','shot-generation-prompt');pre.dataset.blockId=block.id;
   nodeText('h4',null,'Prompt',parent);
-  const refs=context?shotReferenceItems(row,inputs,records):materialInputs(inputs,records,row.review_shot_slots||row.input_slots||[]),byLabel=new Map(refs.map(item=>[item.label,item]));
+  const refs=shotReferenceItems(row,inputs,records),byLabel=new Map(refs.map(item=>[item.label,item]));
   const spans=[],previewBindings=[];
   const points=Array.from(block.text),links=row.review_prompt_links||row.payload.generation?.prompt_links||[];
   for(const link of links){
@@ -310,7 +310,10 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null,{select
     pre.append(document.createTextNode(block.text.slice(offset,span.start)));const input=span.input;
     if(input?.ref&&(!input.missing||input.slot?.record)){
       const a=el('a','prompt-reference'+(span.entity?' prompt-entity-reference':''));a.dataset.reviewDialogTrigger='';a.href=reviewURL(materialReferenceRequest(input.ref,false).url);const named=input.row||input.slot?.record,title=named&&(typeof materialPositionText==='function'?materialPositionText({record:named,object_id:named.object_id,title:named.payload.title,scope:named.payload.scope}):named.payload.title),same=named&&refs.filter(r=>(r.row||r.slot?.record)?.payload.title===named.payload.title),sameIdentity=same?.filter(r=>(r.row||r.slot?.record)?.object_id===named.object_id).length>1;a.textContent=named?'@'+title+(same.length>1?' · '+(sameIdentity?`参考${input.index+1}`:businessCode(named)||`参考${input.index+1}`):''):span.text;
-      if(input.slot?.reference_contract)a.textContent='@'+input.slot.label;
+      if(input.slot?.reference_contract){
+        const slot=input.slot,mid=slot.canonical_material_id||slot.material_id,duplicate=slot.disposition==='current'&&slot.direct!==false&&mid&&new Set(refs.filter(r=>r.slot?.direct!==false&&(r.slot?.canonical_material_id||r.slot?.material_id)===mid).map(r=>r.index)).size>1;
+        a.textContent='@'+(slot.disposition==='current'?[slot.material_code,slot.title].filter(Boolean).join(' · ')||slot.label:slot.label)+(duplicate?` · 参考${input.index+1}`:'');
+      }
       const displayStart=Array.from(pre.textContent).length,sourceStart=Array.from(block.text.slice(0,span.start)).length,sourceEnd=Array.from(block.text.slice(0,span.end)).length;
       pre.reviewTextMap.push({sourceStart,sourceEnd,displayStart,displayEnd:displayStart+Array.from(a.textContent).length});
       a.setAttribute('aria-label',a.textContent);
