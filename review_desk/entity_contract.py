@@ -39,6 +39,23 @@ def direct_materials(store, row, *, metadata=False):
     return list(found.values()) if metadata else [p.record(store, oid) for oid in found]
 
 
+def reference_workspace_marker(store, need):
+    """Advance an open reader only when the saved consumer is its sole change."""
+    from . import list_reading as light
+    from .store import canonical, digest
+    owner = p.ref_record(store, need['payload']['scope'])
+    if owner['kind'] == 'STATE':
+        owner = p.ref_record(store, owner['payload']['entity'])
+    if owner['kind'] not in KINDS:
+        return None
+    states = [] if owner['kind'] == 'AV_SHOT' else light.rows(store, 'STATE',
+        "json_extract(r.payload,'$.entity.object_id')=? AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (owner['object_id'],))
+    needs = [n for row in [owner, *states] for n in direct_materials(store, row, metadata=True)]
+    records = [[r['object_id'], r['id'], r['version']] for r in [owner, *states, *needs]]
+    return {'owner_id': owner['object_id'], 'records': records,
+            'source_signature': digest(canonical([tuple(v) for v in records]).encode())}
+
+
 def source_labels(store, row):
     labels = []
     for source in row['payload'].get('sources', []):

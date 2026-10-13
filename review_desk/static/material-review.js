@@ -132,14 +132,14 @@ function materialInputs(inputs,records=[],slots=[]){
     if(!row)return [{value,index,row:null,label:'输入'+(index+1),ref:{...ref,...value},missing:true}];
     if(!['ASSET','REQUIREMENT'].includes(row.kind))return [];
     const component=value.component_id?row.payload.components?.find(c=>c.id===value.component_id):row.payload.components?.find(c=>c.role==='original');
-    const type=component?.mime.split('/')[0]||slot?.media_type||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频'}[type];
+    const family=component?.mime.split('/')[0],type=['image','audio','video'].includes(family)?family:slot?.media_type||row.payload.media_type,label={image:'图片',audio:'音频',video:'视频',project:'工程',document:'文档'}[type];
     if(row.kind==='ASSET'&&(!value.component_id||!component)){if(label)counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label?label+counts[type]:'输入'+(index+1),ref:{...ref,...value},missing:true}]}
     if(!label)return [];
     if(slots.find(s=>s.index===index)?.active===false)return [{value,index,row,label:'备选 '+(slots.find(s=>s.index===index)?.rule?.route||index+1),ref:{...ref,...value}}];
     counts[type]=(counts[type]||0)+1;return [{value,index,row,label:label+counts[type],ref:{...ref,...Object.fromEntries(['component_id','crop','range'].filter(k=>value[k]).map(k=>[k,value[k]]))}}];
   }).map(item=>{const slot=slots.find(s=>s.index===item.index);return {...item,slot,ref:{...item.ref,...(slot?{reference_identity:slot}:{}),...(item.row?.submission_only||item.row?.unavailable?{snapshot_record:item.row}:{})}}});
 }
-function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false}={}){
+function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{compact=false,selectable=false}={}){
   const effective=materialInputs(inputs,records,need?.review_shot_slots||need?.input_slots||[]);if(!effective.length)return;
   nodeText('h4',null,actual?'实际使用的参考':'参考素材',host);
   const grid=el('div','material-reference-grid');host.append(grid);
@@ -147,10 +147,12 @@ function renderMaterialInputs(host,inputs,records=[],need=null,actual=false,{com
     const line=el('div','material-input');grid.append(line);
     const identity=item.slot,row=item.row,component=row?.payload.components?.find(c=>c.id===item.value.component_id)||row?.payload.components?.find(c=>c.role==='original');
     const range=item.value.range?` · ${item.value.range.start_seconds}–${item.value.range.end_seconds} 秒`:item.value.crop?' · 已登记裁切区域':'';
-    const subtitle=(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?'尚未选定原件':identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件')+range;
+    const picking=selectable&&identity?.material_id&&identity.direct!==false;
+    const subtitle=(item.missing?'准确原件不可用':identity?.candidate_number?'候选 '+identity.candidate_number:row?.kind==='REQUIREMENT'?(picking?'':identity?.candidate_count===0?'暂无候选':'未选定候选'):identity?.disposition==='historical'?'历史原件':actual?'实际原件':'已指定原件')+range;
     const button=reviewSmallCard(line,{title:identity?.title||row?.payload.title||item.label,business_code:identity?.material_code||identity?.original_code||(row&&businessCode(row)),material_category:identity?.material_category||row?.payload.material_category,icon:row?.payload.media_type||identity?.media_type,preview:!item.missing&&component?.mime?.startsWith('image/')?component:null,selectionSubtitle:subtitle},trigger=>openMaterialReference(item.ref,trigger));
     if(identity?.reason)nodeText('p',item.missing?'production-issue':'production-meta',identity.reason,line);
     button.dataset.reviewDialogTrigger='';
+    if(picking&&typeof renderReferenceCandidatePicker==='function')renderReferenceCandidatePicker(line,item,need,button);
     if(!compact&&item.value.use&&!item.value.relation)nodeText('p',null,item.value.use,line);
   }
 }
@@ -237,7 +239,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round){
   const editable=!round?.current_content&&!item&&!round?.frozen&&(!need.current_revision||need.id===need.current_revision);
   if(editable&&!state.reviewWork)renderMaterialRouteChoices(host,need,result=>refreshMaterialPlan(result));
   if(editable&&!state.reviewWork&&need.review_shot_slots&&typeof renderShotInputs==='function')renderShotInputs(host,need,plan.inputs||[],need.review_input_records||[],{need,number:round?.number,frozen:false,compact:true,onSaved:result=>refreshMaterialPlan(result)});
-  else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true});
+  else renderMaterialInputs(host,plan.inputs||[],need.review_input_records||[],need,false,{compact:true,selectable:!!round?.current_content&&!item&&!need.submission_only});
   if(!(plan.inputs||[]).length)nodeText('p','production-meta','本方案没有参考素材输入',host);
   renderLinkedPrompt(host,need,plan.inputs||[],need.review_input_records||[],'generation.prompt');
   if(!plan.prompt&&!['external-edit','reuse'].includes(plan.method))nodeText('p','production-meta','此方案未保存完整 Prompt。',host);
