@@ -173,7 +173,7 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});
   dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();if(selectionAction&&selectionParent){selectionAction.hidden=true;selectionParent.insertBefore(selectionAction,selectionNext?.parentNode===selectionParent?selectionNext:null)}reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}if(trigger?.isConnected)trigger.focus({preventScroll:true});restoreReading()},{once:true});
+  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();if(selectionAction&&selectionParent){selectionAction.hidden=true;selectionParent.insertBefore(selectionAction,selectionNext?.parentNode===selectionParent?selectionNext:null)}reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}const returnTrigger=dialog.reviewReturnTrigger||trigger;if(returnTrigger?.isConnected)returnTrigger.focus({preventScroll:true});restoreReading()},{once:true});
   history.pushState({...history.state,reviewDialog:dialogId},'',location.href);reviewDialogStack.push(dialog);
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }
