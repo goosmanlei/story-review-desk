@@ -204,6 +204,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
   line.dataset.referenceInput=String(index);card.classList.add('reference-picker-card');
   const copy=card.querySelector('.material-small-copy'),detailButton=card.querySelector('.reference-material-name');
+  const ownPrefix=item.slot?.own_candidate?detailButton.title.split('：')[0]:null;
   copy.querySelector('.small-card-selection')?.remove();
   const picker=el('div','reference-candidate-picker'),choices=el('div','reference-candidate-choices'),status=nodeText('small','reference-picker-status','正在读取候选…',choices);
   picker.append(choices);copy.append(picker);status.setAttribute('role','status');
@@ -270,6 +271,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
   };
   const refresh=()=>{
     if(!line.isConnected)return;const slot=current();
+    if(ownPrefix&&slot.candidate_number){const title=`${ownPrefix}：本素材候选${slot.candidate_number}`;detailButton.title=title;const heading=detailButton.querySelector('strong');heading.textContent=title;heading.title=title}
     if(data){
       const original=data.candidates.find(c=>c.candidate.revision_id===slot.candidate?.revision_id)?.originals.find(o=>o.id===slot.value.component_id);
       let thumbnail=card.querySelector('.material-small-preview');
@@ -288,6 +290,9 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     reconcile.hidden=!session.conflict;retry.hidden=!session.pending||!!session.busy;picker.setAttribute('aria-busy',String(!!session.busy));
     for(const button of choices.querySelectorAll('[data-candidate-revision]')){
       const same=slot.candidate?.revision_id===button.dataset.candidateRevision;
+      const range=same&&slot.value.range,crop=same&&slot.value.crop;
+      const label=`候选 ${button.dataset.candidateNumber}`+(range?` · ${range.start_seconds}–${range.end_seconds} 秒`:crop?' · 已登记裁切区域':'');
+      button.querySelector('.reference-choice-label').textContent=label;button.setAttribute('aria-label',label);
       button.setAttribute('aria-pressed',String(same));button.classList.toggle('selected',same);button.disabled=!!session.busy||!!session.pending||!!session.conflict;button.setAttribute('aria-disabled',String(!same&&!!button.dataset.issue));
       button.querySelector('.reference-choice-check').textContent=same?'✓ ':'';
       button.title=button.dataset.issue||(same?'再次点击取消此参考选择':'点击选择；悬停或聚焦预览；触屏按住预览');
@@ -297,8 +302,8 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     closePreview();choices.querySelectorAll('[data-candidate-revision],.reference-load-retry').forEach(b=>b.remove());
     for(const candidate of data.candidates){
       const single=candidate.originals.length===1?candidate.originals[0]:null,button=productionButton(choices,'',()=>{});
-      button.className='reference-candidate-choice';button.dataset.candidateRevision=candidate.candidate.revision_id;
-      nodeText('span','reference-choice-check','',button);nodeText('span',null,`候选 ${candidate.number}`,button);
+      button.className='reference-candidate-choice';button.dataset.candidateRevision=candidate.candidate.revision_id;button.dataset.candidateNumber=String(candidate.number);
+      nodeText('span','reference-choice-check','',button);nodeText('span','reference-choice-label',`候选 ${candidate.number}`,button);
       button.setAttribute('aria-label',`候选 ${candidate.number}`);button.setAttribute('aria-haspopup','dialog');
       const issue=candidate.issue||single?.issue;if(issue)button.dataset.issue=issue;
       bindPreview(button,candidate,single);

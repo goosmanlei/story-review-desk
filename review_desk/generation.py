@@ -323,7 +323,16 @@ def readiness(store, requirement_id):
     from .version_consolidation import deleted, NOTICE
     # Unselected alternatives remain inspectable, but do not block the active route.
     from .material_relations import active_inputs
-    selected_inputs, route_issues = active_inputs(store, plan or {}, need['object_id'])
+    try:
+        selected_inputs, route_issues = active_inputs(store, plan or {}, need['object_id'])
+    except (KeyError, ValueError) as exc:
+        return {'requirement':need,'plan':plan,'inputs':[], 'i2i_depth':0,
+                'issues':[str(exc)], 'ready':False}
+    from .material_input_validation import issues as reference_issues
+    deterministic_issues = reference_issues(store, need)
+    if deterministic_issues:
+        return {'requirement':need,'plan':plan,'inputs':[], 'i2i_depth':0,
+                'issues':list(dict.fromkeys([*route_issues, *deterministic_issues])), 'ready':False}
     inspected = {**need['payload'], 'generation': {**(plan or {}), 'inputs': [v for _, v in selected_inputs]}}
     missing = [path for path, reference in p.references(inspected, include_unavailable=True)
                if reference.get('unavailable') or deleted(store, reference['revision_id'])]
