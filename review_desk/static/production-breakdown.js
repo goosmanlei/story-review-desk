@@ -265,7 +265,7 @@ function renderShotReferenceChoice(box,model,item,player){
     try{const result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(request)});
       const slot=result.slots.find(s=>s.index===(result.selected_index??request.index));
       if(result.requirement_id!==request.requirement_id||!slot)throw Error('保存回执与当前消费位置不匹配，请重新打开核对');
-      context.need={...context.need,id:result.revision_id};context.number=result.number;context.frozen=!!result.frozen;
+      context.need={...context.need,id:result.revision_id,...(result.edit_token!==undefined?{edit_token:result.edit_token,content_sha256:result.content_sha256}:{})};context.number=result.number??1;context.frozen=!!result.frozen;
       context.slot={...context.slot,...slot};context.source.saved=result;context.result=result;
     }catch(error){context.error='保存失败：'+error.message}
     finally{context.busy=false;context.source.pending=false;if(context.dialog.isConnected&&state.shotReferenceContext===context)context.choiceView?.refresh();else if(!context.dialog.isConnected&&context.pageActive?.()&&context.source.saved)context.source.onSaved(context.source.saved)}
