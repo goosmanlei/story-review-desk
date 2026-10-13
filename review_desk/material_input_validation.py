@@ -49,6 +49,11 @@ def issues(store, need):
                 else:
                     slot = input_slot(store, value, index)
                     failures = slot['issues'][:]
+                    if value.get('selection_state') == 'unselected':
+                        if slot.get('canonical_material_id') != mid:
+                            failures.append('未选原件只能保留本素材准确候选出处')
+                        elif failures == ['尚未选定候选']:
+                            failures = []  # A preparation gap, never executable.
                     if slot.get('disposition') == 'missing':
                         failures.append(slot.get('reason') or '准确原件不可用')
                     errors.extend(label + failure for failure in failures)
