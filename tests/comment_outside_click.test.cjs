@@ -5,6 +5,7 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),fs=requir
 class Element{
   constructor(tag='div'){this.tagName=tag.toUpperCase();this.className='';this.dataset={};this.attrs={};this.children=[];this.listeners={};this.hidden=false;this.textContent='';this.value=''}
   append(...children){for(const child of children){child.remove();child.parentNode=this;this.children.push(child)}}
+  replaceChildren(...children){for(const child of [...this.children])child.remove();this.append(...children)}
   remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(n=>n!==this);this.parentNode=null}
   insertBefore(child,next){this.append(child);if(next){this.children.pop();this.children.splice(this.children.indexOf(next),0,child)}}
   get isConnected(){return this.tagName==='BODY'||!!this.parentNode?.isConnected}
@@ -313,11 +314,36 @@ test('a late lower-card response waits for the newer upper card and returns to i
   const open=f.c.openReviewDialog;f.c.openReviewDialog=(...args)=>{const result=open(...args);stack.push(result.dialog);return result};
   f.c.readUnifiedCard=(object_id,id)=>new Promise(resolve=>held[object_id]=()=>resolve({record:{object_id,id}}));
   const original={object_id:'manager',id:'manager'};f.c.state.productionSelected=original;
-  const first=f.c.openUnifiedMaterial({object_id:'first',revision_id:'first-old'}),second=f.c.openUnifiedMaterial({object_id:'second',revision_id:'second-old'});
+  const first=f.c.openUnifiedMaterial({object_id:'first',revision_id:'first-old'}),nestedTrigger=new Element('button');f.dialogs[0].append(nestedTrigger);
+  const second=f.c.openUnifiedMaterial({object_id:'second',revision_id:'second-old'},nestedTrigger);
   held.second();await second;assert.equal(f.c.state.productionSelected.object_id,'second');
   held.first();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.c.state.productionSelected.object_id,'second');
   stack.pop();f.close(f.dialogs[1]);await first;assert.equal(f.c.state.productionSelected.id,'first-old');assert.equal(f.panel.parentNode,f.dialogs[0]);
   stack.pop();f.close(f.dialogs[0]);assert.equal(f.c.state.productionSelected,original);assert.equal(f.panel.parentNode,f.body);
+});
+
+test('rapid sibling opens reuse one container and only the last target may activate',async()=>{
+  const f=await unifiedCloseFixture(),held={},stack=[];f.c.reviewDialogStack=stack;
+  const open=f.c.openReviewDialog;f.c.openReviewDialog=(...args)=>{const result=open(...args);stack.push(result.dialog);return result};
+  f.c.readUnifiedCard=(object_id,id)=>new Promise(resolve=>held[object_id]=()=>resolve({record:{object_id,id}}));
+  const first=f.c.openUnifiedMaterial({object_id:'first',revision_id:'exact-first'},f.outside);
+  const duplicate=f.c.openUnifiedMaterial({object_id:'first',revision_id:'exact-first'},f.outside);
+  assert.equal(f.dialogs.length,1);
+  const second=f.c.openUnifiedMaterial({object_id:'second',revision_id:'exact-second'},f.outside);
+  assert.equal(f.dialogs.length,1);held.second();await second;held.first();await Promise.all([first,duplicate]);
+  assert.equal(f.c.state.productionSelected.id,'exact-second');assert.equal(stack.length,1);
+  const third=f.c.openUnifiedMaterial({object_id:'third',revision_id:'exact-third'},f.outside);
+  assert.equal(f.dialogs.length,1);held.third();await third;assert.equal(f.c.state.productionSelected.id,'exact-third');
+});
+test('same-container retry keeps the original exact target, and a closed retry cannot revive it',async()=>{
+  const f=await unifiedCloseFixture(),requests=[];f.c.readUnifiedCard=(object_id,id)=>new Promise((resolve,reject)=>requests.push({object_id,id,resolve,reject}));
+  const opening=f.c.openUnifiedMaterial({object_id:'need',revision_id:'exact-need'},f.outside);
+  requests[0].reject(Error('accurate read offline'));await opening;
+  const dialog=f.dialogs[0],body=dialog.querySelector('.review-dialog-body'),retry=body.querySelector('button');
+  assert.ok(body.querySelector('p').textContent.includes('accurate read offline'));
+  const pending=retry.onclick();await new Promise(resolve=>setImmediate(resolve));assert.equal(f.dialogs.length,1);assert.equal(requests[1].id,'exact-need');
+  f.close(dialog);const restored=f.c.state.productionSelected;requests[1].resolve({record:{object_id:'need',id:'exact-need'}});await pending;
+  assert.equal(f.c.state.productionSelected,restored);assert.equal(dialog.isConnected,false);assert.equal(f.panel.parentNode,f.body);
 });
 
 for(const width of [390,1199,1200,1440])test(`top-level comment toggles never inspect or scroll the story reader at width ${width}`,async()=>{
