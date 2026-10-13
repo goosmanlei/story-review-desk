@@ -82,6 +82,9 @@ def enrich_detail(store, detail):
                     item['rule']=rules(store,plan['inputs'][item['index']],row['object_id'])
                     item['own_candidate'] = bool(item.get('candidate_id') and not item['issues']
                         and item.get('canonical_material_id') == canonical_id(store, row['object_id']))
+                    item['own_candidate_pending'] = bool(item['value'].get('selection_state') == 'unselected'
+                        and item.get('record', {}).get('kind') == 'ASSET'
+                        and item.get('canonical_material_id') == canonical_id(store, row['object_id']))
             row['review_reference_links'] = project(store, row)
             row['review_prompt_links'] = annotations(store, row).get('prompt_links', [])
     return detail

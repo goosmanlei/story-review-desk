@@ -66,13 +66,24 @@ def validate_plan(store, object_id, payload):
         p._text(value.get('use'), 'input purpose')
         target = p.ref_record(store, value.get('reference'), {'ASSET', 'REQUIREMENT'})
         media_types.append(target['payload']['media_type'])
-        if 'selection_state' in value and (value['selection_state'] != 'unselected' or target['kind'] != 'REQUIREMENT' or value.get('material_selection') is not None):
-            raise ValueError('invalid unselected reference slot')
+        pending_original = value.get('selection_state') == 'unselected' and target['kind'] == 'ASSET'
+        if 'selection_state' in value:
+            if value['selection_state'] != 'unselected':
+                raise ValueError('invalid unselected reference slot')
+            if pending_original:
+                from .production_current import input_slot
+                from .material_storage import canonical_id
+                slot = input_slot(store, value, 0)
+                if (slot['issues'] != ['尚未选定候选']
+                        or slot.get('canonical_material_id') != canonical_id(store, object_id)):
+                    raise ValueError('未选原件只能保留本素材准确候选出处')
+            elif value.get('material_selection') is not None:
+                raise ValueError('invalid unselected reference slot')
         key = canonical(value)
         if key in seen:
             raise ValueError('duplicate generation input')
         seen.add(key)
-        if target['kind'] == 'ASSET':
+        if target['kind'] == 'ASSET' and not pending_original:
             _, component = p.component_for(store, value['reference'], value.get('component_id'))
             p.validate_selection(component, value)
         elif value.get('component_id') or value.get('crop') or value.get('range'):

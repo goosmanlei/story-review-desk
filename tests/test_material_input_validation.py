@@ -87,6 +87,54 @@ class ReferenceValidationTest(MaterialFixture, unittest.TestCase):
             with self.subTest(change=change), self.assertRaises((ValueError, KeyError)):
                 self.change(oid, generation=self.plan(oid, [{**value, **change}]))
 
+    def test_cancel_own_candidate_is_a_recoverable_gap_and_can_select_again(self):
+        from review_desk.shot_references import input_key
+        from review_desk.bundle import export, restore
+        from review_desk.store import Store, Conflict
+        self.generate()
+        oid = 'need-full-overall'
+        original = self.ref('generated')
+        history = copy.deepcopy(p.record(self.store, 'generated')['submission'])
+        bounds = {'start_seconds': .1, 'end_seconds': .8}
+        self.change(oid, generation=self.plan(oid, [self.input('generated', component_id='original', range=bounds)], method='reuse', model=None))
+        def request(operation, candidate=None, **values):
+            need = p.record(self.store, oid)
+            return {'id': operation, 'requirement_id': oid, 'expected_content': current.marker(need),
+                    'index': 0, 'input_key': input_key(need['payload']['generation']['inputs'][0]),
+                    'material_id': oid, 'candidate': candidate, **values}
+        clear = request('cancel-own')
+        operations.select(self.store, clear)
+        need = p.record(self.store, oid)
+        value = need['payload']['generation']['inputs'][0]
+        self.assertEqual(value['reference'], original)
+        self.assertEqual(value['material_selection'], {'material_id': oid})
+        self.assertEqual(value['selection_state'], 'unselected')
+        self.assertNotIn('range', value)
+        self.assertNotIn('component_id', value)
+        validation.validate_tree(self.store)
+        ready = g.readiness(self.store, oid)
+        self.assertFalse(ready['ready'])
+        self.assertIn('尚未选定', '；'.join(ready['issues']))
+        with self.assertRaises(Conflict):
+            g.package(self.store, oid)
+        saved = copy.deepcopy(need)
+        self.assertTrue(operations.select(self.store, clear)['already_applied'])
+        self.assertEqual(p.record(self.store, oid), saved)
+        export(self.store, self.root / 'export')
+        recovered = Store(self.root / 'own-gap-recovered/.runtime/review.sqlite3')
+        self.addCleanup(recovered.close)
+        restore(recovered, self.root / 'export')
+        self.assertEqual(p.record(recovered, oid)['payload']['generation']['inputs'][0], value)
+        self.assertFalse(g.readiness(recovered, oid)['ready'])
+        for extra in ({'range': bounds}, {'component_id': 'original'}, {'sha256': '0' * 64}):
+            with self.subTest(extra=extra), self.assertRaises(ValueError):
+                self.change(oid, generation=self.plan(oid, [{**value, **extra}]))
+        with self.assertRaises(ValueError):
+            self.change('need-wet-overall', generation=self.plan('need-wet-overall', [value]))
+        operations.select(self.store, request('select-own-again', original, component_id='original', range=bounds))
+        self.assertTrue(g.readiness(self.store, oid)['ready'])
+        self.assertEqual(p.record(self.store, 'generated')['submission'], history)
+
     def test_withdrawn_selected_upstream_is_rejected(self):
         first, second = 'need-full-overall', 'need-wet-overall'
         self.change(first, generation=self.plan(first, [self.input(second)]))

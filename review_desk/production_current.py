@@ -533,6 +533,12 @@ def input_slot(store, value, index):
             raise ValueError('需要明确候选的素材需求归属')
         if selection.get('candidate_id', candidate[0]) != candidate[0]:
             raise ValueError('参考候选身份不匹配')
+        if value.get('selection_state') == 'unselected':
+            if set(selection) != {'material_id'} or any(k in value for k in ('component_id', 'crop', 'range', 'sha256')):
+                raise ValueError('未选原件不能保留候选选择或使用范围')
+            result['material_id'] = mid
+            result['issues'].append('尚未选定候选')
+            return describe(store, with_identity(store, result))
         result.update(material_id=mid, number=1, candidate={'object_id': target['object_id'], 'revision_id': target['id']},
                       candidate_id=candidate[0], candidate_number=matched['number'])
         _, component = p.component_for(store, result['candidate'], value.get('component_id'))
