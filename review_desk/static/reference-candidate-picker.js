@@ -96,7 +96,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
       const media=el(image?'img':original.mime.startsWith('audio/')?'audio':original.mime.startsWith('video/')?'video':'a');
       if(media.tagName==='A'){media.href=file;media.target='_blank';media.rel='noopener';media.textContent='查看原件文件'}
       else{media.src=file;if(image)media.alt=`候选 ${candidate.number} · ${original.id}`;else{media.controls=true;media.preload='none';media.tabIndex=0}}
-      media.onerror=()=>{if(previewKey!==key)return;media.remove();pinned=true;const message=nodeText('p','production-issue','预览加载失败',mediaBox);productionButton(message,'重试预览',()=>display(original))};mediaBox.append(media);
+      media.onerror=()=>{if(previewKey!==key)return;media.remove();const message=nodeText('p','production-issue','预览加载失败',mediaBox);productionButton(message,'重试预览',()=>display(original))};mediaBox.append(media);
     };
     if(candidate.originals.length>1){
       const originals=el('div','reference-originals');preview.append(originals);
@@ -141,7 +141,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     button.onmouseenter=()=>showPreview(button,candidate,component);button.onmouseleave=laterClose;
     button.onfocus=()=>{if(!skipFocus)requestAnimationFrame(()=>{if(document.activeElement===button&&line.isConnected)showPreview(button,candidate,component)})};button.onblur=laterClose;
     button.onkeydown=event=>{
-      if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();showPreview(button,candidate,component,true);preview?.querySelector('.reference-original-choice,audio,video,a,button')?.focus()}
+      if(event.key==='ArrowDown'){event.preventDefault();event.stopPropagation();showPreview(button,candidate,component);preview?.querySelector('.reference-original-choice,audio,video,a,button')?.focus()}
       else if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closePreview()}
     };
     button.onpointerdown=event=>{if(event.pointerType!=='touch')return;pointer={x:event.clientX,y:event.clientY};suppress=false;touchTimer=setTimeout(()=>{suppress=true;showPreview(button,candidate,component,true)},450)};
@@ -149,9 +149,9 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     button.onpointerup=()=>{clearTimeout(touchTimer);pointer=null};button.onpointercancel=()=>{clearTimeout(touchTimer);pointer=null;suppress=true};
     button.onclick=event=>{event.stopPropagation();if(suppress){suppress=false;return}if(session.busy||session.pending||session.conflict)return;
       const selected=current().candidate?.revision_id===candidate.candidate.revision_id;
-      if(button.dataset.issue&&!selected)return showPreview(button,candidate,component,true);
+      if(button.dataset.issue&&!selected)return showPreview(button,candidate,component);
       if(component||selected)return select(candidate,component);
-      showPreview(button,candidate,null,true);
+      showPreview(button,candidate,null);
     };
   };
   const refresh=()=>{
