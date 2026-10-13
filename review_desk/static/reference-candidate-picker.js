@@ -88,7 +88,6 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     referencePickerCloseActive?.();closePreview();referencePickerCloseActive=closePreview;previewKey=key;pinned=explicit;
     preview=el('div','reference-candidate-preview');preview.setAttribute('popover','manual');preview.setAttribute('role','dialog');preview.setAttribute('aria-label',`候选 ${candidate.number} 预览`);picker.append(preview);
     const heading=el('div','reference-preview-heading');preview.append(heading);nodeText('strong',null,`候选 ${candidate.number}`,heading);
-    productionButton(heading,'关闭预览',closePreview);
     const mediaBox=el('div','reference-preview-media');
     const display=original=>{
       mediaBox.querySelectorAll('audio,video').forEach(p=>{p.pause();p.removeAttribute('src');p.load()});mediaBox.replaceChildren();
@@ -108,8 +107,9 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
       }
     }
     preview.append(mediaBox);display(component||(candidate.originals.length===1?candidate.originals[0]:null));
-    const rect=button.getBoundingClientRect(),width=Math.min(320,document.documentElement.clientWidth-24),height=Math.min(430,window.innerHeight-24);
-    preview.style.width=width+'px';preview.style.maxHeight=height+'px';
+    const rect=button.getBoundingClientRect(),width=Math.min(560,document.documentElement.clientWidth-24),height=Math.min(680,window.innerHeight-24);
+    const fitHeight=limit=>{preview.style.maxHeight=limit+'px';preview.style.setProperty('--reference-preview-media-height',Math.max(40,limit-64)+'px')};
+    preview.style.width=width+'px';fitHeight(height);
     const side=rect.right+width+24<document.documentElement.clientWidth?rect.right+12:rect.left-width-12>=12?rect.left-width-12:null;
     preview.style.left=(side??Math.max(12,Math.min(document.documentElement.clientWidth-width-12,rect.left)))+'px';
     preview.style.top=Math.max(12,Math.min(window.innerHeight-height-12,rect.top))+'px';
@@ -117,7 +117,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
     const actualHeight=preview.getBoundingClientRect().height;
     if(side===null){
       const below=window.innerHeight-rect.bottom-12,above=rect.top-12,useBelow=below>=actualHeight||below>=above;
-      preview.style.maxHeight=Math.max(50,Math.min(height,useBelow?below:above))+'px';
+      fitHeight(Math.max(50,Math.min(height,useBelow?below:above)));
       preview.style.top=(useBelow?rect.bottom+8:Math.max(12,rect.top-preview.getBoundingClientRect().height-8))+'px';
     }else preview.style.top=Math.max(12,Math.min(window.innerHeight-actualHeight-12,rect.top))+'px';
     preview.onmouseenter=()=>clearTimeout(leaveTimer);preview.onmouseleave=laterClose;preview.onfocusin=()=>clearTimeout(leaveTimer);preview.onfocusout=laterClose;
@@ -160,11 +160,17 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
       const original=data.candidates.find(c=>c.candidate.revision_id===slot.candidate?.revision_id)?.originals.find(o=>o.id===slot.value.component_id);
       let thumbnail=card.querySelector('.material-small-preview');
       if(original?.mime.startsWith('image/')&&!original.issue){
-        if(!thumbnail){thumbnail=el('span','material-small-preview');thumbnail.append(el('img'));card.insertBefore(thumbnail,copy)}
+        if(!thumbnail){thumbnail=el('span','material-small-preview');card.insertBefore(thumbnail,copy)}
+        if(!thumbnail.querySelector('img')){thumbnail.textContent='';thumbnail.append(el('img'))}
+        delete thumbnail.dataset.placeholder;thumbnail.removeAttribute('role');thumbnail.removeAttribute('aria-label');thumbnail.removeAttribute('title');
         const img=thumbnail.querySelector('img'),src=reviewURL('/api/production/files/'+encodeURIComponent(original.file));if(img.getAttribute('src')!==src)img.src=src;img.alt='';img.loading='lazy';
+      }else if((item.slot?.media_type||item.row?.payload.media_type)==='image'){
+        if(!thumbnail){thumbnail=el('span','material-small-preview');card.insertBefore(thumbnail,copy)}
+        if(!thumbnail.dataset.placeholder){thumbnail.textContent='';thumbnail.append(productionEntityIcon('image'));thumbnail.dataset.placeholder='true'}
+        const label=original?.issue?'准确原件不可用':'未选定原件';thumbnail.setAttribute('role','img');thumbnail.setAttribute('aria-label',label);thumbnail.title=label;
       }else thumbnail?.remove();
     }
-    status.textContent=error||(!data?'正在读取候选…':!data.candidates.length?'暂无候选':session.busy?'正在保存…':'');status.title=error;status.hidden=!status.textContent;status.className=error?'reference-picker-status production-issue':'reference-picker-status';
+    status.textContent=error||(!data?'正在读取候选…':!data.candidates.length?'暂无候选':'');status.title=error;status.hidden=!status.textContent;status.className=error?'reference-picker-status production-issue':'reference-picker-status';
     reconcile.hidden=!session.conflict;retry.hidden=!session.pending||!!session.busy;picker.setAttribute('aria-busy',String(!!session.busy));
     for(const button of choices.querySelectorAll('[data-candidate-revision]')){
       const same=slot.candidate?.revision_id===button.dataset.candidateRevision;
