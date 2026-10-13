@@ -288,12 +288,12 @@ function renderShotReferenceChoice(box,model,item,player){
   if(!item)nodeText('p','production-meta','可先选定此版本；候选仍待选，完成选定前不能执行制作。',actions);
   return actions;
 }
-function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
+function renderLinkedPrompt(parent,row,inputs,records,field,context=null,{selectable=false,workspace=null}={}){
   const block=productionTextBlocks(row).find(b=>b.field===field);if(!block)return;
   const pre=el('pre','shot-generation-prompt');pre.dataset.blockId=block.id;
   nodeText('h4',null,'Prompt',parent);
   const refs=context?shotReferenceItems(row,inputs,records):materialInputs(inputs,records,row.review_shot_slots||row.input_slots||[]),byLabel=new Map(refs.map(item=>[item.label,item]));
-  const spans=[];
+  const spans=[],previewBindings=[];
   const points=Array.from(block.text),links=row.review_prompt_links||row.payload.generation?.prompt_links||[];
   for(const link of links){
     const input=refs.find(item=>item.referenceKeys?.includes(link.reference_key));
@@ -316,10 +316,12 @@ function renderLinkedPrompt(parent,row,inputs,records,field,context=null){
       a.setAttribute('aria-label',a.textContent);
       a.title=span.entity?'审阅素材引用；'+(input.slot?.direct===false?'经“'+shotReferenceOwnerTitle(input.slot)+'”传递；不增加模型输入':'对应准确直接输入'):'模型输入 '+input.label;
       a.title=a.textContent+' · '+(input.row?businessCode(input.row):'')+'；'+a.title;
-      a.onclick=e=>{e.preventDefault();if(getSelection()?.isCollapsed){if(context&&!input.slot?.nonmedia&&!input.slot?.reference_contract)openShotReference(input,context,a);else openMaterialReference(input.ref,a)}};pre.append(a);
+      let referencePreview=null;
+      a.onclick=e=>{e.preventDefault();if(referencePreview?.consumeClick())return;if(getSelection()?.isCollapsed){const current=referencePreview?.input()||input;referencePreview?.close();if(context&&!current.slot?.nonmedia&&!current.slot?.reference_contract)openShotReference(current,context,a);else openMaterialReference(current.ref,a)}};pre.append(a);
+      if(typeof bindPromptReferencePreview==='function')previewBindings.push(()=>{referencePreview=bindPromptReferencePreview(a,input,row,{selectable,workspace})});
     }else pre.append(document.createTextNode(span.text));offset=span.end;
   }
-  pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);
+  pre.append(document.createTextNode(block.text.slice(offset)));parent.append(pre);previewBindings.forEach(bind=>bind());
 }
 function breakdownPromptSelection(need,context){
   const detail=context.video_details?.[need.object_id],rounds=detail?.material_cards?.[need.object_id]||[];
@@ -600,9 +602,10 @@ function renderShotProductPlan(parent,need,context){
   const plan=source.kind==='CALL'?source.payload:source.payload.generation;
   if(!plan){nodeText('p','production-meta',need.payload.media_type==='project'?'此产物为已有工程；尚无模型生成方案，可打开素材核对工程与交付要求。':'此产物尚无生成方案',parent);return}
   const inputs=plan.inputs||[],records=source.review_input_records||[];
-  if(need.current_content)renderMaterialInputs(parent,inputs,records,source,source.kind==='CALL',{compact:true});else renderShotInputs(parent,source,inputs,records,referenceContext,{pure:true});
+  const selectable=!!round?.current_content&&source.kind==='REQUIREMENT'&&!source.submission_only;
+  if(need.current_content)renderMaterialInputs(parent,inputs,records,source,source.kind==='CALL',{compact:true,selectable});else renderShotInputs(parent,source,inputs,records,referenceContext,{pure:true});
   const surface=materialTextSurface(parent,source);materialParameters(surface,source,source.kind==='CALL'?'call':'generation',plan.model);
-  renderLinkedPrompt(surface,source,inputs,records,source.kind==='CALL'?'call.prompt':'generation.prompt',referenceContext);
+  renderLinkedPrompt(surface,source,inputs,records,source.kind==='CALL'?'call.prompt':'generation.prompt',referenceContext,{selectable});
 }
 
 async function showBreakdownScene(scene,body,nav,epoch,restore=null,savedPosition=null,commit=null){
