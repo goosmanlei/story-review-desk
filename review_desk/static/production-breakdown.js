@@ -235,59 +235,6 @@ function shotReferenceChoiceContext(box,model){
   if(model.material_id!==context.slot.material_id&&model.round?.canonical_id!==context.slot.canonical_material_id)return;
   return context;
 }
-function renderShotReferenceChoice(box,model,item,player){
-  const context=shotReferenceChoiceContext(box,model);if(!context)return;
-  const actions=el('div','production-toolbar shot-reference-actions');box.append(actions);
-  if(context.indirect){
-    nodeText('p','production-meta','间接参考的 '+shotReferenceLabel(context.slot)+' 属于“'+shotReferenceOwnerTitle(context.slot)+'”。当前镜头通过该方案传递此素材；这里浏览不保存，也不修改共享上游方案或其他镜头。',actions);
-    const bounds=context.slot.number===model.round?.number?referenceSelectionBounds(context.slot,item):{};
-    if(player&&bounds.range)productionButton(actions,`试听已保存片段 · ${bounds.range.start_seconds}–${bounds.range.end_seconds} 秒`,()=>player.reviewAudition(bounds.range,'已保存片段'));
-    materialReferenceLink(actions,context.slot.selection_owner,'查看选定归属方案');return actions;
-  }
-  const purpose=nodeText('p','production-meta','',actions);
-  context.drafts||={};
-  const identity=JSON.stringify([model.material_id,model.round?.number,item?.record.id||null,item?.component.id||null]);
-  const savedChoice=()=>context.slot.number===model.round?.number&&(context.slot.material_id===model.material_id||context.slot.canonical_material_id===model.material_id)&&(context.slot.candidate?.revision_id||null)===(item?.record.id||null)&&(!item||context.slot.value.component_id===item.component.id);
-  const savedBounds=()=>savedChoice()?referenceSelectionBounds(context.slot,item):{};
-  const selectionFields=renderReferenceSelectionFields(actions,item,{...context.slot,value:savedChoice()?context.slot.value:{}},()=>{player?.reviewPause();context.drafts[identity]=selectionFields.snapshot();context.error=null;refresh()},context.drafts[identity]);
-  const actionLabel=item?'选为方案参考':'选定此素材，候选待选';
-  const unchanged=()=>savedChoice()&&JSON.stringify(selectionFields())===JSON.stringify(referenceSelectionBounds(context.slot,item));
-  const audition=player?productionButton(actions,'试听选段',()=>{
-    try{const bounds=selectionFields();if(!bounds.range||!player.reviewAudition(bounds.range,unchanged()?'已保存片段':'未保存范围'))throw Error('起点须早于终点，且在此原件范围内');context.error=null}
-    catch(error){context.error=error.message}refresh();
-  }):null;
-  const button=productionButton(actions,actionLabel,async()=>{
-    if(context.busy||button.disabled)return;
-    let bounds;try{bounds=selectionFields()}catch(error){context.error=error.message;refresh();return}
-    const value={requirement_id:context.need.object_id,expected_revision:context.need.id,expected_content:{edit_token:context.need.edit_token,content_sha256:context.need.content_sha256},plan_number:context.number,index:context.slot.index,input_key:context.slot.input_key,material_id:model.material_id,number:model.round.number,...(item?{candidate:productionRef(item.record),component_id:item.component.id,...bounds}:{candidate:null})};
-    const choice=JSON.stringify(value);if(context.requestChoice!==choice){context.requestChoice=choice;context.requestId='shot-ref-'+crypto.randomUUID()}
-    const request={id:context.requestId,...value};context.busy=true;context.source.pending=true;context.error=null;refresh();
-    try{const result=await api('/api/production/shot-reference',{method:'POST',body:JSON.stringify(request)});
-      const slot=result.slots.find(s=>s.index===(result.selected_index??request.index));
-      if(result.requirement_id!==request.requirement_id||!slot)throw Error('保存回执与当前消费位置不匹配，请重新打开核对');
-      context.need={...context.need,id:result.revision_id,...(result.edit_token!==undefined?{edit_token:result.edit_token,content_sha256:result.content_sha256}:{})};context.number=result.number??1;context.frozen=!!result.frozen;
-      context.slot={...context.slot,...slot};context.source.saved=result;context.result=result;
-    }catch(error){context.error='保存失败：'+error.message}
-    finally{context.busy=false;context.source.pending=false;if(context.dialog.isConnected&&state.shotReferenceContext===context)context.choiceView?.refresh();else if(!context.dialog.isConnected&&context.pageActive?.()&&context.source.saved)context.source.onSaved(context.source.saved)}
-  });
-  const discard=productionButton(actions,'放弃范围修改',()=>{player?.reviewPause();delete context.drafts[identity];context.error=null;selectionFields.restore(savedBounds());refresh()});
-  const message=nodeText('small','production-meta','',actions);message.setAttribute('role','status');
-  const refresh=()=>{if(!actions.isConnected)return;let same=false;try{same=unchanged()}catch{}
-    purpose.textContent=`为当前方案的参考 ${context.slot.index+1} 选择；仅浏览不会保存。`+(context.frozen?' 保存修改不改变已提交的候选。':'');
-    button.disabled=context.busy||same||!model.round||!!(item&&(item.record.payload.placeholder||item.component?.role!=='original'));
-    button.textContent=context.busy?'正在保存…':same?'已保存':context.slot.number?'保存修改 · 未保存':actionLabel;
-    message.textContent=context.error||(item&&item.component?.role!=='original'?'试听／预览组成仅供比较；请选择原件后保存。':'');message.className=context.error?'production-issue':'production-meta';
-    discard.hidden=!context.drafts[identity]||same;discard.disabled=context.busy;
-    if(audition){let bounds;try{bounds=selectionFields()}catch{}
-      audition.hidden=!selectionFields.snapshot().range?.enabled;
-      audition.disabled=!bounds?.range;
-      audition.textContent=(same?'试听已保存片段':'试听未保存范围')+(bounds?.range?` · ${bounds.range.start_seconds}–${bounds.range.end_seconds} 秒`:'');
-    }
-  };
-  context.choiceView={refresh};refresh();
-  if(!item)nodeText('p','production-meta','可先选定此版本；候选仍待选，完成选定前不能执行制作。',actions);
-  return actions;
-}
 function renderLinkedPrompt(parent,row,inputs,records,field,context=null,{selectable=false,workspace=null}={}){
   const block=productionTextBlocks(row).find(b=>b.field===field);if(!block)return;
   const pre=el('pre','shot-generation-prompt');pre.dataset.blockId=block.id;
@@ -763,22 +710,4 @@ function renderMaterialRouteChoices(host,need,onSaved){
   for(const [group,choices] of groups){const label=el('label'),select=el('select');nodeText('span',null,'执行路线 · '+group,label);select.setAttribute('aria-label','执行路线 '+group);select.dataset.routeKey='route:'+group;select.append(new Option('请选择路线',''));for(const [route,slot] of choices)select.append(new Option(slot.record?.payload.title||route,route));select.value=plan.selected_routes?.[group]||'';select.disabled=need.id!==need.current_revision;select.onchange=()=>{if(select.value)save('route',group,select.value,select)};label.append(select);box.append(label)}
   for(const key of conditions){const label=el('label'),select=el('select');nodeText('span',null,'条件 · '+key,label);select.setAttribute('aria-label','条件 '+key);select.dataset.routeKey='condition:'+key;for(const [v,title] of [['','待判断'],['true','满足'],['false','不满足']])select.append(new Option(title,v));select.value=key in (plan.conditions||{})?String(plan.conditions[key]):'';select.disabled=need.id!==need.current_revision;select.onchange=()=>{if(select.value)save('condition',key,select.value==='true',select)};label.append(select);box.append(label)}
   for(const slot of slots.filter(s=>s.rule?.necessity==='optional')){const label=el('label'),input=el('input');input.type='checkbox';input.dataset.routeKey='optional:'+slot.index;input.checked=slot.active;input.disabled=need.id!==need.current_revision;input.onchange=()=>save('optional',slot.index,input.checked,input);label.append(input,document.createTextNode('使用可选参考：'+(slot.record?.payload.title||slot.index+1)));box.append(label)}
-}
-function referenceSelectionBounds(slot,item){
-  const value=item&&slot.candidate?.revision_id===item.record.id&&slot.value.component_id===item.component.id?slot.value:{};
-  return Object.fromEntries([['crop',['x','y','width','height']],['range',['start_seconds','end_seconds']]].filter(([key])=>value[key]).map(([key,fields])=>[key,Object.fromEntries(fields.map(name=>[name,value[key][name]]))]));
-}
-function renderReferenceSelectionFields(host,item,slot,onChange=()=>{},draft=null){
-  const controls=[],current=referenceSelectionBounds(slot,item),component=item?.component;
-  const add=(key,title,fields,initial)=>{const wrap=el('fieldset'),legend=el('legend'),toggle=el('input');toggle.type='checkbox';toggle.setAttribute('aria-label',title);toggle.checked=draft?.[key]?.enabled??!!current[key];legend.append(toggle,document.createTextNode(title));wrap.append(legend);const values={};
-    for(const [name,label,max,step] of fields){const line=el('label'),input=el('input');input.type='number';input.min='0';input.max=String(max);input.step=String(step);input.value=String(draft?.[key]?.[name]??current[key]?.[name]??initial[name]);input.setAttribute('aria-label',label);input.disabled=!toggle.checked;input.oninput=onChange;line.append(document.createTextNode(label),input);wrap.append(line);values[name]=input}toggle.onchange=()=>{Object.values(values).forEach(input=>input.disabled=!toggle.checked);onChange()};host.append(wrap);controls.push({key,toggle,values,initial});
-  };
-  if(item){
-  if(component.mime.startsWith('image/')||component.mime.startsWith('video/'))add('crop','使用局部区域（0–1比例）',[['x','左边界',1,.01],['y','上边界',1,.01],['width','区域宽度',1,.01],['height','区域高度',1,.01]],{x:0,y:0,width:1,height:1});
-  if(component.mime.startsWith('audio/')||component.mime.startsWith('video/'))add('range','使用时间段（秒）',[['start_seconds','开始秒数',component.duration_seconds,.01],['end_seconds','结束秒数',component.duration_seconds,.01]],{start_seconds:0,end_seconds:component.duration_seconds});
-  }
-  const read=()=>Object.fromEntries(controls.filter(c=>c.toggle.checked).map(({key,values})=>[key,Object.fromEntries(Object.entries(values).map(([name,input])=>{if(input.value.trim()===''||!Number.isFinite(Number(input.value)))throw Error('请填写完整的范围数值');return [name,Number(input.value)]}))]));
-  read.snapshot=()=>Object.fromEntries(controls.map(({key,toggle,values})=>[key,{enabled:toggle.checked,...Object.fromEntries(Object.entries(values).map(([name,input])=>[name,input.value]))}]));
-  read.restore=bounds=>{for(const {key,toggle,values,initial} of controls){toggle.checked=!!bounds[key];for(const [name,input] of Object.entries(values)){input.value=String(bounds[key]?.[name]??initial[name]);input.disabled=!toggle.checked}}};
-  return read;
 }

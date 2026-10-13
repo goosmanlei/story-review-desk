@@ -27,12 +27,23 @@ class ReferenceCandidatesTest(MaterialFixture, unittest.TestCase):
         self.prepare();component=p.record(self.store,'generated')['payload']['components'][0]
         (self.root/'export/assets'/component['file']).unlink()
         values=summaries(self.store,'need-full-overall')['candidates'];self.assertEqual(len(values),2);self.assertIn('不可用',values[0]['originals'][0]['issue'])
-    def test_card_repeat_preserves_bounds_and_change_drops_them(self):
-        self.prepare();sr.select(self.store,self.request(range={'start_seconds':0.1,'end_seconds':0.8}))
-        before=p.record(self.store,'need-wet-overall');sr.select(self.store,self.request(operation='repeat',preserve_bounds=True))
-        self.assertEqual(p.record(self.store,'need-wet-overall'),before)
-        sr.select(self.store,self.request('second','change',preserve_bounds=True));after=p.record(self.store,'need-wet-overall')
-        self.assertNotIn('range',after['payload']['generation']['inputs'][0]);self.assertEqual(after['payload']['generation']['prompt'],before['payload']['generation']['prompt'])
+    def test_whole_reference_rejects_new_bounds_and_removes_legacy_bounds_on_selection(self):
+        self.prepare()
+        before=p.record(self.store,'need-wet-overall')
+        for bounds in ({'range':{'start_seconds':0.1,'end_seconds':0.8}}, {'crop':{'x':0,'y':0,'width':0.5,'height':0.5}}):
+            with self.assertRaisesRegex(ValueError,'完整原件'):
+                sr.select(self.store,self.request(**bounds))
+            self.assertEqual(p.record(self.store,'need-wet-overall'),before)
+        plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs'][0].update(reference=self.ref('generated'),component_id='original',range={'start_seconds':0.1,'end_seconds':0.8})
+        self.change('need-wet-overall',generation=plan)
+        sr.select(self.store,self.request(operation='whole',preserve_bounds=True))
+        after=p.record(self.store,'need-wet-overall')
+        self.assertNotIn('range',after['payload']['generation']['inputs'][0])
+        self.assertEqual(after['payload']['generation']['prompt'],before['payload']['generation']['prompt'])
+        sr.select(self.store,self.request(operation='same-whole'))
+        self.assertEqual(p.record(self.store,'need-wet-overall'),after)
+
     def test_same_operation_replay_after_response_loss_is_idempotent(self):
         self.prepare();r=self.request();first=sr.select(self.store,r);saved=p.record(self.store,'need-wet-overall')
         second=sr.select(self.store,r);self.assertTrue(second['already_applied']);self.assertEqual(p.record(self.store,'need-wet-overall'),saved)
@@ -81,7 +92,9 @@ class ReferenceCandidatesTest(MaterialFixture, unittest.TestCase):
         plan['inputs'][0].update(use='identity',role='voice',necessity='required')
         self.change('need-wet-overall',generation=plan)
         history=p.record(self.store,'generated');upstream=p.record(self.store,'need-full-overall')
-        sr.select(self.store,self.request(range={'start_seconds':0.1,'end_seconds':0.8}))
+        plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs'][0].update(reference=self.ref('generated'),component_id='original',range={'start_seconds':0.1,'end_seconds':0.8})
+        self.change('need-wet-overall',generation=plan)
         other=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation']['inputs'][1])
         clear={**self.request(operation='clear'),'candidate':None};clear.pop('component_id')
         sr.select(self.store,clear);after=p.record(self.store,'need-wet-overall')
@@ -109,3 +122,23 @@ class ReferenceCandidatesTest(MaterialFixture, unittest.TestCase):
         self.assertEqual(p.record(self.store,edge),relation)
         unrelated={**value,'reference':self.ref('need-wet-overall')}
         with self.assertRaisesRegex(ValueError,'对象对'):br.exact_input_relation(self.store,'need-wet-overall',unrelated)
+
+    def test_whole_reference_cutover_preserves_candidates_history_and_unrelated_content(self):
+        from review_desk.production_operations import whole_references
+        self.prepare()
+        plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs'][0].update(reference=self.ref('generated'),component_id='original',range={'start_seconds':0.1,'end_seconds':0.8})
+        plan['inputs'].append({'reference':self.ref('need-full-overall'),'use':'other unchanged input'})
+        self.change('need-wet-overall',generation=plan)
+        before=p.record(self.store,'need-wet-overall');upstream=p.record(self.store,'need-full-overall')
+        evidence={table:[tuple(r) for r in self.store.db.execute('SELECT * FROM '+table)] for table in ('production_submissions','production_candidates','production_candidate_targets','comments','comment_events')}
+        request={'id':'whole-references','requirements':[{'object_id':before['object_id'],'expected_content':current.marker(before)}]}
+        result=whole_references(self.store,request);after=p.record(self.store,'need-wet-overall')
+        expected=copy.deepcopy(before['payload']);expected['generation']['inputs'][0].pop('range');expected.pop('method_adjustment',None)
+        actual=copy.deepcopy(after['payload']);actual.pop('method_adjustment',None)
+        self.assertEqual(actual,expected);self.assertEqual(result['changed'][0]['indices'],[0])
+        self.assertEqual(p.record(self.store,'need-full-overall'),upstream)
+        for table,rows in evidence.items():self.assertEqual([tuple(r) for r in self.store.db.execute('SELECT * FROM '+table)],rows)
+        self.assertTrue(whole_references(self.store,request)['already_applied'])
+        self.assertEqual(p.record(self.store,'need-wet-overall'),after)
+        with self.assertRaises(Conflict):whole_references(self.store,{**request,'id':'stale-whole-references'})

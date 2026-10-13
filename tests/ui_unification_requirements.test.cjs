@@ -72,7 +72,7 @@ test('current plan remains reachable with zero or many correctly numbered candid
   const {c}=fixture(),{need,asset,round}=material();round.current_content=true;
   const candidates=Array.from({length:24},(_,i)=>({record:{...asset,id:'fixture-candidate-'+i,candidate_number:i+1},component:asset.payload.components[0],components:asset.payload.components}));
   const model={need,identity:need,round,rounds:[round],material_id:need.object_id,candidates};
-  c.materialCompareControl=()=>{};c.renderShotReferenceChoice=()=>{};
+  c.materialCompareControl=()=>{};
   let selected='current',recipe;
   c.renderSelectedGenerationRecipe=(_box,plan,item)=>recipe=item?.record.id||plan.id;
   const render=()=>{const root=new Element('main');c.renderMaterialCard(root,model,{selectedCandidateId:selected,selectCandidate:id=>selected=id});return root};
@@ -416,36 +416,6 @@ test('explicit state outranks a material default form and the owner reaches the 
   await f.c.readUnifiedCard(f.a.object_id,'a-old',params);assert.equal(requested.searchParams.get('entity_id'),f.a.object_id);assert.equal(requested.searchParams.get('revision_id'),'a-old');
 });
 
-function shotChoiceFixture(){
-  const f=fixture(),{need,asset,round}=material(),dialog={isConnected:true},box=new Element('section');box.closest=()=>dialog;
-  const callbacks=[],source={onSaved:result=>callbacks.push(result)};
-  const context={dialog,source,need:row('video','REQUIREMENT'),slot:{material_id:'need',canonical_material_id:'need',index:0,input_key:'ordered-slot'},number:1,pageActive:()=>true};
-  f.c.state.shotReferenceContext=context;f.c.crypto={randomUUID:require('node:crypto').randomUUID};
-  return {...f,box,context,dialog,callbacks,model:{material_id:'need',round},item:{record:asset,component:asset.payload.components[0]},button:()=>box.all().find(n=>n.tag==='button')};
-}
-test('shot reference browsing adds no writes and ordinary cards expose no selection operation',()=>{
-  const f=shotChoiceFixture(),calls=[];f.c.api=(...args)=>calls.push(args);
-  f.c.renderShotReferenceChoice(f.box,f.model,f.item);assert.equal(calls.length,0);
-  f.c.state.shotReferenceContext=null;const ordinary=new Element('section');ordinary.closest=()=>f.dialog;
-  f.c.renderShotReferenceChoice(ordinary,f.model,f.item);assert.equal(ordinary.children.length,0);
-});
-test('shot reference unknown save retries keep operation identity and changed choices get a new one',async()=>{
-  const f=shotChoiceFixture(),requests=[];f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));throw Error('response lost')};
-  f.c.renderShotReferenceChoice(f.box,f.model,f.item);await f.button().onclick();await f.button().onclick();
-  assert.equal(requests[0].id,requests[1].id);assert.equal(f.context.source.saved,undefined);assert.ok(f.box.textContent.includes('保存失败'));
-  const other={...f.item,record:{...f.item.record,id:'other-result'}};f.box.replaceChildren();f.c.renderShotReferenceChoice(f.box,f.model,other);await f.button().onclick();assert.notEqual(requests[0].id,requests[2].id);
-});
-test('late save refreshes only the active page and never paints a closed dialog',async()=>{
-  for(const active of [true,false]){const f=shotChoiceFixture();let finish;f.context.pageActive=()=>active;f.c.api=()=>new Promise(resolve=>finish=resolve);
-    f.c.renderShotReferenceChoice(f.box,f.model,f.item);const promise=f.button().onclick();await Promise.resolve();f.dialog.isConnected=false;finish({requirement_id:'video',revision_id:'saved-plan',number:2,slots:[{...f.context.slot,input_key:'saved-slot',value:{}}]});await promise;
-    assert.equal(f.callbacks.length,active?1:0);assert.equal(f.button().textContent,'正在保存…');
-  }
-});
-test('an empty reference version can be saved without a candidate and frozen versions explain the new plan',async()=>{
-  const f=shotChoiceFixture(),requests=[];f.context.frozen=true;f.c.api=async(_url,options)=>{requests.push(JSON.parse(options.body));return {requirement_id:'video',revision_id:'saved-plan',number:2,slots:[{...f.context.slot,input_key:'saved-slot',value:{}}]}};
-  f.c.renderShotReferenceChoice(f.box,f.model,null);assert.equal(f.button().disabled,false);assert.ok(f.box.textContent.includes('不改变已提交的候选'));
-  assert.ok(f.box.textContent.includes('候选仍待选'));await f.button().onclick();assert.equal(requests[0].candidate,null);assert.equal(requests[0].component_id,undefined);
-});
 test('an exact shot video candidate mismatch never falls back to another result',()=>{
   const {c,reader,need,context}=videoFixture();c.location.href='http://fixture/?shot_material_id=video-need&shot_candidate=missing';c.renderShotProductPlan(reader,need,context);
   assert.ok(reader.textContent.includes('准确素材候选不属于此制作版本'));assert.ok(!reader.textContent.includes('真实生成内容'));
@@ -502,4 +472,16 @@ test('material read failure is retryable in the same range, and late filters can
  buttons().find(n=>n.dataset.filterValue==='audio').onclick();await new Promise(resolve=>setImmediate(resolve));
  old(data('stale','image'));await new Promise(resolve=>setImmediate(resolve));
  assert.match(host.textContent,/newer/);assert.doesNotMatch(host.textContent,/stale/);
+});
+
+test('reference details retain their media but expose no range editor or secondary selection actions',()=>{
+ const {c}=fixture(),{need,asset,round}=material();c.renderSelectedGenerationRecipe=()=>{};c.materialCompareControl=()=>{};c.renderMaterialPlaceholder=()=>{};
+ const candidates=[{record:asset,component:asset.payload.components[0],components:asset.payload.components}],model={need,identity:need,round,rounds:[round],material_id:need.object_id,candidates};
+ for(const selected of ['current',asset.id]){
+  const host=new Element('main'),dialog={};host.closest=()=>dialog;c.state.shotReferenceContext={dialog,slot:{material_id:need.object_id}};
+  c.renderMaterialCard(host,model,{selectedCandidateId:selected,selectCandidate(){}});
+  assert.doesNotMatch(host.textContent,/选为方案参考|选定此素材|候选待选|使用局部区域|使用时间段|为当前方案的参考|仅浏览不会保存|可先选定|放弃范围/);
+  assert.equal(host.all().filter(n=>n.tag==='fieldset'||n.tag==='input'&&n.type==='number').length,0);
+  if(selected===asset.id)assert.ok(host.all().some(n=>n.tag==='img'));
+ }
 });

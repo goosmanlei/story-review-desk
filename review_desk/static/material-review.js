@@ -410,7 +410,6 @@ function materialCompareControl(host,model){
 function renderMaterialCard(parent,model,options={}){
   const box=el('article','material-card'),need=model.need;
   const referenceContext=typeof shotReferenceChoiceContext==='function'?shotReferenceChoiceContext(parent,model):null;
-  let referencePlayer;
   let items=model.candidates.map(item=>{
     const number=item.record.candidate_codes?.find(c=>c.material_id===model.material_id&&c.version===model.round?.number);
     return number?{...item,candidate_number:number.number,candidate_code:number.code}:item;
@@ -450,7 +449,7 @@ function renderMaterialCard(parent,model,options={}){
       for(const c of previewable){const label=({original:'原件',preview:'预览',thumbnail:'缩略图'})[c.role]||'媒体';const peers=previewable.filter(v=>v.role===c.role);select.append(new Option(label+(peers.length>1?' '+(peers.indexOf(c)+1):''),c.id))};select.value=item.component.id;
       if(options.selectComponent&&!options.multipleCards)select.id='production-component';select.onchange=()=>{options.selectComponent?.(select.value,item.record.id)};box.append(select);
     }
-    const player=materialMedia(box,item,{fullPlayback:referenceContext?(item.component.role==='original'?'原件':'预览'):null});if(!referencePlayer)referencePlayer=player;
+    materialMedia(box,item,{fullPlayback:referenceContext?(item.component.role==='original'?'原件':'预览'):null});
 
   }
   // A version owns one demand definition. Result associations are uses, not
@@ -459,10 +458,6 @@ function renderMaterialCard(parent,model,options={}){
   for(const item of items)options.renderResult?.(box,item);
 
   parent.append(box);
-  if(!model.historicalRecipe&&typeof renderShotReferenceChoice==='function'){
-    const actions=renderShotReferenceChoice(box,model,items[0],referencePlayer);
-    if(actions&&referencePlayer)box.insertBefore(actions,referencePlayer.parentNode.nextSibling);
-  }
   return box;
 }
 function renderMaterialWorkspace(root,detail){

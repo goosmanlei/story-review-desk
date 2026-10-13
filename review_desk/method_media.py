@@ -237,6 +237,15 @@ def check_adjustment(store, object_id, payload):
             aa[index] = copy.deepcopy(b)
         methods.require(before == after, '关系契约迁移不能夹带创作修订')
         return parent
+    if receipt['operation'] == 'whole-reference':
+        before, after = copy.deepcopy(old), copy.deepcopy(payload)
+        before.pop('method_adjustment', None)
+        after.pop('method_adjustment', None)
+        for value in before.get('generation', {}).get('inputs', []):
+            value.pop('crop', None)
+            value.pop('range', None)
+        methods.require(before == after, '完整参考转换只能清除当前输入的局部区域和时间片段')
+        return parent
     if receipt['operation'] == 'administrative':
         ignored = {'method_adjustment', 'status', 'required', 'withdrawal_reason'}
         methods.require({k:v for k,v in old.items() if k not in ignored} == {k:v for k,v in payload.items() if k not in ignored}, '撤回或必需性调整不能改写方案')
