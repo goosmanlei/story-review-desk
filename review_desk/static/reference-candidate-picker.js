@@ -104,7 +104,7 @@ function referencePromptPreviewChoice(slot,candidates,hovered=null){
   return {candidate:null,original:original||(selected?{issue:'当前选定原件不可用'}:null),placeholder:!selected&&!original};
 }
 function bindPromptReferencePreview(anchor,item,need,{selectable=false,workspace=null}={}){
-  if(!item.slot||item.slot.nonmedia||item.slot.reference_contract)return null;
+  if(!item.slot||item.slot.nonmedia)return null;
   const editable=!!(selectable&&need.kind==='REQUIREMENT'&&need.current_content&&!need.submission_only&&item.slot.material_id&&item.slot.direct!==false);
   const session=editable?referencePickerConsumer(need):null,index=item.index;
   const workspaces=[workspace,state.entityReview,state.materialCommentCard?.data].filter(data=>data?.requirements?.some(r=>r.object_id===need.object_id));
