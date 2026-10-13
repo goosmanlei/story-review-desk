@@ -130,3 +130,10 @@ test('specialty selection survives back and a full remount with its exact file',
  f.root.replaceChildren();await f.ctx.renderMethods(f.root);
  assert.equal(vm.runInContext('methodView.specialty',f.ctx),'SKILL.md');
 });
+
+test('ordinary same-node selection leaves an old exact file and reads current, then repeat preserves it',async()=>{
+ const f=setup('http://fixture/?workspace=production.approach&tab=foundation&method_category=skill&method_object=method.skill.structure&method_revision=structure1&method_file=SKILL.md&method_node=method.skill.structure');
+ await f.ctx.drawMethods(f.root);assert.equal(f.read().revision,'structure1');
+ await f.ctx.methodSelectNode(f.root,f.structure.object_id);assert.equal(f.read().revision,'structure2');
+ vm.runInContext('methodView.reader.scrollTop=167',f.ctx);await f.ctx.methodSelectNode(f.root,f.structure.object_id);assert.equal(vm.runInContext('methodView.reader.scrollTop',f.ctx),167);
+});
