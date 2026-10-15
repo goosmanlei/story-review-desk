@@ -53,7 +53,8 @@ def validate_retirement(store, oid, kind, payload):
     receipt = store.db.execute('SELECT result FROM production_current_operations WHERE id=?',
                                (payload.get('operation_id'),)).fetchone()
     value = json.loads(receipt[0]) if receipt else {}
-    if (value.get('format') != FORMAT or
+    from .candidate_reset import FORMAT as RESET_FORMAT
+    if (value.get('format') not in (FORMAT, RESET_FORMAT) or
             value.get('retired', {}).get(oid) != current.checksum(payload) or
             payload.get('original_kind') != kind or not payload.get('reason')):
         raise ValueError('retirement has no matching exact consolidation receipt: '+oid)

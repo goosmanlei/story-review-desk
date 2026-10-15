@@ -89,6 +89,12 @@ def record(store, object_id=None, revision_id=None):
         row = store.db.execute("""SELECT r.*,o.kind,o.current_revision FROM objects o
             JOIN revisions r ON r.id=o.current_revision WHERE o.id=?""", (object_id,)).fetchone()
     if not row:
+        from .production_reset import deleted_record
+        erased = deleted_record(store, object_id, revision_id)
+        if erased:
+            value = record(store, erased)
+            value['legacy_reference'] = {'object_id': erased, 'revision_id': revision_id}
+            return value
         from .production_current import enabled as current_enabled
         if revision_id and current_enabled(store):
             link = store.db.execute('SELECT * FROM production_legacy_links WHERE revision_id=?', (revision_id,)).fetchone()
@@ -260,6 +266,9 @@ def _components(store, payload, inspect=True):
 
 def component_for(store, ref, component_id):
     asset = ref_record(store, ref, {"ASSET"})
+    if asset['payload'].get('media_deleted'):
+        from .candidate_reset import NOTICE
+        raise ValueError(NOTICE)
     component = next((c for c in asset["payload"]["components"] if c["id"] == component_id), None)
     if component is None:
         raise ValueError("component is absent from exact asset revision")
@@ -461,6 +470,9 @@ def validate_payload(store, object_id, kind, payload, inspect=True, check_curren
                     (object_id, p['scope']['object_id'], p['slot'])).fetchone():
                 raise Conflict('scope/slot already has a requirement; revise that object explicitly')
     elif kind == "ASSET":
+        from .candidate_reset import erased_component, NOTICE
+        if any(erased_component(store, c) for c in payload.get('components', [])):
+            raise Conflict(NOTICE)
         _components(store, p, inspect)
         if p.get("media_type") not in ("image", "audio", "video", "project", "document"):
             raise ValueError("invalid asset media type")

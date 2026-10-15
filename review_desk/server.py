@@ -683,6 +683,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path in ("/entity-graph-worker.js", "/entity-graph-routing.js", "/vendor/viz-3.31.0.js", "/novel.js", "/methods.js", "/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
+            from .production_current import enabled
+            from .candidate_reset import erased_files, NOTICE
+            if enabled(store) and path[8:] in erased_files(store):
+                return self._json({'error': NOTICE, 'media_deleted': True, 'original_file': path[8:]}, 410)
             asset = self.server.root / "export" / "assets" / path[8:]
             mime = {".ico": "image/x-icon", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm"}.get(asset.suffix.lower(), "application/octet-stream")
             return self._file(asset, mime)

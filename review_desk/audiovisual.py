@@ -173,6 +173,9 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None, ep
     from .audiovisual_notes import get as working_note
     editions = sorted(p.current_records(store, {'AV_EPISODE'}), key=lambda r: r['payload']['number'])
     target = p.record(store, object_id, revision_id) if object_id else None
+    if target and target['payload'].get('production_deleted'):
+        return {'episodes': [], 'scenes': [], 'shots': [], 'design': None, 'lock': None,
+                'deleted_target': ref(target), 'deletion_notice': target['payload']['reason']}
     if target and target['kind'] not in KINDS:
         raise ValueError('该旧制作对象已退出视听编排；不能替换成新设计')
     # A child can be reused by several editions. An explicit edition is the
@@ -181,6 +184,9 @@ def catalog(store, episode=None, object_id=None, revision_id=None, view=None, ep
         if not episode:
             raise ValueError('准确集版本需要集对象')
         selected = p.record(store, episode, episode_revision)
+        if selected['payload'].get('production_deleted'):
+            return {'episodes': [], 'scenes': [], 'shots': [], 'design': None, 'lock': None,
+                    'deleted_target': ref(selected), 'deletion_notice': selected['payload']['reason']}
         if selected['kind'] != 'AV_EPISODE':
             raise ValueError('准确集版本不是视听集')
     else:

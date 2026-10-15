@@ -125,6 +125,8 @@ def submission(store, operation_id):
 
 def save_submission(store, operation_id, snapshot, *, origin='submitted', created_at=None):
     """Caller owns the transaction; execute BEFORE handing a request to a tool."""
+    from .production_reset import guard_operation
+    guard_operation(store, operation_id)
     old = store.db.execute('SELECT snapshot_sha256 FROM production_submissions WHERE operation_id=?',
                            (operation_id,)).fetchone()
     sha = checksum(snapshot)
@@ -427,9 +429,20 @@ def material_snapshot(store, mid):
         candidate = p.record(store, item['asset_object_id'])
         candidate.update(candidate_id=item['id'], candidate_number=item['number'])
         results.append(candidate)
+    from .candidate_reset import receipts, NOTICE
+    deleted = []
+    for receipt in receipts(store):
+        for asset_id, material_id in receipt.get('candidate_memberships', []):
+            if material_id != canonical_mid:
+                continue
+            links = [r[0] for r in store.db.execute(
+                'SELECT revision_id FROM production_legacy_links WHERE target_object_id=? AND kind=?', (asset_id, 'ASSET'))]
+            deleted.append({'object_id':asset_id, 'revision_ids':[address(asset_id), *links], 'reason':NOTICE})
     return [{'model': CONTRACT, 'material_id': mid, 'canonical_material_id': canonical_id(store, mid),
              'number': 1, 'frozen': False, 'state': 'current', 'plan': plan,
-             'results': results, 'members': ([plan] if plan else [])+results,
+             'results': results, 'deleted_candidates':deleted,
+             'reset_notice':('本轮候选已清空；素材及所需输入待重新准备。' if receipts(store) and not results else None),
+             'members': ([plan] if plan else [])+results,
              'definition_records': {'requirement': plan, 'call': None},
              'feedback': [], 'current_content': True}]
 
@@ -453,6 +466,13 @@ def candidate_context(store, asset):
         if item.get('component'):
             ref = item['reference'].get('reference', item['reference'])
             component = copy.deepcopy(item['component'])
+            from .candidate_reset import erased_component, NOTICE
+            if erased_component(store, component):
+                inputs.append({'object_id':ref['object_id'], 'id':ref['revision_id'], 'kind':'ASSET',
+                    'submission_only':True, 'unavailable':True,
+                    'payload':{'format':'production-retirement-v1', 'title':item.get('title') or ref['object_id'],
+                               'reason':NOTICE, 'media_deleted':True, 'components':[]}})
+                continue
             inputs.append({'object_id': ref['object_id'], 'id': ref['revision_id'], 'kind': 'ASSET',
                            'payload': {'title': item.get('title') or component['file'],
                                        'media_type': component['mime'].split('/')[0], 'components': [component]},
@@ -500,6 +520,10 @@ def input_slot(store, value, index):
     try:
         target = p.ref_record(store, value.get('reference', value))
         result['record'] = target
+        if target['payload'].get('media_deleted'):
+            from .candidate_reset import NOTICE
+            result['issues'].append(NOTICE)
+            return describe(store, result)
         if target['kind'] not in ('ASSET', 'REQUIREMENT'):
             result['nonmedia'] = True
             return result

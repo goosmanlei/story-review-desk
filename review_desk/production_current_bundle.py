@@ -44,7 +44,8 @@ def required_assets(store):
     icon = store.configuration('SYSTEM')['body']['site_favicon']
     if icon:
         names.add(icon)
-    return names
+    from .candidate_reset import erased_files
+    return names - erased_files(store).keys()
 
 
 def install(store):
@@ -229,7 +230,9 @@ def validate(store):
                 raise ValueError('submitted requirement checksum mismatch')
         for value in snapshot.get('input_contents', []):
             if value.get('component'):
-                validate_component(p.root_of(store), value['component'], inspect=False)
+                from .candidate_reset import erased_component
+                if not erased_component(store, value['component']):
+                    validate_component(p.root_of(store), value['component'], inspect=False)
         for value in snapshot.get('basis_contents', []):
             if current.checksum(value['content']) != value['content_sha256']:
                 raise ValueError('submitted production basis checksum mismatch')

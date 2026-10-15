@@ -13,10 +13,16 @@ FORMAT = 'comment-handling-v1'
 
 
 def exact_revision(store, object_id, revision_id):
+    from .production_reset import deleted_record
+    erased = deleted_record(store, object_id, revision_id)
+    if erased:
+        from .production import record
+        value = record(store, erased)
+        return {**value, 'title': value['payload']['reason']}
     revision = revision_record(store, revision_id)
     obj = store.db.execute('SELECT kind FROM objects WHERE id=?', (object_id,)).fetchone()
     if not revision or revision['object_id'] != object_id or not obj or (
-            obj['kind'] not in {'SOURCE', 'EPISODE', *KINDS} and not (obj['kind'] == 'GUIDANCE' and revision['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1')) and object_id != STRUCTURE_ID):
+            obj['kind'] not in {'SOURCE', 'EPISODE', 'DELETED_PRODUCTION', *KINDS} and not (obj['kind'] == 'GUIDANCE' and revision['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1')) and object_id != STRUCTURE_ID):
         raise ValueError('准确内容修订不存在或不匹配；未替换为最新稿')
     if obj['kind'] == 'SOURCE':
         source = store.source(object_id)
@@ -122,7 +128,7 @@ def snapshot(store, object_id, revision_id, file=None):
     if method:
         relevant.update(c['id'] for c in store.comments(target_object_id=object_id))
     from .production_current import enabled, RECORD_KINDS
-    if enabled(store) and current['kind'] in RECORD_KINDS:
+    if enabled(store) and current['kind'] in RECORD_KINDS | {'DELETED_PRODUCTION'}:
         relevant.update(c['id'] for c in store.comments(target_object_id=object_id) if c.get('original_context'))
     if object_id == STRUCTURE_ID:
         revisions = {r['id']: r for r in object_revisions(store, STRUCTURE_ID)}
@@ -146,7 +152,7 @@ def snapshot(store, object_id, revision_id, file=None):
             if item['comment_id'] not in relevant:
                 continue
         from .production_current import enabled, RECORD_KINDS
-        current_mode = enabled(store) and current['kind'] in RECORD_KINDS
+        current_mode = enabled(store) and current['kind'] in RECORD_KINDS | {'DELETED_PRODUCTION'}
         in_context = any(ref['object_id'] == object_id and ref['revision_id'] == revision_id
                          for ref in [item['original'], item['response'], *item['evidence']])
         if current_mode:

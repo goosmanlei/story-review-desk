@@ -219,6 +219,9 @@ def exact_input_relation(store, requirement_id, item, *, metadata=False):
             and current_enabled(store)):
         mid = canonical_id(store, upstream)
         for endpoint in ends - {requirement_id}:
+            from .candidate_reset import was_candidate_for
+            if was_candidate_for(store, endpoint, mid):
+                possible.add(endpoint)
             if store.db.execute('''SELECT 1 FROM production_candidate_targets t
                 JOIN production_candidates c ON c.id=t.candidate_id
                 WHERE t.material_id=? AND c.asset_object_id=?''', (mid, endpoint)).fetchone():

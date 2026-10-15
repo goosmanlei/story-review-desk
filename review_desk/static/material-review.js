@@ -232,6 +232,7 @@ function renderSelectedGenerationRecipe(parent,requirement,item,round,workspace=
     if(need?.payload.status!=='withdrawn'&&need?.payload.blocks?.length){const host=materialTextSurface(box,need);for(const block of need.payload.blocks)nodeText('p',null,block.text,host).dataset.blockId=block.id;return}
     nodeText('p','production-meta',round?.current_content?'当前方案尚未编写':need?.payload.status==='withdrawn'?'此版本未附生成方案':'此素材版本未保留完整的生成方案。',box);return
   }
+  if(round?.current_content&&round.reset_notice)nodeText('p','production-meta',round.reset_notice,box);
   if(round?.current_content&&need.payload.current_plan_for&&!plan.prompt&&!plan.tool&&!plan.model&&!Object.keys(plan.parameters||{}).length&&!plan.inputs?.length){nodeText('p','production-meta','当前方案尚未编写',box);return}
   const host=materialTextSurface(box,need);box.dataset.requirementId=need.object_id;
   for(const block of need.payload.blocks||[])nodeText('p',null,block.text,host).dataset.blockId=block.id;

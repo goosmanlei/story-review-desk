@@ -117,7 +117,7 @@ function renderUnifiedSelected(data){
   const explicit=state.productionSelected;
   if(selected.candidates.some(i=>i.record.id===explicit?.id)&&data.localVersions?.[explicit.object_id])data.selectedCandidates[key]=explicit.id;
   if(!data.selectedCandidates[key])data.selectedCandidates[key]='current';
-  if(data.selectedCandidates[key]!=='current'&&!selected.candidates.some(i=>i.record.id===data.selectedCandidates[key])){nodeText('p','production-issue','准确候选已不可用；未替换为其他结果',right);return}
+  if(data.selectedCandidates[key]!=='current'&&!selected.candidates.some(i=>i.record.id===data.selectedCandidates[key])){nodeText('p','production-issue',deletedCandidateNotice(data,data.selectedCandidates[key]),right);return}
   if(selected.round)state.materialCommentCard={data,material_id:key,number:selected.round.number};
   const chosen=data.selectedCandidates[key]==='current'?null:materialCandidateChoice(selected.candidates,data.selectedCandidates[key]);
   if(changed||data.materialSwitchPending)restoreUnifiedMaterialReader(data,key,chosen?.record||selected.need||selected.identity);
@@ -247,7 +247,7 @@ function activateUnifiedCard(result){
     detail.explicitRevision=result.explicit&&!result.defaultSelection;detail.adoptionContext=result.adoption_context;
     detail.sourceMaterials=result.source_materials||[];
     detail.sourceSession||={cards:{[row.id]:result},request:0};
-    const target=params.get('material_target');if(target&&target!=='current'&&!materialRows(detail).some(r=>r.id===target))throw Error('准确候选引用不存在；未替换为最新结果');
+    const target=params.get('material_target');if(target&&target!=='current'&&!materialRows(detail).some(r=>r.id===target))throw Error(deletedCandidateNotice(detail,target));
     const draft=!target?materialSavedDraft(result):null;
     if(target||draft)detail.selectedCandidateId=target||draft.id;
     focusProductionReview(target&&target!=='current'?entityReviewDetail(materialRows(detail).find(r=>r.id===target)):draft?entityReviewDetail(draft):detail,false);
@@ -349,6 +349,10 @@ async function openUnifiedMaterial(ref,trigger,view=null){
   return dialog.unifiedLoad(ref);
 }
 
+function deletedCandidateNotice(data,target){
+  const rounds=Array.isArray(data)?data:Object.values(data.material_cards||data.entity_review?.material_cards||{}).flat();
+  return rounds.flatMap(r=>r.deleted_candidates||[]).find(item=>item.revision_ids.includes(target))?.reason||'准确候选已不可用；未替换为其他结果';
+}
 function validateUnifiedReference(result){
   // An old exact URL opens its retirement receipt, never another candidate.
   if(result.detail.record.payload.format==='production-retirement-v1')return;
@@ -361,7 +365,7 @@ function validateUnifiedReference(result){
   if(mid&&!Object.hasOwn(versions||{},mid))throw Error('准确素材标识不存在；未替换为其他素材');
   const sets=Object.entries(versions||{}).filter(([id])=>!mid||id===mid),rounds=sets.flatMap(([,rs])=>rs);
   if(number&&!rounds.some(r=>r.number===number))throw Error('准确素材版本不存在；未替换为最新版本');
-  const target=params.get('material_target');if(target&&target!=='current'&&!(number?rounds.filter(r=>r.number===number).flatMap(materialCommentRows):materialRows(detail)).some(r=>r.id===target))throw Error('准确候选不存在；未替换为最新结果');
+  const target=params.get('material_target');if(target&&target!=='current'&&!(number?rounds.filter(r=>r.number===number).flatMap(materialCommentRows):materialRows(detail)).some(r=>r.id===target))throw Error(deletedCandidateNotice(rounds,target));
 }
 
 // The same reader is mounted in a modal or directly in an audiovisual scene.
@@ -464,7 +468,7 @@ function renderShotEntityWorkspace(root,data){
     const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
     for(const button of panel.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===selected));
     if(!data.selectedCandidates[selected])data.selectedCandidates[selected]='current';
-    if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){issue('准确候选已不可用；未替换为其他结果');return}
+    if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){issue(deletedCandidateNotice(data,data.selectedCandidates[selected]));return}
     const candidate=data.selectedCandidates[selected];
     if(data.deferred_materials?.includes(selected)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){
       pending('正在读取 '+materialModelCode(model)+' · '+reviewPositionText(model.need.payload.title)+'…');

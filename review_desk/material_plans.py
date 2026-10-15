@@ -39,6 +39,8 @@ def scheme(payload, kind):
             'randomization': strategy, **({'execution':copy.deepcopy(value['execution'])} if 'execution' in value else {})}
 
 def identity(payload):
+    if payload.get('media_deleted'):
+        return None
     if payload.get('candidate_identity'):
         return payload['candidate_identity']
     originals = sorted({c['sha256'] for c in payload.get('components', []) if c['role'] == 'original'})

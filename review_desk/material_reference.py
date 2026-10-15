@@ -17,7 +17,8 @@ def receipts(store):
 def recovered_record(store, ref):
     """Read a proven original without reviving its deleted production tree."""
     item = evidence(store, ref)
-    if not item.get('component'):
+    from .candidate_reset import erased_component
+    if not item.get('component') or erased_component(store, item['component']):
         return None
     return {'object_id':ref['object_id'], 'id':ref['revision_id'], 'kind':'ASSET',
             'submission_only':True, 'recovered_original':True,
@@ -38,6 +39,9 @@ def validate_evidence(store):
                 raise ValueError('ambiguous historical reference evidence')
             seen.add(key)
             if item.get('component'):
+                from .candidate_reset import erased_component
+                if erased_component(store, item['component']):
+                    continue
                 proof = item['source_proof']
                 deleted = store.db.execute('SELECT before_sha256 FROM consolidation_revisions WHERE revision_id=? AND object_id=? AND new_number IS NULL', key[::-1]).fetchone()
                 if not deleted or deleted[0] != proof['original_content_sha256'] or not proof.get('commit'):

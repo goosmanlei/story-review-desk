@@ -39,6 +39,9 @@ def issues(store, need):
             continue
         children = []
         for index, value in selected:
+            from .candidate_reset import deleted_input
+            if deleted_input(store, value):
+                continue
             label = mid + ' 参考 ' + str(index + 1) + '：'
             try:
                 target = p.ref_record(store, value['reference'], {'REQUIREMENT', 'ASSET'})

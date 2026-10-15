@@ -392,7 +392,7 @@ function renderProductionReaderContent(){
 function renderProductionRecord(root,detail,entityCard=false){
   const r=detail.record,p=r.payload,activate=action=>()=>{focusProductionReview(detail);return action()},referenceTitles=detail.reference_titles||[];
   if(p.format==='production-retirement-v1'){
-    nodeText('h2',null,businessTitle(r,p.title),root);nodeText('p',null,p.reason,root);
+    nodeText('h2',null,businessTitle(r,p.production_deleted?'本轮已删除':p.title),root);nodeText('p',null,p.reason,root);
     if(p.merged_into){const button=productionButton(root,'打开归并后的当前内容',()=>openUnifiedMaterial({...p.merged_into,params:new URLSearchParams(),defaultSelection:true},button));button.setAttribute('aria-haspopup','dialog')}
     if(p.production)productionRefLink(root,p.production,'查看实际制作来源');
     for(const component of p.components||[])productionMedia(root,component);
