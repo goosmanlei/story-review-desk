@@ -412,6 +412,10 @@ async function loadProductionBreakdown({refresh=false}={}){
     [...known.scenes,...known.shots].some(r=>r.object_id===targetId&&r.id===targetRevision);
   const catalogPath='/api/production/breakdown?'+query;cancelBreakdownReads(reuse?null:catalogPath);
   const data=reuse?known:await readBreakdownAPI(catalogPath);if(epoch!==breakdownEpoch||workspace!==state.workspace)return;
+  if(data.deleted_target){
+    host.replaceChildren();nodeText('p','production-meta',data.deletion_notice,host);
+    await openUnifiedMaterial({...data.deleted_target,params,restoreRoute:true},null);return;
+  }
   state.breakdownCatalog={workspace,tab:productionTab(),data};
   if(!reuse)state.breakdownCommentIndex=data.comment_index||null;
   state.breakdownData=data;state.productionRecords=[data.lock,data.design,...data.scenes,...data.shots].filter(Boolean);

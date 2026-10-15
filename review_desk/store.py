@@ -223,6 +223,8 @@ class Store:
             return results
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
+        from .production_reset import guard_write as guard_erased
+        guard_erased(self, object_id, payload)
         from .business_relations import guard_write as guard_relation
         guard_relation(self, object_id, kind, payload)
         from .audiovisual_cleanup import guard_write as guard_av
