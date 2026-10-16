@@ -23,10 +23,12 @@ def decisions(store):
     values = {}
     if not current.enabled(store):
         return values
-    for raw in store.db.execute('SELECT result FROM production_current_operations'):
+    # Reference selections also keep potentially large results in this table.
+    # Decode only semantic decisions, preserving their original row order.
+    for raw in store.db.execute("SELECT result FROM production_current_operations "
+                                "WHERE json_extract(result,'$.format')=? ORDER BY rowid", (FORMAT,)):
         receipt = json.loads(raw[0])
-        if receipt.get('format') == FORMAT:
-            values.update(receipt.get('mapping', {}))
+        values.update(receipt.get('mapping', {}))
     return values
 
 
