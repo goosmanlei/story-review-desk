@@ -111,6 +111,37 @@ class CurrentProductionTest(unittest.TestCase):
         with self.assertRaises(Conflict): operations.reuse(self.store,{**reuse,'id':'reuse-stale'})
 
 
+    def test_submit_selected_reference_preserves_and_checks_original_identity(self):
+        self.migrate()
+        self.submit('reference-source')
+        source = self.result('reference-source')
+        need = p.record(self.store, 'need-wet-overall')
+        payload = copy.deepcopy(need['payload'])
+        selection = {'material_id': 'need-full-overall', 'candidate_id': source['candidate_id']}
+        payload['generation'].update(model='seed-audio-1.0', prompt='@音频1 保留原声源，改变湿润纸页声。',
+            inputs=[{'reference': self.ref(source['object_id']), 'component_id': 'original',
+                     'material_selection': selection, 'use': '音频1：同一纸页声源'}])
+        self.put({'object_id': need['object_id'], 'kind': 'REQUIREMENT',
+                  'expected_version': need['version'], 'payload': payload})
+        need = p.record(self.store, need['object_id'])
+        package = generation.package(self.store, need['object_id'])
+        request = {'id': 'submit-with-reference', 'call_id': 'with-reference',
+                   'requirement_id': need['object_id'], 'tool': 'test',
+                   'expected_content': c.marker(need), 'package_sha256': c.checksum(package)}
+        operations.submit(self.store, request)
+        saved = c.submission(self.store, 'with-reference')['snapshot']['request']['inputs'][0]
+        self.assertEqual(saved['sha256'], self.component['sha256'])
+        self.assertEqual(saved['material_selection'], selection)
+        self.assertTrue(operations.submit(self.store, request)['already_applied'])
+        for field, wrong, message in (
+                ('sha256', '0' * 64, '原件哈希'),
+                ('material_selection', {**selection, 'candidate_id': 'different'}, '候选身份'),
+                ('component_id', 'different', '参考不同')):
+            changed = copy.deepcopy(p.record(self.store, 'with-reference')['payload'])
+            changed['inputs'][0][field] = wrong
+            with self.subTest(field=field), self.assertRaisesRegex(Conflict, message):
+                generation.validate_call(self.store, 'not-submitted-' + field, changed)
+
     def test_callbacks_unknown_failure_components_and_external_original(self):
         self.migrate()
         _, submitted = self.submit('poll')
