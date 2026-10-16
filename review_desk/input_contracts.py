@@ -53,10 +53,11 @@ def check(model, prompt, inputs, *, parameters=None, execution=None):
     if not inputs:
         return {'model':model,'convention':'text only','verified':not issues and (mode is None or mode['verified']),
                 'issues':issues, **({'mode_check':mode} if mode else {})}
-    if model in ('gpt-image-2-5-sunburst','gpt-image-2'):
+    if model in ('gpt-image-2-5-sunburst','gpt-image-2','nano-banana-2-1'):
         convention='OpenArt visualReferences ordered array; describe 图片1、图片2 in natural language'
-        if any(not v['component']['mime'].startswith('image/') for v in inputs) or len(inputs)>16:
-            issues.append('该 OpenArt 图像模式仅接受最多 16 张图片参考')
+        limit=14 if model=='nano-banana-2-1' else 16
+        if any(not v['component']['mime'].startswith('image/') for v in inputs) or len(inputs)>limit:
+            issues.append(f'该 OpenArt 图像模式仅接受最多 {limit} 张图片参考')
         for label in labels:
             if not re.search(re.escape(label)+r'(?!\d)',prompt):issues.append('提示词未说明参考 '+label+' 的用途')
     elif model in ('seed-audio-1.0','Seedance 2.0','seedance-2.0','seedance2.0_fast_vision','Seedance_2.5'):

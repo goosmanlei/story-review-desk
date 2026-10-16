@@ -399,10 +399,6 @@ function materialCompareControl(host,model){
         const type=component.mime.split('/')[0];if(['image','audio','video'].includes(type)){
           const media=el(type==='image'?'img':type);media.src=reviewURL('/api/production/files/'+encodeURIComponent(component.file));if(type==='image')media.alt=item.label+' · '+item.record.payload.title;else {media.controls=true;media.addEventListener('play',()=>{for(const other of grid.querySelectorAll('audio,video'))if(other!==media)other.pause()})}content.append(media);
         }
-        const inspect=productionButton(content,'审阅此准确候选',()=>openUnifiedMaterial({...productionRef(item.record),params:new URLSearchParams({material_id:materialModelKey(model),material_target:item.record.id,...(item.round.current_content?{}:{material_version:item.round.number})})},inspect));inspect.dataset.reviewDialogTrigger='';
-        const plan=item.round.definition_records?.requirement?.payload.generation;
-        if(plan)renderReviewHelp(content,item.round.definition_records.requirement);
-        nodeText('p','production-meta','此处切换只用于比较；参考选择和实际采用在对应操作中保存。',content);
       };
       select.onchange=()=>{for(const media of content.querySelectorAll('audio,video'))media.pause();draw()};pane.append(select,content);grid.append(pane);draw();
     }

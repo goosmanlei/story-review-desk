@@ -9,7 +9,7 @@ from review_desk.entity_contract import entity_workspace
 
 class MaterialSourceWorkspaceTest(unittest.TestCase):
     for name in ('setUp', 'tearDown', 'spec', 'put', 'ref', 'entity', 'full',
-                 'need', 'setup_plans', 'media', 'migrate'):
+                 'need', 'setup_plans', 'media', 'migrate', 'submit', 'result'):
         locals()[name] = getattr(Fixture, name)
 
     def read(self, **options):
@@ -57,3 +57,17 @@ class MaterialSourceWorkspaceTest(unittest.TestCase):
         self.assertEqual(data['material_groups'], [])
         self.assertEqual(data['requirements'], [])
         self.assertEqual(data['material_cards'], {})
+
+    def test_selected_candidate_keeps_its_identity_in_results_and_members(self):
+        self.migrate()
+        self.submit('first')
+        first = self.result('first')['id']
+        self.submit('second')
+        second = self.result('second')
+        for selected in (second['id'], first, second['id']):
+            data = self.read(material_id='need-full-overall', candidate_revision=selected)
+            round = data['material_cards']['need-full-overall'][0]
+            for rows in (round['results'], [r for r in round['members'] if r['kind']=='ASSET']):
+                self.assertEqual([r.get('candidate_number') for r in rows], [1, 2])
+                self.assertTrue(all(r.get('candidate_id') for r in rows))
+                self.assertFalse(next(r for r in rows if r['id']==selected).get('deferred_detail'))
