@@ -35,6 +35,17 @@ class InputContractsTest(unittest.TestCase):
         self.assertFalse(check('UNKNOWN','@音频1与@音频2',inputs)['verified'])
         self.assertTrue(check('unknown','仅文字',[])['verified'])
 
+    def test_google_nano_uses_google_contract_and_keeps_input_guards(self):
+        images=label_inputs([self.media('image') for _ in range(14)])
+        prompt='；'.join(v['label']+'用于准确形象参考' for v in images)
+        result=check('gemini-nano-banana-2.1',prompt,images)
+        self.assertTrue(result['verified'])
+        self.assertIn('Google Interactions input image blocks',result['convention'])
+        self.assertFalse(check('gemini-nano-banana-2.1',prompt,label_inputs([self.media('image') for _ in range(15)]))['verified'])
+        self.assertFalse(check('gemini-nano-banana-2.1','图片1身份，音频1声音',label_inputs([self.media('image'),self.media('audio')]))['verified'])
+        self.assertFalse(check('gemini-nano-banana-2.1','图片1身份',images[:2])['verified'])
+        self.assertFalse(check('gemini-nano-banana-2.1','图片10身份',images[:1])['verified'])
+
     def test_pending_plan_checks_size_type_and_phantom_slots_without_media(self):
         self.assertFalse(check_declared('seedance2.0_fast_vision','@图片1 @音频1',['image','audio']))
         self.assertTrue(check_declared('seedance2.0_fast_vision','字'*5001,[]))
