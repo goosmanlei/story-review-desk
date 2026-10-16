@@ -1,6 +1,7 @@
 import copy
 import json
 import unittest
+from unittest import mock
 
 from test_production_current import CurrentProductionTest
 from review_desk import semantic_consolidation as merge, production as p, production_current as current
@@ -22,6 +23,24 @@ class SemanticConsolidationTest(unittest.TestCase):
     def choices(self):
         return {'merges':[{'source':'need-wet-overall','target':'need-full-overall',
                            'reason':'隔离夹具：已审定为同一翻页声需求，两个状态共用。'}]}
+
+    def test_decisions_skip_other_operations_and_keep_latest_mapping(self):
+        self.migrate()
+        receipts = [
+            {'format': merge.FORMAT, 'mapping': {'old': 'first', 'kept': 'same'}},
+            {'format': 'reference-selection', 'mapping': {'old': 'wrong'},
+             'slots': [{'format': merge.FORMAT, 'mapping': {'kept': 'wrong'}}]},
+            {'candidate_id': 'another-result', 'mapping': {'old': 'wrong'}},
+            {'format': merge.FORMAT, 'mapping': {'old': 'latest', 'removed': None}},
+        ]
+        with self.store.db:
+            self.store.db.executemany('INSERT INTO production_current_operations VALUES (?,?,?)',
+                [('decision-filter-'+str(i), current.checksum(value), json.dumps(value))
+                 for i, value in enumerate(receipts)])
+        with mock.patch.object(merge.json, 'loads', wraps=json.loads) as loads:
+            result = merge.decisions(self.store)
+        self.assertEqual(result, {'old': 'latest', 'kept': 'same', 'removed': None})
+        self.assertEqual(loads.call_count, 2)
 
     def test_atomic_replay_stale_content_and_recovery(self):
         self.migrate()
