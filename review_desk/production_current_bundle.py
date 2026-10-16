@@ -104,7 +104,9 @@ def export(store, directory):
         hashes = {name: physical_file_hash(data) if isinstance(data, Path) else digest(data) for name, data in files.items()}
         for name in sorted(names):
             hashes['assets/'+_safe_asset(name)] = physical_file_hash(target/'assets'/name)
+        from .numbering_restart import epoch
         manifest = {'schema_version': 14, 'production_model': current.CONTRACT,
+                    'production_numbering_epoch': epoch(store.db),
                     'sources': len(materials), 'comments': len(comments['comments']), 'events': len(comments['events']),
                     'objects': len(framework['objects']), 'revisions': len(framework['revisions']),
                     'configurations': len(configurations['records']), 'files': hashes}
@@ -162,6 +164,8 @@ def populate(store, framework, materials, comments, configurations, content):
 
 
 def validate(store):
+    from .numbering_restart import validate as validate_numbering
+    validate_numbering(store)
     from . import methods, production as p, version_consolidation as consolidation
     from .production_media import validate_component
     if not current.enabled(store) or store.db.execute('SELECT contract FROM production_current_policy').fetchone()[0] != current.CONTRACT:
@@ -287,6 +291,8 @@ def restore(store, directory):
         test = Store(Path(temp)/'.runtime/review.sqlite3')
         try:
             populate(test, framework, materials, comments, configurations, content_rows(target/'material-content.json'))
+            from .numbering_restart import guard_epoch
+            guard_epoch(test.db, manifest.get('production_numbering_epoch', []))
             if not {'assets/'+_safe_asset(name) for name in required_assets(test)} <= manifest['files'].keys():
                 raise ValueError('current recovery manifest omits referenced originals')
             test.instance_root = target.parent
