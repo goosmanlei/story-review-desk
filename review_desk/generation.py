@@ -508,5 +508,12 @@ def validate_call(store, object_id, payload):
     from .material_plans import randomization
     if manifest['randomization']!=randomization(payload):raise Conflict('实际随机策略不同于准备方案')
     expected=[{'object_id':v['asset']['object_id'],'revision_id':v['asset']['revision_id'],'component_id':v['component']['id'],**{k:v[k] for k in ('crop','range','role') if k in v}} for v in manifest['inputs']]
-    actual=[v for v in payload['inputs'] if v.get('component_id')]
+    supplied=[v for v in payload['inputs'] if v.get('component_id')]
+    identity_fields=('object_id','revision_id','component_id','crop','range','role')
+    actual=[{k:v[k] for k in identity_fields if k in v} for v in supplied]
     if expected!=actual:raise Conflict('实际生成参考不同于准备包')
+    for item, value in zip(manifest['inputs'], supplied):
+        if 'sha256' in value and value['sha256'] != item['component']['sha256']:
+            raise Conflict('实际生成参考原件哈希不同于准备包')
+        if 'material_selection' in value and value['material_selection'] != item.get('material_selection'):
+            raise Conflict('实际生成参考候选身份不同于准备包')

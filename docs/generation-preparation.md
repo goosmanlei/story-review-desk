@@ -16,7 +16,7 @@ ENTITY（实体）、STATE（完整状态）、REQUIREMENT（素材需求）、R
 
 `production-generation-ready ID` 与 `/api/production/generation-ready?requirement_id=ID` 检查准确方案、方法、输入锁、文件、范围、谱系、参数和执行渠道契约。`production-generation-package ID --output DIR` 写入空目录并携带准确原件；它只准备，不调用模型。
 
-准备包包含当时当前方案、方法、完整 Prompt、参数和准确有序参考。对外调用之前通过 `/api/production/submit` 核对包摘要和并发标记并持久化快照；成功后才发请求。相同操作重放只查询原调用。回调沿 `/api/production/result` 归回原提交；候选由真实原件形成。完整协议见 [当前制作与候选](current-materials.md)。
+准备包包含当时当前方案、方法、完整 Prompt、参数和准确有序参考。对外调用之前通过 `/api/production/submit` 核对包摘要和并发标记并持久化快照；成功后才发请求。参考的对象、修订、组成、顺序、范围和角色与准备包逐项一致，提交中携带的原件哈希和候选身份也分别核对并保留。相同操作重放只查询原调用。回调沿 `/api/production/result` 归回原提交；候选由真实原件形成。完整协议见 [当前制作与候选](current-materials.md)。
 
 任务授权、付费额度和正式发布权限由实际委托决定，方案无需内容审批不产生额外执行权限。
 
