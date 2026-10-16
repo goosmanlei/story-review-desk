@@ -145,7 +145,9 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
                 JOIN production_candidates c ON c.id=t.candidate_id
                 WHERE t.material_id=? ORDER BY t.number''', (canonical_id(store, mid),))]
             if candidate_revision and mid == selected:
-                results = [p.record(store, r['object_id'], r['id']) if r['id'] == candidate_revision else r for r in results]
+                results = [{**p.record(store, r['object_id'], r['id']),
+                            'candidate_id': r['candidate_id'], 'candidate_number': r['candidate_number']}
+                           if r['id'] == candidate_revision else r for r in results]
             plan = p.record(store, mid) if load_selected and mid == selected else need
             versions[mid] = [{'model': model, 'material_id': mid, 'canonical_material_id': canonical_id(store, mid),
                 'number': 1, 'frozen': False, 'state': 'current', 'plan': plan, 'results': results,

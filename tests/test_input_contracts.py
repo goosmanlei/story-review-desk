@@ -18,6 +18,16 @@ class InputContractsTest(unittest.TestCase):
         self.assertFalse(check('Seedance 2.0','@图片1角色，@音频2声音',inputs)['verified'])
         self.assertEqual(inputs[1]['range'],{'start_seconds':1,'end_seconds':3})
 
+    def test_nano_banana_references_use_exact_order_and_fourteen_image_limit(self):
+        images=label_inputs([self.media('image') for _ in range(14)])
+        prompt='；'.join(v['label']+'用于身份与外观参考' for v in images)
+        self.assertTrue(check('nano-banana-2-1',prompt,images)['verified'])
+        self.assertFalse(check('nano-banana-2-1',prompt,label_inputs([self.media('image') for _ in range(15)]))['verified'])
+        self.assertFalse(check('nano-banana-2-1','图片1身份，音频1声音',label_inputs([self.media('image'),self.media('audio')]))['verified'])
+        self.assertFalse(check('nano-banana-2-1','图片1身份',images[:2])['verified'])
+        self.assertFalse(check('nano-banana-2-1','图片10身份',images[:1])['verified'])
+        self.assertFalse(check('nano-banana-future',prompt,images)['verified'])
+
     def test_seed_audio_order_limits_unknown_model_and_text_only(self):
         inputs=label_inputs([self.media('audio'),self.media('audio')])
         self.assertTrue(check('seed-audio-1.0','@音频1与@音频2',inputs)['verified'])
