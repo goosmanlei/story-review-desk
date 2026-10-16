@@ -55,5 +55,24 @@ class InputContractsTest(unittest.TestCase):
         self.assertTrue(check_declared('seedance2.0_fast_vision','只有文字',['audio']))
         self.assertTrue(check_declared('Seedance_2.5','文档',['document']))
 
+    def test_higgsfield_flare_preserves_order_and_rejects_unverified_inputs(self):
+        model='marketing-studio/image/flare'
+        def direct(prompt, inputs):
+            return check(model,prompt,inputs,parameters={'enhance_prompt':False})
+        images=label_inputs([self.media('image') for _ in range(16)])
+        prompt='；'.join(v['label']+'用于准确原件参考' for v in images)
+        result=direct(prompt,images)
+        self.assertTrue(result['verified'])
+        self.assertIn('Higgsfield OpenAPI image_urls ordered array',result['convention'])
+        self.assertEqual([v['input_index'] for v in images],list(range(1,17)))
+        self.assertFalse(direct(prompt,label_inputs([self.media('image') for _ in range(17)]))['verified'])
+        for kind in ['audio','video']:
+            self.assertFalse(direct('图片1身份，音频1声音，视频1运动',label_inputs([self.media('image'),self.media(kind)]))['verified'])
+        self.assertFalse(direct('图片1身份',images[:2])['verified'])
+        self.assertFalse(direct('图片10身份',images[:1])['verified'])
+        self.assertFalse(check(model,prompt,images,parameters={'enhance_prompt':True})['verified'])
+        self.assertFalse(check(model,prompt,images)['verified'])
+        self.assertFalse(check('marketing-studio/image/future',prompt,images)['verified'])
+
 
 if __name__=='__main__':unittest.main()

@@ -24,6 +24,8 @@ OpenArt 图片参考按 `visualReferences` 数组顺序解释，Prompt 用“图
 
 Google 的 `gemini-nano-banana-2.1` 使用 Interactions API 的有序 `input` 图片块，最多14张图片，Prompt 同样逐一说明“图片1、图片2”的用途。该模型按 Google 的真实标识记录，不换成 OpenArt 别名；音频等其他类型及缺少指代的输入仍拒绝。接口与参数依据 [Google 图片生成文档](https://ai.google.dev/gemini-api/docs/image-generation)，实际账号可用性、提交、原件尺寸与质量仍须由执行方分别核实。
 
+Higgsfield OpenAPI 的 `marketing-studio/image/flare` 在 `enhance_prompt=false` 的直接模式下以有序 `image_urls` 接收最多16张图片，Prompt 逐一说明“图片1、图片2”的用途；其他媒体类型、漏写用途、未核实的预设模式和未知模型保持拒绝。执行方负责将准确原件上传并核对文件哈希与 URL 顺序，提交前固定完整请求；通用系统不代为上传或调用。契约依据 [Flare 官方接口](https://open.higgsfield.ai/models/marketing-studio/image/flare/api-reference)及[文件上传说明](https://docs.higgsfield.ai/docs/concepts/file-uploads.md)，本地契约通过不代表账户、外部调用或作品质量通过。
+
 ## 视频渠道、模式与输入角色
 
 普通参考借鉴构图与身份；固定首帧或首尾帧要求渠道将图片用作端点。Prompt 写“以此图开始”不能改变上传角色。新视频方案使用 `generation.execution` 声明 `channel`、`mode` 与 `start_constraint`，每个直接输入使用 `role`。例如：
