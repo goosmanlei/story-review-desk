@@ -22,6 +22,8 @@ ENTITY（实体）、STATE（完整状态）、REQUIREMENT（素材需求）、R
 
 OpenArt 图片参考按 `visualReferences` 数组顺序解释，Prompt 用“图片1、图片2”等说明各输入用途。已核实的 `nano-banana-2-1` 图生图路径支持1至14张图片参考；本系统不将表单共用结构中的其他媒体类型视为该图像路径已验证。Sunburst／GPT Image 2沿用最多16张图片的契约；未知有参考模型继续拒绝。数量和指代检查通过不代表外部请求已发送、原件规格或作品质量通过。
 
+Google 的 `gemini-nano-banana-2.1` 使用 Interactions API 的有序 `input` 图片块，最多14张图片，Prompt 同样逐一说明“图片1、图片2”的用途。该模型按 Google 的真实标识记录，不换成 OpenArt 别名；音频等其他类型及缺少指代的输入仍拒绝。接口与参数依据 [Google 图片生成文档](https://ai.google.dev/gemini-api/docs/image-generation)，实际账号可用性、提交、原件尺寸与质量仍须由执行方分别核实。
+
 ## 视频渠道、模式与输入角色
 
 普通参考借鉴构图与身份；固定首帧或首尾帧要求渠道将图片用作端点。Prompt 写“以此图开始”不能改变上传角色。新视频方案使用 `generation.execution` 声明 `channel`、`mode` 与 `start_constraint`，每个直接输入使用 `role`。例如：
