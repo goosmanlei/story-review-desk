@@ -94,6 +94,11 @@ class NumberingRestartTest(unittest.TestCase):
         self.assertEqual(record['candidate_codes'][0]['code'], 'M001 / MC001')
         self.assertEqual(submission, list(self.store.db.execute('SELECT * FROM production_submissions')))
         self.assertEqual(targets, list(self.store.db.execute('SELECT * FROM production_candidate_targets')))
+        self.put(self.spec('call-two', 'CALL', method='recording', tool='fixture', status='submitted', inputs=[], outputs=[]))
+        self.put(self.spec('asset-two', 'ASSET', media_type='audio', subjects=[], states=[], components=[component],
+                           production=self.ref('call-two'), lineage={}, candidate_requirements=[self.ref('need')]))
+        self.assertFalse(self.store.db.execute("SELECT 1 FROM business_codes WHERE object_id='asset-two'").fetchone())
+        self.assertEqual(business_codes.annotate(self.store, p.record(self.store, 'asset-two'))['candidate_codes'][0]['code'], 'M001 / MC002')
 
 
 if __name__ == '__main__':
