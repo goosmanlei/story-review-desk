@@ -41,6 +41,10 @@ def scene_identity(episode_id, scene_id):
 def allocate_number(store, object_id, prefix):
     if not prefix or store.db.execute('SELECT 1 FROM business_codes WHERE object_id=?', (object_id,)).fetchone():
         return
+    if prefix in ('AE', 'AS', 'ASH', 'EN', 'ST', 'M'):
+        from .numbering_restart import suppressed
+        if store.db.execute("SELECT 1 FROM sqlite_master WHERE name='production_current_operations'").fetchone() and suppressed(store, object_id):
+            return
     number = store.db.execute('SELECT coalesce(max(number),0)+1 FROM business_codes WHERE prefix=?', (prefix,)).fetchone()[0]
     store.db.execute('INSERT INTO business_codes VALUES (?,?,?)', (object_id, prefix, number))
 
@@ -184,6 +188,22 @@ def annotate(store, value, *, share_records=False):
             result['business_code'] = relation_code(store, v, codes)
         if v.get('id') in comment_codes and 'anchor' in v and 'body' in v:result['business_code']=comment_codes[v['id']]
         oid = v.get('object_id') or v.get('id')
+        if v.get('kind') == 'ASSET' and 'payload' in v:
+            from .material_plans import identity
+            cid = identity(v['payload'])
+            result['candidate_codes'] = [
+                {'material_id': mid, 'number': number,
+                 'code': codes.get(aliases.get(mid, mid), mid)+' / MC'+str(number).zfill(3)}
+                for (mid, candidate), number in candidates.items() if candidate == cid]
+            if len(result['candidate_codes']) == 1:
+                mid = result['candidate_codes'][0]['material_id']
+                if aliases.get(mid, mid) in codes:
+                    result['business_code'] = codes[aliases.get(mid, mid)]
+        if isinstance(oid, str) and v.get('payload', {}).get('format') == 'production-retirement-v1' and oid not in codes:
+            from .numbering_restart import historical
+            old = historical(store, oid)
+            if old:
+                result['business_code'] = code(old)
         if isinstance(oid,str) and (oid in codes or aliases.get(oid) in codes) and ('payload' in v or 'title' in v):
             result['business_code'] = codes.get(oid,codes.get(aliases.get(oid)))
             if oid in aliases and v.get('payload', {}).get('format') != 'production-retirement-v1':
@@ -193,13 +213,6 @@ def annotate(store, value, *, share_records=False):
                 if scene:
                     result['business_scene_id'] = scene['scene_id']
                     result['business_scene_code'] = codes.get(scene_identity(scene['object_id'], scene['scene_id']), '')
-            if v.get('kind') == 'ASSET' and 'payload' in v:
-                from .material_plans import identity
-                cid = identity(v['payload'])
-                result['candidate_codes'] = [
-                    {'material_id':mid,'number':number,
-                     'code':codes.get(aliases.get(mid,mid),mid)+''+' / MC'+str(number).zfill(3)}
-                    for (mid,candidate),number in candidates.items() if candidate == cid]
         if isinstance(oid, str) and codes.get(oid, '').startswith('E') and codes[oid][1:].isdigit():
             target = result.get('payload', result)
             for scene in target.get('scenes', []):
