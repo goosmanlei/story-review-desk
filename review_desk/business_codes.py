@@ -54,6 +54,16 @@ def allocate(store, object_id, kind, payload):
         return  # Working content of an existing material, not a new M identity.
     if kind == 'EPISODE':
         return  # E/S come from the complete immutable edition, not this ledger.
+    if kind == 'ASSET' and store.db.execute("SELECT 1 FROM sqlite_master WHERE name='production_current_operations'").fetchone():
+        from .numbering_restart import epoch
+        if epoch(store.db):
+            targets = {r['object_id'] for r in payload.get('candidate_requirements', [])}
+            operation = payload.get('production', {}).get('object_id')
+            saved = store.db.execute('SELECT snapshot FROM production_submissions WHERE operation_id=?', (operation,)).fetchone()
+            if saved:
+                targets.update(r['object_id'] for r in json.loads(saved[0]).get('requirements', []))
+            if targets-{object_id}:
+                return  # A result belongs to its M identity; it only adds MC.
     prefix = 'RL' if kind == 'RELATION' and payload.get('relation_type') == 'entity' else PREFIXES.get(kind)
     allocate_number(store, object_id, prefix)
 
