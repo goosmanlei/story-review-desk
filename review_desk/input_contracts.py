@@ -53,11 +53,15 @@ def check(model, prompt, inputs, *, parameters=None, execution=None):
     if not inputs:
         return {'model':model,'convention':'text only','verified':not issues and (mode is None or mode['verified']),
                 'issues':issues, **({'mode_check':mode} if mode else {})}
-    if model in ('gpt-image-2-5-sunburst','gpt-image-2','nano-banana-2-1','gemini-nano-banana-2.1'):
+    if model in ('gpt-image-2-5-sunburst','gpt-image-2','nano-banana-2-1','gemini-nano-banana-2.1','marketing-studio/image/flare'):
         google = model == 'gemini-nano-banana-2.1'
-        platform = 'Google' if google else 'OpenArt'
+        higgsfield = model == 'marketing-studio/image/flare'
+        platform = 'Google' if google else 'Higgsfield OpenAPI' if higgsfield else 'OpenArt'
         convention=('Google Interactions input image blocks in submission order' if google else
+                    'Higgsfield OpenAPI image_urls ordered array' if higgsfield else
                     'OpenArt visualReferences ordered array') + '; describe 图片1、图片2 in natural language'
+        if higgsfield and (parameters or {}).get('enhance_prompt') is not False:
+            issues.append('Higgsfield 图片参考契约仅核实 enhance_prompt=false 的直接模式')
         limit=14 if model in ('nano-banana-2-1','gemini-nano-banana-2.1') else 16
         if any(not v['component']['mime'].startswith('image/') for v in inputs) or len(inputs)>limit:
             issues.append(f'该 {platform} 图像模式仅接受最多 {limit} 张图片参考')
