@@ -49,6 +49,29 @@ class ReferenceCandidatesTest(MaterialFixture, unittest.TestCase):
         second=sr.select(self.store,r);self.assertTrue(second['already_applied']);self.assertEqual(p.record(self.store,'need-wet-overall'),saved)
         stale={**r,'id':'other'}
         with self.assertRaises(Conflict):sr.select(self.store,stale)
+
+    def test_selection_response_reuses_evidence_without_caching_pre_write_content(self):
+        from review_desk import material_reference
+        self.prepare()
+        plan=copy.deepcopy(p.record(self.store,'need-wet-overall')['payload']['generation'])
+        plan['inputs'] = [{**plan['inputs'][0], 'use':'voice purpose '+str(i)} for i in range(3)]
+        self.change('need-wet-overall',generation=plan)
+        actual_response=sr.response
+        response_reads=[]
+        with patch.object(material_reference,'receipts',wraps=material_reference.receipts) as reads:
+            def response(*args,**kwargs):
+                before=reads.call_count
+                value=actual_response(*args,**kwargs)
+                response_reads.append(reads.call_count-before)
+                return value
+            with patch.object(sr,'response',response):
+                first=sr.select(self.store,self.request())
+                second=sr.select(self.store,self.request(candidate='second',operation='replace'))
+        self.assertEqual(response_reads,[1,1])
+        self.assertEqual(first['slots'][0]['value']['reference'],self.ref('generated'))
+        self.assertEqual(second['slots'][0]['value']['reference'],self.ref('second'))
+        self.assertFalse(hasattr(self.store,'_production_reads'))
+        self.assertEqual(p.record(self.store,'need-wet-overall')['payload']['generation']['inputs'][1],plan['inputs'][1])
     def test_preview_and_multiple_originals_are_exposed_without_automatic_choice(self):
         self.prepare();row=p.record(self.store,'generated');components=row['payload']['components']
         fake=[components[0],{**components[0],'id':'other-original'},{**components[0],'id':'preview','role':'preview'}]

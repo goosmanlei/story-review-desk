@@ -210,7 +210,10 @@ def select(store, request):
         p.validate_payload(store, need['object_id'], 'REQUIREMENT', payload)
         result = store._put_object(need['object_id'], 'REQUIREMENT', payload, need['version'],
                                    [{'revision_id': r['revision_id'], 'role': role} for role,r in p.references(payload)])
-        return response(store, p.record(store, need['object_id']), False)
+        # Build the returned reference slots from the post-write transaction.
+        # Reuse read-only evidence within this response, never across writes.
+        with p.read_scope(store):
+            return response(store, p.record(store, need['object_id']), False)
     return run(store, request, action)
 
 
