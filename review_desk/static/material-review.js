@@ -267,7 +267,7 @@ function materialContentLabel(row){if(row.candidate_id||row.component_snapshot)r
 function materialResultKey(row){return JSON.stringify([row.payload.production?.object_id,[...new Set(row.payload.components.filter(c=>c.role==='original').map(c=>c.sha256))].sort()])}
 function materialRoundResults(round,selected,explicit){return round.results.map(row=>explicit&&row.object_id===selected.object_id&&materialResultKey(row)===materialResultKey(selected)&&round.members.some(m=>m.id===selected.id)?selected:row)}
 function materialCandidateChoice(items,targetId){
-  return items.find(i=>i.record.id===targetId)||items.find(i=>i.review_context?.call?.id===targetId)||[...items].sort((a,b)=>(b.candidate_number||b.record.candidate_number||0)-(a.candidate_number||a.record.candidate_number||0)||(b.record.created_at||'').localeCompare(a.record.created_at||'')||(b.record.version||0)-(a.record.version||0)||(b.record.id||'').localeCompare(a.record.id||''))[0]||null;
+  return items.find(i=>i.record.id===targetId)||items.find(i=>i.review_context?.call?.id===targetId)||[...items].sort((a,b)=>(b.candidate_number||b.record.candidate_number||0)-(a.candidate_number||a.record.candidate_number||0)||(b.record.created_at||'').localeCompare(a.record.created_at||'')||(b.record.version||0)-(a.record.version||0))[0]||null;
 }
 function materialExactCandidates(detail,items,targetId,round=null){
   const target=(round?round.members:materialRows(detail)).find(r=>r.kind==='ASSET'&&r.id===targetId);if(!target)return items;
