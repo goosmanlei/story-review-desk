@@ -51,6 +51,15 @@ test('unchanged server snapshots do not accumulate pending drafts',async()=>{
   for(let version=1;version<=8;version++)f=await boot(storage,project(version));
   assert.equal(f.ctx.recoveries.length,0);assert.equal(f.ctx.draft.text,'server 8');
 });
+for(const redo of [false,true])test('undoing draft recovery preserves both drafts after reload'+(redo?' and redo':''),async()=>{
+  const storage=new Map();let f=await boot(storage,project(1));
+  f.c.editMutation(f.ctx,p=>{p.text='older work'});f=await boot(storage,project(2));
+  f.c.editMutation(f.ctx,p=>{p.text='newer work'});
+  f.c.editRestoreDraft(f.ctx,f.ctx.recoveries[0]);f.c.editHistory(f.ctx,'undo','redo');
+  if(redo)f.c.editHistory(f.ctx,'redo','undo');
+  f=await boot(storage,project(2));assert.equal(f.ctx.draft.text,redo?'older work':'newer work');
+  assert.equal(f.ctx.recoveries.length,1);assert.equal(f.ctx.recoveries[0].draft.text,redo?'newer work':'older work');
+});
 test('storage failure retains the earlier persisted recovery and warns without losing in-page work',async()=>{
   const storage=new Map();let f=await boot(storage,project(1));
   f.c.editMutation(f.ctx,p=>{p.text='older work'});f=await boot(storage,project(2));

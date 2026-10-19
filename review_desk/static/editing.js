@@ -28,12 +28,16 @@ function editKeepRecovery(recoveries,saved){
 }
 function editRestoreDraft(ctx,recovery){
   if(!ctx.recoveries.includes(recovery))return;
-  ctx.recoveries=ctx.recoveries.filter(r=>r!==recovery);
-  // Restoring an older draft must not discard newer, unsaved work either.
-  if(editChanged(ctx)&&JSON.stringify(ctx.draft)!==JSON.stringify(recovery.draft))editKeepRecovery(ctx.recoveries,{basis:ctx.project.id,version:ctx.project.version,draft:ctx.draft});
-  editMutation(ctx,()=>{ctx.draft=editClone(recovery.draft)});
+  editMutation(ctx,()=>{
+    ctx.recoveries=ctx.recoveries.filter(r=>r!==recovery);
+    // Restoring an older draft must not discard newer, unsaved work either.
+    if(editChanged(ctx)&&JSON.stringify(ctx.draft)!==JSON.stringify(recovery.draft))editKeepRecovery(ctx.recoveries,{basis:ctx.project.id,version:ctx.project.version,draft:ctx.draft});
+    ctx.draft=editClone(recovery.draft);
+  });
 }
-function editMutation(ctx,fn){ctx.undo.push(editClone(ctx.draft));if(ctx.undo.length>40)ctx.undo.shift();ctx.redo=[];fn(ctx.draft);editRemember(ctx);renderEpisodeEditing(ctx)}
+const editDraftState=ctx=>editClone({draft:ctx.draft,recoveries:ctx.recoveries});
+function editMutation(ctx,fn){ctx.undo.push(editDraftState(ctx));if(ctx.undo.length>40)ctx.undo.shift();ctx.redo=[];fn(ctx.draft);editRemember(ctx);renderEpisodeEditing(ctx)}
+function editHistory(ctx,from,to){if(!ctx[from].length)return;ctx[to].push(editDraftState(ctx));Object.assign(ctx,ctx[from].pop());editRemember(ctx);renderEpisodeEditing(ctx)}
 function clearEpisodeEditReview(){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;state.productionEntityId=null;state.productionSelected=null;state.productionDetail=null;state.reviewReferenceContext=null;state.reviewCommentScope=null;state.anchor=null;state.editing=null;state.selected=null;state.drawMode=null;
@@ -144,8 +148,8 @@ function renderEpisodeEditing(ctx){
   }else{nodeText('p','edit-notice','工程已保存，尚无合成版本。完成渲染后在此播放和审阅。',main)}
   const inspector=el('section','edit-inspector');main.append(inspector);renderEditInspector(ctx,inspector);
   const actions=el('div','edit-toolbar production-toolbar edit-actions');main.append(actions);
-  productionButton(actions,'撤销',()=>{if(!ctx.undo.length)return;ctx.redo.push(editClone(ctx.draft));ctx.draft=ctx.undo.pop();editRemember(ctx);renderEpisodeEditing(ctx)}).disabled=!ctx.undo.length;
-  productionButton(actions,'重做',()=>{if(!ctx.redo.length)return;ctx.undo.push(editClone(ctx.draft));ctx.draft=ctx.redo.pop();editRemember(ctx);renderEpisodeEditing(ctx)}).disabled=!ctx.redo.length;
+  productionButton(actions,'撤销',()=>editHistory(ctx,'undo','redo')).disabled=!ctx.undo.length;
+  productionButton(actions,'重做',()=>editHistory(ctx,'redo','undo')).disabled=!ctx.redo.length;
   productionButton(actions,'保存工程',async()=>{try{const saved=await editCall('save',{project:ctx.draft,expected_version:ctx.project.version});ctx.project=saved;editRemember(ctx);toast('工程已保存，成片预览尚未更新。');renderEpisodeEditing(ctx)}catch(e){toast(e.message)}});
   productionButton(actions,'渲染新版本',async()=>{try{const saved=await editCall('save',{project:ctx.draft,expected_version:ctx.project.version});ctx.project=saved;editRemember(ctx);const job=await editCall('submit',{project_id:saved.object_id,expected_version:saved.version,task_id:'browser-edit',request_id:crypto.randomUUID()});ctx.job=job;renderEditJob(ctx,jobHost);pollEditJob(ctx,jobHost)}catch(e){toast(e.message)}});
   const jobHost=el('div','edit-job');main.append(jobHost);if(ctx.job){renderEditJob(ctx,jobHost);pollEditJob(ctx,jobHost)}
