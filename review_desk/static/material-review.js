@@ -376,7 +376,16 @@ function materialMedia(parent,item,options={}){
     const observer=new ResizeObserver(()=>{if(!pane.isConnected){observer.disconnect();return}fit()});observer.observe(viewport);stage.querySelector('img').addEventListener('load',fit);requestAnimationFrame(fit);
     if(item.crop)stage.dataset.reviewCrop=JSON.stringify(item.crop);
   }else if(/^(audio|video)\//.test(component.mime))player=reviewMediaPlayer(pane,component,record,item,true,options);
-  else nodeText('p','production-meta',component.id+' · '+component.mime,pane);
+  else if(record.payload.text_layer?.format==='episode-text-layer-v1'){
+    const doc=record.payload.text_layers?.[component.id]||record.payload.text_layer;
+    for(const entry of doc.entries){
+      const row=el('article','material-text-entry');row.dataset.materialEntry=entry.entry_id;row.tabIndex=0;
+      nodeText('small',null,(entry.element_type==='subtitle'?'字幕':entry.track_key==='text:nameplates'?'人名条':'片头／片尾')+' · '+editTime({spec:doc.spec},entry.start_frame)+'–'+editTime({spec:doc.spec},entry.end_frame),row);
+      const surface=materialTextSurface(row,record),text=nodeText('p',null,entry.title,surface);text.dataset.blockId=(component.id==='original'?'':component.id+'-')+entry.entry_id;
+      for(const identity of entry.identity_sources||[])productionRefLink(row,identity,'人物身份来源');
+      pane.append(row);
+    }
+  }else nodeText('p','production-meta',component.id+' · '+component.mime,pane);
   if(!component.mime.startsWith('audio/'))link('下载原文件','/api/production/files/'+encodeURIComponent(component.file),pane);parent.append(pane);
   return player;
 }
@@ -440,8 +449,8 @@ function renderMaterialCard(parent,model,options={}){
   for(const item of items){
     const h=el('div','entity-review-local-heading');if(need||items.length>1)nodeText('h4',null,reviewPositionText(item.record.payload.title),h);
     if(!model.round)options.assetVersion?.(h,item);box.append(h);
-    const previewable=(item.components||[]).filter(c=>/^(image|audio|video)\//.test(c.mime));
-    if(!/^(image|audio|video)\//.test(item.component?.mime)&&previewable.length)item.component=previewable.find(c=>c.role==='original')||previewable[0];
+    const previewable=(item.components||[]).filter(c=>/^(image|audio|video)\//.test(c.mime)||item.record.payload.text_layer&&c.mime==='application/json');
+    if(!previewable.some(c=>c.id===item.component?.id)&&previewable.length)item.component=previewable.find(c=>c.role==='original')||previewable[0];
     if(previewable.length>1){
       const select=el('select');select.setAttribute('aria-label','原件与预览组成');
       for(const c of previewable){const label=({original:'原件',preview:'预览',thumbnail:'缩略图'})[c.role]||'媒体';const peers=previewable.filter(v=>v.role===c.role);select.append(new Option(label+(peers.length>1?' '+(peers.indexOf(c)+1):''),c.id))};select.value=item.component.id;

@@ -232,7 +232,7 @@ function appendLegacyMaterialDraft(editor,key){
 const unscopedComments=()=>typeof isMethodsReading==='function'&&isMethodsReading()?[...new Map(state.comments.filter(c=>c.target_object_id===methodView.document.record.object_id&&c.anchor.file===methodView.document.file).map(c=>[c.id,c])).values()]:state.reviewReferenceContext?state.comments.filter(c=>c.target_revision_id===state.reviewReferenceContext.record.id):typeof isEntityReview==='function'&&isEntityReview()?entityReviewComments():typeof isMaterialReview==='function'&&isMaterialReview()?materialReviewComments():state.comments.filter(c=>isProduction()?c.target_object_id===state.productionSelected?.object_id&&c.target_revision_id===state.productionSelected?.id:isStructure()?c.target_object_id==='story-structure'&&c.target_revision_id===state.structureRevision:isScript()?c.target_object_id===scriptEpisode()?.object_id&&c.target_revision_id===scriptEpisode()?.id:c.target_object_id===state.current?.id&&c.target_revision_id===state.current?.target_revision_id);
 const activeComments=()=>state.reviewCommentScope?reviewBlockComments(state.comments,state.reviewCommentScope):unscopedComments();
 const newDraftAnchor=()=>state.anchor&&!state.editing?state.anchor:null;
-const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`时间段 ${a.start_seconds.toFixed(2)}–${a.end_seconds.toFixed(2)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
+const anchorLabel=a=>a.type==='global'?'整体意见':a.type==='time'?`${a.edit_selection?'成片选段 · '+a.edit_selection.track_titles.join('、')+' · '+a.edit_selection.start_frame+'–'+a.edit_selection.end_frame+' 帧 · ':''}${a.start_seconds.toFixed(3)}–${a.end_seconds.toFixed(3)} 秒`:a.type==='visual'?'整张图像／图示':a.type==='region'?'图像／图示圈选区域':a.quote||'原文引用';
 const renderActiveReader=()=>typeof isMethodsReading==='function'&&isMethodsReading()?paintMethodComments():state.reviewReferenceContext?paintProductionReview():isProduction()?paintProductionReview():isStructure()?renderStructureReader():isScript()?renderScriptReader():renderDocument();
 const escapeSelector=value=>CSS.escape(value);
 
@@ -1012,6 +1012,7 @@ async function editComment(comment){
     let located=true;
     if(state.reviewReferenceContext)located=state.reviewReferenceContext.record.id===comment.target_revision_id;
     else if(typeof isMethodsReading==='function'&&isMethodsReading()&&(methodView.document.record.revision_id!==comment.target_revision_id||methodView.document.file!==comment.anchor.file)){located=await locateMethodComment(comment)}
+    else if(typeof isEpisodeEditComment==='function'&&isEpisodeEditComment(comment))located=await locateEpisodeEditComment(comment);
     else if(typeof isEntityReview==='function'&&isEntityReview())located=await locateEntityReviewComment(comment);
     else if(typeof isMaterialReview==='function'&&isMaterialReview())located=await locateMaterialComment(comment);
     if(located===false||action!==commentAction||state.workspace!==workspace)return;
@@ -1059,7 +1060,7 @@ function renderComments({replaceDraft=false}={}){
   if(typeof isMethodsReading==='function'&&isMethodsReading())appendMethodReviewStatus(body);else if(typeof appendCrossVersionReview==='function')appendCrossVersionReview(body);
   if(methodReadFailure){nodeText('p','structure-alert','评论读取失败：'+state.commentReadError+'；保留上次已读意见和当前草稿。',body);const retry=nodeText('button',null,'重新读取评论',body);retry.onclick=()=>refreshComments().catch(()=>{})}
   if(state.reviewCommentScope){nodeText('p','comment-help',`此块全部评论 · ${own.length}`,body);if(!own.length)nodeText('p',null,'此块暂无评论',body)}
-  if(!state.reviewCommentScope)nodeText('p','comment-help',typeof isMethodsReading==='function'&&isMethodsReading()?'本面板汇总当前文件各版本的未关闭意见；原圈选保持原版本。':state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
+  if(!state.reviewCommentScope)nodeText('p','comment-help',typeof isMethodsReading==='function'&&isMethodsReading()?'本面板汇总当前文件各版本的未关闭意见；原圈选保持原版本。':state.reviewReferenceContext?'评论绑定当前引用的准确版本、文件与范围。':state.productionSelected?.kind==='EPISODE_FILM'?'评论绑定此成片版本。选择素材片段或跨轨范围，提出对应的剪辑意见。':typeof isEntityReview==='function'&&isEntityReview()?'本面板汇总整个实体的评论。选中文字、圈选图片或指定时间段，可对具体内容提出意见。':isStructure()?'选中文字、圈选图像或留下整体意见。评论始终绑定当前稿件修订。':isScript()?'选中动作或对白添加评论。意见与草稿绑定这个剧本版本的本集修订；关闭后仍保留历史。':'选中正文后添加评论。评论锚点绑定资料与原文区间；关闭后仍保留历史，可重新打开。',body);
   appendStoredCommentEdits(body);
   if(typeof appendStaleProductionDrafts==='function')appendStaleProductionDrafts(body);
   if(state.anchor){const editor=el('section','comment-editor');editor.dataset.draftKey=draftKey();editor.dataset.draftTarget=JSON.stringify(commentTarget());nodeText('strong',null,state.editing?'编辑评论':'添加新评论',editor);appendAnchorQuote(editor,state.anchor);if(isProduction()&&state.productionSelected?.payload){

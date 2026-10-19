@@ -71,7 +71,7 @@ def _export(store, directory):
         original=export_asset_path(store.db_path.parent.parent, name)
         if original.is_file():physical_file_hash(original)
     from . import editing
-    media_rows=list(store.db.execute("SELECT r.id,r.payload,o.kind FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM')"))
+    media_rows=list(store.db.execute("SELECT r.id,r.payload,o.kind FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM','EDIT_ASSOCIATION')"))
     for row in media_rows:editing.verify_payload_media(store.db_path.parent.parent,row['kind'],json.loads(row['payload']))
     media_identity={(row['id'],row['payload']) for row in media_rows}
     with tempfile.TemporaryDirectory(prefix='.current-export-', dir=target) as temporary:
@@ -115,7 +115,7 @@ def _export_snapshot(store, media_identity, target, content_file):
     from .material_storage import physical_revisions
     from .bundle import _write_content
     allocate_comments(store)
-    current_identity={(row['id'],row['payload']) for row in store.db.execute("SELECT r.id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM')")}
+    current_identity={(row['id'],row['payload']) for row in store.db.execute("SELECT r.id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM','EDIT_ASSOCIATION')")}
     if current_identity!=media_identity:raise ValueError('editing records changed during export preflight; retry export')
     validate(store,inspect_editing=False)
     excluded = {'sources', 'comments', 'comment_events', 'configurations', 'configuration_events', 'read_generations', 'material_content'}
@@ -282,6 +282,8 @@ def validate(store,inspect_editing=True):
         actual = asset['payload'].get('production', {}).get('object_id') or 'source:'+asset['object_id']
         if actual != candidate['operation_id']:
             raise ValueError('candidate operation mismatch')
+    from .editing_review import validate_chains
+    validate_chains(store)
     for comment in store.comments():
         context = comment.get('original_context')
         if context:

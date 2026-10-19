@@ -322,7 +322,7 @@ async function openUnifiedMaterial(ref,trigger,view=null){
   const {dialog,title,body}=view||openReviewDialog(ref.readingLabel||'实体与素材详情',trigger,'unified-card-dialog');
   if(ref.restoreRoute)history.replaceState(history.state,'',requestURL);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
-  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(toggleParent)toggleParent.insertBefore(toggle,toggleNext?.parentNode===toggleParent?toggleNext:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
+  dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(toggleParent)toggleParent.insertBefore(toggle,toggleNext?.parentNode===toggleParent?toggleNext:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();ref.onClose?.();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
   let attempt=0;
   dialog.unifiedLoad=nextRef=>{
    if(dialog.unifiedActivated){
@@ -336,11 +336,14 @@ async function openUnifiedMaterial(ref,trigger,view=null){
    const read=async()=>{
     try{const result=await readUnifiedCard(selectedRef.object_id,selectedRef.revision_id||selectedRef.id,selectedRef.params,Object.hasOwn(selectedRef,'work')?selectedRef.work:currentReviewWork());if(!active())return;
     while(typeof reviewDialogStack!=='undefined'&&reviewDialogStack.at(-1)!==dialog&&dialog.isConnected){const upper=reviewDialogStack.at(-1);await new Promise(resolve=>upper.addEventListener('close',resolve,{once:true}));if(!active())return;}
+    if(ref.expectedOrigin&&(result.scope?.object_id!==ref.expectedOrigin.object_id||result.scope?.kind!==ref.expectedOrigin.kind))throw Error('原素材归属已变化：'+ref.expectedOrigin.object_id+'；未打开其他对象');
     result.defaultSelection=!!ref.defaultSelection;
     state.reviewPermission=!!ref.permission;
     state.shotReferenceContext=ref.shotReference?{...ref.shotReference,dialog,source:ref.shotReference,pageActive:owns}:null;
     if(ref.component_id){const data=result.entity_review||result.detail;data.selectedComponents||={};data.selectedComponents[ref.revision_id]=ref.component_id;if(!result.entity_review)result.detail.componentId=ref.component_id}
     state.unifiedCardRoot=body;panel.remove();dialog.append(panel);if(toggle)dialog.append(toggle);activateUnifiedCard(result);dialog.unifiedActivated=true;body.setAttribute('aria-busy','false');renderProductionReader();renderComments();
+    if(ref.entry_id){const entry=[...body.querySelectorAll('[data-material-entry]')].find(n=>n.dataset.materialEntry===ref.entry_id&&n.closest('[data-review-revision]')?.dataset.reviewRevision===ref.revision_id);if(!entry)throw Error('准确字层条目不可用：'+ref.entry_id);entry.classList.add('selected');entry.scrollIntoView({block:'center'});}
+    ref.onReady?.(dialog,result);
     }catch(error){if(active())renderUnifiedCardLoading(body,error,()=>dialog.unifiedLoad(selectedRef))}
     finally{if(active())dialog.unifiedPending=false}
    };
@@ -452,7 +455,7 @@ function renderShotEntityWorkspace(root,data){
     if(!available.length){nodeText('p','production-meta','本镜尚无独立素材需求',panel);return}
     let selected=data.unifiedMaterialId;if(selected&&!available.includes(selected)){issue('准确素材已不可用；未替换为首项');return}selected||=available[0];data.unifiedMaterialId=selected;
     const preserve=action=>{const body=card.closest('.breakdown-body'),top=card.getBoundingClientRect().top;action();if(body)body.scrollTop+=card.getBoundingClientRect().top-top};
-    const select=id=>{if(id===data.unifiedMaterialId)return;for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;data.selectedCandidates[id]||='current';const model=by.get(id);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
+    const select=id=>{if(id===data.unifiedMaterialId)return;for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;const model=by.get(id);data.selectedCandidates[id]||=model.round?.plan?'current':model.candidates[0]?.record.id;focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
     if(!reuseList)for(const group of groups){
       const sections=new Map();
       for(const id of group.material_ids.filter(id=>by.has(id))){const states=(group.key_states||[]).filter(s=>s.requirements.some(ref=>ref.object_id===id)),key=states.map(s=>s.id).join('|');if(!sections.has(key))sections.set(key,{states,ids:[]});sections.get(key).ids.push(id)}
@@ -467,7 +470,7 @@ function renderShotEntityWorkspace(root,data){
     }
     const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
     for(const button of panel.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===selected));
-    if(!data.selectedCandidates[selected])data.selectedCandidates[selected]='current';
+    if(!data.selectedCandidates[selected])data.selectedCandidates[selected]=model.round?.plan?'current':model.candidates[0]?.record.id;
     if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){issue(deletedCandidateNotice(data,data.selectedCandidates[selected]));return}
     const candidate=data.selectedCandidates[selected];
     if(data.deferred_materials?.includes(selected)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){

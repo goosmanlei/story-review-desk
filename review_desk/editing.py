@@ -14,9 +14,9 @@ from pathlib import Path
 from .store import Conflict, canonical, digest, now
 from .production_media import asset_path, physical_file_hash, validate_component
 
-KINDS = {'EPISODE_EDIT', 'EDIT_SNAPSHOT', 'EPISODE_FILM'}
+KINDS = {'EPISODE_EDIT', 'EDIT_SNAPSHOT', 'EPISODE_FILM', 'EDIT_ASSOCIATION'}
 FORMATS = {'EPISODE_EDIT': 'episode-edit-v1', 'EDIT_SNAPSHOT': 'edit-snapshot-v1',
-           'EPISODE_FILM': 'episode-film-v1'}
+           'EPISODE_FILM': 'episode-film-v1', 'EDIT_ASSOCIATION': 'edit-association-v1'}
 ENGINE = 'episode-render-v1'
 ID = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,159}$')
 
@@ -118,6 +118,10 @@ def verify_source_media(root,source,inspect=True):
 
 
 def verify_payload_media(root,kind,payload):
+    if kind=='EDIT_ASSOCIATION':
+        for item in payload['elements']:
+            validate_component(root,item['binding']['component'],inspect=False)
+        return
     project=payload if kind=='EPISODE_EDIT' else payload['project']
     for source in project['sources']:verify_source_media(root,source)
     if kind=='EPISODE_FILM':validate_deliverables(root,project,payload['components'],True)
@@ -238,6 +242,14 @@ def validate_project(store, root, p, inspect=False, check_files=True):
                     raise ValueError('invalid nameplate position')
             elif 'position' in item:
                 raise ValueError('only nameplates have a position')
+            if item.get('material_ref'):
+                from .editing_review import verify_binding, text_layer_document
+                bound=item['material_ref']
+                asset=verify_binding(store,bound)
+                doc=text_layer_document(store,asset,bound['component'])
+                entry=next((e for e in doc['entries'] if e['entry_id']==bound.get('entry_id')),None)
+                if not entry or entry['title']!=item['text'] or entry['element_type']!=('subtitle' if group=='subtitles' else 'title'):
+                    raise Conflict('字层引用不是此文字的真实素材条目')
     for mark in p.get('markers',[]):
         identifier(mark['id']);integer(mark['frame'],'scene marker',0,spec['duration_frames']-1)
     return p
@@ -246,6 +258,8 @@ def validate_project(store, root, p, inspect=False, check_files=True):
 def dependencies(project):
     refs=[{'revision_id':project['episode']['revision_id'],'role':'edit.episode'}]
     refs.extend({'revision_id':s['asset']['revision_id'],'role':'edit.source.'+s['id']} for s in project['sources'])
+    for group in ('subtitles','titles'):
+        refs.extend({'revision_id':e['material_ref']['asset']['revision_id'],'role':'edit.text.'+group+'.'+e['id']} for e in project.get(group,[]) if e.get('material_ref'))
     if project.get('method_execution'):
         refs.append({'revision_id':project['method_execution']['revision_id'],'role':'edit.method'})
     return refs
@@ -299,7 +313,10 @@ def validate_deliverables(root,project,components,inspect):
 def validate_record(store, oid, kind, payload, inspect=False, check_files=True):
     root=getattr(store,'_production_root',None) or store.db_path.parent.parent
     if payload.get('format') != FORMATS[kind]: raise ValueError('editing format differs from kind')
-    if kind=='EPISODE_EDIT':
+    if kind=='EDIT_ASSOCIATION':
+        from .editing_review import validate_association
+        validate_association(store,oid,payload)
+    elif kind=='EPISODE_EDIT':
         validate_project(store,root,payload,inspect,check_files)
         if oid!='edit-'+payload['episode']['object_id']: raise ValueError('one project per episode is required')
     elif kind=='EDIT_SNAPSHOT':
@@ -378,6 +395,9 @@ def catalog(store, root, episode_id=None):
 
 
 def expected_dependencies(kind,payload):
+    if kind=='EDIT_ASSOCIATION':
+        from .editing_review import association_dependencies
+        return association_dependencies(payload)
     if kind=='EPISODE_EDIT':return dependencies(payload)
     if kind=='EDIT_SNAPSHOT':return [{'revision_id':payload['project_ref']['revision_id'],'role':'edit.project'}]+dependencies(payload['project'])
     return [{'revision_id':payload['snapshot']['revision_id'],'role':'edit.snapshot'}]

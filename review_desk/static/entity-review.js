@@ -1,5 +1,5 @@
 // Entity detail and exact material members share the production review surface.
-const isEntityReview=()=>isProduction()&&!!state.entityReview;
+const isEntityReview=()=>isProduction()&&!!state.entityReview&&state.productionSelected?.kind!=='EPISODE_FILM';
 const entityReviewDetail=record=>({record,history:[record],uses:[]});
 const entityReviewRows=data=>[data.entity,...data.states,...(data.requirements||[]),...(data.relationships||[]),...data.media.map(m=>m.record),...(data.comment_records||[])];
 const entityReviewStateMedia=(data,form)=>form?data.media.filter(m=>(m.state||m.review_state)?.object_id===form.object_id&&(m.state||m.review_state).revision_id===form.id):[];

@@ -544,7 +544,7 @@ function productionCommentLocationIssue(comment,row){
   return null;
 }
 function locateProductionComment(comment,local=false){
-  if(!local&&typeof locateEpisodeEditComment==='function'&&productionTab()==='editing')return locateEpisodeEditComment(comment);
+  if(!local&&typeof isEpisodeEditComment==='function'&&isEpisodeEditComment(comment))return locateEpisodeEditComment(comment);
   if(comment.original_context?.matches_current===false){const row=[state.productionSelected,...(state.productionRecords||[])].find(r=>r?.object_id===comment.target_object_id)||{object_id:comment.target_object_id,payload:{title:comment.original_context.excerpt.title}};return openProductionCommentOriginal(row,comment);}
   if(typeof locateMaterialRelationComment==='function'&&locateMaterialRelationComment(comment))return;
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);
