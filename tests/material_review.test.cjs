@@ -335,3 +335,12 @@ test('entry default candidate options preserve an explicit current plan',()=>{
  assert.equal(c.materialCandidateOptions({selectedCandidateId:'latest'},items).selectedCandidateId,'latest');
  assert.equal(c.materialCandidateOptions({},items).selectedCandidateId,'latest');
 });
+test('entry default an unselected readonly reference uses latest while actual inputs stay exact',()=>{
+ const record={object_id:'material',id:'plan',kind:'REQUIREMENT',payload:{title:'material',media_type:'audio'}};
+ let activate,opened;
+ const c={state:{},el:()=>({append(){}}),nodeText(){},productionEntityIcon(){},businessCode:()=>'',reviewSmallCard:(_host,_item,fn)=>{activate=fn;return {dataset:{}}},renderReadonlyReferencePreview(){},openMaterialReference:ref=>{opened=ref}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ c.openMaterialReference=ref=>{opened=ref};
+ c.materialInputs=()=>[{slot:{material_id:'material',direct:false,candidate:null,media_type:'audio'},row:record,value:{},ref:{object_id:'material',revision_id:'plan'}}];
+ for(const actual of [false,true]){c.renderMaterialInputs({append(){}},[],[],null,actual);activate(null);assert.equal(!!opened.defaultSelection,!actual);assert.equal(opened.revision_id,'plan');}
+});
