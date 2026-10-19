@@ -67,6 +67,21 @@ test('a lazy material list keeps the exact scope title supplied with its standal
  assert.equal(f.ctx.productionName({object_id:scope.object_id,revision_id:'scope-v0'}),scope.object_id);
 });
 
+test('directly owned external material opens its real candidate without a fabricated current plan',()=>{
+ const f=setup(),shot={object_id:'shot',id:'shot-r1',kind:'AV_SHOT',payload:{title:'Source shot'}},asset=f.b;
+ asset.payload.scope={object_id:shot.object_id,revision_id:shot.id};asset.payload.external_source={kind:'external'};
+ const data={entity:shot,states:[],requirements:[asset],media:[{record:asset,state:null}],comment_records:[asset],comment_targets:[],material_cards:{[asset.object_id]:[{number:1,current_content:true,plan:null,members:[asset],results:[asset]}]}};
+ const result={detail:{record:asset},entity_review:data,scope:shot,params:new URLSearchParams(),defaultSelection:true};
+ f.ctx.activateUnifiedCard(result);
+ assert.equal(f.ctx.state.productionSelected.id,asset.id);
+ assert.equal(data.selectedCandidates[asset.object_id],asset.id);
+ assert.notEqual(result.params.get('material_target'),'current');
+ for(const target of ['current','foreign-candidate']){
+  const exact={...result,params:new URLSearchParams({material_target:target})};
+  assert.throws(()=>f.ctx.activateUnifiedCard(exact),/准确候选不属于/);
+ }
+});
+
 for(const explicit of [false,true])test(`deduplicated ${explicit?'exact link':'asset index'} keeps the requested exact member without an approval action`,async()=>{
  const f=setup();f.a.payload.production={...f.b.payload.production};f.a.payload.components=f.b.payload.components.map(c=>({...c}));
  f.detail.record=f.a;f.detail.history=[f.a];f.detail.review_context=f.detail.review_contexts[f.b.id];f.detail.review_contexts[f.a.id]=f.detail.review_context;
