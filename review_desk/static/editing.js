@@ -84,7 +84,7 @@ function renderEpisodeEditing(ctx){
   }
   if(!output){clearEpisodeEditReview();renderComments()}
   if(!ctx.project){nodeText('p',null,'本集尚未建立剪辑工程。工程由制作任务导入后可在此继续编辑和审阅。',host);return}
-  if(ctx.recoveries.length){const recovery=el('div','edit-notice');nodeText('p',null,'另有本机草稿，已保留。恢复后仍须按当前工程版本检查再保存。',recovery);ctx.recoveries.forEach((saved,i)=>productionButton(recovery,'恢复本机草稿'+(ctx.recoveries.length>1?' '+(i+1):'')+(saved.version?'（工程版本 '+saved.version+'）':''),()=>editRestoreDraft(ctx,saved)));host.append(recovery)}
+  if(ctx.recoveries.length){const recovery=el('div','edit-notice');nodeText('p',null,'另有本机草稿，已保留。恢复后仍须按当前工程版本检查再保存。',recovery);ctx.recoveries.forEach((saved,i)=>productionButton(recovery,'恢复本机草稿'+(ctx.recoveries.length>1?' '+(i+1):'')+(saved.version?'（工程版本 '+saved.version+'）':''),()=>{if(editCurrent(ctx)&&ctx.render===render&&recovery.isConnected)editRestoreDraft(ctx,saved)}));host.append(recovery)}
   if(editChanged(ctx)||output&&output.payload.snapshot&&JSON.stringify(project)!==JSON.stringify(ctx.draft))nodeText('p','edit-notice','工程草稿已有修改，当前预览尚未更新。播放器和时间线仍对应所选成片版本。',host);
   const layout=el('div','edit-layout'),nav=el('nav','edit-scenes breakdown-scene-list'),main=el('div','edit-main');nav.setAttribute('aria-label','场镜导航');layout.append(nav,main);host.append(layout);
   let media,rangeStart,rangeEnd,playhead,frameFact,followPlayback=()=>{};
@@ -148,8 +148,8 @@ function renderEpisodeEditing(ctx){
   }else{nodeText('p','edit-notice','工程已保存，尚无合成版本。完成渲染后在此播放和审阅。',main)}
   const inspector=el('section','edit-inspector');main.append(inspector);renderEditInspector(ctx,inspector);
   const actions=el('div','edit-toolbar production-toolbar edit-actions');main.append(actions);
-  productionButton(actions,'撤销',()=>editHistory(ctx,'undo','redo')).disabled=!ctx.undo.length;
-  productionButton(actions,'重做',()=>editHistory(ctx,'redo','undo')).disabled=!ctx.redo.length;
+  productionButton(actions,'撤销',()=>{if(editCurrent(ctx)&&ctx.render===render&&actions.isConnected)editHistory(ctx,'undo','redo')}).disabled=!ctx.undo.length;
+  productionButton(actions,'重做',()=>{if(editCurrent(ctx)&&ctx.render===render&&actions.isConnected)editHistory(ctx,'redo','undo')}).disabled=!ctx.redo.length;
   productionButton(actions,'保存工程',async()=>{try{const saved=await editCall('save',{project:ctx.draft,expected_version:ctx.project.version});ctx.project=saved;editRemember(ctx);toast('工程已保存，成片预览尚未更新。');renderEpisodeEditing(ctx)}catch(e){toast(e.message)}});
   productionButton(actions,'渲染新版本',async()=>{try{const saved=await editCall('save',{project:ctx.draft,expected_version:ctx.project.version});ctx.project=saved;editRemember(ctx);const job=await editCall('submit',{project_id:saved.object_id,expected_version:saved.version,task_id:'browser-edit',request_id:crypto.randomUUID()});ctx.job=job;renderEditJob(ctx,jobHost);pollEditJob(ctx,jobHost)}catch(e){toast(e.message)}});
   const jobHost=el('div','edit-job');main.append(jobHost);if(ctx.job){renderEditJob(ctx,jobHost);pollEditJob(ctx,jobHost)}
