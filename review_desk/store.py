@@ -340,21 +340,28 @@ class Store:
         return {scope: self.configuration(scope) for scope in ("SYSTEM", "PROJECT")}
 
     def set_configuration(self, scope, updates, expected_version):
-        with self.db:
-            self.db.execute('BEGIN IMMEDIATE')
+        def prepared_body():
             current = self.configuration(scope)
             if type(expected_version) is not int or expected_version != current["version"]:
                 raise Conflict("configuration version changed; refresh before saving")
             if not isinstance(updates, dict):
                 raise ValueError("configuration updates must be an object")
-            body = validate(scope, {**current["body"], **updates})
+            return validate(scope, {**current["body"], **updates})
+        body = prepared_body()
+        from .production_media import physical_hash_scope, frozen_physical_hashes, physical_file_hash
+        with physical_hash_scope():
             if scope == "SYSTEM" and body["site_favicon"]:
                 from .favicon import asset
-                asset(self.db_path.parent.parent, body["site_favicon"])
-            version, stamp = expected_version + 1, now()
-            self.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET schema_version=excluded.schema_version,version=excluded.version,body=excluded.body,updated_at=excluded.updated_at", (scope, SCHEMA_VERSION, version, canonical(body), stamp))
-            self.db.execute("INSERT INTO configuration_events(scope,version,body,at) VALUES (?,?,?,?)", (scope, version, canonical(body), stamp))
-            return self.configuration(scope)
+                path, _ = asset(self.db_path.parent.parent, body["site_favicon"])
+                physical_file_hash(path)
+            with self.db, frozen_physical_hashes():
+                self.db.execute('BEGIN IMMEDIATE')
+                if prepared_body() != body:
+                    raise Conflict("configuration changed during resource preflight")
+                version, stamp = expected_version + 1, now()
+                self.db.execute("INSERT INTO configurations VALUES (?,?,?,?,?) ON CONFLICT(scope) DO UPDATE SET schema_version=excluded.schema_version,version=excluded.version,body=excluded.body,updated_at=excluded.updated_at", (scope, SCHEMA_VERSION, version, canonical(body), stamp))
+                self.db.execute("INSERT INTO configuration_events(scope,version,body,at) VALUES (?,?,?,?)", (scope, version, canonical(body), stamp))
+                return self.configuration(scope)
 
     def configuration_events(self):
         return [dict(row) for row in self.db.execute("SELECT * FROM configuration_events ORDER BY id")]
