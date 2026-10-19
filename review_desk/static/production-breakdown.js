@@ -199,7 +199,7 @@ function openShotReference(item,context,trigger){
     };
     if(typeof afterReviewDialogReturn==='function')afterReviewDialogReturn(refresh);else refresh();
   };
-  return openUnifiedMaterial({...ref,params,component_id:item.value.component_id,defaultSelection:!slot.number,
+  return openUnifiedMaterial({...ref,params,component_id:item.value.component_id,defaultSelection:!slot.candidate,
     shotReference:{...context,slot,indirect:slot.direct===false,onSaved}},trigger);
 }
 function renderShotInputs(host,row,inputs,records,context,{pure=false}={}){
