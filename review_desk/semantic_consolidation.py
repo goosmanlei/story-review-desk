@@ -321,6 +321,21 @@ def apply(store, plan, *, fault=None):
         return {**json.loads(prior[1]), 'already_applied': True}
     if store.db.in_transaction:
         raise Conflict('consolidation must own its transaction')
+    from .production_media import physical_hash_scope, frozen_physical_hashes, export_asset_path
+    with physical_hash_scope():
+        for name, sha in plan['media'].items():
+            if _file_hash(export_asset_path(p.root_of(store), name)) != sha:
+                raise Conflict('original file checksum changed: '+name)
+        for oid, payload in plan['patches'].items():
+            if payload.get('format') == 'production-requirement-v1':
+                p.preflight_requirement(store, {'object_id': oid, 'id': '@'+oid,
+                    'kind': 'REQUIREMENT', 'payload': payload})
+        with frozen_physical_hashes():
+            return _apply_preflighted(store, plan, fault=fault)
+
+
+def _apply_preflighted(store, plan, *, fault=None):
+    from .production_media import export_asset_path
     store.db.execute('BEGIN IMMEDIATE')
     store._semantic_consolidating = True
     try:
@@ -331,7 +346,7 @@ def apply(store, plan, *, fault=None):
             if [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY '+order)] != plan[key]:
                 raise Conflict('semantic consolidation baseline changed: '+table)
         for name, sha in plan['media'].items():
-            if _file_hash(p.root_of(store)/'export/assets'/name) != sha:
+            if _file_hash(export_asset_path(p.root_of(store), name)) != sha:
                 raise Conflict('original file checksum changed: '+name)
         rows = _rows(store)
         patches = copy.deepcopy(plan['patches'])
@@ -414,6 +429,8 @@ def apply(store, plan, *, fault=None):
             raise ValueError('consolidation left a foreign key error')
         if fault == 'before-commit':
             raise RuntimeError('injected semantic consolidation interruption')
+        from .production_media import validate_physical_hashes
+        validate_physical_hashes()
         store.db.commit()
         return receipt
     except BaseException:
@@ -449,6 +466,8 @@ def validate(store):
 
 def cleanup_files(store, operation_id):
     """Idempotent post-commit deletion; never remove a retained exact input."""
+    from .resources import require_local_cleanup
+    require_local_cleanup(p.root_of(store))
     raw = store.db.execute('SELECT result FROM production_current_operations WHERE id=?', (operation_id,)).fetchone()
     receipt = json.loads(raw[0]) if raw else {}
     if receipt.get('format') != FORMAT: raise ValueError('committed consolidation required')

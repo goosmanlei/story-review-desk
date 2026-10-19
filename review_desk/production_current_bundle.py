@@ -15,13 +15,12 @@ def required_assets(store):
     from .version_consolidation import file_references
     names = {a['file'] for source in store.sources() for a in source['assets']}
     names.update(source['media']['file'] for source in store.sources() if (source.get('media') or {}).get('file'))
-    revisions = store.revisions()
     retired_outputs = {}
-    for row in revisions:
+    for row in store.db.execute('SELECT object_id,payload FROM revisions ORDER BY object_id,version'):
         value = json.loads(row['payload'])
         if value.get('format')=='production-retirement-v1' and value.get('former_components'):
             retired_outputs[row['object_id']]={c['former_file'] for c in value['former_components']}
-    for row in revisions:
+    for row in store.db.execute('SELECT object_id,payload FROM revisions ORDER BY object_id,version'):
         payload = json.loads(row['payload'])
         if payload.get('private') is True:
             continue
@@ -217,17 +216,18 @@ def validate(store,inspect_editing=True):
     from .material_input_validation import validate_tree as validate_inputs
     validate_inputs(store)
     for obj in store.objects():
-        rows = list(store.db.execute('SELECT * FROM revisions WHERE object_id=?', (obj['id'],)))
-        heads = [r for r in rows if r['id'] == obj['current_revision'] and r['version'] == obj['version']]
-        if len(heads) != 1 or obj['kind'] in current.RECORD_KINDS and len(rows) != 1:
+        count = store.db.execute('SELECT COUNT(*) FROM revisions WHERE object_id=?', (obj['id'],)).fetchone()[0]
+        heads = store.db.execute('SELECT COUNT(*) FROM revisions WHERE object_id=? AND id=? AND version=?',
+                                 (obj['id'],obj['current_revision'],obj['version'])).fetchone()[0]
+        if heads != 1 or obj['kind'] in current.RECORD_KINDS and count != 1:
             raise ValueError('invalid current object or retained production draft')
-        for row in rows:
+        for row in store.db.execute('SELECT * FROM revisions WHERE object_id=? ORDER BY version', (obj['id'],)):
             payload = json.loads(row['payload'])
             if not consolidation.valid_identity(store, obj['id'], row['version'], payload, row['id']):
                 raise ValueError('recovery content checksum mismatch: '+obj['id'])
             from . import editing
             if obj['kind'] in editing.KINDS:
-                if obj['kind'] != 'EPISODE_EDIT' and (len(rows)!=1 or row['version']!=1):
+                if obj['kind'] != 'EPISODE_EDIT' and (count!=1 or row['version']!=1):
                     raise ValueError('immutable editing evidence has multiple revisions')
                 editing.validate_record(store,obj['id'],obj['kind'],payload,inspect=inspect_editing)
                 expected={(d['revision_id'],d['role']) for d in editing.expected_dependencies(obj['kind'],payload)}

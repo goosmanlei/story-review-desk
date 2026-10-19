@@ -80,7 +80,7 @@ function referencePreviewDisplay(box,original,label,type='image',{placeholder=fa
   const image=original.mime.startsWith('image/'),file=reviewURL('/api/production/files/'+encodeURIComponent(original.file));
   const media=el(image?'img':original.mime.startsWith('audio/')?'audio':original.mime.startsWith('video/')?'video':'a');
   if(media.tagName==='A'){media.href=file;media.target='_blank';media.rel='noopener';media.textContent='查看原件文件'}
-  else{media.src=file;if(image)media.alt=label;else{media.controls=true;media.preload='none';media.tabIndex=0}}
+  else{media.src=image?file+'?variant=large':file;if(media.tagName==='VIDEO')media.poster=file+'?variant=poster';if(image)media.alt=label;else{media.controls=true;media.preload='none';media.tabIndex=0}}
   media.onerror=()=>{if(!media.isConnected)return;media.remove();const message=nodeText('p','production-issue','预览加载失败',box);productionButton(message,'重试预览',()=>referencePreviewDisplay(box,original,label,type,{placeholder}))};box.append(media);
 }
 function referencePreviewPosition(preview,anchor,extraHeader=0){
@@ -295,7 +295,7 @@ function renderReferenceCandidatePicker(line,item,need,card,workspace=null){
         if(!thumbnail){thumbnail=el('span','material-small-preview');card.insertBefore(thumbnail,copy)}
         if(!thumbnail.querySelector('img')){thumbnail.textContent='';thumbnail.append(el('img'))}
         delete thumbnail.dataset.placeholder;thumbnail.removeAttribute('role');thumbnail.removeAttribute('aria-label');thumbnail.removeAttribute('title');
-        const img=thumbnail.querySelector('img'),src=reviewURL('/api/production/files/'+encodeURIComponent(original.file));if(img.getAttribute('src')!==src)img.src=src;img.alt='';img.loading='lazy';
+        const img=thumbnail.querySelector('img'),src=reviewURL('/api/production/files/'+encodeURIComponent(original.file)+'?variant=small');if(img.getAttribute('src')!==src)img.src=src;img.alt='';img.loading='lazy';
       }else if((item.slot?.media_type||item.row?.payload.media_type)==='image'){
         if(!thumbnail){thumbnail=el('span','material-small-preview');card.insertBefore(thumbnail,copy)}
         if(!thumbnail.dataset.placeholder){thumbnail.textContent='';thumbnail.append(productionEntityIcon('image'));thumbnail.dataset.placeholder='true'}

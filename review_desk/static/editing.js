@@ -106,13 +106,13 @@ function renderEpisodeEditing(ctx){
   editChoices(head,'edit-output','成片版本',outputs.map((o,i)=>[o.object_id,'版本 '+(i+1)]),ctx.output,async value=>{editRemember(ctx);ctx.host.querySelector('video')?.pause();ctx.output=value;ctx.loop=false;editRoute({edit_output:value,edit_element:null});clearEpisodeEditReview();await loadEditOutput(ctx)});
   editChoices(head,'edit-variant','字幕',[['subtitled','对白与唱词字幕'],['clean','无对白与唱词字幕']],ctx.variant,value=>{ctx.variant=value;ctx.loop=false;clearEpisodeEditReview();renderEpisodeEditing(ctx)});
   const downloads=el('details','edit-downloads');nodeText('summary',null,'下载',downloads);
-  for(const [id,title] of [['subtitled','字幕版 MP4'],['clean','无字幕版 MP4'],['mix','混音母版 WAV'],['subtitles','字幕 SRT'],['project','可编辑工程 JSON'],['source-map','原件与来源映射']]){const c=output.payload.components.find(c=>c.id===id),a=nodeText('a',null,title,downloads);a.href=reviewURL('/api/production/files/'+encodeURIComponent(c.file));a.download=ctx.episode+'-'+id+'.'+c.file.split('.').at(-1)}head.append(downloads);
+  for(const [id,title] of [['subtitled','字幕版 MP4'],['clean','无字幕版 MP4'],['mix','混音母版 WAV'],['subtitles','字幕 SRT'],['project','可编辑工程 JSON'],['source-map','原件与来源映射']]){const c=output.payload.components.find(c=>c.id===id),a=nodeText('a',null,title,downloads);a.download=ctx.episode+'-'+id+'.'+c.file.split('.').at(-1);a.href=reviewDownloadURL('/api/production/files/'+encodeURIComponent(c.file),a.download)}head.append(downloads);
   state.productionRecords=outputs;focusProductionReview({record:output,history:[output],uses:[]},false);
   const layout=el('div','edit-layout'),nav=el('nav','edit-scenes breakdown-scene-list'),main=el('div','edit-main');nav.setAttribute('aria-label','场镜导航');layout.append(nav,main);host.append(layout);
   const reader=el('section');reader.id='production-reader';main.append(reader);
   const player=el('section','review-media-player edit-player'),component=output.payload.components.find(c=>c.id===ctx.variant),media=el('video');
   Object.assign(player.dataset,{reviewRevision:output.id,reviewFile:component.file,reviewFrom:0,reviewTo:project.spec.duration_frames/editRate(project)});
-  media.controls=true;media.preload='metadata';media.dataset.episodePlayer='true';media.dataset.componentId=component.id;media.src=reviewURL('/api/production/files/'+component.file);player.append(media);reader.append(player);
+  media.controls=true;media.preload='metadata';media.dataset.episodePlayer='true';media.dataset.componentId=component.id;media.src=reviewURL('/api/production/files/'+component.file);media.poster=reviewVariantURL(media.src,'poster');reviewRefreshMedia(media);player.append(media);reader.append(player);
   player.reviewFocus=()=>focusProductionReview({record:output,history:[output],uses:[]},false);reviewSurface(player,'audio');
   const current=()=>editCurrent(ctx)&&ctx.render===render&&ctx.output===output.object_id&&media.isConnected;
   const tools=el('div','edit-timeline-tools');main.append(tools);const zoomGroup=el('div','edit-zoom-group');tools.append(zoomGroup);
@@ -190,7 +190,8 @@ function renderEpisodeEditing(ctx){
   }
   player.reviewLocate=a=>{if(a.asset_file!==component.file)return false;v.range=a.edit_selection?{start:a.edit_selection.start_frame,end:a.edit_selection.end_frame,tracks:[...a.edit_selection.tracks]}:{start:Math.round(a.start_seconds*editRate(project)),end:Math.round(a.end_seconds*editRate(project)),tracks:[]};syncInputs();seek(v.range.start);feedback.textContent=a.edit_selection?feedback.textContent:'历史混合范围 · '+editTime(project,v.range.start)+'–'+editTime(project,v.range.end);return true};
   for(const marker of project.markers||[]){productionButton(nav,marker.title,()=>seek(marker.frame));for(const c of project.clips.filter(c=>c.kind==='video'&&c.scene_id===marker.id))productionButton(nav,c.title||c.id,()=>seek(c.timeline_start))}
-  media.onloadedmetadata=()=>{if(current())media.currentTime=Math.min(v.frame/editRate(project),media.duration)};
+  media.reviewRestorePosition=()=>Math.min(v.frame/editRate(project),media.duration);
+  media.onloadedmetadata=()=>{if(current())media.currentTime=media.reviewRestorePosition()};
   media.addEventListener('timeupdate',()=>{if(!current())return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   media.addEventListener('play',follow);media.addEventListener('pause',()=>{if(current())editRemember(ctx)});
   media.addEventListener('ended',()=>{if(current()&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});

@@ -215,10 +215,18 @@ class Store:
 
     def put_objects(self, records, *, expected_heads=None):
         """Publish a complete set atomically, including optimistic version checks."""
-        from . import editing
-        for record in records:
-            if record["kind"] in editing.KINDS:
-                editing.validate_record(self, record["object_id"], record["kind"], record["payload"], inspect=True)
+        from .production_media import physical_hash_scope, frozen_physical_hashes
+        from .production import preflight_records
+        with physical_hash_scope():
+            preflight_records(self, records)
+            from . import editing
+            for record in records:
+                if record['kind'] in editing.KINDS:
+                    editing.validate_record(self, record['object_id'], record['kind'], record['payload'], inspect=True)
+            with frozen_physical_hashes():
+                return self._put_objects_preflighted(records, expected_heads=expected_heads)
+
+    def _put_objects_preflighted(self, records, *, expected_heads=None):
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             for object_id, revision_id in (expected_heads or {}).items():
@@ -228,6 +236,8 @@ class Store:
             from .material_input_validation import batch
             with batch(self):
                 results = [self._put_object(**record) for record in records]
+            from .production_media import validate_physical_hashes
+            validate_physical_hashes()
             return results
 
     def _put_object(self, object_id, kind, payload, expected_version=0, dependencies=()):
@@ -649,8 +659,12 @@ class Store:
             visual = next((v for v in visuals if v.get("id", v.get("file")) == anchor.get("visual_id")), None)
             if not visual or anchor.get("asset_file") != visual.get("file"):
                 raise Conflict("visual asset reference differs from target revision")
-            if not (self.db_path.parent.parent / "export" / "assets" / visual["file"]).is_file():
-                raise Conflict("referenced visual asset is missing")
+            from .production_media import export_asset_path
+            try:
+                if not export_asset_path(self.db_path.parent.parent, visual["file"]).is_file():
+                    raise FileNotFoundError('missing visual original')
+            except FileNotFoundError:
+                raise Conflict("referenced visual asset is missing") from None
             if str(payload.get("format", "")).startswith("production-"):
                 from .production_media import validate_component
                 validate_component(self.db_path.parent.parent, visual, inspect=False)
@@ -687,6 +701,11 @@ class Store:
             comment["anchor"], _source_cache=source_cache))} for comment in comments]
 
     def create_comment(self, value):
+        from .production_media import physical_hash_scope
+        with physical_hash_scope():
+            return self._create_comment(value)
+
+    def _create_comment(self, value):
         import uuid
         source_id, anchor, body = value.get("source_id"), value.get("anchor"), str(value.get("body", "")).strip()
         if not body:
@@ -719,7 +738,8 @@ class Store:
                 return existing
             raise Conflict("comment id already used")
         stamp = now()
-        with self.db:
+        from .production_media import frozen_physical_hashes
+        with self.db, frozen_physical_hashes():
             self.db.execute('BEGIN IMMEDIATE')
             existing = self.comment(comment_id)
             if existing:

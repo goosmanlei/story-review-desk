@@ -751,7 +751,7 @@ function renderDocument(){
   if(source.media){const media=el('section','source-media');nodeText('strong',null,source.media.file?'演出资料 · 本实例媒体':'演出资料 · 第三方平台',media);
     if(source.media.file){const url=`/assets/${encodeURIComponent(source.media.file)}`;
       if(source.media.kind==='audio')reviewMediaPlayer(media,{id:source.media.file,file:source.media.file,mime:'audio/mpeg'}, {id:source.target_revision_id,object_id:source.id}, {},false,{src:url});
-      else{const player=el('video');player.controls=true;player.preload='metadata';player.src=reviewURL(url);player.playsInline=true;media.append(player);const download=el('a',null,'下载视频 ↓');download.href=reviewURL(url);download.download=source.media.file;media.append(download)}
+      else{const player=el('video');player.controls=true;player.preload='metadata';player.src=reviewURL(url);player.poster=reviewVariantURL(url,'poster');reviewRefreshMedia(player);player.playsInline=true;media.append(player);const download=el('a',null,'下载视频 ↓');download.href=reviewDownloadURL(url,source.media.file);download.download=source.media.file;media.append(download)}
     }
     if(source.media.url)link(source.media.label||'原始发布页面 ↗',source.media.url,media);
     nodeText('p',null,source.media.note||'请核对演出元数据和整理文本。',media);doc.append(media)}

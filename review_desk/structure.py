@@ -71,7 +71,8 @@ def _validate_document(store, value):
             name = visual.get("file")
             if not isinstance(name, str) or not name or name != Path(name).name or name.startswith(".") or Path(name).suffix.lower() not in (".png", ".jpg", ".webp", ".svg"):
                 raise ValueError("unsafe visual asset name")
-            if not (store.db_path.parent.parent / "export" / "assets" / name).is_file():
+            from .production_media import export_asset_path
+            if not export_asset_path(store.db_path.parent.parent, name).is_file():
                 raise ValueError("missing visual asset: " + name)
             if not all(isinstance(visual.get(field), str) and visual[field].strip() for field in ("title", "alt", "description")):
                 raise ValueError("visual needs title, alt and description")

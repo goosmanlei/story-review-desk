@@ -49,8 +49,8 @@ function fixture({selected=true,readonly=false,indirect=false,media='image',defe
   return {c,body,anchor,need,item,view,candidates,calls,settle,popup,choice,Element,read:()=>resolveRead({material_id:'material',candidates}),leave:()=>{for(const fn of timers.values())fn();timers.clear()},mutate:()=>observers.filter(o=>!o.closed).forEach(o=>o.fn()),key:key=>events.filter(e=>e.name==='keydown'&&!e.signal.aborted).forEach(e=>e.fn({key,preventDefault(){},stopImmediatePropagation(){}}))};
 }
 test('hover restores the confirmed original without saving; click switches then explicitly cancels',async()=>{
- const f=fixture();f.anchor.onmouseenter();await f.settle();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
- f.choice(2).onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');f.choice(2).onmouseleave();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');assert.equal(f.calls.filter(v=>v.id).length,0);
+ const f=fixture();f.anchor.onmouseenter();await f.settle();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');
+ f.choice(2).onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2?variant=large');f.choice(2).onmouseleave();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');assert.equal(f.calls.filter(v=>v.id).length,0);
  let mirrored;f.c.referencePickerConsumer(f.need).listeners.add({connected:()=>true,refresh:()=>mirrored=f.need.review_shot_slots[0].candidate});
  await f.choice(2).onclick({stopPropagation(){}});assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');assert.equal(mirrored.revision_id,'candidate-2');
  await f.choice(2).onclick({stopPropagation(){}});assert.equal(f.choice(2).getAttribute('aria-pressed'),'false');assert.ok(f.popup().querySelector('.reference-preview-placeholder'));assert.equal(f.need.payload.generation.inputs[0].range,undefined);assert.equal(f.need.review_shot_slots[1].value.crop.x,.2);
@@ -59,7 +59,7 @@ test('hover restores the confirmed original without saving; click switches then 
 test('unselected defaults to placeholder; multi-original preview never selects the first original',async()=>{
  const f=fixture({selected:false});f.anchor.onmouseenter();await f.settle();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
  f.choice(2).onmouseenter();assert.ok(f.popup().querySelector('img'));f.choice(2).onmouseleave();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
- await f.choice(3).onclick({stopPropagation(){}});assert.equal(f.calls.filter(v=>v.id).length,0);const originals=f.popup().querySelector('.reference-originals').querySelectorAll('button');originals[1].onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/four');originals[1].onmouseleave();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
+ await f.choice(3).onclick({stopPropagation(){}});assert.equal(f.calls.filter(v=>v.id).length,0);const originals=f.popup().querySelector('.reference-originals').querySelectorAll('button');originals[1].onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/four?variant=large');originals[1].onmouseleave();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));
  await originals[1].onclick({stopPropagation(){}});assert.equal(f.need.review_shot_slots[0].value.component_id,'second');
 });
 test('unknown clear retains confirmed choice and retries the same exact request',async()=>{
@@ -71,7 +71,7 @@ test('historical preview stays exact and read-only; closing stops playback',asyn
  player.paused=false;f.view.close();assert.equal(player.paused,true);assert.equal(player.src,null);assert.equal(player.isConnected,false);assert.equal(f.popup(),null);
 });
 test('an indirect reference previews its exact original without exposing choice or borrowing its owner',async()=>{
- const f=fixture({indirect:true});const before=JSON.stringify(f.need);f.anchor.onmouseenter();await f.settle();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');assert.equal(f.popup().querySelectorAll('[data-candidate-revision]').length,0);assert.equal(f.calls.length,0);assert.equal(JSON.stringify(f.need),before);
+ const f=fixture({indirect:true});const before=JSON.stringify(f.need);f.anchor.onmouseenter();await f.settle();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');assert.equal(f.popup().querySelectorAll('[data-candidate-revision]').length,0);assert.equal(f.calls.length,0);assert.equal(JSON.stringify(f.need),before);
 });
 test('a candidate read preserves active playback of the same original, and mouse leave stops it',async()=>{
  const f=fixture({media:'audio',deferred:true});f.anchor.onmouseenter();const player=f.popup().querySelector('audio');assert.equal(player.paused,true);player.paused=false;f.read();await f.settle();assert.equal(f.popup().querySelector('audio'),player);assert.equal(player.paused,false);f.anchor.onmouseleave({type:'mouseleave'});f.leave();assert.equal(player.paused,true);assert.equal(f.popup(),null);
@@ -97,13 +97,13 @@ test('authored @entity references hover without activation and synchronize real 
  f.c.renderReferenceCandidatePicker(line,f.item,f.need,card);
  const parent=new f.Element('main');shell.append(parent);f.c.renderLinkedPrompt(parent,f.need,f.need.payload.generation.inputs,[],'prompt',null,{selectable:true});f.body.append(shell);
  const a=parent.querySelector('a');assert.ok(a);assert.equal(a.textContent,'@M1 · 周家米铺 · 空间布局参考 · 参考1');
- assert.equal(a.getAttribute('aria-expanded'),'false');assert.equal(f.popup(),null);a.onmouseenter();await f.settle();assert.equal(a.getAttribute('aria-expanded'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.calls.filter(c=>c.id).length,0);
+ assert.equal(a.getAttribute('aria-expanded'),'false');assert.equal(f.popup(),null);a.onmouseenter();await f.settle();assert.equal(a.getAttribute('aria-expanded'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.calls.filter(c=>c.id).length,0);
  const cardChoice=n=>card.querySelector('.reference-candidate-choices').querySelectorAll('[data-candidate-revision]')[n-1];
- f.choice(2).onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');f.choice(2).onmouseleave();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
+ f.choice(2).onmouseenter();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2?variant=large');f.choice(2).onmouseleave();assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');
  await f.choice(2).onclick({stopPropagation(){}});assert.equal(cardChoice(2).getAttribute('aria-pressed'),'true');assert.equal(cardChoice(1).getAttribute('aria-pressed'),'false');assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');
- await cardChoice(1).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1');
+ await cardChoice(1).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(1).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-1?variant=large');
  await f.choice(1).onclick({stopPropagation(){}});assert.equal(cardChoice(1).getAttribute('aria-pressed'),'false');assert.ok(f.popup().querySelector('.reference-preview-placeholder'));assert.equal(card.querySelector('.material-small-preview').dataset.placeholder,'true');
- await cardChoice(2).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2');assert.equal(f.need.review_shot_slots[1].value.crop.x,.2);
+ await cardChoice(2).onclick({stopPropagation(){}});await f.settle();assert.equal(f.choice(2).getAttribute('aria-pressed'),'true');assert.equal(f.popup().querySelector('img').src,'/api/production/files/file-2?variant=large');assert.equal(f.need.review_shot_slots[1].value.crop.x,.2);
 });
 test('audio candidate hover survives moving to its player, while leaving closes and resets the audition',async()=>{
  const f=fixture({selected:false,media:'audio'});f.anchor.onmouseenter();await f.settle();assert.ok(f.popup().querySelector('.reference-preview-placeholder'));

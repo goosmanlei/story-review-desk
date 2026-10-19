@@ -33,6 +33,12 @@ def main():
     remove.add_argument("ids", nargs="+", help="exact source ids to remove with their exclusive comments and revisions")
     subs.add_parser("export")
     subs.add_parser("restore")
+    offline=subs.add_parser('offline-bundle', help='copy a complete verified recovery medium outside Git')
+    offline.add_argument('--destination', type=Path, required=True)
+    resource_put=subs.add_parser('resource-put', help='upload a task candidate and freeze its exact resource catalog')
+    resource_put.add_argument('file', type=Path)
+    resource_put.add_argument('--prefix', default='export/assets')
+    subs.add_parser('resource-promote', help='explicitly upload all offline originals and derivatives, then freeze the catalog')
     subs.add_parser("comments")
     evidence = subs.add_parser('import-comment-evidence')
     evidence.add_argument('file', type=Path)
@@ -111,6 +117,29 @@ def main():
     args = parser.parse_args()
     root = args.instance.resolve()
     config = json.loads((root / "config" / "instance.json").read_text())
+    if args.command=='resource-promote':
+        from . import resources
+        result=resources.promote(root)
+        resources.freeze_catalog(root,root/'config/resource-catalog.json')
+        print(json.dumps(result,ensure_ascii=False))
+        return
+    if args.command=='resource-put':
+        import re
+        from . import resources
+        prefix=resources.safe_path(args.prefix)
+        suffix=args.file.suffix.lower()
+        if not re.fullmatch(r'\.[a-z0-9]{1,12}',suffix):
+            raise ValueError('candidate requires an explicit file extension')
+        digest=resources.hash_file(args.file)
+        relative=prefix+'/'+digest+suffix
+        spec=resources.publish_file(root,relative,args.file,expected_sha=digest)
+        resources.freeze_catalog(root,root/'config/resource-catalog.json')
+        print(json.dumps({'logical_path':relative,'resource':spec},ensure_ascii=False))
+        return
+    if args.command=='offline-bundle':
+        from .resource_bundle import offline_bundle
+        print(json.dumps(offline_bundle(root,args.destination),ensure_ascii=False))
+        return
     if args.command == "edit-worker":
         from .editing_worker import work
         return work(root,args.once)
@@ -255,4 +284,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    from .resources import lease_scope
+    with lease_scope():
+        main()

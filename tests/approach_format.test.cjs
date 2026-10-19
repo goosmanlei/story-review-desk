@@ -7,7 +7,7 @@ class Node{
 }
 function fixture(){
  const context={URL,location:{href:'http://fixture/?workspace=production.approach',origin:'http://fixture'},document:{addEventListener(){},createTextNode:text=>new Node('#text',text)},window:{addEventListener(){}},el:(tag,cls)=>new Node(tag),nodeText:(tag,cls,text,parent)=>{const n=new Node(tag,text);parent.append(n);return n}};
- vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8').split('const state=')[0],context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/approach.js'),'utf8'),context);return context;
+ vm.createContext(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/app.js'),'utf8').split('const state=')[0],context);require('./load_review_helpers.cjs')(context);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/approach.js'),'utf8'),context);return context;
 }
 function text(node){return node.textContent+node.children.map(text).join('')}
 test('rich text never interprets HTML, loads media or creates executable links',()=>{
@@ -43,7 +43,7 @@ test('declared media uses local controls and pauses other method playback',()=>{
  root.closest=()=>({querySelectorAll:()=>[root.children[1].children[0],{pause(){pauses++}}]});
  c.renderApproachBlocks(root,[{type:'media',kind:'image',file:'reference.png',caption:'<reference>',width:1672,height:941},{type:'media',kind:'video',file:'demo.mp4',caption:'动作示例',width:1280,height:720}],'示例');
  const image=root.children[0].children[0],video=root.children[1].children[0];
- assert.equal(image.src,'/approach-media/reference.png');assert.equal(image.alt,'<reference>');
+ assert.equal(image.src,'http://fixture/approach-media/reference.png?variant=large');assert.equal(image.alt,'<reference>');
  assert.equal(image.width,1672);assert.equal(image.height,941);assert.equal(video.width,1280);assert.equal(video.height,720);
  assert.equal(text(root.children[0]),'<reference>');assert.equal(video.controls,true);assert.equal(video.preload,'metadata');assert.equal(video.autoplay,undefined);
  video.events.play();assert.equal(pauses,1);

@@ -54,26 +54,55 @@ function openReviewBlockComments(host,kind){
   const scope=reviewBlockScope(host,kind);state.reviewCommentScope=scope;state.historyOpen=true;state.historyLimit=Number.MAX_SAFE_INTEGER;
   openPanel();renderComments();
 }
-const reviewWaveCache=new Map();let reviewAudioContext;
+function reviewVariantURL(url,variant){const target=new URL(reviewURL(url),location.href);target.searchParams.set('variant',variant);return target.href}
+function reviewDownloadURL(url,filename){const target=new URL(reviewURL(url),location.href);target.searchParams.set('download','1');if(filename)target.searchParams.set('filename',filename);return target.href}
+const reviewWaveCache=new Map();
 async function reviewWaveform(url){
   if(reviewWaveCache.has(url))return reviewWaveCache.get(url);
   const promise=(async()=>{
-    const response=await reviewFetch(url);if(!response.ok)throw Error('音频无法读取');
-    const Audio=window.AudioContext||window.webkitAudioContext;if(!Audio)throw Error('此浏览器不支持波形解码');
-    reviewAudioContext ||= new Audio();const buffer=await reviewAudioContext.decodeAudioData(await response.arrayBuffer());
-    const channels=Array.from({length:buffer.numberOfChannels},(_,i)=>buffer.getChannelData(i)),count=Math.min(1600,buffer.length),peaks=[];
-    for(let i=0;i<count;i++){let peak=0;const a=Math.floor(i*buffer.length/count),b=Math.floor((i+1)*buffer.length/count);for(const values of channels)for(let j=a;j<b;j++)peak=Math.max(peak,Math.abs(values[j]));peaks.push(peak)}
-    return {peaks,duration:buffer.duration};
-  })();reviewWaveCache.set(url,promise);if(reviewWaveCache.size>12)reviewWaveCache.delete(reviewWaveCache.keys().next().value);return promise;
+    const target=new URL(url,location.href);target.searchParams.set('variant','waveform');
+    // Deliberately independent of reviewFetch: application headers/cookies must
+    // never follow a signed redirect to object storage.
+    const response=await fetch(target.href,{credentials:'omit',referrerPolicy:'no-referrer'});
+    if(!response.ok)throw Error('波形无法读取');
+    const value=await response.json();
+    if(!Array.isArray(value.peaks)||!value.peaks.length||value.peaks.length>1600||!Number.isFinite(value.duration)||value.duration<=0||value.peaks.some(x=>!Number.isFinite(x)||x<0))throw Error('波形数据无效');
+    return value;
+  })();reviewWaveCache.set(url,promise);if(reviewWaveCache.size>12)reviewWaveCache.delete(reviewWaveCache.keys().next().value);
+  promise.catch(()=>reviewWaveCache.delete(url));return promise;
+}
+function reviewRefreshMedia(media){
+  const original=media.src;let attempts=0,lastTime=0,wasPaused=true,pending=null;
+  media.reviewCancelResume=()=>{wasPaused=true;if(pending)pending.resume=false};
+  media.addEventListener('timeupdate',()=>{if(!pending)lastTime=media.currentTime});
+  media.addEventListener('play',()=>{wasPaused=false});
+  media.addEventListener('pause',()=>{if(!media.error&&!pending)wasPaused=true});
+  media.addEventListener('error',()=>{
+    if(attempts++>=1||!media.isConnected)return;
+    const target=new URL(original,location.href);target.searchParams.set('refresh',String(Date.now()));
+    const retry={resume:!wasPaused,position:lastTime,url:target.href};pending=retry;
+    // Keep the element and all review selection/draft state. Other metadata
+    // handlers use the same restored time instead of seeking back to zero.
+    media.dataset.reviewSeek=String(retry.position);
+    const timed=typeof media.load==='function';
+    media.addEventListener(timed?'loadedmetadata':'load',()=>{
+      if(pending!==retry)return;pending=null;
+      if(!media.isConnected||media.src!==retry.url){media.pause?.();return}
+      if(!timed)return;
+      media.currentTime=media.reviewRestorePosition?.()??Number(media.dataset.reviewSeek??retry.position);
+      if(retry.resume)media.play().catch(()=>{});
+    },{once:true});
+    media.src=retry.url;media.load?.();
+  });
 }
 function reviewMediaPlayer(parent,component,record,selection={},review=true,options={}){
   const from=selection.range?.start_seconds??0;
   let to=selection.range?.end_seconds??component.duration_seconds??0,span=to-from;
   const box=el('section','review-media-player');box.dataset.reviewRevision=record.id;box.dataset.reviewFile=component.file;box.dataset.reviewFrom=from;box.dataset.reviewTo=to;
-  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=reviewURL(options.src||'/api/production/files/'+encodeURIComponent(component.file));media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
+  const audio=component.mime.startsWith('audio/'),media=el(audio?'audio':'video');media.src=reviewURL(options.src||'/api/production/files/'+encodeURIComponent(component.file));if(!audio)media.poster=reviewVariantURL(media.src,'poster');reviewRefreshMedia(media);media.preload='metadata';media.dataset.componentId=component.id;if(audio)media.hidden=true;else media.controls=true;
   const focus=()=>{if(review){if(options.focus)options.focus();else focusProductionReview({record,history:[record],uses:[]})}};box.reviewFocus=focus;box.addEventListener('pointerdown',focus,true);box.addEventListener('focusin',focus,true);box.append(media);
   const playLabel=options.fullPlayback?'播放完整'+options.fullPlayback:'播放';
-  const top=el('div','review-audio-controls'),play=productionButton(top,playLabel,()=>{if(media.paused){stopAt=to;playingRange=false;if(options.fullPlayback||media.currentTime<from||media.currentTime>=to)seek(from);media.play().catch(e=>toast(e.message))}else media.pause()}),clock=nodeText('output','review-audio-clock','',top);
+  const top=el('div','review-audio-controls'),play=productionButton(top,playLabel,()=>{if(media.paused){stopAt=to;playingRange=false;if(options.fullPlayback||media.currentTime<from||media.currentTime>=to)seek(from);media.play().catch(e=>toast(e.message))}else {media.reviewCancelResume?.();media.pause()}}),clock=nodeText('output','review-audio-clock','',top);
   const mute=productionButton(top,'静音',()=>{media.muted=!media.muted;mute.textContent=media.muted?'恢复声音':'静音'});box.append(top);
   const track=el('div','review-timeline');track.tabIndex=0;track.setAttribute('role','slider');track.setAttribute('aria-label',audio?'音频时间轴':'视频时间轴');track.setAttribute('aria-valuemin',String(from));track.setAttribute('aria-valuemax',String(to));
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 800 72');svg.setAttribute('preserveAspectRatio','none');svg.setAttribute('aria-hidden','true');track.append(svg);
@@ -108,7 +137,7 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
     if(!box.isConnected||mediaFailed||!Number.isFinite(a)||!Number.isFinite(b)||a<from||a>=b||b>to)return false;
     media.pause();stopAt=b;playingRange=origin;seek(a);media.play().catch(e=>toast(e.message));return true;
   };
-  box.reviewPause=()=>media.pause();
+  box.reviewPause=()=>{media.reviewCancelResume?.();media.pause()};
   productionButton(tools,'试听选段',()=>box.reviewAudition({start_seconds:range[0],end_seconds:range[1]}));
   if(review)productionButton(tools,'添加评论',()=>{focus();startDraft({type:'time',component_id:component.id,asset_file:component.file,start_seconds:range[0],end_seconds:range[1]})});
   productionButton(tools,'清除选段',()=>{range=null;paint()});box.append(tools);
@@ -117,15 +146,15 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
     input.onchange=()=>{const a=Number(start.value),b=Number(end.value);if(!(from<=a&&a<b&&b<=to)){start.value=range[0].toFixed(2);end.value=range[1].toFixed(2);toast('起点须早于终点，且在此素材范围内')}};
   }
   const point=e=>{const rect=track.getBoundingClientRect();return clamp(from+(e.clientX-rect.left)/rect.width*span)};
-  track.onpointerdown=e=>{if(e.button!==0||e.target.closest('.review-time-comments'))return;e.preventDefault();focus();media.pause();track.setPointerCapture(e.pointerId);gesture={x:e.clientX,time:point(e),mode:e.target===aHandle?'start':e.target===bHandle?'end':'new',pointer:e.pointerId};track.focus()};
+  track.onpointerdown=e=>{if(e.button!==0||e.target.closest('.review-time-comments'))return;e.preventDefault();focus();media.reviewCancelResume?.();media.pause();track.setPointerCapture(e.pointerId);gesture={x:e.clientX,time:point(e),mode:e.target===aHandle?'start':e.target===bHandle?'end':'new',pointer:e.pointerId};track.focus()};
   track.onpointermove=e=>{if(!gesture||e.pointerId!==gesture.pointer)return;const t=point(e);if(gesture.mode==='start')select(Math.min(t,range[1]-.01),range[1]);else if(gesture.mode==='end')select(range[0],Math.max(t,range[0]+.01));else if(Math.abs(e.clientX-gesture.x)>3)select(Math.min(t,gesture.time),Math.max(t,gesture.time))};
   track.onpointerup=e=>{if(!gesture||e.pointerId!==gesture.pointer)return;if(gesture.mode==='new'&&Math.abs(e.clientX-gesture.x)<=3)seek(point(e));gesture=null;stopAt=to};track.onpointercancel=()=>{gesture=null};
   track.onkeydown=e=>{if(e.target!==track)return;if(['ArrowLeft','ArrowRight','Home','End'].includes(e.key)){e.preventDefault();seek(e.key==='Home'?from:e.key==='End'?to:media.currentTime+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1))}else if(e.key===' '){e.preventDefault();play.click()}else if(e.key.toLowerCase()==='i'){e.preventDefault();select(clamp(media.currentTime),range?.[1]??to)}else if(e.key.toLowerCase()==='o'){e.preventDefault();select(range?.[0]??from,clamp(media.currentTime))}};
   track.title='点击定位，拖动选段；方向键定位，I / O 设起止点';
   for(const [handle,index] of [[aHandle,0],[bHandle,1]])handle.onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();e.stopPropagation();const next=e.key==='Home'?from:e.key==='End'?to:range[index]+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?1:.1);select(index===0?next:range[0],index===1?next:range[1])};
   const setDuration=duration=>{if(!to&&Number.isFinite(duration)){to=duration;span=to-from;stopAt=to;box.dataset.reviewTo=to;track.setAttribute('aria-valuemax',to);for(const input of [start,end])input.max=to;for(const handle of [aHandle,bHandle])handle.setAttribute('aria-valuemax',to);axis.lastElementChild.textContent=to.toFixed(2)+' 秒'}};
-  media.onloadedmetadata=()=>{if(!box.isConnected)return;setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);armEndTimer();paint()};media.onpause=()=>{clearEndTimer();paint()};media.onratechange=armEndTimer;media.onseeked=()=>{armEndTimer();paint()};media.onerror=()=>{clearEndTimer();mediaFailed=true;fallback.hidden=false;fallback.textContent='原文件读取失败；未替换为其他文件，请返回继续审阅';play.disabled=true};
-  box.reviewLocate=anchor=>{if(!box.isConnected||anchor.component_id!==component.id||anchor.asset_file!==component.file||anchor.start_seconds<from||anchor.end_seconds>to||!select(anchor.start_seconds,anchor.end_seconds))return false;media.pause();seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'});return true};
+  media.onloadedmetadata=()=>{if(!box.isConnected)return;mediaFailed=false;play.disabled=false;fallback.hidden=audio&&box.dataset.waveform==='decoded';fallback.textContent=audio?'波形不可用 · 可继续播放和选段':'视频时间轴';setDuration(media.duration);seek(Number(media.dataset.reviewSeek??from))};media.onended=()=>{media.pause();stopAt=to;paint()};media.ontimeupdate=()=>{const endAt=Math.min(to,stopAt);if(media.currentTime>=endAt){media.pause();if(media.currentTime>endAt)media.currentTime=endAt;stopAt=to}paint()};media.onplay=()=>{if(media.currentTime<from||media.currentTime>=to)seek(from);armEndTimer();paint()};media.onpause=()=>{clearEndTimer();paint()};media.onratechange=armEndTimer;media.onseeked=()=>{armEndTimer();paint()};media.onerror=()=>{clearEndTimer();mediaFailed=true;fallback.hidden=false;fallback.textContent='原文件读取失败；未替换为其他文件，请返回继续审阅';play.disabled=true};
+  box.reviewLocate=anchor=>{if(!box.isConnected||anchor.component_id!==component.id||anchor.asset_file!==component.file||anchor.start_seconds<from||anchor.end_seconds>to||!select(anchor.start_seconds,anchor.end_seconds))return false;media.reviewCancelResume?.();media.pause();seek(anchor.start_seconds);track.focus();box.scrollIntoView({block:'center'});return true};
   if(review){
     reviewSurface(box,'audio');let commentKey='';
     box.reviewPaintComments=()=>{
@@ -173,12 +202,12 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
   dialog.addEventListener('pointerdown',e=>e.stopPropagation());
   dialog.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();dialog.close()}});
   dialog.addEventListener('cancel',e=>{e.preventDefault();dialog.close()});
-  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video'))media.pause();if(selectionAction&&selectionParent){selectionAction.hidden=true;selectionParent.insertBefore(selectionAction,selectionNext?.parentNode===selectionParent?selectionNext:null)}reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}const returnTrigger=dialog.reviewReturnTrigger||trigger;if(returnTrigger?.isConnected)returnTrigger.focus({preventScroll:true});restoreReading()},{once:true});
+  dialog.addEventListener('close',()=>{for(const media of dialog.querySelectorAll('audio,video')){media.reviewCancelResume?.();media.pause()}if(selectionAction&&selectionParent){selectionAction.hidden=true;selectionParent.insertBefore(selectionAction,selectionNext?.parentNode===selectionParent?selectionNext:null)}reviewDialogStack.splice(reviewDialogStack.indexOf(dialog),1);dialog.remove();if(!dialog.closedByHistory&&history.state?.reviewDialog===dialogId){reviewDialogBackPending=true;history.back()}const returnTrigger=dialog.reviewReturnTrigger||trigger;if(returnTrigger?.isConnected)returnTrigger.focus({preventScroll:true});restoreReading()},{once:true});
   history.pushState({...history.state,reviewDialog:dialogId},'',location.href);reviewDialogStack.push(dialog);
   document.body.append(dialog);dialog.showModal();return {dialog,title,body};
 }
 
-function pauseReviewMedia(root=document){for(const media of root.querySelectorAll('audio,video'))media.pause()}
+function pauseReviewMedia(root=document){for(const media of root.querySelectorAll('audio,video')){media.reviewCancelResume?.();media.pause()}}
 // Detached media can otherwise continue playing after a card/version change.
 if(typeof MutationObserver!=='undefined')new MutationObserver(changes=>{
   for(const change of changes)for(const node of change.removedNodes)if(node.nodeType===1&&!node.isConnected){if(node.matches('audio,video'))node.pause();pauseReviewMedia(node)}

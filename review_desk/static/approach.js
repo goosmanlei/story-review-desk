@@ -80,6 +80,8 @@ function renderApproachBlocks(article, blocks, title, tabId) {
       const media = el(block.kind === 'image' ? 'img' : block.kind);
       if (block.kind !== 'audio') { media.width = block.width; media.height = block.height; }
       media.src = reviewURL('/approach-media/' + encodeURIComponent(block.file));
+      if(block.kind==='image')media.src=reviewVariantURL(media.src,'large');
+      if(block.kind==='video'){media.poster=reviewVariantURL(media.src,'poster');reviewRefreshMedia(media)}
       if (block.kind === 'image') {
         media.alt = block.caption; media.loading = 'lazy'; media.decoding = 'async';
         media.tabIndex = 0; media.setAttribute('role', 'button'); media.setAttribute('aria-haspopup', 'dialog');

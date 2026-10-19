@@ -147,9 +147,13 @@ async function drawMethods(root,restoreViewport=null){
 }
 function renderMethodOriginal(parent,doc){
  const media=el(doc.media?.mime.startsWith('audio/')?'audio':doc.media?.mime.startsWith('video/')?'video':'img');
- media.src=doc.media?reviewURL('/api/methods/file-media?'+new URLSearchParams({object_id:doc.record.object_id,file:doc.file,version:doc.file_version.version})):'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(doc.content);
+ const original=doc.media?reviewURL('/api/methods/file-media?'+new URLSearchParams({object_id:doc.record.object_id,file:doc.file,version:doc.file_version.version})):'data:image/svg+xml;charset=utf-8,'+encodeURIComponent(doc.content);
+ media.src=doc.media&&media.tagName==='IMG'?reviewVariantURL(original,'large'):original;
+ if(doc.media&&media.tagName==='VIDEO')media.poster=reviewVariantURL(original,'poster');
  if(media.tagName==='IMG')media.alt=doc.file;else{media.controls=true;media.preload='metadata'}
- media.onerror=()=>{media.remove();nodeText('p','production-issue','此版本的准确原件无法读取；未替换为其他原件。',parent);methodButton(parent,'重试原件',()=>{parent.replaceChildren();renderMethodOriginal(parent,doc)})};parent.append(media);
+ let failure;media.onerror=()=>{if(failure)return;failure=el('div');nodeText('p','production-issue','此版本的准确原件无法读取；未替换为其他原件。',failure);methodButton(failure,'重试原件',()=>{parent.replaceChildren();renderMethodOriginal(parent,doc)});parent.append(failure)};
+ const recovered=()=>{failure?.remove();failure=null};media.addEventListener('load',recovered);media.addEventListener('loadedmetadata',recovered);
+ if(doc.media)reviewRefreshMedia(media);parent.append(media);
 }
 async function compareMethodFile(doc,trigger){
  const modal=openReviewDialog('版本比较 · '+doc.file,trigger,'method-comparison'),body=modal.body;let left=doc.versions[1].version,right=doc.versions[0].version,epoch=0;
@@ -174,7 +178,7 @@ function methodLink(root,doc,part,parent){
   if(/^https:\/\//.test(href)){link.href=href;link.target='_blank';link.rel='noopener noreferrer';return}
   const raw=href.split('#')[0],hash=href.split('#')[1],base=doc.file.split('/').slice(0,-1),pieces=[...base,...raw.split('/')],out=[];for(const piece of pieces){if(piece==='..')out.pop();else if(piece&&piece!=='.')out.push(piece)}const path=out.join('/');
   const payload=doc.record.payload;
-  if(payload.source&&(/\.(mp4|webm|mp3|wav|png|jpg|jpeg|webp)$/.test(href))){link.href=reviewURL('/api/methods/media?'+new URLSearchParams({object_id:doc.record.object_id,revision_id:doc.record.revision_id,file:doc.file,href}));link.target='_blank';link.rel='noopener';const media=el(/\.(mp3|wav)$/.test(href)?'audio':/\.(mp4|webm)$/.test(href)?'video':'img');media.src=link.href;if(media.tagName!=='IMG'){media.controls=true;media.preload='metadata'}else media.alt=part.text;media.onerror=()=>{media.remove();nodeText('p','production-issue','准确媒体未能读取，未替换为其他版本。',parent)};const figure=el('figure','approach-media');figure.append(media);parent.parentElement.append(figure);return;}
+  if(payload.source&&(/\.(mp4|webm|mp3|wav|png|jpg|jpeg|webp)$/.test(href))){link.href=reviewURL('/api/methods/media?'+new URLSearchParams({object_id:doc.record.object_id,revision_id:doc.record.revision_id,file:doc.file,href}));link.target='_blank';link.rel='noopener';const media=el(/\.(mp3|wav)$/.test(href)?'audio':/\.(mp4|webm)$/.test(href)?'video':'img');media.src=media.tagName==='IMG'?reviewVariantURL(link.href,'large'):link.href;if(media.tagName==='VIDEO')media.poster=reviewVariantURL(link.href,'poster');if(media.tagName!=='IMG'){media.controls=true;media.preload='metadata'}else media.alt=part.text;let failure;media.onerror=()=>{if(!failure)failure=nodeText('p','production-issue','准确媒体未能读取，未替换为其他版本。',parent)};const recovered=()=>{failure?.remove();failure=null};media.addEventListener('load',recovered);media.addEventListener('loadedmetadata',recovered);reviewRefreshMedia(media);const figure=el('figure','approach-media');figure.append(media);parent.parentElement.append(figure);return;}
   let ref={category:methodView.category,object_id:doc.record.object_id,revision_id:doc.record.revision_id,file:raw?path:doc.file};
   if(!Object.hasOwn(payload.files,ref.file)){
     ref=null;

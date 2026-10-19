@@ -101,6 +101,8 @@ def fingerprint(store):
 
 
 def prepare(store):
+    from .resources import require_local_cleanup
+    require_local_cleanup(p.root_of(store))
     if not current.enabled(store):
         raise ValueError('current production contract required')
     from .material_archives import read_bytes
@@ -158,6 +160,8 @@ def prepare(store):
 
 def cleanup(store, plan, stop_after=None):
     """Resume the same committed manifest; deleted bytes have no rollback."""
+    from .resources import require_local_cleanup
+    require_local_cleanup(p.root_of(store))
     known = erased_files(store)
     if not set(plan['erased_files']) <= known.keys():
         raise Conflict('commit exact reference conversion before deleting bytes')

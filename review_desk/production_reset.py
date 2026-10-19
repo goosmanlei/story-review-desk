@@ -149,6 +149,8 @@ def apply(store, plan, fault=None):
         return {**json.loads(prior[1]), 'already_applied': True}
     if store.db.in_transaction:
         raise Conflict('reset must own its transaction')
+    from .resources import require_local_cleanup
+    require_local_cleanup(p.root_of(store))
     store.db.execute('PRAGMA secure_delete=ON')
     store.db.execute('BEGIN IMMEDIATE')
     store.db.execute('PRAGMA defer_foreign_keys=ON')

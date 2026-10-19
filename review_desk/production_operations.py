@@ -18,19 +18,33 @@ def remember(store, operation, fingerprint, result):
     return result
 
 
-def run(store, request, action):
+def run(store, request, action, *, preflight=None):
     if not current.enabled(store):
         raise Conflict('需要先迁移为当前制作模型')
     operation = request.get('id')
     if not isinstance(operation, str) or not p.ID.fullmatch(operation):
         raise ValueError('需要唯一操作身份')
     fingerprint = current.checksum(request)
+    result = prior(store, operation, fingerprint)
+    if result is not None:
+        return result
+    from .production_media import physical_hash_scope, frozen_physical_hashes
+    with physical_hash_scope():
+        if preflight is not None:
+            preflight()
+        with frozen_physical_hashes():
+            return _run_preflighted(store, operation, fingerprint, action)
+
+
+def _run_preflighted(store, operation, fingerprint, action):
     store.db.execute('BEGIN IMMEDIATE')
     try:
         result = prior(store, operation, fingerprint)
         if result is None:
             result = action()
             result = remember(store, operation, fingerprint, result)
+        from .production_media import validate_physical_hashes
+        validate_physical_hashes()
         store.db.commit()
         return result
     except BaseException:
@@ -67,10 +81,18 @@ def submit(store, request):
             {'object_id': oid, 'kind': 'CALL', 'expected_version': 0, 'payload': payload}]}, transaction=False)
         return {'call_id': oid, 'submission_sha256': current.submission(store, oid)['snapshot_sha256'],
                 'already_applied': False, 'recovery': 'query-existing-operation-before-any-resubmit'}
-    return run(store, request, action)
+    return run(store, request, action, preflight=lambda: package(store, request['requirement_id']))
 
 
 def reuse(store, request):
+    def preflight():
+        row = store.db.execute('SELECT * FROM production_candidates WHERE id=?', (request['candidate_id'],)).fetchone()
+        if row:
+            saved = current.submission(store, row['operation_id'])['snapshot']
+            p.preflight_inputs(store, saved.get('request', {}).get('inputs', []))
+            for source in saved.get('requirements', []):
+                if source['object_id'] == request['requirement_id']:
+                    p.preflight_requirement(store, source)
     def action():
         need = p.record(store, request['requirement_id'])
         if need['kind'] != 'REQUIREMENT':
@@ -112,11 +134,14 @@ def reuse(store, request):
         result = store._put_object(need['object_id'], 'REQUIREMENT', payload, need['version'],
                                    [{'revision_id': r['revision_id'], 'role': role} for role,r in p.references(payload)])
         return {**result, 'already_applied': False, 'candidate_id': row['id']}
-    return run(store, request, action)
+    return run(store, request, action, preflight=preflight)
 
 
 def finish(store, request):
     """Idempotent poll/callback receipt. No external dispatch occurs here."""
+    def preflight():
+        if request.get('asset'):
+            p._components(store, request['asset'], inspect=True)
     def action():
         call = p.record(store, request['call_id'])
         saved = current.submission(store, call['object_id'])
@@ -154,11 +179,25 @@ def finish(store, request):
             'expected_version':call['version'],'payload':payload}]}, transaction=False)
         candidate=store.db.execute('SELECT id FROM production_candidates WHERE operation_id=?',(call['object_id'],)).fetchone()
         return {'call_id':call['object_id'],'candidate_id':candidate[0] if candidate else None,'status':status,'already_applied':False}
-    return run(store, request, action)
+    return run(store, request, action, preflight=preflight)
 
 
 def select(store, request):
     from .shot_references import input_key, slot, response
+    def preflight():
+        need = p.record(store, request['requirement_id'])
+        p.preflight_requirement(store, need)
+        if request.get('candidate'):
+            p.preflight_inputs(store, [{'reference': request['candidate'], 'component_id': request.get('component_id'),
+                'material_selection': {'material_id': request.get('material_id')}}])
+            proposed = copy.deepcopy(need)
+            items = proposed['payload'].get('generation', {}).get('inputs', [])
+            index = request.get('index')
+            if type(index) is int and 0 <= index < len(items):
+                items[index] = {**items[index], 'reference': request['candidate'],
+                    'component_id': request.get('component_id'),
+                    'material_selection': {'material_id': request.get('material_id')}}
+                p.preflight_requirement(store, proposed)
     def action():
         need = p.record(store, request['requirement_id'])
         current.guard(store, need['object_id'], request.get('expected_content'))
@@ -214,11 +253,14 @@ def select(store, request):
         # Reuse read-only evidence within this response, never across writes.
         with p.read_scope(store):
             return response(store, p.record(store, need['object_id']), False)
-    return run(store, request, action)
+    return run(store, request, action, preflight=preflight)
 
 
 def whole_references(store, request):
     """Remove retired partial-reference settings from guarded current plans only."""
+    def preflight():
+        for target in request['requirements']:
+            p.preflight_requirement(store, p.record(store, target['object_id']))
     def action():
         changed = []
         for target in request['requirements']:
@@ -242,4 +284,4 @@ def whole_references(store, request):
                               [{'revision_id': r['revision_id'], 'role': role} for role, r in p.references(payload)])
             changed.append({'object_id': need['object_id'], 'indices': indices})
         return {'changed': changed, 'already_applied': False}
-    return run(store, request, action)
+    return run(store, request, action, preflight=preflight)

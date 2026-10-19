@@ -41,7 +41,7 @@ test('submitted reference preview uses its frozen original when the former upstr
  const record={object_id:'asset',id:'retired-upstream',kind:'ASSET',submission_only:true,component_snapshot:true,payload:{title:'提交时原图',components:[{id:'original',role:'original',mime:'image/png',file:'submitted.png'}]}};
  c.openReviewDialog=()=>({dialog,body,title});c.api=async()=>{throw Error('must not read a mutable upstream')};c.paintReviewCommentCounts=()=>{};
  await c.openMaterialReference({object_id:'asset',revision_id:'retired-upstream',component_id:'original',snapshot_record:record},null,false);
- const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.src,'/api/production/files/submitted.png');
+ const img=body.all().find(n=>n.tag==='img');assert.ok(img);assert.equal(img.src,'/api/production/files/submitted.png?variant=large');
  assert.ok(title.textContent.includes('准确候选原件'));
 });
 test('an unclassified requirement hands its existing container to the unified reader without reopening',async()=>{

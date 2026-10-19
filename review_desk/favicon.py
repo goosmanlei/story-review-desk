@@ -83,9 +83,9 @@ def validate_image(data, suffix):
 
 def asset(root, name):
     validate_name(name)
-    base = (Path(root) / 'export' / 'assets').resolve()
-    path = base / name
-    if path.is_symlink() or not path.is_file() or path.resolve().parent != base:
+    from .resources import materialize
+    path = materialize(root, 'export/assets/' + name)
+    if path.is_symlink() or not path.is_file():
         raise ValueError('站点图标文件不存在或不是受管本地文件')
     if path.stat().st_size > MAX_BYTES:
         raise ValueError('站点图标文件须在 256 KiB 以内')
@@ -102,8 +102,22 @@ def upload(root, name, encoded):
         raise ValueError('无效图标上传内容') from exc
     validate_image(data, suffix)
     filename = 'favicon-' + hashlib.sha256(data).hexdigest() + suffix
-    base = Path(root) / 'export' / 'assets'
+    from . import resources
+    cloud = resources.settings(root)
+    base = resources.contained(root, '.runtime/resource-ingest') if cloud else Path(root)/'export/assets'
     base.mkdir(parents=True, exist_ok=True)
+    if cloud:
+        import tempfile
+        import os
+        fd, temporary = tempfile.mkstemp(prefix='favicon-', suffix=suffix, dir=base)
+        path = Path(temporary)
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                stream.write(data)
+            resources.publish_file(root, 'export/assets/' + filename, path)
+        finally:
+            path.unlink(missing_ok=True)
+        return filename
     path = base / filename
     if path.is_symlink():
         raise ValueError('不允许图标符号链接')
@@ -115,7 +129,12 @@ def upload(root, name, encoded):
 
 def choices(root):
     result = []
-    for path in sorted((Path(root) / 'export' / 'assets').glob('*')):
+    from . import resources
+    config = resources.settings(root)
+    paths = ([Path(name) for name,spec in resources._catalog(root,config).items()
+              if name.startswith('export/assets/') and spec['bytes'] <= MAX_BYTES] if config else
+             (Path(root)/'export/assets').glob('*'))
+    for path in sorted(paths):
         if path.suffix.lower() not in MIMES:
             continue
         try:
