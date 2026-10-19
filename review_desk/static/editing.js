@@ -20,8 +20,19 @@ function editChoices(host,key,label,options,value,change){
   const group=flatFilterGroup(host,key,label,options,value,null,()=>{}),buttons=[...group.querySelectorAll('button')];
   buttons.forEach((button,index)=>{button.onclick=()=>{if(button.getAttribute('aria-pressed')==='true')return;for(const b of buttons)b.setAttribute('aria-pressed',String(b===button));return Promise.resolve(change(options[index][0])).catch(e=>toast(e.message))}});return group;
 }
-function editRemember(ctx){try{localStorage.setItem('episode-edit:'+location.pathname+':'+ctx.episode,JSON.stringify({output:ctx.output,variant:ctx.variant,frame:ctx.frame,zoom:ctx.zoom,zoomLevel:ctx.zoomLevel,ranges:ctx.ranges,timelineScroll:ctx.timelineScroll,draft:ctx.draft,basis:ctx.project?.id,selected:ctx.selected,selectedTitle:ctx.selectedTitle}));localStorage.setItem('episode-edit:last:'+location.pathname,ctx.episode)}catch{toast('本机草稿保存失败；当前草稿仍在页面中，请保存工程。')}}
+function editRemember(ctx){try{localStorage.setItem('episode-edit:'+location.pathname+':'+ctx.episode,JSON.stringify({output:ctx.output,variant:ctx.variant,frame:ctx.frame,zoom:ctx.zoom,zoomLevel:ctx.zoomLevel,ranges:ctx.ranges,timelineScroll:ctx.timelineScroll,draft:ctx.draft,basis:ctx.project?.id,version:ctx.project?.version,dirty:!!editChanged(ctx),recoveries:ctx.recoveries,selected:ctx.selected,selectedTitle:ctx.selectedTitle}));localStorage.setItem('episode-edit:last:'+location.pathname,ctx.episode)}catch{toast('本机草稿保存失败；当前草稿仍在页面中，请保存工程。')}}
 function editChanged(ctx){return ctx.project&&JSON.stringify(ctx.draft)!==JSON.stringify(ctx.project.payload)}
+function editKeepRecovery(recoveries,saved){
+  if(!saved?.basis||!saved.draft)return;
+  if(!recoveries.some(r=>r.basis===saved.basis&&JSON.stringify(r.draft)===JSON.stringify(saved.draft)))recoveries.push({basis:saved.basis,version:saved.version,draft:editClone(saved.draft)});
+}
+function editRestoreDraft(ctx,recovery){
+  if(!ctx.recoveries.includes(recovery))return;
+  ctx.recoveries=ctx.recoveries.filter(r=>r!==recovery);
+  // Restoring an older draft must not discard newer, unsaved work either.
+  if(editChanged(ctx)&&JSON.stringify(ctx.draft)!==JSON.stringify(recovery.draft))editKeepRecovery(ctx.recoveries,{basis:ctx.project.id,version:ctx.project.version,draft:ctx.draft});
+  editMutation(ctx,()=>{ctx.draft=editClone(recovery.draft)});
+}
 function editMutation(ctx,fn){ctx.undo.push(editClone(ctx.draft));if(ctx.undo.length>40)ctx.undo.shift();ctx.redo=[];fn(ctx.draft);editRemember(ctx);renderEpisodeEditing(ctx)}
 function clearEpisodeEditReview(){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
@@ -37,8 +48,10 @@ async function loadEpisodeEditing(){
     let ctx=episodeEditing.contexts.get(episode);const project=data.projects.find(p=>p.payload.episode.object_id===episode);
     if(!ctx){let saved;try{saved=JSON.parse(localStorage.getItem('episode-edit:'+location.pathname+':'+episode)||'null')}catch{}
       ctx={episode,output:saved?.output,variant:saved?.variant||'subtitled',frame:saved?.frame||0,zoom:0,zoomLevel:editZoomLevels.includes(saved?.zoomLevel)?saved.zoomLevel:({2:'overview',4:'standard',8:'detail',16:'fine',96:'frame'}[saved?.zoom]||'overview'),ranges:saved?.ranges||{},timelineScroll:saved?.timelineScroll||0,undo:[],redo:[],selected:saved?.selected,selectedTitle:saved?.selectedTitle,
-        draft:saved&&project&&saved.basis===project.id?saved.draft:project?editClone(project.payload):null,project};episodeEditing.contexts.set(episode,ctx);
-      if(saved?.draft&&saved.basis!==project?.id)ctx.recoverable=saved;
+        draft:saved&&project&&saved.basis===project.id?saved.draft:project?editClone(project.payload):null,project,recoveries:[]};episodeEditing.contexts.set(episode,ctx);
+      for(const recovery of Array.isArray(saved?.recoveries)?saved.recoveries:[])editKeepRecovery(ctx.recoveries,recovery);
+      // Older storage has no dirty flag: preserve it conservatively once.
+      if(saved?.draft&&saved.basis!==project?.id&&saved.dirty!==false)editKeepRecovery(ctx.recoveries,saved);
     }else if(project?.id!==ctx.project?.id&&!editChanged(ctx)){ctx.project=project;ctx.draft=project?editClone(project.payload):null}
     ctx.data=data;ctx.host=host;ctx.epoch=epoch;ctx.readEpoch=readEpoch;ctx.job=(data.jobs||[]).find(j=>j.episode_id===episode)||null;
     const outputs=data.outputs.filter(o=>o.payload.project.episode.object_id===episode);
@@ -67,7 +80,7 @@ function renderEpisodeEditing(ctx){
   }
   if(!output){clearEpisodeEditReview();renderComments()}
   if(!ctx.project){nodeText('p',null,'本集尚未建立剪辑工程。工程由制作任务导入后可在此继续编辑和审阅。',host);return}
-  if(ctx.recoverable){const recovery=el('div','edit-notice');nodeText('p',null,'另有基于旧工程的本机草稿，已保留。恢复后仍须按当前工程版本检查再保存。',recovery);productionButton(recovery,'恢复本机草稿',()=>{ctx.draft=ctx.recoverable.draft;ctx.recoverable=null;renderEpisodeEditing(ctx)});host.append(recovery)}
+  if(ctx.recoveries.length){const recovery=el('div','edit-notice');nodeText('p',null,'另有本机草稿，已保留。恢复后仍须按当前工程版本检查再保存。',recovery);ctx.recoveries.forEach((saved,i)=>productionButton(recovery,'恢复本机草稿'+(ctx.recoveries.length>1?' '+(i+1):'')+(saved.version?'（工程版本 '+saved.version+'）':''),()=>editRestoreDraft(ctx,saved)));host.append(recovery)}
   if(editChanged(ctx)||output&&output.payload.snapshot&&JSON.stringify(project)!==JSON.stringify(ctx.draft))nodeText('p','edit-notice','工程草稿已有修改，当前预览尚未更新。播放器和时间线仍对应所选成片版本。',host);
   const layout=el('div','edit-layout'),nav=el('nav','edit-scenes breakdown-scene-list'),main=el('div','edit-main');nav.setAttribute('aria-label','场镜导航');layout.append(nav,main);host.append(layout);
   let media,rangeStart,rangeEnd,playhead,frameFact,followPlayback=()=>{};
