@@ -142,8 +142,8 @@ def media_type(filename):
     return MEDIA_TYPES.get('.' + filename.rsplit('.', 1)[-1])
 
 
-def media_file(root, filename):
-    """Serve only declared, local method assets with the declared exact bytes."""
+def media_reference(root, filename):
+    """Resolve declared identity without reading remote bytes during HTTP routing."""
     if not media_type(filename):
         raise ValueError('invalid method media filename')
     document = read_document(root)
@@ -152,18 +152,21 @@ def media_file(root, filename):
                 if block['type'] == 'media' and block['file'] == filename]
     if not declared:
         raise FileNotFoundError(filename)
-    folder = root / 'content' / 'production-approach-assets'
-    path = folder / filename
-    if folder.resolve() != root.resolve() / 'content' / 'production-approach-assets' or folder.is_symlink() or path.is_symlink() or path.resolve().parent != folder.resolve() or not path.is_file():
-        raise FileNotFoundError(filename)
-    digest = hashlib.sha256()
-    with path.open('rb') as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b''): digest.update(chunk)
-    if any(block['sha256'] != digest.hexdigest() for block in declared):
+    hashes = {block['sha256'] for block in declared}
+    if len(hashes) != 1:
+        raise ValueError('conflicting exact method media declarations')
+    return 'content/production-approach-assets/' + filename, media_type(filename)[1], hashes.pop()
+
+
+def media_file(root, filename):
+    relative, mime, expected = media_reference(root, filename)
+    from .resources import materialize, hash_file
+    path = materialize(root, relative)
+    if not path.is_file() or hash_file(path) != expected:
         raise ValueError('method media differs from declared content')
     if path.suffix == '.svg':
         validate_diagram(path.read_bytes())
-    return path, media_type(filename)[1]
+    return path, mime
 
 
 def validate_collaboration(diagram):

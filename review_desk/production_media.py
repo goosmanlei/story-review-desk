@@ -33,9 +33,11 @@ def _file_identity(path):
 @contextmanager
 def physical_hash_scope():
     """Reuse verified physical bytes only for this publication/export operation."""
-    token = _physical_hashes.set({'files': {}, 'frozen': False})
+    token = _physical_hashes.set({'files': {}, 'probes': {}, 'frozen': False})
     try:
-        yield
+        from .resources import lease_scope
+        with lease_scope():
+            yield
     finally:
         _physical_hashes.reset(token)
 
@@ -49,12 +51,22 @@ def frozen_physical_hashes():
     previous = scope['frozen']
     scope['frozen'] = True
     try:
-        yield
-        for path, (identity, _) in scope['files'].items():
-            if _file_identity(path) != identity:
-                raise ValueError('media changed during preflight; retry operation')
+        from .resources import frozen_scope
+        with frozen_scope():
+            yield
+        validate_physical_hashes()
     finally:
         scope['frozen'] = previous
+
+
+def validate_physical_hashes():
+    """Recheck identities before a caller commits its database transaction."""
+    scope = _physical_hashes.get()
+    if scope is None:
+        return
+    for path, (identity, _) in scope['files'].items():
+        if _file_identity(path) != identity:
+            raise ValueError('media changed during preflight; retry operation')
 
 
 def physical_file_hash(path):
@@ -92,7 +104,9 @@ def asset_path(root, name):
 
 def export_asset_path(root, name):
     """Shared export assets also include named source figures and site icons."""
-    return bundle_asset_path(Path(root) / 'export', name)
+    bundle_asset_path(Path(root) / 'export', name)  # validate the legacy name
+    from .resources import materialize
+    return materialize(root, 'export/assets/' + name)
 
 
 def bundle_asset_path(directory, name):
@@ -108,6 +122,23 @@ def bundle_asset_path(directory, name):
 
 
 def probe(path):
+    path = Path(path).absolute()
+    scope = _physical_hashes.get()
+    before = _file_identity(path)
+    saved = scope['probes'].get(path) if scope is not None else None
+    if saved and saved[0] == before:
+        return dict(saved[1])
+    if scope is not None and scope['frozen']:
+        raise ValueError('media metadata was not preflighted before the database transaction')
+    result = _probe(path)
+    if _file_identity(path) != before:
+        raise ValueError('media changed during metadata inspection')
+    if scope is not None:
+        scope['probes'][path] = (before, dict(result))
+    return result
+
+
+def _probe(path):
     suffix = path.suffix.lower()
     mime = MIMES.get(suffix)
     if mime is None:
@@ -167,8 +198,10 @@ def ingest(root, source, name, length=None):
     suffix = Path(name).suffix.lower()
     if suffix not in MIMES:
         raise ValueError("unsupported production file type")
-    folder = Path(root) / "export" / "assets"
-    asset_path(root, "0" * 64 + suffix)  # validate directory before creating it
+    from . import resources
+    cloud = resources.settings(root)
+    folder = (resources.contained(root, '.runtime/resource-ingest') if cloud else Path(root)/'export/assets')
+    bundle_asset_path(Path(root) / 'export', "0" * 64 + suffix)
     folder.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=".ingest-", suffix=suffix, dir=folder)
     temp = Path(temporary)
@@ -182,12 +215,18 @@ def ingest(root, source, name, length=None):
                 out.write(chunk)
                 h.update(chunk)
                 size += len(chunk)
+                if size>8*1024**3:
+                    raise ValueError('media exceeds the 8 GiB upload bound')
             out.flush()
             os.fsync(out.fileno())
         if size == 0 or length is not None and size != length:
             raise ValueError("empty or incomplete media upload")
         meta = probe(temp)
         filename = h.hexdigest() + suffix
+        if cloud:
+            resources.publish_file(root, 'export/assets/' + filename, temp, expected_sha=h.hexdigest(), mime=meta['mime'])
+            return {"id": "original", "role": "original", "file": filename,
+                    "sha256": h.hexdigest(), "bytes": size, **meta}
         destination = asset_path(root, filename)
         if destination.exists():
             if file_hash(destination) != h.hexdigest():

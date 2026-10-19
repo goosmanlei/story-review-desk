@@ -92,6 +92,10 @@ def _write_content(store, path):
 
 
 def export(store, export_dir):
+    from .resources import settings
+    if settings(store.db_path.parent.parent):
+        from .resource_bundle import export as export_resources
+        return export_resources(store, export_dir)
     from .production_current import enabled
     if enabled(store):
         from .production_current_bundle import export as export_current
@@ -111,5 +115,9 @@ def _export(store, export_dir, content_file):
 
 
 def restore(store, export_dir):
+    manifest = json.loads((Path(export_dir)/'manifest.json').read_text())
+    if manifest.get('schema_version') == 16:
+        from .resource_bundle import restore as restore_resources
+        return restore_resources(store, export_dir)
     from .production_current_bundle import restore as restore_current
     return restore_current(store, export_dir)

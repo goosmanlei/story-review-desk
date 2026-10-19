@@ -8,7 +8,7 @@ function materialDefaultCandidate(model,data){
 function reviewSmallCard(parent,item,activate,selected=false){
   const button=item.inlineControls?el('div'):productionButton(parent,'',()=>activate(button));if(item.inlineControls)parent.append(button);button.className='material-small-card';if(!item.inlineControls){button.setAttribute('aria-pressed',String(selected));button.title=item.title}
   const preview=el('span','material-small-preview');
-  if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src=reviewURL('/api/production/files/'+encodeURIComponent(item.preview.file));img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
+  if(item.preview?.mime?.startsWith('image/')){const img=el('img');img.src=reviewURL('/api/production/files/'+encodeURIComponent(item.preview.file)+'?variant=small');img.alt='';img.loading='lazy';preview.append(img)}else preview.append(productionEntityIcon(item.icon));
   if(item.preview?.mime?.startsWith('image/')||(item.inlineControls&&item.icon==='image')){
     if(!item.preview?.mime?.startsWith('image/')){preview.dataset.placeholder='true';preview.setAttribute('role','img');preview.setAttribute('aria-label','未选定原件');preview.title='未选定原件'}
     button.append(preview);

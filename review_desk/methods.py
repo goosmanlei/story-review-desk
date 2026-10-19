@@ -542,6 +542,19 @@ def export_execution(store, ref, destination):
 def sync_source(store, root, value):
     """Read-only projections from project-owned Markdown; never write the source."""
     root = Path(root).resolve(strict=True)
+    from . import resources
+    import posixpath
+    def source_path(relative):
+        relative=posixpath.normpath(relative)
+        path=resources.contained(root,relative)
+        if resources.settings(root):
+            try:
+                resources.descriptor(root,relative)
+            except FileNotFoundError:
+                require(path.suffix in ('.md','.json'), '媒体必须先登记准确云版本')
+            else:
+                return resources.materialize(root,relative)
+        return path
     payload = {'title': value['title'], 'files': {}, 'sections': {}, 'source': {'kind': 'project-markdown', 'files': {}}}
     for section, spec in value['sections'].items():
         identifier(section)
@@ -568,8 +581,8 @@ def sync_source(store, root, value):
             require(isinstance(names, list), '附属资料应为准确文件清单')
             for name in names:
                 relative = file_path(name)
-                path = (root / relative).resolve(strict=True)
-                require(root in path.parents and path.suffix in ('.md', '.svg', '.json'), '附属资料须为项目内 Markdown、SVG 或 JSON')
+                path = source_path(relative)
+                require(Path(relative).suffix in ('.md', '.svg', '.json'), '附属资料须为项目内 Markdown、SVG 或 JSON')
                 body = path.read_bytes().decode('utf-8')
                 require(name not in payload['files'] or payload['files'][name] == body, '附属文件不能替换章节切片')
                 payload['files'][name] = body
@@ -589,13 +602,14 @@ def sync_source(store, root, value):
             if href in media.get(filename, {}):
                 continue
             spec = payload['source']['files'][filename]
-            path = (root / Path(spec['path']).parent / href).resolve(strict=True)
-            require(root in path.parents and path.is_file(), '媒体必须属于项目源目录')
+            logical=posixpath.normpath((Path(spec['path']).parent / href).as_posix())
+            path = source_path(logical)
+            require(path.is_file(), '媒体必须属于项目源目录')
             sha = hashlib.sha256()
             with path.open('rb') as stream:
                 for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                     sha.update(chunk)
-            media.setdefault(filename, {})[href] = {'path': path.relative_to(root).as_posix(),
+            media.setdefault(filename, {})[href] = {'path': logical,
                 'sha256': sha.hexdigest(), 'bytes': path.stat().st_size,
                 'mime': mimetypes.guess_type(path.name)[0] or 'application/octet-stream'}
     if media:

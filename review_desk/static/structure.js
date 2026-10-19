@@ -153,7 +153,7 @@ function renderStructureVisual(visual,preview=false){
   if(Number(size.width)>0&&Number(size.height)>0){img.width=Number(size.width);img.height=Number(size.height)}
   img.addEventListener('load',()=>{if(img.naturalWidth&&img.naturalHeight){structureVisualSizes.set(visual.file,{width:img.naturalWidth,height:img.naturalHeight});img.width=img.naturalWidth;img.height=img.naturalHeight}scheduleStructureIndex()});
   img.addEventListener('error',scheduleStructureIndex);
-  img.src=reviewURL(`/assets/${encodeURIComponent(visual.file)}`);img.alt=visual.alt;stage.append(img);
+  img.src=reviewURL(`/assets/${encodeURIComponent(visual.file)}?variant=large`);img.alt=visual.alt;stage.append(img);
   if(preview){
     img.classList.add('structure-image-trigger');img.dataset.reviewDialogTrigger='';img.tabIndex=0;img.setAttribute('role','button');img.setAttribute('aria-label',`放大查看：${visual.title}`);img.setAttribute('aria-haspopup','dialog');img.title='点击放大查看';img.draggable=false;
     img.onclick=()=>openStructureImage(visual,img);

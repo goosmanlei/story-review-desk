@@ -130,7 +130,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
     def handle_one_request(self):
         self._write_window = None
         try:
-            return super().handle_one_request()
+            from .resources import lease_scope
+            with lease_scope():
+                return super().handle_one_request()
         finally:
             if self._write_window is not None:
                 self._write_window.close()
@@ -221,10 +223,69 @@ class ReviewHandler(BaseHTTPRequestHandler):
             self.send_header('Content-Encoding', 'gzip')
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
-        self.wfile.write(data)
+        if self.command != 'HEAD':
+            self.wfile.write(data)
 
-    def _file(self, path, mime):
+    def _resource(self, relative, mime=None, expected_sha=None, expected_bytes=None):
+        from . import resources
+        from .media_previews import prepare, checksum
+        query = parse_qs(urlsplit(self.path).query)
+        variant = query.get('variant', [None])[0]
+        config = resources.settings(self.server.root)
+        if config:
+            spec = resources.descriptor(self.server.root, relative)
+            if expected_sha and spec['sha256'] != expected_sha or expected_bytes is not None and spec['bytes'] != expected_bytes:
+                raise ValueError('exact resource differs from the referenced original')
+            chosen = resources.descriptor(self.server.root, relative, variant)
+            if os.environ.get('REVIEW_RESOURCES_OFFLINE') == '1':
+                media = resources.materialize(self.server.root, relative, spec=chosen)
+                return self._file(media, chosen['mime'], chosen['sha256'])
+            if query.get('download') == ['1']:
+                # Keep explicit downloads on the application's origin. A
+                # cross-origin redirect ignores the anchor's download contract
+                # in browsers and can navigate away from an unsaved review.
+                media = resources.materialize(self.server.root, relative, spec=chosen)
+                return self._file(media, chosen['mime'], chosen['sha256'])
+            # OSS ignores If-Range and defaults to 200 for unsatisfiable Range.
+            # Keep the public application's conditional-read contract while
+            # ordinary valid reads still redirect directly to the exact object.
+            if self.headers.get('If-Range'):
+                etag=resources.remote_etag(self.server.root,chosen)
+                media=resources.materialize(self.server.root,relative,spec=chosen)
+                return self._file(media,chosen['mime'],chosen['sha256'],expected_etag=etag)
+            if self.headers.get('Range'):
+                match=re.fullmatch(r'bytes=(\d*)-(\d*)',self.headers['Range'])
+                invalid=not match or not any(match.groups())
+                if not invalid:
+                    left,right=match.groups();size=chosen['bytes']
+                    invalid=(int(left)>=size or bool(right) and int(right)<int(left)) if left else int(right)==0
+                if invalid:
+                    self.send_response(416)
+                    self.send_header('Content-Range','bytes */'+str(chosen['bytes']))
+                    self.send_header('Content-Length','0');self.end_headers()
+                    return
+            url = resources.signed_url(self.server.root, relative, variant=variant,
+                                       download=query.get('download') == ['1'], filename=query.get('filename',[None])[0], method=self.command)
+            self.send_response(307)
+            self.send_header('Location', url)
+            self.send_header('Cache-Control', 'no-store')
+            self.send_header('Referrer-Policy', 'no-referrer')
+            self.send_header('Content-Length', '0')
+            self.end_headers()
+            return
+        source = resources.contained(self.server.root, relative)
+        mime = mime or mimetypes.guess_type(relative)[0] or 'application/octet-stream'
+        if variant:
+            if expected_bytes is not None and source.stat().st_size != expected_bytes:
+                raise ValueError('exact resource size differs from the referenced original')
+            media, spec = prepare(self.server.root, source, expected_sha or checksum(source), variant, mime)
+            return self._file(media, spec['mime'], spec['sha256'])
+        return self._file(source, mime, expected_sha, expected_bytes=expected_bytes)
+
+    def _file(self, path, mime, expected_sha=None, expected_etag=None, expected_bytes=None):
         if not path.is_file():
+            if expected_sha is not None or expected_bytes is not None:
+                raise FileNotFoundError('the referenced exact original is missing')
             return self._json({"error": "not found"}, 404)
         from .material_archives import reference, read_bytes
         import io
@@ -232,12 +293,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == Path(__file__).parent / 'static' / 'index.html':
             reconstructed = self.server.web_assets.index
         with (io.BytesIO(reconstructed) if reconstructed is not None else path.open("rb")) as stream:
-            return self._file_stream(stream, path, mime, reconstructed)
+            return self._file_stream(stream, path, mime, reconstructed, expected_sha, expected_etag, expected_bytes)
 
-    def _file_stream(self, stream, path, mime, reconstructed):
+    def _file_stream(self, stream, path, mime, reconstructed, expected_sha=None, expected_etag=None, expected_bytes=None):
         import os
         size = len(reconstructed) if reconstructed is not None else os.fstat(stream.fileno()).st_size
-        media = urlsplit(self.path).path.startswith('/api/production/files/') and mime.startswith(('image/', 'audio/', 'video/'))
+        if expected_bytes is not None and size != expected_bytes:
+            raise ValueError('exact resource size differs from the referenced original')
+        media = expected_sha is not None or urlsplit(self.path).path.startswith('/api/production/files/') and mime.startswith(('image/', 'audio/', 'video/'))
         etag = None
         if media:
             # Revalidate original bytes, never key historic media by a mutable
@@ -246,9 +309,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
             for chunk in iter(lambda: stream.read(1024 * 1024), b''):
                 digest.update(chunk)
             stream.seek(0)
-            if path.stem != digest.hexdigest():
+            if (expected_sha or path.stem) != digest.hexdigest():
                 raise ValueError('original media checksum differs from its identity')
-            etag = '"'+digest.hexdigest()+'"'
+            etag = expected_etag or '"'+digest.hexdigest()+'"'
             if self.headers.get('If-None-Match') == etag:
                 self.send_response(304)
                 self.send_header('ETag', etag)
@@ -274,17 +337,27 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 self.send_header("Content-Range", f"bytes */{size}")
                 self.end_headers()
                 return
+        query = parse_qs(urlsplit(self.path).query)
+        disposition=None
+        if query.get('download') == ['1']:
+            from .resources import download_name
+            from urllib.parse import quote
+            disposition="attachment; filename*=UTF-8''" + quote(download_name(str(path),query.get('filename',[None])[0]))
         self.send_response(206 if partial else 200)
+        if disposition:
+            self.send_header('Content-Disposition', disposition)
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(max(0, end - start + 1)))
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
-        self.send_header("Cache-Control", "private, no-cache" if media else "no-store")
+        self.send_header("Cache-Control", "private, no-cache" if media and urlsplit(self.path).path != "/favicon.ico" else "no-store")
         if etag:
             self.send_header('ETag', etag)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.end_headers()
+        if self.command == 'HEAD':
+            return
         stream.seek(start)
         remaining = end - start + 1
         while remaining > 0:
@@ -308,6 +381,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 closed = True
             if closed:
                 raise production.ReadCancelled('reader disconnected')
+
+    def do_HEAD(self):
+        return self.do_GET()
 
     def do_GET(self):
         request_path = urlsplit(self.path).path
@@ -404,16 +480,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 spec = doc['media']
                 if not spec:
                     raise ValueError('此文件版本没有准确媒体原件')
-                media = (self.server.root / spec['path']).resolve(strict=True)
-                if self.server.root.resolve() not in media.parents:
-                    raise ValueError('准确媒体路径无效')
-                sha = hashlib.sha256()
-                with media.open('rb') as stream:
-                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                        sha.update(chunk)
-                if media.stat().st_size != spec['bytes'] or sha.hexdigest() != spec['sha256']:
-                    raise ValueError('准确媒体原件已变化；未使用其他版本替代')
-                return self._file(media, spec['mime'])
+                return self._resource(spec['path'], spec['mime'], spec['sha256'], spec['bytes'])
             except (ValueError, KeyError, TypeError, OSError) as exc:
                 return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/resolve':
@@ -431,17 +498,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 spec = row['payload'].get('media', {}).get(filename, {}).get(href)
                 if not spec:
                     raise ValueError('此准确版本没有原件摘要；未用当前媒体替代，请恢复准确资料')
-                media = (self.server.root / spec['path']).resolve(strict=True)
-                if self.server.root.resolve() not in media.parents:
-                    raise ValueError('准确媒体路径无效')
-                sha = hashlib.sha256()
-                with media.open('rb') as stream:
-                    for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                        sha.update(chunk)
-                if media.stat().st_size != spec['bytes'] or sha.hexdigest() != spec['sha256']:
-                    raise ValueError('准确媒体原件已变化，未使用其他版本替代')
-                mime = spec['mime']
-                return self._file(media, mime)
+                return self._resource(spec['path'], spec['mime'], spec['sha256'], spec['bytes'])
             except (ValueError, KeyError, TypeError, OSError) as exc:
                 return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/document':
@@ -600,8 +657,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 if path == "/api/production/package":
                     return self._json(production.package_manifest(store, param("scope")))
                 if path.startswith("/api/production/files/"):
-                    media = asset_path(self.server.root, path.removeprefix("/api/production/files/"))
-                    return self._file(media, mimetypes.guess_type(media.name)[0] or "application/octet-stream")
+                    from .production_media import NAME
+                    filename = path.removeprefix("/api/production/files/")
+                    if not NAME.fullmatch(filename):
+                        raise ValueError('invalid production filename')
+                    from .candidate_reset import erased_files, NOTICE
+                    if filename in erased_files(store):
+                        return self._json({'error': NOTICE, 'media_deleted': True}, 410)
+                    return self._resource('export/assets/' + filename)
             except Conflict as exc:
                 return self._json({"error": str(exc)}, 409)
             except KeyError:
@@ -618,8 +681,9 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": "实例制作方法文档格式错误或无法读取"}, 503)
         if path.startswith('/approach-media/'):
             try:
-                media, mime = media_file(self.server.root, path[len('/approach-media/'):])
-                return self._file(media, mime)
+                from .approach import media_reference
+                relative, mime, sha = media_reference(self.server.root, path[len('/approach-media/'):])
+                return self._resource(relative, mime, sha)
             except FileNotFoundError:
                 return self._json({'error': 'method media not found'}, 404)
             except (ValueError, OSError):
@@ -683,7 +747,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if path == "/favicon.ico":
             try:
                 icon_path, _, icon = current_favicon(self.server.root, store.configuration("SYSTEM")["body"])
-                return self._file(icon_path, icon["mime"])
+                return self._resource('export/assets/' + icon['file'], icon['mime'], icon['sha256']) if icon['file'] else self._file(icon_path, icon["mime"])
             except (ValueError, OSError) as exc:
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
@@ -695,9 +759,10 @@ class ReviewHandler(BaseHTTPRequestHandler):
             from .candidate_reset import erased_files, NOTICE
             if enabled(store) and path[8:] in erased_files(store):
                 return self._json({'error': NOTICE, 'media_deleted': True, 'original_file': path[8:]}, 410)
-            asset = self.server.root / "export" / "assets" / path[8:]
-            mime = {".ico": "image/x-icon", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".mp4": "video/mp4", ".webm": "video/webm"}.get(asset.suffix.lower(), "application/octet-stream")
-            return self._file(asset, mime)
+            try:
+                return self._resource('export/assets/' + path[8:])
+            except (ValueError, OSError) as exc:
+                return self._json({'error': str(exc)}, 400)
         return self._json({"error": "not found"}, 404)
 
     def _write(self, action, comment_id=None):

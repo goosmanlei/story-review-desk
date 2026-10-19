@@ -6,16 +6,19 @@
 
 制作域只维护当前内容，素材卡在当前方案和真实候选之间切换；候选固定提交前的完整方案与准确输入，故事版本保持。数据、接口、迁移及恢复见 [当前制作与候选](docs/current-materials.md)。
 
-当前实例通过准确事务迁移取消制作全文链。较早版本收敛的历史背景见 [版本收敛](docs/version-consolidation.md)，后续制作与 Schema 15 恢复以 [当前制作与候选](docs/current-materials.md) 为准。
+当前实例通过准确事务迁移取消制作全文链。较早版本收敛的历史背景见 [版本收敛](docs/version-consolidation.md)，后续制作与完整恢复以 [当前制作与候选](docs/current-materials.md) 为准。
 
 制作页面按需读取正文，列表和目录保留准确身份；有界并发、事务失效缓存、轻量接口及恢复边界见[制作读取说明](docs/production-performance.md)。
 
 ## 启动一个故事实例
 
+启用 OSS 的实例先按 [资源存储与恢复](docs/resources.md) 配置独立运行凭据和准确资源目录，再执行恢复；离线恢复使用完整介质和明确离线模式。Docker 镜像包含 Python 依赖，本机直接运行需先安装下面的 requirements。
+
 正式本机入口为故事仓库中的 Docker Compose：本仓库维护 Python 与 Nginx 两个系统镜像及通用代理规则，故事仓库只保存实例 Compose 配置；Nginx 长期运行于 `127.0.0.1:3000`，反代容器内 Python 服务。实例根目录需要 `config/instance.json` 和 `export/`；有方法文档时一并保留 Git 中的 `content/`。首次从公开导出恢复：
 
 ```bash
 cd /path/to/story-review-desk
+python3 -m pip install -r requirements.txt
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo restore
 cd /path/to/story-repo
 docker compose up -d --build
@@ -35,7 +38,7 @@ Python 服务对套接字读写设置两秒空闲超时，浏览器只预连而�
 
 ## 数据访问与公开同步
 
-导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框、资料总数或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件必须放在实例的 `export/assets/`。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放；音频不显示下载入口，受管文件与后台导出保持可用；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
+导入资料：准备 JSON 数组，每项至少含 `id,title,version_type,origin,source_url,collected_at,notes,blocks,assets`。每个 `block` 有稳定 `id` 和完整 `text`；同 ID 文本不可原地改写，修订请用新 ID/新资料版本。可选 `group:"folk-tales"|"expansion-directions"|"story-refinements"` 与非负整数 `order` 在故事采编左侧生成默认收起的独立二级菜单（对应“民间小故事”“扩写方向”“故事精修”）；分类归故事实例数据，菜单由通用系统实现。资料条目显示标题和当前修订的评论数，类型、来源等信息在右侧详情中查看。分类区分资料项数和评论总数；计数包含已关闭评论，零评论明确显示。三类创作子页持续选中一级“故事创作”，采编不再提供右上搜索框、资料总数或正文重复审阅按钮；通过浮动“查看评论”和正文高亮打开共用面板。精修菜单标题若已含“故事精修N”，则省略末尾重复的“第N版”；只简化菜单显示。`assets` 项至少有相对 `file`、`title` 和 `source_url`，文件使用实例 `export/assets/` 逻辑路径；启用 OSS 时先上传并登记准确资源目录。演出可用 `media:{kind:"video"|"audio",file,label,note,url?}` 指向位于同一 `export/assets/` 的本地媒体，纳入导出哈希并可在网页播放；音频不显示下载入口，受管文件与后台导出保持可用；仅作线索的外链仍可用 `media:{kind,url,label,note}`，不能计作已下载的演出。旁证可选 `references:[{label,url}]`，来源链接需 HTTPS。没有听辨的演出，`blocks` 不得伪装为完整整理文本。示例为 [故事实例](https://github.com/goosmanlei/SnakeSlayingRecord)。
 
 ```bash
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo import-sources /path/to/new-sources.json
@@ -58,14 +61,10 @@ PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
 
 `comments` 输出评论、对象类型与精确修订、原文圈选 `anchor.quote`、所在正文块；资料评论另含资料标题/链接。Codex 可直接读 JSON，或 `GET /api/comments/context`。`GET /api/sources`、`GET /api/comments?source_id=...`、`GET /api/framework`、`GET /api/configurations` 供浏览器和工具读取。提交资料评论 `POST /api/comments`：`{source_id,anchor,body,id?}`；通用对象评论改用 `{target_object_id,target_revision_id,anchor,body,id?}`。文字锚点包含 `block_id,end_block_id,start,end,quote`，位置按 Unicode 字符计数，跨段 quote 以换行连接，服务端核对与不可变修订一致。图像和图示的整图、归一化多边形区域以及结构整体意见也使用同一接口；完整数据格式、方向选择、结构稿导入、改稿审阅和剧本交接见[故事结构接口说明](docs/story-structure.md)。修改 `PATCH /api/comments/{id}`：`{action:"EDIT"|"CLOSE"|"REOPEN",expected_version,body?}`，并发版本错误返回 409。评论有审计事件；重试相同创建 ID/内容幂等。配置可在页面或 `PATCH /api/configurations/SYSTEM|PROJECT` 保存：`{expected_version,updates:{...}}`；CLI 使用 `config-set SCOPE updates.json --expected-version N`。
 
-导出写入实例 `export/materials.json`、`comments.json`、`objects.json`、`configurations.json`、`manifest.json`，清单对每个文件和被引用素材存 SHA-256。故事仓库公开同步操作：
+未配置云存储的实例导出完整本地包。启用 OSS 的实例使用 Schema 16：轻量 manifest／目录引用准确云数据库快照和原件，运行凭据不入包；详见 [资源存储与恢复](docs/resources.md)。导出命令：
 
 ```bash
 PYTHONPATH=. python3 -m review_desk --instance /path/to/story-repo export
-cd /path/to/story-repo
-git add config/instance.json compose.yaml nginx export
-git commit -m "Sync story review data"
-git push origin main
 ```
 
 同步前审阅全部评论：公开仓库意味着评论正文公开。凭据、数据库、浏览器草稿和日志只留本机。恢复只允许空实例，先验证清单、素材 SHA、评论锚点、对象修订、精确依赖与配置，失败不写入目标。故事结构选择、修订、评论、确认和图文资产沿用同一导出协议。
@@ -92,7 +91,7 @@ git push origin main
 
 批量准备使用 `production-import data.json --validate-only`，确认数据后去掉该选项提交。`production-file file` 导入受管原件，`production-ready ID` 检查缺项，`production-package ID --output directory` 在必要输入齐备且完整包的准确依赖与全部原件均有效时生成目录包；已采用的可选原件或历史输入缺失也会阻断导出。页面下载的是同一精确输入清单。图像和音视频规格按实际文件探测；本分支 Docker 镜像安装 FFmpeg，直接用 Python 运行时也需在 PATH 提供 `ffprobe`，不能把未探测文件标为就绪。
 
-Schema 15 导出另保存集级剪辑工程、不可变快照与成片；不含剪辑对象的 Schema 14 包保留兼容恢复。完整导出保存当前制作单份正文、不可变提交快照、真实候选、意见／回应摘录、故事原有版本、配置方法及有效原件。迁移删除旧制作全文与专属版本索引，恢复仅进入空实例并拒绝旧模型复活。详见 [当前制作与候选](docs/current-materials.md)。
+云实例的 Schema 16 快照保存集级剪辑工程、不可变快照与成片；旧 Schema 14／15 完整本地包保留兼容恢复。完整导出保存当前制作单份正文、不可变提交快照、真实候选、意见／回应摘录、故事原有版本、配置方法及有效原件。迁移删除旧制作全文与专属版本索引，恢复仅进入空实例并拒绝旧模型复活。详见 [当前制作与候选](docs/current-materials.md)。
 
 `tests/test_complete_states.py` 验证完整形态、状态转换、整体与细节覆盖、就绪阻断和读取依赖并发保护；`tests/test_production.py` 验证原子批量导入、并发、来源、状态并存、一材多用、显式换版、变更复核、谱系、精确媒体评论和恢复；`tests/test_production_api.py` 验证真实 HTTP 上传、Range、来源及冲突响应。真实故事数据和浏览器操作证据归故事实例；测试夹具不计作媒体成果。
 

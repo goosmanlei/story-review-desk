@@ -179,6 +179,12 @@ def srt(project):
 
 
 def render(runner,project):
+    from .resources import lease_scope
+    with lease_scope():
+        return _render(runner,project)
+
+
+def _render(runner,project):
     r=runner;p=project;s=p['spec'];rate=edit.fps(p);seconds=float(Fraction(s['duration_frames'],1)/rate)
     sources={x['id']:x for x in p['sources']};directory=r.directory
     video=sorted((c for c in p['clips'] if c['kind']=='video'),key=lambda c:c['timeline_start'])

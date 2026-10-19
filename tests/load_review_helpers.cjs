@@ -10,6 +10,11 @@ const breakdown=fs.readFileSync(path.join(root,'production-breakdown.js'),'utf8'
 const titles=['breakdownSceneTitle','breakdownShotTitle'].map(name=>{const start=breakdown.indexOf('function '+name+'(');return [name,breakdown.slice(start,breakdown.indexOf('\nfunction ',start+1))]});
 const presentation=['productionButton','reviewChoiceButtons','materialModelCode'].map(name=>{const source=fs.readFileSync(path.join(root,name==='productionButton'?'production.js':'material-review.js'),'utf8'),start=source.indexOf('function '+name+'(');return [name,source.slice(start,source.indexOf('\nfunction ',start+1))]});
 module.exports=context=>{
+  context.URL ||= URL;
+  context.location ||= {href:'http://fixture/',origin:'http://fixture'};
+  const media=fs.readFileSync(path.join(root,'review-ui.js'),'utf8');
+  for(const name of ['reviewVariantURL','reviewDownloadURL'])if(typeof context[name]!=='function')vm.runInContext(media.split('\n').find(line=>line.startsWith('function '+name+'(')),context);
+  if(typeof context.reviewRefreshMedia!=='function'){const start=media.indexOf('function reviewRefreshMedia(');vm.runInContext(media.slice(start,media.indexOf('\nfunction ',start+1)),context)}
   if(typeof context.materialCategoryLabel!=='function')vm.runInContext(cards.split('\n').find(line=>line.startsWith('function materialCategoryLabel(')),context);
   if(context.document&&!context.document.createTextNode)context.document.createTextNode=text=>{const node=context.document.createElement?context.document.createElement('#text'):context.el('#text');node.textContent=text;return node};
   for(const name of ['renderLinkedPrompt','bindRelationSummary'])if(typeof context[name]!=='function'){

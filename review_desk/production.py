@@ -586,7 +586,106 @@ def current_records(store, kinds=None):
 
 
 def import_records(store, document, validate_only=False):
-    return _import_records(store, document, validate_only)
+    from .production_media import physical_hash_scope, frozen_physical_hashes
+    with physical_hash_scope():
+        preflight_records(store, document.get('records', []) if isinstance(document, dict) else [])
+        with frozen_physical_hashes():
+            return _import_records(store, document, validate_only)
+
+
+def preflight_inputs(store, inputs):
+    """Warm exactly the selected inputs; unresolved draft slots remain issues."""
+    from .production_current import input_slot
+    for index, value in enumerate(inputs if isinstance(inputs, list) else []):
+        if isinstance(value, dict):
+            try:
+                input_slot(store, value, index)
+            except (KeyError, ValueError, TypeError):
+                # The owning validator retains its existing draft/error rules.
+                # Any uncached read in its transaction is refused, never fetched.
+                continue
+
+
+def preflight_requirement(store, row, pending=None):
+    """Prepare reads used by validation and declared provenance paths.
+
+    Preparation does not decide whether a draft is valid. The same validators
+    run again under the write lock, with media identities frozen.
+    """
+    plan = row['payload'].get('generation') or {}
+    preflight_inputs(store, plan.get('inputs', []))
+    from .material_input_validation import issues
+    from .reference_paths import resolve
+    try:
+        issues(store, row)
+    except (KeyError, ValueError, TypeError):
+        pass
+    for link in plan.get('reference_links', []):
+        try:
+            path = link.get('path')
+            if not pending:
+                resolve(store, row, path)
+                continue
+            # A batch reference is not in SQLite yet. Walk its proposed record
+            # without inserting anything; every new ASSET is prepared below.
+            from .shot_references import inputs_for
+            owner = row
+            if not isinstance(path, list) or not 0 < len(path) <= 16:
+                continue
+            for depth, index in enumerate(path):
+                values = (owner['payload'].get('generation', {}).get('inputs', [])
+                          if owner['kind'] == 'REQUIREMENT' else
+                          owner['payload'].get('inputs', []) if owner.get('_preflight_pending') else
+                          inputs_for(store, owner))
+                value = values[index]
+                preflight_inputs(store, [value])
+                reference = value.get('reference', value)
+                target = pending.get(reference['object_id']) if reference['revision_id'] == '@'+reference['object_id'] else None
+                target = target or ref_record(store, reference)
+                if depth < len(path)-1:
+                    if target['kind'] == 'REQUIREMENT':
+                        owner = target
+                    else:
+                        reference = target['payload']['production']
+                        owner = pending.get(reference['object_id']) if reference['revision_id'] == '@'+reference['object_id'] else None
+                        owner = owner or ref_record(store, reference, {'CALL'})
+        except (KeyError, ValueError, TypeError, IndexError):
+            continue
+
+
+def preflight_records(store, records):
+    """Prepare actual media reads before ordinary import/CLI write transactions."""
+    pending = {row['object_id']: {**row, 'id': '@'+row['object_id'], '_preflight_pending': True}
+               for row in records if isinstance(row, dict) and isinstance(row.get('object_id'), str)
+               and isinstance(row.get('payload'), dict)}
+    for row in records:
+        payload = row.get('payload') if isinstance(row, dict) else None
+        if not isinstance(payload, dict):
+            continue
+        kind = row.get('kind')
+        if kind == 'ASSET' and payload.get('format') == 'production-asset-v1':
+            _components(store, payload, inspect=True)
+        elif kind == 'REQUIREMENT':
+            preflight_requirement(store, pending[row['object_id']], pending)
+            if payload.get('status') == 'withdrawn':
+                for raw in store.db.execute('''SELECT DISTINCT r.object_id FROM dependencies d
+                    JOIN revisions r ON r.id=d.from_revision JOIN objects o ON o.id=r.object_id
+                    WHERE d.to_revision IN (SELECT id FROM revisions WHERE object_id=?) AND o.kind='REQUIREMENT' ''',
+                    (row['object_id'],)):
+                    preflight_requirement(store, pending.get(raw[0]) or record(store, raw[0]), pending)
+        elif kind == 'CALL':
+            executed = store.db.execute("SELECT 1 FROM revisions WHERE object_id=? AND json_extract(payload,'$.status') IN ('submitted','completed','failed','unknown') LIMIT 1", (row.get('object_id'),)).fetchone()
+            if executed:
+                continue
+            preflight_inputs(store, payload.get('inputs', []))
+            reference = payload.get('generation_requirement')
+            if isinstance(reference, dict):
+                try:
+                    need = pending.get(reference.get('object_id')) if str(reference.get('revision_id', '')).startswith('@') else None
+                    need = need or ref_record(store, reference, {'REQUIREMENT'})
+                    preflight_requirement(store, need, pending)
+                except (KeyError, ValueError, TypeError):
+                    continue
 
 
 def restore_records(store, batches):
@@ -668,6 +767,8 @@ def _import_records(store, document, validate_only=False, *, check_current=True,
             if validate_only:
                 store.db.rollback()
             else:
+                from .production_media import validate_physical_hashes
+                validate_physical_hashes()
                 store.db.commit()
     except BaseException:
         if transaction: store.db.rollback()
