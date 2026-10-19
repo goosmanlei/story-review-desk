@@ -106,10 +106,8 @@ function renderEpisodeEditing(ctx){
   if(!editZoomLevels.includes(v.zoomLevel))v.zoomLevel='overview';
   editChoices(head,'edit-output','成片版本',outputs.map((o,i)=>[o.object_id,'版本 '+(i+1)]),ctx.output,async value=>{editRemember(ctx);pauseEpisodeMedia(ctx.host.querySelector('video'));ctx.output=value;ctx.loop=false;editRoute({edit_output:value,edit_element:null});clearEpisodeEditReview();await loadEditOutput(ctx)});
   editChoices(head,'edit-variant','字幕',[['subtitled','对白与唱词字幕'],['clean','无对白与唱词字幕']],ctx.variant,value=>{ctx.variant=value;ctx.loop=false;clearEpisodeEditReview();renderEpisodeEditing(ctx)});
-  const downloads=el('details','edit-downloads');nodeText('summary',null,'下载',downloads);
-  for(const [id,title] of [['subtitled','字幕版 MP4'],['clean','无字幕版 MP4'],['mix','混音母版 WAV'],['subtitles','字幕 SRT'],['project','可编辑工程 JSON'],['source-map','原件与来源映射']]){const c=output.payload.components.find(c=>c.id===id),a=nodeText('a',null,title,downloads);a.download=ctx.episode+'-'+id+'.'+c.file.split('.').at(-1);a.href=reviewDownloadURL('/api/production/files/'+encodeURIComponent(c.file),a.download)}head.append(downloads);
   state.productionRecords=outputs;focusProductionReview({record:output,history:[output],uses:[]},false);
-  const layout=el('div','edit-layout'),nav=el('nav','edit-scenes breakdown-scene-list'),main=el('div','edit-main');nav.setAttribute('aria-label','场镜导航');layout.append(nav,main);host.append(layout);
+  const main=el('div','edit-main');host.append(main);
   const reader=el('section');reader.id='production-reader';main.append(reader);
   const player=el('section','review-media-player edit-player'),component=output.payload.components.find(c=>c.id===ctx.variant),media=el('video');
   Object.assign(player.dataset,{reviewRevision:output.id,reviewFile:component.file,reviewFrom:0,reviewTo:project.spec.duration_frames/editRate(project)});
@@ -190,7 +188,6 @@ function renderEpisodeEditing(ctx){
     positionHead();scroll.scrollLeft=v.zoomLevel==='overview'?0:restore?v.scroll||0:Math.max(0,v.frame/editRate(project)*zoom-anchor);paintSelection();editRemember(ctx);
   }
   player.reviewLocate=a=>{if(a.asset_file!==component.file)return false;v.range=a.edit_selection?{start:a.edit_selection.start_frame,end:a.edit_selection.end_frame,tracks:[...a.edit_selection.tracks]}:{start:Math.round(a.start_seconds*editRate(project)),end:Math.round(a.end_seconds*editRate(project)),tracks:[]};syncInputs();seek(v.range.start);feedback.textContent=a.edit_selection?feedback.textContent:'历史混合范围 · '+editTime(project,v.range.start)+'–'+editTime(project,v.range.end);return true};
-  for(const marker of project.markers||[]){productionButton(nav,marker.title,()=>seek(marker.frame));for(const c of project.clips.filter(c=>c.kind==='video'&&c.scene_id===marker.id))productionButton(nav,c.title||c.id,()=>seek(c.timeline_start))}
   media.reviewRestorePosition=()=>Math.min(v.frame/editRate(project),media.duration);
   media.onloadedmetadata=()=>{if(current())media.currentTime=media.reviewRestorePosition()};
   media.addEventListener('seeking',()=>{if(current()&&!media.reviewRefreshing){v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead()}});
