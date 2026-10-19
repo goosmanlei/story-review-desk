@@ -12,10 +12,6 @@
 .edit-play-position output { min-width:74px; color:var(--desk-ink); font-size:16px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .edit-range-controls { margin:0; padding-left:22px; border-left:2px solid var(--desk-line); }
 
-.edit-layout { display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; }
-.edit-scenes { display:flex; flex-direction:column; gap:7px; max-height:780px; overflow:auto; }
-.edit-scenes button { text-align:left; font:inherit; font-size:13px; line-height:1.5; padding:9px 12px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); color:var(--desk-ink); }
-.edit-scenes button:hover { background:var(--desk-hover); border-color:var(--desk-selection-line); }
 .edit-main { min-width:0; }
 .edit-player { max-width:960px; margin:0 auto; background:#171e19; border-radius:var(--desk-radius); overflow:hidden; }
 .edit-player video { display:block; width:100%; max-height:60vh; aspect-ratio:16/9; }
@@ -39,13 +35,8 @@
 .edit-playhead::after { content:''; position:absolute; left:2px; top:0; width:10px; height:10px; background:var(--desk-red); pointer-events:auto; clip-path:polygon(0 0,100% 0,100% 55%,50% 100%,0 55%); }
 .edit-playhead:focus-visible,.edit-playhead.dragging { outline:1px solid var(--desk-red); outline-offset:-1px; }
 .edit-hint { font-size:12px; color:var(--desk-muted); line-height:1.7; }
-.episode-editing summary { cursor:pointer; color:var(--desk-ink); }
-.edit-downloads a { display:inline-block; font-size:13px; padding:10px 18px 0 0; color:var(--desk-red); }
 .episode-editing .edit-toolbar button[aria-pressed=true] { background:var(--desk-selected); border-color:var(--desk-selection-line); color:var(--desk-ink); }
 @media(max-width:760px) {
-  .edit-layout { grid-template-columns:1fr; }
-  .edit-scenes { flex-direction:row; max-height:100px; overflow:auto; }
-  .edit-scenes button { flex-shrink:0; max-width:140px; }
   .edit-player video { max-height:50vh; }
   .edit-toolbar { gap:8px; }
 }
@@ -61,5 +52,4 @@
 .material-text-entry { padding:12px; border-bottom:1px solid var(--desk-line); }
 .material-text-entry p { white-space:pre-wrap; }
 .material-text-entry.selected { background:var(--desk-selected); outline:1px solid var(--desk-selection-line); }
-.edit-downloads { padding:12px 0; font-size:13px; }
 @media(max-width:760px) { .edit-range-controls { padding-left:0; border-left:0; } }
