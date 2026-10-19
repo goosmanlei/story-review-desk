@@ -145,11 +145,30 @@ def subtitle_file(project,path,include_dialogue):
     text+='Style: Dialogue,Noto Sans CJK SC,34,&H00F7F5EC,&H00F7F5EC,&H00151916,&H80000000,0,0,0,0,100,100,0,0,1,2,0,2,70,70,32,1\n'
     text+='Style: Title,Noto Serif CJK SC,46,&H00F7F5EC,&H00F7F5EC,&H00151916,&H80000000,0,0,0,0,100,100,1,0,1,1.5,0,8,65,65,45,1\n'
     text+='Style: Credit,Noto Sans CJK SC,22,&H00F7F5EC,&H00F7F5EC,&H00151916,&H80000000,0,0,0,0,100,100,0,0,1,1.5,0,9,65,65,45,1\n'
+    text+='Style: Nameplate,Noto Serif CJK SC,32,&H00EAF1F4,&H00EAF1F4,&H00151916,&H80000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n'
+    text+='Style: NameplateDetail,Noto Sans CJK SC,20,&H00EAF1F4,&H00EAF1F4,&H00151916,&H80000000,0,0,0,0,100,100,0,0,1,0,0,7,0,0,0,1\n'
     text+='[Events]\nFormat: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text\n'
     for group in ('titles','subtitles'):
         if group=='subtitles' and not include_dialogue:continue
         for item in project.get(group,[]):
             value=item['text'].replace('\\','＼').replace('{','｛').replace('}','｝').replace('\r','').replace('\n',r'\N')
+            if group=='titles' and item.get('style')=='nameplate':
+                # A separate graphics lane remains in both dialogue variants.
+                lines=value.split(r'\N');scale=min(s['height']/720,s['width']/1280)
+                width=round(max(240,len(lines[0])*32+40,len(lines[1])*20+40 if len(lines)>1 else 0)*scale)
+                height=round((100 if len(lines)>1 else 64)*scale);margin=round(64*scale)
+                position=item.get('position','lower-left')
+                x=margin if position.endswith('left') else s['width']-margin-width
+                y=round(92*scale) if position.startswith('upper') else s['height']-round(220*scale)
+                start,end=ass_time(item['start_frame'],rate),ass_time(item['end_frame'],rate)
+                fade=min(160,int(float(Fraction(item['end_frame']-item['start_frame'],1)/rate)*1000/3))
+                prefix=f'Dialogue: 2,{start},{end},Nameplate,,0,0,0,,'
+                for w,color,alpha in ((width,'2D352B','28'),(max(1,round(3*scale)),'86B7D3','00')):
+                    text+=prefix+f'{{\\an7\\pos(0,0)\\p1\\1c&H{color}&\\1a&H{alpha}&\\fad({fade},{fade})}}m {x} {y} l {x+w} {y} {x+w} {y+height} {x} {y+height}{{\\p0}}\n'
+                for i,line in enumerate(lines):
+                    style='NameplateDetail' if i else 'Nameplate';size=round((20 if i else 32)*scale,2)
+                    text+=f'Dialogue: 3,{start},{end},{style},,0,0,0,,{{\\an7\\pos({x+round(18*scale)},{y+round((54 if i else 10)*scale)})\\fs{size}\\fad({fade},{fade})}}{line}\n'
+                continue
             style=('Credit' if item.get('style')=='credit' else 'Title') if group=='titles' else 'Dialogue'
             text+=f"Dialogue: {1 if group=='titles' else 0},{ass_time(item['start_frame'],rate)},{ass_time(item['end_frame'],rate)},{style},,0,0,0,,{value}\n"
     path.write_text(text)

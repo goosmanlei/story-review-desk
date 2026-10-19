@@ -5,6 +5,14 @@
 .edit-toolbar { display:flex; align-items:end; flex-wrap:wrap; gap:10px; margin:14px 0; }
 .edit-toolbar label,.edit-fields label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--desk-muted); }
 .edit-toolbar input { width:110px; }
+.edit-timeline-tools { display:flex; align-items:center; flex-wrap:wrap; gap:16px 0; margin-top:22px; }
+.edit-zoom-group { padding-right:22px; }
+.edit-zoom-group .production-filter-group { display:flex; align-items:center; gap:12px; margin:0; }
+.edit-zoom-group .production-filter-label { padding-top:0; }
+.edit-play-position { display:flex; flex-direction:column; gap:7px; padding:0 22px; border-left:2px solid var(--desk-line); color:var(--desk-muted); font-size:13px; }
+.edit-play-position output { min-width:74px; color:var(--desk-ink); font-size:16px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.edit-range-controls { margin:0; padding-left:22px; border-left:2px solid var(--desk-line); }
+
 .edit-layout { display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; }
 .edit-scenes { display:flex; flex-direction:column; gap:7px; max-height:780px; overflow:auto; }
 .edit-scenes button { text-align:left; font:inherit; font-size:13px; line-height:1.5; padding:9px 12px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); color:var(--desk-ink); }
@@ -14,13 +22,13 @@
 .edit-player video { display:block; width:100%; max-height:60vh; aspect-ratio:16/9; }
 .edit-notice { border-left:3px solid var(--desk-selection-line); background:var(--desk-soft); padding:10px 14px; line-height:1.7; font-size:13px; }
 .edit-timeline-scroll { overflow:auto; max-width:100%; margin-top:14px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); }
-.edit-timeline { position:relative; min-width:0; overflow:hidden; cursor:crosshair; user-select:none; }
+.edit-timeline { position:relative; min-width:0; overflow:clip; cursor:crosshair; user-select:none; }
 .edit-timeline button { cursor:crosshair; }
 .edit-frame-grid .edit-track,.edit-frame-grid .edit-ruler { background-image:repeating-linear-gradient(to right,var(--desk-line) 0 1px,transparent 1px var(--edit-frame-width)); }
 .edit-ruler { height:32px; border-bottom:1px solid var(--desk-line); position:relative; overflow:hidden; background:var(--desk-soft); }
 .edit-ruler button { position:absolute; font:inherit; font-size:11px; background:none; border:0; color:var(--desk-muted); padding:5px; }
 .edit-track { height:60px; position:relative; border-bottom:1px solid var(--desk-line); }
-.edit-track-name { position:sticky; left:6px; top:0; z-index:2; font-size:11px; background:var(--desk-surface); color:var(--desk-muted); }
+.edit-track-name { display:inline-block; position:sticky; left:6px; top:0; z-index:2; font-size:11px; background:var(--desk-surface); color:var(--desk-muted); }
 .edit-clip { position:absolute; top:21px; height:32px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid var(--desk-selection-line); border-radius:var(--desk-radius); background:var(--desk-selected); font:inherit; font-size:11px; text-align:left; padding:5px; color:var(--desk-ink); }
 .edit-clip.audio { background:var(--desk-soft); border-color:var(--desk-line); }
 .subtitles .edit-clip { background:var(--desk-surface); border-color:var(--desk-line); }
@@ -35,7 +43,7 @@
 .edit-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:16px; }
 .edit-fields input { min-width:0; width:100%; box-sizing:border-box; }
 .edit-hint { font-size:12px; color:var(--desk-muted); line-height:1.7; }
-.edit-downloads,.edit-clip-picker,.edit-replacement,.edit-comparison { padding:12px 0; font-size:13px; }
+.edit-downloads,.edit-clip-picker,.edit-replacement { padding:12px 0; font-size:13px; }
 .episode-editing summary { cursor:pointer; color:var(--desk-ink); }
 .edit-downloads a { display:inline-block; font-size:13px; padding:10px 18px 0 0; color:var(--desk-red); }
 .edit-source-dialog { width:min(1000px,90vw); border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); color:var(--desk-ink); }

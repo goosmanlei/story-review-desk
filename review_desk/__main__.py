@@ -20,7 +20,7 @@ def main():
     worker=subs.add_parser("edit-worker")
     worker.add_argument("--once",action="store_true")
     editing=subs.add_parser("edit")
-    editing.add_argument("action",choices=("catalog","get","save","validate","submit","status","cancel","retry","compare"))
+    editing.add_argument("action",choices=("catalog","get","save","validate","submit","status","cancel","retry"))
     editing.add_argument("--request",type=Path)
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--host", default="127.0.0.1")

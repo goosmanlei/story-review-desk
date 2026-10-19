@@ -42,7 +42,9 @@ class EditingRecoveryTest(unittest.TestCase):
                      {'id':'a1','track_id':'sound','kind':'audio','source_id':'source','source_in':0,'source_out':64000,'timeline_start':0,'gain_db':-6,'fade_out':12000},
                      {'id':'a2','track_id':'sound','kind':'audio','source_id':'source','source_in':32000,'source_out':64000,'timeline_start':72000,'gain_db':-12,'fade_in':12000}],
             'subtitles':[{'id':'words','start_frame':20,'end_frame':42,'text':'跨镜字幕 · 两份米'}],
-            'titles':[{'id':'credit','start_frame':44,'end_frame':60,'text':'隔离测试','style':'credit'}],'markers':[{'id':'scene','frame':0,'title':'测试场'}]}
+            'titles':[{'id':'credit','start_frame':44,'end_frame':60,'text':'隔离测试','style':'credit'},
+                      {'id':'person','start_frame':6,'end_frame':20,'text':'李寄\n阿蘅的好友','style':'nameplate','position':'upper-right'}],
+            'markers':[{'id':'scene','frame':0,'title':'测试场'}]}
 
     def test_real_dissolve_mix_export_restore_edit_render_and_forged_movie(self):
         filters=subprocess.check_output(['ffmpeg','-hide_banner','-filters'],stderr=subprocess.DEVNULL).decode()
