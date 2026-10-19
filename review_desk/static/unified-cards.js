@@ -229,7 +229,7 @@ function materialSavedDraft(result){
 }
 function activateUnifiedCard(result){
   const detail=result.detail,row=detail.record,params=result.params;
-  if(result.defaultSelection&&['ASSET','REQUIREMENT'].includes(row.kind)&&!params.has('material_target'))params.set('material_target','current');
+  if(result.defaultSelection&&row.kind==='REQUIREMENT'&&!params.has('material_target'))params.set('material_target','current');
   detail.currentMaterialCards||=detail.material_cards;
   state.reviewWork=result.review_work||null;
   state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
