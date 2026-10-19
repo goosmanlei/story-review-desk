@@ -70,7 +70,7 @@ function renderEpisodeEditing(ctx){
   if(ctx.recoverable){const recovery=el('div','edit-notice');nodeText('p',null,'另有基于旧工程的本机草稿，已保留。恢复后仍须按当前工程版本检查再保存。',recovery);productionButton(recovery,'恢复本机草稿',()=>{ctx.draft=ctx.recoverable.draft;ctx.recoverable=null;renderEpisodeEditing(ctx)});host.append(recovery)}
   if(editChanged(ctx)||output&&output.payload.snapshot&&JSON.stringify(project)!==JSON.stringify(ctx.draft))nodeText('p','edit-notice','工程草稿已有修改，当前预览尚未更新。播放器和时间线仍对应所选成片版本。',host);
   const layout=el('div','edit-layout'),nav=el('nav','edit-scenes breakdown-scene-list'),main=el('div','edit-main');nav.setAttribute('aria-label','场镜导航');layout.append(nav,main);host.append(layout);
-  let media,rangeStart,rangeEnd,playhead,frameInput;
+  let media,rangeStart,rangeEnd,playhead,frameInput,followPlayback=()=>{};
   const currentPlayer=()=>editCurrent(ctx)&&ctx.render===render&&ctx.output===output?.object_id&&media?.isConnected;
   const positionPlayhead=()=>{if(!playhead)return;playhead.style.left=ctx.frame/editRate(project)*ctx.zoom+'px';playhead.setAttribute('aria-valuenow',ctx.frame);playhead.setAttribute('aria-valuetext',ctx.frame+' 帧，'+(ctx.frame/editRate(project)).toFixed(3)+' 秒')};
   const seek=(frame,remember=true)=>{if(!currentPlayer()||!Number.isFinite(frame))return;media.pause();ctx.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));frameInput.value=ctx.frame;media.currentTime=ctx.frame/editRate(project);positionPlayhead();if(remember)editRemember(ctx)};
@@ -92,7 +92,8 @@ function renderEpisodeEditing(ctx){
     rangeStart.onchange=rangeEnd.onchange=()=>{ctx.ranges[output.object_id]=[Number(rangeStart.value),Number(rangeEnd.value)];if(!validRange()){ctx.loop=false;loop.setAttribute('aria-pressed','false')}editRemember(ctx)};
     productionButton(controls,'评论此范围',()=>{const a=Number(rangeStart.value),b=Number(rangeEnd.value);if(!(Number.isInteger(a)&&Number.isInteger(b)&&a>=0&&b>a&&b<=project.spec.duration_frames)){toast('请输入成片范围内的整数帧。');return}player.reviewFocus();startDraft({type:'time',component_id:component.id,asset_file:component.file,start_seconds:a/editRate(project),end_seconds:b/editRate(project)})});
     media.onloadedmetadata=()=>{if(!currentPlayer())return;media.currentTime=Math.min(ctx.frame/editRate(project),media.duration)};
-    media.addEventListener('timeupdate',()=>{if(!currentPlayer())return;ctx.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));if(document.activeElement!==frameInput)frameInput.value=ctx.frame;positionPlayhead();if(ctx.loop&&!media.paused&&media.currentTime>=Number(rangeEnd.value)/editRate(project)){media.currentTime=Number(rangeStart.value)/editRate(project);media.play().catch(()=>{})}});
+    media.addEventListener('timeupdate',()=>{if(!currentPlayer())return;ctx.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));if(document.activeElement!==frameInput)frameInput.value=ctx.frame;positionPlayhead();followPlayback();if(ctx.loop&&!media.paused&&media.currentTime>=Number(rangeEnd.value)/editRate(project)){media.currentTime=Number(rangeStart.value)/editRate(project);media.play().catch(()=>{})}});
+    media.addEventListener('play',()=>{if(currentPlayer())followPlayback()});
     media.addEventListener('pause',()=>{if(currentPlayer())editRemember(ctx)});
     media.addEventListener('ended',()=>{if(currentPlayer()&&ctx.loop&&validRange()){media.currentTime=Number(rangeStart.value)/editRate(project);media.play().catch(()=>{})}});
     if(outputs.length>1){ctx.compare=ctx.compare&&ctx.compare!==output.object_id?ctx.compare:outputs.find(o=>o.object_id!==output.object_id).object_id;
@@ -102,6 +103,7 @@ function renderEpisodeEditing(ctx){
     for(const marker of project.markers||[]){productionButton(nav,marker.title,()=>seek(marker.frame));for(const c of project.clips.filter(c=>c.kind==='video'&&c.scene_id===marker.id))productionButton(nav,c.title||c.id,()=>{seek(c.timeline_start);ctx.selected=c.id;renderEditInspector(ctx,inspector)})}
     editChoices(main,'edit-zoom','时间线缩放',editZoomLevels.map((level,i)=>[level,['全片概览','标准','细看','精细','逐帧'][i]]),ctx.zoomLevel,value=>{if(!currentPlayer())return;ctx.zoomLevel=value;layoutTimeline()});
     const scroll=el('div','edit-timeline-scroll'),timeline=el('div','edit-timeline'),items=[];scroll.append(timeline);main.append(scroll);const desiredScroll=ctx.timelineScroll||0;scroll.onscroll=()=>{if(!editCurrent(ctx)||ctx.render!==render||!scroll.isConnected)return;ctx.timelineScroll=scroll.scrollLeft;editRemember(ctx)};
+    followPlayback=()=>{if(!currentPlayer()||media.paused||!scroll.clientWidth)return;const x=ctx.frame/editRate(project)*ctx.zoom,width=scroll.clientWidth,left=scroll.scrollLeft;if(x>left+width*.8)scroll.scrollLeft=x-width*.8;else if(left>0&&x<left+width*.1)scroll.scrollLeft=Math.max(0,x-width*.2)};
     timeline.setAttribute('aria-label','成片时间线，点击任意位置定位到帧');
     timeline.onclick=event=>{if(event.detail>0&&currentPlayer())seek(editTimelineFrame(project,event.clientX-timeline.getBoundingClientRect().left,ctx.zoom))};
     const ruler=el('div','edit-ruler');timeline.append(ruler);
@@ -110,13 +112,16 @@ function renderEpisodeEditing(ctx){
     }
     if(project.subtitles?.length){const row=el('div','edit-track subtitles');nodeText('span','edit-track-name','字幕',row);timeline.append(row);for(const c of project.subtitles){const b=nodeText('button','edit-clip',c.text,row);items.push([b,c.start_frame/editRate(project),(c.end_frame-c.start_frame)/editRate(project)]);b.onclick=event=>{if(event.detail===0)seek(c.start_frame)}}}
     playhead=el('div','edit-playhead');timeline.append(playhead);playhead.tabIndex=0;playhead.setAttribute('role','slider');playhead.setAttribute('aria-label','播放头');playhead.setAttribute('aria-valuemin','0');playhead.setAttribute('aria-valuemax',project.spec.duration_frames-1);playhead.title='拖动定位；方向键逐帧调整';
-    let pointer=null,grabOffset=0;
+    let pointer=null,grabOffset=0,originX=0,dragging=false,suppressClick=false,captureTarget;
     const dragSeek=event=>seek(editTimelineFrame(project,event.clientX-timeline.getBoundingClientRect().left-grabOffset,ctx.zoom),false);
-    playhead.onpointerdown=event=>{if(event.button!==0||!currentPlayer())return;event.preventDefault();event.stopPropagation();pointer=event.pointerId;grabOffset=event.clientX-timeline.getBoundingClientRect().left-ctx.frame/editRate(project)*ctx.zoom;playhead.setPointerCapture(pointer);playhead.classList.add('dragging');dragSeek(event)};
-    playhead.onpointermove=event=>{if(pointer===event.pointerId&&currentPlayer())dragSeek(event)};
-    const endDrag=event=>{if(pointer!==event.pointerId)return;if(event.type==='pointerup'&&currentPlayer())dragSeek(event);pointer=null;playhead.classList.remove('dragging');if(playhead.hasPointerCapture(event.pointerId))playhead.releasePointerCapture(event.pointerId);if(currentPlayer())editRemember(ctx)};
-    playhead.onpointerup=playhead.onpointercancel=playhead.onlostpointercapture=endDrag;
-    playhead.onclick=event=>{event.preventDefault();event.stopPropagation()};
+    // Keep native clip/subtitle hit targets. Capture on that same element so a
+    // press without a drag still delivers its normal click and keyboard focus.
+    timeline.onpointerdown=event=>{suppressClick=false;if(event.button!==0||pointer!==null||!currentPlayer())return;const offset=event.clientX-timeline.getBoundingClientRect().left-ctx.frame/editRate(project)*ctx.zoom;if(offset< -6||offset>8)return;pointer=event.pointerId;grabOffset=offset;originX=event.clientX;dragging=false;captureTarget=event.target;captureTarget.setPointerCapture(pointer)};
+    timeline.onpointermove=event=>{if(pointer!==event.pointerId||!currentPlayer())return;if(!dragging&&Math.abs(event.clientX-originX)<3)return;dragging=true;playhead.classList.add('dragging');dragSeek(event)};
+    const endDrag=event=>{if(pointer!==event.pointerId)return;if(dragging&&event.type==='pointerup'&&currentPlayer())dragSeek(event);suppressClick=dragging;pointer=null;playhead.classList.remove('dragging');if(captureTarget.hasPointerCapture(event.pointerId))captureTarget.releasePointerCapture(event.pointerId);if(currentPlayer())editRemember(ctx)};
+    timeline.onpointerup=timeline.onpointercancel=timeline.onlostpointercapture=endDrag;
+    timeline.addEventListener('click',event=>{if(suppressClick&&event.detail>0){suppressClick=false;event.preventDefault();event.stopPropagation()}},true);
+    playhead.onclick=event=>event.stopPropagation();
     playhead.onkeydown=event=>{const frame=({ArrowLeft:ctx.frame-1,ArrowRight:ctx.frame+1,Home:0,End:project.spec.duration_frames-1})[event.key];if(frame!==undefined){event.preventDefault();seek(frame)}};
     let viewWidth=0;
     const layoutTimeline=(restore=false)=>{if(!currentPlayer()||!scroll.isConnected)return;const width=scroll.clientWidth;if(!width)return;const offset=ctx.frame/editRate(project)*ctx.zoom-scroll.scrollLeft,anchor=viewWidth&&offset>=0&&offset<=viewWidth?offset/viewWidth*width:width/2;viewWidth=width;ctx.zoom=editZoomScale(project,width,ctx.zoomLevel);const duration=project.spec.duration_frames/editRate(project);timeline.style.width=duration*ctx.zoom+'px';timeline.style.setProperty('--edit-frame-width',ctx.zoom/editRate(project)+'px');timeline.classList.toggle('edit-frame-grid',ctx.zoom/editRate(project)>=2);
