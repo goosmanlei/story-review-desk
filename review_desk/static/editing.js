@@ -76,7 +76,7 @@ async function openEditElement(ctx,element,trigger){
   if(!editCurrent(ctx)||ctx.selecting)return;
   const output=ctx.data.outputs.find(o=>o.object_id===ctx.output),v=editView(ctx,output),p=output.payload.project;
   ctx.host.querySelector('video')?.pause();v.selected=editElementKey(element);ctx.paintSelection?.();editRemember(ctx);
-  if(element.unavailable||!element.binding){toast(element.unavailable||'原素材关联不可用：'+element.element_id);return}
+  if(element.unavailable||!element.binding){toast(element.title+'（'+(element.binding?.material_id||element.source_id||element.element_id)+'）：'+(element.unavailable||'原素材关联不可用'));return}
   const b=element.binding,range={start:Math.max(0,Math.floor(element.start_frame)),end:Math.min(p.spec.duration_frames,Math.ceil(element.end_frame)),tracks:[element.track_key]};
   const anchor=editAnchor(output,ctx.review,ctx.variant,range);
   editRoute({edit_element:editElementKey(element)});
