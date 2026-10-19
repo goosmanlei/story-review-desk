@@ -240,6 +240,11 @@ class ReviewHandler(BaseHTTPRequestHandler):
             if os.environ.get('REVIEW_RESOURCES_OFFLINE') == '1':
                 media = resources.materialize(self.server.root, relative, spec=chosen)
                 return self._file(media, chosen['mime'], chosen['sha256'])
+            if variant == 'waveform':
+                # Waveforms are small JSON documents. Serve verified bytes on
+                # this origin so fetch does not depend on redirect CORS behavior.
+                media = resources.materialize(self.server.root, relative, spec=chosen)
+                return self._file(media, chosen['mime'], chosen['sha256'])
             if query.get('download') == ['1']:
                 # Keep explicit downloads on the application's origin. A
                 # cross-origin redirect ignores the anchor's download contract

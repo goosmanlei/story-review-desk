@@ -82,6 +82,19 @@ class ResourceHttpTest(ResourceFixture,unittest.TestCase):
     ReviewHandler.handle_one_request(handler)
    self.assertEqual(handler.responses,[status]);self.assertEqual(handler.wfile.getvalue(),body);self.assertEqual(observed,[True]);self.assertIsNone(r._leases.get())
    with Path(str(cached)+'.lock').open('a') as lock:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+ def test_waveform_uses_verified_small_json_and_conditional_same_origin_cache(self):
+  relative,spec=self.add('wave-audio',b'original-audio')
+  _,wave=self.add('wave-json',b'{"duration":1,"peaks":[0,1,0]}')
+  wave['mime']='application/json';spec['variants']={'waveform':wave}
+  (self.root/'config/resource-catalog.json').write_text(json.dumps({**self.config,'entries':self.entries}))
+  cached=r.materialize(self.root,relative,spec=wave)
+  for headers,status,body in [({},200,cached.read_bytes()),({'If-None-Match':'"'+wave['sha256']+'"'},304,b'')]:
+   handler=self.handler('/api/production/files/audio?variant=waveform',headers=headers)
+   with patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'}),patch.object(r,'client',side_effect=AssertionError('warm verified waveform needs no cloud read')),patch.object(r,'signed_url',side_effect=AssertionError('waveform must stay same origin')),r.lease_scope():
+    ReviewHandler._resource(handler,relative)
+   self.assertEqual(handler.responses,[status]);self.assertEqual(handler.wfile.getvalue(),body)
+   self.assertNotIn('Location',handler.response_headers)
+   self.assertEqual(handler.response_headers['ETag'],'"'+wave['sha256']+'"')
  def test_local_get_head_and_range_have_attachment_name_and_exact_bytes(self):
   data=b'synthetic original bytes';sha=hashlib.sha256(data).hexdigest();filename='李寄 原片.mp4'
   for method,extra,status,body in [('GET',{},200,data),('HEAD',{},200,b''),('GET',{'Range':'bytes=2-7'},206,data[2:8])]:
