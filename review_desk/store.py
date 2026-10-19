@@ -213,10 +213,18 @@ class Store:
         return self.put_objects([{"object_id": object_id, "kind": kind, "payload": payload,
                                   "expected_version": expected_version, "dependencies": dependencies}])[0]
 
-    def put_objects(self, records):
+    def put_objects(self, records, *, expected_heads=None):
         """Publish a complete set atomically, including optimistic version checks."""
+        from . import editing
+        for record in records:
+            if record["kind"] in editing.KINDS:
+                editing.validate_record(self, record["object_id"], record["kind"], record["payload"], inspect=True)
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
+            for object_id, revision_id in (expected_heads or {}).items():
+                head = self.db.execute('SELECT current_revision FROM objects WHERE id=?', (object_id,)).fetchone()
+                if not head or head[0] != revision_id:
+                    raise Conflict('工程已变化，不能渲染旧草稿')
             from .material_input_validation import batch
             with batch(self):
                 results = [self._put_object(**record) for record in records]
@@ -242,6 +250,14 @@ class Store:
         version = current["version"] if current else 0
         if type(expected_version) is not int or expected_version != version or (current and current["kind"] != kind):
             raise Conflict("object version or kind changed")
+        from . import editing
+        if kind in editing.KINDS:
+            if current and kind != "EPISODE_EDIT":
+                raise Conflict("submitted snapshots and film outputs are immutable")
+            editing.validate_record(self, object_id, kind, payload, inspect=False, check_files=False)
+            expected_refs = editing.expected_dependencies(kind, payload)
+            if {(d["revision_id"],d["role"]) for d in dependencies} != {(d["revision_id"],d["role"]) for d in expected_refs}:
+                raise ValueError("editing dependencies differ from exact inputs")
         if kind == 'REQUIREMENT' and (payload.get('generation') or payload.get('material_category') == 'text-layer'):
             from .method_media import verify, administrative
             payload, administrative_ref = administrative(self, object_id, payload, current)
@@ -610,14 +626,14 @@ class Store:
         if kind == "text":
             self._validate_blocks(blocks, anchor)
         elif kind == "global":
-            production = str(payload.get("format", "")).startswith("production-")
+            production = str(payload.get("format", "")).startswith("production-") or obj["kind"] in ("EPISODE_EDIT","EPISODE_FILM")
             if not (production or obj["kind"] == "STORY" and object_id == "story-structure") or set(anchor) != {"type"}:
                 raise ValueError("invalid global anchor")
         elif kind == "time":
             from .production_media import validate_component
             from .production import validate_selection, FORMATS
-            if payload.get("format") not in FORMATS:
-                raise ValueError("time comments require a production media revision")
+            if payload.get("format") not in FORMATS and payload.get("format") != "episode-film-v1":
+                raise ValueError("time comments require an exact production or episode film revision")
             component = next((c for c in payload.get("components", []) if c["id"] == anchor.get("component_id")), None)
             if not component or component["file"] != anchor.get("asset_file"):
                 raise Conflict("time comment differs from exact component")

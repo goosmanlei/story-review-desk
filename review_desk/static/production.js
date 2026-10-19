@@ -79,6 +79,7 @@ let productionLoadEpoch=0,productionReadEpoch=0;
 // A new page choice ends every read owned by the previous production page,
 // including another child of the same workspace and a later return to it.
 function invalidateProductionReads(){
+  if(typeof pauseEpisodePlayer==='function')pauseEpisodePlayer();
   ++productionLoadEpoch;++productionReadEpoch;
   if(typeof invalidateBreakdownReads==='function')invalidateBreakdownReads();
 }
@@ -175,7 +176,7 @@ async function loadProductionWorkspace({onReadStart}={}){
     else{const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','此准确对象不是场镜制作位置，请从原来源读取。',host);state.productionSelected=null;return}
     history.replaceState(null,'',route);
   }
-  if(typeof productionTab==='function'){const tab=productionTab();if(tab==='retired'){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','此旧页面已退役，目标不可用。请从生产制作选择当前子页。',host);state.productionSelected=null;return}if(tab==='breakdown')return loadProductionBreakdown();if(tab==='materials')return loadProductionMaterials()}
+  if(typeof productionTab==='function'){const tab=productionTab();if(tab==='retired'){const host=$('#production-view');host.replaceChildren();nodeText('p','production-issue','此旧页面已退役，目标不可用。请从生产制作选择当前子页。',host);state.productionSelected=null;return}if(tab==='editing')return loadEpisodeEditing();if(tab==='breakdown')return loadProductionBreakdown();if(tab==='materials')return loadProductionMaterials()}
   const workspace=state.workspace,epoch=++productionLoadEpoch,readEpoch=productionReadEpoch,view=$('#production-view');view.replaceChildren();const loading=nodeText('p',null,'正在读取制作记录…',view);
   let result;try{result=await api(typeof productionTab==='function'?'/api/production/index?'+new URLSearchParams({view:'settings',...(typeof entityManagementScopeParams==='function'?entityManagementScopeParams():{}),object_id:new URL(location.href).searchParams.get('production_object')||''}):'/api/production')}
   catch(error){if(state.workspace!==workspace||epoch!==productionLoadEpoch||readEpoch!==productionReadEpoch)return;if(loading.isConnected){view.replaceChildren();nodeText('p','production-issue',`制作记录读取失败：${error.message}。请重新读取或通过左侧导航打开本页。`,view);productionButton(view,'重新读取列表',()=>loadProductionWorkspace());if(['production_scope_episode','production_scope_revision','production_scope_scene'].some(key=>new URL(location.href).searchParams.has(key)))productionButton(view,'重新选择制作范围',()=>{breakdownRoute({production_scope_episode:null,production_scope_revision:null,production_scope_scene:null});loadProductionWorkspace()})}throw error}
@@ -543,6 +544,7 @@ function productionCommentLocationIssue(comment,row){
   return null;
 }
 function locateProductionComment(comment,local=false){
+  if(!local&&typeof locateEpisodeEditComment==='function'&&productionTab()==='editing')return locateEpisodeEditComment(comment);
   if(comment.original_context?.matches_current===false){const row=[state.productionSelected,...(state.productionRecords||[])].find(r=>r?.object_id===comment.target_object_id)||{object_id:comment.target_object_id,payload:{title:comment.original_context.excerpt.title}};return openProductionCommentOriginal(row,comment);}
   if(typeof locateMaterialRelationComment==='function'&&locateMaterialRelationComment(comment))return;
   if(!local&&typeof isEntityReview==='function'&&isEntityReview())return locateEntityReviewComment(comment);

@@ -56,40 +56,34 @@ def install(store):
 
 
 def export(store, directory):
-    from .bundle import _bytes, _staged_files, _write_content, _safe_asset, physical_file_hash
-    from .production import references
-    from .version_consolidation import file_references
-    from .material_storage import physical_revisions
-    from .business_codes import allocate_comments
+    from .production_media import physical_hash_scope
+    with physical_hash_scope():
+        return _export(store, directory)
+
+
+def _export(store, directory):
+    from .bundle import _bytes, _staged_files, _safe_asset, physical_file_hash
     target = Path(directory)
     target.mkdir(parents=True, exist_ok=True)
+    from .production_media import export_asset_path, bundle_asset_path, frozen_physical_hashes
+    for name in required_assets(store):
+        physical_file_hash(bundle_asset_path(target, name))
+        original=export_asset_path(store.db_path.parent.parent, name)
+        if original.is_file():physical_file_hash(original)
+    from . import editing
+    media_rows=list(store.db.execute("SELECT r.id,r.payload,o.kind FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM')"))
+    for row in media_rows:editing.verify_payload_media(store.db_path.parent.parent,row['kind'],json.loads(row['payload']))
+    media_identity={(row['id'],row['payload']) for row in media_rows}
     with tempfile.TemporaryDirectory(prefix='.current-export-', dir=target) as temporary:
         content_file = Path(temporary)/'material-content.json'
         store.db.execute('SAVEPOINT current_export')
         try:
-            allocate_comments(store)
-            validate(store)
-            excluded = {'sources', 'comments', 'comment_events', 'configurations', 'configuration_events', 'read_generations', 'material_content'}
-            framework = {table: [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY 1')]
-                         for table in sorted(table_names(store)-excluded)}
-            framework['revisions'] = physical_revisions(store)
-            # Public recovery never publishes local private creative steps.
-            private = {r['object_id'] for r in store.revisions()
-                       if json.loads(r['payload']).get('private') is True}
-            private_rids = {r['id'] for r in framework['revisions'] if r['object_id'] in private}
-            if any(d['to_revision'] in private_rids and d['from_revision'] not in private_rids for d in framework['dependencies']):
-                raise ValueError('public content depends on private method inputs')
-            framework['objects'] = [r for r in framework['objects'] if r['id'] not in private]
-            framework['revisions'] = [r for r in framework['revisions'] if r['object_id'] not in private]
-            framework['dependencies'] = [r for r in framework['dependencies'] if r['from_revision'] not in private_rids]
-            materials = store.sources()
-            comments = {'comments': store.comments(), 'events': store.events()}
-            configurations = {'records': [dict(r) for r in store.db.execute('SELECT * FROM configurations ORDER BY scope')],
-                              'events': store.configuration_events()}
-            names = required_assets(store)
-            from .favicon import current as favicon_current
-            favicon_current(target.parent, store.configuration('SYSTEM')['body'])
-            _write_content(store, content_file)
+            with frozen_physical_hashes():
+                _read_export = _export_snapshot(store, media_identity, target, content_file)
+            framework, materials, comments, configurations, names = _read_export
+        except BaseException:
+            store.db.execute('ROLLBACK TO SAVEPOINT current_export')
+            raise
         finally:
             store.db.execute('RELEASE SAVEPOINT current_export')
         files = {'materials.json': _bytes(materials), 'comments.json': _bytes(comments),
@@ -105,7 +99,7 @@ def export(store, directory):
         for name in sorted(names):
             hashes['assets/'+_safe_asset(name)] = physical_file_hash(target/'assets'/name)
         from .numbering_restart import epoch
-        manifest = {'schema_version': 14, 'production_model': current.CONTRACT,
+        manifest = {'schema_version': 15, 'production_model': current.CONTRACT,
                     'production_numbering_epoch': epoch(store.db),
                     'sources': len(materials), 'comments': len(comments['comments']), 'events': len(comments['events']),
                     'objects': len(framework['objects']), 'revisions': len(framework['revisions']),
@@ -115,6 +109,37 @@ def export(store, directory):
             publish()
         return manifest
 
+
+def _export_snapshot(store, media_identity, target, content_file):
+    from .business_codes import allocate_comments
+    from .material_storage import physical_revisions
+    from .bundle import _write_content
+    allocate_comments(store)
+    current_identity={(row['id'],row['payload']) for row in store.db.execute("SELECT r.id,r.payload FROM revisions r JOIN objects o ON o.id=r.object_id WHERE o.kind IN ('EPISODE_EDIT','EDIT_SNAPSHOT','EPISODE_FILM')")}
+    if current_identity!=media_identity:raise ValueError('editing records changed during export preflight; retry export')
+    validate(store,inspect_editing=False)
+    excluded = {'sources', 'comments', 'comment_events', 'configurations', 'configuration_events', 'read_generations', 'material_content'}
+    framework = {table: [dict(r) for r in store.db.execute('SELECT * FROM '+table+' ORDER BY 1')]
+                 for table in sorted(table_names(store)-excluded)}
+    framework['revisions'] = physical_revisions(store)
+    # Public recovery never publishes local private creative steps.
+    private = {r['object_id'] for r in store.revisions()
+               if json.loads(r['payload']).get('private') is True}
+    private_rids = {r['id'] for r in framework['revisions'] if r['object_id'] in private}
+    if any(d['to_revision'] in private_rids and d['from_revision'] not in private_rids for d in framework['dependencies']):
+        raise ValueError('public content depends on private method inputs')
+    framework['objects'] = [r for r in framework['objects'] if r['id'] not in private]
+    framework['revisions'] = [r for r in framework['revisions'] if r['object_id'] not in private]
+    framework['dependencies'] = [r for r in framework['dependencies'] if r['from_revision'] not in private_rids]
+    materials = store.sources()
+    comments = {'comments': store.comments(), 'events': store.events()}
+    configurations = {'records': [dict(r) for r in store.db.execute('SELECT * FROM configurations ORDER BY scope')],
+                      'events': store.configuration_events()}
+    names = required_assets(store)
+    from .favicon import current as favicon_current
+    favicon_current(target.parent, store.configuration('SYSTEM')['body'])
+    _write_content(store, content_file)
+    return framework, materials, comments, configurations, names
 
 def insert_rows(store, table, rows):
     columns = [r['name'] for r in store.db.execute('PRAGMA table_info('+table+')')]
@@ -163,7 +188,7 @@ def populate(store, framework, materials, comments, configurations, content):
         store._material_migrating = False
 
 
-def validate(store):
+def validate(store,inspect_editing=True):
     from .numbering_restart import validate as validate_numbering
     validate_numbering(store)
     from . import methods, production as p, version_consolidation as consolidation
@@ -200,6 +225,14 @@ def validate(store):
             payload = json.loads(row['payload'])
             if not consolidation.valid_identity(store, obj['id'], row['version'], payload, row['id']):
                 raise ValueError('recovery content checksum mismatch: '+obj['id'])
+            from . import editing
+            if obj['kind'] in editing.KINDS:
+                if obj['kind'] != 'EPISODE_EDIT' and (len(rows)!=1 or row['version']!=1):
+                    raise ValueError('immutable editing evidence has multiple revisions')
+                editing.validate_record(store,obj['id'],obj['kind'],payload,inspect=inspect_editing)
+                expected={(d['revision_id'],d['role']) for d in editing.expected_dependencies(obj['kind'],payload)}
+                actual={(d['to_revision'],d['role']) for d in store.db.execute('SELECT * FROM dependencies WHERE from_revision=?',(row['id'],))}
+                if expected!=actual:raise ValueError('editing recovery dependency mismatch')
             if obj['kind'] == 'SOURCE' and payload['source_revision'] != current.checksum(store.source(obj['id'])):
                 raise ValueError('source recovery fingerprint mismatch')
             if obj['kind'] in current.RECORD_KINDS:
@@ -268,7 +301,7 @@ def restore(store, directory):
     target = Path(directory)
     manifest = json.loads((target/'manifest.json').read_text())
     core = {'materials.json', 'comments.json', 'objects.json', 'configurations.json', 'material-content.json'}
-    if manifest.get('schema_version') != 14 or manifest.get('production_model') != current.CONTRACT or not core <= manifest.get('files', {}).keys():
+    if manifest.get('schema_version') not in (14,15) or manifest.get('production_model') != current.CONTRACT or not core <= manifest.get('files', {}).keys():
         raise ValueError('invalid current production recovery manifest')
     for name, sha in manifest['files'].items():
         if name.startswith('assets/'):
@@ -279,6 +312,9 @@ def restore(store, directory):
             raise ValueError('current recovery file checksum mismatch: '+name)
     framework, materials, comments, configurations = [json.loads((target/name).read_text()) for name in
                                                        ('objects.json','materials.json','comments.json','configurations.json')]
+    from .editing import KINDS as EDITING_KINDS
+    if manifest['schema_version']==14 and any(o['kind'] in EDITING_KINDS for o in framework['objects']):
+        raise ValueError('editing records require schema 15')
     counts = dict(sources=len(materials), comments=len(comments['comments']), events=len(comments['events']),
                   objects=len(framework['objects']), revisions=len(framework['revisions']), configurations=len(configurations['records']))
     if any(manifest[k] != v for k, v in counts.items()):

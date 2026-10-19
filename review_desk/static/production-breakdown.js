@@ -142,7 +142,7 @@ async function renderMaterialRelations(host,materialId,selected=null,{comparison
   }catch(error){if(box.isConnected)nodeText('p','production-issue',error.message,box)}
 }
 
-function productionTab(){const p=new URL(location.href).searchParams;if(state.workspace==='materials.workspace')return 'materials';if(p.get('production_tab')==='history')return 'retired';return (['entities','materials','breakdown'].includes(p.get('production_tab'))?p.get('production_tab'):null)||((p.has('production_entity')||p.has('entity_state'))?'entities':'breakdown')}
+function productionTab(){const p=new URL(location.href).searchParams;if(state.workspace==='materials.workspace')return 'materials';if(p.get('production_tab')==='history')return 'retired';return (['entities','materials','breakdown','editing'].includes(p.get('production_tab'))?p.get('production_tab'):null)||((p.has('production_entity')||p.has('entity_state'))?'entities':'breakdown')}
 function productionTabs(){if(typeof renderWorkspaceTabs==='function')renderWorkspaceTabs()}
 function breakdownRoute(values){const url=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)url.searchParams.delete(k);else url.searchParams.set(k,v)}history.replaceState(history.state,'',url)}
 function breakdownHeading(host){productionTabs(host)}

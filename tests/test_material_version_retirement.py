@@ -54,7 +54,7 @@ class RemovalTest(unittest.TestCase):
     def test_fresh_store_and_public_recovery_never_create_removed_storage(self):
         retirement.validate_absent(self.store)
         manifest = export(self.store, self.root / 'export')
-        self.assertEqual(manifest['schema_version'], 14)
+        self.assertEqual(manifest['schema_version'], 15)
         restored = Store(self.root / 'restored/.runtime/review.sqlite3')
         self.addCleanup(restored.close)
         restore(restored, self.root / 'export')

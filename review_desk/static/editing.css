@@ -1,0 +1,50 @@
+/* Layout only; selection, paper colors and controls use the shared desk theme. */
+.episode-editing { margin:0; min-width:0; color:var(--desk-ink); }
+.edit-filters { margin-bottom:22px; }
+.edit-filters .production-filter-group:first-child { margin-top:0; }
+.edit-toolbar { display:flex; align-items:end; flex-wrap:wrap; gap:10px; margin:14px 0; }
+.edit-toolbar label,.edit-fields label { display:flex; flex-direction:column; gap:5px; font-size:13px; color:var(--desk-muted); }
+.edit-toolbar input { width:110px; }
+.edit-layout { display:grid; grid-template-columns:170px minmax(0,1fr); gap:22px; }
+.edit-scenes { display:flex; flex-direction:column; gap:7px; max-height:780px; overflow:auto; }
+.edit-scenes button { text-align:left; font:inherit; font-size:13px; line-height:1.5; padding:9px 12px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); color:var(--desk-ink); }
+.edit-scenes button:hover { background:var(--desk-hover); border-color:var(--desk-selection-line); }
+.edit-main { min-width:0; }
+.edit-player { max-width:960px; margin:0 auto; background:#171e19; border-radius:var(--desk-radius); overflow:hidden; }
+.edit-player video { display:block; width:100%; max-height:60vh; aspect-ratio:16/9; }
+.edit-notice { border-left:3px solid var(--desk-selection-line); background:var(--desk-soft); padding:10px 14px; line-height:1.7; font-size:13px; }
+.edit-timeline-scroll { overflow:auto; max-width:100%; margin-top:14px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); }
+.edit-timeline { position:relative; min-width:600px; }
+.edit-ruler { height:32px; border-bottom:1px solid var(--desk-line); position:relative; background:var(--desk-soft); }
+.edit-ruler button { position:absolute; font:inherit; font-size:11px; background:none; border:0; color:var(--desk-muted); padding:5px; }
+.edit-track { height:60px; position:relative; border-bottom:1px solid var(--desk-line); }
+.edit-track-name { position:sticky; left:6px; top:0; z-index:2; font-size:11px; background:var(--desk-surface); color:var(--desk-muted); }
+.edit-clip { position:absolute; top:21px; height:32px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; border:1px solid var(--desk-selection-line); border-radius:var(--desk-radius); background:var(--desk-selected); font:inherit; font-size:11px; text-align:left; padding:5px; color:var(--desk-ink); }
+.edit-clip.audio { background:var(--desk-soft); border-color:var(--desk-line); }
+.subtitles .edit-clip { background:var(--desk-surface); border-color:var(--desk-line); }
+.edit-clip:hover { background:var(--desk-hover); }
+.edit-playhead { position:absolute; top:0; bottom:0; width:2px; background:var(--desk-red); pointer-events:none; z-index:3; }
+.edit-inspector { border:1px solid var(--desk-line); border-radius:var(--desk-radius); padding:20px; margin-top:22px; background:var(--desk-surface); }
+.edit-inspector h3 { margin:0 0 10px; font-size:16px; font-weight:650; }
+.edit-selected-clip { margin:0 0 12px; font-size:14px; }
+.edit-fields { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:14px; margin-top:16px; }
+.edit-fields input { min-width:0; width:100%; box-sizing:border-box; }
+.edit-hint { font-size:12px; color:var(--desk-muted); line-height:1.7; }
+.edit-downloads,.edit-clip-picker,.edit-replacement,.edit-comparison { padding:12px 0; font-size:13px; }
+.episode-editing summary { cursor:pointer; color:var(--desk-ink); }
+.edit-downloads a { display:inline-block; font-size:13px; padding:10px 18px 0 0; color:var(--desk-red); }
+.edit-source-dialog { width:min(1000px,90vw); border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); color:var(--desk-ink); }
+.edit-source-dialog video { display:block; width:100%; max-height:70vh; }
+.edit-source-dialog::backdrop { background:#14281bb0; }
+.edit-job { font-size:13px; color:var(--desk-muted); }
+.edit-job progress { width:260px; accent-color:var(--desk-selection-line); }
+.episode-editing .edit-toolbar button[aria-pressed=true] { background:var(--desk-selected); border-color:var(--desk-selection-line); color:var(--desk-ink); }
+@media(max-width:760px) {
+  .edit-layout { grid-template-columns:1fr; }
+  .edit-scenes { flex-direction:row; max-height:100px; overflow:auto; }
+  .edit-scenes button { flex-shrink:0; max-width:140px; }
+  .edit-fields { grid-template-columns:1fr 1fr; }
+  .edit-player video { max-height:50vh; }
+  .edit-toolbar { gap:8px; }
+  .edit-inspector { padding:14px; }
+}
