@@ -196,7 +196,7 @@ function workspaceTabItems(){
   ].map(([value,id,label,controls])=>({id,label,controls,active:value===workspace,open:()=>{rememberWorkspacePosition();switchWorkspace(value)}}));
   if(workspace==='project.configuration')return [['PROJECT','故事项目'],['SYSTEM','系统与 AI']].map(([value,label])=>({id:'configuration-tab-'+value,label,controls:'configuration-view',active:value===configurationSectionFromRoute(),open:()=>selectConfigurationSection(value)}));
   if(['settings.workspace','materials.workspace','production.workspace'].includes(workspace)){
-    const options=[['breakdown','视听制作'],['entities','实体管理'],['materials','素材管理']];
+    const options=[['breakdown','视听制作'],['entities','实体管理'],['materials','素材管理'],['editing','成片剪辑']];
     return options.map(([value,label])=>({id:'production-tab-'+value,label,controls:'production-view',active:value===productionTab(),open:()=>selectProductionTab(value)}));
   }
   return [];
@@ -243,6 +243,7 @@ function workspacePageDescriptor(workspace,params){
   if(params.get('production_tab')==='history')return ['页面不可用','页面已退役','此旧页面已移除，请从生产制作选择当前工作入口。'];
   const tab=workspace==='materials.workspace'?'materials':workspace==='production.workspace'||params.get('production_tab')==='shots'?'breakdown':(params.get('production_tab')||((params.has('production_entity')||params.has('entity_state'))?'entities':'breakdown'));
   return ({
+    editing:['EPISODE EDIT','成片剪辑','观看完整成片，定位场镜与片段，按准确版本提出修改意见。'],
     breakdown:['STORY → PRODUCTION','视听制作','按视听集、场、镜阅读设计，审阅各项素材方案与准确候选。'],
     entities:['ENTITIES & STATES','实体管理','按集场镜查看实体关系，打开实体与镜头审阅其素材。'],
     materials:['MATERIAL LIBRARY','素材管理','按素材分类浏览素材，筛选集场镜与结果，打开当前方案与真实候选。']

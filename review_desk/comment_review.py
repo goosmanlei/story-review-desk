@@ -8,6 +8,7 @@ import json
 from .store import Conflict, canonical, digest
 from .structure import revision_record, object_revisions, STRUCTURE_ID
 from .production import KINDS
+from .editing import KINDS as EDITING_KINDS
 
 FORMAT = 'comment-handling-v1'
 
@@ -22,7 +23,7 @@ def exact_revision(store, object_id, revision_id):
     revision = revision_record(store, revision_id)
     obj = store.db.execute('SELECT kind FROM objects WHERE id=?', (object_id,)).fetchone()
     if not revision or revision['object_id'] != object_id or not obj or (
-            obj['kind'] not in {'SOURCE', 'EPISODE', 'DELETED_PRODUCTION', *KINDS} and not (obj['kind'] == 'GUIDANCE' and revision['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1')) and object_id != STRUCTURE_ID):
+            obj['kind'] not in {'SOURCE', 'EPISODE', 'DELETED_PRODUCTION', *KINDS, *EDITING_KINDS} and not (obj['kind'] == 'GUIDANCE' and revision['payload'].get('format') in ('managed-method-skill-v1', 'managed-method-resource-v1')) and object_id != STRUCTURE_ID):
         raise ValueError('准确内容修订不存在或不匹配；未替换为最新稿')
     if obj['kind'] == 'SOURCE':
         source = store.source(object_id)

@@ -16,6 +16,12 @@ def main():
     parser.add_argument("--instance", required=True, type=Path, help="story repository root")
     subs = parser.add_subparsers(dest="command", required=True)
     serve = subs.add_parser("serve")
+    serve.add_argument("--render-worker", action="store_true")
+    worker=subs.add_parser("edit-worker")
+    worker.add_argument("--once",action="store_true")
+    editing=subs.add_parser("edit")
+    editing.add_argument("action",choices=("catalog","get","save","validate","submit","status","cancel","retry","compare"))
+    editing.add_argument("--request",type=Path)
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--host", default="127.0.0.1")
     source = subs.add_parser("import-sources")
@@ -105,8 +111,15 @@ def main():
     args = parser.parse_args()
     root = args.instance.resolve()
     config = json.loads((root / "config" / "instance.json").read_text())
+    if args.command == "edit-worker":
+        from .editing_worker import work
+        return work(root,args.once)
     if args.command == "serve":
         server = ReviewServer((args.host, args.port), root, config)
+        child=None
+        if args.render_worker:
+            import subprocess,sys
+            child=subprocess.Popen([sys.executable,"-m","review_desk","--instance",str(root),"edit-worker"])
         print(f"{config['title']}: http://{args.host}:{args.port}/", flush=True)
         try:
             server.serve_forever()
@@ -114,9 +127,18 @@ def main():
             pass
         finally:
             server.server_close()
+            if child:
+                child.terminate()
+                try:child.wait(timeout=10)
+                except subprocess.TimeoutExpired:child.kill();child.wait()
         return
     store = Store(root / ".runtime" / "review.sqlite3")
     try:
+        if args.command == 'edit':
+            from .editing_api import dispatch
+            value=json.loads(args.request.read_text()) if args.request else {}
+            print(json.dumps(dispatch(store,root,args.action,value),ensure_ascii=False,indent=2))
+            return
         if args.command == 'methods' or args.command.startswith('method-'):
             from . import methods
             if args.command == 'methods': result = methods.catalog(store)

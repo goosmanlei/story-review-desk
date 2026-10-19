@@ -361,6 +361,14 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.server.web_assets.serve(self, path):
             return
         store = self.server.store
+        if path.startswith('/api/editing/'):
+            try:
+                from .editing_api import dispatch
+                action=path.rsplit('/',1)[1]
+                if action not in ('catalog','get','status'):raise ValueError('use POST for editing actions')
+                return self._json(dispatch(store,self.server.root,action,{k:v[0] for k,v in query.items()}))
+            except Conflict as exc:return self._json({'error':str(exc)},409)
+            except (ValueError,KeyError,TypeError,OSError) as exc:return self._json({'error':str(exc)},400)
         if path == '/api/data-model':
             from .data_model import load
             try:
@@ -680,7 +688,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 503)
         if path == "/":
             return self._file(Path(__file__).parent / "static" / "index.html", "text/html; charset=utf-8")
-        if path in ("/entity-graph-worker.js", "/entity-graph-routing.js", "/vendor/viz-3.31.0.js", "/novel.js", "/methods.js", "/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
+        if path in ("/editing.js", "/editing.css", "/entity-graph-worker.js", "/entity-graph-routing.js", "/vendor/viz-3.31.0.js", "/novel.js", "/methods.js", "/comment-review.js", "/comment-review.css", "/desk-theme.css", "/management-cards.js", "/navigation.js", "/navigation.css", "/unified-cards.js", "/unified-review.css", "/production-breakdown.js", "/material-review.js", "/entity-relations.js", "/review-ui.js", "/review-ui.css", "/entity-review.js", "/production.js", "/production.css", "/app.js", "/approach.js", "/approach.css", "/screenplay.js", "/screenplay.css", "/structure.js", "/style.css", "/polish.css", "/workspace.css", "/structure.css"):
             return self._file(Path(__file__).parent / "static" / path[1:], "text/javascript; charset=utf-8" if path.endswith(".js") else "text/css; charset=utf-8")
         if path.startswith("/assets/") and path[8:] == Path(path[8:]).name and not path[8:].startswith("."):
             from .production_current import enabled
@@ -706,6 +714,12 @@ class ReviewHandler(BaseHTTPRequestHandler):
             return self._json({"error": str(exc)}, 400)
 
     def do_POST(self):
+        if self.path.startswith("/api/editing/"):
+            try:
+                from .editing_api import dispatch
+                return self._json(dispatch(self.server.store,self.server.root,self.path.rsplit("/",1)[1],self._input(2_000_000)))
+            except Conflict as exc:return self._json({"error":str(exc)},409)
+            except (ValueError,KeyError,TypeError,OSError) as exc:return self._json({"error":str(exc)},400)
         if self.path in ('/api/production/submit', '/api/production/reuse-candidate', '/api/production/result'):
             try:
                 from .production_operations import submit, reuse, finish

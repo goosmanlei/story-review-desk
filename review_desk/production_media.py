@@ -1,5 +1,7 @@
 """Content-addressed production files; no platform URLs stand in for originals."""
 import hashlib
+from contextlib import contextmanager
+from contextvars import ContextVar
 import json
 import math
 import os
@@ -15,15 +17,65 @@ MIMES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
          ".m4a": "audio/mp4", ".ogg": "audio/ogg", ".flac": "audio/flac",
          ".mp4": "video/mp4", ".webm": "video/webm", ".mov": "video/quicktime",
          ".blend": "application/x-blender", ".json": "application/json",
-         ".txt": "text/plain", ".zip": "application/zip"}
+         ".txt": "text/plain", ".srt": "application/x-subrip", ".ass": "text/plain", ".zip": "application/zip"}
+
+
+_physical_hashes = ContextVar('production_physical_hashes', default=None)
+
+
+def _file_identity(path):
+    if path.is_symlink():
+        raise ValueError('managed media cannot be a symlink')
+    stat = path.stat()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+@contextmanager
+def physical_hash_scope():
+    """Reuse verified physical bytes only for this publication/export operation."""
+    token = _physical_hashes.set({'files': {}, 'frozen': False})
+    try:
+        yield
+    finally:
+        _physical_hashes.reset(token)
+
+
+@contextmanager
+def frozen_physical_hashes():
+    """Reject changed/unprepared files rather than reading media under a DB lock."""
+    scope = _physical_hashes.get()
+    if scope is None:
+        raise RuntimeError('physical media preflight scope is required')
+    previous = scope['frozen']
+    scope['frozen'] = True
+    try:
+        yield
+        for path, (identity, _) in scope['files'].items():
+            if _file_identity(path) != identity:
+                raise ValueError('media changed during preflight; retry operation')
+    finally:
+        scope['frozen'] = previous
 
 
 def physical_file_hash(path):
+    path = Path(path).absolute()
+    scope = _physical_hashes.get()
+    before = _file_identity(path)
+    cached = scope['files'].get(path) if scope is not None else None
+    if cached and cached[0] == before:
+        return cached[1]
+    if scope is not None and scope['frozen']:
+        raise ValueError('media changed or was not preflighted; retry operation')
     h = hashlib.sha256()
-    with Path(path).open("rb") as stream:
+    with path.open("rb") as stream:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             h.update(chunk)
-    return h.hexdigest()
+    if _file_identity(path) != before:
+        raise ValueError('media changed while hashing; retry operation')
+    result = h.hexdigest()
+    if scope is not None:
+        scope['files'][path] = (before, result)
+    return result
 
 
 def file_hash(path):
@@ -35,7 +87,18 @@ def file_hash(path):
 def asset_path(root, name):
     if not isinstance(name, str) or not NAME.fullmatch(name):
         raise ValueError("invalid production filename")
-    folder = Path(root) / "export" / "assets"
+    return export_asset_path(root, name)
+
+
+def export_asset_path(root, name):
+    """Shared export assets also include named source figures and site icons."""
+    return bundle_asset_path(Path(root) / 'export', name)
+
+
+def bundle_asset_path(directory, name):
+    if not isinstance(name, str) or not name or name != Path(name).name or name.startswith('.'):
+        raise ValueError('unsafe asset name')
+    folder = Path(directory) / 'assets'
     if folder.is_symlink() or (folder.parent.exists() and folder.parent.is_symlink()):
         raise ValueError("managed media directory cannot be a symlink")
     path = folder / name
