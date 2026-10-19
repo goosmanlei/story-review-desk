@@ -228,8 +228,16 @@ def validate_project(store, root, p, inspect=False, check_files=True):
             integer(item['end_frame'],'text end',item['start_frame']+1,spec['duration_frames'])
             if not isinstance(item['text'],str) or not item['text'].strip() or len(item['text'])>600:
                 raise ValueError('invalid text')
-            if 'style' in item and (group!='titles' or item['style'] not in ('title','credit')):
+            if 'style' in item and (group!='titles' or item['style'] not in ('title','credit','nameplate')):
                 raise ValueError('invalid title style')
+            if item.get('style')=='nameplate':
+                lines=item['text'].split('\n')
+                if not 1<=len(lines)<=2 or any(not line.strip() for line in lines) or len(lines[0])>12 or (len(lines)==2 and len(lines[1])>24):
+                    raise ValueError('nameplate needs a name up to 12 characters and an optional detail up to 24 characters')
+                if item.get('position','lower-left') not in ('lower-left','lower-right','upper-left','upper-right'):
+                    raise ValueError('invalid nameplate position')
+            elif 'position' in item:
+                raise ValueError('only nameplates have a position')
     for mark in p.get('markers',[]):
         identifier(mark['id']);integer(mark['frame'],'scene marker',0,spec['duration_frames']-1)
     return p
@@ -367,24 +375,6 @@ def catalog(store, root, episode_id=None):
     return {'episodes':[{'id':r['object_id'],'revision_id':r['id'],'title':r['payload']['title'],'number':r['payload'].get('number')} for r in episodes],
             'projects':[p for p in projects if not episode_id or p['payload']['episode']['object_id']==episode_id],
             'outputs':[f for f in films if not episode_id or f['payload']['project']['episode']['object_id']==episode_id],'jobs':jobs}
-
-
-def compare(source, target, frame):
-    """Map content through a stable clip lineage and exact source, never seconds."""
-    candidates=[]
-    for a in source['clips']:
-        if a['kind']!='video':continue
-        size=duration(a,source)
-        if not a['timeline_start']<=frame<a['timeline_start']+size:continue
-        sa=next(s for s in source['sources'] if s['id']==a['source_id'])
-        source_frame=Fraction(frame-a['timeline_start'],1)/fps(source)*Fraction(sa['video']['fps'])+a['source_in']
-        for b in target['clips']:
-            if b['kind']!='video' or b.get('lineage_id',b['id'])!=a.get('lineage_id',a['id']):continue
-            sb=next(s for s in target['sources'] if s['id']==b['source_id'])
-            if sa['component']['sha256']!=sb['component']['sha256'] or not b['source_in']<=source_frame<b['source_out']:continue
-            candidates.append(rounded((source_frame-b['source_in'])/Fraction(sb['video']['fps'])*fps(target))+b['timeline_start'])
-    return {'mapped':len(candidates)==1,'frame':candidates[0] if len(candidates)==1 else None,
-            'reason':'' if len(candidates)==1 else '该内容已删除、替换或有多个对应片段，无法可靠自动定位。'}
 
 
 def expected_dependencies(kind,payload):

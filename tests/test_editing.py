@@ -89,11 +89,33 @@ class EditingTest(unittest.TestCase):
         with self.assertRaises(ValueError):self.save()
         self.assertEqual(edit.records(self.store,'EPISODE_EDIT'),[])
 
-    def test_content_mapping_after_split_and_delete(self):
-        p=copy.deepcopy(self.project);p['clips'][0]['source_out']=24
-        p['clips'].append({**p['clips'][0],'id':'v2','lineage_id':'v1','source_in':24,'source_out':48,'timeline_start':24})
-        self.assertEqual(edit.compare(self.project,p,30),{'mapped':True,'frame':30,'reason':''})
-        p['clips'].pop();self.assertFalse(edit.compare(self.project,p,30)['mapped'])
+    def test_nameplates_validate_and_render_in_both_dialogue_variants(self):
+        p=copy.deepcopy(self.project)
+        p['titles']=[{'id':'person','style':'nameplate','text':'李寄\n阿蘅的好友',
+                      'start_frame':8,'end_frame':32,'position':'upper-right'}]
+        for change in ({'position':'outside'},{'text':'李寄\n好友\n第三行'}, {'text':'甲'*13}, {'text':'李寄\n'}):
+            bad=copy.deepcopy(p);bad['titles'][0].update(change)
+            with self.assertRaises(ValueError):self.save(bad)
+            self.assertEqual(edit.records(self.store,'EPISODE_EDIT'),[])
+        self.assertEqual(self.save(p)['payload']['titles'],p['titles'])
+        filters=subprocess.check_output(['ffmpeg','-hide_banner','-filters'],stderr=subprocess.DEVNULL).decode()
+        if ' subtitles ' not in filters:self.skipTest('deployment FFmpeg/libass required')
+        frames=[]
+        for include_dialogue in (False,True):
+            path=self.root/('dialogue.ass' if include_dialogue else 'clean.ass')
+            worker.subtitle_file(p,path,include_dialogue)
+            frames.append(subprocess.check_output(['ffmpeg','-v','error','-f','lavfi','-i','color=black:s=320x180:r=24:d=2',
+                '-vf','subtitles='+path.name,'-pix_fmt','rgb24','-f','rawvideo','pipe:1'],cwd=self.root,timeout=60))
+        size=320*180*3
+        def card(movie,frame):
+            return b''.join(movie[frame*size+(y*320+244)*3:frame*size+(y*320+304)*3] for y in range(23,48))
+        for movie in frames:
+            self.assertEqual(len(movie),48*size)
+            self.assertFalse(any(card(movie,7)))
+            self.assertTrue(any(card(movie,16)))
+            self.assertFalse(any(card(movie,32)))
+        self.assertEqual(card(frames[0],16),card(frames[1],16))
+        self.assertNotEqual(frames[0],frames[1],'dialogue variants still differ outside the nameplate')
 
     def test_cancel_and_explicit_retry(self):
         first=self.save();job=edit.submit(self.store,self.root,first['object_id'],1,'test','cancel')
