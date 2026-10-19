@@ -14,10 +14,10 @@
 .edit-player video { display:block; width:100%; max-height:60vh; aspect-ratio:16/9; }
 .edit-notice { border-left:3px solid var(--desk-selection-line); background:var(--desk-soft); padding:10px 14px; line-height:1.7; font-size:13px; }
 .edit-timeline-scroll { overflow:auto; max-width:100%; margin-top:14px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); }
-.edit-timeline { position:relative; min-width:600px; cursor:crosshair; }
+.edit-timeline { position:relative; min-width:0; overflow:hidden; cursor:crosshair; }
 .edit-timeline button { cursor:crosshair; }
 .edit-frame-grid .edit-track,.edit-frame-grid .edit-ruler { background-image:repeating-linear-gradient(to right,var(--desk-line) 0 1px,transparent 1px var(--edit-frame-width)); }
-.edit-ruler { height:32px; border-bottom:1px solid var(--desk-line); position:relative; background:var(--desk-soft); }
+.edit-ruler { height:32px; border-bottom:1px solid var(--desk-line); position:relative; overflow:hidden; background:var(--desk-soft); }
 .edit-ruler button { position:absolute; font:inherit; font-size:11px; background:none; border:0; color:var(--desk-muted); padding:5px; }
 .edit-track { height:60px; position:relative; border-bottom:1px solid var(--desk-line); }
 .edit-track-name { position:sticky; left:6px; top:0; z-index:2; font-size:11px; background:var(--desk-surface); color:var(--desk-muted); }
@@ -25,7 +25,10 @@
 .edit-clip.audio { background:var(--desk-soft); border-color:var(--desk-line); }
 .subtitles .edit-clip { background:var(--desk-surface); border-color:var(--desk-line); }
 .edit-clip:hover { background:var(--desk-hover); }
-.edit-playhead { position:absolute; top:0; bottom:0; width:2px; background:var(--desk-red); pointer-events:none; z-index:3; }
+.edit-playhead { position:absolute; top:0; bottom:0; width:14px; margin-left:-6px; cursor:ew-resize; touch-action:none; z-index:3; }
+.edit-playhead::before { content:''; position:absolute; left:6px; top:0; bottom:0; width:2px; background:var(--desk-red); }
+.edit-playhead::after { content:''; position:absolute; left:2px; top:0; width:10px; height:10px; background:var(--desk-red); clip-path:polygon(0 0,100% 0,100% 55%,50% 100%,0 55%); }
+.edit-playhead:focus-visible,.edit-playhead.dragging { outline:1px solid var(--desk-red); outline-offset:-1px; }
 .edit-inspector { border:1px solid var(--desk-line); border-radius:var(--desk-radius); padding:20px; margin-top:22px; background:var(--desk-surface); }
 .edit-inspector h3 { margin:0 0 10px; font-size:16px; font-weight:650; }
 .edit-selected-clip { margin:0 0 12px; font-size:14px; }
