@@ -265,7 +265,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                     self.send_header('Content-Length','0');self.end_headers()
                     return
             url = resources.signed_url(self.server.root, relative, variant=variant,
-                                       download=query.get('download') == ['1'], filename=query.get('filename',[None])[0], method=self.command)
+                                       download=query.get('download') == ['1'], filename=query.get('filename',[None])[0],
+                                       method=self.command, refresh=bool(query.get('refresh')))
             self.send_response(307)
             self.send_header('Location', url)
             self.send_header('Cache-Control', 'no-store')
