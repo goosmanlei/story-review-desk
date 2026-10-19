@@ -149,9 +149,12 @@ def text_layer_document(store, asset, component):
     from .production import record
     from .production_current import submission
     project=output['payload']['project']
-    source_origins={}
+    source_origins={};missing_sources={}
     for source in project['sources']:
-        candidate=store.db.execute('SELECT operation_id FROM production_candidates WHERE id=?',(source['candidate_id'],)).fetchone()
+        candidate=store.db.execute('SELECT operation_id,asset_object_id FROM production_candidates WHERE id=?',(source['candidate_id'],)).fetchone()
+        if not candidate or candidate[1]!=source['asset']['object_id']:
+            missing_sources[source['id']]=source['asset']['object_id']
+            continue
         saved=submission(store,candidate[0])['snapshot']
         scopes={canonical(n['payload']['scope']):n['payload']['scope'] for n in saved.get('requirements',[]) if n['payload'].get('scope')}
         if len(scopes)==1:
@@ -167,6 +170,9 @@ def text_layer_document(store, asset, component):
         if any(entry.get(k) != v for k,v in expected[element_key(entry)].items()):
             raise Conflict('字层原件条目与原工程不一致')
         intersecting=[e for e in pictures if e['start_frame']<entry['end_frame'] and e['end_frame']>entry['start_frame']]
+        missing=[missing_sources[e['source_id']] for e in intersecting if e['source_id'] in missing_sources]
+        if missing:
+            raise ValueError('字层使用镜头的准确来源不可用：'+', '.join(dict.fromkeys(missing)))
         if all(e['source_id'] in source_origins for e in intersecting):
             uses={canonical(source_origins[e['source_id']]) for e in intersecting}
             if len(entry.get('uses',[]))!=len(uses) or {canonical(u) for u in entry['uses']}!=uses:
@@ -297,13 +303,13 @@ def review(store, output_id, revision_id, association=None):
                     item['binding']=copy.deepcopy(original['material_ref'])
                 else:
                     item['binding'] = binding(store, sources[item['source_id']])
-            except (ValueError, KeyError, Conflict) as error:
+            except (ValueError, KeyError, Conflict, OSError) as error:
                 item['unavailable'] = str(error)
     for item in items:
         if item.get('binding'):
             try:
                 verify_binding(store, item['binding'], live=True)
-            except (ValueError, KeyError, Conflict) as error:
+            except (ValueError, KeyError, Conflict, OSError) as error:
                 item['unavailable'] = str(error)
     return {'output':ref(output), 'snapshot':output['payload']['snapshot'],
             'association':({**ref(selected), 'version':selected['payload']['version'], 'digest':selected['payload']['digest']} if selected else None),
