@@ -36,6 +36,11 @@ def direct_materials(store, row, *, metadata=False):
     found = {item['object_id']:item for item in light.rows(
         store, 'REQUIREMENT', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=? "
         "AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (row['object_id'], row['id']))}
+    # Externally registered originals can be a material in their own right;
+    # they do not need a fabricated generation demand merely to open this card.
+    for item in light.rows(store, 'ASSET', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=?", (row['object_id'], row['id'])):
+        if not item['payload'].get('candidate_requirements') and item['payload'].get('external_source'):
+            found[item['object_id']] = p.record(store, item['object_id'])
     return list(found.values()) if metadata else [p.record(store, oid) for oid in found]
 
 
@@ -120,7 +125,7 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
     deferred = deferred and enabled(store)
     needs = [need for owner in [row, *states] for need in direct_materials(store, owner, metadata=deferred)]
     if deferred:
-        needs = [material_summary(n) for n in needs]
+        needs = [material_summary(n) if n['kind']=='REQUIREMENT' else n for n in needs]
     groups = material_groups(row, needs) if shot else [
         {'key': owner['object_id'], 'label': '基础状态' if owner is row else owner['payload']['title'],
          'material_ids': [n['object_id'] for n in needs if n['payload']['scope']['object_id'] == owner['object_id']],
@@ -133,7 +138,7 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
     for need in needs:
         p.check_read(store)
         mid = need['object_id']
-        if not deferred:
+        if not deferred or need['kind']=='ASSET':
             versions[mid] = material_plans.snapshot(store, mid)
         else:
             from . import list_reading as light
@@ -156,9 +161,9 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
     contexts, targets = {}, {r['id']: r for r in [row, *states, *needs]}
     from .shot_references import enrich_detail
     for index, need in enumerate(needs):
-        if deferred and (not load_selected or need['object_id'] != selected):
+        if deferred and need['kind']=='REQUIREMENT' and (not load_selected or need['object_id'] != selected):
             continue
-        need = versions[need['object_id']][0]['plan'] if deferred else need
+        need = (versions[need['object_id']][0]['plan'] or need) if deferred else need
         needs[index] = need
         need['review_input_records'] = [p.ref_record(store, item['reference']) for item in need['payload'].get('generation', {}).get('inputs', [])]
         enrich_detail(store, {'record':need,'material_cards':{need['object_id']:versions[need['object_id']]}})
@@ -168,7 +173,7 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
         for plan in rounds:
             for member in plan['members']:
                 targets[member['id']] = member
-                if member['kind'] == 'ASSET' and (not deferred or mid == selected and member['id'] == candidate_revision):
+                if member['kind'] == 'ASSET' and (not deferred or not plan['plan'] or mid == selected and member['id'] == candidate_revision):
                     context = material_review.context(store, member)
                     contexts[member['id']] = context
                     if context.get('call'): targets[context['call']['id']] = context['call']
@@ -201,7 +206,7 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
             'usages': {}, 'versions': {}, 'material_origin_contract': 'material-unique-origin-v1',
             'state_material_ids': {r['object_id']: [n['object_id'] for n in needs if n['payload']['scope']['object_id'] == r['object_id']] for r in states},
             'material_cards': versions,
-            'deferred_materials': [n['object_id'] for n in needs if deferred and (not load_selected or n['object_id'] != selected)],
+            'deferred_materials': [n['object_id'] for n in needs if n['kind']=='REQUIREMENT' and deferred and (not load_selected or n['object_id'] != selected)],
             'deferred_candidates': [r['id'] for v in versions.values() for plan in v for r in plan['results'] if deferred and r['id'] not in contexts],
             'materialContexts': contexts, 'material_card_counts': material_plans.card_counts(store, versions),
             'comment_records': list(targets.values()),

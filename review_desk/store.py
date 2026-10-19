@@ -254,6 +254,9 @@ class Store:
         if kind in editing.KINDS:
             if current and kind != "EPISODE_EDIT":
                 raise Conflict("submitted snapshots and film outputs are immutable")
+            if kind == 'EDIT_ASSOCIATION':
+                from .editing_review import guard_append
+                guard_append(self, object_id, payload)
             editing.validate_record(self, object_id, kind, payload, inspect=False, check_files=False)
             expected_refs = editing.expected_dependencies(kind, payload)
             if {(d["revision_id"],d["role"]) for d in dependencies} != {(d["revision_id"],d["role"]) for d in expected_refs}:
@@ -623,6 +626,9 @@ class Store:
         if not isinstance(anchor, dict):
             raise ValueError("invalid anchor")
         kind = anchor.get("type", "text")
+        if 'edit_selection' in anchor:
+            from .editing_review import validate_anchor
+            validate_anchor(self, object_id, revision_id, payload, anchor)
         if kind == "text":
             self._validate_blocks(blocks, anchor)
         elif kind == "global":
@@ -728,6 +734,9 @@ class Store:
                 if value.get('expected_edit_token') != actual:
                     raise Conflict('制作内容已变化；请核对原意见摘录后重新提交，草稿未保存到新内容')
                 self.validate_target(object_id, revision_id, anchor)
+            if anchor.get('edit_selection'):
+                from .editing_review import validate_new_anchor
+                validate_new_anchor(self, object_id, revision_id, anchor)
             self.db.execute("INSERT INTO comments VALUES (?,?,?,?,?,?,?,?,?,?)", (comment_id, source_id, object_id, revision_id, canonical(anchor), body, "OPEN", 1, stamp, stamp))
             from .business_codes import allocate_comments
             allocate_comments(self)

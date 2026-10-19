@@ -7,6 +7,12 @@ def dispatch(store, root, action, value):
     if not isinstance(value,dict):raise ValueError('editing request must be an object')
     if action=='catalog':return edit.catalog(store,root,value.get('episode_id'))
     if action=='get':return edit.read(store,value['object_id'],value.get('revision_id'))
+    if action=='review':
+        from .editing_review import review
+        return review(store,value['object_id'],value['revision_id'],value.get('association'))
+    if action=='associate':
+        from .editing_review import append_association
+        return append_association(store,value['association'])
     if action=='validate':
         edit.validate_project(store,root,value['project'],inspect=True)
         return {'validated':True}

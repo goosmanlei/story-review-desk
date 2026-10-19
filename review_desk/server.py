@@ -365,7 +365,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
             try:
                 from .editing_api import dispatch
                 action=path.rsplit('/',1)[1]
-                if action not in ('catalog','get','status'):raise ValueError('use POST for editing actions')
+                if action not in ('catalog','get','status','review'):raise ValueError('use POST for editing actions')
                 return self._json(dispatch(store,self.server.root,action,{k:v[0] for k,v in query.items()}))
             except Conflict as exc:return self._json({'error':str(exc)},409)
             except (ValueError,KeyError,TypeError,OSError) as exc:return self._json({'error':str(exc)},400)

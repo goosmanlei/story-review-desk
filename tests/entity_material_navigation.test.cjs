@@ -37,6 +37,13 @@ test('late entity route response cannot override a newer record or workspace',as
 test('historical same-object asset renders its exact original, without inheriting newer crop or range',async()=>{
  const f=fixture(),newer={...f.asset,id:'asset-r2',version:2,payload:{...f.asset.payload,components:[{...f.asset.payload.components[0],sha256:'new-bytes'}]}};f.asset.current_revision=newer.id;f.records.splice(f.records.indexOf(f.asset),1,newer);f.data.media[0]={id:'placement',record:newer,state:null,component_id:'original',crop:{x:.2,y:.2,width:.5,height:.5}};f.data.material_cards.need[0].members.push(newer);f.data.material_cards.need[0].results.push(newer);const read=f.c.api;f.c.api=async url=>url.includes('object_id=asset&revision_id=asset-r1')?{record:f.asset,history:[],uses:[]}:read(url);await f.c.loadProductionWorkspace();const data=f.c.state.entityReview,items=f.c.entityReviewMaterialItems(data,data.media),models=f.c.entityReviewMaterialModels([],items,data);assert.equal(models[0].candidates[0].record.id,f.asset.id);assert.equal(models[0].candidates[0].component.sha256,'old-bytes');assert.equal(models[0].candidates[0].crop,null);
 });
+test('historical text layer keeps its explicitly selected edition component',()=>{
+ const f=fixture(),original={id:'original',role:'original',mime:'application/json'},edition={id:'edition-old',role:'original',mime:'application/json'};
+ f.asset.payload.text_layer={format:'episode-text-layer-v1'};f.asset.payload.components=[original,edition];
+ const rendered=[];f.c.materialMedia=(_parent,item)=>rendered.push(item.component.id);f.c.renderSelectedGenerationRecipe=()=>{};f.c.materialCompareControl=()=>{};
+ f.c.renderMaterialCard(new E('section'),{material_id:f.asset.object_id,identity:f.asset,candidates:[{record:f.asset,component:original,components:[original,edition]}]},{selectedComponents:{[f.asset.id]:edition.id}});
+ assert.deepEqual(rendered,['edition-old']);
+});
 test('explicitly switching to another state clears the previous card and round URL context',async()=>{
  const f=fixture(),other=row('other-state','STATE',{entity:ref(f.entity),state_model:'complete-v1'});f.data.states.push(other);f.records.push(other);await f.c.loadProductionWorkspace();f.c.selectEntityReviewState(other);assert.equal(params(f).get('material_round'),null);assert.equal(params(f).get('material_id'),null);assert.equal(params(f).get('production_object'),other.object_id);assert.equal(params(f).get('production_revision'),null);
 });
