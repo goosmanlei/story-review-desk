@@ -8,6 +8,7 @@ import io
 import json
 import os
 from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 import wave
@@ -17,6 +18,7 @@ from test_resource_offline import FakeOSS
 from review_desk import production as p, production_operations as operations
 from review_desk import production_current as current, generation, resources as r, production_media
 from review_desk import semantic_consolidation as semantic
+from review_desk.store import Store, Conflict
 
 
 class ProductionResourceTest(unittest.TestCase):
@@ -339,6 +341,101 @@ class ProductionResourceTest(unittest.TestCase):
         self.assert_preflighted()
         self.assertEqual(result['changed'], [{'object_id': need['object_id'], 'indices': [0]}])
         self.assertNotIn('range', p.record(self.store, need['object_id'])['payload']['generation']['inputs'][0])
+
+
+class ConfigurationResourceTest(unittest.TestCase):
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix='cold-config-')
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / 'config').mkdir()
+        config = {'format': r.FORMAT, 'provider': 'oss', 'instance_id': 'config-cold-test', 'project': 'config-cold-test', 'bucket': 'synthetic-only', 'region': 'cn-hongkong', 'cache_bytes': 1024 * 1024}
+        (self.root / 'config/instance.json').write_text(json.dumps({'id': config['instance_id']}))
+        (self.root / 'config/resource-storage.json').write_text(json.dumps(config))
+        self.data = b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 8 8"><rect width="8" height="8"/></svg>'
+        self.sha = hashlib.sha256(self.data).hexdigest()
+        self.name = 'favicon-' + self.sha + '.svg'
+        spec = {'key': config['project'] + '/originals/' + self.sha, 'version_id': 'synthetic-exact', 'sha256': self.sha, 'verified_sha256': self.sha, 'bytes': len(self.data), 'mime': 'image/svg+xml'}
+        (self.root / 'config/resource-catalog.json').write_text(json.dumps({**config, 'entries': {'export/assets/' + self.name: spec}}))
+        self.store = Store(self.root / '.runtime/review.sqlite3')
+        self.addCleanup(self.store.close)
+        self.cloud = FakeOSS()
+        self.cloud.objects[spec['key'], spec['version_id']] = (self.data, spec['mime'])
+        self.get_phases, self.read_phases = ([], [])
+        self.cloud.on_get = lambda: self.get_phases.append(self.store.db.in_transaction)
+        actual_open = Path.open
+
+        def traced_open(path, *args, **kwargs):
+            mode = args[0] if args else kwargs.get('mode', 'r')
+            if mode == 'rb' and path.parent.name == 'resource-cache':
+                self.read_phases.append(self.store.db.in_transaction)
+            return actual_open(path, *args, **kwargs)
+        for manager in (patch.dict(os.environ, {'REVIEW_RESOURCES_OFFLINE': '0'}), patch.object(r, 'client', return_value=self.cloud), patch.object(Path, 'open', traced_open)):
+            manager.start()
+            self.addCleanup(manager.stop)
+
+    def assert_cold_outside_write(self):
+        self.assertEqual(self.get_phases, [False])
+        self.assertTrue(self.read_phases)
+        self.assertFalse(any(self.read_phases))
+        self.assertFalse((self.root / 'export/assets').exists())
+
+    def cache(self):
+        return r._cache_dir(self.root) / (self.sha + '.svg')
+
+    def test_cold_exact_favicon_is_read_before_write(self):
+        saved = self.store.set_configuration('SYSTEM', {'site_favicon': self.name}, 0)
+        self.assertEqual(saved['version'], 1)
+        self.assertEqual(saved['body']['site_favicon'], self.name)
+        self.assert_cold_outside_write()
+
+    def test_other_system_update_preflights_existing_favicon(self):
+        first = self.store.set_configuration('SYSTEM', {'site_favicon': self.name}, 0)
+        self.cache().unlink()
+        self.get_phases.clear()
+        self.read_phases.clear()
+        saved = self.store.set_configuration('SYSTEM', {'ai_context_max_chars': 13000}, first['version'])
+        self.assertEqual(saved['version'], 2)
+        self.assertEqual(saved['body']['site_favicon'], self.name)
+        self.assertEqual(saved['body']['ai_context_max_chars'], 13000)
+        self.assert_cold_outside_write()
+
+    def test_original_change_after_last_write_rolls_back_configuration_and_event(self):
+        actual = self.store.configuration
+        changed = []
+
+        def change_after_write(scope):
+            result = actual(scope)
+            if self.store.db.in_transaction and result['version'] == 1:
+                self.cache().write_bytes(self.data[:-1] + b'!')
+                changed.append(True)
+            return result
+        with patch.object(self.store, 'configuration', change_after_write):
+            with self.assertRaisesRegex(ValueError, 'media changed'):
+                self.store.set_configuration('SYSTEM', {'site_favicon': self.name}, 0)
+        self.assertEqual(changed, [True])
+        self.assertEqual(self.store.configuration('SYSTEM')['version'], 0)
+        self.assertEqual(self.store.configuration_events(), [])
+        self.assertFalse(self.store.db.in_transaction)
+        self.assert_cold_outside_write()
+
+    def test_other_connection_wins_during_download_and_original_request_conflicts(self):
+        other = Store(self.store.db_path)
+        self.addCleanup(other.close)
+
+        def write_during_get():
+            self.get_phases.append(self.store.db.in_transaction)
+            other.set_configuration('SYSTEM', {'ai_context_max_chars': 14000}, 0)
+        self.cloud.on_get = write_during_get
+        with self.assertRaisesRegex(Conflict, 'configuration version changed'):
+            self.store.set_configuration('SYSTEM', {'site_favicon': self.name}, 0)
+        saved = self.store.configuration('SYSTEM')
+        self.assertEqual(saved['version'], 1)
+        self.assertEqual(saved['body']['ai_context_max_chars'], 14000)
+        self.assertEqual(saved['body']['site_favicon'], '')
+        self.assertEqual(len(self.store.configuration_events()), 1)
+        self.assert_cold_outside_write()
 
 
 if __name__ == '__main__':
