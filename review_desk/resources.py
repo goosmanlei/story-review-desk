@@ -24,6 +24,8 @@ _leases = ContextVar('resource_leases', default=None)
 _transfers = threading.BoundedSemaphore(3)
 _catalog_cache = {}
 _catalog_guard = threading.Lock()
+_signed_cache = {}
+_signed_guard = threading.Lock()
 _frozen = ContextVar('resource_preflight_frozen', default=False)
 
 
@@ -194,7 +196,7 @@ def validate_descriptor(config, spec, *, allow_offline=None):
         raise ValueError('resource lacks a verified exact cloud version')
 
 
-def client(config, *, administrative=False):
+def _credentials(config, *, administrative=False):
     if offline_mode():
         raise ValueError('cloud access is disabled for this offline instance')
     import alibabacloud_oss_v2 as oss
@@ -205,7 +207,7 @@ def client(config, *, administrative=False):
         selected = next(p for p in document['profiles'] if p['name'] == document['current'])
         if selected.get('mode') != 'AK' or selected.get('region_id') != config['region']:
             raise ValueError('expected the existing AK profile in the configured region')
-        credentials = oss.credentials.StaticCredentialsProvider(selected['access_key_id'], selected['access_key_secret'])
+        key, secret = selected['access_key_id'], selected['access_key_secret']
     else:
         filename = os.environ.get('REVIEW_OSS_CREDENTIALS_FILE')
         if filename:
@@ -218,14 +220,25 @@ def client(config, *, administrative=False):
             instance = os.environ.get('REVIEW_RESOURCE_INSTANCE', 'local')
             if instance not in ('local', 'vps') or value.get('instance') != instance:
                 raise ValueError('runtime credentials belong to another instance')
-            credentials = oss.credentials.StaticCredentialsProvider(value['access_key_id'], value['access_key_secret'])
+            key, secret = value['access_key_id'], value['access_key_secret']
         else:
             key, secret = os.environ.get('REVIEW_OSS_ACCESS_KEY_ID'), os.environ.get('REVIEW_OSS_ACCESS_KEY_SECRET')
             if not key or not secret:
                 raise ValueError('project OSS runtime credentials are unavailable')
-            credentials = oss.credentials.StaticCredentialsProvider(key, secret)
+    credentials = oss.credentials.StaticCredentialsProvider(key, secret)
+    identity = hashlib.sha256(json.dumps([key, secret], separators=(',', ':')).encode()).hexdigest()
+    return credentials, identity
+
+
+def _connection(config, credentials):
+    import alibabacloud_oss_v2 as oss
     return oss.Client(oss.Config(region=config['region'], credentials_provider=credentials,
                                 retry_max_attempts=1, connect_timeout=15, readwrite_timeout=60))
+
+
+def client(config, *, administrative=False):
+    credentials, _ = _credentials(config, administrative=administrative)
+    return _connection(config, credentials)
 
 
 def _remote_hash(connection, config, spec, destination=None):
@@ -403,7 +416,7 @@ def download_name(relative, requested=None):
     return name
 
 
-def signed_url(root, relative, *, variant=None, download=False, filename=None, method='GET'):
+def signed_url(root, relative, *, variant=None, download=False, filename=None, method='GET', refresh=False):
     import alibabacloud_oss_v2 as oss
     config = settings(root)
     spec = descriptor(root, relative, variant)
@@ -414,7 +427,23 @@ def signed_url(root, relative, *, variant=None, download=False, filename=None, m
     if method == 'GET' and download:
         args['response_content_disposition'] = "attachment; filename*=UTF-8''" + quote(download_name(relative,filename))
     request = oss.GetObjectRequest(**args) if method == 'GET' else oss.HeadObjectRequest(**args)
-    return client(config).presign(request, expires=timedelta(seconds=900)).url
+    # Revalidate ownership and credentials even on a warm hit. Stable short-lived
+    # URLs let the browser reuse exact object bytes; signatures never go to disk.
+    credentials, identity = _credentials(config)
+    key = (str(Path(root).resolve()), config['project'], config['bucket'], config['region'],
+           os.environ.get('REVIEW_RESOURCE_INSTANCE', 'local'), identity,
+           storage_identity(spec), method, args.get('response_content_disposition'))
+    with _signed_guard:
+        now = time.monotonic()
+        cached = _signed_cache.get(key)
+        if not refresh and cached and now < cached[0]:
+            return cached[1]
+        url = _connection(config, credentials).presign(request, expires=timedelta(seconds=900)).url
+        _signed_cache.pop(key, None)
+        while len(_signed_cache) >= 512:
+            _signed_cache.pop(next(iter(_signed_cache)))
+        _signed_cache[key] = (now + 300, url)
+        return url
 
 
 def remote_etag(root, spec):
