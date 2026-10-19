@@ -14,7 +14,9 @@
 .edit-player video { display:block; width:100%; max-height:60vh; aspect-ratio:16/9; }
 .edit-notice { border-left:3px solid var(--desk-selection-line); background:var(--desk-soft); padding:10px 14px; line-height:1.7; font-size:13px; }
 .edit-timeline-scroll { overflow:auto; max-width:100%; margin-top:14px; border:1px solid var(--desk-line); border-radius:var(--desk-radius); background:var(--desk-surface); }
-.edit-timeline { position:relative; min-width:600px; }
+.edit-timeline { position:relative; min-width:600px; cursor:crosshair; }
+.edit-timeline button { cursor:crosshair; }
+.edit-frame-grid .edit-track,.edit-frame-grid .edit-ruler { background-image:repeating-linear-gradient(to right,var(--desk-line) 0 1px,transparent 1px var(--edit-frame-width)); }
 .edit-ruler { height:32px; border-bottom:1px solid var(--desk-line); position:relative; background:var(--desk-soft); }
 .edit-ruler button { position:absolute; font:inherit; font-size:11px; background:none; border:0; color:var(--desk-muted); padding:5px; }
 .edit-track { height:60px; position:relative; border-bottom:1px solid var(--desk-line); }
