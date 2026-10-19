@@ -327,3 +327,11 @@ test('original generation details preserve exact calls, missing history and read
   const {c,node,rendered}=fixture(),host=node('main');c.materialGenerationDetails(host,{record:{id:'asset'}});assert.equal(host.children.length,0);assert.equal(rendered[0].host,host);assert.equal(rendered[0].context,undefined);
  });
 });
+test('entry default candidate options preserve an explicit current plan',()=>{
+ const c={URL,location:{href:'http://fixture/'},materialDefaultCandidate:()=> 'latest'};
+ vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/material-review.js'),'utf8'),c);
+ const items=[{record:{id:'latest'}}];
+ assert.equal(c.materialCandidateOptions({selectedCandidateId:'current'},items).selectedCandidateId,'current');
+ assert.equal(c.materialCandidateOptions({selectedCandidateId:'latest'},items).selectedCandidateId,'latest');
+ assert.equal(c.materialCandidateOptions({},items).selectedCandidateId,'latest');
+});

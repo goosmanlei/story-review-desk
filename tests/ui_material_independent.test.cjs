@@ -249,12 +249,12 @@ test('D01 state-specific default adoption does not leak through a cached shared 
   data.unifiedRight=new Element('aside');c.renderMaterialCard=()=>{};c.cancelMaterialCommentLocation=()=>{};
   c.renderProductionReader=()=>{const selected=c.state.productionChildDetail.record;data.unifiedGroups=c.entityReviewMaterialModels(data.requirements.filter(n=>n.payload.scope.revision_id===selected.id),items,data);c.renderUnifiedSelected(data)};
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'current');
+  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   c.selectEntityReviewState(second);
-  assert.equal(data.selectedCandidates.shared,'current');
+  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   data.selectedComponents['asset-b-r1']='preview-b';
   c.selectEntityReviewState(first);
-  assert.equal(data.selectedCandidates.shared,'current');
+  assert.equal(data.selectedCandidates.shared,'asset-b-r1');
   assert.equal(data.selectedComponents['asset-b-r1'],undefined);
   c.selectEntityReviewState(second);
   assert.equal(data.selectedComponents['asset-b-r1'],'preview-b');
@@ -280,7 +280,7 @@ test('D04/C08 refreshing an exact definition-source target is accepted without m
   assert.doesNotThrow(()=>c.validateUnifiedReference(result));
   assert.equal(data.material_cards.shared[0].results.some(r=>r.id===shared.id),false);
   result.params.set('material_target','unrelated-source-r1');
-  assert.throws(()=>c.validateUnifiedReference(result),/不存在|不属于/);
+  assert.throws(()=>c.validateUnifiedReference(result),/准确候选已不可用；未替换为其他结果/);
 });
 
 test('D04/C08 an entity route can locate the exact frozen definition source outside old members',()=>{
@@ -419,12 +419,12 @@ test('production draft location survives reload while another page has a separat
   assert.equal(Object.keys(c.productionDraftContexts()).length,0);
 });
 
-test('C08 saved asset draft focus never overrides explicit requirement or material-version links',()=>{
-  for(const exact of ['revision','material_version','material_round']){
+test('C08 saved asset draft focus never overrides an explicit requirement revision',()=>{
+  for(const exact of ['revision']){
     const {c,create}=materialDraftFixture(),target=create('first');
     if(exact==='revision'){target.explicit=true;target.params.set('production_revision',target.detail.record.id)}else target.params.set(exact,'1');
     c.activateUnifiedCard(target);
-    assert.equal(c.state.productionSelected.id,'first-r1',exact);
+    assert.equal(c.state.productionSelected.id,exact==='revision'?'first-r1':'first-asset-r1',exact);
     assert.equal(c.state.anchor,null,exact);
   }
 });
@@ -432,9 +432,9 @@ test('C08 saved asset draft focus never overrides explicit requirement or materi
 test('C08 a removed draft or an exact-reference entry cannot revive a prior asset draft focus',()=>{
   for(const mode of ['removed','exact-reference']){
     const {c,create,drafts}=materialDraftFixture(),target=create('first');
-    if(mode==='removed')drafts.clear();else target.allowDraftFocus=false;
+    if(mode==='removed')drafts.clear();else {target.allowDraftFocus=false;target.explicit=true;}
     c.activateUnifiedCard(target);
-    assert.equal(c.state.productionSelected.id,'first-r1',mode);
+    assert.equal(c.state.productionSelected.id,mode==='removed'?'first-asset-r1':'first-r1',mode);
     assert.equal(c.state.anchor,null,mode);
   }
 });
@@ -447,7 +447,42 @@ test('C08 saved asset draft focus cannot cross its material version or surviving
       target.detail.material_cards.first[0].results=[];target.detail.candidate_records=[];
     }
     c.activateUnifiedCard(target);
-    assert.equal(c.state.productionSelected.id,'first-r1',mismatch);
+    assert.equal(c.state.productionSelected.id,mismatch==='member'?'first-r1':'first-asset-r1',mismatch);
     assert.equal(c.state.anchor,null,mismatch);
   }
+});
+
+test('entry default uses the authoritative candidate number and leaves the input order intact',()=>{
+  const {c}=materialDraftFixture();
+  const a={record:{id:'a',candidate_number:1,created_at:'2099',payload:{}}},b={record:{id:'b',candidate_number:3,created_at:'2000',payload:{}}},d={record:{id:'d',candidate_number:2,created_at:'2100',payload:{}}};
+  for(const candidates of [[a,b,d],[d,a,b],[b,d,a]]){
+    const before=candidates.map(i=>i.record.id).join();
+    assert.equal(c.materialDefaultCandidate({need:{},round:{current_content:true},candidates}),b.record.id);
+    assert.equal(candidates.map(i=>i.record.id).join(),before);
+  }
+  assert.equal(c.materialDefaultCandidate({need:{},candidates:[]}), 'current');
+  assert.equal(c.materialDefaultCandidate({need:{},candidates:[a]}), 'a');
+});
+test('entry default starts with latest but exact current and candidate targets win over drafts',()=>{
+  for(const target of [null,'current','first-asset-r1']){
+    const {c,create}=materialDraftFixture(),result=create('first');
+    const latest={...result.detail.candidate_records[0],object_id:'latest',id:'latest-r1',candidate_number:3};
+    const round=result.detail.material_cards.first[0];round.results.push(latest);round.members.push(latest);
+    if(target)result.params.set('material_target',target);
+    c.activateUnifiedCard(result);
+    assert.equal(c.state.productionSelected.id,target==='current'?'first-r1':target||'latest-r1');
+  }
+});
+test('entry default never changes an explicit requirement revision into the latest result',()=>{
+  const {c,create}=materialDraftFixture(),result=create('first');result.explicit=true;
+  c.activateUnifiedCard(result);assert.equal(c.state.productionSelected.id,'first-r1');
+});
+test('entry default same-source first visit keeps the displayed candidate as the comment target',async()=>{
+  const {c,create}=materialDraftFixture(),first=create('first'),next=create('next');
+  c.activateUnifiedCard(first);c.state.unifiedCardRoot=null;c.state.unifiedScope=null;
+  c.preserveCardPosition=()=>()=>{};c.renderProductionReader=()=>{};
+  c.readUnifiedCard=async()=>next;
+  await c.switchUnifiedSourceMaterial({object_id:'next',id:'next-r1'});
+  assert.equal(c.state.materialReview.selectedCandidateId,'next-asset-r1');
+  assert.equal(c.state.productionSelected.id,'next-asset-r1');
 });

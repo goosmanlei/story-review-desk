@@ -2,8 +2,7 @@ function materialCategoryLabel(category){return ({'character-image':'角色图�
 /* One entity/material reader, whether embedded or opened over a scene. */
 function materialModelKey(model){return model.material_id||model.need?.object_id||model.identity?.object_id||model.candidates[0]?.record.object_id}
 function materialDefaultCandidate(model,data){
-  if(model.round?.current_content&&model.need)return 'current';
-  return materialCandidateChoice(model.candidates||[],null)?.record.id||null;
+  return materialCandidateChoice(model.candidates||[],null)?.record.id||(model.need?'current':null);
 }
 function reviewSmallCard(parent,item,activate,selected=false){
   const button=item.inlineControls?el('div'):productionButton(parent,'',()=>activate(button));if(item.inlineControls)parent.append(button);button.className='material-small-card';if(!item.inlineControls){button.setAttribute('aria-pressed',String(selected));button.title=item.title}
@@ -95,7 +94,7 @@ function renderUnifiedModels(parent,models,data){
   for(const model of models){const key=materialModelKey(model);materialSmallCard(list,modelSmallItem(model),()=>{
     for(const group of data.unifiedLeft?.querySelectorAll('.material-source-group')||[])group.closeSourceExplanation?.();
     rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=key;state.materialCommentCard=null;
-    data.selectedCandidates||={};data.selectedCandidates[key]||='current';
+    data.selectedCandidates||={};data.selectedCandidates[key]||=materialDefaultCandidate(model,data);
     const currentModel=data.unifiedGroups.find(m=>materialModelKey(m)===key)||model,row=currentModel.candidates.find(i=>i.record.id===data.selectedCandidates[key])?.record||currentModel.need||currentModel.identity;
     if(model.round)state.materialCommentCard={data,material_id:key,number:model.round.number};
     restoreUnifiedMaterialReader(data,key,row);renderUnifiedSelected(data);paintProductionReview();renderComments();
@@ -116,7 +115,7 @@ function renderUnifiedSelected(data){
   const key=materialModelKey(selected);data.selectedCandidates||={};
   const explicit=state.productionSelected;
   if(selected.candidates.some(i=>i.record.id===explicit?.id)&&data.localVersions?.[explicit.object_id])data.selectedCandidates[key]=explicit.id;
-  if(!data.selectedCandidates[key])data.selectedCandidates[key]='current';
+  if(!data.selectedCandidates[key])data.selectedCandidates[key]=materialDefaultCandidate(selected,data);
   if(data.selectedCandidates[key]!=='current'&&!selected.candidates.some(i=>i.record.id===data.selectedCandidates[key])){nodeText('p','production-issue',deletedCandidateNotice(data,data.selectedCandidates[key]),right);return}
   if(selected.round)state.materialCommentCard={data,material_id:key,number:selected.round.number};
   const chosen=data.selectedCandidates[key]==='current'?null:materialCandidateChoice(selected.candidates,data.selectedCandidates[key]);
@@ -200,11 +199,11 @@ async function switchUnifiedSourceMaterial(item,trigger){
   session.cards[previous.record.id].params=savedParams;
   const request=(session.request||0)+1;session.request=request;
   let result=session.cards[item.id];
-  if(!result)result=await readUnifiedCard(item.object_id,item.id,new URLSearchParams());
+  if(!result){result=await readUnifiedCard(item.canonical_material_id||item.object_id,null,new URLSearchParams());result.defaultSelection=true;}
   if(session.request!==request||state.materialReview!==previous||state.unifiedCardRoot!==root||state.unifiedScope!==scope||root&&!root.isConnected)return;
   session.cards[item.id]=result;result.detail.sourceSession=session;
   const restore=preserveCardPosition();activateUnifiedCard(result);
-  restoreUnifiedMaterialReader(result.detail,item.object_id,result.detail.record);
+  restoreUnifiedMaterialReader(result.detail,item.object_id,state.productionSelected||result.detail.record);
   renderProductionReader();renderComments();restore();
   state.unifiedCardRoot?.querySelector(`[data-material-id="${CSS.escape(item.object_id)}"]`)?.focus({preventScroll:true});
 }
@@ -229,7 +228,13 @@ function materialSavedDraft(result){
 }
 function activateUnifiedCard(result){
   const detail=result.detail,row=detail.record,params=result.params;
-  if(result.defaultSelection&&row.kind==='REQUIREMENT'&&!params.has('material_target'))params.set('material_target','current');
+  result.defaultSelection||=!result.explicit&&row.kind==='REQUIREMENT';
+  if(row.kind==='REQUIREMENT'&&!params.has('material_target')){
+    const data=result.entity_review||detail,mid=params.get('material_id')||row.material_identity?.id||row.object_id;
+    const round=materialDefaultRound(data.material_cards?.[mid]);
+    const candidates=(round?.results||[]).filter(r=>!r.payload.placeholder).map(record=>({record}));
+    params.set('material_target',result.defaultSelection?materialDefaultCandidate({need:row,candidates},data):'current');
+  }
   detail.currentMaterialCards||=detail.material_cards;
   state.reviewWork=result.review_work||null;
   state.entityReview=result.entity_review;state.positionReview=result.position_review||null;state.materialReview=state.entityReview||!['ASSET','REQUIREMENT'].includes(row.kind)?null:detail;state.unifiedScope=result.scope;
@@ -248,7 +253,7 @@ function activateUnifiedCard(result){
     detail.sourceMaterials=result.source_materials||[];
     detail.sourceSession||={cards:{[row.id]:result},request:0};
     const target=params.get('material_target');if(target&&target!=='current'&&!materialRows(detail).some(r=>r.id===target))throw Error(deletedCandidateNotice(detail,target));
-    const draft=!target?materialSavedDraft(result):null;
+    const draft=!result.defaultSelection&&!target?materialSavedDraft(result):null;
     if(target||draft)detail.selectedCandidateId=target||draft.id;
     focusProductionReview(target&&target!=='current'?entityReviewDetail(materialRows(detail).find(r=>r.id===target)):draft?entityReviewDetail(draft):detail,false);
   }
@@ -455,7 +460,7 @@ function renderShotEntityWorkspace(root,data){
     if(!available.length){nodeText('p','production-meta','本镜尚无独立素材需求',panel);return}
     let selected=data.unifiedMaterialId;if(selected&&!available.includes(selected)){issue('准确素材已不可用；未替换为首项');return}selected||=available[0];data.unifiedMaterialId=selected;
     const preserve=action=>{const body=card.closest('.breakdown-body'),top=card.getBoundingClientRect().top;action();if(body)body.scrollTop+=card.getBoundingClientRect().top-top};
-    const select=id=>{if(id===data.unifiedMaterialId)return;for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;const model=by.get(id);data.selectedCandidates[id]||=model.round?.plan?'current':model.candidates[0]?.record.id;focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
+    const select=id=>{if(id===data.unifiedMaterialId)return;for(const group of panel.querySelectorAll('.material-source-group'))group.closeSourceExplanation?.();rememberProductionDraft();saveUnifiedMaterialReader(data,data.unifiedMaterialId);data.unifiedMaterialId=id;const model=by.get(id);data.selectedCandidates[id]||=materialDefaultCandidate(model,data);focus(data.selectedCandidates[id]==='current'?model.need:model.candidates.find(i=>i.record.id===data.selectedCandidates[id])?.record,true);preserve(()=>draw(true,true));paintProductionReview()};
     if(!reuseList)for(const group of groups){
       const sections=new Map();
       for(const id of group.material_ids.filter(id=>by.has(id))){const states=(group.key_states||[]).filter(s=>s.requirements.some(ref=>ref.object_id===id)),key=states.map(s=>s.id).join('|');if(!sections.has(key))sections.set(key,{states,ids:[]});sections.get(key).ids.push(id)}
@@ -470,7 +475,7 @@ function renderShotEntityWorkspace(root,data){
     }
     const model=by.get(selected);if(!model){nodeText('p','production-meta','此组尚无素材',right);return}
     for(const button of panel.querySelectorAll('[data-material-id]'))button.setAttribute('aria-pressed',String(button.dataset.materialId===selected));
-    if(!data.selectedCandidates[selected])data.selectedCandidates[selected]=model.round?.plan?'current':model.candidates[0]?.record.id;
+    if(!data.selectedCandidates[selected])data.selectedCandidates[selected]=materialDefaultCandidate(model,data);
     if(data.selectedCandidates[selected]!=='current'&&!model.candidates.some(i=>i.record.id===data.selectedCandidates[selected])){issue(deletedCandidateNotice(data,data.selectedCandidates[selected]));return}
     const candidate=data.selectedCandidates[selected];
     if(data.deferred_materials?.includes(selected)||candidate!=='current'&&data.deferred_candidates?.includes(candidate)){

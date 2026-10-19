@@ -39,3 +39,16 @@ test('a closed reference waits for a different open reader before refreshing the
   opened.shotReference.onSaved({number:1});assert.equal(refreshes,0);
   vm.runInContext('reviewDialogStack.pop()',f.c);onClose();assert.equal(refreshes,1);
 });
+test('entry default unselected reference uses latest while a confirmed candidate remains exact',()=>{
+ const c={URLSearchParams,state:{},productionRef:r=>({object_id:r.object_id,revision_id:r.id}),document:{activeElement:null}};
+ vm.createContext(c);vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/production-breakdown.js'),'utf8'),c);
+ c.openUnifiedMaterial=ref=>ref;
+ const record={object_id:'material',id:'plan'};
+ for(const candidate of [null,{object_id:'candidate',revision_id:'exact'}]){
+  const value={component_id:candidate?'second':null},slot={material_id:'material',number:1,record,candidate};
+  const ref=c.openShotReference({slot,value},{need:{}},null);
+  assert.equal(ref.defaultSelection,!candidate);
+  assert.equal(ref.params.get('material_target'),candidate?.revision_id||null);
+  assert.equal(ref.component_id,value.component_id);
+ }
+});
