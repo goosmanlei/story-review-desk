@@ -72,28 +72,42 @@ async function reviewWaveform(url){
   promise.catch(()=>reviewWaveCache.delete(url));return promise;
 }
 function reviewRefreshMedia(media){
-  const original=media.src;let attempts=0,lastTime=0,wasPaused=true,pending=null;
-  media.reviewCancelResume=()=>{wasPaused=true;if(pending)pending.resume=false};
-  media.addEventListener('timeupdate',()=>{if(!pending)lastTime=media.currentTime});
+  const original=media.src;let attempts=0,lastTime=0,wasPaused=true,pending=null,stallTimer=null;
+  const clearStall=()=>{if(stallTimer!==null){clearTimeout(stallTimer);stallTimer=null}};
+  const available=()=>!media.seeking&&media.readyState>=(media.paused?2:3);
+  media.reviewCancelResume=()=>{wasPaused=true;if(pending)pending.resume=false;clearStall()};
+  media.addEventListener('timeupdate',()=>{if(!pending){if(media.currentTime!==lastTime&&media.readyState>=3&&!media.seeking)clearStall();lastTime=media.currentTime}});
   media.addEventListener('play',()=>{wasPaused=false});
-  media.addEventListener('pause',()=>{if(!media.error&&!pending)wasPaused=true});
-  media.addEventListener('error',()=>{
-    if(attempts++>=1||!media.isConnected)return;
+  media.addEventListener('pause',()=>{if(!media.error&&!pending){wasPaused=true;if(!media.seeking)clearStall()}});
+  const refresh=()=>{
+    clearStall();if(attempts>=1||pending||!media.isConnected)return;attempts++;
     const target=new URL(original,location.href);target.searchParams.set('refresh',String(Date.now()));
-    const retry={resume:!wasPaused,position:lastTime,url:target.href};pending=retry;
+    const retry={resume:!wasPaused,position:lastTime,url:target.href};pending=retry;media.reviewRefreshing=true;
     // Keep the element and all review selection/draft state. Other metadata
     // handlers use the same restored time instead of seeking back to zero.
     media.dataset.reviewSeek=String(retry.position);
     const timed=typeof media.load==='function';
     media.addEventListener(timed?'loadedmetadata':'load',()=>{
-      if(pending!==retry)return;pending=null;
+      if(pending!==retry)return;pending=null;media.reviewRefreshing=false;
       if(!media.isConnected||media.src!==retry.url){media.pause?.();return}
       if(!timed)return;
       media.currentTime=media.reviewRestorePosition?.()??Number(media.dataset.reviewSeek??retry.position);
       if(retry.resume)media.play().catch(()=>{});
     },{once:true});
     media.src=retry.url;media.load?.();
-  });
+  };
+  media.addEventListener('error',refresh);
+  const stalled=()=>{
+    if(pending||attempts||stallTimer!==null||typeof media.load!=='function'||typeof setTimeout!=='function'||media.paused&&!media.seeking)return;
+    const source=media.src;
+    // Expired Range requests can remain in seeking/waiting without an error.
+    // Repeated events share one deadline; ordinary buffering cancels it.
+    stallTimer=setTimeout(()=>{stallTimer=null;if(!media.isConnected||media.src!==source||pending||available())return;lastTime=media.currentTime;refresh()},8000);
+  };
+  media.addEventListener('seeking',()=>{if(!pending)lastTime=media.currentTime;stalled()});
+  for(const event of ['waiting','stalled'])media.addEventListener(event,stalled);
+  for(const event of ['playing','canplay','ended'])media.addEventListener(event,clearStall);
+  media.addEventListener('seeked',()=>{if(available())clearStall()});
 }
 function reviewMediaPlayer(parent,component,record,selection={},review=true,options={}){
   const from=selection.range?.start_seconds??0;

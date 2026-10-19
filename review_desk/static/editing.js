@@ -32,7 +32,8 @@ function editAnchor(output,review,variant,range){
       elements:editIntersections(review,range).map(e=>Object.fromEntries(['track_key','element_type','element_id','element_digest','binding'].filter(k=>k in e).map(k=>[k,e[k]])))}};
 }
 const editCurrent=ctx=>ctx.epoch===episodeEditing.epoch&&ctx.readEpoch===productionReadEpoch&&state.workspace==='settings.workspace'&&productionTab()==='editing';
-function pauseEpisodePlayer(){episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();document.querySelector('#production-view video[data-episode-player]')?.pause()}
+function pauseEpisodeMedia(media){media?.reviewCancelResume?.();media?.pause()}
+function pauseEpisodePlayer(){episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();pauseEpisodeMedia(document.querySelector('#production-view video[data-episode-player]'))}
 async function editCall(action,value={}){return api('/api/editing/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})}
 function editRoute(values){const u=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)u.searchParams.delete(k);else u.searchParams.set(k,v)}history.replaceState(history.state,'',u)}
 function editControl(host,label,value){const wrap=nodeText('label',null,'',host);nodeText('span',null,label,wrap);const input=el('input');input.type='text';input.value=value;input.setAttribute('aria-label',label);wrap.append(input);return input}
@@ -75,7 +76,7 @@ function editView(ctx,output){return ctx.views[output.id]||=( {frame:0,zoomLevel
 async function openEditElement(ctx,element,trigger){
   if(!editCurrent(ctx)||ctx.selecting)return;
   const output=ctx.data.outputs.find(o=>o.object_id===ctx.output),v=editView(ctx,output),p=output.payload.project;
-  ctx.host.querySelector('video')?.pause();v.selected=editElementKey(element);ctx.paintSelection?.();editRemember(ctx);
+  pauseEpisodeMedia(ctx.host.querySelector('video'));v.selected=editElementKey(element);ctx.paintSelection?.();editRemember(ctx);
   if(element.unavailable||!element.binding){toast(element.title+'（'+(element.binding?.material_id||element.source_id||element.element_id)+'）：'+(element.unavailable||'原素材关联不可用'));return}
   const b=element.binding,range={start:Math.max(0,Math.floor(element.start_frame)),end:Math.min(p.spec.duration_frames,Math.ceil(element.end_frame)),tracks:[element.track_key]};
   const anchor=editAnchor(output,ctx.review,ctx.variant,range);
@@ -95,7 +96,7 @@ async function openEditElement(ctx,element,trigger){
 function renderEpisodeEditing(ctx){
   if(!editCurrent(ctx))return;
   episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();const abort=episodeEditing.abort=new AbortController();
-  ctx.host.querySelector('video')?.pause();const render=ctx.render=(ctx.render||0)+1,host=ctx.host;
+  pauseEpisodeMedia(ctx.host.querySelector('video'));const render=ctx.render=(ctx.render||0)+1,host=ctx.host;
   const outputs=ctx.data.outputs.filter(o=>o.payload.project.episode.object_id===ctx.episode),output=outputs.find(o=>o.object_id===ctx.output),project=output?.payload.project;
   host.replaceChildren();host.classList.add('episode-editing');productionTabs();
   const head=el('section','production-filters edit-filters');host.append(head);
@@ -103,7 +104,7 @@ function renderEpisodeEditing(ctx){
   if(!output){clearEpisodeEditReview();nodeText('p',null,'本集尚无可审阅成片。',host);renderComments();return}
   const v=editView(ctx,output),review=ctx.review;ctx.selecting=false;
   if(!editZoomLevels.includes(v.zoomLevel))v.zoomLevel='overview';
-  editChoices(head,'edit-output','成片版本',outputs.map((o,i)=>[o.object_id,'版本 '+(i+1)]),ctx.output,async value=>{editRemember(ctx);ctx.host.querySelector('video')?.pause();ctx.output=value;ctx.loop=false;editRoute({edit_output:value,edit_element:null});clearEpisodeEditReview();await loadEditOutput(ctx)});
+  editChoices(head,'edit-output','成片版本',outputs.map((o,i)=>[o.object_id,'版本 '+(i+1)]),ctx.output,async value=>{editRemember(ctx);pauseEpisodeMedia(ctx.host.querySelector('video'));ctx.output=value;ctx.loop=false;editRoute({edit_output:value,edit_element:null});clearEpisodeEditReview();await loadEditOutput(ctx)});
   editChoices(head,'edit-variant','字幕',[['subtitled','对白与唱词字幕'],['clean','无对白与唱词字幕']],ctx.variant,value=>{ctx.variant=value;ctx.loop=false;clearEpisodeEditReview();renderEpisodeEditing(ctx)});
   const downloads=el('details','edit-downloads');nodeText('summary',null,'下载',downloads);
   for(const [id,title] of [['subtitled','字幕版 MP4'],['clean','无字幕版 MP4'],['mix','混音母版 WAV'],['subtitles','字幕 SRT'],['project','可编辑工程 JSON'],['source-map','原件与来源映射']]){const c=output.payload.components.find(c=>c.id===id),a=nodeText('a',null,title,downloads);a.download=ctx.episode+'-'+id+'.'+c.file.split('.').at(-1);a.href=reviewDownloadURL('/api/production/files/'+encodeURIComponent(c.file),a.download)}head.append(downloads);
@@ -123,7 +124,7 @@ function renderEpisodeEditing(ctx){
   const inputs={start:editControl(controls,'范围起帧',v.range.start),end:editControl(controls,'范围止帧',v.range.end),startTime:editControl(controls,'起点时间',editTime(project,v.range.start)),endTime:editControl(controls,'终点时间',editTime(project,v.range.end))};
   inputs.start.inputMode=inputs.end.inputMode='numeric';inputs.startTime.placeholder=inputs.endTime.placeholder='分:秒.毫秒';
   const loop=productionButton(controls,'循环选段',()=>{if(rangeIssue)return;ctx.loop=!ctx.loop;loop.setAttribute('aria-pressed',String(!!ctx.loop));if(ctx.loop){seek(v.range.start);return media.play()}});loop.setAttribute('aria-pressed',String(!!ctx.loop));
-  const comment=productionButton(controls,'评论此范围',()=>{if(rangeIssue)return;media.pause();player.reviewFocus();startDraft(editAnchor(output,review,ctx.variant,v.range))});
+  const comment=productionButton(controls,'评论此范围',()=>{if(rangeIssue)return;pauseEpisodeMedia(media);player.reviewFocus();startDraft(editAnchor(output,review,ctx.variant,v.range))});
   productionButton(controls,'清除选择',()=>{v.range.tracks=[];ctx.loop=false;paintSelection();editRemember(ctx)});
   const trackTools=el('div','edit-track-choices production-filter-group');trackTools.setAttribute('aria-label','选中轨道');main.append(trackTools);nodeText('span','production-filter-label','轨道',trackTools);
   const trackButtons=review.tracks.map(track=>{const b=productionButton(trackTools,track.title,()=>{const keys=new Set(v.range.tracks);if(keys.has(track.key))keys.delete(track.key);else keys.add(track.key);v.range.tracks=review.tracks.map(t=>t.key).filter(k=>keys.has(k));paintSelection();editRemember(ctx)});b.className='production-filter-chip';return b});
@@ -141,7 +142,7 @@ function renderEpisodeEditing(ctx){
   const playhead=el('div','edit-playhead');content.append(playhead);playhead.tabIndex=0;playhead.setAttribute('role','slider');playhead.setAttribute('aria-label','播放头');playhead.setAttribute('aria-valuemin',0);playhead.setAttribute('aria-valuemax',project.spec.duration_frames-1);
   let zoom=0,viewWidth=0,gesture=null,suppressClick=false;
   function positionHead(){playhead.style.left=(labelWidth+v.frame/editRate(project)*zoom)+'px';playhead.setAttribute('aria-valuenow',v.frame);clock.textContent=v.frame+' 帧'}
-  function seek(frame,remember=true){if(!current()||!Number.isFinite(frame))return;media.pause();v.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));media.currentTime=v.frame/editRate(project);positionHead();if(remember)editRemember(ctx)}
+  function seek(frame,remember=true){if(!current()||!Number.isFinite(frame))return;pauseEpisodeMedia(media);v.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));media.currentTime=v.frame/editRate(project);positionHead();if(remember)editRemember(ctx)}
   const eventFrame=event=>editTimelineFrame(project,event.clientX-content.getBoundingClientRect().left-labelWidth,zoom,true);
   const inPlot=event=>event.clientX>=scroll.getBoundingClientRect().left+labelWidth&&!event.target.closest('.edit-track-name');
   function syncInputs(){inputs.start.value=v.range.start??'';inputs.end.value=v.range.end??'';inputs.startTime.value=Number.isInteger(v.range.start)?editTime(project,v.range.start):'';inputs.endTime.value=Number.isInteger(v.range.end)?editTime(project,v.range.end):'';fieldIssue='';paintSelection()}
@@ -160,12 +161,12 @@ function renderEpisodeEditing(ctx){
       fieldIssue=Object.values(inputs).some(i=>!i.value.trim())||frame===null?'请填写完整的整数帧或分:秒.毫秒时间。':'';paintSelection();editRemember(ctx)};
     const commit=()=>{if(v.range.start!==null&&v.range.end!==null&&!fieldIssue)syncInputs()};input.onblur=commit;input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();commit()}};
   }
-  function setSelecting(value){ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)media.pause()}
+  function setSelecting(value){ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media)}
   function finishGesture(cancel=false){if(!gesture)return;const g=gesture;gesture=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');editRemember(ctx)}
   timeline.onpointerdown=event=>{
     suppressClick=false;if(event.button!==0||!current()||!inPlot(event))return;
     const row=event.target.closest('.edit-track'),x=event.clientX,frame=eventFrame(event);
-    if(ctx.selecting){if(!row)return;event.preventDefault();media.pause();gesture={kind:'range',id:event.pointerId,target:timeline,x,y:event.clientY,frame,previous:editClone(v.range),moved:false};}
+    if(ctx.selecting){if(!row)return;event.preventDefault();pauseEpisodeMedia(media);gesture={kind:'range',id:event.pointerId,target:timeline,x,y:event.clientY,frame,previous:editClone(v.range),moved:false};}
     else{const headX=content.getBoundingClientRect().left+labelWidth+v.frame/editRate(project)*zoom;if(Math.abs(x-headX)>8)return;gesture={kind:'head',id:event.pointerId,target:event.target,x,offset:x-headX,moved:false};}
     gesture.target.setPointerCapture(event.pointerId);
   };
@@ -192,7 +193,8 @@ function renderEpisodeEditing(ctx){
   for(const marker of project.markers||[]){productionButton(nav,marker.title,()=>seek(marker.frame));for(const c of project.clips.filter(c=>c.kind==='video'&&c.scene_id===marker.id))productionButton(nav,c.title||c.id,()=>seek(c.timeline_start))}
   media.reviewRestorePosition=()=>Math.min(v.frame/editRate(project),media.duration);
   media.onloadedmetadata=()=>{if(current())media.currentTime=media.reviewRestorePosition()};
-  media.addEventListener('timeupdate',()=>{if(!current())return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
+  media.addEventListener('seeking',()=>{if(current()&&!media.reviewRefreshing){v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead()}});
+  media.addEventListener('timeupdate',()=>{if(!current()||media.reviewRefreshing)return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   media.addEventListener('play',follow);media.addEventListener('pause',()=>{if(current())editRemember(ctx)});
   media.addEventListener('ended',()=>{if(current()&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   requestAnimationFrame(()=>{if(!current())return;layoutTimeline(true);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!current()){observer.disconnect();return}if(scroll.clientWidth-labelWidth!==viewWidth)layoutTimeline()});episodeEditing.timelineObserver=observer;observer.observe(scroll)}});
@@ -205,7 +207,7 @@ async function locateEpisodeEditComment(comment){
   if(state.unifiedCardRoot){focusProductionReview({record:output,history:[output],uses:[]},false);state.selected=comment.id;renderComments();return true}
   const component=output.payload.components.find(c=>c.id===comment.anchor.component_id&&c.file===comment.anchor.asset_file);
   if(!component||!['subtitled','clean'].includes(component.id)){toast('此评论的准确成片组件不可用。');return true}
-  ctx.host.querySelector('video')?.pause();ctx.output=output.object_id;ctx.loop=false;ctx.variant=component.id;
+  pauseEpisodeMedia(ctx.host.querySelector('video'));ctx.output=output.object_id;ctx.loop=false;ctx.variant=component.id;
   const review=await editCall('review',{object_id:output.object_id,revision_id:output.id,association:comment.anchor.edit_selection?.association});if(!editCurrent(ctx))return false;ctx.review=review;
   editRoute({edit_output:ctx.output});renderEpisodeEditing(ctx);return locateProductionComment(comment,true);
 }
