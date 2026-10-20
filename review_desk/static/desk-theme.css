@@ -289,3 +289,21 @@ button:disabled,input:disabled,select:disabled { opacity: .55; cursor: not-allow
 .approach-methods .skill-heading { font-size:21px; }
 .method-prose > video {display:block;width:100%;max-width:100%;height:auto}
 .method-prose > audio {display:block;max-width:100%}
+
+/* Public source links stay below workspace navigation, including on narrow screens. */
+.sidebar .repository-links { display: grid; gap: 6px; flex: 0 0 auto; margin-top: auto; padding: 24px 4px 0; }
+.repository-links a { display: block; min-width: 0; padding: 5px 6px; color: var(--desk-ink); text-decoration: none; border-radius: var(--desk-radius); overflow-wrap: anywhere; }
+.repository-links a[hidden] { display: none; }
+.repository-links a:hover { background: var(--desk-hover); }
+.repository-links small { display: block; color: var(--desk-muted); font-size: 10px; line-height: 1.5; }
+.repository-links span { display: block; font-size: 12px; line-height: 1.6; }
+.sidebar .sidebar-foot { margin-top: 0; }
+@media(max-width:700px) {
+  .sidebar { flex-wrap: wrap; height: auto; min-height: 64px; }
+  .sidebar .repository-links { flex: 0 0 100%; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; margin-top: 8px; padding: 0; border-top: 1px solid var(--desk-line); }
+  .repository-links a { padding-block: 4px; }
+  .repository-links small { font-size: 9px; }
+  .repository-links span { font-size: 11px; }
+  .workspace-topbar { top: var(--review-sidebar-height,64px); }
+  .comment-panel { top: var(--review-sidebar-height,64px); }
+}
