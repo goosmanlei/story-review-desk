@@ -10,7 +10,7 @@ function fixture({tracks=true}={}){
  const output={object_id:'film',id:'revision',payload:{project:p,components:[{id:'subtitled',file:'film.mp4'}]}};
  const ctx={epoch:0,readEpoch:0,host,episode:'episode',output:'film',variant:'subtitled',views:{},data:{episodes:[],outputs:[output]},review:{tracks:tracks?[{key:'picture',title:'画面'},{key:'audio',title:'声音'},{key:'text',title:'字幕'}]:[],elements:[{track_key:'picture',element_type:'clip',element_id:'one',start_frame:0,end_frame:1000}]}};
  const c={AbortController,URL,location:{href:'http://fixture/',pathname:'/'},history:{replaceState(){}},state:{workspace:'settings.workspace'},productionReadEpoch:0,productionTab:()=> 'editing',document:{addEventListener:(k,fn)=>listeners[k]=fn},window:{addEventListener(){}},el:(t,cls)=>new E(t,cls),nodeText:(t,cls,text,parent)=>{const n=new E(t,cls);n.textContent=text;parent?.append(n);return n},productionTabs(){},focusProductionReview(){},reviewURL:x=>x,reviewVariantURL:x=>x,reviewRefreshMedia(){},reviewSurface(){},renderComments(){},requestAnimationFrame:fn=>{frames.push(fn);return frames.length},cancelAnimationFrame(){},localStorage:{setItem(){}},clearTimeout(){},setTimeout(){},toast(){},startDraft:a=>c.anchor=a};
- c.productionButton=(parent,text,fn)=>{const n=c.nodeText('button','',text,parent);n.onclick=fn;return n};vm.createContext(c);vm.runInContext(fs.readFileSync('review_desk/static/editing.js','utf8'),c);vm.runInContext('editChoices=()=>{}',c);c.renderEpisodeEditing(ctx);frames.shift()();
+ c.productionButton=(parent,text,fn)=>{const n=c.nodeText('button','',text,parent);n.onclick=fn;return n};c.choices={};vm.createContext(c);vm.runInContext(fs.readFileSync('review_desk/static/editing.js','utf8'),c);vm.runInContext('editChoices=(host,key,label,options,value,change)=>choices[key]=change',c);c.renderEpisodeEditing(ctx);frames.shift()();
  const byText=t=>host.all().find(n=>n.textContent===t),input=t=>host.all().find(n=>n.tag==='input'&&n.attrs['aria-label']===t),click=n=>n.onclick({stopPropagation(){}});
  return {c,ctx,p,output,host,byText,input,click,listeners,frames};
 }
@@ -38,4 +38,13 @@ test('Escape cancels an unfinished drag before exiting; ruler rebuild retains th
  timeline.onpointerdown({button:0,clientX:200,clientY:10,pointerId:1,target,preventDefault(){}});timeline.onpointermove({clientX:600,clientY:50,pointerId:1,preventDefault(){}});frames.shift()();assert.notEqual(JSON.stringify(ctx.views.revision.range),before);
  listeners.keydown({key:'Escape',target:{closest:()=>null},preventDefault(){},stopImmediatePropagation(){}});assert.equal(JSON.stringify(ctx.views.revision.range),before);assert.equal(ctx.selecting,true);assert.equal(ruler.children[0].className,'edit-selection-corner');
  const name=byText('画面');timeline.onpointerdown({button:0,clientX:20,target:{closest:()=>name}});timeline.listeners.click({target:{closest:s=>s==='.edit-track'?row:s==='.edit-track-name'?name:null},preventDefault(){throw Error('track name must receive click')},stopPropagation(){}});
+});
+
+test('playback immediately reveals an offscreen head and follows animation frames during selection loops',()=>{
+ const {c,ctx,host,frames,click,byText}=fixture();c.choices['edit-zoom']('frame');
+ const media=host.all().find(n=>n.tag==='video'),scroll=host.all().find(n=>n.className==='edit-timeline-scroll'),clock=host.all().find(n=>n.tag==='output');
+ click(byText('选择'));media.currentTime=500/24;media.paused=false;media.listeners.play();assert.equal(clock.textContent,'500 帧');assert.ok(scroll.scrollLeft>0);const before=scroll.scrollLeft;
+ media.currentTime=900/24;frames.shift()();assert.equal(clock.textContent,'900 帧');assert.ok(scroll.scrollLeft>before);
+ scroll.scrollLeft=0;scroll.onscroll();assert.ok(scroll.scrollLeft>0);
+ media.paused=true;media.listeners.pause();scroll.scrollLeft=0;scroll.onscroll();assert.equal(scroll.scrollLeft,0);frames.shift()();assert.equal(frames.length,0);
 });
