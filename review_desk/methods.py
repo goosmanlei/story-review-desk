@@ -231,6 +231,9 @@ def guard_write(store, object_id, kind, payload, expected_version):
     require(kind == ('NOTE' if category in ('execution', 'artifact') else 'GUIDANCE'), '方法记录类型不匹配')
     if category in ('execution', 'artifact', 'activation'):
         require(expected_version == 0, '执行依据与产物不可改写；请开始新的步骤')
+    if category == 'artifact' and isinstance(payload.get('output'), dict) and 'checks' in payload['output']:
+        from .method_checks import guard_new
+        guard_new(store, payload['output']['checks'])
 
 
 def _save(store, object_id, payload, expected_version, dependencies=()):
@@ -505,7 +508,11 @@ def stage_record(store, execution_ref, stage):
         verify_dependencies(store, row)
         if name != stage:
             previous.append(reference(row))
-    return {'artifact': row, 'previous': previous}
+    result = {'artifact': row, 'previous': previous}
+    if isinstance(row['payload']['output'], dict) and 'checks' in row['payload']['output']:
+        from .method_checks import inspect
+        result['checks'] = inspect(store, row['payload']['output']['checks'])
+    return result
 
 
 def export_execution(store, ref, destination):

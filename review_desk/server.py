@@ -196,7 +196,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.command == 'GET':
             production.check_read(self.server.store)
         from .business_codes import annotate
-        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach', '/api/methods/record', '/api/methods/stage', '/api/methods/document'):
+        if self.command == 'GET' and status == 200 and urlsplit(self.path).path not in ('/api/production/package', '/api/instance', '/api/framework', '/api/configurations', '/api/production-approach', '/api/methods/record', '/api/methods/stage', '/api/methods/checks', '/api/methods/document'):
             value = annotate(self.server.store, value, share_records=True)
         if self.command == 'GET' and status == 200 and urlsplit(self.path).path.startswith('/api/production') and urlsplit(self.path).path != '/api/production/package':
             from .review_composition import attach as compose
@@ -522,12 +522,20 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({'record': row, 'file': filename, 'blocks': project(row['payload'], filename)})
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
+        if path == '/api/methods/checks':
+            try:
+                from .method_checks import query as check_query
+                with production.read_scope(store):
+                    return self._json(check_query(store, query.get('object_id', [''])[0]))
+            except (ValueError, KeyError, TypeError) as exc:
+                return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/stage':
             try:
                 from .methods import stage_record
-                return self._json(stage_record(store, {
-                    'object_id': query.get('execution_object_id', [''])[0],
-                    'revision_id': query.get('execution_revision_id', [''])[0]}, query.get('stage', [''])[0]))
+                with production.read_scope(store):
+                    return self._json(stage_record(store, {
+                        'object_id': query.get('execution_object_id', [''])[0],
+                        'revision_id': query.get('execution_revision_id', [''])[0]}, query.get('stage', [''])[0]))
             except (ValueError, KeyError, TypeError) as exc:
                 return self._json({'error': str(exc)}, 400)
         if path == '/api/methods/record':
