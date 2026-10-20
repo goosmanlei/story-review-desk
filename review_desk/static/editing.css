@@ -8,9 +8,9 @@
 .edit-zoom-group { min-width:0; }
 .edit-zoom-group .production-filter-group { display:flex; align-items:center; gap:12px; margin:0; }
 .edit-zoom-group .production-filter-label { padding-top:0; }
-.edit-play-position { display:flex; flex-direction:column; gap:7px; padding:0 22px 0 0; border-right:2px solid var(--desk-line); color:var(--desk-muted); font-size:13px; }
+.edit-play-position { display:flex; align-items:center; gap:7px; white-space:nowrap; padding:0 22px 0 0; border-right:2px solid var(--desk-line); color:var(--desk-muted); font-size:13px; }
 .edit-play-position output { min-width:74px; color:var(--desk-ink); font-size:16px; font-variant-numeric:tabular-nums; white-space:nowrap; }
-.edit-range-controls { flex:1 0 100%; margin:0; padding:0; }
+.edit-range-controls { order:-1; flex:1 1 auto; margin:0; padding:0; gap:8px; }
 
 .edit-main { min-width:0; }
 .edit-player { max-width:960px; margin:0 auto; background:#171e19; border-radius:var(--desk-radius); overflow:hidden; }
