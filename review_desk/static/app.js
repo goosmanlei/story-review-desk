@@ -1241,7 +1241,7 @@ function locateComment(comment){
 
 async function init(){try{
   const initialUrl=new URL(location.href);let initialWorkspace=initialUrl.searchParams.get('workspace')||(initialUrl.searchParams.has('source')?'story.sources':'production.approach');
-  const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance'),api('/api/comments'),api('/api/framework'),api(initialWorkspace==='project.configuration'?'/api/configurations':'/api/configurations?summary=1'),api('/api/business-codes'),['story.sources','story.outline','story.novel','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
+  const [instance,comments,framework,configurations,codes]=await Promise.all([api('/api/instance').catch(()=>({id:'',title:'故事审阅台'})).then(instance=>typeof renderRepositoryLinks==='function'?renderRepositoryLinks(instance):instance),api('/api/comments'),api('/api/framework'),api(initialWorkspace==='project.configuration'?'/api/configurations':'/api/configurations?summary=1'),api('/api/business-codes'),['story.sources','story.outline','story.novel','story.script'].includes(initialWorkspace)?loadStoryData():loadStoryDirectory()]);
   state.navigationInstanceId=instance.id;
   if(typeof restoreWorkspaceNavigation==='function')restoreWorkspaceNavigation();
   state.businessCodeCatalog=codes;state.businessCodes=new Map(codes.objects.map(row=>[row.object_id,row.display_code||row.prefix+String(row.number).padStart(3,'0')]));

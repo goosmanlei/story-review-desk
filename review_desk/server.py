@@ -683,6 +683,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 return self._json({"error": str(exc)}, 400)
         if path == "/api/instance":
             return self._json({"id": self.server.config["id"], "title": self.server.config["title"],
+                               "repository": self.server.config.get("repository", ""),
+                               "review_desk_repository": self.server.config.get("review_desk_repository", "https://github.com/goosmanlei/story-review-desk"),
                                **({"deployment": self.server.deployment} if self.server.deployment["base_path"] or self.server.deployment["publication_id"] else {})})
         if path == "/api/production-approach":
             try:
