@@ -30,7 +30,14 @@ function reviewBlockScope(host,kind){
   if(host.closest('.material-reference-dialog')||host.closest('.material-source-explanation')){revisions=[revision];materialId=null;materialNumber=null}
   return {revision,revisions,materialId,materialNumber,materialModel,kind,blockIds,orderedBlockIds,visualId:visual?.dataset.visualId,componentId:media?.dataset.componentId,file:host.dataset.reviewFile,from:Number(host.dataset.reviewFrom??0),to:Number(host.dataset.reviewTo??Infinity)};
 }
+const reviewCommentIndices=new WeakMap();
+function reviewCommentsForRevisions(comments,revisions){
+  let index=reviewCommentIndices.get(comments);
+  if(!index){index=new Map();for(const comment of comments){const rows=index.get(comment.target_revision_id)||[];rows.push(comment);index.set(comment.target_revision_id,rows)}reviewCommentIndices.set(comments,index)}
+  return [...new Set(revisions)].flatMap(revision=>index.get(revision)||[]);
+}
 function reviewBlockComments(comments,scope){
+  comments=reviewCommentsForRevisions(comments,scope.revisions||[scope.revision]);
   const selected=new Map();for(const c of comments){if(!(scope.revisions||[scope.revision]).includes(c.target_revision_id))continue;const a=c.anchor;let matches=false;
     const scopes=c.material_scopes;if(scope.materialId&&scopes?.length&&!scopes.some(s=>s.material_id===scope.materialId&&s.number===scope.materialNumber))continue;
     if(scope.kind==='text'){const order=scope.orderedBlockIds||scope.blockIds;matches=a.type==='global'||(!a.type||a.type==='text')&&(a.segments||[a]).some(part=>{const start=order.indexOf(part.block_id),end=order.indexOf(part.end_block_id||part.block_id);return scope.blockIds.some(id=>id===part.block_id||id===part.end_block_id||start>=0&&end>=start&&order.indexOf(id)>=start&&order.indexOf(id)<=end)})}
@@ -39,10 +46,14 @@ function reviewBlockComments(comments,scope){
     if(matches)selected.set(c.id,c);
   }return [...selected.values()];
 }
+const reviewCountState=new WeakMap();
 function paintReviewCommentCounts(){
   for(const host of document.querySelectorAll('.review-surface')){
     const cue=host.querySelector(':scope > .review-cue');if(!cue)continue;
-    const count=reviewBlockComments(state.comments,reviewBlockScope(host,host.dataset.reviewKind)).length;
+    const scope=reviewBlockScope(host,host.dataset.reviewKind),key=JSON.stringify(scope),previous=reviewCountState.get(host);
+    if(previous?.comments===state.comments&&previous.key===key)continue;
+    const count=reviewBlockComments(state.comments,scope).length;
+    reviewCountState.set(host,{comments:state.comments,key});
     let number=cue.querySelector('.review-comment-count');
     if(count){if(!number)number=nodeText('span','review-comment-count','',cue);number.textContent=count}
     else number?.remove();
@@ -57,21 +68,30 @@ function openReviewBlockComments(host,kind){
 function reviewVariantURL(url,variant){const target=new URL(reviewURL(url),location.href);target.searchParams.set('variant',variant);return target.href}
 function reviewDownloadURL(url,filename){const target=new URL(reviewURL(url),location.href);target.searchParams.set('download','1');if(filename)target.searchParams.set('filename',filename);return target.href}
 const reviewWaveCache=new Map();
-async function reviewWaveform(url){
+const reviewWavePending=new Map();
+function reviewWait(promise,signal){
+  if(!signal)return promise;
+  if(signal.aborted)return Promise.reject(new DOMException('读取已取消','AbortError'));
+  return new Promise((resolve,reject)=>{const cancel=()=>reject(new DOMException('读取已取消','AbortError'));signal.addEventListener('abort',cancel,{once:true});promise.then(resolve,reject).finally(()=>signal.removeEventListener('abort',cancel))});
+}
+async function reviewWaveform(url,signal){
   if(reviewWaveCache.has(url))return reviewWaveCache.get(url);
-  const promise=(async()=>{
+  let entry=reviewWavePending.get(url);
+  if(!entry){const controller=new AbortController();entry={controller,clients:0,done:false};entry.promise=(async()=>{
     const target=new URL(url,location.href);target.searchParams.set('variant','waveform');
     // Deliberately independent of reviewFetch: application headers/cookies must
     // never follow a signed redirect to object storage.
-    const response=await fetch(target.href,{credentials:'omit',referrerPolicy:'no-referrer'});
+    const response=await fetch(target.href,{signal:controller.signal,credentials:'omit',referrerPolicy:'no-referrer'});
     if(!response.ok)throw Error('波形无法读取');
     const value=await response.json();
     if(!Array.isArray(value.peaks)||!value.peaks.length||value.peaks.length>1600||!Number.isFinite(value.duration)||value.duration<=0||value.peaks.some(x=>!Number.isFinite(x)||x<0))throw Error('波形数据无效');
-    return value;
-  })();reviewWaveCache.set(url,promise);if(reviewWaveCache.size>12)reviewWaveCache.delete(reviewWaveCache.keys().next().value);
-  promise.catch(()=>reviewWaveCache.delete(url));return promise;
+    reviewWaveCache.set(url,value);if(reviewWaveCache.size>12)reviewWaveCache.delete(reviewWaveCache.keys().next().value);return value;
+  })().finally(()=>{entry.done=true;if(reviewWavePending.get(url)===entry)reviewWavePending.delete(url)});reviewWavePending.set(url,entry)}
+  entry.clients++;
+  try{return await reviewWait(entry.promise,signal)}finally{entry.clients--;if(!entry.clients&&!entry.done){entry.controller.abort();reviewWavePending.delete(url)}}
 }
 function reviewRefreshMedia(media){
+  reviewLifetime(media).onDispose(()=>{media.reviewCancelResume?.();media.pause?.();media.removeAttribute('src');media.load?.()});
   const original=media.src;let attempts=0,lastTime=0,wasPaused=true,pending=null,stallTimer=null;
   const clearStall=()=>{if(stallTimer!==null){clearTimeout(stallTimer);stallTimer=null}};
   const available=()=>!media.seeking&&media.readyState>=(media.paused?2:3);
@@ -183,7 +203,8 @@ function reviewMediaPlayer(parent,component,record,selection={},review=true,opti
   const active=state.anchor?.type==='time'&&state.productionSelected?.id===record.id?state.anchor:state.comments.find(c=>c.id===state.selected&&c.target_revision_id===record.id)?.anchor;
   if(active?.type==='time'&&active.component_id===component.id&&active.asset_file===component.file&&from<=active.start_seconds&&active.end_seconds<=to){range=[active.start_seconds,active.end_seconds];media.dataset.reviewSeek=String(active.start_seconds)}
   paint();
-  if(audio)reviewWaveform(media.src).then(({peaks,duration})=>{
+  const lifetime=reviewLifetime(box);lifetime.onDispose(()=>{clearEndTimer();box.reviewPause()});
+  if(audio)reviewWaveform(media.src,lifetime.signal).then(({peaks,duration})=>{
     if(!box.isConnected)return;setDuration(duration);paint();if(!mediaFailed)fallback.hidden=true;const path=document.createElementNS(svg.namespaceURI,'path');let d='';
     const scale=Math.max(...peaks,.001);
     for(let i=0;i<400;i++){const t=from+i/399*span,j=Math.min(peaks.length-1,Math.floor(t/duration*peaks.length)),v=peaks[j]/scale*32;d+=`M${i*2},${36-v}V${36+v} `}path.setAttribute('d',d);svg.append(path);box.dataset.waveform='decoded';
@@ -222,7 +243,15 @@ function openReviewDialog(label,trigger,className='',closeLabel='关闭'){
 }
 
 function pauseReviewMedia(root=document){for(const media of root.querySelectorAll('audio,video')){media.reviewCancelResume?.();media.pause()}}
-// Detached media can otherwise continue playing after a card/version change.
+const reviewLifetimes=new Map();
+function reviewLifetime(root){
+  if(reviewLifetimes.has(root))return reviewLifetimes.get(root);
+  const controller=new AbortController(),cleanups=new Set(),scope={signal:controller.signal,onDispose:fn=>cleanups.add(fn),dispose:()=>{if(controller.signal.aborted)return;controller.abort();reviewLifetimes.delete(root);for(const fn of cleanups)try{fn()}catch(error){console.error('组件清理失败',error)}cleanups.clear()}};
+  reviewLifetimes.set(root,scope);return scope;
+}
+function disposeReviewTree(root){if(!root)return;for(const [node,scope] of reviewLifetimes)if(node===root||root.contains(node))scope.dispose()}
+// Visit only registered active components, not every removed text subtree.
 if(typeof MutationObserver!=='undefined')new MutationObserver(changes=>{
-  for(const change of changes)for(const node of change.removedNodes)if(node.nodeType===1&&!node.isConnected){if(node.matches('audio,video'))node.pause();pauseReviewMedia(node)}
+  if(!changes.some(change=>change.removedNodes.length))return;
+  for(const [node,scope] of reviewLifetimes)if(!node.isConnected)scope.dispose();
 }).observe(document.body,{childList:true,subtree:true});

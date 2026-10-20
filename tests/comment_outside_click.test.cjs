@@ -34,7 +34,7 @@ class Element{
 async function fixture(){
   const nodes=new Map(),listeners={},storage=new Map(),renders=[],body=new Element('body');
   const node=selector=>{if(!nodes.has(selector)){const value=new Element();body.append(value);nodes.set(selector,value)}return nodes.get(selector)};
-  const c={URL,URLSearchParams,console,setTimeout:()=>0,clearTimeout(){},CSS:{escape:x=>x},
+  const c={URL,URLSearchParams,AbortController,console,setTimeout:()=>0,clearTimeout(){},CSS:{escape:x=>x},
     location:{href:'http://fixture/?workspace=story.sources&source=source'},history:{state:null},
     window:{innerWidth:1024,innerHeight:800,addEventListener(){}},Node:{TEXT_NODE:3},getSelection:()=>({removeAllRanges(){}}),
     document:{body,activeElement:null,querySelector:node,querySelectorAll:()=>[],
@@ -282,6 +282,8 @@ test('narrow successful location restores focus even if comment rendering alread
 
 async function unifiedCloseFixture(){
   const f=await fixture(),dialogs=[];
+  const media=fs.readFileSync(path.join(__dirname,'../review_desk/static/review-ui.js'),'utf8');
+  vm.runInContext(media.slice(media.indexOf('const reviewLifetimes=')),f.c,{filename:'review-ui.js:lifetime'});
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static/unified-cards.js'),'utf8'),f.c,{filename:'unified-cards.js'});
   // Network/card painting are separate contracts. Execute the real modal owner,
   // panel relocation, saved-state close callback and setPanelOpen functions here.

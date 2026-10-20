@@ -92,6 +92,7 @@ async function loadEntityManagement(result,{epoch,onReadStart}={}){
   const panel=el('section','production-filters');panel.setAttribute('aria-label','实体管理范围');host.append(panel);
   const summary=nodeText('p','production-filter-summary','',host),content=el('div','management-entity-graph');host.append(content);
   const current=token=>token===request&&epoch===productionLoadEpoch&&workspace===state.workspace;
+  let readAbort=null;reviewLifetime(host).onDispose(()=>readAbort?.abort());
   function draw(){
     const rows=productionWorkspaceRows(result.records,workspace,result.material_assets);
     state.productionRecords=result.records;state.productionVisibleEntities=new Set(rows.map(row=>row.object_id));
@@ -111,11 +112,12 @@ async function loadEntityManagement(result,{epoch,onReadStart}={}){
   }
   async function refresh(push=false){
     const token=++request;
+    readAbort?.abort();readAbort=new AbortController();
     if(push){rememberProductionDraft();memory.graphs={};entityScopeRoute(filters,{push:true});}
     panel.replaceChildren();entityScopeFilters(panel,filters,catalog,()=>refresh(true));
     state.productionVisibleEntities=new Set();summary.textContent='正在读取实体…';content.replaceChildren();
     try{
-      const data=await api('/api/production/index?'+new URLSearchParams({view:'settings',...entityManagementScopeParams()}));
+      const data=await api('/api/production/index?'+new URLSearchParams({view:'settings',...entityManagementScopeParams()}),{signal:readAbort.signal});
       if(!current(token))return;result=data;catalog.episodes=data.management_episodes||[];Object.assign(filters,data.entity_scope);draw();
     }catch(error){
       if(!current(token))return;summary.textContent='实体读取失败';content.replaceChildren();nodeText('p','production-issue',error.message,content);productionButton(content,'重新读取列表',()=>refresh());
@@ -128,7 +130,9 @@ function readableSearchMatches(query,terms){
   const normalized=value=>String(value||'').normalize('NFKC').toLowerCase().trim().replace(/\s+/gu,' '),needle=normalized(query);
   return !needle||( /^(?:m|en|st|ash|as|ae)\d+$/u.test(needle)?terms.some(term=>normalized(term)===needle):terms.some(term=>normalized(term).includes(needle)));
 }
+const managementMaterialCache=new WeakMap();
 function managementMaterialGroups(result){
+  if(managementMaterialCache.has(result))return managementMaterialCache.get(result);
   const unique=new Map();
   for(const item of result.items){
     const id=item.canonical_material_id||item.object_id;
@@ -145,7 +149,7 @@ function managementMaterialGroups(result){
   }
   const code=item=>item.business_code||businessCode(item);
   for(const group of groups.values())group.items.sort((a,b)=>Number(!!b.generated)-Number(!!a.generated)||code(a).localeCompare(code(b),undefined,{numeric:true})||(a.canonical_material_id||a.object_id).localeCompare(b.canonical_material_id||b.object_id));
-  return [...groups.values()].filter(group=>group.items.length);
+  const values=[...groups.values()].filter(group=>group.items.length);managementMaterialCache.set(result,values);return values;
 }
 function entitySmallCard(parent,row,{stateCount=0,materialCount=0,preview=null,references=[]}={}){
   const button=reviewSmallCard(parent,{title:row.kind==='AV_SHOT'?breakdownShotTitle(row).replace(/^ASH\d+ · /,''):row.payload.title,business_code:businessCode(row),icon:row.entity_type||row.payload.entity_type,preview,subtitle:`状态 ${stateCount} 个 · 素材 ${materialCount} 个`},trigger=>openManagementReferences(references,trigger,'选择此范围的准确实体版本',{object_id:row.object_id,defaultSelection:true}));button.classList.add('entity-small-card');button.dataset.objectId=row.object_id;button.dataset.entityType=row.entity_type||row.payload.entity_type;button.setAttribute('aria-haspopup','dialog');return button;
@@ -173,16 +177,17 @@ function materialCategoryFilters(parent,families,selected,counts,onchange){
 async function loadMaterialManagement(){
   state.productionVisibleEntities=null;state.refreshEntityIndex=null;rememberProductionDraft();const workspace=state.workspace,epoch=++productionLoadEpoch,host=$('#production-view'),params=new URL(location.href).searchParams,memory=managementMemory('materials',params,'material_');++productionReadEpoch;state.productionSelected=null;state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;host.replaceChildren();breakdownHeading(host);
   const keys=['episode','scene','shot','media','status','search'];for(const key of keys)memory.filters[key]=params.get('material_'+key)||'';managementScopeMemory(memory,params,'material_');const filters=memory.filters,catalog={episodes:[]};if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;state.productionRecords=[];
-  const panel=el('section','production-filters');panel.setAttribute('aria-label','素材管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(facets,scope);managementLegacyNotice(panel,memory);host.append(panel);const summary=nodeText('p','production-filter-summary','',host);summary.setAttribute('role','status');const content=el('div','management-card-list');content.setAttribute('aria-label','素材列表');content.classList.add('material-management-list');host.append(content);const bottom=el('div');host.append(bottom);let request=0,result=null,timer;
+  const panel=el('section','production-filters');panel.setAttribute('aria-label','素材管理筛选');const controls=el('div','production-toolbar'),search=el('input');search.type='search';search.placeholder='搜索素材';search.setAttribute('aria-label','搜索素材');search.value=filters.search;controls.append(search);panel.append(controls);const scope=el('div','management-scope-filters'),facets=el('div');panel.append(facets,scope);managementLegacyNotice(panel,memory);host.append(panel);const summary=nodeText('p','production-filter-summary','',host);summary.setAttribute('role','status');const content=el('div','management-card-list');content.setAttribute('aria-label','素材列表');content.classList.add('material-management-list');host.append(content);const bottom=el('div');host.append(bottom);let request=0,result=null,timer,readAbort=null,groups=[],total=0,generated=0;
+  reviewLifetime(host).onDispose(()=>{clearTimeout(timer);readAbort?.abort()});
   const clear=productionButton(controls,'清除筛选',()=>{for(const key of [...keys,'scope_revision'])filters[key]='';search.value='';refresh()});search.oninput=()=>{++request;clearTimeout(timer);timer=setTimeout(()=>{filters.search=search.value.trim();refresh()},150)};
   function draw(){
-    const groups=managementMaterialGroups(result),items=groups.flatMap(group=>group.items),page=groupedCardPage(groups,memory.page,memory.rows,5);memory.page=page.page;content.replaceChildren();
+    const page=groupedCardPage(groups,memory.page,memory.rows,5);memory.page=page.page;content.replaceChildren();
     managementSections(content,page.groups,(list,item)=>{const button=materialSmallCard(list,item,trigger=>openManagementMaterial(item,trigger),false,{includesHistory:true});button.setAttribute('aria-haspopup','dialog')});
-    if(!items.length)nodeText('p','production-meta','没有符合筛选条件的素材；可清除搜索或调整集场镜、素材分类与结果条件。',content);
-    summary.textContent=`${items.length} 项素材；${items.filter(i=>i.generated).length} 项有结果，${items.filter(i=>!i.generated).length} 项无结果。`;summary.title='按唯一素材身份计数；有结果依据真实候选或原件，不表示人工认可';
+    if(!total)nodeText('p','production-meta','没有符合筛选条件的素材；可清除搜索或调整集场镜、素材分类与结果条件。',content);
+    summary.textContent=`${total} 项素材；${generated} 项有结果，${total-generated} 项无结果。`;summary.title='按唯一素材身份计数；有结果依据真实候选或原件，不表示人工认可';
     bottom.replaceChildren();reviewPagination(bottom,page,(p,rows)=>{memory.page=p;memory.rows=rows;draw();content.scrollIntoView({block:'start'});bottom.querySelector('[aria-label="每页行数"]')?.focus({preventScroll:true})});managementRoute('material_',memory);
   }
-  async function refresh(reset=true){if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;if(reset)memory.page=1;const token=++request;managementRoute('material_',memory);summary.textContent='正在读取素材…';bottom.replaceChildren();content.replaceChildren();clear.disabled=!Object.values(filters).some(Boolean);try{const data=await api('/api/production/materials?'+new URLSearchParams({...filters,scope:'av',grouped:1,compact:1,cards:1}));if(token!==request||epoch!==productionLoadEpoch||workspace!==state.workspace)return;result=data;catalog.episodes=result.management_episodes||catalog.episodes;facets.replaceChildren();if(result.material_categories){
+  async function refresh(reset=true){if(epoch!==productionLoadEpoch||workspace!==state.workspace)return;if(reset)memory.page=1;const token=++request;readAbort?.abort();readAbort=new AbortController();managementRoute('material_',memory);summary.textContent='正在读取素材…';bottom.replaceChildren();content.replaceChildren();clear.disabled=!Object.values(filters).some(Boolean);try{const data=await api('/api/production/materials?'+new URLSearchParams({...filters,scope:'av',grouped:1,compact:1,cards:1}),{signal:readAbort.signal});if(token!==request||epoch!==productionLoadEpoch||workspace!==state.workspace)return;result=data;groups=managementMaterialGroups(result);total=groups.reduce((n,g)=>n+g.items.length,0);generated=groups.reduce((n,g)=>n+g.items.filter(i=>i.generated).length,0);catalog.episodes=result.management_episodes||catalog.episodes;facets.replaceChildren();if(result.material_categories){
       if(filters.media==='project')filters.media='text-layer';
       materialCategoryFilters(facets,result.material_categories,filters.media,result.facets.media,value=>{filters.media=value;refresh()});
     }else{const options=Object.keys(result.facets.media).map(value=>[value,value?(productionMediaLabels[value]||value):'全部']);flatFilterGroup(facets,'media','素材分类',options,filters.media,result.facets.media,value=>{filters.media=value;refresh()})}

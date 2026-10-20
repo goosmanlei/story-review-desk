@@ -744,6 +744,11 @@ class Store:
             if matches(existing):
                 return existing
             raise Conflict("comment id already used")
+        if anchor.get('edit_selection'):
+            # Text bindings also need their exact originals leased and checked
+            # before network/file work is frozen by the write transaction.
+            from .editing_review import validate_new_anchor
+            validate_new_anchor(self, object_id, revision_id, anchor)
         stamp = now()
         from .production_media import frozen_physical_hashes
         with self.db, frozen_physical_hashes():

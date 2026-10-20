@@ -147,8 +147,9 @@ function renderEntityRelationGraph(root,data){
   viewport.onpointermove=e=>{if(!pan)return;if(Math.hypot(e.clientX-pan.x,e.clientY-pan.y)>5){moved=true;viewport.setPointerCapture(e.pointerId)}if(moved){viewport.scrollLeft=pan.left+pan.x-e.clientX;viewport.scrollTop=pan.top+pan.y-e.clientY}};
   viewport.onpointerup=viewport.onpointercancel=()=>{pan=null};viewport.onclick=e=>{if(canSelect(e)&&!e.target.closest('.relation-node,.relation-text,.relation-edge-hit'))choose(null)};
   viewport.onkeydown=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();choose(null);return}if(e.target!==viewport)return;const key=({'+':'in','=':'in','-':'out','0':'original',f:'fit'})[e.key];if(key){e.preventDefault();e.stopPropagation();zoom(key);return}if(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)){e.preventDefault();viewport.scrollBy({left:e.key==='ArrowLeft'?-80:e.key==='ArrowRight'?80:0,top:e.key==='ArrowUp'?-80:e.key==='ArrowDown'?80:0})}};
-  requestAnimationFrame(layout);
-  if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return}layout()});observer.observe(viewport);observer.observe(central.host);for(const item of items)observer.observe(item.host);for(const group of groups.values())observer.observe(group.node.host)}
+  const lifetime=reviewLifetime(viewport);let frame=requestAnimationFrame(layout);
+  lifetime.onDispose(()=>cancelAnimationFrame(frame));
+  if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{cancelAnimationFrame(frame);frame=requestAnimationFrame(layout)});lifetime.onDispose(()=>observer.disconnect());observer.observe(viewport);observer.observe(central.host);for(const item of items)observer.observe(item.host);for(const group of groups.values())observer.observe(group.node.host)}
 }
 
 function relationSceneLabel(source){
@@ -210,12 +211,14 @@ function managementOverlap(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.
 // geometry is cached; failures release the worker and can be retried normally.
 let managementGraphWorker=null,managementGraphRequest=0;
 const managementGraphPending=new Map(),managementGraphCache=new Map();
+const managementGraphFlights=new Map();
 function managementGraphWorkerFailure(error){
   managementGraphWorker?.terminate();managementGraphWorker=null;
   for(const item of managementGraphPending.values()){clearTimeout(item.timer);item.reject(error);}
   managementGraphPending.clear();
 }
-async function managementEdgeGeometry(nodes,edges){
+async function managementEdgeGeometry(nodes,edges,signal){
+  if(signal?.aborted)throw new DOMException('关系图读取已取消','AbortError');
   const input=nodes.map(({id,w,h,component,rank})=>({id,w,h,component,rank})),key=JSON.stringify([input,edges]);
   let raw=managementGraphCache.get(key);
   if(!raw){
@@ -228,10 +231,16 @@ async function managementEdgeGeometry(nodes,edges){
       };
       managementGraphWorker.onerror=()=>managementGraphWorkerFailure(new Error('关系图计算程序未能运行，请重试'));
     }
-    raw=await new Promise((resolve,reject)=>{
+    let flight=managementGraphFlights.get(key);
+    if(!flight){flight={clients:0};flight.promise=new Promise((resolve,reject)=>{
       const id=++managementGraphRequest,timer=setTimeout(()=>managementGraphWorkerFailure(new Error('关系图计算超时，请重试')),5000);
-      managementGraphPending.set(id,{resolve,reject,timer});managementGraphWorker.postMessage({id,nodes:input,edges});
-    });
+      flight.id=id;flight.reject=reject;managementGraphPending.set(id,{resolve,reject,timer});managementGraphWorker.postMessage({id,nodes:input,edges});
+    }).finally(()=>{if(managementGraphFlights.get(key)===flight)managementGraphFlights.delete(key)});managementGraphFlights.set(key,flight)}
+    flight.clients++;
+    try{raw=await reviewWait(flight.promise,signal)}finally{
+      flight.clients--;
+      if(!flight.clients&&managementGraphPending.has(flight.id)){const item=managementGraphPending.get(flight.id);clearTimeout(item.timer);managementGraphPending.delete(flight.id);flight.reject(new DOMException('关系图读取已取消','AbortError'));if(!managementGraphPending.size){managementGraphWorker?.terminate();managementGraphWorker=null}}
+    }
     if(!Number.isFinite(raw.width)||!Number.isFinite(raw.height)||raw.width<=0||raw.height<=0)throw new Error('实体关系图边界无效');
     if(raw.nodes.length!==nodes.length||raw.views.length!==edges.length||new Set(raw.nodes.map(n=>n.id)).size!==nodes.length||new Set(raw.views.map(v=>v.edge.id)).size!==edges.length)throw new Error('实体关系图未返回完整集合');
     if(raw.nodes.some((n,i)=>n.id!==nodes[i].id||![n.x,n.y,n.w,n.h].every(Number.isFinite)))throw new Error('实体关系节点不一致');
@@ -253,6 +262,7 @@ function renderManagementEntityGraph(root,rows,result,memory){
   const marker='entity-map-arrow-'+(++relationGraphSerial),defs=make('defs'),arrow=make('marker',{id:marker,viewBox:'0 0 10 10',refX:9,refY:5,markerWidth:6,markerHeight:6,orient:'auto-start-reverse'},defs);make('path',{d:'M0 0L10 5L0 10Z',fill:'#73917a'},arrow);
   const edgeLayer=make('g'),captionLayer=make('g'),edgeViews=[];let width=Math.max(800,...nodes.map(n=>n.x+360)),height=Math.max(450,...nodes.map(n=>n.y+220));
   const nodeHosts=[];let moved=false,pan=null,opening=false;
+  const lifetime=reviewLifetime(viewport);let geometryKey=null;
   function choose(selection){memory.selection=selection;paintSelection();}
   function paintSelection(){
     const selection=memory.selection,selected=managementGraphSelection(edges,selection),ends=new Set(selection?.kind==='node'?[selection.id]:[]);
@@ -272,7 +282,9 @@ function renderManagementEntityGraph(root,rows,result,memory){
     // the visible graph, including card bounds and viewBox. One failed route
     // must not erase a complete drawing or leave a partially committed layer.
     const measured=nodeHosts.map(({node,host})=>({...node,h:Math.max(110,host.scrollHeight)}));
-    const geometry=await managementEdgeGeometry(measured,edges);if(token!==layoutSerial||!viewport.isConnected)return false;const nextEdges=document.createElementNS(ns,'g'),nextCaptions=document.createElementNS(ns,'g'),nextViews=[];
+    const key=JSON.stringify(measured.map(({id,w,h,component,rank})=>[id,w,h,component,rank]));
+    if(key===geometryKey)return true;
+    const geometry=await managementEdgeGeometry(measured,edges,lifetime.signal);if(token!==layoutSerial||!viewport.isConnected)return false;const nextEdges=document.createElementNS(ns,'g'),nextCaptions=document.createElementNS(ns,'g'),nextViews=[];
     for(const view of geometry.views){const {edge,a,b,label:box}=view,path=make('path',{class:'relation-edge','data-edge-id':edge.id,d:view.path},nextEdges);
       if(['forward','reverse','mutual'].includes(edge.direction))path.setAttribute('marker-end',`url(#${marker})`);if(edge.direction==='mutual')path.setAttribute('marker-start',`url(#${marker})`);
       const foreign=make('foreignObject',{x:box.x,y:box.y,width:box.w,height:box.h,'data-relation-id':edge.id},nextCaptions),label=el('button','relation-text management-edge-caption');label.textContent=edge.summary;label.setAttribute('aria-label',a.row.payload.title+(edge.direction==='related'?' — ':' → ')+b.row.payload.title+'：'+edge.summary);foreign.append(label);
@@ -280,7 +292,7 @@ function renderManagementEntityGraph(root,rows,result,memory){
     }
     for(const [i,{node,foreign}] of nodeHosts.entries()){Object.assign(node,geometry.nodes[i]);foreign.setAttribute('x',node.x);foreign.setAttribute('y',node.y);foreign.setAttribute('height',node.h);}
     edgeLayer.replaceChildren(...nextEdges.childNodes);captionLayer.replaceChildren(...nextCaptions.childNodes);edgeViews.splice(0,edgeViews.length,...nextViews);width=geometry.width;height=geometry.height;
-    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.visibility='visible';paintSelection();return true;
+    svg.setAttribute('viewBox',`0 0 ${width} ${height}`);svg.style.visibility='visible';geometryKey=key;paintSelection();return true;
   }
   svg.setAttribute('viewBox',`0 0 ${width} ${height}`);
   let scale=memory.scale||1,ready=false;const status=nodeText('output','relation-scale','',controls);
@@ -302,8 +314,13 @@ function renderManagementEntityGraph(root,rows,result,memory){
     try{if(!await drawEdges(token))return;const {left,top}=memory;issue.hidden=true;issue.replaceChildren();if(memory.mode==='fit'||!memory.scale)scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);if(memory.mode!=='fit'){viewport.scrollLeft=left??0;viewport.scrollTop=top??0;}ready=true;remember();}
     catch(error){if(token!==layoutSerial||!viewport.isConnected)return;issue.hidden=false;issue.replaceChildren();nodeText('p',null,(ready?'关系图未能重新绘制，仍保留上一次完整结果。':'关系图绘制失败。')+error.message,issue);productionButton(issue,'重新绘制关系图',layout);}
   }
-  requestAnimationFrame(layout);
-  if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!viewport.isConnected){observer.disconnect();return;}layout();});observer.observe(viewport);for(const {host} of nodeHosts)observer.observe(host);}
+  let layoutFrame=requestAnimationFrame(layout);
+  lifetime.onDispose(()=>{++layoutSerial;cancelAnimationFrame(layoutFrame)});
+  if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(entries=>{
+    if(!viewport.isConnected)return;
+    if(ready&&entries.length&&entries.every(entry=>entry.target===viewport)){if(memory.mode==='fit')scale=fit();resize(memory.mode==='fit'?{x:width/2,y:height/2}:null);return}
+    cancelAnimationFrame(layoutFrame);layoutFrame=requestAnimationFrame(layout);
+  });lifetime.onDispose(()=>observer.disconnect());observer.observe(viewport);for(const {host} of nodeHosts)observer.observe(host);}
 }
 function managementGraphSelection(edges,selection){
   return new Set(!selection?[]:edges.filter(e=>selection.kind==='edge'?e.id===selection.id:e.endpoints.includes(selection.id)).map(e=>e.id));

@@ -33,8 +33,8 @@ function editAnchor(output,review,variant,range){
 }
 const editCurrent=ctx=>ctx.epoch===episodeEditing.epoch&&ctx.readEpoch===productionReadEpoch&&state.workspace==='settings.workspace'&&productionTab()==='editing';
 function pauseEpisodeMedia(media){media?.reviewCancelResume?.();media?.pause()}
-function pauseEpisodePlayer(){episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();pauseEpisodeMedia(document.querySelector('#production-view video[data-episode-player]'))}
-async function editCall(action,value={}){return api('/api/editing/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})}
+function pauseEpisodePlayer(){episodeEditing.dispose?.();episodeEditing.dispose=null;episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();episodeEditing.readAbort?.abort();pauseEpisodeMedia(document.querySelector('#production-view video[data-episode-player]'))}
+async function editCall(action,value={}){return api('/api/editing/'+action,{method:'POST',signal:episodeEditing.readAbort?.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(value)})}
 function editRoute(values){const u=new URL(location.href);for(const [k,v] of Object.entries(values)){if(v===null)u.searchParams.delete(k);else u.searchParams.set(k,v)}history.replaceState(history.state,'',u)}
 function editControl(host,label,value){const wrap=nodeText('label',null,'',host);nodeText('span',null,label,wrap);const input=el('input');input.type='text';input.value=value;input.setAttribute('aria-label',label);wrap.append(input);return input}
 function editChoices(host,key,label,options,value,change){
@@ -42,7 +42,11 @@ function editChoices(host,key,label,options,value,change){
   const group=flatFilterGroup(host,key,label,options,value,null,()=>{}),buttons=[...group.querySelectorAll('button')];
   buttons.forEach((button,index)=>{button.onclick=()=>{if(button.getAttribute('aria-pressed')==='true')return;return Promise.resolve(change(options[index][0])).catch(e=>toast(e.message))}});return group;
 }
-function editRemember(ctx){try{localStorage.setItem('episode-review:'+location.pathname+':'+ctx.episode,JSON.stringify({output:ctx.output,variant:ctx.variant,views:ctx.views}));localStorage.setItem('episode-review:last:'+location.pathname,ctx.episode)}catch{if(!ctx.storageWarning){ctx.storageWarning=true;toast('审阅位置未能保存到本机；当前选择仍保留。')}}}
+function editRemember(ctx,immediate=true){
+  if(!immediate){if(!ctx.rememberTimer)ctx.rememberTimer=setTimeout(()=>{ctx.rememberTimer=null;editRemember(ctx)},250);return}
+  clearTimeout(ctx.rememberTimer);ctx.rememberTimer=null;
+  try{localStorage.setItem('episode-review:'+location.pathname+':'+ctx.episode,JSON.stringify({output:ctx.output,variant:ctx.variant,views:ctx.views}));localStorage.setItem('episode-review:last:'+location.pathname,ctx.episode)}catch{if(!ctx.storageWarning){ctx.storageWarning=true;toast('审阅位置未能保存到本机；当前选择仍保留。')}}
+}
 function clearEpisodeEditReview(){
   if(typeof rememberProductionDraft==='function')rememberProductionDraft();
   state.entityReview=null;state.materialReview=null;state.unifiedCardRoot=null;state.productionEntityId=null;state.productionSelected=null;state.productionDetail=null;state.reviewReferenceContext=null;state.reviewCommentScope=null;state.anchor=null;state.editing=null;state.selected=null;state.drawMode=null;
@@ -50,8 +54,9 @@ function clearEpisodeEditReview(){
 async function loadEpisodeEditing(){
   pauseEpisodePlayer();const readEpoch=++productionReadEpoch;clearEpisodeEditReview();renderComments();
   const epoch=++episodeEditing.epoch,host=$('#production-view');productionTabs();host.replaceChildren();nodeText('p',null,'正在读取成片…',host);
+  episodeEditing.readAbort=new AbortController();
   try{
-    const data=await api('/api/editing/catalog');if(epoch!==episodeEditing.epoch||readEpoch!==productionReadEpoch||state.workspace!=='settings.workspace'||productionTab()!=='editing')return;
+    const data=await api('/api/editing/catalog?summary=1',{signal:episodeEditing.readAbort.signal});if(epoch!==episodeEditing.epoch||readEpoch!==productionReadEpoch||state.workspace!=='settings.workspace'||productionTab()!=='editing')return;
     const params=new URL(location.href).searchParams;let last;try{last=localStorage.getItem('episode-review:last:'+location.pathname)}catch{}
     const episode=params.get('edit_episode')||last||data.episodes[0]?.id;
     let ctx=episodeEditing.contexts.get(episode);
@@ -67,10 +72,17 @@ async function loadEpisodeEditing(){
   }catch(error){if(epoch===episodeEditing.epoch&&readEpoch===productionReadEpoch){host.replaceChildren();nodeText('p','production-issue',error.message,host)}}
 }
 async function loadEditOutput(ctx){
-  const output=ctx.data.outputs.find(o=>o.object_id===ctx.output),id=ctx.output;
+  episodeEditing.readAbort?.abort();episodeEditing.readAbort=new AbortController();
+  const id=ctx.output,output=await readEditOutput(ctx,id);
+  if(!editCurrent(ctx)||ctx.output!==id)return;
   if(output){const review=await editCall('review',{object_id:output.object_id,revision_id:output.id});if(!editCurrent(ctx)||ctx.output!==id)return;ctx.review=review;ctx.reviews[output.id]=review}
   else ctx.review=null;
   editRoute({edit_episode:ctx.episode,edit_output:ctx.output||null});renderEpisodeEditing(ctx);
+}
+async function readEditOutput(ctx,id){
+  let output=ctx.data.outputs.find(o=>o.object_id===id);
+  if(output?.summary){const full=await editCall('get',{object_id:output.object_id,revision_id:output.id});if(!editCurrent(ctx))return null;ctx.data.outputs[ctx.data.outputs.indexOf(output)]=full;output=full}
+  return output;
 }
 function editView(ctx,output){return ctx.views[output.id]||=( {frame:0,zoomLevel:'overview',scroll:0,range:{start:0,end:output.payload.project.spec.duration_frames,tracks:[]},selected:null} )}
 async function openEditElement(ctx,element,trigger){
@@ -95,7 +107,7 @@ async function openEditElement(ctx,element,trigger){
 }
 function renderEpisodeEditing(ctx){
   if(!editCurrent(ctx))return;
-  episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();const abort=episodeEditing.abort=new AbortController();
+  episodeEditing.dispose?.();episodeEditing.timelineObserver?.disconnect();episodeEditing.abort?.abort();const abort=episodeEditing.abort=new AbortController();
   pauseEpisodeMedia(ctx.host.querySelector('video'));const render=ctx.render=(ctx.render||0)+1,host=ctx.host;
   const outputs=ctx.data.outputs.filter(o=>o.payload.project.episode.object_id===ctx.episode),output=outputs.find(o=>o.object_id===ctx.output),project=output?.payload.project;
   host.replaceChildren();host.classList.add('episode-editing');productionTabs();
@@ -138,10 +150,11 @@ function renderEpisodeEditing(ctx){
     for(const item of review.elements.filter(e=>e.track_key===track.key)){const button=nodeText('button','edit-clip '+(item.element_type==='clip'?(project.clips.find(c=>c.id===item.element_id)?.kind||''):'text-layer'),item.title,row);button.type='button';button.dataset.elementKey=editElementKey(item);button.title=item.title+' · '+editTime(project,Math.floor(item.start_frame))+'–'+editTime(project,Math.ceil(item.end_frame));button.onclick=event=>{event.stopPropagation();if(!current()||ctx.selecting||suppressClick)return;if(event.detail===0)seek(item.start_frame);else seek(eventFrame(event));return openEditElement(ctx,item,button).catch(e=>toast(e.message))};buttons.push([button,item]);}
   }
   const playhead=el('div','edit-playhead');content.append(playhead);playhead.tabIndex=0;playhead.setAttribute('role','slider');playhead.setAttribute('aria-label','播放头');playhead.setAttribute('aria-valuemin',0);playhead.setAttribute('aria-valuemax',project.spec.duration_frames-1);
-  let zoom=0,viewWidth=0,gesture=null,suppressClick=false;
+  let zoom=0,viewWidth=0,gesture=null,suppressClick=false,gestureFrame=0,pendingMove=null,geometry=null;
+  function measureGesture(){geometry={left:content.getBoundingClientRect().left,edge:scroll.getBoundingClientRect(),rows:rows.map(row=>row.getBoundingClientRect())};return geometry}
   function positionHead(){playhead.style.left=(labelWidth+v.frame/editRate(project)*zoom)+'px';playhead.setAttribute('aria-valuenow',v.frame);clock.textContent=v.frame+' 帧'}
   function seek(frame,remember=true){if(!current()||!Number.isFinite(frame))return;pauseEpisodeMedia(media);v.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));media.currentTime=v.frame/editRate(project);positionHead();if(remember)editRemember(ctx)}
-  const eventFrame=event=>editTimelineFrame(project,event.clientX-content.getBoundingClientRect().left-labelWidth,zoom,true);
+  const eventFrame=event=>editTimelineFrame(project,event.clientX-(gesture?(geometry||measureGesture()).left:content.getBoundingClientRect().left)-labelWidth,zoom,true);
   const inPlot=event=>event.clientX>=scroll.getBoundingClientRect().left+labelWidth&&!event.target.closest('.edit-track-name');
   function syncInputs(){inputs.start.value=v.range.start??'';inputs.end.value=v.range.end??'';inputs.startTime.value=Number.isInteger(v.range.start)?editTime(project,v.range.start):'';inputs.endTime.value=Number.isInteger(v.range.end)?editTime(project,v.range.end):'';fieldIssue='';paintSelection()}
   function paintSelection(){
@@ -160,29 +173,35 @@ function renderEpisodeEditing(ctx){
     const commit=()=>{if(v.range.start!==null&&v.range.end!==null&&!fieldIssue)syncInputs()};input.onblur=commit;input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();commit()}};
   }
   function setSelecting(value){ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media)}
-  function finishGesture(cancel=false){if(!gesture)return;const g=gesture;gesture=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');editRemember(ctx)}
+  function finishGesture(cancel=false){if(!gesture)return;cancelAnimationFrame(gestureFrame);gestureFrame=0;if(!cancel&&pendingMove)applyMove();pendingMove=null;const g=gesture;gesture=null;geometry=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');editRemember(ctx)}
   timeline.onpointerdown=event=>{
     suppressClick=false;if(event.button!==0||!current()||!inPlot(event))return;
     const row=event.target.closest('.edit-track'),x=event.clientX,frame=eventFrame(event);
     if(ctx.selecting){if(!row)return;event.preventDefault();pauseEpisodeMedia(media);gesture={kind:'range',id:event.pointerId,target:timeline,x,y:event.clientY,frame,previous:editClone(v.range),moved:false};}
     else{const headX=content.getBoundingClientRect().left+labelWidth+v.frame/editRate(project)*zoom;if(Math.abs(x-headX)>8)return;gesture={kind:'head',id:event.pointerId,target:event.target,x,offset:x-headX,moved:false};}
     gesture.target.setPointerCapture(event.pointerId);
+    measureGesture();
   };
   timeline.onpointermove=event=>{
     if(!gesture||event.pointerId!==gesture.id||!current())return;const g=gesture;if(!g.moved&&Math.hypot(event.clientX-g.x,event.clientY-(g.y||event.clientY))<3)return;g.moved=true;event.preventDefault();
-    if(g.kind==='head'){playhead.classList.add('dragging');seek(editTimelineFrame(project,event.clientX-content.getBoundingClientRect().left-labelWidth-g.offset,zoom),false);return}
-    const edge=scroll.getBoundingClientRect();if(event.clientX>edge.right)scroll.scrollLeft+=Math.min(30,event.clientX-edge.right);else if(event.clientX<edge.left+labelWidth)scroll.scrollLeft-=Math.min(30,edge.left+labelWidth-event.clientX);
-    const end=eventFrame(event),start=Math.min(g.frame,end),stop=Math.max(g.frame,end);if(stop===start)return;
-    const y1=Math.min(g.y,event.clientY),y2=Math.max(g.y,event.clientY);v.range={start,end:stop,tracks:review.tracks.filter((t,i)=>{const r=rows[i].getBoundingClientRect();return r.top<y2&&r.bottom>y1}).map(t=>t.key)};syncInputs();
+    pendingMove={clientX:event.clientX,clientY:event.clientY};if(!gestureFrame)gestureFrame=requestAnimationFrame(()=>{gestureFrame=0;applyMove()});
   };
+  function applyMove(){
+    if(!gesture||!pendingMove||!current())return;const g=gesture,event=pendingMove;pendingMove=null;const measured=geometry||measureGesture();
+    if(g.kind==='head'){playhead.classList.add('dragging');seek(editTimelineFrame(project,event.clientX-measured.left-labelWidth-g.offset,zoom),false);return}
+    const edge=measured.edge,before=scroll.scrollLeft;if(event.clientX>edge.right)scroll.scrollLeft+=Math.min(30,event.clientX-edge.right);else if(event.clientX<edge.left+labelWidth)scroll.scrollLeft-=Math.min(30,edge.left+labelWidth-event.clientX);measured.left-=scroll.scrollLeft-before;
+    const end=eventFrame(event),start=Math.min(g.frame,end),stop=Math.max(g.frame,end);if(stop===start)return;
+    const y1=Math.min(g.y,event.clientY),y2=Math.max(g.y,event.clientY);v.range={start,end:stop,tracks:review.tracks.filter((t,i)=>{const r=measured.rows[i];return r.top<y2&&r.bottom>y1}).map(t=>t.key)};syncInputs();
+  }
   timeline.onpointerup=()=>finishGesture(false);timeline.onpointercancel=()=>finishGesture(true);timeline.onlostpointercapture=()=>{if(gesture)finishGesture(true)};
   timeline.addEventListener('click',event=>{if(suppressClick||ctx.selecting&&event.target.closest('.edit-track')){event.preventDefault();event.stopPropagation();suppressClick=false}},true);
   timeline.onclick=event=>{if(event.detail>0&&current()&&inPlot(event)&&!ctx.selecting)seek(eventFrame(event))};
   playhead.onclick=event=>event.stopPropagation();playhead.onkeydown=event=>{const f=({ArrowLeft:v.frame-1,ArrowRight:v.frame+1,Home:0,End:project.spec.duration_frames-1})[event.key];if(f!==undefined&&!ctx.selecting){event.preventDefault();seek(f)}};
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&current()&&!state.unifiedCardRoot&&(ctx.selecting||gesture)){event.preventDefault();event.stopImmediatePropagation();if(gesture)finishGesture(true);else setSelecting(false)}},{capture:true,signal:abort.signal});
-  scroll.onscroll=()=>{if(current()){v.scroll=scroll.scrollLeft;editRemember(ctx)}};
+  scroll.onscroll=()=>{geometry=null;if(current()){v.scroll=scroll.scrollLeft;editRemember(ctx,false)}};
+  window.addEventListener('scroll',()=>{geometry=null},{capture:true,passive:true,signal:abort.signal});
   function follow(){if(!current()||media.paused||ctx.selecting)return;const x=v.frame/editRate(project)*zoom,width=scroll.clientWidth-labelWidth;if(x>scroll.scrollLeft+width*.8)scroll.scrollLeft=x-width*.8;else if(x<scroll.scrollLeft+width*.1)scroll.scrollLeft=Math.max(0,x-width*.2)}
-  function layoutTimeline(restore=false){if(!current())return;const width=scroll.clientWidth-labelWidth;if(width<=0)return;const offset=v.frame/editRate(project)*zoom-scroll.scrollLeft,anchor=viewWidth&&offset>=0&&offset<=viewWidth?offset/viewWidth*width:width/2;viewWidth=width;zoom=editZoomScale(project,width,v.zoomLevel);const duration=project.spec.duration_frames/editRate(project);content.style.width=(labelWidth+duration*zoom)+'px';content.style.setProperty('--edit-frame-width',zoom/editRate(project)+'px');content.classList.toggle('edit-frame-grid',zoom/editRate(project)>=2);
+  function layoutTimeline(restore=false){geometry=null;if(!current())return;const width=scroll.clientWidth-labelWidth;if(width<=0)return;const offset=v.frame/editRate(project)*zoom-scroll.scrollLeft,anchor=viewWidth&&offset>=0&&offset<=viewWidth?offset/viewWidth*width:width/2;viewWidth=width;zoom=editZoomScale(project,width,v.zoomLevel);const duration=project.spec.duration_frames/editRate(project);content.style.width=(labelWidth+duration*zoom)+'px';content.style.setProperty('--edit-frame-width',zoom/editRate(project)+'px');content.classList.toggle('edit-frame-grid',zoom/editRate(project)>=2);
     for(const [button,item] of buttons){button.style.left=labelWidth+item.start_frame/editRate(project)*zoom+'px';button.style.width=Math.max(2,(item.end_frame-item.start_frame)/editRate(project)*zoom)+'px'}
     ruler.replaceChildren();const step=[1,2,5,10,30,60,120,300,600].find(n=>n*zoom>=60)||600;for(let n=0;n<duration;n+=step){const tick=nodeText('button',null,n+'s',ruler);tick.style.left=labelWidth+n*zoom+'px';tick.onclick=event=>{if(event.detail===0)seek(n*editRate(project))}}
     positionHead();scroll.scrollLeft=v.zoomLevel==='overview'?0:restore?v.scroll||0:Math.max(0,v.frame/editRate(project)*zoom-anchor);paintSelection();editRemember(ctx);
@@ -194,13 +213,15 @@ function renderEpisodeEditing(ctx){
   media.addEventListener('timeupdate',()=>{if(!current()||media.reviewRefreshing)return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   media.addEventListener('play',follow);media.addEventListener('pause',()=>{if(current())editRemember(ctx)});
   media.addEventListener('ended',()=>{if(current()&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
-  requestAnimationFrame(()=>{if(!current())return;layoutTimeline(true);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!current()){observer.disconnect();return}if(scroll.clientWidth-labelWidth!==viewWidth)layoutTimeline()});episodeEditing.timelineObserver=observer;observer.observe(scroll)}});
+  const firstFrame=requestAnimationFrame(()=>{if(!current())return;layoutTimeline(true);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!current()){observer.disconnect();return}if(scroll.clientWidth-labelWidth!==viewWidth)layoutTimeline()});episodeEditing.timelineObserver=observer;observer.observe(scroll)}});
+  episodeEditing.dispose=()=>{finishGesture(false);cancelAnimationFrame(firstFrame);cancelAnimationFrame(gestureFrame);ctx.paintSelection=null;editRemember(ctx)};
   renderComments();editRemember(ctx);
 }
 function isEpisodeEditComment(comment){return [...episodeEditing.contexts.values()].some(c=>c.data?.outputs.some(o=>o.object_id===comment.target_object_id&&o.id===comment.target_revision_id))}
 async function locateEpisodeEditComment(comment){
-  const ctx=[...episodeEditing.contexts.values()].find(c=>c.epoch===episodeEditing.epoch),output=ctx?.data.outputs.find(o=>o.object_id===comment.target_object_id&&o.id===comment.target_revision_id);
+  const ctx=[...episodeEditing.contexts.values()].find(c=>c.epoch===episodeEditing.epoch);let output=ctx?.data.outputs.find(o=>o.object_id===comment.target_object_id&&o.id===comment.target_revision_id);
   if(!output)return false;
+  output=await readEditOutput(ctx,output.object_id);if(!output)return false;
   if(state.unifiedCardRoot){focusProductionReview({record:output,history:[output],uses:[]},false);state.selected=comment.id;renderComments();return true}
   const component=output.payload.components.find(c=>c.id===comment.anchor.component_id&&c.file===comment.anchor.asset_file);
   if(!component||!['subtitled','clean'].includes(component.id)){toast('此评论的准确成片组件不可用。');return true}

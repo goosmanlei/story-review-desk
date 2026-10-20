@@ -77,6 +77,7 @@ class ResourceHttpTest(ResourceFixture,unittest.TestCase):
     with Path(str(cached)+'.lock').open('a') as lock:
      with self.assertRaises(BlockingIOError):fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
    handler.end_headers=locked_end
+   handler._check_read_connection=lambda:None
    def simulated_base(instance):return ReviewHandler._resource(instance,relative,expected_sha=spec['sha256'])
    with patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'}),patch.object(r,'client',side_effect=AssertionError('warm cache only')),patch.object(BaseHTTPRequestHandler,'handle_one_request',simulated_base):
     ReviewHandler.handle_one_request(handler)

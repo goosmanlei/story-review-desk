@@ -49,7 +49,7 @@ def index(store, view, object_id=None, scope=None, scope_episode=None, scope_rev
     result={'records':values,'material_assets':{}}
     if view=='settings':
         from .ui_projection import entity_summaries, material_entries
-        entries=material_entries(store)
+        entries=material_entries(store, uses=scope not in ('shot', 'av'))
         from .entity_contract import is_entity, graph
         entities = [r for r in values if is_entity(r)]
         if scope == 'shot':
@@ -61,7 +61,7 @@ def index(store, view, object_id=None, scope=None, scope_episode=None, scope_rev
             result['records'] = entities
             result.update(management_episodes=catalog, entity_scope=focus,
                           entity_locations=projected['entity_locations'])
-        result.update(entity_summaries(store, entities, entries))
+        result.update(entity_summaries(store, entities, entries, locations=scope not in ('shot', 'av')))
         if scope == 'shot':
             result.update(management_episodes=catalog, entity_locations=projected['entity_locations'])
         result['entity_graph'] = graph(store, entities)

@@ -32,16 +32,39 @@ def validate(kind, payload):
 
 def direct_materials(store, row, *, metadata=False):
     """All directly owned needs, including cameras omitted from products."""
+    found = direct_materials_many(store, [row])[(row['object_id'], row['id'])]
+    return found if metadata else [p.record(store, item['object_id']) for item in found]
+
+
+def direct_materials_many(store, owners):
+    """Query exact scopes before opening payloads; batch catalog counts."""
     from . import list_reading as light
-    found = {item['object_id']:item for item in light.rows(
-        store, 'REQUIREMENT', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=? "
-        "AND COALESCE(json_extract(r.payload,'$.status'),'')!='withdrawn'", (row['object_id'], row['id']))}
-    # Externally registered originals can be a material in their own right;
-    # they do not need a fabricated generation demand merely to open this card.
-    for item in light.rows(store, 'ASSET', "json_extract(r.payload,'$.scope.object_id')=? AND json_extract(r.payload,'$.scope.revision_id')=?", (row['object_id'], row['id'])):
-        if not item['payload'].get('candidate_requirements') and item['payload'].get('external_source'):
-            found[item['object_id']] = p.record(store, item['object_id'])
-    return list(found.values()) if metadata else [p.record(store, oid) for oid in found]
+    from .business_relations import archived_ids
+    grouped = {(r['object_id'], r['id']): [] for r in owners}
+    revisions = list(dict.fromkeys(r['id'] for r in owners))
+    archived = archived_ids(store)
+    # Keep the existing scope expression index useful even without ANALYZE:
+    # the exact-scope side of this CROSS JOIN must be visited first.
+    for offset in range(0, len(revisions), 500):
+        batch = revisions[offset:offset+500]
+        query = '''SELECT r.id,r.object_id,r.version,r.payload AS stored_payload,r.created_at,o.kind,o.current_revision
+            FROM revisions r CROSS JOIN objects o ON o.id=r.object_id AND o.current_revision=r.id
+            WHERE json_extract(r.payload,'$.scope.revision_id') IN ('''+','.join('?' for _ in batch)+''')
+            AND o.kind IN ('REQUIREMENT','ASSET') ORDER BY o.kind DESC,o.id'''
+        for raw in store.db.execute(query, batch):
+            if raw['object_id'] in archived:
+                continue
+            item = light.project(store, raw)
+            value = item['payload']; scope = value.get('scope') or {}
+            key = (scope.get('object_id'), scope.get('revision_id'))
+            if key not in grouped:
+                continue
+            if item['kind'] == 'REQUIREMENT':
+                if value.get('status') != 'withdrawn':
+                    grouped[key].append(item)
+            elif not value.get('candidate_requirements') and value.get('external_source'):
+                grouped[key].append(p.record(store, item['object_id']))
+    return grouped
 
 
 def reference_workspace_marker(store, need):
@@ -108,6 +131,45 @@ def material_groups(row, needs):
 
 def entity_workspace(store, object_id, revision_id=None, *, deferred=False, material_id=None,
                    candidate_revision=None, load_selected=True):
+    from .production_current import enabled
+    from .read_cache import read_json
+    deferred = deferred and enabled(store)
+    reader = lambda: _entity_workspace(store, object_id, revision_id, deferred=deferred,
+        material_id=material_id, candidate_revision=candidate_revision, load_selected=load_selected)
+    # Only unexpanded structure is independent of original byte availability.
+    # Selected plans and external assets carry live reference/file checks.
+    cacheable = deferred and not load_selected and candidate_revision is None
+    if cacheable:
+        owner = p.record(store, object_id, revision_id)
+        cacheable = owner['kind'] == 'AV_SHOT' and not any(
+            need['kind'] == 'ASSET' for need in direct_materials(store, owner, metadata=True))
+    value = read_json(store, ['entity-workspace-content-v2', object_id, revision_id, material_id,
+                             candidate_revision, load_selected], reader, domain='content') if cacheable else reader()
+    if deferred:
+        _comment_targets(store, value)
+    return value
+
+
+def _comment_targets(store, workspace):
+    from . import list_reading as light
+    targets = {r['id']: r for r in workspace['comment_records']}
+    owned = {r['object_id'] for r in targets.values()}
+    for value in list(targets.values()):
+        call = value['payload'].get('production')
+        if call: owned.add(call['object_id'])
+    for relation in light.rows(store, 'RELATION'):
+        if workspace['entity']['object_id'] in relation['payload'].get('endpoints', []):
+            owned.add(relation['object_id'])
+    for comment in store.db.execute('SELECT DISTINCT target_object_id,target_revision_id FROM comments'):
+        if comment['target_object_id'] in owned and comment['target_revision_id'] not in targets:
+            value = light.record(store, comment['target_object_id'], comment['target_revision_id'])
+            targets[value['id']] = material_summary(value)
+    workspace['comment_records'] = list(targets.values())
+    workspace['comment_targets'] = [{'object_id': r['object_id'], 'revision_id': r['id']} for r in targets.values()]
+
+
+def _entity_workspace(store, object_id, revision_id=None, *, deferred=False, material_id=None,
+                      candidate_revision=None, load_selected=True):
     from . import material_plans, material_review, audiovisual
     from .store import canonical, digest
     row = source_labels(store, p.record(store, object_id, revision_id))
@@ -179,20 +241,6 @@ def entity_workspace(store, object_id, revision_id=None, *, deferred=False, mate
                     if context.get('call'): targets[context['call']['id']] = context['call']
     if candidate_revision and candidate_revision not in contexts:
         raise ValueError('准确镜头候选不属于此素材')
-    # Comments remain discoverable before expanding a candidate's full call or
-    # frozen plan. Only tiny target rows are read here; exact text is on demand.
-    if deferred:
-        from . import list_reading as light
-        owned = {r['object_id'] for r in targets.values()}
-        for value in list(targets.values()):
-            call = value['payload'].get('production')
-            if call: owned.add(call['object_id'])
-        for relation in light.rows(store, 'RELATION'):
-            if object_id in relation['payload'].get('endpoints', []):owned.add(relation['object_id'])
-        for comment in store.db.execute('SELECT DISTINCT target_object_id,target_revision_id FROM comments'):
-            if comment['target_object_id'] in owned and comment['target_revision_id'] not in targets:
-                value=light.record(store,comment['target_object_id'],comment['target_revision_id'])
-                targets[value['id']]=material_summary(value)
     scope = {'entity': {'object_id': object_id, 'revision_id': row['id']}, 'states': [{'object_id': r['object_id'], 'revision_id': r['id']} for r in states],
              'requirements': [{'object_id': n['object_id'], 'revision_id': n['id']} for n in needs],
              'relationships': [], 'dependencies': []}

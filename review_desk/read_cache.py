@@ -85,6 +85,8 @@ def initialize(store):
     with store.db:
         store.db.execute('CREATE TABLE IF NOT EXISTS read_generations (name TEXT PRIMARY KEY, token TEXT NOT NULL)')
         tables = [r[0] for r in store.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='read_generations' ORDER BY name")]
+        if 'production_current_operations' in tables:
+            store.db.execute("CREATE INDEX IF NOT EXISTS production_operation_format ON production_current_operations(json_extract(result,'$.format'))")
         # DROP TABLE removes its triggers but not its disposable journal token.
         # Reconcile retired table names without changing any live token.
         store.db.execute("DELETE FROM read_generations WHERE name NOT IN (SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name!='read_generations')")
@@ -98,9 +100,10 @@ def initialize(store):
                                  f'BEGIN UPDATE read_generations SET token=lower(hex(randomblob(16))) WHERE name={literal}; END')
 
 
-def token(store, tables=None):
+def token(store, tables=None, *, domain=None):
     values = [(r[0], r[1]) for r in store.db.execute('SELECT name,token FROM read_generations ORDER BY name')
-              if tables is None or r[0] in tables]
+              if (tables is None or r[0] in tables)
+              and not (domain == 'content' and r[0] in ('comments', 'comment_events', 'business_comments', 'production_comment_quotes'))]
     return hashlib.sha256(json.dumps(values, separators=(',', ':')).encode()).hexdigest()
 
 
@@ -263,7 +266,7 @@ def manage(store, action):
         cache.close()
 
 
-def read_json(store, identity, reader):
+def read_json(store, identity, reader, *, domain=None):
     """Cache a successful projection from the request's exact read snapshot."""
     import zlib
     scope = getattr(store, '_production_reads', None)
@@ -271,7 +274,9 @@ def read_json(store, identity, reader):
     generation = scope.get('generation') if scope else None
     if not cache or not generation:
         return reader()
-    key = cache.key(generation, ['projection', identity, layout_version(store)])
+    if domain:
+        generation = token(store, domain=domain)
+    key = cache.key(generation, ['projection', domain, identity, layout_version(store)])
     def cached():
         raw = cache.get(key)
         if raw is not None:

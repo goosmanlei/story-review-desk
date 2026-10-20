@@ -20,14 +20,24 @@ def summaries(store, material_id, media_type=None):
             issue = None
             if media_type and row['payload']['media_type'] != media_type:
                 issue = '此候选与输入媒体类型不兼容'
+            availability = 'unknown'
             try:
-                path = asset_path(p.root_of(store), component['file'])
-                from .material_archives import logical_size
-                if not path.is_file() or logical_size(path) != component['bytes']:
-                    issue = issue or '原件文件不可用'
+                from . import resources
+                root = p.root_of(store)
+                if resources.settings(root):
+                    spec = resources.descriptor(root, 'export/assets/' + component['file'])
+                    if (spec['sha256'], spec['bytes'], spec['mime']) != (component['sha256'], component['bytes'], component['mime']):
+                        issue = issue or '原件目录与准确候选不一致'
+                else:
+                    path = asset_path(root, component['file'])
+                    from .material_archives import logical_size
+                    if not path.is_file() or logical_size(path) != component['bytes']:
+                        issue = issue or '原件文件不可用'
+                    else:
+                        availability = 'local_metadata'
             except (ValueError, OSError):
                 issue = issue or '原件文件不可用'
-            originals.append({**component, 'issue': issue})
+            originals.append({**component, 'issue': issue, 'availability': 'unavailable' if issue else availability})
         candidates.append({'candidate': {'object_id': row['object_id'], 'revision_id': row['id']},
                            'candidate_id': candidate_id, 'number': number,
                            'media_type': row['payload']['media_type'], 'originals': originals,

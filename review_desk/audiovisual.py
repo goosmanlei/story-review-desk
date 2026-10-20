@@ -131,6 +131,15 @@ def children(store, row):
 
 
 def parents(store, row, *, current_only=True):
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('av_parents', {}) if scope is not None else {}
+    key = (row['id'], current_only, store.db.total_changes)
+    if key not in cache:
+        cache[key] = _parents(store, row, current_only=current_only)
+    return list(cache[key])
+
+
+def _parents(store, row, *, current_only=True):
     parent_kind = {'AV_SHOT': 'AV_SCENE', 'AV_SCENE': 'AV_EPISODE'}.get(row['kind'])
     if not parent_kind:
         return []

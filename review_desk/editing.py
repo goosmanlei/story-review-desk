@@ -374,10 +374,22 @@ def submit(store, root, project_id, expected_version, task_id, request_id):
     return enqueue(store,root,{'payload':payload},task_id,request_id,prepare)
 
 
-def catalog(store, root, episode_id=None):
+def catalog(store, root, episode_id=None, *, summary=False):
     from .production import record
     episodes=[record(store,r[0]) for r in store.db.execute("SELECT id FROM objects WHERE kind='AV_EPISODE'")]
     episodes.sort(key=lambda r:(r['payload'].get('number',999),r['object_id']))
+    if summary:
+        outputs = [dict(row) for row in store.db.execute('''SELECT r.id,r.object_id,r.version,r.created_at,
+            o.kind,o.current_revision,json_extract(r.payload,'$.title') AS title,
+            json_extract(r.payload,'$.project.episode') AS episode
+            FROM objects o JOIN revisions r ON r.id=o.current_revision
+            WHERE o.kind='EPISODE_FILM' ORDER BY r.created_at,r.object_id''')]
+        for row in outputs:
+            row['payload'] = {'title': row.pop('title'), 'project': {'episode': json.loads(row.pop('episode'))}}
+            row['summary'] = True
+        return {'episodes': [{'id': r['object_id'], 'revision_id': r['id'], 'title': r['payload']['title'],
+                              'number': r['payload'].get('number')} for r in episodes],
+                'outputs': [r for r in outputs if not episode_id or r['payload']['project']['episode']['object_id'] == episode_id]}
     projects=records(store,'EPISODE_EDIT');films=records(store,'EPISODE_FILM')
     jobs=[]
     if (Path(root)/'.runtime/edit-render.sqlite3').exists():
