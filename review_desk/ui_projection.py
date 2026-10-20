@@ -8,7 +8,7 @@ from . import material_categories as categories
 def material_entries(store, *, uses=True, identities=True):
     from .read_cache import read_json
     return read_json(store, ['material-entries-v10-category', uses, identities],
-                     lambda: _material_entries(store, uses=uses, identities=identities))
+                     lambda: _material_entries(store, uses=uses, identities=identities), domain='content')
 
 
 def _material_entries(store, *, uses=True, identities=True):
@@ -115,7 +115,7 @@ def management_episodes(store):
             if isinstance(r['payload'].get('number'),int) and r['payload']['number']>0]
 
 
-def entity_summaries(store, entities, entries):
+def entity_summaries(store, entities, entries, *, locations=True):
     counts={row['object_id']:{} for row in entities};seen=set()
     for item in entries:
         for eid in set(item['entity_ids']):
@@ -123,21 +123,27 @@ def entity_summaries(store, entities, entries):
             if key in seen:continue
             seen.add(key)
             if eid in counts:counts[eid][item['media_type']]=counts[eid].get(item['media_type'],0)+1
-    from .entity_contract import direct_materials
+    from .entity_contract import direct_materials_many
+    direct = direct_materials_many(store, [e for e in entities if e['kind']=='AV_SHOT'])
     for entity in entities:
         if entity['kind']=='AV_SHOT':
             counts[entity['object_id']]={}
-            for need in direct_materials(store,entity):
+            for need in direct[(entity['object_id'], entity['id'])]:
                 media=need['payload']['media_type'];counts[entity['object_id']][media]=counts[entity['object_id']].get(media,0)+1
     from .entity_review import full_states
     from .navigation_search import entity_fields, codes
     from .list_associations import entity_locations
     rows = p.current_records(store, {'ENTITY','STATE','AV_SCENE','AV_SHOT','RELATION'})
-    return {'management_episodes':management_episodes(store),'entity_material_counts':counts,
+    previews = {}
+    for item in sorted(entries, key=lambda v:v.get('slot')!='overall'):
+        if item.get('preview'):
+            for eid in item['entity_ids']:
+                previews.setdefault(eid, item['preview'])
+    return {**({'management_episodes':management_episodes(store), 'entity_locations':entity_locations(store,entities,rows)} if locations else {}),
+            'entity_material_counts':counts,
             'entity_search_fields':entity_fields(entities,[r for r in rows if r['kind']=='STATE'],codes(store)),
             'entity_state_counts':{e['object_id']:(len(e['payload'].get('key_states', [])) if e['kind']=='AV_SHOT' else len({r['object_id'] for r in full_states(rows,e['object_id'])})) for e in entities},
-            'entity_locations':entity_locations(store,entities,rows),
-            'entity_previews':{eid:next((item['preview'] for item in sorted(entries,key=lambda v:v.get('slot')!='overall') if eid in item['entity_ids'] and item.get('preview')),None) for eid in counts}}
+            'entity_previews':{eid:previews.get(eid) for eid in counts}}
 
 
 def _material_av_catalog(store, episode, revision, compact):
@@ -229,7 +235,7 @@ def material_list(store, episode=None, scene=None, media=None, search='', status
         # Scene, word and media/status only filter this exact catalog. Reuse
         # its locations across queries; every committed write changes the key.
         projected=read_json(store, ['material-av-catalog-v5-shot', episode, scope_revision, compact],
-                            lambda: _material_av_catalog(store, episode, scope_revision, compact))
+                            lambda: _material_av_catalog(store, episode, scope_revision, compact), domain='content')
         if scene and not episode:
             raise ValueError('视听场需要准确所属视听集，请重新选择制作范围')
         if scene and not any(e['object_id'] == episode and any(s['id'] == scene for s in e['scenes']) for e in projected['management_episodes']):

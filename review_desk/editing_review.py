@@ -127,10 +127,16 @@ def verify_binding(store, value, *, live=False):
 
 def text_layer_document(store, asset, component):
     """Read the actual content-addressed text original, including its lineage."""
-    from .production_media import asset_path, validate_component
+    from .production_media import asset_path, validate_component, _file_identity
     root = getattr(store, '_production_root', None) or store.db_path.parent.parent
-    validate_component(root, component, inspect=False)
     path = asset_path(root, component['file'])
+    physical = _file_identity(path)
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('text_layer_documents', {}) if scope is not None else None
+    key = (asset['object_id'], asset['id'], canonical(component), physical)
+    if cache is not None and key in cache:
+        return cache[key]
+    validate_component(root, component, inspect=False)
     if path.stat().st_size > 8*1024*1024:
         raise ValueError('字层工程原件过大')
     value = json.loads(path.read_text(encoding='utf-8'))
@@ -138,30 +144,16 @@ def text_layer_document(store, asset, component):
     if value != recorded or value.get('format') != 'episode-text-layer-v1':
         raise Conflict('字层正文与真实工程原件不匹配')
     output = edit.read(store, value['output']['object_id'], value['output']['revision_id'])
-    if value.get('snapshot') != output['payload']['snapshot'] or value.get('project_digest') != checksum(output['payload']['project']):
+    project_check = _text_project(store, output)
+    if value.get('snapshot') != output['payload']['snapshot'] or value.get('project_digest') != project_check['digest']:
         raise Conflict('字层派生谱系与冻结工程不一致')
     if value.get('spec')!=output['payload']['project']['spec']:
         raise Conflict('字层帧率或规格与冻结工程不一致')
     source = next(c for c in output['payload']['components'] if c['id'] == 'project')
     if value.get('source_component') != source:
         raise Conflict('字层派生原件不一致')
-    expected = {element_key(e):e for e in elements(output['payload']['project'])[1] if e['element_type'] != 'clip'}
     from .production import record
-    from .production_current import submission
-    project=output['payload']['project']
-    source_origins={};missing_sources={}
-    for source in project['sources']:
-        candidate=store.db.execute('SELECT operation_id,asset_object_id FROM production_candidates WHERE id=?',(source['candidate_id'],)).fetchone()
-        if not candidate or candidate[1]!=source['asset']['object_id']:
-            missing_sources[source['id']]=source['asset']['object_id']
-            continue
-        saved=submission(store,candidate[0])['snapshot']
-        scopes={canonical(n['payload']['scope']):n['payload']['scope'] for n in saved.get('requirements',[]) if n['payload'].get('scope')}
-        if len(scopes)==1:
-            scope=next(iter(scopes.values()));owner=record(store,**scope)
-            source_origins[source['id']]={**scope,'kind':owner['kind']}
-    video_tracks={'track:'+t['id'] for t in project['tracks'] if t['kind']=='video'}
-    pictures=[e for e in elements(project)[1] if e['track_key'] in video_tracks]
+    expected, source_origins, missing_sources, pictures = (project_check[k] for k in ('expected','origins','missing','pictures'))
     ids = set()
     for entry in value['entries']:
         if entry['entry_id'] in ids or element_key(entry) not in expected:
@@ -180,7 +172,41 @@ def text_layer_document(store, asset, component):
         for identity in entry.get('identity_sources',[]):
             if record(store,**identity)['kind']!='ENTITY':
                 raise Conflict('人名条身份来源不是真实人物实体')
+    if _file_identity(path) != physical:
+        raise Conflict('字层原件在读取时发生变化，请重试')
+    if cache is not None:
+        cache[key] = value
     return value
+
+
+def _text_project(store, output):
+    """Validate lineage once per exact output in this read transaction."""
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('text_layer_projects', {}) if scope is not None else None
+    key = (output['object_id'], output['id'])
+    if cache is not None and key in cache:
+        return cache[key]
+    from .production import record
+    from .production_current import submission
+    project = output['payload']['project']
+    items = elements(project)[1]
+    source_origins, missing_sources = {}, {}
+    for source in project['sources']:
+        candidate = store.db.execute('SELECT operation_id,asset_object_id FROM production_candidates WHERE id=?', (source['candidate_id'],)).fetchone()
+        if not candidate or candidate[1] != source['asset']['object_id']:
+            missing_sources[source['id']] = source['asset']['object_id']
+            continue
+        saved = submission(store, candidate[0])['snapshot']
+        scopes = {canonical(n['payload']['scope']):n['payload']['scope'] for n in saved.get('requirements', []) if n['payload'].get('scope')}
+        if len(scopes) == 1:
+            origin = next(iter(scopes.values()))
+            source_origins[source['id']] = {**origin, 'kind':record(store, **origin)['kind']}
+    video_tracks = {'track:'+t['id'] for t in project['tracks'] if t['kind']=='video'}
+    result = {'digest':checksum(project), 'expected':{element_key(e):e for e in items if e['element_type']!='clip'},
+              'origins':source_origins, 'missing':missing_sources, 'pictures':[e for e in items if e['track_key'] in video_tracks]}
+    if cache is not None:
+        cache[key] = result
+    return result
 
 
 def association_dependencies(payload):
@@ -281,6 +307,7 @@ def guard_append(store, oid, payload):
 
 
 def review(store, output_id, revision_id, association=None):
+    from .production import check_read
     output = edit.read(store, output_id, revision_id)
     if output['kind'] != 'EPISODE_FILM':
         raise ValueError('仅可审阅准确成片')
@@ -294,6 +321,7 @@ def review(store, output_id, revision_id, association=None):
     else:
         sources = {s['id']:s for s in output['payload']['project']['sources']}
         for item in items:
+            check_read(store)
             try:
                 if item['element_type'] != 'clip':
                     group='subtitles' if item['element_type']=='subtitle' else 'titles'
@@ -306,6 +334,7 @@ def review(store, output_id, revision_id, association=None):
             except (ValueError, KeyError, Conflict, OSError) as error:
                 item['unavailable'] = str(error)
     for item in items:
+        check_read(store)
         if item.get('binding'):
             try:
                 verify_binding(store, item['binding'], live=True)

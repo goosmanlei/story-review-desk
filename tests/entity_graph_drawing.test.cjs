@@ -12,7 +12,7 @@ async function fixture(){
  const viz=await renderer;
  const f=JSON.parse(fs.readFileSync('tests/fixtures/entity-graph-ash242.json','utf8')),frames=[],observers=[];
  const el=(tag,cls)=>{const n=new Element(tag);n.className=cls;return n;},nodeText=(tag,cls,text,parent)=>{const n=el(tag,cls);n.textContent=text;parent.append(n);return n;};
- const c={businessCode:r=>r.business_code,el,nodeText,document:{createElementNS:(_ns,tag)=>new Element(tag),addEventListener(){}},window:{addEventListener(){}},requestAnimationFrame:fn=>frames.push(fn),ResizeObserver:class{constructor(fn){observers.push(fn);}observe(){}disconnect(){}},entitySmallCard:host=>{const n=new Element('button');host.append(n);return n;},productionButton:(parent,text,action)=>{const n=nodeText('button','',text,parent);n.onclick=action;return n;}};
+ const c={reviewLifetime:()=>({signal:new AbortController().signal,onDispose(){}}),cancelAnimationFrame(){},businessCode:r=>r.business_code,el,nodeText,document:{createElementNS:(_ns,tag)=>new Element(tag),addEventListener(){}},window:{addEventListener(){}},requestAnimationFrame:fn=>frames.push(fn),ResizeObserver:class{constructor(fn){observers.push(fn);}observe(){}disconnect(){}},entitySmallCard:host=>{const n=new Element('button');host.append(n);return n;},productionButton:(parent,text,action)=>{const n=nodeText('button','',text,parent);n.onclick=action;return n;}};
  vm.createContext(c);vm.runInContext(fs.readFileSync('review_desk/static/entity-relations.js','utf8'),c);
  c.managementEdgeGeometry=async(nodes,edges)=>router.layout(viz,nodes,edges);
  const root=new Element('main'),memory={};c.renderManagementEntityGraph(root,f.rows,{entity_graph:{edges:f.edges}},memory);

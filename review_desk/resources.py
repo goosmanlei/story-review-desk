@@ -27,6 +27,60 @@ _catalog_guard = threading.Lock()
 _signed_cache = {}
 _signed_guard = threading.Lock()
 _frozen = ContextVar('resource_preflight_frozen', default=False)
+_settings_cache = {}
+_settings_guard = threading.Lock()
+_verified = {}
+_verified_guard = threading.Lock()
+_cancel = ContextVar('resource_cancel', default=None)
+
+
+def _check_cancel():
+    check = _cancel.get()
+    if check is not None:
+        check()
+
+
+def verify_stream(stream, sha, size=None):
+    """Reuse only bytes already hashed on this exact open-file identity."""
+    before = os.fstat(stream.fileno())
+    identity = (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    if size is not None and before.st_size != size:
+        raise ValueError('original media size differs from its identity')
+    key = (identity, sha)
+    with _verified_guard:
+        known = key in _verified
+    if not known:
+        digest = hashlib.sha256()
+        for block in iter(lambda: stream.read(1024 * 1024), b''):
+            _check_cancel()
+            digest.update(block)
+        stream.seek(0)
+        after = os.fstat(stream.fileno())
+        if identity != (after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns):
+            raise ValueError('original media changed while verifying')
+        if digest.hexdigest() != sha:
+            raise ValueError('original media checksum differs from its identity')
+        with _verified_guard:
+            while len(_verified) >= 1024:
+                _verified.pop(next(iter(_verified)))
+            _verified[key] = True
+
+
+def verified_file(path, spec):
+    if not path.is_file() or path.stat().st_size != spec['bytes']:
+        return False
+    try:
+        with path.open('rb') as stream:
+            verify_stream(stream, spec['sha256'], spec['bytes'])
+        return True
+    except ValueError:
+        return False
+
+
+def file_identity(path):
+    """An atomic replacement and an in-place edit both invalidate reuse."""
+    stat = path.stat()
+    return (stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
 def service_status(error):
@@ -92,15 +146,26 @@ def settings(root):
     path = contained(root, 'config/resource-storage.json')
     if not path.is_file():
         return None
+    instance_path = contained(root, 'config/instance.json')
+    key = (str(path), file_identity(path), str(instance_path), file_identity(instance_path))
+    with _settings_guard:
+        if key in _settings_cache:
+            return dict(_settings_cache[key])
     value = json.loads(path.read_text())
-    instance = json.loads(contained(root, 'config/instance.json').read_text())
+    instance = json.loads(instance_path.read_text())
     if (value.get('format') != FORMAT or value.get('provider') != 'oss' or
             value.get('instance_id') != instance.get('id') or
             not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,62}', value.get('project', '')) or
             not re.fullmatch(r'[a-z0-9][a-z0-9-]{1,61}[a-z0-9]', value.get('bucket', '')) or
             not re.fullmatch(r'[a-z0-9-]+', value.get('region', ''))):
         raise ValueError('invalid project resource configuration')
-    return value
+    if key[1] != file_identity(path) or key[3] != file_identity(instance_path):
+        raise ValueError('resource configuration changed while reading; retry')
+    with _settings_guard:
+        if len(_settings_cache) >= 16:
+            _settings_cache.clear()
+        _settings_cache[key] = value
+    return dict(value)
 
 
 def offline_mode():
@@ -131,9 +196,12 @@ def _promoted(before, after):
 def _catalog(root, config, *, allow_offline=None):
     allow_offline = offline_mode() if allow_offline is None else allow_offline
     paths = [contained(root, 'config/resource-catalog.json'), contained(root, '.runtime/resources/catalog.json')]
-    identity = tuple((str(p), p.stat().st_mtime_ns, p.stat().st_size) if p.exists() else (str(p), None) for p in paths)
-    key = (str(Path(root).resolve()), identity, allow_offline)
+    identity = tuple((str(p), file_identity(p)) if p.exists() else (str(p), None) for p in paths)
+    key = (str(Path(root).resolve()), identity, allow_offline, config['project'], config['bucket'], config['region'])
     with _catalog_guard:
+        actual = tuple((str(p), file_identity(p)) if p.exists() else (str(p), None) for p in paths)
+        if actual != identity:
+            raise ValueError('resource catalog changed while reading; retry')
         if key in _catalog_cache:
             return _catalog_cache[key]
     entries = {}
@@ -152,6 +220,9 @@ def _catalog(root, config, *, allow_offline=None):
     for spec in entries.values():
         for selected in (spec, *spec.get('variants', {}).values()):
             validate_descriptor(config, selected, allow_offline=allow_offline)
+    actual = tuple((str(p), file_identity(p)) if p.exists() else (str(p), None) for p in paths)
+    if actual != identity:
+        raise ValueError('resource catalog changed while reading; retry')
     with _catalog_guard:
         if len(_catalog_cache) >= 8:
             _catalog_cache.clear()
@@ -255,6 +326,7 @@ def _remote_hash(connection, config, spec, destination=None):
         if (response.content_type or '').split(';',1)[0].lower() != spec['mime'].lower():
             raise ValueError('cloud resource MIME differs from the exact descriptor')
         for block in response.body.iter_bytes(chunk_size=1024 * 1024):
+            _check_cancel()
             size += len(block)
             if size > spec['bytes']:
                 raise ValueError('cloud resource exceeds declared size')
@@ -277,18 +349,20 @@ def verify_remote(root, spec):
 
 
 @contextmanager
-def lease_scope():
+def lease_scope(check=None):
     if _leases.get() is not None:
         yield
         return
     locks = {}
     token = _leases.set(locks)
+    cancellation = _cancel.set(check)
     try:
         yield
     finally:
         for lock, identity in locks.values():
             lock.close()
         _leases.reset(token)
+        _cancel.reset(cancellation)
 
 
 def _cache_dir(root):
@@ -299,14 +373,32 @@ def _cache_dir(root):
 
 def _trim(root, incoming, maximum):
     directory = _cache_dir(root)
-    # Called only with .capacity.lock held. All resolver downloads hold that
-    # same lock for their complete lifetime, so these exact temp names are
-    # interrupted writes, not another active download.
+    # Capacity covers completed bytes plus full reservations, not just partial
+    # bytes received so far. An object's EX lock proves its reservation is live.
+    reserved, outstanding, active_parts = 0, 0, set()
+    for reservation in directory.glob('*.reserve'):
+        contained(directory, reservation.name)
+        value = json.loads(reservation.read_text())
+        name = safe_path(value['target'])
+        if '/' in name or reservation.name != name + '.reserve' or type(value['bytes']) is not int or value['bytes'] < 1:
+            raise ValueError('invalid resource cache reservation')
+        with contained(directory, name + '.lock').open('a') as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                reserved += value['bytes']
+                active_parts.add(name + '.part')
+                part = contained(directory, name + '.part')
+                outstanding += max(0, value['bytes'] - (part.stat().st_size if part.exists() else 0))
+                continue
+            contained(directory, name + '.part').unlink(missing_ok=True)
+            reservation.unlink()
+    # These names were used by the previous serialized downloader only.
     for path in directory.iterdir():
         if re.fullmatch(r'(?:tmp[a-z0-9_]{8}|\.download-[a-z0-9_]{8})\.part',path.name) and path.is_file() and not path.is_symlink():
             path.unlink()
-    files = sorted((p for p in directory.iterdir() if p.is_file() and not p.name.endswith('.lock')), key=lambda p: p.stat().st_atime_ns)
-    total = sum(p.stat().st_size for p in files)
+    files = sorted((p for p in directory.iterdir() if p.is_file() and not p.name.endswith(('.lock', '.reserve')) and p.name not in active_parts), key=lambda p: p.stat().st_atime_ns)
+    total = reserved + sum(p.stat().st_size for p in files)
     for path in files:
         if total + incoming <= maximum:
             break
@@ -322,11 +414,13 @@ def _trim(root, incoming, maximum):
             total -= size
     if total + incoming > maximum:
         raise ValueError('resource cache capacity is leased; release inputs before retrying')
+    return outstanding
 
 
 def _lock(stream, mode):
     deadline = time.monotonic() + 120
     while True:
+        _check_cancel()
         try:
             fcntl.flock(stream, mode | fcntl.LOCK_NB)
             return
@@ -344,15 +438,14 @@ def materialize(root, relative, *, spec=None, administrative=False):
     validate_descriptor(config, spec)
     if spec.get('source') == 'offline-candidate':
         media = contained(root, 'resource-bundle/' + spec['sha256'])
-        if not media.is_file() or media.stat().st_size != spec['bytes'] or hash_file(media) != spec['sha256']:
+        if not verified_file(media, spec):
             raise ValueError('durable offline candidate is missing or corrupt')
     directory = _cache_dir(root)
     suffix = Path(relative).suffix
     target = contained(directory, spec['sha256'] + suffix)
     held = _leases.get()
     if held is not None and str(target) in held:
-        stat = target.stat()
-        if (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns) != held[str(target)][1]:
+        if file_identity(target) != held[str(target)][1]:
             raise ValueError('leased resource was changed')
         return target
     if _frozen.get():
@@ -362,12 +455,12 @@ def materialize(root, relative, *, spec=None, administrative=False):
         # Hits acquire SH directly: A/B render inputs can be acquired in either
         # order without two readers waiting forever for each other's EX lock.
         _lock(lock, fcntl.LOCK_SH)
-        valid = target.is_file() and target.stat().st_size == spec['bytes'] and hash_file(target) == spec['sha256']
+        valid = verified_file(target, spec)
         if not valid:
             fcntl.flock(lock, fcntl.LOCK_UN)
             _lock(lock, fcntl.LOCK_EX)
             # Another downloader may have completed while we changed locks.
-            valid = target.is_file() and target.stat().st_size == spec['bytes'] and hash_file(target) == spec['sha256']
+            valid = verified_file(target, spec)
         if not valid:
             target.unlink(missing_ok=True)
             offline = offline_mode()
@@ -375,32 +468,53 @@ def materialize(root, relative, *, spec=None, administrative=False):
             if offline and not media.is_file():
                 raise FileNotFoundError('exact offline resource is unavailable')
             maximum = config.get('cache_bytes', 16 * 1024 ** 3)
-            with (directory / '.capacity.lock').open('a') as capacity:
-                fcntl.flock(capacity, fcntl.LOCK_EX)
-                _trim(root, spec['bytes'], maximum)
-                fd, temporary = tempfile.mkstemp(prefix='.download-',suffix='.part', dir=directory)
+            temporary = contained(directory, target.name + '.part')
+            reservation = contained(directory, target.name + '.reserve')
+            while not _transfers.acquire(timeout=.05):
+                _check_cancel()
+            try:
+                with (directory / '.capacity.lock').open('a') as capacity:
+                    _lock(capacity, fcntl.LOCK_EX)
+                    # We own this object's EX lock, so its older reservation
+                    # can only be an interrupted transfer from a dead owner.
+                    temporary.unlink(missing_ok=True)
+                    reservation.unlink(missing_ok=True)
+                    outstanding = _trim(root, spec['bytes'], maximum)
+                    import shutil
+                    if shutil.disk_usage(directory).free < outstanding + spec['bytes'] + 64 * 1024 ** 2:
+                        raise ValueError('resource cache needs disk headroom')
+                    atomic_json(reservation, {'target': target.name, 'bytes': spec['bytes']})
                 try:
-                    with os.fdopen(fd, 'wb') as out, _transfers:
+                    with temporary.open('wb') as out:
                         if offline:
-                            import shutil
                             with media.open('rb') as source:
-                                shutil.copyfileobj(source, out, 1024 * 1024)
+                                for block in iter(lambda: source.read(1024 * 1024), b''):
+                                    _check_cancel()
+                                    out.write(block)
                         else:
                             _remote_hash(client(config, administrative=administrative), config, spec, out)
                         out.flush()
                         os.fsync(out.fileno())
-                    if Path(temporary).stat().st_size != spec['bytes'] or hash_file(temporary) != spec['sha256']:
+                    if not verified_file(temporary, spec):
                         raise ValueError('resource cache verification failed')
-                    os.replace(temporary, target)
+                    with (directory / '.capacity.lock').open('a') as capacity:
+                        _lock(capacity, fcntl.LOCK_EX)
+                        os.replace(temporary, target)
+                        reservation.unlink()
                 finally:
-                    Path(temporary).unlink(missing_ok=True)
+                    with (directory / '.capacity.lock').open('a') as capacity:
+                        # Cleanup must finish even when the caller cancelled.
+                        fcntl.flock(capacity, fcntl.LOCK_EX)
+                        temporary.unlink(missing_ok=True)
+                        reservation.unlink(missing_ok=True)
+            finally:
+                _transfers.release()
         fcntl.flock(lock, fcntl.LOCK_SH)
         if held is not None:
             old = held.get(str(target))
             if old:
                 old[0].close()
-            stat = target.stat()
-            held[str(target)] = (lock, (stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+            held[str(target)] = (lock, file_identity(target))
             lock = None
         return target
     finally:

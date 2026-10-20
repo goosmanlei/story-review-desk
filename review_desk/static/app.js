@@ -59,7 +59,7 @@ function unpackReviewGraph(graph){
   }
   return read(graph.root);
 }
-const api=async(path,options={})=>{const response=await reviewFetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
+const api=async(path,options={})=>{if(!options.signal&&(!options.method||options.method==='GET')&&path.startsWith('/api/production')&&typeof productionReadController!=='undefined')options={...options,signal:productionReadController?.signal};const response=await reviewFetch(path,{...options,headers:{'Content-Type':'application/json','Accept':'application/vnd.review-desk.graph+json, application/json',...(options.headers||{})}});let data;try{data=await response.json();if(response.headers?.get?.('Content-Type')?.includes('application/vnd.review-desk.graph+json'))data=unpackReviewGraph(data)}catch(error){error.status=response.status;throw error}if(!response.ok){const error=Error(data.error||`HTTP ${response.status}`);error.status=response.status;throw error}return data};
 const chars=text=>Array.from(text);
 const toast=message=>{const node=$('#toast');if(!node)return;toast.clear?.();
   const modal=[...(document.querySelectorAll?.('dialog[open]')||[])].filter(d=>d.matches(':modal')).at(-1);

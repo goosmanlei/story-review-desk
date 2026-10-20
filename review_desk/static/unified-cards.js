@@ -207,10 +207,10 @@ async function switchUnifiedSourceMaterial(item,trigger){
   renderProductionReader();renderComments();restore();
   state.unifiedCardRoot?.querySelector(`[data-material-id="${CSS.escape(item.object_id)}"]`)?.focus({preventScroll:true});
 }
-async function readUnifiedCard(objectId,revisionId=null,params=null,work=currentReviewWork()){
+async function readUnifiedCard(objectId,revisionId=null,params=null,work=currentReviewWork(),signal){
   let result;
   validateMaterialRoute(params||new URLSearchParams());
-  try{result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{}),...(work?{work_object:work.object_id,work_revision:work.revision_id,...(work.scene_id?{work_scene:work.scene_id}:{})}:{})}))}
+  try{result=await api('/api/production/card?'+new URLSearchParams({object_id:objectId,...(revisionId?{revision_id:revisionId}:{}),...(params?.get('production_entity')?{entity_id:params.get('production_entity')}:{}),...(work?{work_object:work.object_id,work_revision:work.revision_id,...(work.scene_id?{work_scene:work.scene_id}:{})}:{})}),{signal})}
   catch(error){if(error.message==='production record not found')throw Error('指定的对象或修订不可用；未打开其他版本。');throw error}
   result.params=params||new URLSearchParams();result.explicit=!!revisionId;validateUnifiedReference(result);return result;
 }
@@ -328,7 +328,8 @@ async function openUnifiedMaterial(ref,trigger,view=null){
   if(ref.restoreRoute)history.replaceState(history.state,'',requestURL);
   // The exact read is isolated; closing before it finishes cannot replace outer state.
   dialog.addEventListener('close',()=>{parent.insertBefore(panel,next?.parentNode===parent?next:null);if(toggleParent)toggleParent.insertBefore(toggle,toggleNext?.parentNode===toggleParent?toggleNext:null);if(!owns())return;rememberProductionDraft();Object.assign(state,saved);if(!dialog.closedByHistory)history.replaceState(history.state,'',url);renderComments();setPanelOpen(!hidden);paintProductionReview();ref.onClose?.();if(ref.shotReference?.saved&&!ref.shotReference.pending)ref.shotReference.onSaved(ref.shotReference.saved)},{once:true});
-  let attempt=0;
+  let attempt=0,readAbort=null;
+  reviewLifetime(dialog).onDispose(()=>readAbort?.abort());
   dialog.unifiedLoad=nextRef=>{
    if(dialog.unifiedActivated){
     rememberProductionDraft();Object.assign(state,saved);parent.insertBefore(panel,next?.parentNode===parent?next:null);
@@ -336,10 +337,11 @@ async function openUnifiedMaterial(ref,trigger,view=null){
     dialog.unifiedActivated=false;
    }
    ref=nextRef;dialog.unifiedReadKey=unifiedDialogReadKey(ref);dialog.unifiedPending=true;
+   readAbort?.abort();readAbort=new AbortController();const signal=readAbort.signal;
    const selectedRef=ref,current=++attempt,active=()=>dialog.isConnected&&owns()&&current===attempt;
    renderUnifiedCardLoading(body);
    const read=async()=>{
-    try{const result=await readUnifiedCard(selectedRef.object_id,selectedRef.revision_id||selectedRef.id,selectedRef.params,Object.hasOwn(selectedRef,'work')?selectedRef.work:currentReviewWork());if(!active())return;
+    try{const result=await readUnifiedCard(selectedRef.object_id,selectedRef.revision_id||selectedRef.id,selectedRef.params,Object.hasOwn(selectedRef,'work')?selectedRef.work:currentReviewWork(),signal);if(!active())return;
     while(typeof reviewDialogStack!=='undefined'&&reviewDialogStack.at(-1)!==dialog&&dialog.isConnected){const upper=reviewDialogStack.at(-1);await new Promise(resolve=>upper.addEventListener('close',resolve,{once:true}));if(!active())return;}
     if(ref.expectedOrigin&&(result.scope?.object_id!==ref.expectedOrigin.object_id||result.scope?.kind!==ref.expectedOrigin.kind))throw Error('原素材归属已变化：'+ref.expectedOrigin.object_id+'；未打开其他对象');
     result.defaultSelection=!!ref.defaultSelection;

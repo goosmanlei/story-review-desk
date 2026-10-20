@@ -131,7 +131,8 @@ class ReviewHandler(BaseHTTPRequestHandler):
         self._write_window = None
         try:
             from .resources import lease_scope
-            with lease_scope():
+            with lease_scope(lambda: self._check_read_connection() if getattr(self, 'command', None) in ('GET', 'HEAD') or
+                             getattr(self, 'path', '').split('?')[0] in ('/api/editing/catalog', '/api/editing/get', '/api/editing/status', '/api/editing/review') else None):
                 return super().handle_one_request()
         finally:
             if self._write_window is not None:
@@ -311,13 +312,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if media:
             # Revalidate original bytes, never key historic media by a mutable
             # filename alone. Hash and serve the same open file, bounded in RAM.
-            digest = hashlib.sha256()
-            for chunk in iter(lambda: stream.read(1024 * 1024), b''):
-                digest.update(chunk)
-            stream.seek(0)
-            if (expected_sha or path.stem) != digest.hexdigest():
+            sha = expected_sha or path.stem
+            if reconstructed is None:
+                from .resources import verify_stream
+                verify_stream(stream, sha, expected_bytes)
+            elif hashlib.sha256(reconstructed).hexdigest() != sha:
                 raise ValueError('original media checksum differs from its identity')
-            etag = expected_etag or '"'+digest.hexdigest()+'"'
+            etag = expected_etag or '"'+sha+'"'
             if self.headers.get('If-None-Match') == etag:
                 self.send_response(304)
                 self.send_header('ETag', etag)
@@ -407,10 +408,13 @@ class ReviewHandler(BaseHTTPRequestHandler):
         layout_key = hashlib.sha256(layout.read_bytes()).hexdigest() if layout.is_file() else None
         parsed = urlsplit(self.path)
         request_key = [parsed.path, sorted(parse_qs(parsed.query).items())]
+        # These lists contain source identities and candidate counts, never
+        # comment text/counts. Every other table remains a dependency.
+        domain = 'content' if parsed.path in ('/api/production/index', '/api/production/materials', '/api/business-codes') else None
         deadline = time.monotonic()+15
         while True:
             self._check_read_connection()
-            generation = token(store)
+            generation = token(store, domain=domain)
             key = cache.key(generation, ['http', request_key, self._representation(), layout_key])
             data = cache.get(key)
             if data is not None:
@@ -427,7 +431,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                         production.check_read(store)
                         # A writer may commit between the first token read and
                         # opening this snapshot. Never publish under its old key.
-                        if store._production_reads['generation'] != generation:
+                        if token(store, domain=domain) != generation:
                             continue
                         self._response_cache = (key, store.db.total_changes)
                         self._cache_state = 'miss'
@@ -448,7 +452,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
                 from .editing_api import dispatch
                 action=path.rsplit('/',1)[1]
                 if action not in ('catalog','get','status','review'):raise ValueError('use POST for editing actions')
-                return self._json(dispatch(store,self.server.root,action,{k:v[0] for k,v in query.items()}))
+                return self._json(dispatch(store,self.server.root,action,{k:v[0] for k,v in query.items()},cancel_check=self._check_read_connection))
             except Conflict as exc:return self._json({'error':str(exc)},409)
             except (ValueError,KeyError,TypeError,OSError) as exc:return self._json({'error':str(exc)},400)
         if path == '/api/data-model':
@@ -788,7 +792,7 @@ class ReviewHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/editing/"):
             try:
                 from .editing_api import dispatch
-                return self._json(dispatch(self.server.store,self.server.root,self.path.rsplit("/",1)[1],self._input(2_000_000)))
+                return self._json(dispatch(self.server.store,self.server.root,self.path.rsplit("/",1)[1],self._input(2_000_000),cancel_check=self._check_read_connection))
             except Conflict as exc:return self._json({"error":str(exc)},409)
             except (ValueError,KeyError,TypeError,OSError) as exc:return self._json({"error":str(exc)},400)
         if self.path in ('/api/production/submit', '/api/production/reuse-candidate', '/api/production/result'):

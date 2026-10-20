@@ -18,19 +18,38 @@ NOTICE = '本轮已删除；原件不可用，保留原文字意见与真实调�
 def receipts(store):
     if not current.enabled(store):
         return []
+    if getattr(store, '_production_reads', None) is None:
+        with p.read_scope(store):
+            return receipts(store)
     scope = getattr(store, '_production_reads', None)
     if scope is not None and 'candidate_reset_receipts' in scope:
         return scope['candidate_reset_receipts']
-    result = [json.loads(r[0]) for r in store.db.execute(
-        "SELECT result FROM production_current_operations WHERE json_extract(result,'$.format') IN (?,?)", (FORMAT, 'full-production-reset-v1'))]
+    # Tokens and receipts are read from the same transaction. A rollback returns
+    # to the old token; other processes and new receipts invalidate immediately.
+    journal = store.db.execute("SELECT 1 FROM sqlite_master WHERE name='read_generations'").fetchone()
+    from .read_cache import token
+    generation = token(store, {'production_current_operations'}) if journal else None
+    cached = getattr(store, '_reset_receipts', None)
+    if generation is not None and cached and cached[0] == generation:
+        result = cached[1]
+    else:
+        result = [json.loads(r[0]) for r in store.db.execute(
+            "SELECT result FROM production_current_operations WHERE json_extract(result,'$.format') IN (?,?)", (FORMAT, 'full-production-reset-v1'))]
+        if generation is not None:
+            files = {name: spec for receipt in result for name, spec in receipt['erased_files'].items()}
+            store._reset_receipts = (generation, result, files)
     if scope is not None:
         scope['candidate_reset_receipts'] = result
     return result
 
 
 def erased_files(store):
+    values = receipts(store)
+    cached = getattr(store, '_reset_receipts', None)
+    if cached and cached[1] is values:
+        return cached[2]
     result = {}
-    for receipt in receipts(store):
+    for receipt in values:
         result.update(receipt['erased_files'])
     return result
 

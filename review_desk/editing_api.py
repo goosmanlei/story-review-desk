@@ -3,9 +3,24 @@ from . import editing as edit
 from . import editing_worker as worker
 
 
-def dispatch(store, root, action, value):
+def dispatch(store, root, action, value, *, cancel_check=None):
+    if action in ('catalog', 'get', 'status', 'review'):
+        from .production import read_scope
+        from .resources import lease_scope
+        with read_scope(store), lease_scope():
+            if cancel_check is not None:
+                store._production_reads['cancel_check'] = cancel_check
+                cancel_check()
+            result = _dispatch(store, root, action, value)
+            if cancel_check is not None:
+                cancel_check()
+            return result
+    return _dispatch(store, root, action, value)
+
+
+def _dispatch(store, root, action, value):
     if not isinstance(value,dict):raise ValueError('editing request must be an object')
-    if action=='catalog':return edit.catalog(store,root,value.get('episode_id'))
+    if action=='catalog':return edit.catalog(store,root,value.get('episode_id'), summary=value.get('summary') in (True, '1'))
     if action=='get':return edit.read(store,value['object_id'],value.get('revision_id'))
     if action=='review':
         from .editing_review import review

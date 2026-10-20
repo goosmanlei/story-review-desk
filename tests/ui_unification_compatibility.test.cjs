@@ -34,6 +34,7 @@ function setup(){
   for(const name of ['app.js','production.js','material-review.js','entity-review.js','production-breakdown.js','unified-cards.js'])vm.runInContext(fs.readFileSync(path.join(__dirname,'../review_desk/static',name),'utf8'),ctx);
   vm.runInContext('globalThis.state=state',ctx);ctx.state.workspace='settings.workspace';
   for(const fn of ['renderProductionReader','renderComments','paintProductionReview'])ctx[fn]=()=>{};
+  ctx.reviewLifetime=()=>({signal:new AbortController().signal,onDispose(){}});
   ctx.scrollBreakdownTarget=()=>{};ctx.rememberBreakdownPosition=()=>{};ctx.requestAnimationFrame=()=>1;ctx.window={scrollY:0,addEventListener(){},removeEventListener(){},scrollTo(){}};
   return ctx;
 }

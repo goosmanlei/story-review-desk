@@ -114,13 +114,21 @@ def annotate(store, value):
 
 
 def submission(store, operation_id):
+    scope = getattr(store, '_production_reads', None)
+    cache = scope.setdefault('submissions', {}) if scope is not None else None
+    if cache is not None and operation_id in cache:
+        return copy.deepcopy(cache[operation_id])
     row = store.db.execute('SELECT * FROM production_submissions WHERE operation_id=?', (operation_id,)).fetchone()
     if not row:
         raise KeyError('submission does not exist')
     snapshot = json.loads(row['snapshot'])
     if checksum(snapshot) != row['snapshot_sha256']:
         raise ValueError('submission snapshot checksum mismatch')
-    return {**dict(row), 'snapshot': snapshot}
+    result = {**dict(row), 'snapshot': snapshot}
+    if cache is not None:
+        cache[operation_id] = result
+        return copy.deepcopy(result)
+    return result
 
 
 def save_submission(store, operation_id, snapshot, *, origin='submitted', created_at=None):
