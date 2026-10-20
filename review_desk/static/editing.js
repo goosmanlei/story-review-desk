@@ -84,7 +84,7 @@ async function readEditOutput(ctx,id){
   if(output?.summary){const full=await editCall('get',{object_id:output.object_id,revision_id:output.id});if(!editCurrent(ctx))return null;ctx.data.outputs[ctx.data.outputs.indexOf(output)]=full;output=full}
   return output;
 }
-function editView(ctx,output){return ctx.views[output.id]||=( {frame:0,zoomLevel:'overview',scroll:0,range:{start:0,end:output.payload.project.spec.duration_frames,tracks:[]},selected:null} )}
+function editView(ctx,output){return ctx.views[output.id]||=( {frame:0,zoomLevel:'overview',scroll:0,range:{start:null,end:null,tracks:[]},selected:null} )}
 async function openEditElement(ctx,element,trigger){
   if(!editCurrent(ctx)||ctx.selecting)return;
   const output=ctx.data.outputs.find(o=>o.object_id===ctx.output),v=editView(ctx,output),p=output.payload.project;
@@ -126,27 +126,31 @@ function renderEpisodeEditing(ctx){
   media.controls=true;media.preload='metadata';media.dataset.episodePlayer='true';media.dataset.componentId=component.id;media.src=reviewURL('/api/production/files/'+component.file);media.poster=reviewVariantURL(media.src,'poster');reviewRefreshMedia(media);player.append(media);reader.append(player);
   player.reviewFocus=()=>focusProductionReview({record:output,history:[output],uses:[]},false);reviewSurface(player,'audio');
   const current=()=>editCurrent(ctx)&&ctx.render===render&&ctx.output===output.object_id&&media.isConnected;
-  const tools=el('div','edit-timeline-tools');main.append(tools);const zoomGroup=el('div','edit-zoom-group');tools.append(zoomGroup);
+  const tools=el('div','edit-timeline-tools');main.append(tools);const zoomGroup=el('div','edit-zoom-group');
   editChoices(zoomGroup,'edit-zoom','时间线缩放',editZoomLevels.map((level,i)=>[level,['全片概览','标准','细看','精细','逐帧'][i]]),v.zoomLevel,value=>{v.zoomLevel=value;for(const b of zoomGroup.querySelectorAll('button'))b.setAttribute('aria-pressed',String(b.dataset.filterValue===value));layoutTimeline()});
-  const position=el('div','edit-play-position');nodeText('span',null,'播放起点',position);const clock=nodeText('output',null,v.frame+' 帧',position);clock.setAttribute('aria-label','播放起点');tools.append(position);
+  const position=el('div','edit-play-position');nodeText('span',null,'当前帧',position);const clock=nodeText('output',null,v.frame+' 帧',position);clock.setAttribute('aria-label','当前帧');tools.append(position,zoomGroup);
   const controls=el('div','edit-toolbar production-toolbar edit-range-controls');controls.setAttribute('aria-label','选帧范围');tools.append(controls);
-  const selectButton=productionButton(controls,'选择',()=>setSelecting(!ctx.selecting));selectButton.setAttribute('aria-pressed','false');
-  const inputs={start:editControl(controls,'范围起帧',v.range.start),end:editControl(controls,'范围止帧',v.range.end),startTime:editControl(controls,'起点时间',editTime(project,v.range.start)),endTime:editControl(controls,'终点时间',editTime(project,v.range.end))};
+
+  const inputs={start:editControl(controls,'范围起帧',v.range.start??''),end:editControl(controls,'范围止帧',v.range.end??''),startTime:editControl(controls,'起点时间',Number.isInteger(v.range.start)?editTime(project,v.range.start):''),endTime:editControl(controls,'终点时间',Number.isInteger(v.range.end)?editTime(project,v.range.end):'')};
   inputs.start.inputMode=inputs.end.inputMode='numeric';inputs.startTime.placeholder=inputs.endTime.placeholder='分:秒.毫秒';
-  const loop=productionButton(controls,'循环选段',()=>{if(rangeIssue)return;ctx.loop=!ctx.loop;loop.setAttribute('aria-pressed',String(!!ctx.loop));if(ctx.loop){seek(v.range.start);return media.play()}});loop.setAttribute('aria-pressed',String(!!ctx.loop));
-  const comment=productionButton(controls,'评论此范围',()=>{if(rangeIssue)return;pauseEpisodeMedia(media);player.reviewFocus();startDraft(editAnchor(output,review,ctx.variant,v.range))});
-  productionButton(controls,'清除选择',()=>{v.range.tracks=[];ctx.loop=false;paintSelection();editRemember(ctx)});
-  const trackTools=el('div','edit-track-choices production-filter-group');trackTools.setAttribute('aria-label','选中轨道');main.append(trackTools);nodeText('span','production-filter-label','轨道',trackTools);
-  const trackButtons=review.tracks.map(track=>{const b=productionButton(trackTools,track.title,()=>{const keys=new Set(v.range.tracks);if(keys.has(track.key))keys.delete(track.key);else keys.add(track.key);v.range.tracks=review.tracks.map(t=>t.key).filter(k=>keys.has(k));paintSelection();editRemember(ctx)});b.className='production-filter-chip';return b});
-  const hint=nodeText('p','edit-hint','起帧包含，止帧不含；时间显示到毫秒，实际范围以整数帧为准。',main),feedback=nodeText('p','edit-range-feedback','',main);feedback.setAttribute('role','status');
+  const loop=productionButton(controls,'循环选段',()=>{if(!ctx.selecting||rangeIssue)return;ctx.loop=!ctx.loop;loop.setAttribute('aria-pressed',String(!!ctx.loop));if(ctx.loop){seek(v.range.start);return media.play()}});loop.setAttribute('aria-pressed',String(!!ctx.loop));
+  const comment=productionButton(controls,'评论此范围',()=>{if(!ctx.selecting||rangeIssue)return;pauseEpisodeMedia(media);player.reviewFocus();startDraft(editAnchor(output,review,ctx.variant,v.range))});
+  const clear=productionButton(controls,'清除选择',()=>{if(!ctx.selecting)return;v.range={start:null,end:null,tracks:[]};ctx.loop=false;syncInputs();editRemember(ctx)});
+  const feedback=nodeText('p','edit-range-feedback','',main);feedback.setAttribute('role','status');feedback.hidden=true;
   let rangeIssue='',fieldIssue='';
   const scroll=el('div','edit-timeline-scroll'),timeline=el('div','edit-timeline');scroll.append(timeline);main.append(scroll);timeline.setAttribute('aria-label','成片多轨时间线');
   const labelWidth=112,content=el('div','edit-timeline-content');timeline.append(content);const ruler=el('div','edit-ruler');content.append(ruler);
-  const rows=[],buttons=[],overlays=[];
+  const corner=el('div','edit-selection-corner');ruler.append(corner);
+  const selectButton=productionButton(corner,'选择',()=>setSelecting(!ctx.selecting));selectButton.setAttribute('aria-label','多轨时间线选择');selectButton.setAttribute('aria-pressed','false');
+  const selectionIcon=nodeText('span','edit-selection-icon','▤',selectButton);selectionIcon.setAttribute('aria-hidden','true');
+  selectButton.disabled=!review.tracks.length||project.spec.duration_frames<=0;
+  const rows=[],buttons=[],overlays=[],trackNames=[];let historicalRange=null;
   for(const track of review.tracks){
     const row=el('div','edit-track');row.dataset.trackKey=track.key;row.setAttribute('aria-label',track.title);content.append(row);rows.push(row);
     const shade=el('div','edit-range-shade');row.append(shade);overlays.push(shade);
-    const name=nodeText('span','edit-track-name',track.title,row);name.title=track.title;
+    const name=nodeText('span','edit-track-name',track.title,row);name.title=track.title;trackNames.push(name);
+    const toggleTrack=()=>{if(!ctx.selecting)return;const keys=new Set(v.range.tracks);if(keys.has(track.key))keys.delete(track.key);else keys.add(track.key);v.range.tracks=review.tracks.map(t=>t.key).filter(k=>keys.has(k));paintSelection();editRemember(ctx)};
+    name.onclick=event=>{event.stopPropagation();toggleTrack()};name.onkeydown=event=>{if(ctx.selecting&&(event.key==='Enter'||event.key===' ')){event.preventDefault();event.stopPropagation();toggleTrack()}};
     for(const item of review.elements.filter(e=>e.track_key===track.key)){const button=nodeText('button','edit-clip '+(item.element_type==='clip'?(project.clips.find(c=>c.id===item.element_id)?.kind||''):'text-layer'),item.title,row);button.type='button';button.dataset.elementKey=editElementKey(item);button.title=item.title+' · '+editTime(project,Math.floor(item.start_frame))+'–'+editTime(project,Math.ceil(item.end_frame));button.onclick=event=>{event.stopPropagation();if(!current()||ctx.selecting||suppressClick)return;if(event.detail===0)seek(item.start_frame);else seek(eventFrame(event));return openEditElement(ctx,item,button).catch(e=>toast(e.message))};buttons.push([button,item]);}
   }
   const playhead=el('div','edit-playhead');content.append(playhead);playhead.tabIndex=0;playhead.setAttribute('role','slider');playhead.setAttribute('aria-label','播放头');playhead.setAttribute('aria-valuemin',0);playhead.setAttribute('aria-valuemax',project.spec.duration_frames-1);
@@ -155,24 +159,30 @@ function renderEpisodeEditing(ctx){
   function positionHead(){playhead.style.left=(labelWidth+v.frame/editRate(project)*zoom)+'px';playhead.setAttribute('aria-valuenow',v.frame);clock.textContent=v.frame+' 帧'}
   function seek(frame,remember=true){if(!current()||!Number.isFinite(frame))return;pauseEpisodeMedia(media);v.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));media.currentTime=v.frame/editRate(project);positionHead();if(remember)editRemember(ctx)}
   const eventFrame=event=>editTimelineFrame(project,event.clientX-(gesture?(geometry||measureGesture()).left:content.getBoundingClientRect().left)-labelWidth,zoom,true);
-  const inPlot=event=>event.clientX>=scroll.getBoundingClientRect().left+labelWidth&&!event.target.closest('.edit-track-name');
+  const inPlot=event=>event.clientX>=scroll.getBoundingClientRect().left+labelWidth&&!event.target.closest('.edit-track-name,.edit-selection-corner');
   function syncInputs(){inputs.start.value=v.range.start??'';inputs.end.value=v.range.end??'';inputs.startTime.value=Number.isInteger(v.range.start)?editTime(project,v.range.start):'';inputs.endTime.value=Number.isInteger(v.range.end)?editTime(project,v.range.end):'';fieldIssue='';paintSelection()}
   function paintSelection(){
-    rangeIssue=fieldIssue||editRangeIssue(project,review,v.range);feedback.textContent=rangeIssue||'已选：'+review.tracks.filter(t=>v.range.tracks.includes(t.key)).map(t=>t.title).join('、')+' · '+editTime(project,v.range.start)+'–'+editTime(project,v.range.end);
-    comment.disabled=loop.disabled=!!rangeIssue;if(rangeIssue){ctx.loop=false;loop.setAttribute('aria-pressed','false')}
-    trackButtons.forEach((b,i)=>b.setAttribute('aria-pressed',String(v.range.tracks.includes(review.tracks[i].key))));
-    const valid=Number.isInteger(v.range.start)&&Number.isInteger(v.range.end)&&v.range.end>v.range.start&&!fieldIssue;
-    rows.forEach((row,i)=>{const selected=valid&&v.range.tracks.includes(review.tracks[i].key);row.classList.toggle('range-selected',selected);const shade=overlays[i];shade.hidden=!selected;shade.style.left=labelWidth+v.range.start/editRate(project)*zoom+'px';shade.style.width=(v.range.end-v.range.start)/editRate(project)*zoom+'px'});
-    for(const [button,item] of buttons){const selected=valid&&v.range.tracks.includes(item.track_key)&&item.start_frame<v.range.end&&item.end_frame>v.range.start;button.classList.toggle('range-selected',selected);button.setAttribute('aria-pressed',String(v.selected===editElementKey(item)))}
+    rangeIssue=fieldIssue||editRangeIssue(project,review,v.range);
+    const empty=v.range.start===null&&v.range.end===null&&!v.range.tracks.length&&!fieldIssue;
+    feedback.textContent=ctx.selecting&&!empty?rangeIssue:'';feedback.hidden=!feedback.textContent;
+    for(const input of Object.values(inputs))input.disabled=!ctx.selecting;
+    clear.disabled=!ctx.selecting;comment.disabled=loop.disabled=!ctx.selecting||!!rangeIssue;
+    if(!ctx.selecting||rangeIssue)ctx.loop=false;loop.setAttribute('aria-pressed',String(!!ctx.loop));
+    trackNames.forEach((name,i)=>{const selected=ctx.selecting&&v.range.tracks.includes(review.tracks[i].key);name.classList.toggle('selected',selected);name.tabIndex=ctx.selecting?0:-1;
+      if(ctx.selecting){name.setAttribute('role','button');name.setAttribute('aria-pressed',String(selected))}else{name.removeAttribute('role');name.removeAttribute('aria-pressed')}});
+    const range=ctx.selecting?v.range:historicalRange;
+    const valid=range&&Number.isInteger(range.start)&&Number.isInteger(range.end)&&range.end>range.start&&(!ctx.selecting||!fieldIssue);
+    rows.forEach((row,i)=>{const selected=!!(valid&&range.tracks.includes(review.tracks[i].key));row.classList.toggle('range-selected',ctx.selecting&&selected);const shade=overlays[i];shade.hidden=!selected;shade.classList.toggle('historical',!ctx.selecting);if(valid){shade.style.left=labelWidth+range.start/editRate(project)*zoom+'px';shade.style.width=(range.end-range.start)/editRate(project)*zoom+'px'}});
+    for(const [button,item] of buttons){const selected=ctx.selecting&&valid&&range.tracks.includes(item.track_key)&&item.start_frame<range.end&&item.end_frame>range.start;button.classList.toggle('range-selected',!!selected);button.setAttribute('aria-pressed',String(v.selected===editElementKey(item)))}
   }
   ctx.paintSelection=paintSelection;
   for(const [key,input] of Object.entries(inputs)){
-    input.oninput=()=>{const field=key.startsWith('start')?'start':'end';const frame=key.endsWith('Time')?editParseTime(project,input.value):/^\d+$/.test(input.value)?Number(input.value):null;v.range[field]=frame;
+    input.oninput=()=>{if(!ctx.selecting)return;const field=key.startsWith('start')?'start':'end';const frame=key.endsWith('Time')?editParseTime(project,input.value):/^\d+$/.test(input.value)?Number(input.value):null;v.range[field]=frame;
       if(Number.isInteger(frame)){if(key.endsWith('Time'))inputs[field].value=frame;else inputs[field+'Time'].value=editTime(project,frame)}
       fieldIssue=Object.values(inputs).some(i=>!i.value.trim())||frame===null?'请填写完整的整数帧或分:秒.毫秒时间。':'';paintSelection();editRemember(ctx)};
     const commit=()=>{if(v.range.start!==null&&v.range.end!==null&&!fieldIssue)syncInputs()};input.onblur=commit;input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();commit()}};
   }
-  function setSelecting(value){ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media)}
+  function setSelecting(value){if(selectButton.disabled)return;finishGesture(true);ctx.loop=false;ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media);paintSelection()}
   function finishGesture(cancel=false){if(!gesture)return;cancelAnimationFrame(gestureFrame);gestureFrame=0;if(!cancel&&pendingMove)applyMove();pendingMove=null;const g=gesture;gesture=null;geometry=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');editRemember(ctx)}
   timeline.onpointerdown=event=>{
     suppressClick=false;if(event.button!==0||!current()||!inPlot(event))return;
@@ -194,28 +204,28 @@ function renderEpisodeEditing(ctx){
     const y1=Math.min(g.y,event.clientY),y2=Math.max(g.y,event.clientY);v.range={start,end:stop,tracks:review.tracks.filter((t,i)=>{const r=measured.rows[i];return r.top<y2&&r.bottom>y1}).map(t=>t.key)};syncInputs();
   }
   timeline.onpointerup=()=>finishGesture(false);timeline.onpointercancel=()=>finishGesture(true);timeline.onlostpointercapture=()=>{if(gesture)finishGesture(true)};
-  timeline.addEventListener('click',event=>{if(suppressClick||ctx.selecting&&event.target.closest('.edit-track')){event.preventDefault();event.stopPropagation();suppressClick=false}},true);
+  timeline.addEventListener('click',event=>{if(suppressClick||ctx.selecting&&event.target.closest('.edit-track')&&!event.target.closest('.edit-track-name')){event.preventDefault();event.stopPropagation();suppressClick=false}},true);
   timeline.onclick=event=>{if(event.detail>0&&current()&&inPlot(event)&&!ctx.selecting)seek(eventFrame(event))};
   playhead.onclick=event=>event.stopPropagation();playhead.onkeydown=event=>{const f=({ArrowLeft:v.frame-1,ArrowRight:v.frame+1,Home:0,End:project.spec.duration_frames-1})[event.key];if(f!==undefined&&!ctx.selecting){event.preventDefault();seek(f)}};
-  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&current()&&!state.unifiedCardRoot&&(ctx.selecting||gesture)){event.preventDefault();event.stopImmediatePropagation();if(gesture)finishGesture(true);else setSelecting(false)}},{capture:true,signal:abort.signal});
+  document.addEventListener('keydown',event=>{if(event.key==='Escape'&&current()&&!state.unifiedCardRoot&&!event.target.closest('input,textarea,select,[contenteditable=true]')&&(ctx.selecting||gesture)){event.preventDefault();event.stopImmediatePropagation();if(gesture)finishGesture(true);else setSelecting(false)}},{capture:true,signal:abort.signal});
   scroll.onscroll=()=>{geometry=null;if(current()){v.scroll=scroll.scrollLeft;editRemember(ctx,false)}};
   window.addEventListener('scroll',()=>{geometry=null},{capture:true,passive:true,signal:abort.signal});
   function follow(){if(!current()||media.paused||ctx.selecting)return;const x=v.frame/editRate(project)*zoom,width=scroll.clientWidth-labelWidth;if(x>scroll.scrollLeft+width*.8)scroll.scrollLeft=x-width*.8;else if(x<scroll.scrollLeft+width*.1)scroll.scrollLeft=Math.max(0,x-width*.2)}
   function layoutTimeline(restore=false){geometry=null;if(!current())return;const width=scroll.clientWidth-labelWidth;if(width<=0)return;const offset=v.frame/editRate(project)*zoom-scroll.scrollLeft,anchor=viewWidth&&offset>=0&&offset<=viewWidth?offset/viewWidth*width:width/2;viewWidth=width;zoom=editZoomScale(project,width,v.zoomLevel);const duration=project.spec.duration_frames/editRate(project);content.style.width=(labelWidth+duration*zoom)+'px';content.style.setProperty('--edit-frame-width',zoom/editRate(project)+'px');content.classList.toggle('edit-frame-grid',zoom/editRate(project)>=2);
     for(const [button,item] of buttons){button.style.left=labelWidth+item.start_frame/editRate(project)*zoom+'px';button.style.width=Math.max(2,(item.end_frame-item.start_frame)/editRate(project)*zoom)+'px'}
-    ruler.replaceChildren();const step=[1,2,5,10,30,60,120,300,600].find(n=>n*zoom>=60)||600;for(let n=0;n<duration;n+=step){const tick=nodeText('button',null,n+'s',ruler);tick.style.left=labelWidth+n*zoom+'px';tick.onclick=event=>{if(event.detail===0)seek(n*editRate(project))}}
+    ruler.replaceChildren(corner);const step=[1,2,5,10,30,60,120,300,600].find(n=>n*zoom>=60)||600;for(let n=0;n<duration;n+=step){const tick=nodeText('button',null,n+'s',ruler);tick.style.left=labelWidth+n*zoom+'px';tick.onclick=event=>{if(event.detail===0)seek(n*editRate(project))}}
     positionHead();scroll.scrollLeft=v.zoomLevel==='overview'?0:restore?v.scroll||0:Math.max(0,v.frame/editRate(project)*zoom-anchor);paintSelection();editRemember(ctx);
   }
-  player.reviewLocate=a=>{if(a.asset_file!==component.file)return false;v.range=a.edit_selection?{start:a.edit_selection.start_frame,end:a.edit_selection.end_frame,tracks:[...a.edit_selection.tracks]}:{start:Math.round(a.start_seconds*editRate(project)),end:Math.round(a.end_seconds*editRate(project)),tracks:[]};syncInputs();seek(v.range.start);feedback.textContent=a.edit_selection?feedback.textContent:'历史混合范围 · '+editTime(project,v.range.start)+'–'+editTime(project,v.range.end);return true};
+  player.reviewLocate=a=>{if(a.asset_file!==component.file)return false;historicalRange=a.edit_selection?{start:a.edit_selection.start_frame,end:a.edit_selection.end_frame,tracks:[...a.edit_selection.tracks]}:{start:Math.round(a.start_seconds*editRate(project)),end:Math.round(a.end_seconds*editRate(project)),tracks:[]};ctx.loop=false;setSelecting(false);seek(historicalRange.start);paintSelection();return true};
   media.reviewRestorePosition=()=>Math.min(v.frame/editRate(project),media.duration);
   media.onloadedmetadata=()=>{if(current())media.currentTime=media.reviewRestorePosition()};
   media.addEventListener('seeking',()=>{if(current()&&!media.reviewRefreshing){v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead()}});
-  media.addEventListener('timeupdate',()=>{if(!current()||media.reviewRefreshing)return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
+  media.addEventListener('timeupdate',()=>{if(!current()||media.reviewRefreshing)return;v.frame=Math.min(project.spec.duration_frames-1,editFrameAtTime(project,media.currentTime));positionHead();follow();if(ctx.selecting&&ctx.loop&&!rangeIssue&&!media.paused&&media.currentTime>=v.range.end/editRate(project)){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   media.addEventListener('play',follow);media.addEventListener('pause',()=>{if(current())editRemember(ctx)});
-  media.addEventListener('ended',()=>{if(current()&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
+  media.addEventListener('ended',()=>{if(current()&&ctx.selecting&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   const firstFrame=requestAnimationFrame(()=>{if(!current())return;layoutTimeline(true);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!current()){observer.disconnect();return}if(scroll.clientWidth-labelWidth!==viewWidth)layoutTimeline()});episodeEditing.timelineObserver=observer;observer.observe(scroll)}});
   episodeEditing.dispose=()=>{finishGesture(false);cancelAnimationFrame(firstFrame);cancelAnimationFrame(gestureFrame);ctx.paintSelection=null;editRemember(ctx)};
-  renderComments();editRemember(ctx);
+  paintSelection();renderComments();editRemember(ctx);
 }
 function isEpisodeEditComment(comment){return [...episodeEditing.contexts.values()].some(c=>c.data?.outputs.some(o=>o.object_id===comment.target_object_id&&o.id===comment.target_revision_id))}
 async function locateEpisodeEditComment(comment){
