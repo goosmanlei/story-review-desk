@@ -37,6 +37,9 @@ def compact_output(value, target, stage):
             result['text_layer_sha256'] = methods.checksum(value['text_layer'])
     elif isinstance(value, dict) and isinstance(value.get('assessment'), str):
         result['assessment'] = value['assessment']
+    if isinstance(value, dict) and 'checks' in value:
+        from .method_checks import validate
+        result['checks'] = copy.deepcopy(validate(value['checks']))
     return result
 
 
