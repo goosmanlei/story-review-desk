@@ -30,7 +30,7 @@
 .edit-clip.audio { background:var(--desk-soft); border-color:var(--desk-line); }
 .subtitles .edit-clip { background:var(--desk-surface); border-color:var(--desk-line); }
 .edit-clip:hover { background:var(--desk-hover); }
-.edit-playhead { position:absolute; top:0; bottom:0; width:14px; margin-left:-6px; cursor:ew-resize; touch-action:none; pointer-events:none; z-index:3; }
+.edit-playhead { position:absolute; top:0; bottom:0; width:14px; margin-left:-6px; cursor:inherit; touch-action:none; pointer-events:none; z-index:3; }
 .edit-playhead::before { content:''; position:absolute; left:6px; top:0; bottom:0; width:2px; background:var(--desk-red); }
 .edit-playhead::after { content:''; position:absolute; left:2px; top:0; width:10px; height:10px; background:var(--desk-red); pointer-events:auto; clip-path:polygon(0 0,100% 0,100% 55%,50% 100%,0 55%); }
 .edit-playhead:focus-visible,.edit-playhead.dragging { outline:1px solid var(--desk-red); outline-offset:-1px; }
@@ -60,3 +60,6 @@
 .material-text-entry p { white-space:pre-wrap; }
 .material-text-entry.selected { background:var(--desk-selected); outline:1px solid var(--desk-selection-line); }
 @media(max-width:760px) { .edit-zoom-group .production-filter-group { flex-wrap:wrap; gap:8px; } .edit-play-position { margin-right:auto; } }
+
+.edit-timeline.head-cursor,.edit-timeline.head-cursor *,:root:has(.edit-playhead.dragging),:root:has(.edit-playhead.dragging) * { cursor:ew-resize !important; }
+.edit-timeline.selecting .edit-playhead { cursor:crosshair; }

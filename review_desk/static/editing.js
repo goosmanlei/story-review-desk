@@ -154,12 +154,20 @@ function renderEpisodeEditing(ctx){
     for(const item of review.elements.filter(e=>e.track_key===track.key)){const button=nodeText('button','edit-clip '+(item.element_type==='clip'?(project.clips.find(c=>c.id===item.element_id)?.kind||''):'text-layer'),item.title,row);button.type='button';button.dataset.elementKey=editElementKey(item);button.title=item.title+' · '+editTime(project,Math.floor(item.start_frame))+'–'+editTime(project,Math.ceil(item.end_frame));button.onclick=event=>{event.stopPropagation();if(!current()||ctx.selecting||suppressClick)return;if(event.detail===0)seek(item.start_frame);else seek(eventFrame(event));return openEditElement(ctx,item,button).catch(e=>toast(e.message))};buttons.push([button,item]);}
   }
   const playhead=el('div','edit-playhead');content.append(playhead);playhead.tabIndex=0;playhead.setAttribute('role','slider');playhead.setAttribute('aria-label','播放头');playhead.setAttribute('aria-valuemin',0);playhead.setAttribute('aria-valuemax',project.spec.duration_frames-1);
-  let zoom=0,viewWidth=0,gesture=null,suppressClick=false,gestureFrame=0,playbackFrame=0,pendingMove=null,geometry=null;
+  let zoom=0,viewWidth=0,gesture=null,suppressClick=false,gestureFrame=0,playbackFrame=0,pendingMove=null,geometry=null,hoverPoint=null;
   function measureGesture(){geometry={left:content.getBoundingClientRect().left,edge:scroll.getBoundingClientRect(),rows:rows.map(row=>row.getBoundingClientRect())};return geometry}
-  function positionHead(){playhead.style.left=(labelWidth+v.frame/editRate(project)*zoom)+'px';playhead.setAttribute('aria-valuenow',v.frame);clock.textContent=v.frame+' 帧'}
+  function positionHead(){playhead.style.left=(labelWidth+v.frame/editRate(project)*zoom)+'px';playhead.setAttribute('aria-valuenow',v.frame);clock.textContent=v.frame+' 帧';syncHeadCursor()}
   function seek(frame,remember=true){if(!current()||!Number.isFinite(frame))return;pauseEpisodeMedia(media);v.frame=Math.max(0,Math.min(project.spec.duration_frames-1,Math.round(frame)));media.currentTime=v.frame/editRate(project);positionHead();if(remember)editRemember(ctx)}
   const eventFrame=event=>editTimelineFrame(project,event.clientX-(gesture?(geometry||measureGesture()).left:content.getBoundingClientRect().left)-labelWidth,zoom,true);
   const inPlot=event=>event.clientX>=scroll.getBoundingClientRect().left+labelWidth&&!event.target.closest('.edit-track-name,.edit-selection-corner');
+  const headX=()=>content.getBoundingClientRect().left+labelWidth+v.frame/editRate(project)*zoom;
+  const hitsHead=event=>!ctx.selecting&&inPlot(event)&&Math.abs(event.clientX-headX())<=8;
+  function syncHeadCursor(){
+    const target=!ctx.selecting&&hoverPoint&&document.elementFromPoint(hoverPoint.clientX,hoverPoint.clientY);
+    const hovering=target&&timeline.contains(target)&&hitsHead({...hoverPoint,target});
+    timeline.classList.toggle('head-cursor',!ctx.selecting&&(gesture?.kind==='head'||!!hovering));
+  }
+  const rememberPointer=event=>{hoverPoint={clientX:event.clientX,clientY:event.clientY};syncHeadCursor()};
   function syncInputs(){inputs.start.value=v.range.start??'';inputs.end.value=v.range.end??'';inputs.startTime.value=Number.isInteger(v.range.start)?editTime(project,v.range.start):'';inputs.endTime.value=Number.isInteger(v.range.end)?editTime(project,v.range.end):'';fieldIssue='';paintSelection()}
   function paintSelection(){
     rangeIssue=fieldIssue||editRangeIssue(project,review,v.range);
@@ -182,17 +190,20 @@ function renderEpisodeEditing(ctx){
       fieldIssue=Object.values(inputs).some(i=>!i.value.trim())||frame===null?'请填写完整的整数帧或分:秒.毫秒时间。':'';paintSelection();editRemember(ctx)};
     const commit=()=>{if(v.range.start!==null&&v.range.end!==null&&!fieldIssue)syncInputs()};input.onblur=commit;input.onkeydown=event=>{if(event.key==='Enter'){event.preventDefault();commit()}};
   }
-  function setSelecting(value){if(selectButton.disabled)return;finishGesture(true);ctx.loop=false;ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media);paintSelection()}
-  function finishGesture(cancel=false){if(!gesture)return;cancelAnimationFrame(gestureFrame);gestureFrame=0;if(!cancel&&pendingMove)applyMove();pendingMove=null;const g=gesture;gesture=null;geometry=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');editRemember(ctx)}
+  function setSelecting(value){if(selectButton.disabled)return;finishGesture(true);ctx.loop=false;ctx.selecting=value;selectButton.setAttribute('aria-pressed',String(value));timeline.classList.toggle('selecting',value);if(value)pauseEpisodeMedia(media);paintSelection();syncHeadCursor()}
+  function finishGesture(cancel=false){if(!gesture)return;cancelAnimationFrame(gestureFrame);gestureFrame=0;if(!cancel&&pendingMove)applyMove();pendingMove=null;const g=gesture;gesture=null;geometry=null;if(cancel&&g.kind==='range'){v.range=g.previous;syncInputs()}suppressClick=g.moved||g.kind==='range';if(g.target.hasPointerCapture(g.id))g.target.releasePointerCapture(g.id);playhead.classList.remove('dragging');syncHeadCursor();editRemember(ctx)}
   timeline.onpointerdown=event=>{
     suppressClick=false;if(event.button!==0||!current()||!inPlot(event))return;
     const row=event.target.closest('.edit-track'),x=event.clientX,frame=eventFrame(event);
     if(ctx.selecting){if(!row)return;event.preventDefault();pauseEpisodeMedia(media);gesture={kind:'range',id:event.pointerId,target:timeline,x,y:event.clientY,frame,previous:editClone(v.range),moved:false};}
-    else{const headX=content.getBoundingClientRect().left+labelWidth+v.frame/editRate(project)*zoom;if(Math.abs(x-headX)>8)return;gesture={kind:'head',id:event.pointerId,target:event.target,x,offset:x-headX,moved:false};}
+    else{if(!hitsHead(event))return;gesture={kind:'head',id:event.pointerId,target:event.target,x,offset:x-headX(),moved:false};}
     gesture.target.setPointerCapture(event.pointerId);
-    measureGesture();
+    rememberPointer(event);measureGesture();
   };
+  timeline.onpointerenter=rememberPointer;
+  timeline.onpointerleave=()=>{hoverPoint=null;syncHeadCursor()};
   timeline.onpointermove=event=>{
+    rememberPointer(event);
     if(!gesture||event.pointerId!==gesture.id||!current())return;const g=gesture;if(!g.moved&&Math.hypot(event.clientX-g.x,event.clientY-(g.y||event.clientY))<3)return;g.moved=true;event.preventDefault();
     pendingMove={clientX:event.clientX,clientY:event.clientY};if(!gestureFrame)gestureFrame=requestAnimationFrame(()=>{gestureFrame=0;applyMove()});
   };
@@ -203,13 +214,13 @@ function renderEpisodeEditing(ctx){
     const end=eventFrame(event),start=Math.min(g.frame,end),stop=Math.max(g.frame,end);if(stop===start)return;
     const y1=Math.min(g.y,event.clientY),y2=Math.max(g.y,event.clientY);v.range={start,end:stop,tracks:review.tracks.filter((t,i)=>{const r=measured.rows[i];return r.top<y2&&r.bottom>y1}).map(t=>t.key)};syncInputs();
   }
-  timeline.onpointerup=()=>finishGesture(false);timeline.onpointercancel=()=>finishGesture(true);timeline.onlostpointercapture=()=>{if(gesture)finishGesture(true)};
+  timeline.onpointerup=event=>{rememberPointer(event);finishGesture(false)};timeline.onpointercancel=()=>{hoverPoint=null;finishGesture(true);syncHeadCursor()};timeline.onlostpointercapture=()=>{if(gesture)finishGesture(true)};
   timeline.addEventListener('click',event=>{if(suppressClick||ctx.selecting&&event.target.closest('.edit-track')&&!event.target.closest('.edit-track-name')){event.preventDefault();event.stopPropagation();suppressClick=false}},true);
   timeline.onclick=event=>{if(event.detail>0&&current()&&inPlot(event)&&!ctx.selecting)seek(eventFrame(event))};
   playhead.onclick=event=>event.stopPropagation();playhead.onkeydown=event=>{const f=({ArrowLeft:v.frame-1,ArrowRight:v.frame+1,Home:0,End:project.spec.duration_frames-1})[event.key];if(f!==undefined&&!ctx.selecting){event.preventDefault();seek(f)}};
   document.addEventListener('keydown',event=>{if(event.key==='Escape'&&current()&&!state.unifiedCardRoot&&!event.target.closest('input,textarea,select,[contenteditable=true]')&&(ctx.selecting||gesture)){event.preventDefault();event.stopImmediatePropagation();if(gesture)finishGesture(true);else setSelecting(false)}},{capture:true,signal:abort.signal});
-  scroll.onscroll=()=>{geometry=null;if(current()){v.scroll=scroll.scrollLeft;follow();editRemember(ctx,false)}};
-  window.addEventListener('scroll',()=>{geometry=null},{capture:true,passive:true,signal:abort.signal});
+  scroll.onscroll=()=>{geometry=null;if(current()){v.scroll=scroll.scrollLeft;follow();syncHeadCursor();editRemember(ctx,false)}};
+  window.addEventListener('scroll',()=>{geometry=null;syncHeadCursor()},{capture:true,passive:true,signal:abort.signal});
   function follow(){if(!current()||media.paused||media.reviewRefreshing||gesture?.kind==='range')return;const x=v.frame/editRate(project)*zoom,width=scroll.clientWidth-labelWidth;if(x>scroll.scrollLeft+width*.8)scroll.scrollLeft=x-width*.8;else if(x<scroll.scrollLeft+width*.1)scroll.scrollLeft=Math.max(0,x-width*.2)}
   function stopPlaybackTracking(){cancelAnimationFrame(playbackFrame);playbackFrame=0}
   function trackPlayback(){
@@ -230,7 +241,7 @@ function renderEpisodeEditing(ctx){
   media.addEventListener('play',()=>{stopPlaybackTracking();trackPlayback()});media.addEventListener('pause',()=>{stopPlaybackTracking();if(current())editRemember(ctx)});
   media.addEventListener('ended',()=>{stopPlaybackTracking();if(current()&&ctx.selecting&&ctx.loop&&!rangeIssue){media.currentTime=v.range.start/editRate(project);media.play().catch(()=>{})}});
   const firstFrame=requestAnimationFrame(()=>{if(!current())return;layoutTimeline(true);if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!current()){observer.disconnect();return}if(scroll.clientWidth-labelWidth!==viewWidth)layoutTimeline()});episodeEditing.timelineObserver=observer;observer.observe(scroll)}});
-  episodeEditing.dispose=()=>{stopPlaybackTracking();finishGesture(false);cancelAnimationFrame(firstFrame);cancelAnimationFrame(gestureFrame);ctx.paintSelection=null;editRemember(ctx)};
+  episodeEditing.dispose=()=>{stopPlaybackTracking();hoverPoint=null;finishGesture(false);timeline.classList.remove('head-cursor');cancelAnimationFrame(firstFrame);cancelAnimationFrame(gestureFrame);ctx.paintSelection=null;editRemember(ctx)};
   paintSelection();renderComments();editRemember(ctx);
 }
 function isEpisodeEditComment(comment){return [...episodeEditing.contexts.values()].some(c=>c.data?.outputs.some(o=>o.object_id===comment.target_object_id&&o.id===comment.target_revision_id))}
