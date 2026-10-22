@@ -598,7 +598,7 @@ def _lock(stream, mode):
             time.sleep(.05)
 
 
-def materialize(root, relative, *, spec=None, administrative=False, _remote=False, _client=None):
+def materialize(root, relative, *, spec=None, administrative=False, _remote=False, _client=None, _source_file=None):
     config = settings(root)
     if config is None:
         return contained(root, relative)
@@ -659,7 +659,9 @@ def materialize(root, relative, *, spec=None, administrative=False, _remote=Fals
             while not _transfers.acquire(timeout=.05):
                 _check_cancel()
             try:
-                with (nullcontext(None) if _remote else _local_source(root, relative, spec, target)) as media:
+                source_scope = (nullcontext(None) if _remote else nullcontext(Path(_source_file))
+                                if _source_file is not None else _local_source(root, relative, spec, target))
+                with source_scope as media:
                     with (directory / '.capacity.lock').open('a') as capacity:
                         _lock(capacity, fcntl.LOCK_EX)
                         # We own this object's EX lock, so its older reservation

@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import sqlite3
 import tempfile
@@ -85,6 +86,42 @@ def verify_catalog(root, catalog, *, full=True, mode=None):
     return len(seen)
 
 
+def _reusable_snapshot(root, target, snapshot, config, category):
+    digest, size = r.hash_file(snapshot), snapshot.stat().st_size
+    prefix = config['project']+'/'+category+'/'
+    namespace = config.get('test_namespace')
+    if namespace:
+        instance = os.environ.get('REVIEW_RESOURCE_INSTANCE', 'local')
+        if instance not in ('local','vps') or not re.fullmatch(r'task-[a-z0-9-]+', namespace):
+            raise ValueError('invalid isolated resource namespace')
+        prefix = config['project']+'/tests/'+instance+'/'+namespace+'/'+category+'/'
+    paths = [Path(target)/'manifest.json']
+    paths += [source/'export/manifest.json' for source in r._source_roots(root, config)]
+    for path in dict.fromkeys(paths):
+        if not path.is_file():
+            continue
+        previous = json.loads(path.read_text())
+        if (previous.get('schema_version') != 16 or previous.get('format') != 'versioned-resource-recovery-v1'
+                or previous.get('instance_id') != config['instance_id'] or previous.get('project') != config['project']):
+            continue
+        spec = previous['snapshot']
+        r.validate_descriptor(config, spec)
+        if (spec['sha256'], spec['bytes'], spec['mime']) != (digest, size, 'application/vnd.sqlite3'):
+            continue
+        if (spec.get('source') == 'offline-candidate' and spec['category'] != category
+                or spec.get('source', 'oss') == 'oss' and not spec['key'].startswith(prefix)):
+            continue
+        if r.offline_mode() and not r.verified_file(r.contained(root, 'resource-bundle/'+digest), spec):
+            continue
+        # The just-created consistent backup is itself an exact local source.
+        # Keep it in the bounded cache before its temporary directory disappears.
+        r.materialize(root, 'database.sqlite3', spec=spec, _source_file=snapshot)
+        if r.read_policy() == 'remote':
+            r.verify_remote(root, spec, relative='database.sqlite3')
+        return dict(spec)  # preserve the real prior cloud version and time
+    return None
+
+
 def export(store, directory):
     from .production_current_bundle import validate
     from .production_media import physical_hash_scope
@@ -118,7 +155,11 @@ def export(store, directory):
         finally:
             check.close()
         category='snapshots/'+os.environ.get('REVIEW_RESOURCE_INSTANCE','local')
-        spec=r.upload(root,snapshot,category=category)
+        if category not in ('snapshots/local', 'snapshots/vps'):
+            raise ValueError('unsupported resource category')
+        spec=_reusable_snapshot(root,target,snapshot,config,category)
+        if spec is None:
+            spec=r.upload(root,snapshot,category=category)
         catalog_path=Path(folder)/'resource-catalog.json'
         r.freeze_catalog(root,catalog_path)
         verify_catalog(root, json.loads(catalog_path.read_text()))
