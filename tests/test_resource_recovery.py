@@ -18,11 +18,29 @@ class RecoveryFixture:
  @staticmethod
  def document(name):return {'id':name,'title':name,'version_type':'original','origin':'fixture','source_url':'https://example.org/source','collected_at':'2026-10-04','notes':'fixture','assets':[],'blocks':[{'id':'body','text':'Original text'}]}
  def fake_upload(self,root,source,**kwargs):
-  sha=r.hash_file(source);data={'sha256':sha,'verified_sha256':sha,'bytes':source.stat().st_size,'mime':'application/vnd.sqlite3','key':'bundle-test/snapshots/local/'+sha,'version_id':'synthetic-'+sha[:12]}
+  sha=r.hash_file(source);data={'sha256':sha,'verified_sha256':sha,'bytes':source.stat().st_size,'mime':'application/vnd.sqlite3','key':'bundle-test/'+kwargs.get('category','snapshots/local')+'/'+sha[:2]+'/'+sha,'version_id':'synthetic-'+sha[:12]}
   for name in ('source','destination'):shutil.copyfile(source,self.root/name/'resource-bundle'/sha)
   return data
 
 class ResourceRecoveryTest(RecoveryFixture,unittest.TestCase):
+ def test_unchanged_export_reuses_exact_snapshot_without_new_upload_or_verification_time(self):
+  original=self.fake_upload
+  def upload(*args,**kwargs):return {**original(*args,**kwargs),'verified_at':123}
+  with patch.object(r,'upload',side_effect=upload) as uploaded:
+   first=rb.export(self.source,self.exports)
+   with r.read_scope('local-only'),patch.object(r,'client',side_effect=AssertionError('network forbidden')):
+    second=rb.export(self.source,self.exports)
+   self.assertEqual(uploaded.call_count,1)
+   self.assertEqual(first['snapshot'],second['snapshot'])
+   self.assertEqual(second['snapshot']['verified_at'],123)
+   with patch.dict(os.environ,REVIEW_RESOURCE_INSTANCE='vps'):
+    other=rb.export(self.source,self.exports)
+   self.assertEqual(uploaded.call_count,2)
+   self.assertTrue(other['snapshot']['key'].startswith('bundle-test/snapshots/vps/'))
+   self.source.put_source(self.document('changed'))
+   third=rb.export(self.source,self.exports)
+   self.assertEqual(uploaded.call_count,3)
+   self.assertNotEqual(third['snapshot']['sha256'],first['snapshot']['sha256'])
  def test_round_trip_exact_tables_and_comment(self):
   manifest=rb.export(self.source,self.exports);rb.restore(self.dest,self.exports)
   self.assertEqual(self.dest.comments(),self.source.comments());self.assertEqual(rb.database_identity(self.dest.db_path),manifest['database'])
