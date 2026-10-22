@@ -52,11 +52,15 @@ def closure(store, root):
             raise ValueError('method file recovery identity differs from its exact version')
 
 
-def verify_catalog(root, catalog, *, full=True):
+def verify_catalog(root, catalog, *, full=True, mode=None):
+    """Check every descriptor/content; remote mode explicitly audits each version."""
     config = r.settings(root)
+    mode = mode or r.read_policy()
+    if mode not in ('local-first', 'local-only', 'remote'):
+        raise ValueError('invalid resource verification mode')
     if any(catalog.get(k) != config[k] for k in ('format','project','bucket','region')):
         raise ValueError('recovery catalog belongs to another project')
-    seen = {}
+    seen, selected_objects = {}, []
     for name, spec in catalog['entries'].items():
         r.safe_path(name)
         for selected in [spec,*spec.get('variants',{}).values()]:
@@ -67,14 +71,18 @@ def verify_catalog(root, catalog, *, full=True):
             content=(selected['sha256'],selected['bytes'],selected['mime'])
             if identity in seen and seen[identity]!=content:
                 raise ValueError('one cloud version has conflicting resource descriptors')
-            if full and identity not in seen:
-                if os.environ.get('REVIEW_RESOURCES_OFFLINE') == '1':
-                    r.materialize(root,name,spec=selected)
-                else:
-                    # A content cache proves bytes, not that this exact cloud
-                    # version still exists and is readable by the runtime.
-                    r.verify_remote(root, selected)
+            if identity not in seen:
+                selected_objects.append((name, selected))
             seen[identity]=content
+    # Detect contradictory descriptors before performing any I/O.
+    if full:
+        with r.read_scope(mode):
+            for name, selected in selected_objects:
+                if mode == 'remote':
+                    r.verify_remote(root, selected, relative=name)
+                else:
+                    with r.lease_scope():
+                        r.materialize(root, name, spec=selected)
     return len(seen)
 
 
@@ -114,6 +122,7 @@ def export(store, directory):
         spec=r.upload(root,snapshot,category=category)
         catalog_path=Path(folder)/'resource-catalog.json'
         r.freeze_catalog(root,catalog_path)
+        verify_catalog(root, json.loads(catalog_path.read_text()))
         manifest={'schema_version':16,'format':'versioned-resource-recovery-v1',
                   'instance_id':config['instance_id'],'project':config['project'],
                   'snapshot':spec,'database':database_identity(snapshot),
@@ -157,8 +166,8 @@ def restore(store, directory):
         publish()
         verify_catalog(root,catalog)
         with physical_hash_scope():
-            if os.environ.get('REVIEW_RESOURCES_OFFLINE') != '1':
-                r.verify_remote(root, manifest['snapshot'])
+            if r.read_policy() == 'remote':
+                r.verify_remote(root, manifest['snapshot'], relative='database.sqlite3')
             snapshot=r.materialize(root,'database.sqlite3',spec=manifest['snapshot'])
             if database_identity(snapshot)!=manifest['database']:
                 raise ValueError('recovery database tables differ from the snapshot manifest')
@@ -275,6 +284,11 @@ def offline_bundle(root, destination):
     for name in ('manifest.json',*manifest['files']):
         shutil.copyfile(root/'export'/name,destination/'export'/name)
     catalog=json.loads((root/'export/resource-catalog.json').read_text())
+    for name, digest in manifest['files'].items():
+        if r.hash_file(r.contained(root/'export', name)) != digest:
+            raise ValueError('offline recovery metadata checksum mismatch: ' + name)
+    verify_catalog(root, catalog, full=False)
+    r.validate_descriptor(r.settings(root), manifest['snapshot'])
     specs=[('database.sqlite3',manifest['snapshot'])]
     specs += [(name,s) for name,x in catalog['entries'].items() for s in [x,*x.get('variants',{}).values()]]
     media=destination/'resource-bundle';media.mkdir()

@@ -4,7 +4,7 @@ The catalog contains durable identities, never credentials or signed URLs. OSS
 is optional for old complete local bundles; a configured cloud instance fails
 closed for unregistered paths instead of falling back to stale local originals.
 """
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from datetime import timedelta
 import fcntl
@@ -32,6 +32,160 @@ _settings_guard = threading.Lock()
 _verified = {}
 _verified_guard = threading.Lock()
 _cancel = ContextVar('resource_cancel', default=None)
+_read_options = ContextVar('resource_read_options', default={})
+_statistics = ContextVar('resource_read_statistics', default=None)
+
+
+def read_policy():
+    policy = _read_options.get().get('policy', os.environ.get('REVIEW_RESOURCE_READ_POLICY', 'local-first'))
+    if policy not in ('local-first', 'local-only', 'remote'):
+        raise ValueError('invalid resource read policy')
+    return policy
+
+
+def require_network():
+    if offline_mode() or read_policy() == 'local-only' or _read_options.get().get('medium_only'):
+        raise ValueError('cloud access is disabled by the resource read policy')
+
+
+@contextmanager
+def read_scope(policy=None, *, sources=None, medium_only=False):
+    """Control reads without changing upload/offline-candidate semantics."""
+    options = dict(_read_options.get())
+    if read_policy() == 'local-only' and policy not in (None, 'local-only'):
+        raise ValueError('local-only resource scope cannot enable cloud access')
+    if policy is not None:
+        options['policy'] = policy
+    if sources is not None:
+        options['sources'] = list(sources)
+    options['medium_only'] = medium_only or options.get('medium_only', False)
+    token = _read_options.set(options)
+    try:
+        read_policy()
+        yield
+    finally:
+        _read_options.reset(token)
+
+
+@contextmanager
+def read_statistics():
+    counts = dict(oss_gets=0, oss_bytes=0, cache_hits=0, source_copies=0,
+                  local_bytes=0, fetched_objects=0, remote_verifications=0)
+    token = _statistics.set(counts)
+    try:
+        yield counts
+    finally:
+        _statistics.reset(token)
+
+
+def _count(**values):
+    counts = _statistics.get()
+    if counts is not None:
+        for key, value in values.items():
+            counts[key] += value
+
+
+def set_local_sources(root, sources, *, append=False):
+    """Register bounded, explicitly selected instance roots; never scan worktrees."""
+    config = settings(root)
+    registry = contained(root, '.runtime/resources/local-sources.json')
+    previous = json.loads(registry.read_text()) if append and registry.is_file() else {'format': 'local-resource-sources-v1', 'sources': []}
+    if previous.get('format') != 'local-resource-sources-v1' or not isinstance(previous.get('sources'), list):
+        raise ValueError('invalid local resource source registry')
+    selected = list(previous['sources'])
+    inherited = []
+    for source in sources:
+        source = Path(source).resolve(strict=True)
+        # Carry a parent instance's explicitly registered recovery sources into
+        # a new task. This is a bounded registry read, not filesystem discovery.
+        inherited.extend(_source_roots(source, config))
+    for source in inherited:
+        other = settings(source)
+        if not other or any(other[k] != config[k] for k in ('project', 'bucket', 'region', 'instance_id')):
+            raise ValueError('local resource source belongs to another instance')
+        relative = os.path.relpath(source, Path(root).resolve())
+        if relative not in selected and source != Path(root).resolve():
+            selected.append(relative)
+    if len(selected) > 16:
+        raise ValueError('too many local resource sources')
+    atomic_json(registry,
+                {'format': 'local-resource-sources-v1', 'sources': selected})
+
+
+def _source_roots(root, config):
+    root = Path(root).resolve()
+    yield root
+    if offline_mode() or _read_options.get().get('medium_only'):
+        return
+    sources = _read_options.get().get('sources')
+    if sources is None:
+        path = contained(root, '.runtime/resources/local-sources.json')
+        value = json.loads(path.read_text()) if path.is_file() else {'format': 'local-resource-sources-v1', 'sources': []}
+        if value.get('format') != 'local-resource-sources-v1':
+            raise ValueError('invalid local resource source registry')
+        sources = value['sources']
+    if not isinstance(sources, list) or len(sources) > 16:
+        raise ValueError('invalid local resource source registry')
+    seen = {root}
+    for name in sources:
+        source = (root / name).resolve()
+        if source in seen or not source.is_dir():
+            continue
+        seen.add(source)
+        other = settings(source)
+        if not other or any(other[k] != config[k] for k in ('project', 'bucket', 'region', 'instance_id')):
+            raise ValueError('local resource source belongs to another instance')
+        yield source
+
+
+@contextmanager
+def _local_source(root, relative, spec, target):
+    """Hold a source cache's shared lock until its verified bytes are copied."""
+    corrupt = False
+    for source in _source_roots(root, settings(root)):
+        candidates = [(contained(source, 'resource-bundle/' + spec['sha256']), False)]
+        if not offline_mode() and not _read_options.get().get('medium_only'):
+            # Explicit source instances may retain original files. Their own
+            # catalog must name this content; a same-name old file is no fallback.
+            try:
+                original = descriptor(source, relative)
+            except FileNotFoundError:
+                original = None
+            if original and content_identity(original) == content_identity(spec):
+                path = contained(source, relative)
+                # Git may hold a small resource-reference document at this
+                # logical path. It is metadata, not a damaged original.
+                if path.is_file() and path.stat().st_size == spec['bytes']:
+                    candidates.append((path, False))
+            cache = contained(source, '.runtime/resource-cache')
+            candidates += [(contained(cache, p.name), True) for p in sorted(cache.glob(spec['sha256'] + '*'))
+                           if re.fullmatch(spec['sha256'] + r'(?:\.[a-zA-Z0-9]+)?', p.name)
+                           and p.suffix not in ('.lock', '.part', '.reserve')]
+        for path, cached in candidates:
+            if path == target or not path.is_file():
+                continue
+            lock = None
+            try:
+                if cached:
+                    lock = contained(path.parent, path.name + '.lock').open('a')
+                    try:
+                        fcntl.flock(lock, fcntl.LOCK_SH | fcntl.LOCK_NB)
+                    except BlockingIOError:
+                        continue
+                if not verified_file(path, spec):
+                    corrupt = True
+                    continue
+                yield path
+                return
+            finally:
+                if lock is not None:
+                    lock.close()
+    if offline_mode() or read_policy() == 'local-only' or _read_options.get().get('medium_only'):
+        message = 'exact local resource ' + ('is corrupt: ' if corrupt else 'is unavailable: ') + relative + ' sha256=' + spec['sha256']
+        if corrupt:
+            raise ValueError(message)
+        raise FileNotFoundError(message)
+    yield None
 
 
 def _check_cancel():
@@ -268,8 +422,7 @@ def validate_descriptor(config, spec, *, allow_offline=None):
 
 
 def _credentials(config, *, administrative=False):
-    if offline_mode():
-        raise ValueError('cloud access is disabled for this offline instance')
+    require_network()
     import alibabacloud_oss_v2 as oss
     # Runtime never reads the account-level CLI credentials. This opt-in exists
     # only for the explicit migration/admin CLI, on the user's own workstation.
@@ -313,12 +466,12 @@ def client(config, *, administrative=False):
 
 
 def _remote_hash(connection, config, spec, destination=None):
-    if offline_mode():
-        raise ValueError('cloud access is disabled for this offline instance')
+    require_network()
     validate_descriptor(config, {**spec, 'verified_sha256': spec['sha256']}, allow_offline=False)
     import alibabacloud_oss_v2 as oss
     h, size = hashlib.sha256(), 0
     try:
+        _count(oss_gets=1)
         response = connection.get_object(oss.GetObjectRequest(bucket=config['bucket'], key=spec['key'], version_id=spec['version_id']))
     except Exception as error:
         raise ValueError('exact cloud resource unavailable (status ' + str(service_status(error)) + ')') from None
@@ -326,6 +479,7 @@ def _remote_hash(connection, config, spec, destination=None):
         if (response.content_type or '').split(';',1)[0].lower() != spec['mime'].lower():
             raise ValueError('cloud resource MIME differs from the exact descriptor')
         for block in response.body.iter_bytes(chunk_size=1024 * 1024):
+            _count(oss_bytes=len(block))
             _check_cancel()
             size += len(block)
             if size > spec['bytes']:
@@ -340,12 +494,14 @@ def _remote_hash(connection, config, spec, destination=None):
     return response
 
 
-def verify_remote(root, spec):
-    """Verify one explicit cloud version, independently of the content cache."""
+def verify_remote(root, spec, *, relative='verified'):
+    """Always GET the exact cloud version; retain newly verified cache bytes."""
+    require_network()
     config=settings(root)
     validate_descriptor(config,spec,allow_offline=False)
-    with _transfers:
-        _remote_hash(client(config),config,spec)
+    materialize(root, relative, spec=spec, _remote=True)
+    return {'verification': 'full-remote-sha256', 'verified_at': int(time.time()),
+            'bucket': config['bucket'], **{k: spec[k] for k in ('key', 'version_id', 'sha256', 'bytes', 'mime')}}
 
 
 @contextmanager
@@ -430,16 +586,25 @@ def _lock(stream, mode):
             time.sleep(.05)
 
 
-def materialize(root, relative, *, spec=None, administrative=False):
+def materialize(root, relative, *, spec=None, administrative=False, _remote=False, _client=None):
     config = settings(root)
     if config is None:
         return contained(root, relative)
     spec = descriptor(root, relative) if spec is None else spec
     validate_descriptor(config, spec)
-    if spec.get('source') == 'offline-candidate':
+    # An independent medium must prove its own completeness even with a warm
+    # cache. Offline candidates likewise require their durable original.
+    medium_only = offline_mode() or _read_options.get().get('medium_only')
+    if spec.get('source') == 'offline-candidate' or medium_only:
         media = contained(root, 'resource-bundle/' + spec['sha256'])
+        if not media.is_file():
+            raise FileNotFoundError('exact local resource is unavailable: ' + relative + ' sha256=' + spec['sha256'])
         if not verified_file(media, spec):
-            raise ValueError('durable offline candidate is missing or corrupt')
+            kind = 'offline candidate' if spec.get('source') == 'offline-candidate' else 'local resource'
+            raise ValueError('durable ' + kind + ' is corrupt: ' + relative + ' sha256=' + spec['sha256'])
+    if _remote:
+        require_network()
+        validate_descriptor(config, spec, allow_offline=False)
     directory = _cache_dir(root)
     suffix = Path(relative).suffix
     target = contained(directory, spec['sha256'] + suffix)
@@ -447,6 +612,12 @@ def materialize(root, relative, *, spec=None, administrative=False):
     if held is not None and str(target) in held:
         if file_identity(target) != held[str(target)][1]:
             raise ValueError('leased resource was changed')
+        if _remote:
+            with _transfers:
+                _remote_hash(_client or client(config, administrative=administrative), config, spec)
+            _count(remote_verifications=1)
+        else:
+            _count(cache_hits=1, local_bytes=spec['bytes'])
         return target
     if _frozen.get():
         raise ValueError('resource was not preflighted before the database transaction')
@@ -461,52 +632,61 @@ def materialize(root, relative, *, spec=None, administrative=False):
             _lock(lock, fcntl.LOCK_EX)
             # Another downloader may have completed while we changed locks.
             valid = verified_file(target, spec)
+        if valid:
+            if _remote:
+                with _transfers:
+                    _remote_hash(_client or client(config, administrative=administrative), config, spec)
+                _count(remote_verifications=1)
+            else:
+                _count(cache_hits=1, local_bytes=spec['bytes'])
         if not valid:
             target.unlink(missing_ok=True)
-            offline = offline_mode()
-            media = contained(root, 'resource-bundle/' + spec['sha256'])
-            if offline and not media.is_file():
-                raise FileNotFoundError('exact offline resource is unavailable')
             maximum = config.get('cache_bytes', 16 * 1024 ** 3)
             temporary = contained(directory, target.name + '.part')
             reservation = contained(directory, target.name + '.reserve')
             while not _transfers.acquire(timeout=.05):
                 _check_cancel()
             try:
-                with (directory / '.capacity.lock').open('a') as capacity:
-                    _lock(capacity, fcntl.LOCK_EX)
-                    # We own this object's EX lock, so its older reservation
-                    # can only be an interrupted transfer from a dead owner.
-                    temporary.unlink(missing_ok=True)
-                    reservation.unlink(missing_ok=True)
-                    outstanding = _trim(root, spec['bytes'], maximum)
-                    import shutil
-                    if shutil.disk_usage(directory).free < outstanding + spec['bytes'] + 64 * 1024 ** 2:
-                        raise ValueError('resource cache needs disk headroom')
-                    atomic_json(reservation, {'target': target.name, 'bytes': spec['bytes']})
-                try:
-                    with temporary.open('wb') as out:
-                        if offline:
-                            with media.open('rb') as source:
-                                for block in iter(lambda: source.read(1024 * 1024), b''):
-                                    _check_cancel()
-                                    out.write(block)
-                        else:
-                            _remote_hash(client(config, administrative=administrative), config, spec, out)
-                        out.flush()
-                        os.fsync(out.fileno())
-                    if not verified_file(temporary, spec):
-                        raise ValueError('resource cache verification failed')
+                with (nullcontext(None) if _remote else _local_source(root, relative, spec, target)) as media:
                     with (directory / '.capacity.lock').open('a') as capacity:
                         _lock(capacity, fcntl.LOCK_EX)
-                        os.replace(temporary, target)
-                        reservation.unlink()
-                finally:
-                    with (directory / '.capacity.lock').open('a') as capacity:
-                        # Cleanup must finish even when the caller cancelled.
-                        fcntl.flock(capacity, fcntl.LOCK_EX)
+                        # We own this object's EX lock, so its older reservation
+                        # can only be an interrupted transfer from a dead owner.
                         temporary.unlink(missing_ok=True)
                         reservation.unlink(missing_ok=True)
+                        outstanding = _trim(root, spec['bytes'], maximum)
+                        import shutil
+                        if shutil.disk_usage(directory).free < outstanding + spec['bytes'] + 64 * 1024 ** 2:
+                            raise ValueError('resource cache needs disk headroom')
+                        atomic_json(reservation, {'target': target.name, 'bytes': spec['bytes']})
+                    try:
+                        with temporary.open('wb') as out:
+                            if _remote:
+                                _remote_hash(_client or client(config, administrative=administrative), config, spec, out)
+                                _count(fetched_objects=1, remote_verifications=1)
+                            elif media is not None:
+                                with media.open('rb') as source:
+                                    for block in iter(lambda: source.read(1024 * 1024), b''):
+                                        _check_cancel()
+                                        out.write(block)
+                                _count(source_copies=1, local_bytes=spec['bytes'])
+                            else:
+                                _remote_hash(client(config, administrative=administrative), config, spec, out)
+                                _count(fetched_objects=1)
+                            out.flush()
+                            os.fsync(out.fileno())
+                        if not verified_file(temporary, spec):
+                            raise ValueError('resource cache verification failed')
+                        with (directory / '.capacity.lock').open('a') as capacity:
+                            _lock(capacity, fcntl.LOCK_EX)
+                            os.replace(temporary, target)
+                            reservation.unlink()
+                    finally:
+                        with (directory / '.capacity.lock').open('a') as capacity:
+                            # Cleanup must finish even when the caller cancelled.
+                            fcntl.flock(capacity, fcntl.LOCK_EX)
+                            temporary.unlink(missing_ok=True)
+                            reservation.unlink(missing_ok=True)
             finally:
                 _transfers.release()
         fcntl.flock(lock, fcntl.LOCK_SH)
@@ -635,12 +815,15 @@ def upload(root, source, *, category='originals', administrative=False, expected
         if not version or version == 'null':
             raise ValueError('bucket must preserve explicit object versions')
         spec['version_id'] = version
-        response = _remote_hash(connection, config, spec)
-        after = source.stat()
-        if (after.st_ino, after.st_size, after.st_mtime_ns) != (before.st_ino, before.st_size, before.st_mtime_ns):
-            raise ValueError('source changed during upload')
-        spec.update(verified_sha256=digest, verified_at=int(time.time()))
-        return spec
+    # Release the upload slot before the cache installer acquires a transfer
+    # slot. Three simultaneous uploads must not wait on their own semaphore.
+    spec['verified_sha256'] = digest
+    materialize(root, 'uploaded' + source.suffix, spec=spec, _remote=True, _client=connection)
+    after = source.stat()
+    if (after.st_ino, after.st_size, after.st_mtime_ns) != (before.st_ino, before.st_size, before.st_mtime_ns):
+        raise ValueError('source changed during upload')
+    spec['verified_at'] = int(time.time())
+    return spec
 
 
 def _save_offline(root, source, spec, category, before):
