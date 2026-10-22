@@ -81,8 +81,7 @@ def verify_catalog(root, catalog, *, full=True, mode=None):
                 if mode == 'remote':
                     r.verify_remote(root, selected, relative=name)
                 else:
-                    with r.lease_scope():
-                        r.materialize(root, name, spec=selected)
+                    r.verify_content(root, name, selected)
     return len(seen)
 
 

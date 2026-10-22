@@ -22,6 +22,8 @@ OSS 对无效 Range 和 If-Range 的行为不能直接当作应用契约。应�
 
 日常读取、完整目录检查、导出及恢复默认采用 `local-first`：先验证本实例的缓存／原件介质，再查显式登记的本机来源；全部允许来源都没有合格内容时，才 GET 描述中准确 key／VersionId 的缺项。大小、完整 SHA256、描述 MIME 及业务／媒体检查保持；本地文件没有云端响应头，MIME 依据已验证描述和适用的媒体探测，不能据此断言云端当前响应 MIME。单个缓存损坏先从其他合格来源修复，不回退 latest 或同名旧文件。
 
+完整目录通过 `verify_content()` 在合格来源上直接核验，不为检查复制整套任务镜像；只有实际物化使用或联网补缺才填充任务缓存。统计中的 `source_hits` 表示来源直接核验，`source_copies` 表示实际本地复制，两者均不产生云验时间。
+
 `resources.set_local_sources(instance, [source_instance, ...])` 登记最多16个受控实例根，并继承来源已显式登记的恢复来源，保存到本机 `.runtime/resources/local-sources.json`，不导出；`append=True` 保留已有登记。每次检查来源的项目、bucket、region及实例身份；只搜索其准确 SHA 缓存、`resource-bundle/<SHA256>`，以及其自身目录明确绑定该内容的原件路径，不扫描其他任务或猜旧路径。复制源缓存期间持共享锁，沿用目标缓存的容量预留、磁盘余量、原子安装及租约；不清退来源实例。登记来源不是永久恢复副本的保证。
 
 `REVIEW_RESOURCE_READ_POLICY=local-only` 或 `resources.read_scope('local-only')` 禁止云端读取，缺失／损坏准确失败；内层不能将严格策略改为联网。它不产生离线候选，也不替代用于离线继续制作的 `REVIEW_RESOURCES_OFFLINE=1`。默认制作环境保持在线语义，新原件仍须上传并真实完整回读。
