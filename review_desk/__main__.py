@@ -14,6 +14,8 @@ from .production_media import ingest
 def main():
     parser = argparse.ArgumentParser(prog="python3 -m review_desk")
     parser.add_argument("--instance", required=True, type=Path, help="story repository root")
+    parser.add_argument('--resource-policy', choices=('local-first', 'local-only', 'remote'),
+                        help='read policy; remote explicitly audits catalog/snapshot versions during recovery')
     subs = parser.add_subparsers(dest="command", required=True)
     serve = subs.add_parser("serve")
     serve.add_argument("--render-worker", action="store_true")
@@ -39,6 +41,8 @@ def main():
     resource_put.add_argument('file', type=Path)
     resource_put.add_argument('--prefix', default='export/assets')
     subs.add_parser('resource-promote', help='explicitly upload all offline originals and derivatives, then freeze the catalog')
+    verify = subs.add_parser('resource-verify', help='fully verify export catalog and database snapshot without restoring')
+    verify.add_argument('--mode', choices=('local-first', 'local-only', 'remote'), default=None)
     subs.add_parser("comments")
     evidence = subs.add_parser('import-comment-evidence')
     evidence.add_argument('file', type=Path)
@@ -115,8 +119,46 @@ def main():
     cache = subs.add_parser('read-cache', help='inspect or invalidate disposable local read results')
     cache.add_argument('action', choices=('status', 'clear'))
     args = parser.parse_args()
+    if args.resource_policy:
+        import os
+        os.environ['REVIEW_RESOURCE_READ_POLICY'] = args.resource_policy
     root = args.instance.resolve()
     config = json.loads((root / "config" / "instance.json").read_text())
+    if args.command == 'resource-verify':
+        from . import resources
+        from .resource_bundle import verify_catalog, database_identity, closure
+        from .production_current_bundle import validate
+        from .production_media import physical_hash_scope
+        manifest = json.loads((root / 'export/manifest.json').read_text())
+        storage = resources.settings(root)
+        if (manifest.get('schema_version') != 16 or manifest.get('format') != 'versioned-resource-recovery-v1'
+                or manifest.get('instance_id') != storage['instance_id'] or manifest.get('project') != storage['project']):
+            raise ValueError('invalid versioned recovery identity')
+        catalog_path = root / 'export/resource-catalog.json'
+        if resources.hash_file(catalog_path) != manifest['files']['resource-catalog.json']:
+            raise ValueError('recovery catalog checksum mismatch')
+        mode = args.mode or resources.read_policy()
+        with resources.read_scope(mode), resources.read_statistics() as counts:
+            objects = verify_catalog(root, json.loads(catalog_path.read_text()), mode=mode)
+            if mode == 'remote':
+                resources.verify_remote(root, manifest['snapshot'], relative='database.sqlite3')
+            with resources.lease_scope(), physical_hash_scope():
+                path = resources.materialize(root, 'database.sqlite3', spec=manifest['snapshot'])
+                if database_identity(path) != manifest['database']:
+                    raise ValueError('recovery database tables differ from the snapshot manifest')
+                store = Store.open_readonly(path)
+                store.db_path = root / '.runtime/review.sqlite3'
+                try:
+                    if store.db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
+                        raise ValueError('recovery database integrity failed')
+                    closure(store, root)
+                    validate(store)
+                finally:
+                    store.close()
+        print(json.dumps({'mode': mode, 'objects': objects, 'snapshot_sha256': manifest['snapshot']['sha256'],
+                          'cloud_verification': 'performed' if mode == 'remote' else 'not-performed',
+                          'reads': counts}, ensure_ascii=False))
+        return
     if args.command=='resource-promote':
         from . import resources
         result=resources.promote(root)

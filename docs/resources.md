@@ -18,6 +18,23 @@ OSS 对无效 Range 和 If-Range 的行为不能直接当作应用契约。应�
 
 后台使用 `resources.lease_scope()` 与 `materialize()`。缓存按内容摘要定位，流式下载、全量 SHA256／大小／MIME 校验、原子启用，默认上限 16 GiB、最多三个传输；持租约的输入不被清理。普通导入、提交、回执、参考选择、方案复用、需求合并和评论写入均先准备各自实际需要的媒体。全量读取与 ffprobe 探测在写事务外完成；事务内复用准确物理身份的校验结果，缺少预检或文件改变时拒绝，并在提交前再次检查身份。
 
+### 完整内容检查与云端验证
+
+日常读取、完整目录检查、导出及恢复默认采用 `local-first`：先验证本实例的缓存／原件介质，再查显式登记的本机来源；全部允许来源都没有合格内容时，才 GET 描述中准确 key／VersionId 的缺项。大小、完整 SHA256、描述 MIME 及业务／媒体检查保持；本地文件没有云端响应头，MIME 依据已验证描述和适用的媒体探测，不能据此断言云端当前响应 MIME。单个缓存损坏先从其他合格来源修复，不回退 latest 或同名旧文件。
+
+`resources.set_local_sources(instance, [source_instance, ...])` 登记最多16个受控实例根，并继承来源已显式登记的恢复来源，保存到本机 `.runtime/resources/local-sources.json`，不导出；`append=True` 保留已有登记。每次检查来源的项目、bucket、region及实例身份；只搜索其准确 SHA 缓存、`resource-bundle/<SHA256>`，以及其自身目录明确绑定该内容的原件路径，不扫描其他任务或猜旧路径。复制源缓存期间持共享锁，沿用目标缓存的容量预留、磁盘余量、原子安装及租约；不清退来源实例。登记来源不是永久恢复副本的保证。
+
+`REVIEW_RESOURCE_READ_POLICY=local-only` 或 `resources.read_scope('local-only')` 禁止云端读取，缺失／损坏准确失败；内层不能将严格策略改为联网。它不产生离线候选，也不替代用于离线继续制作的 `REVIEW_RESOURCES_OFFLINE=1`。默认制作环境保持在线语义，新原件仍须上传并真实完整回读。
+
+`verify_remote()` 始终完整 GET 指定云版本，独立于缓存；`verify_catalog(..., mode='remote')` 对每个去重云版本执行同样检查。即使相同 SHA 在另一个版本已可读，也不替代本版本。冷缓存下该次合格字节原子保留，后续物化不再下载；暖缓存仍实际读云验证。返回回执写本次远端验证时间，普通本地命中不更新目录中历史 `verified_at`。`full=False` 只核描述及冲突，不能当作内容或云端检查。描述冲突先整体验出，再开始读字节。
+
+```sh
+python3 -m review_desk --instance "$INSTANCE" resource-verify --mode local-only
+python3 -m review_desk --instance "$INSTANCE" resource-verify --mode remote
+```
+
+该命令检查导出目录全部原件／派生、准确数据库快照、逐表指纹、数据库完整性及业务引用。结果分别标明内容策略与是否实际云验，并输出 OSS GET尝试数、返回正文字节、缓存命中、本地复制及补取数量。`resources.read_statistics()` 可在后台流程取得相同计数；它不统计浏览器流量、HTTP头或账户账单，不将模拟测试算作真实云请求。
+
 下载期间只持同一对象的排他锁和传输名额，全局容量锁仅用于预留、清退和安装。容量核算包含活动预留的完整大小，磁盘余量还扣除尚未写入的预留并保留 64 MiB；不同对象的小文件可在其他传输进行时继续读取。同对象下载合并，完成后原子安装；取消或失败释放预留和本次临时文件。未知临时文件计入占用，不误删活跃下载；已持租约的原件不能清退。资源锁等待和传输边界检查客户端取消，写事务预检沿原契约执行。
 
 上传先探测文件，再上传并完整读取准确版本，最后登记。8 GiB 单文件上限保持；128 MiB 以上采用 32 MiB 分片，检查点保存 key、SHA256、字节数、MIME、upload_id。源文件改变或检查点不符停止；未知结果先查对应 key／分片，重复上传保留第一个已经验证的目录身份。派生明确传 MIME，不依赖宿主机文件扩展名数据库。云端验证不以 ETag 或自写 metadata 代替真实读取。
@@ -30,15 +47,16 @@ OSS 对无效 Range 和 If-Range 的行为不能直接当作应用契约。应�
 
 云配置实例的 `export` 生成一致性 SQLite 快照，上传为实例自己的准确快照版本。Git 中的 manifest 保存快照描述、逐表指纹及轻量资源目录摘要。故事、方法、对象修订、候选、调用、配置、评论编辑历史、关系、工程及成片表均保存；私有渲染队列不导出。有私有创作记录时拒绝公开恢复导出。
 
-`restore` 先核对所有云对象完整字节、目录、数据库完整性和业务闭包，再在一个写事务中安装。安装前重新检查目标仍为空且未改变；失败回滚数据和目录，不覆盖并发到达的业务。在线验证独立于暖缓存，准确远端版本缺失不能被缓存掩盖。旧 Schema 14／15 完整本地包仍沿原解析器恢复。
+`restore` 先按选定策略核对全部完整字节、目录、数据库完整性和业务闭包，再在一个写事务中安装。安装前重新检查目标仍为空且未改变；失败回滚数据和目录，不覆盖并发到达的业务。日常恢复默认本地优先；明确审计云端或验证在线灾难恢复时使用 `--resource-policy remote`，准确远端版本缺失不能被暖缓存掩盖。旧 Schema 14／15 完整本地包仍沿原解析器恢复。
 
 ```sh
 python3 -m review_desk --instance "$INSTANCE" export
 python3 -m review_desk --instance "$EMPTY_INSTANCE" restore
+python3 -m review_desk --instance "$EMPTY_INSTANCE" --resource-policy remote restore
 python3 -m review_desk --instance "$INSTANCE" offline-bundle --destination "$OFFLINE_MEDIUM"
 ```
 
-恢复命令读取目标实例自身的 `export/`；先把准确轻量导出及声明的实例配置放入空实例。独立介质保存准确快照、声明的配置和每个原件／派生的真实字节，目录为 `resource-bundle/<SHA256>`，不复制任意配置文件。介质必须放在 Git 外。另一个新空实例配置 `REVIEW_RESOURCES_OFFLINE=1` 并禁止网络后，可从介质恢复；缺失或损坏直接失败。项目发布工具负责最新快照、双端部署、介质位置与保留责任，系统恢复不负责覆盖在线活库。
+恢复命令读取目标实例自身的 `export/`；先把准确轻量导出及声明的实例配置放入空实例。独立介质保存准确快照、声明的配置和每个原件／派生的真实字节，目录为 `resource-bundle/<SHA256>`，不复制任意配置文件。介质必须放在 Git 外。另一个新空实例配置 `REVIEW_RESOURCES_OFFLINE=1` 并禁止网络后，可从介质恢复；每项必须在自身介质内通过完整校验，即使缓存已热也不掩盖缺项。也可用 `read_scope('local-only', medium_only=True)` 限定介质验收范围。项目发布工具负责最新快照、双端部署、介质位置与保留责任，系统恢复不负责覆盖在线活库。
 
 离线介质与继续工作的实例分开保留。工作实例也必须位于 Git 外，并有可写的 `resource-bundle/`；新增工程、成片、附件和预览先完整校验，再原子保存到该目录，不依赖可驱逐缓存。目录以 `source=offline-candidate` 标明仅在本地保存，包含内容摘要、大小与 MIME，不伪造 OSS key 或版本号。离线模式禁用签名及所有云端客户端入口；也可重新导出包含本地快照的新离线介质。
 

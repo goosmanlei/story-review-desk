@@ -83,7 +83,7 @@ class ResourceRecoveryFaultTest(RecoveryFixture,unittest.TestCase):
   (root/'resource-bundle'/sha).write_bytes(data)
   r.materialize(root,'export/assets/one.bin')
   with patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'}),patch.object(r,'client',return_value=object()),patch.object(r,'_remote_hash',side_effect=remote):
-   with self.assertRaisesRegex(ValueError,'missing exact version'):rb.verify_catalog(root,catalog)
+   with self.assertRaisesRegex(ValueError,'missing exact version'):rb.verify_catalog(root,catalog,mode='remote')
   self.assertEqual(calls,['version-exists','version-missing'])
 
  def test_online_restore_rechecks_snapshot_even_when_cache_is_warm(self):
@@ -91,7 +91,8 @@ class ResourceRecoveryFaultTest(RecoveryFixture,unittest.TestCase):
   r.materialize(root,'database.sqlite3',spec=manifest['snapshot'])
   before=rb.database_identity(self.dest.db_path)
   with patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'}),patch.object(r,'verify_remote',side_effect=ValueError('snapshot exact version unavailable')) as remote:
-   with self.assertRaisesRegex(ValueError,'snapshot exact version unavailable'):rb.restore(self.dest,self.exports)
+   with r.read_scope('remote'):
+    with self.assertRaisesRegex(ValueError,'snapshot exact version unavailable'):rb.restore(self.dest,self.exports)
   self.assertEqual(remote.call_args.args[1]['version_id'],manifest['snapshot']['version_id'])
   self.assertEqual(rb.database_identity(self.dest.db_path),before)
 

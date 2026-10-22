@@ -27,7 +27,7 @@ class StoryResourceTest(RecoveryFixture,unittest.TestCase):
   cloud.on_get=outside_write
   with patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'}),patch.object(r,'client',return_value=cloud):
    comment=self.source.create_comment({'id':'region','source_id':'illustrated','anchor':self.anchor,'body':'Exact region'})
-  self.assertEqual(len(cloud.gets),1);self.assertFalse((self.root/'source/export/assets').exists())
+  self.assertEqual(len(cloud.gets),0);self.assertFalse((self.root/'source/export/assets').exists())
   self.source.change_comment(comment['id'],'EDIT',1,'Revised region opinion')
   manifest=rb.export(self.source,self.exports);rb.restore(self.dest,self.exports)
   self.assertEqual(self.dest.comment('region'),self.source.comment('region'))

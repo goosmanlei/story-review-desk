@@ -1,5 +1,5 @@
 """Multipart failure and resume reconciliation without cloud writes."""
-import hashlib,json,os,sys,unittest
+import hashlib,json,os,shutil,sys,unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -36,6 +36,7 @@ class Connection:
 class ResourceMultipartTest(ResourceFixture,unittest.TestCase):
  def setUp(self):
   super().setUp();self.online=patch.dict(os.environ,{'REVIEW_RESOURCES_OFFLINE':'0'});self.online.start();self.addCleanup(self.online.stop);self.source=self.root/'original.bin';self.source.write_bytes(b'A'*4096);self.connection=Connection();self.spec=self.specification()
+  self.config['cache_bytes']=256*1024**2;(self.root/'config/resource-storage.json').write_text(json.dumps(self.config))
  def specification(self):
   sha=r.hash_file(self.source);return {'sha256':sha,'bytes':self.source.stat().st_size,'mime':'application/octet-stream','key':'independent-test/originals/'+sha[:2]+'/'+sha}
  def checkpoint(self):
@@ -76,7 +77,10 @@ class ResourceMultipartTest(ResourceFixture,unittest.TestCase):
  def test_unknown_completion_is_resolved_by_head_and_exact_version_verify(self):
   with self.source.open('r+b') as stream:stream.truncate(129*1024**2)
   self.connection.fail_complete_once=True;verified=[]
-  def verify(connection,config,spec,destination=None):verified.append((spec['key'],spec['version_id'],spec['bytes']))
+  def verify(connection,config,spec,destination=None):
+   verified.append((spec['key'],spec['version_id'],spec['bytes']))
+   if destination is not None:
+    with self.source.open('rb') as source:shutil.copyfileobj(source,destination,1024**2)
   with patch.object(r,'client',return_value=self.connection),patch.object(r,'_remote_hash',side_effect=verify):
    result=r.upload(self.root,self.source)
    again=r.upload(self.root,self.source)
@@ -95,7 +99,10 @@ class ResourceMultipartTest(ResourceFixture,unittest.TestCase):
   self.config['test_namespace']='task-independent-review';(self.root/'config/resource-storage.json').write_text(json.dumps(self.config))
   # Existing-object branch verifies selected namespace; no upload RPC needed.
   self.connection.versions.append('synthetic-existing')
-  with patch.object(r,'client',return_value=self.connection),patch.object(r,'_remote_hash'),patch.dict(os.environ,{'REVIEW_RESOURCE_INSTANCE':'vps'}):
+  def verify(connection,config,spec,destination=None):
+   if destination is not None:
+    with self.source.open('rb') as source:shutil.copyfileobj(source,destination,1024**2)
+  with patch.object(r,'client',return_value=self.connection),patch.object(r,'_remote_hash',side_effect=verify),patch.dict(os.environ,{'REVIEW_RESOURCE_INSTANCE':'vps'}):
    result=r.upload(self.root,self.source)
   self.assertTrue(result['key'].startswith('independent-test/tests/vps/task-independent-review/originals/'))
   with patch.object(r,'client',return_value=self.connection),patch.dict(os.environ,{'REVIEW_RESOURCE_INSTANCE':'other'}):
