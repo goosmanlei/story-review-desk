@@ -69,7 +69,7 @@ def read_scope(policy=None, *, sources=None, medium_only=False):
 
 @contextmanager
 def read_statistics():
-    counts = dict(oss_gets=0, oss_bytes=0, cache_hits=0, source_copies=0,
+    counts = dict(oss_gets=0, oss_bytes=0, cache_hits=0, source_copies=0, source_hits=0,
                   local_bytes=0, fetched_objects=0, remote_verifications=0)
     token = _statistics.set(counts)
     try:
@@ -502,6 +502,18 @@ def verify_remote(root, spec, *, relative='verified'):
     materialize(root, relative, spec=spec, _remote=True)
     return {'verification': 'full-remote-sha256', 'verified_at': int(time.time()),
             'bucket': config['bucket'], **{k: spec[k] for k in ('key', 'version_id', 'sha256', 'bytes', 'mime')}}
+
+
+def verify_content(root, relative, spec):
+    """Hash an allowed source in place; full audits need no per-task mirror."""
+    validate_descriptor(settings(root), spec)
+    with _local_source(root, relative, spec, None) as path:
+        if path is None:
+            with lease_scope():
+                materialize(root, relative, spec=spec)
+        else:
+            hit = 'cache_hits' if path.parent == contained(root, '.runtime/resource-cache') else 'source_hits'
+            _count(**{hit: 1, 'local_bytes': spec['bytes']})
 
 
 @contextmanager

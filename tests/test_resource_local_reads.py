@@ -144,6 +144,7 @@ class ResourceLocalReadTest(ResourceFixture, unittest.TestCase):
         self.move_to_source(derived)
         with patch.object(r, 'client', side_effect=AssertionError('network forbidden')):
             self.assertEqual(rb.verify_catalog(self.root, catalog, mode='local-only'), 2)
+            self.assertFalse((self.root / '.runtime/resource-cache').exists(), 'complete verification copied a full local mirror')
             bad = {**spec, 'bytes': spec['bytes'] + 1}
             catalog['entries']['conflicting.bin'] = bad
             with self.assertRaisesRegex(ValueError, 'conflicting'):
